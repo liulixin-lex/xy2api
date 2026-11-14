@@ -333,43 +333,6 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
-  it.each(['focus', 'visibilitychange'])('reads shared scheduling state and account cost on %s', async eventName => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    const wrapper = mountView(); await flushPromises()
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
-    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.035 }], total: 1, page: 1, page_size: 20, pages: 1 })
-    getBatchTodayStats.mockClear()
-    const target = eventName === 'focus' ? window : document
-    target.dispatchEvent(new Event(eventName)); await flushPromises()
-    expect(listAccounts).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
-    expect(getBatchTodayStats).not.toHaveBeenCalled()
-    expect(setSchedulable).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-
-  it('catches a focus refresh failure, keeps the rendered data and permits a later refresh', async () => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const now = vi.spyOn(Date, 'now')
-    const wrapper = mountView(); await flushPromises()
-    const failure = new Error('focus list unavailable')
-    listAccounts.mockRejectedValueOnce(failure)
-    now.mockReturnValue(20000)
-    window.dispatchEvent(new Event('focus')); await flushPromises()
-    expect(logError).toHaveBeenCalledWith('Failed to refresh accounts after returning to the page:', failure)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
-    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.3 }], total: 1, page: 1, page_size: 20, pages: 1 })
-    now.mockReturnValue(22000)
-    window.dispatchEvent(new Event('focus')); await flushPromises()
-    expect(listAccounts).toHaveBeenCalledTimes(3)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.30x')
-    wrapper.unmount()
-  })
-
   it('updates a rate-only change from an automatic ETag refresh', async () => {
     vi.useFakeTimers()
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)

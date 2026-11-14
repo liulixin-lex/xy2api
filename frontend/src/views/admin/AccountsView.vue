@@ -1277,15 +1277,6 @@ const reload = async () => {
   await refreshTodayStatsBatch()
 }
 
-let accountFocusRefreshAt = 0
-const refreshAccountListOnFocus = () => {
-  if (document.hidden || loading.value || togglingSchedulable.value.size || Date.now() - accountFocusRefreshAt < 1000) return
-  accountFocusRefreshAt = Date.now()
-  load({ refreshTodayStats: false }).catch((error) => {
-    console.error('Failed to refresh accounts after returning to the page:', error)
-  })
-}
-
 const buildUpstreamBillingRateFilters = () => {
   const rawParams = toRaw(params) as Record<string, unknown>
   return {
@@ -3080,8 +3071,6 @@ onMounted(async () => {
   }
   window.addEventListener('scroll', handleScroll, true)
   window.addEventListener('resize', handleViewportResize)
-  window.addEventListener('focus', refreshAccountListOnFocus)
-  document.addEventListener('visibilitychange', refreshAccountListOnFocus)
   document.addEventListener('click', handleClickOutside)
 
   if (autoRefreshEnabled.value) {
@@ -3105,8 +3094,6 @@ onUnmounted(() => {
   }
   pendingUsageBatchIds.clear()
   window.removeEventListener('scroll', handleScroll, true)
-  window.removeEventListener('focus', refreshAccountListOnFocus)
-  document.removeEventListener('visibilitychange', refreshAccountListOnFocus)
   window.removeEventListener('resize', handleViewportResize)
   document.removeEventListener('click', handleClickOutside)
   if (desktopViewportMediaQuery && desktopViewportListener) {
