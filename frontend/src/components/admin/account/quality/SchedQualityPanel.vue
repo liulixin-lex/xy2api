@@ -15,19 +15,19 @@
         <header class="qp-head">
           <div class="qp-title-row">
             <div class="qp-title">
-              <h2 :id="titleId" class="qp-name">{{ detail?.account.name || drawer.accountName }}</h2>
+              <h2 :id="titleId" class="qp-name">{{ (fresh && detail?.account.name) || drawer.accountName }}</h2>
               <div class="qp-sub">{{ subline }}</div>
             </div>
             <button type="button" class="qp-close" :aria-label="t('admin.schedQuality.aria.close')" data-qp-close @click="close(true)">
               <Icon name="x" size="md" />
             </button>
           </div>
-          <dl v-if="detail" class="qp-meta">
+          <dl v-if="fresh && detail" class="qp-meta">
             <div><dt>{{ t('admin.schedQuality.drawer.priority') }}</dt><dd>{{ detail.account.priority }}</dd></div>
             <div><dt>{{ t('admin.schedQuality.drawer.rate') }}</dt><dd>{{ detail.account.rate.toFixed(3) }}</dd></div>
             <div><dt>{{ t('admin.schedQuality.drawer.concurrency') }}</dt><dd>{{ detail.account.in_flight }} / {{ detail.account.concurrency }}</dd></div>
           </dl>
-          <div v-if="detail && canManage" class="qp-actions">
+          <div v-if="fresh && detail && canManage" class="qp-actions">
             <span v-if="failedGroups.has(0)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
             <button
               type="button"
@@ -49,13 +49,21 @@
           </div>
         </header>
 
-        <div ref="bodyRef" class="qp-body">
-          <div v-if="!detail && !poll.error.value" class="qp-loading" data-qp-loading>
-            <span v-for="i in 5" :key="i" class="skeleton block h-3.5 w-full" />
-          </div>
-          <div v-else-if="!detail" class="qp-failed" data-qp-failed>
+        <!-- Switched to another account: the previous one's content stays, dimmed and out of reach, until the new one lands. -->
+        <div
+          ref="bodyRef"
+          class="qp-body"
+          :class="{ 'opacity-60': detail && !fresh }"
+          :inert="(detail && !fresh) || undefined"
+          :aria-busy="detail && !fresh ? 'true' : undefined"
+          data-qp-body
+        >
+          <div v-if="failed" class="qp-failed" data-qp-failed>
             <span class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
-            <button type="button" class="btn btn-secondary btn-sm" @click="poll.refresh()">{{ t('admin.schedQuality.action.retry') }}</button>
+            <button type="button" class="btn btn-secondary btn-sm" @click="retry(SCHED_PANEL_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
+          </div>
+          <div v-else-if="!detail" class="qp-loading" data-qp-loading>
+            <span v-for="i in 5" :key="i" class="skeleton block h-3.5 w-full" />
           </div>
 
           <template v-else>
@@ -177,9 +185,12 @@
 /**
  * The account quality panel (spec 5, 7a, 7b; prototype). One instance per page, opened through useSchedLayers.
  *
- * - Data: the backend's own detail and summary of the account (no compatibility layer), loaded on open and every 5 s
- *   while open; the content updates in place. After an exemption, its removal or a recovery from here the panel
- *   loads again at once and markSchedChanged() tells the page, whose table asks its quality summary again.
+ * - Data: the backend's own detail and summary of the account (no compatibility layer), fetched by the host page's
+ *   live table (useSchedLayerData); the content updates in place. After an exemption, its removal or a recovery from
+ *   here markSchedChanged() tells the page, which loads the panel and its quality summary again.
+ * - Switching to another account puts its name in the header at once; the body keeps the previous account's content,
+ *   dimmed as the table dims its old rows, until the new detail lands. The skeleton shows only when the panel opens
+ *   with nothing to show yet.
  * - Not modal: no backdrop, the table behind stays usable. Its top edge follows the top of the table's visible area
  *   (`anchor`), never above the page header, so the toolbar stays visible and no scrolling row shows above it; it
  *   covers the table's right-hand columns.
@@ -196,16 +207,13 @@ import Icon from '@/components/icons/Icon.vue'
 import SchedPauseMark from './SchedPauseMark.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
-import schedQualityAPI, { backendSummary } from '@/api/admin/schedQuality'
-import type { BackendAccountDetail, BackendAccountSummary, BackendAutoState } from '@/api/admin/schedQualityTypes'
-import type { SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
-import type { Account } from '@/types'
-
-type PanelRow = Account & { quality?: BackendAccountSummary | null }
-import { secondsUntil, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import schedQualityAPI from '@/api/admin/schedQuality'
+import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
+import { secondsUntil } from '@/composables/useSchedQuality'
+import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
-import { closeSchedDrawer, markSchedChanged, openSchedDrawer, qualityOpenerKey, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedDrawer, markSchedChanged, openSchedDrawer, qualityOpenerKey, useSchedLayers } from '@/composables/useSchedLayers'
 import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
@@ -231,7 +239,7 @@ const props = defineProps<{
    * The page's row of an account (platform, type, upstream ratio probe, and its quality summary, which the table
    * refreshes every 5 s), when the page has one. Without a row the panel asks for the summary itself.
    */
-  account?: (id: number) => PanelRow | undefined
+  account?: (id: number) => SchedPanelRow | undefined
   /** Name and alias of a group by id, for the alias pills. */
   groupInfo?: (id: number) => { name: string; alias?: string | null } | undefined
   /** The element whose top edge the panel's top follows (the table); the page header's bottom without one. */
@@ -239,7 +247,8 @@ const props = defineProps<{
 }>()
 
 const { t, te } = useI18n()
-const { drawer, changed } = useSchedLayers()
+const { drawer } = useSchedLayers()
+const { panel, retry } = useSchedLayerData()
 // Write actions need accounts:manage; without it they are not shown.
 const { canManage } = useAdminPermission('accounts')
 const now = useLiveClock()
@@ -249,22 +258,15 @@ const bodyRef = ref<HTMLElement | null>(null)
 const open = computed(() => drawer.accountId !== null)
 
 // ---- Data ----
-// The row's summary when the page's table carries one (the same numbers as its cells); otherwise the panel's own.
+// The header is the open account's; the body shows the account the detail is for (the previous one right after a
+// switch, until the new detail lands: `fresh` is false meanwhile).
 const row = computed(() => (drawer.accountId === null ? undefined : props.account?.(drawer.accountId)))
-interface PanelData { detail: BackendAccountDetail; summary: BackendAccountSummary | null }
-const poll = useSchedQualityPoll<PanelData>(() => drawer.accountId, async (signal) => {
-  const id = drawer.accountId!
-  const ownSummary = row.value?.quality === undefined
-  const [detail, summary] = await Promise.all([
-    schedQualityAPI.accountDetail(id, { signal }),
-    ownSummary ? backendSummary([id], { signal }) : Promise.resolve(null)
-  ])
-  return { detail, summary: summary?.accounts.find((item) => item.account_id === id) ?? null }
-})
-const detail = computed(() => poll.data.value?.detail ?? null)
-const summary = computed(() => (row.value?.quality !== undefined ? row.value.quality : poll.data.value?.summary ?? null))
-// Any quality action (here, in the row menu, in batches) reloads the open panel; a recovery waits for this reload.
-watch(changed, () => { if (drawer.accountId !== null) trackSchedReload(poll.refresh()) })
+const detail = computed(() => panel.detail)
+const fresh = computed(() => panel.accountId !== null && panel.accountId === drawer.accountId)
+const failed = computed(() => !fresh.value && drawer.accountId !== null && panel.failedId === drawer.accountId)
+const shownRow = computed(() => (panel.accountId === null ? undefined : props.account?.(panel.accountId)))
+// The row's summary when the page's table carries one (the same numbers as its cells); otherwise the fetched one.
+const summary = computed(() => (shownRow.value?.quality !== undefined ? shownRow.value.quality : panel.summary))
 
 // ---- Layer: Escape, focus, outside clicks ----
 const layer = useOverlayLayer(open, {
@@ -278,8 +280,8 @@ const layer = useOverlayLayer(open, {
 
 // Keep focus in the panel when a refresh re-renders the control that had it.
 let restoreFocus: (() => void) | null = null
-watch(() => poll.data.value, () => { restoreFocus = layer.holdFocus() }, { flush: 'pre' })
-watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
+watch(() => [panel.detail, panel.summary], () => { restoreFocus = layer.holdFocus() }, { flush: 'pre' })
+watch(() => [panel.detail, panel.summary], () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
 function focusOpener(accountId: number, groupId: number | null) {
   const usable = (el: HTMLElement) => el.isConnected && !el.closest('[inert]') && !el.matches(':disabled') && (el.checkVisibility?.() ?? true)
@@ -345,33 +347,31 @@ const models = computed(() => (detail.value ? panelModels(detail.value) : []))
 const backTabs = computed(() => (detail.value ? backModels(detail.value) : new Set<string>()))
 const tab = ref<string | null>(null)
 const targetGroupId = ref<number | null>(null)
+/** The open request (a dot's group and model) is applied once its account's detail is shown. */
 let pendingRequest = true
 
-watch(() => [drawer.accountId, drawer.raise] as const, ([id], previous) => {
-  targetGroupId.value = drawer.groupId
+watch(() => [drawer.accountId, drawer.raise] as const, ([id]) => {
   pendingRequest = true
-  const sameAccount = !!previous && id === previous[0]
-  if (!sameAccount) tab.value = null
-  if (sameAccount && id !== null) {
-    void poll.refresh()
-    if (detail.value) applyRequest(false)
-  }
+  if (id !== null && fresh.value) applyRequest(false)
 })
 
 watch(detail, (value, previous) => {
-  if (!value) return
-  if (pendingRequest) applyRequest(!previous)
+  if (!value || !fresh.value) return
+  const switched = previous?.account.id !== value.account.id
+  if (switched) tab.value = null
+  if (pendingRequest || switched) applyRequest(switched)
   else tab.value = pickModelTab(models.value, null, tab.value)
 })
 
 /** Opened from a dot: the group's substandard model's tab, and the group row brought into view. */
-function applyRequest(fresh: boolean) {
+function applyRequest(toTop: boolean) {
+  targetGroupId.value = drawer.groupId
   tab.value = pickModelTab(models.value, drawer.model, tab.value)
   pendingRequest = false
   void nextTick(() => {
     const body = bodyRef.value
     if (!body) return
-    if (fresh) body.scrollTop = 0
+    if (toTop) body.scrollTop = 0
     const target = targetGroupId.value === null ? null : body.querySelector<HTMLElement>(`[data-qp-group-row="${targetGroupId.value}"]`)
     if (!target) return
     const rowTop = target.offsetTop
@@ -510,7 +510,7 @@ const recentLines = computed(() => {
 })
 
 const ratio = computed(() => {
-  const account = row.value
+  const account = shownRow.value
   if (!account) return null
   const view = upstreamRateView(account, now.value)
   if (!view.eligible) return null
@@ -533,8 +533,6 @@ function onLeave(el: Element, done: () => void) {
   running = gsap.to(el, { xPercent: 100, duration: motionDuration('--motion-exit'), ease: motionEase('--ease-in'), onComplete: done })
 }
 onScopeDispose(() => running?.kill())
-
-defineExpose({ refresh: () => poll.refresh() })
 </script>
 
 <style scoped>

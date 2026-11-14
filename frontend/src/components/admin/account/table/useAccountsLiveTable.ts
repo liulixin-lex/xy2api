@@ -14,7 +14,7 @@ import { adminAPI } from '@/api/admin'
 import { backendSummary } from '@/api/admin/schedQuality'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { UpstreamBalanceItem } from '@/api/admin/accounts'
-import { useLiveTable, type LiveRowId, type LiveTable } from '@/composables/useLiveTable'
+import { useLiveTable, type LiveRowId, type LiveTable, type LiveTask } from '@/composables/useLiveTable'
 import type { AccountListItem, AccountUsageInfo, WindowStats } from '@/types'
 import type { AccountListFilters } from './accountFilters'
 
@@ -38,6 +38,8 @@ export interface AccountsLiveOptions {
   onQualityMeta?: (meta: { global_enabled: boolean; stale: boolean }) => void
   /** A page answer arrived for these page and size (the pagination bar follows it, not the click). */
   onPageShown?: (page: { page: number; pageSize: number }) => void
+  /** The page's own tasks (the quality panel and board, useSchedLayerData). */
+  tasks?: LiveTask[]
 }
 
 export const ROW_BEAT_MS = 3000
@@ -92,6 +94,7 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
       return { items: result.items as LiveAccount[], total: result.total }
     },
     matches: options.matches,
+    tasks: options.tasks,
     sources: [
       {
         name: 'rows',

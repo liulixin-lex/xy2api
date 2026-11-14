@@ -55,6 +55,11 @@ export function openSchedBoard(group: { id: number; name: string }, model?: stri
   if (reopening) board.raise++
 }
 
+/** Another model picked on the open board. */
+export function setSchedBoardModel(model: string) {
+  board.model = model
+}
+
 export function closeSchedBoard() {
   board.groupId = null
 }

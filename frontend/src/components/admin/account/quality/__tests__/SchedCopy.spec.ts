@@ -15,6 +15,7 @@ import SchedPauseMark from '../SchedPauseMark.vue'
 import GroupSchedBoard from '@/components/admin/group/GroupSchedBoard.vue'
 import GroupSchedPolicyField from '@/components/admin/group/GroupSchedPolicyField.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedBoard } from '@/composables/useSchedLayers'
+import { withSchedHost } from './schedLayerHost'
 
 const api = vi.hoisted(() => ({ groupBoard: vi.fn(), getGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
@@ -88,7 +89,7 @@ describe('quality UI copy', () => {
         h(SchedBatchDialog, { action: 'reset', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
       ]
     })
-    mount(Host, { attachTo: document.body, global: { plugins: [i18n] } })
+    mount(withSchedHost(Host), { attachTo: document.body, global: { plugins: [i18n] } })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
 

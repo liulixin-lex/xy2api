@@ -327,6 +327,7 @@ import { IQ_BUILTIN_MODELS, iqRunSummary, iqTargetsSwitched } from '@/components
 import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
+import { useSchedLayerTasks } from '@/composables/useSchedLayerData'
 import AccountGroupPicker from '@/components/admin/account/table/AccountGroupPicker.vue'
 import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
 import AccountIQCell from '@/components/admin/account/table/AccountIQCell.vue'
@@ -456,6 +457,8 @@ const qualityMeta = ref<{ global_enabled: boolean; stale: boolean } | null>(null
 const qualityActive = computed(() => qualitySchedulingActive(qualityMeta.value))
 /** The page the pagination bar shows: the one whose rows are on screen (it follows them, not the click). */
 const shownPage = reactive({ page: pagination.page, page_size: pagination.page_size })
+// The quality panel's and the group board's data come with the table's beat (spec 7f-1).
+const schedLayers = useSchedLayerTasks()
 const live = useAccountsLiveTable({
   page: () => ({ page: pagination.page, pageSize: pagination.page_size }),
   filters: listFilters,
@@ -472,9 +475,11 @@ const live = useAccountsLiveTable({
   onQualityMeta: (meta) => {
     qualityMeta.value = meta
   },
-  onPageShown: (page) => Object.assign(shownPage, { page: page.page, page_size: page.pageSize })
+  onPageShown: (page) => Object.assign(shownPage, { page: page.page, page_size: page.pageSize }),
+  tasks: schedLayers.tasks
 })
 const table = live.table
+schedLayers.bind(table, (id) => table.record(id))
 const { rows, loading, total, pending, status: liveStatus } = table
 const accountRowClass = (row: LiveAccount) => (table.transitioning.value || table.isDimmed(row.id) ? 'opacity-60' : undefined)
 const changesText = (n: string) => t('admin.accounts.table.changes', { n })

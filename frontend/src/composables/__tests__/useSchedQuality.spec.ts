@@ -1,103 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, ref } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { effectScope } from 'vue'
 
-import { secondsUntil, useSchedQualityPoll } from '../useSchedQuality'
+import { secondsUntil } from '../useSchedQuality'
 import { useLiveClock } from '../useLiveClock'
-
-let hidden = false
-const flush = () => new Promise((resolve) => setTimeout(resolve))
-
-beforeEach(() => {
-  hidden = false
-  Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
-})
 
 afterEach(() => {
   vi.useRealTimers()
-})
-
-describe('useSchedQualityPoll', () => {
-  it('loads on open, again every 5 s while visible, and stops when closed', async () => {
-    vi.useFakeTimers()
-    const accountId = ref<number | null>(null)
-    const load = vi.fn(async () => ({ id: accountId.value }))
-    const scope = effectScope()
-    const poll = scope.run(() => useSchedQualityPoll(accountId, load))!
-    expect(load).not.toHaveBeenCalled()
-
-    accountId.value = 479
-    await nextTick()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(load).toHaveBeenCalledTimes(1)
-    expect(poll.data.value).toEqual({ id: 479 })
-
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(load).toHaveBeenCalledTimes(2)
-
-    hidden = true
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(load).toHaveBeenCalledTimes(2)
-    hidden = false
-    await vi.advanceTimersByTimeAsync(5000)
-    expect(load).toHaveBeenCalledTimes(3)
-
-    accountId.value = null
-    await nextTick()
-    expect(poll.data.value).toBeNull()
-    await vi.advanceTimersByTimeAsync(15_000)
-    expect(load).toHaveBeenCalledTimes(3)
-    scope.stop()
-  })
-
-  it('drops the response of the previous key', async () => {
-    const key = ref<number | null>(1)
-    let finishFirst: (value: string) => void = () => {}
-    const load = vi.fn((signal: AbortSignal) =>
-      key.value === 1
-        ? new Promise<string>((resolve) => { finishFirst = resolve; signal.addEventListener('abort', () => resolve('aborted')) })
-        : Promise.resolve('second')
-    )
-    const scope = effectScope()
-    const poll = scope.run(() => useSchedQualityPoll(key, load))!
-
-    key.value = 2
-    await nextTick()
-    await flush()
-    finishFirst('first')
-    await flush()
-    expect(load.mock.calls[0][0].aborted).toBe(true)
-    expect(poll.data.value).toBe('second')
-    scope.stop()
-  })
-
-  it('settles a replaced refresh only when its replacement is in, but at once when the key changes', async () => {
-    const key = ref<number | null>(1)
-    const answers: Array<(value: string) => void> = []
-    const load = vi.fn((signal: AbortSignal) => new Promise<string>((resolve, reject) => {
-      answers.push(resolve)
-      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
-    }))
-    const scope = effectScope()
-    const poll = scope.run(() => useSchedQualityPoll(key, load))!
-    await nextTick()
-    let firstDone = false
-    void poll.refresh().then(() => { firstDone = true })
-    // Replaced by another refresh of the same key: the first promise waits for the newest one.
-    void poll.refresh()
-    await flush()
-    expect(firstDone).toBe(false)
-    answers.at(-1)!('newest')
-    await flush()
-    expect([firstDone, poll.data.value]).toEqual([true, 'newest'])
-
-    let staleDone = false
-    void poll.refresh().then(() => { staleDone = true })
-    key.value = 2
-    await nextTick()
-    await flush()
-    expect(staleDone).toBe(true)
-    scope.stop()
-  })
 })
 
 describe('cooling countdown', () => {

@@ -20,16 +20,16 @@
         :searchable="false"
         :aria-label="t('admin.schedQuality.aria.model')"
         class="sq-select-sm w-[150px]"
-        @update:model-value="(value) => (requested = String(value))"
+        @update:model-value="(value) => setSchedBoardModel(String(value))"
       />
     </template>
 
-    <div v-if="!data && !poll.error.value" data-sq-board-loading>
+    <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
     </div>
     <div v-else-if="!data" class="flex items-center gap-3" data-sq-board-failed>
       <span class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
-      <button type="button" class="btn btn-secondary btn-sm" @click="poll.refresh()">{{ t('admin.schedQuality.action.retry') }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="retry(SCHED_BOARD_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
     </div>
     <p v-else-if="!data.rows.length" class="sq-text-3 text-sm">{{ t('admin.schedQuality.state.nodata') }}</p>
     <div v-else class="-mx-3 overflow-x-auto">
@@ -88,39 +88,34 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
-import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendDim, BackendOrderRow } from '@/api/admin/schedQualityTypes'
-import { secondsUntil, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import { secondsUntil } from '@/composables/useSchedQuality'
+import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
-import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { DASH, fmtCountdown, rejectName, SCHED_DIMS } from '@/utils/schedQualityFormat'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
-// re-sorted here), refreshed every 5 s while open. Accounts that take no part (layer stopped) come last in the
-// secondary colour; a row at the back (layer below) counts down to its end and marks its failing dimensions.
+// re-sorted here), fetched every 5 s by the host page's live table while open (useSchedLayerData). Accounts that take
+// no part (layer stopped) come last in the secondary colour; a row at the back (layer below) counts down to its end
+// and marks its failing dimensions.
 const { t, te } = useI18n()
-const { board, changed } = useSchedLayers()
+const { board } = useSchedLayers()
+const { board: boardData, boardKey, retry } = useSchedLayerData()
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
 const now = useLiveClock()
 const shellRef = ref<{ holdFocus: () => () => void } | null>(null)
 
-// The model asked for: the opener's, then whatever is picked here; the API answers with the model it used.
-const requested = ref<string | null>(null)
-watch(() => [board.groupId, board.raise] as const, () => { requested.value = board.model }, { immediate: true })
-
-const poll = useSchedQualityPoll(
-  () => (board.groupId === null ? null : `${board.groupId}:${requested.value ?? ''}`),
-  (signal) => schedQualityAPI.groupBoard(board.groupId!, requested.value ?? undefined, { signal })
-)
-const data = computed(() => poll.data.value)
-watch(() => board.raise, () => { if (board.groupId !== null) void poll.refresh() })
-watch(changed, () => { if (board.groupId !== null) void poll.refresh() })
+// The data of the group and model asked for (the opener's model, then whatever is picked here; the API answers with
+// the model it used).
+const data = computed(() => (boardData.key !== null && boardData.key === boardKey() ? boardData.data : null))
+const failed = computed(() => boardData.failedKey !== null && boardData.failedKey === boardKey())
 
 let restoreFocus: (() => void) | null = null
-watch(() => poll.data.value, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
-watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
+watch(() => boardData.data, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
+watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
 const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
 

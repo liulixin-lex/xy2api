@@ -4448,6 +4448,7 @@ import { openSchedBoard } from "@/composables/useSchedLayers";
 import schedQualityAPI from "@/api/admin/schedQuality";
 import type { BackendPolicy } from "@/api/admin/schedQualityTypes";
 import { useLiveTable } from "@/composables/useLiveTable";
+import { useSchedLayerTasks } from "@/composables/useSchedLayerData";
 import { groupUsageOrDefault, withAccountCounts, type GroupUsageSummary } from "./liveRowDefaults";
 import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
@@ -5077,6 +5078,8 @@ const groupListFilters = () => ({
   sort_order: sortState.sort_order,
   group_category: filters.group_category || undefined,
 });
+// The quality panel's and the group board's data come with the table's beat (spec 7f-1).
+const schedLayers = useSchedLayerTasks();
 const liveGroups = useLiveTable<LiveGroup>({
   getId: (group) => group.id,
   fetchPage: async (signal) => {
@@ -5145,8 +5148,9 @@ const liveGroups = useLiveTable<LiveGroup>({
     run: async () => {
       if (!authStore.isSimpleMode && isColumnVisible("category")) await groupCategories.ensureLoaded();
     },
-  }],
+  }, ...schedLayers.tasks],
 });
+schedLayers.bind(liveGroups);
 const { rows: groups, loading, total: groupsTotal } = liveGroups;
 const groupsTableRef = ref<InstanceType<typeof DataTable> | null>(null);
 const groupRowClass = (row: LiveGroup) =>

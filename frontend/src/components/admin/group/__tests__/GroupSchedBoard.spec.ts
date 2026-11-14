@@ -4,7 +4,8 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { BackendOrder, BackendOrderRow } from '@/api/admin/schedQualityTypes'
 import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
 import GroupSchedBoard from '../GroupSchedBoard.vue'
-import { closeSchedBoard, markSchedChanged, openSchedBoard, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, markSchedChanged, openSchedBoard, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
+import { withSchedHost } from '@/components/admin/account/quality/__tests__/schedLayerHost'
 
 const api = vi.hoisted(() => ({ groupBoard: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
@@ -41,6 +42,8 @@ function board(): BackendOrder {
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-board-row]'))
+// The board inside a page whose live table fetches its data (the groups page).
+const Board = withSchedHost(GroupSchedBoard)
 
 beforeEach(() => {
   document.body.innerHTML = ''
@@ -51,9 +54,33 @@ beforeEach(() => {
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
+describe('GroupSchedBoard data from the page\'s live table (7f-1)', () => {
+  it('asks nothing while closed, at once on opening and on another model, and drops the previous model\'s late answer', async () => {
+    mount(Board, { attachTo: document.body })
+    await flushPromises()
+    expect(api.groupBoard).not.toHaveBeenCalled()
+
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await flushPromises()
+    expect(api.groupBoard).toHaveBeenCalledTimes(1)
+
+    let late!: (value: BackendOrder) => void
+    api.groupBoard.mockReturnValueOnce(new Promise((resolve) => { late = resolve }))
+    setSchedBoardModel('gpt-6-astra')
+    await flushPromises()
+    expect(api.groupBoard).toHaveBeenLastCalledWith(53, 'gpt-6-astra', expect.anything())
+    // The answer for the model picked before is not shown under the new one.
+    setSchedBoardModel('gpt-6.1-sol')
+    await flushPromises()
+    late({ ...board(), rows: [row(42, { rank: 1 })] })
+    await flushPromises()
+    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '5', '3', '9', '1'])
+  })
+})
+
 describe('GroupSchedBoard', () => {
   it('renders the accounts in the order the API gives, never re-sorted', async () => {
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
     await flushPromises()
     expect(api.groupBoard).toHaveBeenCalledWith(53, 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
@@ -62,7 +89,7 @@ describe('GroupSchedBoard', () => {
   })
 
   it('shows stopped rows weak at the end with a countdown, a row at the back with its countdown and failing dimensions', async () => {
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
     const [normal, exempt, back, stopped, stoppedNoEnd] = rows()
@@ -81,7 +108,7 @@ describe('GroupSchedBoard', () => {
   })
 
   it('opens the account panel on the board\'s model from an account link', async () => {
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'alias-a')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-trigger="account:3"]')!.click()
@@ -91,7 +118,7 @@ describe('GroupSchedBoard', () => {
 
   it('shows account names as text without accounts:view', async () => {
     perms.granted = ['groups:view']
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
     expect(document.querySelector('[data-sq-trigger^="account:"]')).toBeNull()
@@ -101,7 +128,8 @@ describe('GroupSchedBoard', () => {
   for (const theme of ['light', 'dark']) {
     it(`keeps the open model menu through a refresh: arrows still move, Escape closes only the menu (${theme})`, async () => {
       document.documentElement.classList.toggle('dark', theme === 'dark')
-      mount(GroupSchedBoard, { attachTo: document.body })
+      mount(Board, { attachTo: document.body })
+      await flushPromises()
       openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
       await flushPromises()
       const trigger = document.querySelector<HTMLButtonElement>('[data-base-dialog] .modal-header button[aria-haspopup]')!
