@@ -114,7 +114,7 @@ func TestGatewayRequestTurnClearsSelectionAndPending(t *testing.T) {
 	st.CompleteGatewayForward(true, false)
 	next, _ := st.ClaimGatewayRequest(true)
 	require.NotEqual(t, first.RequestID, next.RequestID)
-	require.False(t, next.Fallback)
+	require.True(t, next.Fallback, "connection-level fallback standing survives turn reset until refreshed")
 	require.False(t, next.Takeover)
 	require.True(t, first.Fallback)
 	require.True(t, first.Takeover)
