@@ -427,13 +427,17 @@ const buildUsageListParams = (
 // The list is a live table in log mode: every 5 s the current page is fetched again; on page 1, newest first, with the
 // list's top in view, new records come in at the top (trimmed to the page size); otherwise they are only counted
 // (liveUsage.pending / pendingMore, taken in by liveUsage.applyPending). Usage rows never change once written, so there
-// is no per-row source. The stats cards are a 30 s page task that also runs after every successful load.
+// is no per-row source. The stats cards are a 30 s page task that also runs after every successful load. On the errors
+// and ranking tabs the list's 5 s check is held (the cards go on) and runs at once on the way back (spec 8.5a).
+type DetailTab = 'usage' | 'errors' | 'ranking'
+const activeTab = ref<DetailTab>('usage')
 const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
 const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: (signal) => adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal }),
   membershipIntervalMs: 5000,
+  membershipActive: () => activeTab.value === 'usage',
   tail: {
     enabled: () => pagination.page === 1 && sortState.sort_by === 'created_at' && sortState.sort_order === 'desc'
       && (usageTableRef.value?.isAtTop?.() ?? true),
@@ -787,8 +791,6 @@ const loadSavedColumns = () => {
 }
 
 // Detail tabs
-type DetailTab = 'usage' | 'errors' | 'ranking'
-const activeTab = ref<DetailTab>('usage')
 const detailTabs = computed(() => [
   { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
   { key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const },

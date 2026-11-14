@@ -5065,8 +5065,10 @@ const sortState = reactive({
 
 // The list is a live table (spec 8.5): the account counts come from the page fetched again with the same query every
 // 10 s, which also counts groups that appeared or went (liveGroups.pending: the changes pill, taken in by
-// liveGroups.applyPending). Capacity (5 s) and costs (30 s) are partial sources
-// from the summary endpoints with explicit defaults; the scheduling gates run after each load and on refresh only.
+// liveGroups.applyPending). The 10 s re-fetch of the current page is also the membership check: under a fast-changing
+// server-side sort a group may drift off the current page between two checks, and it shows dimmed until the next
+// active load. Capacity (5 s) and costs (30 s) are partial sources from the summary endpoints with explicit defaults;
+// the scheduling gates run after each load and on refresh only.
 const groupListFilters = () => ({
   platform: (filters.platform as GroupPlatform) || undefined,
   status: filters.status as any,
@@ -5140,13 +5142,16 @@ const liveGroups = useLiveTable<LiveGroup>({
       },
     },
   ],
-  // GroupCategoryTags read the shared category list once when they mount; rows now stay mounted across loads, so a
-  // failed first fetch is retried after each load here (a no-op once it has loaded).
+  // GroupCategoryTags read the shared category list once when they mount; rows now stay mounted across loads, so the
+  // list is loaded here after each load (a no-op once it has loaded). The store never throws: a failed load fails the
+  // task, so the engine retries it 3, 6, 12, 30 s later (spec 8.5a).
   tasks: [{
     name: "categories",
     intervalMs: 0,
     run: async () => {
-      if (!authStore.isSimpleMode && isColumnVisible("category")) await groupCategories.ensureLoaded();
+      if (authStore.isSimpleMode || !isColumnVisible("category")) return;
+      await groupCategories.ensureLoaded();
+      if (groupCategories.loadState === "failed") throw new Error("Failed to load group categories");
     },
   }, ...schedLayers.tasks],
 });

@@ -1006,6 +1006,18 @@ function scrollToTop() {
   else window.scrollBy(0, delta)
 }
 
+/**
+ * Whether the first row is in view: the table's own scroll is at the top and the list's top is not above the first
+ * visible line (below the sticky page header when the document scrolls). A live log follows new rows only then.
+ */
+function isAtTop() {
+  const wrapper = tableWrapperRef.value
+  if (wrapper && wrapper.scrollTop > 0) return false
+  const list = wrapper ?? mobileRootRef.value
+  if (!list) return true
+  return list.getBoundingClientRect().top >= viewOf(list).top() - 1 // a scroll that stopped on a fraction still counts
+}
+
 // A new batch that shares no row with the old one is another page, filter or sort: start it from the top. A reload
 // after a row action keeps most rows, and a passive update keeps all of them, so neither scrolls. Rows without a
 // stable key cannot be compared across reloads and never scroll on their own.
@@ -1143,6 +1155,7 @@ watch(
 
 defineExpose({
   scrollToTop,
+  isAtTop,
   virtualizer: rowVirtualizer,
   shouldVirtualize,
   sortedData,

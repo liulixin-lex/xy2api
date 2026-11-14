@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootRef" :class="flat ? '' : 'card overflow-hidden'">
+  <div :class="flat ? '' : 'card overflow-hidden'">
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -674,16 +674,12 @@ const ipGeoBatchLoading = ref(false)
 
 // 后端 0.6.5 起，管理端列表把没有账单的请求（多为失败或取消）和 usage 行排在一起。这些行来自另一张表：
 // id 自成序列，没有费用，常常也没有 Token 数。行键带上来源；费用与 Token 显示 —，不编造 0。
-const rootRef = ref<HTMLElement | null>(null)
 const tableRef = ref<InstanceType<typeof DataTable> | null>(null)
 /**
- * The list's top is in view and the table has not been scrolled inside itself: new rows may come in at the top
- * (the live engine's log mode follows the server only then).
+ * The list's first row is in view (below the sticky page header, spec 8.5a) and the table has not been scrolled inside
+ * itself: new rows may come in at the top (the live engine's log mode follows the server only then).
  */
-const isAtTop = () => {
-  if ((tableRef.value?.tableWrapperEl?.scrollTop ?? 0) > 0) return false
-  return (rootRef.value?.getBoundingClientRect().top ?? 0) >= 0
-}
+const isAtTop = () => tableRef.value?.isAtTop() ?? true
 const scrollToTop = () => tableRef.value?.scrollToTop()
 defineExpose({ isAtTop, scrollToTop })
 

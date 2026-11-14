@@ -890,6 +890,26 @@ describe('admin UsageView live log', () => {
     wrapper.unmount()
   })
 
+  it('holds the list\'s 5 s check on the errors and ranking tabs while the cards go on, and checks at once on the way back (8.5a)', async () => {
+    list.mockReset().mockResolvedValue(page('usage:1'))
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mountLive()
+    await flushPromises()
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    const listed = list.mock.calls.length
+    const stats = getStats.mock.calls.length
+
+    await tabs[1].trigger('click') // errors
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(list.mock.calls.length).toBe(listed)
+    expect(getStats.mock.calls.length).toBe(stats + 1)
+
+    await tabs[0].trigger('click')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(list.mock.calls.length).toBe(listed + 1)
+    wrapper.unmount()
+  })
+
   it('offers the records that came in while away from the top as "N new records"; a click takes them in', async () => {
     list.mockReset().mockResolvedValue(page('usage:1'))
     const wrapper = mountLive()

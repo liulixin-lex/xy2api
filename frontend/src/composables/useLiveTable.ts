@@ -25,6 +25,8 @@
  *   rows that went; a new row that pushes one off the page is one change) and dims gone rows in place;
  *   applyPending() takes them in. With `tail` (usage records) the page follows the server's order while
  *   `tail.enabled()` holds; otherwise new rows are only counted (`pendingMore` once a full page is waiting: "N+").
+ *   `membershipActive()` turning false holds the membership check alone (the list is out of view, as on the usage
+ *   page's other tabs; sources and tasks go on); turning true again runs it at once.
  * - Beats are setTimeout chains started after a request ends; a source never overlaps itself. They skip while an active
  *   load runs, stop while the tab is hidden or paused, catch up at once on visible / online / resume (unless they ran
  *   within their own beat), back off 3, 6, 12, 30 s after failures, and abort on dispose. `intervalMs: 0` makes a
@@ -48,7 +50,7 @@
  *   await table.reload()   // first load and every page / filter / sort change
  *   <DataTable :data="table.rows.value" :loading="table.loading.value" />
  */
-import { computed, onScopeDispose, reactive, ref, shallowReactive, shallowRef, toRaw, type ComputedRef, type Ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, shallowReactive, shallowRef, toRaw, watch, type ComputedRef, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 
 export type LiveRowId = string | number
@@ -101,6 +103,8 @@ export interface LiveTableOptions<T extends object> {
   tasks?: LiveTask[]
   /** Membership check beat in ms; 0 (or anything that is not a positive finite number) turns it off. Default 30 s. */
   membershipIntervalMs?: number
+  /** Reactive: the membership check sends nothing while this is false and runs at once when it turns true again. */
+  membershipActive?: () => boolean
   /** A row on the page that no longer matches the filter is dimmed in place. */
   matches?: (row: T) => boolean
   /** Log mode: follow the server's page while `enabled()` holds (page 1, newest first, scrolled to top). */
@@ -473,7 +477,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   if (membershipMs > 0) {
     addBeat(undefined, membershipMs, false, async (signal) => {
       // The page on screen is not the current query while a failed load is owed; its retry settles membership.
-      if (owed) return
+      if (owed || options.membershipActive?.() === false) return
       const requestedAt = ++stamp
       const page = await options.fetchPage(signal)
       if (signal.aborted) return
@@ -506,6 +510,12 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
       addedCount = newRows.length
       countPending()
     })
+    const membership = beats[beats.length - 1]
+    if (options.membershipActive) {
+      watch(options.membershipActive, (active) => {
+        if (active) want(membership, false)
+      })
+    }
   }
 
   // ---- Active load ----

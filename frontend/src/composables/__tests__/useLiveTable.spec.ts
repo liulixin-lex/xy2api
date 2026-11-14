@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, watch } from 'vue'
+import { effectScope, ref, watch } from 'vue'
 
 import { useLiveTable, type LivePage, type LivePatches, type LiveRowId, type LiveTableOptions } from '../useLiveTable'
 
@@ -818,6 +818,27 @@ describe('scheduling', () => {
     await table.reload()
     await vi.advanceTimersByTimeAsync(1000)
     expect([fetch.mock.calls.length, fetchPage.mock.calls.length]).toEqual([4, 1]) // once each after the load
+  })
+
+  it('holds only the membership check while membershipActive is false and runs it at once when it turns true', async () => {
+    const active = ref(true)
+    const fetchPage = vi.fn(async () => page(row(1)))
+    const task = vi.fn(async () => {})
+    const table = engine({ fetchPage, membershipIntervalMs: 5000, membershipActive: () => active.value, tasks: [{ intervalMs: 30_000, run: task }] })
+    await table.reload()
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+
+    active.value = false
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+    expect(task).toHaveBeenCalledTimes(2) // after the load, then on its own 30 s beat
+    expect(table.status.value).toBe('live')
+
+    active.value = true
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(fetchPage).toHaveBeenCalledTimes(3)
   })
 
   it('pauses and resumes by hand, catching up on resume', async () => {

@@ -261,6 +261,20 @@ describe('GroupsView group categories', () => {
     expect(showSuccess).toHaveBeenCalledWith('admin.groups.duplicateSuccess')
   })
 
+  it('retries the category list on the table\'s back-off after it failed to load (8.5a)', async () => {
+    vi.useFakeTimers()
+    categoriesApi.list.mockRejectedValue(new Error('down'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="category-cell"]').text()).toBe('—')
+
+    categoriesApi.list.mockResolvedValue(categories)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(wrapper.get('[data-test="category-cell"]').text()).toBe('Public')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('renders no category UI and loads no categories in simple mode', async () => {
     authState.isSimpleMode = true
     const wrapper = mountView()

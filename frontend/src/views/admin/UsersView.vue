@@ -1412,7 +1412,9 @@ const closePlatformQuotaModal = () => {
 // The list is a live table (spec 8.5): balance, current concurrency and last activity come from the page fetched again
 // with the same query every 10 s, which also counts rows that appeared or went (liveUsers.pending: the changes pill,
 // taken in by liveUsers.applyPending). Usage is a 30 s partial source; platform quotas (one request per user) and
-// attribute values run after each load and on refresh only.
+// attribute values run after each load and on refresh only. The 10 s re-fetch of the current page is also the
+// membership check: under a fast-changing server-side sort a row may drift off the current page between two checks,
+// and it shows dimmed until the next active load.
 type LiveUser = AdminUser & {
   usage_stats?: BatchUserUsageStats
   platform_quotas?: PlatformQuotaItem[]
@@ -1513,7 +1515,11 @@ const {
 const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 const userRowClass = (row: LiveUser) =>
   liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
-watch(usageSort, (sort) => liveUsers.sortBy(sort ? usageComparator(sort) : null), { immediate: true })
+watch(usageSort, (sort, previous) => {
+  // A usage sort the user picks starts from the first row (spec 8.4a); the first run applies the stored one.
+  if (previous !== undefined) usersTableRef.value?.scrollToTop?.()
+  liveUsers.sortBy(sort ? usageComparator(sort) : null)
+}, { immediate: true })
 
 const showLoadError = (error: any) => {
   appStore.showError(error?.response?.data?.detail || error?.message || t('admin.users.failedToLoad'))
@@ -1843,6 +1849,7 @@ const confirmBulkDelete = async () => {
     try {
       await adminAPI.users.delete(id)
       deletedIds.push(id)
+      liveUsers.remove(id) // off the page at once; the reload below follows
     } catch (error) {
       console.error('Error deleting user:', error)
     }

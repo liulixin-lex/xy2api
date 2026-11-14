@@ -91,9 +91,11 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   ...overrides
 })
 
+const tableScrollToTop = vi.fn()
 const DataTableStub = {
   props: ['columns', 'data', 'selectedKeys'],
   emits: ['sort', 'update:selectedKeys'],
+  methods: { scrollToTop: tableScrollToTop },
   template: `
     <div>
       <div data-test="columns">{{ columns.map(col => col.key).join(',') }}</div>
@@ -269,6 +271,25 @@ describe('admin UsersView', () => {
     }
     if (failedIds.length) expect(showError).toHaveBeenCalledWith(`admin.users.bulkDelete.failed:${failedIds.length}`)
     else expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('takes deleted users off the page at once, before the reload answers (8.5a)', async () => {
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ id: 42, email: 'a@example.com' }), createAdminUser({ id: 43, email: 'b@example.com' })],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    deleteUser.mockResolvedValue(undefined)
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    listUsers.mockReturnValue(new Promise(() => {})) // the reload after the delete never answers here
+    await wrapper.get('[data-test="confirm-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteUser.mock.calls).toEqual([[42]])
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('b@example.com')
     wrapper.unmount()
   })
 
@@ -555,12 +576,14 @@ describe('admin UsersView', () => {
 
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('last-used-first@example.com,usage-first@example.com')
 
+    tableScrollToTop.mockClear()
     await wrapper.get('[data-test="usage-sort-trigger-usage"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="usage-sort-usage-today"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('usage-first@example.com,last-used-first@example.com')
+    expect(tableScrollToTop).toHaveBeenCalledTimes(1) // a usage sort starts from the first row (8.4a)
     expect(localStorage.getItem('admin-users-usage-sort')).toContain('"key":"usage"')
 
     await wrapper.get('[data-test="sort-last-used"]').trigger('click')

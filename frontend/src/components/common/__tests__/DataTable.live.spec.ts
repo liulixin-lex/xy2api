@@ -150,6 +150,27 @@ describe('DataTable scroll to top, more cases', () => {
   })
 })
 
+describe('DataTable at top', () => {
+  it('is at the top only while the list\'s top is not under the sticky page header and the table is not scrolled (8.5a)', async () => {
+    stubViewport(true)
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' }, attachTo: document.body })
+    await nextTick()
+    const list = wrapper.get('.table-wrapper').element as HTMLElement
+    list.style.scrollMarginTop = '64px' // --table-sticky-top: the page header
+    trackScrollTop(list, 0)
+    const table = wrapper.vm as unknown as { isAtTop: () => boolean }
+
+    placeAt(list, 64)
+    expect(table.isAtTop()).toBe(true)
+    placeAt(list, 40) // the list's top went under the page header
+    expect(table.isAtTop()).toBe(false)
+    placeAt(list, 200)
+    list.scrollTop = 30
+    expect(table.isAtTop()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
 describe('DataTable mobile progress bar', () => {
   it('comes and goes without changing the list classes or what comes before the first card', async () => {
     stubViewport(false)
