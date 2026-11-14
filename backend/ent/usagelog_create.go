@@ -519,20 +519,6 @@ func (_c *UsageLogCreate) SetNillableDurationMs(v *int) *UsageLogCreate {
 	return _c
 }
 
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (_c *UsageLogCreate) SetEndToEndDurationMs(v int64) *UsageLogCreate {
-	_c.mutation.SetEndToEndDurationMs(v)
-	return _c
-}
-
-// SetNillableEndToEndDurationMs sets the "end_to_end_duration_ms" field if the given value is not nil.
-func (_c *UsageLogCreate) SetNillableEndToEndDurationMs(v *int64) *UsageLogCreate {
-	if v != nil {
-		_c.SetEndToEndDurationMs(*v)
-	}
-	return _c
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (_c *UsageLogCreate) SetEndToEndFirstOutputMs(v int64) *UsageLogCreate {
 	_c.mutation.SetEndToEndFirstOutputMs(v)
@@ -1496,10 +1482,6 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldDurationMs, field.TypeInt, value)
 		_node.DurationMs = &value
 	}
-	if value, ok := _c.mutation.EndToEndDurationMs(); ok {
-		_spec.SetField(usagelog.FieldEndToEndDurationMs, field.TypeInt64, value)
-		_node.EndToEndDurationMs = &value
-	}
 	if value, ok := _c.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
 		_node.EndToEndFirstOutputMs = &value
@@ -2450,30 +2432,6 @@ func (u *UsageLogUpsert) AddDurationMs(v int) *UsageLogUpsert {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (u *UsageLogUpsert) ClearDurationMs() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldDurationMs)
-	return u
-}
-
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsert) SetEndToEndDurationMs(v int64) *UsageLogUpsert {
-	u.Set(usagelog.FieldEndToEndDurationMs, v)
-	return u
-}
-
-// UpdateEndToEndDurationMs sets the "end_to_end_duration_ms" field to the value that was provided on create.
-func (u *UsageLogUpsert) UpdateEndToEndDurationMs() *UsageLogUpsert {
-	u.SetExcluded(usagelog.FieldEndToEndDurationMs)
-	return u
-}
-
-// AddEndToEndDurationMs adds v to the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsert) AddEndToEndDurationMs(v int64) *UsageLogUpsert {
-	u.Add(usagelog.FieldEndToEndDurationMs, v)
-	return u
-}
-
-// ClearEndToEndDurationMs clears the value of the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsert) ClearEndToEndDurationMs() *UsageLogUpsert {
-	u.SetNull(usagelog.FieldEndToEndDurationMs)
 	return u
 }
 
@@ -4023,34 +3981,6 @@ func (u *UsageLogUpsertOne) UpdateDurationMs() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearDurationMs() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
-	})
-}
-
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertOne) SetEndToEndDurationMs(v int64) *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.SetEndToEndDurationMs(v)
-	})
-}
-
-// AddEndToEndDurationMs adds v to the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertOne) AddEndToEndDurationMs(v int64) *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.AddEndToEndDurationMs(v)
-	})
-}
-
-// UpdateEndToEndDurationMs sets the "end_to_end_duration_ms" field to the value that was provided on create.
-func (u *UsageLogUpsertOne) UpdateEndToEndDurationMs() *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.UpdateEndToEndDurationMs()
-	})
-}
-
-// ClearEndToEndDurationMs clears the value of the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertOne) ClearEndToEndDurationMs() *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.ClearEndToEndDurationMs()
 	})
 }
 
@@ -5886,34 +5816,6 @@ func (u *UsageLogUpsertBulk) UpdateDurationMs() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearDurationMs() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
-	})
-}
-
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertBulk) SetEndToEndDurationMs(v int64) *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.SetEndToEndDurationMs(v)
-	})
-}
-
-// AddEndToEndDurationMs adds v to the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertBulk) AddEndToEndDurationMs(v int64) *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.AddEndToEndDurationMs(v)
-	})
-}
-
-// UpdateEndToEndDurationMs sets the "end_to_end_duration_ms" field to the value that was provided on create.
-func (u *UsageLogUpsertBulk) UpdateEndToEndDurationMs() *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.UpdateEndToEndDurationMs()
-	})
-}
-
-// ClearEndToEndDurationMs clears the value of the "end_to_end_duration_ms" field.
-func (u *UsageLogUpsertBulk) ClearEndToEndDurationMs() *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.ClearEndToEndDurationMs()
 	})
 }
 

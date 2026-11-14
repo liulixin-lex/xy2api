@@ -198,7 +198,6 @@ type UsageLog struct {
 	DurationMs            *int
 	FirstTokenMs          *int
 	EndToEndFirstOutputMs *int64
-	EndToEndDurationMs    *int64
 	AttemptFirstOutputMs  *int64
 	UserAgent             *string
 	IPAddress             *string

@@ -245,11 +245,6 @@ func DurationMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldDurationMs, v))
 }
 
-// EndToEndDurationMs applies equality check predicate on the "end_to_end_duration_ms" field. It's identical to EndToEndDurationMsEQ.
-func EndToEndDurationMs(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndDurationMs, v))
-}
-
 // EndToEndFirstOutputMs applies equality check predicate on the "end_to_end_first_output_ms" field. It's identical to EndToEndFirstOutputMsEQ.
 func EndToEndFirstOutputMs(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndFirstOutputMs, v))
@@ -2088,56 +2083,6 @@ func DurationMsIsNil() predicate.UsageLog {
 // DurationMsNotNil applies the NotNil predicate on the "duration_ms" field.
 func DurationMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldDurationMs))
-}
-
-// EndToEndDurationMsEQ applies the EQ predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsEQ(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsNEQ applies the NEQ predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsNEQ(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldNEQ(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsIn applies the In predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsIn(vs ...int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldIn(FieldEndToEndDurationMs, vs...))
-}
-
-// EndToEndDurationMsNotIn applies the NotIn predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsNotIn(vs ...int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldNotIn(FieldEndToEndDurationMs, vs...))
-}
-
-// EndToEndDurationMsGT applies the GT predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsGT(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldGT(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsGTE applies the GTE predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsGTE(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldGTE(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsLT applies the LT predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsLT(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldLT(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsLTE applies the LTE predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsLTE(v int64) predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldLTE(FieldEndToEndDurationMs, v))
-}
-
-// EndToEndDurationMsIsNil applies the IsNil predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsIsNil() predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldIsNull(FieldEndToEndDurationMs))
-}
-
-// EndToEndDurationMsNotNil applies the NotNil predicate on the "end_to_end_duration_ms" field.
-func EndToEndDurationMsNotNil() predicate.UsageLog {
-	return predicate.UsageLog(sql.FieldNotNull(FieldEndToEndDurationMs))
 }
 
 // EndToEndFirstOutputMsEQ applies the EQ predicate on the "end_to_end_first_output_ms" field.

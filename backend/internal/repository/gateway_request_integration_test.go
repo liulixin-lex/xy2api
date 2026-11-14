@@ -81,7 +81,8 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 		RequestID: "billing-fixture", Model: "fixture", CreatedAt: at, InputTokens: 10, CacheReadTokens: 90,
 		TotalCost: 1, ActualCost: 0.5}
 	usage.EndToEndFirstOutputMs = &ms
-	usage.EndToEndDurationMs = new(int64(200))
+	usage.FirstTokenMs = new(50)
+	usage.DurationMs = new(80)
 	_, err := repo.Create(ctx, usage)
 	require.NoError(t, err)
 	gatewayID := uuid.NewString()
@@ -124,14 +125,15 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 			require.True(t, row.HasAttempts)
 			require.Equal(t, "usage", row.Source)
 			require.Equal(t, usage.ID, row.Log.ID)
-			require.Equal(t, 100, *row.Log.FirstTokenMs)
+			require.Equal(t, 50, *row.Log.FirstTokenMs)
+			require.Equal(t, 80, *row.Log.DurationMs)
 			require.False(t, *row.TTFOOver)
 		case row.Result != nil && *row.Result == 3:
 			require.Equal(t, "unbilled", row.Source)
 			require.True(t, *row.TTFOOver)
 			require.False(t, row.HasAttempts)
 		case row.Result == nil:
-			require.Equal(t, legacyFirst, *row.Log.FirstTokenMs, "incomplete end-to-end pair falls back to attempt timing")
+			require.Equal(t, legacyFirst, *row.Log.FirstTokenMs, "D27 preserves original first-token timing")
 			require.True(t, *row.TTFOOver)
 		case *row.Result == 4:
 			require.Nil(t, row.InputTokens)
@@ -143,7 +145,7 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 	require.EqualValues(t, 4, stats.TotalRequests)
 	require.EqualValues(t, 1, stats.Success)
 	require.EqualValues(t, 1, stats.Failed)
-	require.Equal(t, 100.0, *stats.TTFOP50Ms) // lower nearest rank for two measurements
+	require.Equal(t, 300.0, *stats.TTFOP50Ms) // nearest rank of original row values: 50, 300, 999
 	require.InDelta(t, 0.45, *stats.CacheRatio, 1e-9)
 	require.Equal(t, 2.0, stats.TotalCost)
 	filters.AccountID = b.ID

@@ -134,9 +134,6 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("duration_ms").
 			Optional().
 			Nillable(),
-		field.Int64("end_to_end_duration_ms").
-			Optional().
-			Nillable(),
 		field.Int64("end_to_end_first_output_ms").
 			Optional().
 			Nillable(),

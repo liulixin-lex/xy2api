@@ -27,7 +27,7 @@ func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters Usag
 				total_cost,
 				actual_cost,
 				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
-				duration_ms, result, end_to_end_first_output_ms
+				duration_ms, result, first_token_ms
 			FROM requests
 			%s
 		)
@@ -46,7 +46,7 @@ func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters Usag
 			COALESCE(SUM(account_cost), 0) AS account_cost,
 			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
             COUNT(*) FILTER (WHERE result=1), COUNT(*) FILTER (WHERE result=2), COUNT(*) FILTER (WHERE result=3),
-            percentile_disc(0.5) WITHIN GROUP (ORDER BY end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL),
+            percentile_disc(0.5) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL),
             SUM(cache_read_tokens::bigint) FILTER (WHERE input_tokens IS NOT NULL AND cache_read_tokens IS NOT NULL AND cache_creation_tokens IS NOT NULL)::double precision
             / NULLIF(SUM(input_tokens::bigint+cache_read_tokens::bigint+cache_creation_tokens::bigint),0)
 		FROM scoped

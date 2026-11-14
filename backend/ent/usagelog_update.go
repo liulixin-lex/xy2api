@@ -799,33 +799,6 @@ func (_u *UsageLogUpdate) ClearDurationMs() *UsageLogUpdate {
 	return _u
 }
 
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdate) SetEndToEndDurationMs(v int64) *UsageLogUpdate {
-	_u.mutation.ResetEndToEndDurationMs()
-	_u.mutation.SetEndToEndDurationMs(v)
-	return _u
-}
-
-// SetNillableEndToEndDurationMs sets the "end_to_end_duration_ms" field if the given value is not nil.
-func (_u *UsageLogUpdate) SetNillableEndToEndDurationMs(v *int64) *UsageLogUpdate {
-	if v != nil {
-		_u.SetEndToEndDurationMs(*v)
-	}
-	return _u
-}
-
-// AddEndToEndDurationMs adds value to the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdate) AddEndToEndDurationMs(v int64) *UsageLogUpdate {
-	_u.mutation.AddEndToEndDurationMs(v)
-	return _u
-}
-
-// ClearEndToEndDurationMs clears the value of the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdate) ClearEndToEndDurationMs() *UsageLogUpdate {
-	_u.mutation.ClearEndToEndDurationMs()
-	return _u
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (_u *UsageLogUpdate) SetEndToEndFirstOutputMs(v int64) *UsageLogUpdate {
 	_u.mutation.ResetEndToEndFirstOutputMs()
@@ -2020,15 +1993,6 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
 	}
-	if value, ok := _u.mutation.EndToEndDurationMs(); ok {
-		_spec.SetField(usagelog.FieldEndToEndDurationMs, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedEndToEndDurationMs(); ok {
-		_spec.AddField(usagelog.FieldEndToEndDurationMs, field.TypeInt64, value)
-	}
-	if _u.mutation.EndToEndDurationMsCleared() {
-		_spec.ClearField(usagelog.FieldEndToEndDurationMs, field.TypeInt64)
-	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
 	}
@@ -3213,33 +3177,6 @@ func (_u *UsageLogUpdateOne) AddDurationMs(v int) *UsageLogUpdateOne {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (_u *UsageLogUpdateOne) ClearDurationMs() *UsageLogUpdateOne {
 	_u.mutation.ClearDurationMs()
-	return _u
-}
-
-// SetEndToEndDurationMs sets the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdateOne) SetEndToEndDurationMs(v int64) *UsageLogUpdateOne {
-	_u.mutation.ResetEndToEndDurationMs()
-	_u.mutation.SetEndToEndDurationMs(v)
-	return _u
-}
-
-// SetNillableEndToEndDurationMs sets the "end_to_end_duration_ms" field if the given value is not nil.
-func (_u *UsageLogUpdateOne) SetNillableEndToEndDurationMs(v *int64) *UsageLogUpdateOne {
-	if v != nil {
-		_u.SetEndToEndDurationMs(*v)
-	}
-	return _u
-}
-
-// AddEndToEndDurationMs adds value to the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdateOne) AddEndToEndDurationMs(v int64) *UsageLogUpdateOne {
-	_u.mutation.AddEndToEndDurationMs(v)
-	return _u
-}
-
-// ClearEndToEndDurationMs clears the value of the "end_to_end_duration_ms" field.
-func (_u *UsageLogUpdateOne) ClearEndToEndDurationMs() *UsageLogUpdateOne {
-	_u.mutation.ClearEndToEndDurationMs()
 	return _u
 }
 
@@ -4466,15 +4403,6 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
-	}
-	if value, ok := _u.mutation.EndToEndDurationMs(); ok {
-		_spec.SetField(usagelog.FieldEndToEndDurationMs, field.TypeInt64, value)
-	}
-	if value, ok := _u.mutation.AddedEndToEndDurationMs(); ok {
-		_spec.AddField(usagelog.FieldEndToEndDurationMs, field.TypeInt64, value)
-	}
-	if _u.mutation.EndToEndDurationMsCleared() {
-		_spec.ClearField(usagelog.FieldEndToEndDurationMs, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
