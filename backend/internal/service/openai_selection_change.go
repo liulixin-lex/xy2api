@@ -174,9 +174,13 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
 		return
 	}
+	kind := "migrate"
+	if change.expected.AccountID == 0 {
+		kind = "create"
+	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
+		kind: kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy,
 		skipCommit:      change.skipCommit,
 		ownerReleased:   change.ownerReleased,
