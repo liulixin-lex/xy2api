@@ -11,8 +11,8 @@ import (
 
 func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
 	return []any{&row.AttemptID, &row.StartedAt, &row.FinishedAt, &row.AccountID, &row.GroupID,
-		&row.Model, &row.Class, &row.Stream, &row.Warm, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
-		&row.Detail, &row.PromptTokens, &row.PrevPromptTokens, &row.CacheReadTokens, &row.SessionKey,
+		&row.Model, &row.Stream, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
+		&row.Detail, &row.PromptTokens, &row.CacheReadTokens, &row.SessionKey,
 		&row.RequestID, &row.InsertedAt, &row.InputTokens, &row.CacheCreationTokens}
 }
 

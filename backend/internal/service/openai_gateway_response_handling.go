@@ -1696,9 +1696,6 @@ func (s *OpenAIGatewayService) BindOpenAIHTTPResponseOwner(
 }
 
 func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *gin.Context, account *Account, responseID string) {
-	if schedTestRequest(ctx) {
-		return
-	}
 	if s == nil || account == nil || account.ID <= 0 {
 		return
 	}

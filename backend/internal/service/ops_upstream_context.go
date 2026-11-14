@@ -488,11 +488,6 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if c == nil {
 		return
 	}
-	isTest := c.Request != nil && schedTestRequest(c.Request.Context())
-	if isTest {
-		ev.Source = "sched_test"
-		ev.SkipMonitoring = true
-	}
 	if ev.AtUnixMs <= 0 {
 		ev.AtUnixMs = time.Now().UnixMilli()
 	}
@@ -516,7 +511,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if ev.StateFamily == "" && ev.UpstreamResponseBody != "" {
 		ev.StateFamily = string(openAIStateRejection([]byte(ev.UpstreamResponseBody), ev.Message).Family)
 	}
-	if c.Request != nil && !isTest {
+	if c.Request != nil {
 		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)
 	}
 

@@ -188,11 +188,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	upstreamBalanceStore := repository.NewUpstreamBalanceStore(redisClient)
 	schedQualityStore := repository.NewSchedQualityRepository(client, db)
 	schedAttemptStore := repository.NewSchedAttemptRepository(db)
-	schedTestStore := repository.NewSchedTestRepository(db)
 	schedObservabilityService := service.NewSchedObservabilityService()
 	schedObs := service.ProvideSchedObs(schedObservabilityService)
-	schedTestRunnerService := service.ProvideSchedTestRunnerService(openAIGatewayService, concurrencyService, accountRepository, schedTestStore, leaderLockCache, db, schedObs)
-	schedQualityEngineService := service.ProvideSchedQualityEngineService(schedQualityStore, schedAttemptStore, schedTestRunnerService, settingService, leaderLockCache, db, schedObs)
+	schedQualityEngineService := service.ProvideSchedQualityEngineService(schedQualityStore, schedAttemptStore, settingService, leaderLockCache, db, schedObs)
 	openAISelectionBoard := service.ProvideOpenAISelectionBoard(openAIGatewayService, schedQualityEngineService)
 	schedModelTransientAdmin := service.ProvideSchedModelTransientAdmin(openAIGatewayService)
 	schedAdminAccountRepository := repository.NewSchedAdminAccountRepository(client, db, schedulerCache)
@@ -425,7 +423,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	supportChatImagePurgeService := service.ProvideSupportChatImagePurgeService(supportChatRepository, settingService, leaderLockCache, db)
-	v := provideCleanup(engine, client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageBillingRecoveryService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, iqCheckService, ollamaCloudUsageService, openCodeGoUsageService, upstreamBalanceService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager, resilienceService, schedQualityEngineService, schedTestRunnerService, schedAttemptRecorderService, schedObservabilityService, imageTaskService, asyncImageHandler, supportChatImagePurgeService, mcpServer)
+	v := provideCleanup(engine, client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageBillingRecoveryService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, iqCheckService, ollamaCloudUsageService, openCodeGoUsageService, upstreamBalanceService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager, resilienceService, schedQualityEngineService, schedAttemptRecorderService, schedObservabilityService, imageTaskService, asyncImageHandler, supportChatImagePurgeService, mcpServer)
 	application := &Application{
 		Server:        httpServer,
 		PromptAudit:   promptService,
@@ -519,7 +517,6 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 	resilienceSvc *service.ResilienceService,
 	schedQuality *service.SchedQualityEngineService,
-	schedTests *service.SchedTestRunnerService,
 	schedAttempts *service.SchedAttemptRecorderService,
 	schedObs *service.SchedObservabilityService,
 	imageTasks *service.ImageTaskService,
@@ -530,9 +527,6 @@ func provideCleanup(
 	return func() {
 		if schedQuality != nil {
 			schedQuality.Stop()
-		}
-		if schedTests != nil {
-			schedTests.Stop()
 		}
 		if schedAttempts != nil {
 			schedAttempts.Stop()

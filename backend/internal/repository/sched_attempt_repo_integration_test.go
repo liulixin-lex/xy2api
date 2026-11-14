@@ -16,7 +16,7 @@ import (
 func schedAttemptTestRow(account int64, started time.Time) schedquality.AttemptSample {
 	return schedquality.AttemptSample{
 		AttemptID: uuid.Must(uuid.NewV7()).String(), StartedAt: started, FinishedAt: started.Add(time.Second),
-		AccountID: account, GroupID: 1, Model: "model", Class: schedquality.ClassRegular,
+		AccountID: account, GroupID: 1, Model: "model",
 		Outcome: schedquality.OutcomeOther,
 	}
 }
@@ -43,10 +43,6 @@ func TestSchedAttemptRepositoryIdempotenceAndDelayedInsert(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, late.AttemptID, rows[1].AttemptID)
-	recent, err := repo.LoadRecentByAccount(ctx, account, 10)
-	require.NoError(t, err)
-	require.Len(t, recent, 2)
-	require.Equal(t, schedquality.OutcomeOther, recent[0].Outcome)
 	started, err := repo.LoadFinishedSince(ctx, start.Add(-time.Second))
 	require.NoError(t, err)
 	require.Len(t, started, 1)
