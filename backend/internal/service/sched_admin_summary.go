@@ -79,7 +79,9 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			if !schedAdminMember(a, r.GroupID) || !r.View.Failing {
 				continue
 			}
-			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: schedAdminExemption(out.Exemptions, r.GroupID) != nil})
+			exempt := schedAdminExemption(out.Exemptions, r.GroupID) != nil
+			effective := schedAdminBelow(p, a.ID, r.GroupID, exempt, schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled))
+			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: exempt, Effective: effective})
 			for _, d := range r.View.Dims {
 				switch string(d) {
 				case "ttfo":
@@ -165,7 +167,7 @@ func (s *SchedAdminService) attention(ctx context.Context) (schedAdminAttentionR
 			if len(x.Exemptions) > 0 {
 				out.attention.Exempt = append(out.attention.Exempt, a.ID)
 			}
-			below := schedAdminHasEffectiveSubstandard(p, now, a, x)
+			below := x.Stop == nil && schedAdminHasEffectiveSubstandard(x)
 			if below {
 				out.attention.Substandard = append(out.attention.Substandard, a.ID)
 			}
@@ -185,10 +187,9 @@ func (s *SchedAdminService) attention(ctx context.Context) (schedAdminAttentionR
 	return out, nil
 }
 
-func schedAdminHasEffectiveSubstandard(p *SchedQualitySnapshot, now time.Time, a *Account, summary SchedAdminAccountSummary) bool {
+func schedAdminHasEffectiveSubstandard(summary SchedAdminAccountSummary) bool {
 	for _, r := range summary.Substandard {
-		enabled := schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled)
-		if summary.Stop == nil && schedAdminBelow(p, a.ID, r.GroupID, r.Exempt, enabled) {
+		if r.Effective {
 			return true
 		}
 	}
