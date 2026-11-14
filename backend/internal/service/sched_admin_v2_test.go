@@ -60,6 +60,19 @@ func TestSchedAdminSummaryAllModelsMarksAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{1}, attention.Substandard)
 }
+
+func TestSchedAdminInactiveAccountIsManualOff(t *testing.T) {
+	s, _, repo := schedAdminFixture()
+	repo.rows[1].Status = StatusInactive
+	repo.rows[1].Schedulable = true
+
+	out, err := s.Summary(context.Background(), []int64{1})
+	require.NoError(t, err)
+	require.Len(t, out.Accounts, 1)
+	require.Equal(t, "disabled", out.Accounts[0].Status)
+	require.Equal(t, &SchedAdminStop{Source: "manual", Reason: "manual_off"}, out.Accounts[0].Stop)
+}
+
 func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
