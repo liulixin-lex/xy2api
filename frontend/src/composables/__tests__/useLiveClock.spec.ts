@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope } from 'vue'
 
-import { noteServerDate, serverNow, useLiveClock } from '../useLiveClock'
+import { noteServerDate, useLiveClock } from '../useLiveClock'
 
 let hidden = false
 beforeEach(() => {
@@ -40,16 +40,34 @@ describe('useLiveClock', () => {
     const now = scope.run(() => useLiveClock())!
     // The server is 90 s ahead; its header is cut to the second, so the clock lands within that second.
     noteServerDate(new Date(Date.now() + 90_000).toUTCString())
-    for (const offset of [now.value - Date.now(), serverNow() - Date.now()]) {
-      expect(offset).toBeGreaterThanOrEqual(90_000)
-      expect(offset).toBeLessThan(91_000)
-    }
+    const offset = now.value - Date.now()
+    expect(offset).toBeGreaterThanOrEqual(90_000)
+    expect(offset).toBeLessThan(91_000)
 
-    const before = serverNow() - Date.now()
     noteServerDate(new Date(Date.now() + 90_400).toUTCString())
     noteServerDate('not a date')
     noteServerDate(undefined)
-    expect(serverNow() - Date.now()).toBe(before)
+    vi.advanceTimersByTime(1000)
+    expect(now.value - Date.now()).toBe(offset)
     scope.stop()
+  })
+
+  it('takes the midpoint of sending and receiving as the moment the server stamped its header', () => {
+    const scope = effectScope()
+    const now = scope.run(() => useLiveClock())!
+    // Sent at a whole second and answered 4 s later; the server, 60 s ahead, stamped it 2 s after sending.
+    const sentAt = Date.now()
+    vi.advanceTimersByTime(4000)
+    noteServerDate(new Date(sentAt + 2000 + 60_000).toUTCString(), sentAt)
+    expect(now.value - Date.now()).toBe(60_500)
+    scope.stop()
+  })
+
+  it('does not keep a clock running for a caller outside any scope', async () => {
+    const now = useLiveClock()
+    const start = now.value
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(now.value).toBe(start)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

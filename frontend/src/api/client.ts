@@ -39,8 +39,13 @@ const getUserTimezone = (): string => {
   }
 }
 
+/** Send time per request, for the clock calibration in the response interceptor. */
+const sentAt = new WeakMap<object, number>()
+
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    sentAt.set(config, Date.now())
+
     // Attach token from localStorage
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {
@@ -82,7 +87,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
     // The shared page clock corrects its offset from the server's Date header (countdowns).
-    noteServerDate(response.headers?.date)
+    noteServerDate(response.headers?.date, sentAt.get(response.config))
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
     if (apiResponse && typeof apiResponse === 'object' && 'code' in apiResponse) {

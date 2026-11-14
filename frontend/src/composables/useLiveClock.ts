@@ -5,8 +5,10 @@
  *   const now = useLiveClock()            // Readonly<Ref<number>>, ms since epoch, server-corrected
  *   secondsLeft = Math.ceil((Date.parse(until) - now.value) / 1000)
  *
- * The clock runs while at least one scope uses it and the tab is visible; hidden tabs do not tick. The API client
- * passes every response's `Date` header to noteServerDate(), which corrects the local clock's offset from the server.
+ * The clock runs while at least one scope (component setup, effectScope) uses it and the tab is visible; hidden tabs do
+ * not tick. A call outside any scope gets the same value but does not keep the clock running. The API client passes
+ * every response's `Date` header and the request's send time to noteServerDate(), which corrects the offset from the
+ * server.
  */
 import { getCurrentScope, onScopeDispose, readonly, ref, type Ref } from 'vue'
 
@@ -41,32 +43,32 @@ function onVisibilityChange() {
   else start()
 }
 
-/** The shared, server-corrected "now" in ms. Stops ticking when the calling scope is disposed by the last user. */
+const shared = readonly(now)
+
+/** The shared, server-corrected "now" in ms. Ticks while a scope uses it; stops when the last such scope is disposed. */
 export function useLiveClock(): Readonly<Ref<number>> {
+  if (!getCurrentScope()) return shared
   if (users++ === 0 && typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibilityChange)
   start()
-  if (getCurrentScope()) {
-    onScopeDispose(() => {
-      if (--users > 0) return
-      stop()
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibilityChange)
-    })
-  }
-  return readonly(now)
+  onScopeDispose(() => {
+    if (--users > 0) return
+    stop()
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibilityChange)
+  })
+  return shared
 }
 
-/** Server time now, in ms: the local clock plus the measured offset. */
-export const serverNow = () => Date.now() + offsetMs
-
 /**
- * Feeds one response's `Date` header. The header is cut to the second, so the server time is taken as the middle of
- * that second; the offset only moves when it is off by more than a second.
+ * Feeds one response's `Date` header. The server stamped it somewhere between sending and receiving, taken as the
+ * midpoint of the two; the header is cut to the second, so the server time is taken as the middle of that second. The
+ * offset only moves when it is off by more than a second.
  */
-export function noteServerDate(header: unknown, receivedAt = Date.now()) {
+export function noteServerDate(header: unknown, sentAt?: number, receivedAt = Date.now()) {
   if (typeof header !== 'string' || header === '') return
   const server = Date.parse(header)
   if (!Number.isFinite(server)) return
-  const estimate = server + MIN_CORRECTION_MS / 2 - receivedAt
+  const local = sentAt === undefined ? receivedAt : (sentAt + receivedAt) / 2
+  const estimate = server + MIN_CORRECTION_MS / 2 - local
   if (Math.abs(estimate - offsetMs) <= MIN_CORRECTION_MS) return
   offsetMs = estimate
   tick()
