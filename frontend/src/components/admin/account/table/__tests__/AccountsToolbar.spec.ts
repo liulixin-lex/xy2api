@@ -52,6 +52,19 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
+  it('below 1024px keeps every tag in "more filters", whose menu lists them for removal', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+    const wrapper = mountToolbar({ platform: 'openai', type: 'apikey' })
+    await flushPromises()
+    expect(shownTags(wrapper)).toEqual([])
+    expect(wrapper.get('[data-test="more-filters-count"]').text()).toBe('2')
+    await wrapper.get('[data-test="more-filters"]').trigger('click')
+    expect(wrapper.findAll('[data-test="more-filters-menu"] .tb-tag')).toHaveLength(2)
+    wrapper.unmount()
+    window.matchMedia = matchMedia
+  })
+
   it('emits the filters with the one that changed, as the list request takes them (7d-12)', async () => {
     const wrapper = mountToolbar({ platform: 'openai', iq_status: '' })
     await flushPromises()

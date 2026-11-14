@@ -78,6 +78,66 @@
             <template #header-select>
               <input type="checkbox" class="acc-check" :checked="allVisibleSelected" :disabled="!canManage" :aria-label="t('common.selectAll')" @click.stop @change="toggleVisible(($event.target as HTMLInputElement).checked)" />
             </template>
+            <!-- Below 1024px: the cards' sort bar takes the select-all box; each account is an AccountCard filled with the
+                 table's own cells (spec 4.6). -->
+            <template #mobile-sort-extra>
+              <label v-if="canManage" class="acard-all">
+                <span class="acard-hit"><input type="checkbox" class="acc-check" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)" /></span>
+                <span>{{ t('common.selectAll') }}</span>
+              </label>
+            </template>
+            <template #card="{ row, cell }">
+              <AccountCard
+                :rows="cardRows"
+                :expanded="expandedCards.has(row.id)"
+                :selected="isSelected(row.id)"
+                :groups-label="`${columnLabel('groups')} · ${groupsOf(row).length}`"
+                :recent-label="columnLabel('sq_recent')"
+                :sched-label="columnLabel('schedulable')"
+                @toggle="toggleCard(row.id)"
+              >
+                <template #check>
+                  <span class="acard-hit acard-check"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></span>
+                </template>
+                <template #name><AccountNameCell :account="row" /></template>
+                <template v-if="isColumnVisible('status')" #status>
+                  <AccountStatusCell :account="row" @show-temp-unsched="handleShowTempUnsched" />
+                  <AccountStreamOnlyBadge :account="row" @cleared="mergeAccount($event as Account)" />
+                </template>
+                <template v-if="isColumnVisible('schedulable')" #sched>
+                  <AccountSwitch :checked="row.schedulable" :label="t('admin.accounts.columns.schedulable') + ' · ' + row.name" :disabled="!canManage" :busy="togglingSchedulable.has(row.id)" @toggle="handleToggleSchedulable(row, $event)" />
+                </template>
+                <template #ops>
+                  <button v-if="canManage" type="button" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op sq-focus" data-test="row-edit" @click="handleEdit(row)">
+                    <Icon name="edit" size="sm" />
+                  </button>
+                  <button type="button" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="acc-op sq-focus" data-test="row-more" @click="openMenu(row, $event)">
+                    <Icon name="more" size="sm" />
+                  </button>
+                </template>
+                <template v-if="isColumnVisible('groups')" #groups>
+                  <AccountGroupPills
+                    card
+                    :account="row"
+                    :groups="groupsOf(row)"
+                    :quality="row.platform === 'openai' ? row.quality ?? null : null"
+                    :readonly="!canPlaceGroups"
+                    @open-quality="(groupId: number) => openQuality(row, groupId)"
+                    @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
+                  />
+                </template>
+                <template v-if="isColumnVisible('sq_recent')" #recent>
+                  <AccountRecentCell card :quality="row.platform === 'openai' ? row.quality ?? null : null" />
+                </template>
+                <template #row="{ field }">
+                  <AccountIQCell v-if="field === 'iq_check'" detailed :account="row" :disabled="!canManage" :busy="togglingIQ.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" />
+                  <AccountCapacityCell v-else-if="field === 'capacity'" :account="row" />
+                  <UpstreamBillingRateCell v-else-if="field === 'upstream_billing_rate'" detailed :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
+                  <AccountTodayCell v-else-if="field === 'today_stats'" full :stats="row.today_stats" />
+                  <component :is="cell" v-else :column="columnByKey(field)" :row="row" />
+                </template>
+              </AccountCard>
+            </template>
             <template #cell-select="{ row }">
               <div class="acell acell--row"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></div>
             </template>
@@ -328,6 +388,7 @@ import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vu
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
 import { useSchedLayerTasks } from '@/composables/useSchedLayerData'
 import AccountGroupPicker from '@/components/admin/account/table/AccountGroupPicker.vue'
+import AccountCard from '@/components/admin/account/table/AccountCard.vue'
 import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
 import AccountIQCell from '@/components/admin/account/table/AccountIQCell.vue'
 import AccountNameCell from '@/components/admin/account/table/AccountNameCell.vue'
@@ -574,6 +635,18 @@ const cols = computed(() => {
   const pinned = (key: string) => allColumns.value.filter((column) => column.key === key)
   return [...pinned('select'), ...pinned('name'), ...orderedToggleableColumns.value.filter((column) => !hiddenColumns.has(column.key)), ...pinned('actions')]
 })
+const columnByKey = (key: string) => allColumns.value.find((column) => column.key === key)!
+const columnLabel = (key: string) => columnByKey(key).label
+
+// ---- The narrow cards (spec 4.6) ----
+/** Columns the card's always-shown layer holds; every other shown column is a line of the expanded layer. */
+const CARD_FIXED = new Set(['select', 'name', 'status', 'schedulable', 'groups', 'sq_recent', 'actions'])
+const cardRows = computed(() => cols.value.filter((column) => !CARD_FIXED.has(column.key)).map(({ key, label }) => ({ key, label })))
+/** The accounts whose card is open; kept by id, so loads and refreshes leave them open. */
+const expandedCards = reactive(new Set<number>())
+const toggleCard = (id: number) => {
+  if (!expandedCards.delete(id)) expandedCards.add(id)
+}
 // A column that loads its own data asks for it once it is shown again.
 const COLUMN_SOURCES: Record<string, string> = { groups: 'quality', sq_recent: 'quality', today_stats: 'today', usage: 'usage', upstream_balance: 'balance' }
 const toggleColumn = (key: string) => {
@@ -1424,11 +1497,14 @@ onUnmounted(() => cancelModalPrefetch?.())
 }
 .account-table :deep(.acell) {
   display: flex;
-  height: calc(var(--row-height) - 1px);
   min-width: 0;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
+}
+/* The fixed row height is the table's; in a card's details a cell takes the height it needs. */
+.account-table :deep(.table-wrapper .acell) {
+  height: calc(var(--row-height) - 1px);
   overflow: hidden;
 }
 .account-table :deep(.acell--row) {
@@ -1471,6 +1547,27 @@ onUnmounted(() => cancelModalPrefetch?.())
 .account-table :deep(th.acol-expires_at) { --acc-w: var(--acc-w-expires_at); }
 .account-table :deep(th.acol-notes) { --acc-w: var(--acc-w-notes); }
 
+/* A check box with a 40px hit area on the cards (touch); the box itself keeps its size. */
+.acard-hit {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+}
+.acard-check {
+  margin: -12px -8px -12px -12px;
+}
+.acard-all {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+}
+.acard-all .acard-hit {
+  margin: -2px 0 -2px -8px;
+}
 .acc-check {
   width: 14px;
   height: 14px;

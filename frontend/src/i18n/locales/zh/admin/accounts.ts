@@ -18,6 +18,10 @@ export default {
         cancel: '取消',
         inactive: '已停用',
       },
+      card: {
+        expand: '展开详情',
+        collapse: '收起'
+      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '错误', cache: '缓存' },

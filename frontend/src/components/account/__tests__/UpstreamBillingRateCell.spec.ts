@@ -165,6 +165,32 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.classes()).toContain('ratio--stale')
   })
 
+  it('says when a stale probe last succeeded and why it failed, in the card details (spec 4.6)', () => {
+    const wrapper = mount(UpstreamBillingRateCell, {
+      props: {
+        detailed: true,
+        now: Date.now(),
+        account: makeAccount({
+          extra: {
+            upstream_billing_probe_enabled: true,
+            upstream_billing_probe: {
+              status: 'failed',
+              last_error: 'timeout',
+              data: billingData,
+              received_at: '2026-07-12T22:00:00Z',
+              fresh_until: '2026-07-12T23:00:00Z',
+              last_attempt_at: '2026-07-13T00:20:00Z',
+              next_probe_at: '2026-07-13T01:00:00Z'
+            }
+          }
+        })
+      }
+    })
+    const note = wrapper.get('[data-testid="upstream-billing-note"]').text()
+    expect(note).toContain('admin.accounts.upstreamBilling.lastDetectedAt:')
+    expect(note).toContain('admin.accounts.table.ratioFailure:')
+  })
+
   it('shows stale snapshot details, local next probe time, and the account probe state', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
       attachTo: document.body,

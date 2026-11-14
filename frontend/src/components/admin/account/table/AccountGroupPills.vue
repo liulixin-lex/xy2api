@@ -1,5 +1,5 @@
 <template>
-  <div class="pills" :class="{ 'pills--center': groups.length <= 3 }" data-test="group-pills">
+  <div class="pills" :class="{ 'pills--center': groups.length <= 3, 'pills--card': card }" data-test="group-pills">
     <button
       v-if="!groups.length"
       type="button"
@@ -99,6 +99,8 @@ const props = defineProps<{
   /** The account's quality summary; null for accounts without quality data. */
   quality: AccountQualityView | null
   readonly?: boolean
+  /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
+  card?: boolean
 }>()
 const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
 const { t } = useI18n()
@@ -179,6 +181,22 @@ function moreTip(): string {
 }
 .pills--center {
   align-content: center;
+}
+.pills--card {
+  --pill-width: 72px;
+  --pill-height: 32px;
+  --pill-dot-zone: 24px;
+  --pill-gap-x: 8px;
+  --pill-gap-y: 8px;
+  height: auto;
+  align-content: start;
+}
+.pills--card .pill,
+.pills--card .pill__text {
+  font-size: var(--font-size-body);
+}
+.pills--card .pill__text--latin {
+  font-size: var(--font-size-small);
 }
 .pill {
   display: flex;

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="account.platform === 'openai'" class="iq" :class="{ 'iq--off': !enabled }" data-testid="iq-check-cell">
+  <div v-if="account.platform === 'openai'" class="iq" :class="{ 'iq--off': !enabled, 'iq--detailed': detailed }" data-testid="iq-check-cell">
     <AccountSwitch :checked="enabled" :label="t('admin.accounts.iqCheck') + ' · ' + account.name" :disabled="disabled" :busy="busy" @toggle="emit('toggle', $event)" />
     <button
       v-if="lines.length"
@@ -14,6 +14,7 @@
         <span class="iq__v" :class="`iq__v--${line.state}`" v-tip="() => lineTip(line.target, line.state)">
           <Icon v-if="line.state === 'checking'" name="refresh" size="xs" class="iq__spin" />{{ t(`admin.accounts.table.iqStates.${line.state}`) }}
         </span>
+        <span v-if="detailed" class="iq__r" data-test="iq-recheck">{{ recheckOf(line.target, line.state) }}</span>
       </template>
       <span v-if="more > 0" v-tip="allTip" class="iq__more" data-test="iq-more">{{ t('admin.accounts.table.iqMore', { n: more }) }}</span>
     </button>
@@ -26,19 +27,20 @@
 /**
  * IQ check column (spec 4.4, 7c, prototype): the switch and one line per model, at most two, then "+N". The words are
  * only smart (secondary colour), degraded (amber, regular weight), checking (queued included) and paused (muted);
- * unknown and disabled targets show "—". The recheck time lives in the tip.
+ * unknown and disabled targets show "—". The recheck time lives in the tip. The narrow card's details (`detailed`)
+ * list every model with its recheck time beside it: touch screens have no hover.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { iqGateEntries, iqModelLabel, isIQBuiltinModel, sortIQTargets } from '@/components/admin/account/iqCheckPresentation'
-import { useLiveClock } from '@/composables/useLiveClock'
+import { currentTime, useLiveClock } from '@/composables/useLiveClock'
 import type { Account, IQTargetSummary } from '@/types'
 import { vTip } from '@/utils/tip'
 import AccountSwitch from './AccountSwitch.vue'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 
-const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean }>()
+const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean; detailed?: boolean }>()
 const emit = defineEmits<{ toggle: [enabled: boolean]; records: [] }>()
 const { t } = useI18n()
 const now = useLiveClock()
@@ -65,23 +67,30 @@ const allLines = computed(() =>
       return state ? [{ model: target.model, name: iqModelLabel(target.model), state, target }] : []
     })
 )
-const lines = computed(() => allLines.value.slice(0, 2))
+const lines = computed(() => (props.detailed ? allLines.value : allLines.value.slice(0, 2)))
 const more = computed(() => allLines.value.length - lines.value.length)
 const allTip = () =>
   allLines.value.map((line) => t('admin.accounts.table.iqTip', { model: line.target.model, state: t(`admin.accounts.table.iqStates.${line.state}`) })).join('\n')
 
 const gates = computed(() => new Map(iqGateEntries(props.account.extra as Record<string, unknown> | undefined).map((gate) => [gate.model, gate.reset_at])))
 
+/** When the model is checked again (the gate's end while it holds one); empty while checking or paused. */
+function recheckOf(target: IQTargetSummary, state: LineState): string {
+  if (state === 'checking' || state === 'paused') return ''
+  const gate = target.gate_active ? gates.value.get(target.model) : undefined
+  const next = gate ?? target.next_run_at
+  if (!next) return ''
+  // The ticking clock only for a time still ahead (7g-1).
+  const left = msLeft(next, currentTime()) === null ? null : msLeft(next, now.value)
+  return left === null ? t('admin.accounts.table.iqRecheckPending') : t('admin.accounts.table.iqRecheckIn', { time: formatRemaining(t, left) })
+}
+
 function lineTip(target: IQTargetSummary, state: LineState): string {
   const head = t('admin.accounts.table.iqTip', { model: target.model, state: t(`admin.accounts.table.iqStates.${state}`) })
   if (state === 'checking') return `${head}\n${t('admin.accounts.table.iqChecking')}`
   const last = target.last_run_at ? t('admin.accounts.table.iqLastRun', { time: formatShortTime(target.last_run_at) }) : ''
   if (state === 'paused') return [[head, last].filter(Boolean).join(' · '), t('admin.accounts.table.iqPausedTip')].join('\n')
-  const gate = target.gate_active ? gates.value.get(target.model) : undefined
-  const next = gate ?? target.next_run_at
-  const left = msLeft(next, now.value)
-  const recheck = next ? (left === null ? t('admin.accounts.table.iqRecheckPending') : t('admin.accounts.table.iqRecheckIn', { time: formatRemaining(t, left) })) : ''
-  return [[head, last].filter(Boolean).join(' · '), recheck].filter(Boolean).join('\n')
+  return [[head, last].filter(Boolean).join(' · '), recheckOf(target, state)].filter(Boolean).join('\n')
 }
 </script>
 
@@ -154,6 +163,19 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
 .iq__none {
   color: var(--color-text-muted);
   font-size: var(--font-size-body);
+}
+.iq--detailed {
+  align-items: flex-start;
+}
+.iq--detailed .iq__lines {
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: 8px;
+}
+.iq__r {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-body);
 }
 @keyframes spin {
   to {

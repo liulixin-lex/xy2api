@@ -18,6 +18,10 @@ export default {
         cancel: 'Cancel',
         inactive: 'Inactive',
       },
+      card: {
+        expand: 'Show details',
+        collapse: 'Hide details'
+      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },

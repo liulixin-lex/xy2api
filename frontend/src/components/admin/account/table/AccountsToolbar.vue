@@ -1,6 +1,7 @@
 <template>
-  <div ref="rootRef" class="tb" data-test="accounts-toolbar">
-    <div ref="leftRef" class="tb-left">
+  <div ref="rootRef" class="tb-root" data-test="accounts-toolbar">
+    <TableToolbar class="tb">
+      <template #search>
       <label class="tb-search">
         <span class="sr-only">{{ t('admin.accounts.table.searchPlaceholder') }}</span>
         <Icon name="search" size="sm" class="tb-search__icon" />
@@ -15,6 +16,8 @@
           @input="emit('update:search', ($event.target as HTMLInputElement).value)"
         />
       </label>
+      </template>
+      <template #filters>
       <div ref="filtersRef" class="tb-filters">
         <template v-for="key in DIRECT" :key="key">
           <span v-if="!foldedSelects.includes(key)" class="tb-sel">
@@ -56,10 +59,12 @@
           </button>
         </span>
       </div>
-    </div>
+      </template>
 
-    <div class="tb-right">
+      <template #status>
       <LiveStatusIndicator :status="liveStatus" :pause="pause" :resume="resume" :detail="t('admin.accounts.table.liveDetail')" />
+      </template>
+      <template #actions>
       <button
         type="button"
         class="tb-icon-btn"
@@ -74,9 +79,10 @@
       <button v-if="canCreate" type="button" class="tb-btn tb-btn--primary" data-test="accounts-create" @click="emit('create')">
         <Icon name="plus" size="sm" />{{ t('admin.accounts.createAccount') }}
       </button>
-    </div>
+      </template>
+    </TableToolbar>
 
-    <div v-if="menuOpen" ref="menuRef" class="tb-menu" :style="{ left: `${menuLeft}px` }" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
+    <div v-if="menuOpen" ref="menuRef" class="tb-menu" :style="{ left: `${menuLeft}px`, top: menuTop === null ? undefined : `${menuTop}px` }" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
       <div v-if="folded.length" class="tb-menu__folded">
         <span class="tb-menu__k">{{ t('admin.accounts.table.foldedTitle') }}</span>
         <div class="tb-menu__tags">
@@ -106,18 +112,23 @@
 
 <script setup lang="ts">
 /**
- * The accounts toolbar (spec 4.2, prototype): one row, never wrapping. Search, four filters shown directly (platform,
- * status, group, quality), "more filters" (type, privacy, IQ, category) and the active filters as removable tags. Tags
- * that do not fit fold from the right into the "more filters" count, where they can still be seen and removed; if the
- * row still overflows, the direct filters fold into the menu too (quality first, then group, status, platform). All of
- * it is measured on the rendered widths, so any width from 1024px up, with or without a classic scrollbar, keeps one
- * row. On the right: the live indicator, refresh, more actions (slot) and add.
+ * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar. From 1024px one row, never wrapping (this
+ * component's own rules below): search, four filters shown directly (platform, status, group, quality), "more filters"
+ * (type, privacy, IQ, category) and the active filters as removable tags. Tags that do not fit fold from the right into
+ * the "more filters" count, where they can still be seen and removed; if the row still overflows, the direct filters
+ * fold into the menu too (quality first, then group, status, platform). All of it is measured on the rendered widths,
+ * so any width from 1024px up, with or without a classic scrollbar, keeps one row. On the right: the live indicator,
+ * refresh, more actions (slot) and add.
+ *
+ * Below 1024px it takes TableToolbar's narrow layout: search on its own row, the filters on one row that scrolls
+ * sideways, the live indicator and the actions last. The tags then all fold into "more filters" (its count and menu).
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useEventListener, useResizeObserver } from '@vueuse/core'
+import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { LiveStatus } from '@/composables/useLiveTable'
@@ -230,7 +241,6 @@ const clearAll = () => {
 
 // ---- One row: fold tags, then direct filters ----
 const rootRef = ref<HTMLElement | null>(null)
-const leftRef = ref<HTMLElement | null>(null)
 const filtersRef = ref<HTMLElement | null>(null)
 const tagsRef = ref<HTMLElement | null>(null)
 const moreRef = ref<HTMLElement | null>(null)
@@ -275,11 +285,17 @@ async function foldTagsUntilStable(): Promise<ToolbarFilterKey[]> {
     next = again
   }
 }
+/** The direct filters run past the filter row's box (TableToolbar's filters slot, the room left after the search). */
 const filtersOverflow = () => {
   const filters = filtersRef.value?.getBoundingClientRect()
-  const left = leftRef.value?.getBoundingClientRect()
-  return !!filters && !!left && filters.right + 8 > left.right + 0.5
+  const row = filtersRef.value?.parentElement?.getBoundingClientRect()
+  return !!filters && !!row && filters.right + 8 > row.right + 0.5
 }
+/** Below 1024px the filter row scrolls sideways: nothing is measured, every tag sits in "more filters". */
+const wide = useMediaQuery('(min-width: 1024px)')
+watch(wide, () => {
+  void fit()
+})
 
 let fitting = false
 /** A fit was asked for while one ran (a resize, a tag's text arriving): it runs again on what is there now. */
@@ -288,6 +304,12 @@ async function fit() {
   if (!rootRef.value) return
   if (fitting) {
     refit = true
+    return
+  }
+  if (!wide.value) {
+    folded.value = tags.value.map((tag) => tag.key)
+    foldedSelects.value = []
+    if (menuOpen.value) placeMenu()
     return
   }
   fitting = true
@@ -329,12 +351,16 @@ watch(() => tags.value.map((tag) => `${tag.key}:${tag.text}`).join('|'), () => {
 // ---- The menu: under its button (kept inside the toolbar); closes on Escape and on a click outside it and its button ----
 const menuOpen = ref(false)
 const menuLeft = ref(0)
+/** Null until placed: the stylesheet's spot under the toolbar meanwhile. */
+const menuTop = ref<number | null>(null)
+/** Under its button: on one row from 1024px, in the scrolling filter row below it. */
 function placeMenu() {
   const root = rootRef.value?.getBoundingClientRect()
   const button = moreRef.value?.getBoundingClientRect()
   if (!root || !button) return
   const width = menuRef.value?.offsetWidth ?? 0
   menuLeft.value = Math.max(0, Math.min(button.left - root.left, root.width - width))
+  menuTop.value = button.bottom - root.top + 6
 }
 watch(menuOpen, async (open) => {
   if (!open) return
@@ -363,19 +389,37 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 </script>
 
 <style scoped>
-.tb {
+/* The menu is placed against the whole toolbar. */
+.tb-root {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
 }
-.tb-left {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+/* From 1024px the page's own one-row toolbar, on TableToolbar's parts: no wrapping, 8px apart, the tags taking the
+   room left; below 1024px TableToolbar's narrow layout applies as it is. */
+@media (min-width: 1024px) {
+  .tb {
+    align-items: center;
+    gap: 8px;
+  }
+  .tb :deep(.table-toolbar__main) {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .tb :deep(.table-toolbar__search) {
+    width: auto;
+  }
+  .tb :deep(.table-toolbar__filters) {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .tb :deep(.table-toolbar__filters > .tb-tags) {
+    flex: 1 1 0;
+  }
+  .tb :deep(.table-toolbar__actions) {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
 }
 .tb-filters {
   display: flex;
@@ -385,18 +429,11 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 }
 .tb-tags {
   display: flex;
-  flex: 1 1 0;
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
   overflow: hidden;
-}
-.tb-right {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
 }
 .tb-search {
   position: relative;
@@ -635,6 +672,27 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-menu__clear:hover {
     background: var(--color-bg-control-hover);
     color: var(--color-text-primary);
+  }
+}
+/* Below 1024px (prototype, touch): the search fills its row, controls are 40px high, the tags live in the menu. */
+@media (max-width: 1023px) {
+  .tb-search {
+    width: 100%;
+  }
+  .tb-input {
+    height: 40px;
+    font-size: 15px;
+  }
+  .tb-sel select,
+  .tb-btn {
+    height: 40px;
+  }
+  .tb-icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .tb-tags {
+    display: none;
   }
 }
 /* 1024–1279: still one row; the search box and filters narrow */

@@ -2,7 +2,8 @@
   <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
     <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
          column (and the select column before it); the other columns follow as label-over-value pairs in two columns,
-         the actions sit in the foot. -->
+         the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
+         column's cell the way the table does. -->
     <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="table-card">
         <div class="table-card__head">
@@ -88,43 +89,46 @@
         ]"
         @click="clickableRows && emit('rowClick', row)"
       >
-        <div class="table-card__head">
-          <input
-            v-if="selectable"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 flex-none rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-            :checked="isRowSelected(row, index)"
-            :disabled="!isRowSelectable(row)"
-            :aria-label="getRowSelectionLabel(row, index)"
-            data-test="select-row"
-            @click.stop
-            @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
-          />
-          <div
-            v-for="column in cardHead"
-            :key="column.key"
-            :data-field="column.key"
-            class="table-card__title"
-            :class="{ 'flex-none': column.key === 'select' }"
-          >
-            <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
-              {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
-            </slot>
-          </div>
-        </div>
-        <dl v-if="cardFields.length" class="table-card__fields">
-          <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field">
-            <dt class="table-card__label">{{ column.label }}</dt>
-            <dd class="table-card__value">
+        <slot v-if="$slots.card" name="card" :row="row" :index="index" :cell="CardCell" />
+        <template v-else>
+          <div class="table-card__head">
+            <input
+              v-if="selectable"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 flex-none rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
+              :checked="isRowSelected(row, index)"
+              :disabled="!isRowSelectable(row)"
+              :aria-label="getRowSelectionLabel(row, index)"
+              data-test="select-row"
+              @click.stop
+              @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
+            />
+            <div
+              v-for="column in cardHead"
+              :key="column.key"
+              :data-field="column.key"
+              class="table-card__title"
+              :class="{ 'flex-none': column.key === 'select' }"
+            >
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
-            </dd>
+            </div>
           </div>
-        </dl>
-        <div v-if="hasActionsColumn" class="table-card__foot">
-          <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
-        </div>
+          <dl v-if="cardFields.length" class="table-card__fields">
+            <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field">
+              <dt class="table-card__label">{{ column.label }}</dt>
+              <dd class="table-card__value">
+                <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                  {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+                </slot>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="hasActionsColumn" class="table-card__foot">
+            <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
+          </div>
+        </template>
       </div>
     </template>
 
@@ -306,7 +310,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, type ComponentPublicInstance } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, useSlots, type ComponentPublicInstance, type FunctionalComponent } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
@@ -713,6 +717,14 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const slots = useSlots()
+/** One column's cell for a row as the table draws it (its #cell-<key> slot, else the value): for a page's own card. */
+const CardCell: FunctionalComponent<{ column: Column; row: any }> = ({ column, row }) => {
+  const slot = slots[`cell-${column.key}`]
+  if (slot) return slot({ row, value: row[column.key], expanded: actionsExpanded.value })
+  return String((column.formatter ? column.formatter(row[column.key], row) : row[column.key]) ?? '')
+}
+CardCell.props = ['column', 'row']
 /** A card's head: the leading column, with the page's own select column before it when it has one. */
 const cardHead = computed(() => dataColumns.value.slice(0, hasSelectColumn.value ? 2 : 1))
 const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length))

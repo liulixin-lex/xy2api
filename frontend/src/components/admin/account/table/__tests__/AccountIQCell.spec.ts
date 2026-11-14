@@ -16,6 +16,15 @@ const mountCell = (targets: IQTargetSummary[]) =>
   mount(AccountIQCell, { props: { account: { id: 1, name: 'acc-1', platform: 'openai', iq_targets: targets, extra: {} } as never } })
 
 describe('AccountIQCell', () => {
+  it('lists every model with its recheck time in the card details, where there is no hover (spec 4.6)', () => {
+    const later = new Date(Date.now() + 30 * 60_000).toISOString()
+    const targets = [target('gpt-6-astra', 'smart'), { ...target('gpt-6.1-sol', 'smart'), next_run_at: later }, target('gpt-5', 'smart')]
+    const wrapper = mount(AccountIQCell, { props: { detailed: true, account: { id: 1, name: 'acc-1', platform: 'openai', iq_targets: targets, extra: {} } as never } })
+    expect(wrapper.findAll('[data-testid="iq-target-tag"]')).toHaveLength(3)
+    expect(wrapper.find('[data-test="iq-more"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="iq-recheck"]').map((el) => el.text())[1]).toMatch(/^admin\.accounts\.table\.iqRecheckIn:/)
+  })
+
   it('shows two models and counts the rest as +N, whose tip lists every model with its state; two or fewer have no +N', () => {
     const two = mountCell([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'smart')])
     expect(two.findAll('[data-testid="iq-target-tag"]')).toHaveLength(2)

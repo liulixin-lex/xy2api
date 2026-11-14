@@ -362,6 +362,21 @@ describe('DataTable', () => {
     expect(card.get('.table-card__foot [data-test="edit"]').exists()).toBe(true)
   })
 
+  it('lets a page draw its own card, with any column\'s cell drawn the way the table draws it', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: { columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }], data: [{ id: 1, name: 'one', usage: 'snapshot' }], rowKey: 'id' },
+      slots: {
+        'cell-usage': '<b data-test="usage-cell">{{ params.value }}</b>',
+        card: `<template #card="{ row, cell }"><div data-test="own-card">{{ row.name }}<component :is="cell" :column="{ key: 'usage', label: 'Usage' }" :row="row" /></div></template>`
+      }
+    })
+    const card = wrapper.get('.table-card')
+    expect(card.find('.table-card__head').exists()).toBe(false)
+    expect(card.get('[data-test="own-card"]').text()).toBe('onesnapshot')
+    expect(card.get('[data-test="usage-cell"]').text()).toBe('snapshot')
+  })
+
   it('offers current-page select all in the mobile card layout', async () => {
     stubMobileMatchMedia()
     const wrapper = mount(DataTable, {

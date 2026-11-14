@@ -1,5 +1,5 @@
 <template>
-  <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed }">
+  <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed, 'ratio--detailed': detailed }">
     <HelpTooltip width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="upstream-billing-details">
       <template #trigger>
         <span class="ratio__v" data-testid="upstream-billing-rate">{{ primaryValue }}</span>
@@ -74,6 +74,11 @@
     >
       <Icon name="refresh" size="xs" :class="{ 'animate-spin': probing }" />
     </button>
+    <!-- The narrow card's details: what the tip says about a stale or failed probe, in the open (no hover on touch). -->
+    <div v-if="detailed && (stale || failureReason)" class="ratio__note" data-testid="upstream-billing-note">
+      <span v-if="stale && Number.isFinite(receivedAt)">{{ t('admin.accounts.upstreamBilling.lastDetectedAt', { value: formatDate(snapshot?.received_at) }) }}</span>
+      <span v-if="failureReason">{{ t('admin.accounts.table.ratioFailure', { reason: failureReason }) }}</span>
+    </div>
   </div>
   <span v-else class="ratio__none">—</span>
 </template>
@@ -92,6 +97,8 @@ const props = withDefaults(defineProps<{
   now: number
   probing?: boolean
   globalProbeEnabled?: boolean
+  /** The narrow card's details: the refresh button always shows, a stale or failed probe says so below the value. */
+  detailed?: boolean
 }>(), {
   globalProbeEnabled: true
 })
@@ -200,5 +207,19 @@ const formatDate = (value?: string) => value
   .ratio__btn {
     opacity: 1;
   }
+}
+.ratio--detailed {
+  flex-wrap: wrap;
+}
+.ratio--detailed .ratio__btn {
+  opacity: 1;
+}
+.ratio__note {
+  display: grid;
+  flex-basis: 100%;
+  gap: 2px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
 }
 </style>

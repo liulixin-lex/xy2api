@@ -1,5 +1,5 @@
 <template>
-  <div class="recent" data-test="account-recent">
+  <div class="recent" :class="{ 'recent--card': card }" data-test="account-recent">
     <template v-for="line in lines" :key="line.dim">
       <span class="recent__k">{{ line.label }}</span>
       <span class="recent__v" :class="line.cls" :data-dim="line.dim" v-tip="line.tip">{{ line.text }}</span>
@@ -11,7 +11,8 @@
 /**
  * Recent status (prototype): first token, errors and cache on three lines, from the account's quality summary. A value
  * over the line (the backend's `red` mark: one level only) is amber with a dotted underline, never red; too few samples
- * or no data reads muted. The browser judges nothing against a threshold.
+ * or no data reads muted. The browser judges nothing against a threshold. In the narrow card (`card`) the three sit
+ * side by side, each label over its value; the thresholds are in the quality panel.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -19,7 +20,7 @@ import type { BackendAccountSummary, BackendMark } from '@/api/admin/schedQualit
 import { vTip } from '@/utils/tip'
 import { formatRecentPercent, formatRecentSeconds } from './accountRecent'
 
-const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'stop'> | null }>()
+const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'stop'> | null; card?: boolean }>()
 const { t } = useI18n()
 
 type Dim = 'ttfo' | 'error' | 'cache'
@@ -75,5 +76,15 @@ const lines = computed(() => {
 }
 .recent__v--na {
   color: var(--color-text-muted);
+}
+.recent--card {
+  grid-template-rows: auto auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: column;
+  justify-content: stretch;
+  width: auto;
+}
+.recent--card .recent__v {
+  text-align: left;
 }
 </style>

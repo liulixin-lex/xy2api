@@ -1,8 +1,9 @@
 <template>
-  <div class="today" data-test="account-today">
+  <div class="today" :class="{ 'today--full': full }" data-test="account-today">
     <template v-for="line in lines" :key="line.key">
       <span class="today__k">{{ line.label }}</span>
-      <span class="today__v" :data-key="line.key" v-tip="line.text !== line.exact ? line.exact : ''">{{ line.text }}</span>
+      <span v-if="full" class="today__v" :data-key="line.key">{{ line.exact }}</span>
+      <span v-else class="today__v" :data-key="line.key" v-tip="line.text !== line.exact ? line.exact : ''">{{ line.text }}</span>
     </template>
   </div>
 </template>
@@ -11,7 +12,8 @@
 /**
  * Today's stats (spec 7a, 7b): four compact lines (requests, tokens, account cost, user charge), labels left and values
  * right, every number on the same three-significant-digit rule; the full value shows on hover. Before the stats are in,
- * every line reads "—", not 0 (7d-6).
+ * every line reads "—", not 0 (7d-6). The narrow card's details (`full`) show the full values instead: touch screens
+ * have no hover.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -25,7 +27,7 @@ import {
 } from '@/utils/compactNumber'
 import { vTip } from '@/utils/tip'
 
-const props = defineProps<{ stats: WindowStats | null | undefined }>()
+const props = defineProps<{ stats: WindowStats | null | undefined; full?: boolean }>()
 const { t } = useI18n()
 
 const lines = computed(() => {
@@ -56,5 +58,18 @@ const lines = computed(() => {
   color: var(--color-text-primary);
   text-align: right;
   white-space: nowrap;
+}
+/* Full values can be long ("$1,234,567.89"): one pair to a line, the value left after its label. */
+.today--full {
+  column-gap: 12px;
+  row-gap: 4px;
+  font-size: var(--font-size-body);
+  line-height: 18px;
+}
+.today--full .today__k {
+  font-size: var(--font-size-small);
+}
+.today--full .today__v {
+  text-align: left;
 }
 </style>
