@@ -68,6 +68,7 @@ func (v Verdict) String() string {
 	}
 	return ""
 }
+
 type AttemptSample struct {
 	AttemptID                        string
 	StartedAt, FinishedAt            time.Time
