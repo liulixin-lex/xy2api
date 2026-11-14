@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '../client'
 import { backendSummary, previewGroupPolicy, summary } from '../admin/schedQuality'
 import {
-  toAccountDetail,
   toAccountsSummary,
   toBoard,
   toGroupPolicy,
@@ -16,7 +15,6 @@ import {
   toRecentStats,
   toResetResult,
   withQualityFilter,
-  type BackendAccountDetail,
   type BackendAccountsSummary,
   type BackendGroupPolicy,
   type BackendOrder,
@@ -76,33 +74,6 @@ describe('account summary', () => {
       error: { rate: 0.018, bad: 2, n: 88, tier: null },
       cache: { ratio: 0.74, n: 12, tier: null }
     }])
-  })
-})
-
-describe('account detail', () => {
-  it('maps every group, its policy and exemption, and each model row with its verdicts', () => {
-    const raw = fixture<BackendAccountDetail>('account_detail')
-    const out = toAccountDetail(raw)
-    expect(out.account).toEqual(raw.account)
-    expect(out.tests_enabled).toBe(false)
-    expect(out.recent_attempts).toEqual([])
-    expect(out.auto_states).toEqual(raw.auto_states)
-    expect(out.groups.map((g) => [g.group_id, g.name, g.gate_enabled])).toEqual(raw.groups.map((g) => [g.group_id, g.name, g.policy.enabled]))
-    const row = out.groups[0].by_model[0]
-    expect(row).toMatchObject({ model: 'gpt-6.1-sol', state: 'cooling', level: 2, reason: 'speed', until: '2026-11-11T12:30:00Z' })
-    expect(row.ttfo).toEqual({ verdict: 'fail', from: 'real', n: 42, p90_ms: null, p90_timeout: false, limit_ms: 10000 })
-    expect(row.error).toEqual({ verdict: 'pass', from: 'real', n: 88, rate: 2 / 88, limit: 0.05 })
-    // `short` (too few samples) is the old `nodata`.
-    expect(row.cache).toEqual({ verdict: 'nodata', from: 'real', n: 12, ratio: 0.62, limit: 0.7 })
-    // One model tab per model some group has a row for, in first-seen order, without numbers of its own.
-    expect(out.models.map((m) => m.model)).toEqual([...new Set(raw.groups.flatMap((g) => g.by_model.map((r) => r.model)))])
-    expect(out.models.every((m) => m.test === null && m.ttfo.by_class.length === 0)).toBe(true)
-  })
-
-  it('reads the all-groups exemption from the root list', () => {
-    const raw = fixture<BackendAccountDetail>('account_detail')
-    raw.exemptions = [{ group_id: 0, expires_at: null, reason: 'r' }]
-    expect(toAccountDetail(raw).all_groups_override).toEqual({ mode: 'exempt', all_groups: true, expires_at: null, reason: 'r' })
   })
 })
 

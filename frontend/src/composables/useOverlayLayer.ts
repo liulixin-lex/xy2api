@@ -1,5 +1,5 @@
 import { nextTick, onUnmounted, ref, toValue, watch, type Ref, type WatchSource } from 'vue'
-import { closeOverlay, holdFocus, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
+import { closeOverlay, holdFocus, insideLayerAbove, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
 
 interface OverlayLayerOptions {
   /** Outermost element of the layer (made inert while a modal layer is above it). */
@@ -78,6 +78,8 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
      * function once it has rendered. Focus goes back to that element, else to the one with the same data-*, else
      * to the panel. Does nothing unless this layer is on top (a layer opened above in the meantime keeps focus).
      */
-    holdFocus: () => holdFocus(token)
+    holdFocus: () => holdFocus(token),
+    /** Whether `el` lies in a layer opened above this one (a popover or dialog it opened): not "outside" it. */
+    insideAbove: (el: Element) => insideLayerAbove(token, el)
   }
 }

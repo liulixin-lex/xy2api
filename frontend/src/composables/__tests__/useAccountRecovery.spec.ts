@@ -103,7 +103,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     expect(toast[kind].mock.calls).toEqual([[text]])
     expect(toast[kind === 'showSuccess' ? 'showError' : 'showSuccess']).not.toHaveBeenCalled()
     expect(refresh).toHaveBeenCalledTimes(1)
-    // The open drawer and board refresh too.
+    // The open panel and board refresh too.
     expect(changed.value).toBe(before + 1)
   })
 
@@ -112,7 +112,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     api.reset.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     let refreshed!: () => void
     const { recovery } = withRecovery()
-    // Another entry (the drawer, the temporary-pause dialog) on another component shares the lock.
+    // Another entry (the quality panel, the temporary-pause dialog) on another component shares the lock.
     const other = withRecovery().recovery
     const first = recovery.recover({ id: 1, name: 'acc-1' }, () => new Promise<void>((resolve) => { refreshed = resolve }))
     expect(isRecovering(1)).toBe(true)
@@ -130,7 +130,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
   it('holds the lock until the reload of an open layer is in, for a single and a batch recovery (R2-RT-FB P0-1)', async () => {
     api.reset.mockResolvedValue(clean)
     const reloads: Array<() => void> = []
-    // An open drawer reloads on every change and hands the reload over, as SchedAccountDrawer does.
+    // An open panel reloads on every change and hands the reload over, as the quality panel does.
     const stop = watch(useSchedLayers().changed, () => trackSchedReload(new Promise<void>((resolve) => reloads.push(resolve))))
     try {
       const { recovery } = withRecovery()

@@ -17,17 +17,11 @@
 import type {
   AccountRecentStatsBatch,
   RecentStatsTier,
-  SchedAccountDetail,
-  SchedAccountGroup,
   SchedAccountSummary,
   SchedAccountsSummary,
-  SchedAutoState,
   SchedBoard,
   SchedBoardAccount,
-  SchedGroupModelRow,
   SchedGroupPolicy,
-  SchedModelEvidence,
-  SchedOverride,
   SchedPolicy,
   SchedReason,
   SchedResetResult,
@@ -39,48 +33,6 @@ import type {
 import type { BackendAccountSummary, BackendAccountsSummary, BackendDim, BackendExemption, BackendMark, BackendSubstandard } from './schedQualityTypes'
 
 export type { BackendAccountSummary, BackendAccountsSummary, BackendDim, BackendExemption, BackendMark, BackendSubstandard }
-
-interface BackendDimDetail {
-  scope: string
-  window_min: number
-  n: number
-  lcb: number | null
-  /** pass | fail | short */
-  verdict: string
-}
-
-export interface BackendGroupModelDetail {
-  model: string
-  failing: boolean
-  dims: BackendDim[]
-  level: number
-  since: string | null
-  until: string | null
-  other_group_ids: number[]
-  exempt: boolean
-  ttfo: BackendDimDetail & { bad: number }
-  error: BackendDimDetail & { bad: number }
-  cache: BackendDimDetail & { ratio: number | null }
-}
-
-export interface BackendAccountDetail {
-  account: SchedAccountDetail['account']
-  at: string
-  stale: boolean
-  global_enabled: boolean
-  status: string
-  stop: BackendAccountSummary['stop']
-  reset_at: string | null
-  groups: {
-    group_id: number
-    name: string
-    policy: SchedPolicy
-    exemption: BackendExemption | null
-    by_model: BackendGroupModelDetail[]
-  }[]
-  auto_states: SchedAutoState[]
-  exemptions: BackendExemption[]
-}
 
 export interface BackendResetResult {
   account_id: number
@@ -129,16 +81,6 @@ const REASON_OF_DIM: Record<BackendDim, SchedReason> = { ttfo: 'speed', error: '
 
 /** The cooling reason shown for a substandard row: its first failing dimension. */
 const reasonOf = (dims: BackendDim[]): SchedReason => REASON_OF_DIM[dims[0]] ?? ''
-
-/** `short` (too few samples) is the old `nodata`; a word this UI does not know passes through and reads as unknown. */
-const verdictOf = (verdict: string): SchedVerdict => (verdict === 'short' ? 'nodata' : (verdict as SchedVerdict))
-
-const toOverride = (exemption: BackendExemption): SchedOverride => ({
-  mode: 'exempt',
-  all_groups: exemption.group_id === 0,
-  expires_at: exemption.expires_at,
-  reason: exemption.reason
-})
 
 // ---- POST /accounts/summary ----
 
@@ -199,72 +141,6 @@ export function toRecentStats(summary: BackendAccountsSummary): AccountRecentSta
       },
       cache: { ratio: account.cache.ratio, n: account.cache.n, tier: tierOf(account.cache) }
     }))
-  }
-}
-
-// ---- GET /accounts/:id ----
-
-function toGroupModelRow(row: BackendGroupModelDetail, policy: SchedPolicy): SchedGroupModelRow {
-  const from = (n: number) => (n > 0 ? ('real' as const) : null)
-  return {
-    model: row.model,
-    state: row.failing ? 'cooling' : 'normal',
-    level: row.level,
-    reason: row.failing ? reasonOf(row.dims) : '',
-    since: row.since,
-    until: row.until,
-    waiting_test: false,
-    testing: false,
-    // First output is judged by the share of requests over the line now; there is no p90 to show.
-    ttfo: { verdict: verdictOf(row.ttfo.verdict), from: from(row.ttfo.n), n: row.ttfo.n, p90_ms: null, p90_timeout: false, limit_ms: Math.round(policy.ttft_seconds * 1000) },
-    error: { verdict: verdictOf(row.error.verdict), from: from(row.error.n), n: row.error.n, rate: row.error.n > 0 ? row.error.bad / row.error.n : null, limit: policy.max_error_rate },
-    cache: { verdict: verdictOf(row.cache.verdict), from: from(row.cache.n), n: row.cache.n, ratio: row.cache.ratio, limit: policy.min_cache_ratio }
-  }
-}
-
-/** A model tab without numbers: evidence is kept per group and model now, not per account and model. */
-const emptyEvidence = (model: string): SchedModelEvidence => ({
-  model,
-  request_model: model,
-  samples: 0,
-  sessions: 0,
-  from: null,
-  to: null,
-  ttfo: { n: 0, sessions: 0, timeouts: 0, p90_ms: null, p90_timeout: false, fail_bound_ms: null, fail_bound_timeout: false, by_class: [] },
-  error: { n: 0, sessions: 0, bad: 0, rate: null, lcb: null },
-  cache: { turns: 0, sessions: 0, ratio: null },
-  test: null
-})
-
-export function toAccountDetail(detail: BackendAccountDetail): SchedAccountDetail {
-  const groups: SchedAccountGroup[] = detail.groups.map((group) => ({
-    group_id: group.group_id,
-    name: group.name,
-    gate_enabled: group.policy.enabled,
-    policy: {
-      ttft_seconds: group.policy.ttft_seconds,
-      max_error_rate: group.policy.max_error_rate,
-      min_cache_ratio: group.policy.min_cache_ratio,
-      takeover_idle_seconds: group.policy.takeover_idle_seconds
-    },
-    override: group.exemption ? toOverride(group.exemption) : null,
-    by_model: group.by_model.map((row) => toGroupModelRow(row, group.policy))
-  }))
-  // The tabs: every model some group has a row for, in first-seen order.
-  const models = [...new Set(groups.flatMap((group) => group.by_model.map((row) => row.model)))]
-  const allGroups = detail.exemptions.find((exemption) => exemption.group_id === 0)
-  return {
-    account: detail.account,
-    at: detail.at,
-    stale: detail.stale,
-    global_enabled: detail.global_enabled,
-    tests_enabled: false,
-    reset_at: detail.reset_at,
-    models: models.map(emptyEvidence),
-    groups,
-    all_groups_override: allGroups ? toOverride(allGroups) : null,
-    auto_states: detail.auto_states,
-    recent_attempts: []
   }
 }
 

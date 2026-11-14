@@ -1,17 +1,18 @@
 import { nextTick, reactive, ref } from 'vue'
 
-// One account drawer and one group board for the whole admin UI (design spec 0.2): opening one that is already open
-// swaps its content and brings it to the top. SchedQualityLayers renders them.
+// One quality panel and one group board for the whole admin UI: opening one that is already open swaps its content
+// (and brings it to the top). SchedQualityLayers renders them. Elements that open the panel carry
+// data-quality-opener="<account id>:<group id or empty>": a click on one of them while the panel is open switches its
+// content instead of closing it, and Escape or the close button gives focus back to it.
 
 export interface DrawerRequest {
   accountId: number | null
   accountName: string
-  /** Model tab to show; falls back to the first tab when the detail has no such model. */
+  /** Model tab to show; falls back to the previous tab of the same account, else the first tab. */
   model: string | null
-  /** Group row to scroll to and highlight (entered from a capsule). */
+  /** Group row to scroll to and highlight (entered from a group pill's dot). */
   groupId: number | null
-  /** Scroll to the groups section (entered from +N, normal or no data). */
-  toGroups: boolean
+  /** Bumped when an open panel is asked again (another dot): its request is applied anew. */
   raise: number
 }
 
@@ -22,22 +23,24 @@ export interface BoardRequest {
   raise: number
 }
 
-const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, toGroups: false, raise: 0 })
+const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, raise: 0 })
 const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, raise: 0 })
 /** Bumped after any action that changes an account's quality state, so lists and the open layers reload. */
 const changed = ref(0)
 /** Reloads the open layers started for a change; markSchedChanged() waits for them. */
 const reloads = new Set<Promise<unknown>>()
 
-export function openSchedDrawer(account: { id: number; name?: string }, options: { model?: string | null; groupId?: number | null; toGroups?: boolean } = {}) {
+export function openSchedDrawer(account: { id: number; name?: string }, options: { model?: string | null; groupId?: number | null } = {}) {
   const reopening = drawer.accountId !== null
   drawer.accountId = account.id
   drawer.accountName = account.name ?? ''
   drawer.model = options.model ?? null
   drawer.groupId = options.groupId ?? null
-  drawer.toGroups = options.toGroups ?? false
   if (reopening) drawer.raise++
 }
+
+/** The data-quality-opener value of an element that opens the panel for this account (and group). */
+export const qualityOpenerKey = (accountId: number, groupId?: number | null) => `${accountId}:${groupId ?? ''}`
 
 export function closeSchedDrawer() {
   drawer.accountId = null

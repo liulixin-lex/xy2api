@@ -7,7 +7,6 @@
 
 import { apiClient } from '../client'
 import type {
-  SchedAccountDetail,
   SchedAccountsSummary,
   SchedBoard,
   SchedClearAutoState,
@@ -17,13 +16,12 @@ import type {
   SchedPolicyPreview,
   SchedResetResult
 } from '@/types/schedQuality'
+import type { BackendAccountDetail } from './schedQualityTypes'
 import {
-  toAccountDetail,
   toAccountsSummary,
   toBoard,
   toGroupPolicy,
   toResetResult,
-  type BackendAccountDetail,
   type BackendAccountsSummary,
   type BackendGroupPolicy,
   type BackendOrder,
@@ -93,9 +91,10 @@ export async function summary(accountIds: number[], options?: RequestOptions): P
   return toAccountsSummary(await backendSummary(accountIds, options))
 }
 
-export async function accountDetail(id: number, options?: RequestOptions): Promise<SchedAccountDetail> {
+/** One account's quality detail, in the backend's own shape (the quality panel reads it as is). */
+export async function accountDetail(id: number, options?: RequestOptions): Promise<BackendAccountDetail> {
   const { data } = await apiClient.get<BackendAccountDetail>(`${base}/accounts/${id}`, { signal: options?.signal })
-  return toAccountDetail(data)
+  return data
 }
 
 export async function reset(id: number): Promise<SchedResetResult> {

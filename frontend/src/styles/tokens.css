@@ -20,6 +20,8 @@
   --color-bg-pill-hover: #dde3eb;
   --color-bg-target: #e9f6f4;
   --color-bg-selected: #e8f4f2;
+  --color-bg-seg: #edf0f4;
+  --color-bg-seg-active: #ffffff;
 
   /* Lines */
   --color-line-row: #edf0f4;
@@ -105,6 +107,10 @@
   --dot-size: 7px;
   --switch-width: 28px;
   --switch-height: 16px;
+  /* Floating layers of the accounts page */
+  --sidebar-width: 460px;
+  --popover-width: 280px;
+  --motion-panel: 240ms;
 }
 
 .dark {
@@ -119,6 +125,8 @@
   --color-bg-pill-hover: #283350;
   --color-bg-target: #12262d;
   --color-bg-selected: #13222b;
+  --color-bg-seg: #0f1626;
+  --color-bg-seg-active: #253048;
 
   --color-line-row: #1a2335;
   --color-line-strong: #263046;

@@ -17,19 +17,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BackendAccountSummary, BackendMark } from '@/api/admin/schedQualityTypes'
 import { vTip } from '@/utils/tip'
+import { formatRecentPercent, formatRecentSeconds } from './accountRecent'
 
 const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'stop'> | null }>()
 const { t } = useI18n()
-
-const seconds = (ms: number) => {
-  const s = ms / 1000
-  return s < 100 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
-}
-const percent = (ratio: number) => {
-  const pct = ratio * 100
-  if (pct === 0) return '0%'
-  return pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
-}
 
 type Dim = 'ttfo' | 'error' | 'cache'
 const lines = computed(() => {
@@ -44,8 +35,8 @@ const lines = computed(() => {
     return { dim, label, text, cls: '', tip }
   }
   return [
-    row('ttfo', q?.ttfo, q?.ttfo.p50_ms, seconds),
-    row('error', q?.error, q?.error.rate, percent),
+    row('ttfo', q?.ttfo, q?.ttfo.p50_ms, formatRecentSeconds),
+    row('error', q?.error, q?.error.rate, formatRecentPercent),
     row('cache', q?.cache, q?.cache.ratio, (v) => `${Math.round(v * 100)}%`)
   ]
 })

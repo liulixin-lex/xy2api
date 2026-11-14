@@ -199,6 +199,12 @@ export function holdFocus(token: symbol): () => void {
   }
 }
 
+/** Whether `el` lies in a layer drawn above `token`'s layer: a popover, menu or dialog opened while it was open. */
+export function insideLayerAbove(token: symbol, el: Element): boolean {
+  const index = layers.findIndex((layer) => layer.token === token)
+  return index !== -1 && layers.slice(index + 1).some((layer) => !!layer.root()?.contains(el))
+}
+
 export function isTopOverlay(token: symbol) {
   return layers[layers.length - 1]?.token === token
 }

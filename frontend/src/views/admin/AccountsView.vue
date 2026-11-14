@@ -266,7 +266,14 @@
       @updated="handleBulkUpdated"
     />
     <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" :recovering="!!tempUnschedAcc && isRecovering(tempUnschedAcc.id)" @close="showTempUnsched = false" @recover="recoverOne" />
-    <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" :on-recovered="refreshAfterRecover" />
+    <SchedQualityLayers
+      :on-iq-check="openIqRecordsById"
+      :on-edit="openEditById"
+      :on-recovered="refreshAfterRecover"
+      :account="panelAccount"
+      :group-info="panelGroupInfo"
+      :anchor="panelAnchor"
+    />
     <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="reload" @recover="handleBatchRecover" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
@@ -334,7 +341,7 @@ import { useColumnOrder } from '@/composables/useColumnOrder'
 import { defineLazyComponent, prefetchWhenIdle, useLazyMount } from '@/composables/useLazyMount'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isStepUpBlocked, isStepUpCancelled, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -926,14 +933,18 @@ const handleBulkRunIQCheck = async () => {
 }
 
 // ---- Quality: the panel, batches and recovery ----
-const { drawer: sqDrawer, board: sqBoard } = useSchedLayers()
+const { changed: sqChanged } = useSchedLayers()
 const sqBatch = reactive<{ action: SchedBatchAction | null; accounts: Array<{ id: number; name: string }>; anchor: HTMLElement | null }>({ action: null, accounts: [], anchor: null })
 const sqBatchBusy = ref(false)
-const sqLayersOpen = computed(() => sqDrawer.accountId !== null || sqBoard.groupId !== null || sqBatch.action !== null)
-// A closed panel or batch may have changed exemptions: the summary is asked again at once.
-watch(sqLayersOpen, (open) => {
-  if (!open) void table.refresh('quality')
-})
+// An exemption, its removal or a recovery (in the panel, the row menu or a batch): the pills' summary is asked again
+// at once, so the dots change without waiting for the 5 s beat.
+// markSchedChanged() waits for it, so a recovery holds its lock until the new summary is on screen.
+watch(sqChanged, () => trackSchedReload(table.refresh('quality')))
+/** The panel reads the row for the platform line and the upstream ratio. */
+const panelAccount = (id: number) => table.record(id)
+const panelGroupInfo = (id: number) => groupsById.value.get(id)
+/** The panel's top edge follows the table's. */
+const panelAnchor = () => accountTableRef.value
 const sqOpenAIGroups = computed(() => groups.value.filter((group) => group.platform === 'openai').map((group) => ({ id: group.id, name: group.name })))
 /** The pill's dot: the quality panel on that group, with its substandard model's tab when it has one. */
 const openQuality = (row: LiveAccount, groupId: number) => {
@@ -957,11 +968,11 @@ const rereadAfterRecover = async (id: number) => {
     console.error('Failed to reload account after recovery:', error)
   }
 }
-/** After a recovery: the row and its summary are read again; under the quality filter the page loads again. */
+/** After a recovery: the row is read again (the summary through markSchedChanged); under the quality filter the page loads again. */
 const refreshAfterRecover = async (id: number) => {
   if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
   if (filters.sched_quality) await reload()
-  else await Promise.all([rereadAfterRecover(id), table.refresh('quality')])
+  else await rereadAfterRecover(id)
 }
 const recoverOne = (account: Account) => recoverAccount({ id: account.id, name: account.name }, () => refreshAfterRecover(account.id))
 // Recovered accounts leave the selection; failed and not-run ones stay for a retry.

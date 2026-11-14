@@ -59,6 +59,7 @@
                 type="button"
                 class="sq-link sq-focus"
                 :data-sq-trigger="`account:${row.account_id}`"
+                :data-quality-opener="qualityOpenerKey(row.account_id)"
                 @click="openSchedDrawer({ id: row.account_id, name: row.name }, { model: row.evidence_model || null })"
               >{{ row.name }}</button>
               <template v-else>{{ row.name }}</template>
@@ -124,7 +125,7 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedBoardAccount, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { useLiveClock } from '@/composables/useLiveClock'
-import { closeSchedBoard, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
   DASH, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, known, rejectName, SCHED_DIMS, SCHED_STATES, SCHED_VERDICTS, verdictClass,

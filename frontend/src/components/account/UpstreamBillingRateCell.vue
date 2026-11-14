@@ -84,7 +84,7 @@ import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { vTip } from '@/utils/tip'
-import { formatMultiplier } from '@/utils/formatters'
+import { upstreamRateView } from './upstreamBillingRate'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
 
 const props = withDefaults(defineProps<{
@@ -101,81 +101,17 @@ defineEmits<{
 }>()
 
 const { t } = useI18n()
-const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
-// 探测资格已放宽到全部 API-key 平台（上游兼容 /v1/sub2api/billing 即可应答）。
-const eligible = computed(() => props.account.type === 'apikey')
-const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
-const data = computed(() => snapshot.value?.data)
-const probeEnabled = computed(() => props.account.extra?.upstream_billing_probe_enabled === true)
-const nextProbeAt = computed(() => {
-  const value = snapshot.value?.next_probe_at
-  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : ''
-})
-const receivedAt = computed(() => typeof snapshot.value?.received_at === 'string' ? Date.parse(snapshot.value.received_at) : Number.NaN)
-const freshUntil = computed(() => {
-  if (typeof snapshot.value?.fresh_until === 'string') return Date.parse(snapshot.value.fresh_until)
-  if (snapshot.value?.status !== 'ok' || typeof snapshot.value.next_probe_at !== 'string') return Number.NaN
-  const nextProbeAt = Date.parse(snapshot.value.next_probe_at)
-  return Number.isFinite(nextProbeAt) && nextProbeAt > receivedAt.value
-    ? receivedAt.value + 2 * (nextProbeAt - receivedAt.value)
-    : Number.NaN
-})
-const validTimestamps = computed(() => {
-  if (!Number.isFinite(receivedAt.value) || receivedAt.value > props.now + CLOCK_SKEW_TOLERANCE_MS) return false
-  return Number.isFinite(freshUntil.value) && freshUntil.value > receivedAt.value
-})
-const stale = computed(() => {
-  if (!snapshot.value) return false
-  if (!Number.isFinite(receivedAt.value)) return snapshot.value.status === 'ok'
-  if (!validTimestamps.value) return true
-  return props.now > freshUntil.value
-})
-const parseMinute = (value?: string) => {
-  if (typeof value !== 'string') return null
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (!match) return null
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  return hour < 24 && minute < 60 ? hour * 60 + minute : null
-}
-const minuteInTimeZone = (timestamp: number, timeZone?: string) => {
-  if (!timeZone) return null
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23'
-    }).formatToParts(new Date(timestamp))
-    const hour = Number(parts.find(part => part.type === 'hour')?.value)
-    const minute = Number(parts.find(part => part.type === 'minute')?.value)
-    return Number.isInteger(hour) && Number.isInteger(minute) ? hour * 60 + minute : null
-  } catch {
-    return null
-  }
-}
-const currentEffectiveRate = computed(() => {
-  const billing = data.value
-  if (!billing) return null
-  if (billing.billing_scope !== 'token') return null
-  const base = billing.resolved_rate_multiplier
-  if (typeof base !== 'number' || !Number.isFinite(base) || base < 0) return null
-  if (typeof billing.peak_rate_enabled !== 'boolean') return null
-  if (!billing.peak_rate_enabled) return base
-  const start = parseMinute(billing.peak_start)
-  const end = parseMinute(billing.peak_end)
-  const minute = minuteInTimeZone(props.now, billing.timezone)
-  const peak = billing.peak_rate_multiplier
-  if (start == null || end == null || minute == null || start >= end || typeof peak !== 'number' || !Number.isFinite(peak) || peak < 0) return null
-  const value = minute >= start && minute < end ? base * peak : base
-  return Number.isFinite(value) ? value : null
-})
-const lastDetectedRate = computed(() => {
-  const value = data.value?.effective_rate_multiplier
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Number(value.toPrecision(12))
-    : null
-})
+// The value, stale state and failure come from upstreamBillingRate.ts (the quality panel shows the same).
+const view = computed(() => upstreamRateView(props.account, props.now))
+const eligible = computed(() => view.value.eligible)
+const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => view.value.snapshot)
+const data = computed(() => view.value.data)
+const probeEnabled = computed(() => view.value.probeEnabled)
+const nextProbeAt = computed(() => view.value.nextProbeAt)
+const receivedAt = computed(() => view.value.receivedAt)
+const stale = computed(() => view.value.stale)
+const currentEffectiveRate = computed(() => view.value.currentEffectiveRate)
+const lastDetectedRate = computed(() => view.value.lastDetectedRate)
 const elapsedSinceLastSuccess = computed(() => {
   if (!Number.isFinite(receivedAt.value)) return '-'
   const elapsedMinutes = Math.max(0, Math.floor((props.now - receivedAt.value) / 60_000))
@@ -185,11 +121,6 @@ const elapsedSinceLastSuccess = computed(() => {
   if (elapsedHours < 24) return t('admin.accounts.upstreamBilling.hoursAgo', { count: elapsedHours })
   return t('admin.accounts.upstreamBilling.daysAgo', { count: Math.floor(elapsedHours / 24) })
 })
-const effectiveRate = computed(() => {
-  if (!validTimestamps.value || stale.value || !['ok', 'failed'].includes(snapshot.value?.status ?? '')) return '-'
-  const value = currentEffectiveRate.value
-  return value == null ? '-' : `${formatMultiplier(value)}x`
-})
 const statusLabel = computed(() => {
   if (!snapshot.value) return t('admin.accounts.upstreamBilling.notProbed')
   if (snapshot.value.status === 'unsupported') return t('admin.accounts.upstreamBilling.unsupported')
@@ -197,17 +128,14 @@ const statusLabel = computed(() => {
   if (snapshot.value.status === 'failed') return t('admin.accounts.upstreamBilling.failed')
   return ''
 })
-const hasEffectiveRate = computed(() => effectiveRate.value !== '-')
-// Stale: the last value stays, greyed, with the last probe time and the failure in the tip; no "expired" word.
-const staleValue = computed(() => (stale.value && lastDetectedRate.value != null ? `${formatMultiplier(lastDetectedRate.value)}x` : ''))
+const hasEffectiveRate = computed(() => view.value.hasEffectiveRate)
 const primaryValue = computed(() => {
-  if (hasEffectiveRate.value) return effectiveRate.value
-  if (staleValue.value) return staleValue.value
+  if (view.value.shownValue) return view.value.shownValue
   if (snapshot.value?.status === 'unsupported') return statusLabel.value
   return '—'
 })
-const dimmed = computed(() => !hasEffectiveRate.value)
-const failureReason = computed(() => (snapshot.value?.status === 'failed' || stale.value ? snapshot.value?.last_error?.trim() ?? '' : ''))
+const dimmed = computed(() => view.value.dimmed)
+const failureReason = computed(() => view.value.failureReason)
 const formatDate = (value?: string) => value
   ? new Date(value).toLocaleString(undefined, {
       month: '2-digit',

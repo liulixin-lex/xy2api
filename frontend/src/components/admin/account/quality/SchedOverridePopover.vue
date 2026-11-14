@@ -6,28 +6,28 @@
         ref="rootRef"
         role="dialog"
         :aria-labelledby="titleId"
-        class="fixed w-[320px] max-w-[calc(100vw-32px)] rounded-xl border border-gray-200 bg-white p-4 shadow-lg dark:border-dark-700 dark:bg-dark-800"
+        class="fixed w-[320px] max-w-[calc(100vw-32px)] rounded-lg border border-line-strong bg-surface-raised p-4 shadow-popover"
         :style="{ zIndex: stackZ, top: `${pos.top}px`, left: `${pos.left}px` }"
         data-sq-popover
         @keydown.tab="trapTab($event, rootRef)"
       >
-        <h3 :id="titleId" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`admin.schedQuality.action.${mode}`) }}</h3>
+        <h3 :id="titleId" class="text-sm font-semibold text-fg-primary">{{ t(`admin.schedQuality.action.${mode}`) }}</h3>
         <div class="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3 text-sm">
-          <label :for="scopeId" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.override.scope') }}</label>
+          <label :for="scopeId" class="text-fg-secondary">{{ t('admin.schedQuality.override.scope') }}</label>
           <Select :id="scopeId" ref="scopeRef" v-model="groupId" :options="scopeOptions" :searchable="false" />
-          <span class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.override.duration') }}</span>
-          <div role="radiogroup" :aria-label="t('admin.schedQuality.override.duration')" class="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-dark-600">
+          <span class="text-fg-secondary">{{ t('admin.schedQuality.override.duration') }}</span>
+          <div role="radiogroup" :aria-label="t('admin.schedQuality.override.duration')" class="inline-flex rounded-md border border-line-control bg-[var(--color-bg-seg)] p-0.5">
             <button
               v-for="option in DURATIONS"
               :key="option"
               type="button"
               role="radio"
               :aria-checked="duration === option"
-              :class="['sq-focus flex-1 rounded-md px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400' : 'text-gray-600 dark:text-gray-300']"
+              :class="['sq-focus flex-1 rounded px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-[var(--color-bg-seg-active)] text-fg-primary' : 'text-fg-secondary']"
               @click="duration = option"
             >{{ t(`admin.schedQuality.override.${option}`) }}</button>
           </div>
-          <label :for="reasonId" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.override.reason') }}</label>
+          <label :for="reasonId" class="text-fg-secondary">{{ t('admin.schedQuality.override.reason') }}</label>
           <input :id="reasonId" v-model="reason" type="text" class="input py-1.5" maxlength="200" />
         </div>
         <div class="mt-4 flex items-center justify-end gap-2">

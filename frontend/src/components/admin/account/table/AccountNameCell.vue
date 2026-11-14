@@ -20,16 +20,12 @@ import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { platformLabel } from '@/utils/platformColors'
 import { sanitizeUrl } from '@/utils/url'
+import { accountTypeLabel } from './accountLabels'
 
 const props = defineProps<{ account: Account }>()
 const { t } = useI18n()
 
-const TYPE_KEYS: Record<string, string> = { oauth: 'admin.accounts.oauthType', 'setup-token': 'admin.accounts.setupToken', apikey: 'admin.accounts.apiKey' }
-const typeLabel = computed(() => {
-  const type = props.account.type
-  if (type === 'bedrock') return 'AWS Bedrock'
-  return TYPE_KEYS[type] ? t(TYPE_KEYS[type]) : type
-})
+const typeLabel = computed(() => accountTypeLabel(props.account.type, t))
 
 /** An API key account with a safe base URL links its name to the site's home page. */
 const homepage = computed(() => {

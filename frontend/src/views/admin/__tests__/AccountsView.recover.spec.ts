@@ -4,10 +4,26 @@ import { defineComponent, h } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
-import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import { closeSchedDrawer, openSchedDrawer } from '@/composables/useSchedLayers'
 
 // "Recover state" on the account list (contract delta F; acceptance scenarios 37–41).
+
+/** The quality panel's detail (backend 0.6.5) of an account with one substandard model, so 恢复 is enabled. */
+const panelDetail = (id: number) => ({
+  account: { id, name: `acc-${id}`, priority: 1, rate: 1, concurrency: 5, in_flight: 0 },
+  at: '', stale: false, global_enabled: true, status: 'normal', stop: null, reset_at: null,
+  groups: [{
+    group_id: 53, name: '晨星组', exemption: null,
+    policy: { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0, takeover_idle_seconds: 0 },
+    by_model: [{
+      model: 'gpt-6.1-sol', failing: true, dims: ['ttfo'], level: 1, since: null, until: null, other_group_ids: [], exempt: false,
+      ttfo: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'fail', bad: 9 },
+      error: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', bad: 0 },
+      cache: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', ratio: 0.8 }
+    }]
+  }],
+  auto_states: [], exemptions: []
+})
 
 const { listAccounts, getById, sched, backendSummary, toast } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
@@ -374,10 +390,8 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     wrapper.unmount()
   })
 
-  it('refreshes the summary at once when recovering from the open drawer, and holds the lock for it (P1-1)', async () => {
-    const detail = structuredClone(detailFixture)
-    detail.account = { ...detail.account, id: 2, name: 'acc-2' }
-    sched.accountDetail.mockResolvedValue(detail)
+  it('refreshes the summary at once when recovering from the open panel, and holds the lock for it (P1-1)', async () => {
+    sched.accountDetail.mockResolvedValue(panelDetail(2))
     const wrapper = mountView()
     await flushPromises()
     openSchedDrawer({ id: 2, name: 'acc-2' })
@@ -385,15 +399,15 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     const before = backendSummary.mock.calls.length
     const summary = deferred()
     backendSummary.mockReturnValueOnce(summary.promise)
-    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-reset"]')!.click()
+    document.querySelector<HTMLElement>('[data-qp-trigger="reset"]')!.click()
     await flushPromises()
     expect(sched.reset).toHaveBeenCalledWith(2)
     expect(getById).toHaveBeenCalledWith(2)
     expect(backendSummary.mock.calls.length).toBe(before + 1)
-    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('true')
+    expect(document.querySelector('[data-qp-trigger="reset"]')!.getAttribute('aria-busy')).toBe('true')
     summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(2, 0)] })
     await flushPromises()
-    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('false')
+    expect(document.querySelector('[data-qp-trigger="reset"]')!.getAttribute('aria-busy')).toBe('false')
     wrapper.unmount()
   })
 

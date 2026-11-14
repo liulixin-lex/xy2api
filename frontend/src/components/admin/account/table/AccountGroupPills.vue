@@ -27,6 +27,7 @@
         class="pill__dot"
         :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
         v-tip="() => pillTip(pill.group, pill.state, 'dot')"
+        :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
         data-test="group-pill-dot"
         @click="emit('open-quality', pill.group.id)"
       >
@@ -51,6 +52,7 @@
         class="pill__dot"
         :aria-label="t('admin.accounts.table.pillMoreWorst', { n: rest.length, state: stateLabel(restWorst.state) })"
         v-tip="moreTip"
+        :data-quality-opener="qualityOpenerKey(account.id, restWorst.group.id)"
         @click="emit('open-quality', restWorst.group.id)"
       >
         <StatusDot :tone="DOT_TONES[restWorst.state]" />
@@ -80,6 +82,7 @@ import Icon from '@/components/icons/Icon.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { useLiveClock } from '@/composables/useLiveClock'
+import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
 import { vTip } from '@/utils/tip'
 import { groupDotState, groupPillText, isLatinPillText, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'

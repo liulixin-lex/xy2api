@@ -7,7 +7,7 @@ import AccountsView from '../AccountsView.vue'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId, AdminLevel } from '@/types/adminAccess'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
-import { closeSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedDrawer, markSchedChanged, useSchedLayers } from '@/composables/useSchedLayers'
 
 const { listAccounts, getById, backendSummary, sched } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
@@ -230,8 +230,9 @@ describe('AccountsView quality columns', () => {
     manager.unmount()
   })
 
-  // The live table dims rows that left the filter; closing the panel asks for the summary at once, never the list.
-  it('asks for the summary again when the quality panel closes, without loading the list', async () => {
+  // The live table dims rows that left the filter; a quality change (an exemption in the panel, a recovery, a batch)
+  // asks for the summary at once, never the list. Closing the panel asks for nothing.
+  it('asks for the summary again after a quality change, without loading the list', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="filter-substandard"]').trigger('click')
@@ -242,8 +243,12 @@ describe('AccountsView quality columns', () => {
     backendSummary.mockClear()
     closeSchedDrawer()
     await flushPromises()
+    expect(backendSummary).not.toHaveBeenCalled()
+    await markSchedChanged()
+    await flushPromises()
     expect(listAccounts).not.toHaveBeenCalled()
     expect(backendSummary).toHaveBeenCalledTimes(1)
+    expect(backendSummary.mock.calls[0][0]).toEqual([1, 2, 3, 4])
     wrapper.unmount()
   })
 
