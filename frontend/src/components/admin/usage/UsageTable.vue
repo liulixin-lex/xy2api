@@ -190,10 +190,10 @@
                   <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                   <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
                   <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
-                  <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
+                  <span v-if="row.cache_ttl_overridden" :title="tip('usage.cacheTtlOverriddenHint', 'cacheTtl')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
                 </div>
               </div>
-              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
+              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="tip('usage.cacheHitRateHint', 'cacheHitRate')">
                 <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
               </div>
               <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
@@ -231,7 +231,7 @@
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
-                :title="t('admin.usage.longContextPricingTooltip')"
+                :title="tip('admin.usage.longContextPricingTooltip', 'longContext')"
                 class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
               >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
@@ -279,7 +279,7 @@
         <template #cell-created_at="{ row, value }">
           <span class="inline-flex items-center gap-1">
             <button
-              v-if="expandable && row.gateway_request_id && row.has_attempts"
+              v-if="admin && row.gateway_request_id && row.has_attempts"
               type="button"
               class="sq-focus -ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
               :aria-expanded="expanded.has(row.gateway_request_id)"
@@ -300,7 +300,8 @@
         </template>
 
         <template #cell-duration="{ row }">
-          <span class="sq-num text-sm text-gray-900 dark:text-gray-100">{{ row.duration_ms != null ? formatDuration(row.duration_ms) : '—' }}</span>
+          <span class="sq-num block text-sm text-gray-900 dark:text-gray-100">{{ row.duration_ms != null ? formatDuration(row.duration_ms) : '—' }}</span>
+          <span v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)" class="sq-num block text-[11px] text-gray-500 dark:text-gray-400" :title="tip('usage.outputTpsHint', 'tps')" data-testid="usage-token-speed">{{ formatTokenSpeed(row) }}</span>
         </template>
 
         <template #cell-cache="{ row }">
@@ -308,7 +309,7 @@
         </template>
 
         <template #row-detail="{ row }">
-          <UsageAttempts v-if="expandable && row.gateway_request_id && expanded.has(row.gateway_request_id)" :gateway-request-id="row.gateway_request_id" :at="row.created_at" />
+          <UsageAttempts v-if="admin && row.gateway_request_id && expanded.has(row.gateway_request_id)" :gateway-request-id="row.gateway_request_id" :at="row.created_at" />
         </template>
 
         <template #cell-request_id="{ row }">
@@ -668,8 +669,8 @@ interface Props {
   showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
-  /** 管理端：行可展开，列出这条请求试过的每个号 */
-  expandable?: boolean
+  /** 管理端：行可展开列出这条请求试过的每个号，悬浮提示只用短词（FINAL §7） */
+  admin?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -683,7 +684,7 @@ const props = withDefaults(defineProps<Props>(), {
   showUpstreamEndpoint: true,
   showFallbackOrigin: false,
   flat: false,
-  expandable: false
+  admin: false
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
@@ -700,6 +701,8 @@ const ipGeoBatchLoading = ref(false)
 
 // 展开的请求（按网关请求号）；只有尝试表里有行的请求（has_attempts）可展开。首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
 const expanded = reactive(new Set<string>())
+// The admin page shows short tips; the user page keeps the full ones.
+const tip = (full: string, brief: string) => t(props.admin ? `admin.schedQuality.usage.tip.${brief}` : full)
 const toggleExpanded = (id: string) => (expanded.has(id) ? expanded.delete(id) : expanded.add(id))
 // usage 行与无账单行的 id 来自两张表：行键带上来源（契约 §6.1）。
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`

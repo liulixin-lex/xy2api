@@ -30,7 +30,7 @@ func TestAdvanceCooldownLadder(t *testing.T) {
 		prev := evaluationState()
 		prev.Level = tc.level
 		prev.EvidenceSince = evaluationNow.Add(-15 * time.Minute)
-		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
+		next, _ := AdvanceAt(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow, EvaluateDeadline)
 		if next.State != StateCooling || next.Level != tc.wantLevel || next.Until.Sub(evaluationNow) != tc.duration || next.EvidenceSince != prev.EvidenceSince {
 			t.Fatalf("level %d: %+v", tc.level, next)
 		}
@@ -47,7 +47,7 @@ func TestAdvanceNormalDecayBoundary(t *testing.T) {
 	} {
 		prev := evaluationState()
 		prev.Level, prev.EvidenceSince = 4, evaluationNow.Add(-tc.normal)
-		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
+		next, _ := AdvanceAt(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow, EvaluateDeadline)
 		if next.Level != tc.level || next.Until.Sub(evaluationNow) != tc.duration {
 			t.Fatalf("normal %v: %+v", tc.normal, next)
 		}
@@ -89,9 +89,9 @@ func TestAdvanceDeadlineException(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := evaluationState()
-			prev.State, prev.Level, prev.Reason = StateCooling, 5, ReasonSpeed
+			prev.State, prev.Level = StateCooling, 5
 			prev.Since, prev.Until, prev.EvidenceSince = evaluationNow.Add(-20*time.Minute), evaluationNow, evaluationNow.Add(-2*time.Hour)
-			next, e := Advance(prev, evaluationPolicy(), tc.rows(), evaluationNow)
+			next, e := AdvanceAt(prev, evaluationPolicy(), tc.rows(), evaluationNow, EvaluateDeadline)
 			if tc.renew {
 				if next.State != StateCooling || next.Level != 5 || next.Until.Sub(evaluationNow) != 120*time.Minute || next.EvidenceSince != prev.EvidenceSince || e.Speed.Source != EvidenceOther {
 					t.Fatalf("expected renewal: %+v / %+v", next, e)
@@ -107,50 +107,48 @@ func TestAdvancePreservesEvidenceAndCannotReuseRenewal(t *testing.T) {
 	prev := evaluationState()
 	prev.EvidenceSince = evaluationNow.Add(-2 * time.Hour)
 	rows := slowEvaluationSamples(20, 20, 10*time.Minute)
-	entered, _ := Advance(prev, evaluationPolicy(), rows, evaluationNow.Add(-5*time.Minute))
+	entered, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow.Add(-5*time.Minute), EvaluateDeadline)
 	if entered.State != StateCooling {
 		t.Fatal("fixture must enter")
 	}
 	// Old evidence still contributes to ordinary evaluation while cooling.
-	current, e := Advance(entered, evaluationPolicy(), rows, evaluationNow)
+	current, e := AdvanceAt(entered, evaluationPolicy(), rows, evaluationNow, EvaluateDeadline)
 	if current != entered || e.Speed.N != 20 {
 		t.Fatal("entry cleared evidence")
 	}
 	fresh := slowEvaluationSamples(20, 20, time.Minute)
-	renewed, _ := Advance(entered, evaluationPolicy(), fresh, entered.Until)
+	renewed, _ := AdvanceAt(entered, evaluationPolicy(), fresh, entered.Until, EvaluateDeadline)
 	if renewed.Level != 2 || renewed.EvidenceSince != prev.EvidenceSince {
 		t.Fatalf("renewal = %+v", renewed)
 	}
-	released, _ := Advance(renewed, evaluationPolicy(), fresh, renewed.Until)
+	released, _ := AdvanceAt(renewed, evaluationPolicy(), fresh, renewed.Until, EvaluateDeadline)
 	if released.State != StateNormal {
 		t.Fatalf("same evidence renewed twice: %+v", released)
 	}
 }
 
-func TestAdvanceTimedReleaseAndManualRestore(t *testing.T) {
+func TestAdvanceTimedReleaseClearsEvidence(t *testing.T) {
 	prev := evaluationState()
-	prev.State, prev.Level, prev.Reason = StateCooling, 3, ReasonSpeed
+	prev.State, prev.Level = StateCooling, 3
 	prev.Since, prev.Until = evaluationNow.Add(-time.Hour), evaluationNow
+	prev.EvidenceSince = evaluationNow.Add(-time.Hour)
 	rows := slowEvaluationSamples(20, 10, time.Minute)
-	before, _ := Advance(prev, evaluationPolicy(), rows, evaluationNow.Add(-time.Nanosecond))
+	before, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow.Add(-time.Nanosecond), EvaluateDeadline)
 	if before != prev {
 		t.Fatal("released before deadline")
 	}
-	released, _ := Advance(prev, evaluationPolicy(), rows, evaluationNow)
-	restored := Restore(prev, evaluationNow)
-	for _, state := range []StateRow{released, restored} {
-		next, _ := Advance(state, evaluationPolicy(), rows, evaluationNow.Add(time.Second))
-		if next.State != StateNormal || next.EvidenceSince != evaluationNow {
-			t.Fatal("old evidence survived release/reset")
-		}
+	released, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow, EvaluateDeadline)
+	if released.State != StateNormal || released.EvidenceSince != evaluationNow || !released.Until.IsZero() {
+		t.Fatalf("timed release = %+v", released)
 	}
-	if restored.Level != 0 || restored.Reason != "" || restored.State != StateNormal || !restored.Until.IsZero() {
-		t.Fatalf("manual restore = %+v", restored)
+	next, _ := AdvanceAt(released, evaluationPolicy(), rows, evaluationNow.Add(time.Second), EvaluateDeadline)
+	if next.State != StateNormal || next.EvidenceSince != evaluationNow {
+		t.Fatal("old evidence survived timed release")
 	}
 }
 
 func TestAdvanceExemptionOnlyChangesPlacement(t *testing.T) {
-	next, e := Advance(evaluationState(), evaluationPolicy(), slowEvaluationSamples(6, 10, time.Minute), evaluationNow)
+	next, e := AdvanceAt(evaluationState(), evaluationPolicy(), slowEvaluationSamples(6, 10, time.Minute), evaluationNow, EvaluateDeadline)
 	v := StateView{Failing: next.State == StateCooling, Level: next.Level,
 		GroupOverride: OverrideRef{Mode: OverrideExempt, Expires: evaluationNow.Add(time.Minute)}}
 	if next.State != StateCooling || e.Verdicts.Speed != VerdictFail || StandingOf(v, true, evaluationNow) != StandFront || StandingOf(v, true, evaluationNow.Add(time.Minute)) != StandBack {

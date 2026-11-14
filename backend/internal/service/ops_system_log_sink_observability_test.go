@@ -34,8 +34,6 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 	// Access log persistence is disabled; sched_quality info events still pass.
 	sink.SetPersistAccessLogs(false)
 	obs := NewSchedObservabilityService()
-	obs.Count("tests", 3)
-	obs.Count("tests_aborted", 1)
 	obs.Count("cooled", 2)
 	obs.Count("released", 4)
 	obs.Cycle(123*time.Millisecond, true)
@@ -58,7 +56,7 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 	require.Len(t, saved, 2)
 	expected := []map[string]any{
 		{"cycles": float64(1), "cycles_failed": float64(1), "cycle_ms_max": float64(123),
-			"tests": float64(3), "tests_aborted": float64(1), "cooled": float64(2), "released": float64(4)},
+			"cooled": float64(2), "released": float64(4)},
 		{"kind": "takeover", "gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
 			"model": "m", "from_account_id": float64(10), "to_account_id": float64(1)},
 	}

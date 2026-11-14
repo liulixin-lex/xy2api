@@ -33,8 +33,8 @@ const row = (patch: Record<string, unknown> = {}) => ({
   ttfo_over: false, first_token_ms: 4100, duration_ms: 19800, input_tokens: 800, cache_read_tokens: 3000, cache_creation_tokens: 200,
   ...patch
 })
-const mountTable = (data: unknown[], expandable = true) =>
-  mount(UsageTable, { props: { data, columns: [], expandable } as never, global: { stubs: { DataTable: DataTableStub, Icon: true } } })
+const mountTable = (data: unknown[], admin = true) =>
+  mount(UsageTable, { props: { data, columns: [], admin } as never, global: { stubs: { DataTable: DataTableStub, Icon: true } } })
 
 beforeEach(() => {
   api.listAttempts.mockReset().mockResolvedValue([
@@ -44,6 +44,15 @@ beforeEach(() => {
 })
 
 describe('UsageTable — request results (FINAL §6)', () => {
+  it('gives the admin page short tips and leaves the full ones to the user page', () => {
+    const cost = (admin: boolean) => mount(UsageTable, {
+      props: { data: [row({ long_context_billing_applied: true, actual_cost: 0.1 })], columns: [], admin } as never,
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><div v-for="r in data" :key="r.id"><slot name="cell-cost" :row="r" /></div></div>' }, Icon: true } }
+    }).get('[data-testid="long-context-billing-marker"]').attributes('title')
+    expect(cost(true)).toBe('admin.schedQuality.usage.tip.longContext')
+    expect(cost(false)).toBe('admin.usage.longContextPricingTooltip')
+  })
+
   it('shows a dash for the unknown tokens and cost of a request without a bill, and no billing tooltips', () => {
     const w = mount(UsageTable, {
       props: { data: [row({ source: 'unbilled', input_tokens: null, output_tokens: null, actual_cost: null, total_cost: null })], columns: [] } as never,

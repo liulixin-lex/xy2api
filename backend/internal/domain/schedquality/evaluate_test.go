@@ -257,7 +257,7 @@ func TestEvaluateErrorThresholdFloorAndStrictComparison(t *testing.T) {
 		t.Fatal("LCB equal to line must pass")
 	}
 	p.Enabled = false
-	if e := Evaluate(rows, evaluationScope, p, time.Time{}, evaluationNow); e.Reason() != "" {
+	if e := Evaluate(rows, evaluationScope, p, time.Time{}, evaluationNow); e.Failed() {
 		t.Fatal("disabled group triggered")
 	}
 }
