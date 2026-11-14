@@ -508,6 +508,7 @@ export default {
     // Usage Records
     usage: {
       title: '使用记录',
+      description: '查看和管理所有用户的使用记录',
       userFilter: '用户',
       searchUserPlaceholder: '按邮箱搜索用户...',
       searchApiKeyPlaceholder: '按名称搜索 API 密钥...',
@@ -551,6 +552,14 @@ export default {
 	  allUpstreamModelAudit: '全部响应模型状态',
 	  upstreamModelMismatchOnly: '仅不一致',
 	  upstreamModelMatchedOnly: '仅一致',
+      result: '结果',
+      allResults: '全部结果',
+      resultSuccess: '成功',
+      resultRescued: '已救回',
+      resultFailed: '失败',
+      resultCanceled: '已取消',
+      switches: '换号 {n} 次',
+      requestOutcomes: '成功 {success} · 救回 {rescued} · 失败 {failed}',
       ipAddress: 'IP',
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',

@@ -1880,26 +1880,16 @@ export interface UsageLogAccountSummary {
   name: string
 }
 
-/** Request result (contract §0, §2.3): 1 成功, 2 已救回, 3 失败, 4 已取消. */
-export type UsageResult = 1 | 2 | 3 | 4
-
 export interface AdminUsageLog extends UsageLog {
-  // Request layer (sched-v2 contract §6.1). Rows without a usage log (most failures) come from the request table;
-  // rows written before the upgrade have no result (null).
-  /** usage = a usage log row, unbilled = a request without a bill; ids of the two are separate (contract §6.1). */
+  // 后端 0.6.5 的请求层：管理端列表里也有没有账单的请求（多为失败或取消）。这些行没有费用、账号，Token 数也可能为空。
+  /** usage = 一条 usage 日志；unbilled = 没有账单的请求。两者 id 各自成序列。 */
   source?: 'usage' | 'unbilled'
-  gateway_request_id?: string | null
-  result?: UsageResult | null
-  /** Account switches inside this request. */
+  /** 请求结果：1 成功，2 已救回，3 失败，4 已取消；升级前写入的行为 null。 */
+  result?: 1 | 2 | 3 | 4 | null
+  /** 本次请求换号的次数（0 = 没换过）；升级前写入的行为 null。 */
   switches?: number | null
-  /** Served by a substandard account (兜底). */
-  fallback?: boolean | null
-  /** The round a takeover moved to another account (接管). */
-  takeover?: boolean | null
-  /** User-side first output above the group's line; null when the group has no line or there is no first output. */
-  ttfo_over?: boolean | null
-  /** The attempt table has rows for this request (contract v1.9 §6.1); only then can the row open. */
-  has_attempts?: boolean
+  /** 网关请求 id：同一请求的多次账号尝试共用。 */
+  gateway_request_id?: string | null
   // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id，仅管理员可见；用户端的 group 已是原分组）
   origin_group_id?: number | null
   origin_group_name?: string

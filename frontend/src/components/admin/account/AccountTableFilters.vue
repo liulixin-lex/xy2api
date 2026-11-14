@@ -32,7 +32,8 @@ const updateStatus = (value: string | number | boolean | null) => { emit('update
 const updatePrivacyMode = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, privacy_mode: value }) }
 const updateIQStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, iq_status: value }) }
 const updateGroup = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, group: value }) }
-// Quality state filter: the list API filters by sched_quality (contract delta D2, D38).
+// Quality state filter: the list API filters by sched_quality (contract delta D2, D38). The API layer sends
+// `cooling` in the backend's current word (substandard); "demote" went with backend 0.6.5 and `observing` came in.
 const updateSchedQuality = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, sched_quality: value }) }
 const pOpts = computed(() => [{ value: '', label: t('admin.accounts.allPlatforms') }, ...CONCRETE_PLATFORM_OPTIONS])
 const tOpts = computed(() => [{ value: '', label: t('admin.accounts.allTypes') }, { value: 'oauth', label: t('admin.accounts.oauthType') }, { value: 'setup-token', label: t('admin.accounts.setupToken') }, { value: 'apikey', label: t('admin.accounts.apiKey') }, { value: 'bedrock', label: 'AWS Bedrock' }])
@@ -52,9 +53,11 @@ const iqOpts = computed(() => [
 ])
 const qOpts = computed(() => [
   { value: '', label: t('admin.schedQuality.filter.all') },
-  { value: 'observing', label: t('admin.schedQuality.state.observing') },
-  { value: 'substandard', label: t('admin.schedQuality.state.substandard') },
-  { value: 'exempt', label: t('admin.schedQuality.state.exempted') }
+  { value: 'normal', label: t('admin.schedQuality.filter.normal') },
+  { value: 'cooling', label: t('admin.schedQuality.filter.cooling') },
+  { value: 'exempt', label: t('admin.schedQuality.filter.exempt') },
+  // Backend 0.6.5: accounts back from a recovery and still being watched.
+  { value: 'observing', label: t('admin.schedQuality.filter.observing') }
 ])
 const gOpts = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },

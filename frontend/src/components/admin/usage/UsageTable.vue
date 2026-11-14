@@ -21,7 +21,6 @@
         :columns="columns"
         :data="data"
         :row-key="rowKey"
-        :has-details="expanded.size > 0"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
@@ -51,7 +50,12 @@
         </template>
 
         <template #cell-account="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <span class="block text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数 -->
+          <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="mt-0.5 flex flex-wrap gap-x-1.5 text-xs" data-testid="usage-request-marks">
+            <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
+            <span v-if="(row.switches ?? 0) > 0" class="text-gray-500 dark:text-gray-400">{{ t('admin.usage.switches', { n: row.switches }) }}</span>
+          </span>
         </template>
 
         <template #cell-model="{ row }">
@@ -159,7 +163,7 @@
 
         <template #cell-tokens="{ row }">
           <!-- 无账单请求未观测到用量：不编造 0 -->
-          <span v-if="row.source === 'unbilled' && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <span v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
           <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -190,10 +194,10 @@
                   <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                   <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
                   <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
-                  <span v-if="row.cache_ttl_overridden" :title="tip('usage.cacheTtlOverriddenHint', 'cacheTtl')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
+                  <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
                 </div>
               </div>
-              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="tip('usage.cacheHitRateHint', 'cacheHitRate')">
+              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
                 <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
               </div>
               <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
@@ -211,7 +215,7 @@
             </div>
             <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
             <div
-              v-if="row.source !== 'unbilled'"
+              v-if="!isUnbilled(row)"
               class="group relative"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
@@ -224,19 +228,21 @@
         </template>
 
         <template #cell-cost="{ row }">
-          <span v-if="row.source === 'unbilled' && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <!-- 无账单请求没有费用：显示 —，失败 / 取消的标上结果 -->
+          <div v-if="isUnbilled(row) && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500" data-testid="usage-unbilled">
+            —<span v-if="unbilledWord(row)" class="ml-1.5 text-xs">{{ unbilledWord(row) }}</span>
+          </div>
           <div v-else class="text-sm">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
-                :title="tip('admin.usage.longContextPricingTooltip', 'longContext')"
+                :title="t('admin.usage.longContextPricingTooltip')"
                 class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
               >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
               <div
-                v-if="row.source !== 'unbilled'"
                 class="group relative"
                 @mouseenter="showTooltip($event, row)"
                 @mouseleave="hideTooltip"
@@ -276,40 +282,8 @@
           </div>
         </template>
 
-        <template #cell-created_at="{ row, value }">
-          <span class="inline-flex items-center gap-1">
-            <button
-              v-if="admin && row.gateway_request_id && row.has_attempts"
-              type="button"
-              class="sq-focus -ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
-              :aria-expanded="expanded.has(row.gateway_request_id)"
-              :aria-label="t('admin.schedQuality.usage.attempts')"
-              data-usage-expand
-              @click.stop="toggleExpanded(row.gateway_request_id)"
-            ><Icon :name="expanded.has(row.gateway_request_id) ? 'chevronDown' : 'chevronRight'" size="xs" /></button>
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
-          </span>
-        </template>
-
-        <template #cell-result="{ row }">
-          <UsageResultCell :row="row" />
-        </template>
-
-        <template #cell-first_token="{ row }">
-          <span :class="['sq-num text-sm', firstTokenClass(row)]">{{ row.first_token_ms != null ? formatDuration(row.first_token_ms) : '—' }}</span>
-        </template>
-
-        <template #cell-duration="{ row }">
-          <span class="sq-num block text-sm text-gray-900 dark:text-gray-100">{{ row.duration_ms != null ? formatDuration(row.duration_ms) : '—' }}</span>
-          <span v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)" class="sq-num block text-[11px] text-gray-500 dark:text-gray-400" :title="tip('usage.outputTpsHint', 'tps')" data-testid="usage-token-speed">{{ formatTokenSpeed(row) }}</span>
-        </template>
-
-        <template #cell-cache="{ row }">
-          <span class="sq-num text-sm text-gray-900 dark:text-gray-100">{{ formatCacheRatio(row) }}</span>
-        </template>
-
-        <template #row-detail="{ row }">
-          <UsageAttempts v-if="admin && row.gateway_request_id && expanded.has(row.gateway_request_id)" :gateway-request-id="row.gateway_request_id" :at="row.created_at" />
+        <template #cell-created_at="{ value }">
+          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
         </template>
 
         <template #cell-request_id="{ row }">
@@ -593,7 +567,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
@@ -643,9 +617,7 @@ function accountBilled(row: { total_cost?: number | null; account_stats_cost?: n
 }
 
 
-import { cacheReadRatio, formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
-import UsageResultCell from './UsageResultCell.vue'
-import UsageAttempts from './UsageAttempts.vue'
+import { formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
@@ -669,8 +641,6 @@ interface Props {
   showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
-  /** 管理端：行可展开列出这条请求试过的每个号，悬浮提示只用短词（FINAL §7） */
-  admin?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -683,8 +653,7 @@ const props = withDefaults(defineProps<Props>(), {
   showAccountBilling: true,
   showUpstreamEndpoint: true,
   showFallbackOrigin: false,
-  flat: false,
-  admin: false
+  flat: false
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
@@ -699,18 +668,12 @@ const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
 
-// 展开的请求（按网关请求号）；只有尝试表里有行的请求（has_attempts）可展开。首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
-const expanded = reactive(new Set<string>())
-// The admin page shows short tips; the user page keeps the full ones.
-const tip = (full: string, brief: string) => t(props.admin ? `admin.schedQuality.usage.tip.${brief}` : full)
-const toggleExpanded = (id: string) => (expanded.has(id) ? expanded.delete(id) : expanded.add(id))
-// usage 行与无账单行的 id 来自两张表：行键带上来源（契约 §6.1）。
+// 后端 0.6.5 起，管理端列表把没有账单的请求（多为失败或取消）和 usage 行排在一起。这些行来自另一张表：
+// id 自成序列，没有费用，常常也没有 Token 数。行键带上来源；费用与 Token 显示 —，不编造 0。
+const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
-const firstTokenClass = (row: AdminUsageLog) => (row.ttfo_over ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-gray-100')
-const formatCacheRatio = (row: AdminUsageLog) => {
-  const ratio = cacheReadRatio(row)
-  return ratio == null ? '—' : `${Math.round(ratio)}%`
-}
+const unbilledWord = (row: AdminUsageLog) =>
+  row.result === 3 ? t('admin.usage.resultFailed') : row.result === 4 ? t('admin.usage.resultCanceled') : ''
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 

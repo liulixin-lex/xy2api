@@ -9,41 +9,38 @@
     <template #header="{ titleId }">
       <h2 :id="titleId" class="truncate text-lg font-semibold text-gray-900 dark:text-white">{{ detail?.account.name || drawer.accountName }}</h2>
       <div v-if="detail" class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
-        <span :class="statusClass" data-sq-drawer-status>{{ statusText(detail, now, t, te) }}</span>
         <span class="sq-text-3">{{ t('admin.schedQuality.drawer.priority') }}<b class="sq-num ml-1.5 font-medium text-gray-700 dark:text-gray-300">{{ detail.account.priority }}</b></span>
         <span class="sq-text-3">{{ t('admin.schedQuality.drawer.rate') }}<b class="sq-num ml-1.5 font-medium text-gray-700 dark:text-gray-300">{{ detail.account.rate.toFixed(3) }}</b></span>
         <span class="sq-text-3">{{ t('admin.schedQuality.drawer.concurrency') }}<b class="sq-num ml-1.5 font-medium text-gray-700 dark:text-gray-300">{{ detail.account.in_flight }} / {{ detail.account.concurrency }}</b></span>
       </div>
     </template>
-    <template v-if="detail" #header-actions>
-      <router-link
-        v-if="canViewUsage"
-        :to="{ path: '/admin/usage', query: { account_id: String(detail.account.id) } }"
-        class="sq-link sq-focus px-1 text-sm"
-        data-sq-trigger="drawer-records"
-      >{{ t('admin.schedQuality.action.records') }}</router-link>
-      <template v-if="canManage">
-        <span v-if="failedGroups.has(0)" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
+    <template v-if="detail && canManage" #header-actions>
+      <template v-for="mode in OVERRIDE_MODES" :key="mode">
+        <span v-if="failedGroups.has(0) && allGroupsOverride?.mode === mode" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
         <button
           type="button"
           class="btn btn-secondary btn-sm"
-          data-sq-trigger="drawer-exempt"
-          @click="onHeaderExempt"
-        >{{ t(allGroupsExemption ? 'admin.schedQuality.action.undoExempt' : 'admin.schedQuality.action.exempt') }}</button>
-        <button
-          type="button"
-          class="btn btn-primary btn-sm"
-          :disabled="recovering"
-          :aria-busy="recovering"
-          data-sq-trigger="drawer-reset"
-          @click="startRecover"
-        >{{ t('admin.schedQuality.action.reset') }}</button>
+          :data-sq-trigger="`drawer-${mode}`"
+          @click="onHeaderOverride(mode, $event)"
+        >{{ headerOverrideLabel(mode) }}</button>
       </template>
+      <button
+        v-if="recoverable"
+        type="button"
+        class="btn btn-primary btn-sm"
+        :disabled="recovering"
+        :aria-busy="recovering"
+        data-sq-trigger="drawer-reset"
+        @click="startRecover"
+      >{{ t('admin.schedQuality.action.reset') }}</button>
     </template>
 
     <!-- Loading -->
     <div v-if="!detail && !poll.error.value" data-sq-drawer-loading>
-      <span v-for="i in 4" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-3.5']" />
+      <div class="grid grid-cols-3 gap-3">
+        <div v-for="i in 3" :key="i" class="sq-tile"><span class="skeleton block h-3 w-8" /><span class="skeleton mt-2 block h-6 w-[72px]" /></div>
+      </div>
+      <span v-for="i in 3" :key="`line-${i}`" :class="['skeleton block h-3.5 w-full', i === 1 ? 'mt-8' : 'mt-3.5']" />
     </div>
 
     <!-- Failed first load -->
@@ -53,26 +50,45 @@
     </div>
 
     <template v-else>
-      <SchedRecoverLine v-if="line" class="-mx-3 mb-6 rounded-lg" :line="line" @close="recoveryLines.delete(detail.account.id)" />
+      <!-- Model tabs. The per-model cards and per-class first output are gone with the backend's per-account
+           evidence (see api/admin/schedQualityCompat.ts); the tab picks the model of the groups table. -->
+      <section v-if="detail.models.length">
+        <div v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.aria.model')" class="flex flex-wrap gap-1">
+          <button
+            v-for="m in detail.models"
+            :key="m.model"
+            type="button"
+            role="tab"
+            :aria-selected="m.model === tab"
+            :tabindex="m.model === tab ? 0 : -1"
+            class="sq-tab sq-focus"
+            @click="selectTab(m.model)"
+          >{{ m.model }}</button>
+        </div>
+      </section>
 
       <!-- Groups -->
-      <section ref="groupsRef" data-sq-section="groups">
+      <section ref="groupsRef" :class="{ 'mt-8': detail.models.length }" data-sq-section="groups">
         <div class="mb-3 flex items-center gap-1.5">
           <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.byGroup') }}</h3>
           <SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" />
+          <!-- The all-groups override, shown to every reader; the header buttons change it. -->
+          <SchedOverrideCapsule v-if="allGroupsOverride" class="ml-1.5" :mode="allGroupsOverride.mode" all-groups />
         </div>
         <SchedDrawerGroups
           :groups="detail.groups"
+          :model="tab"
+          :card="card"
           :now="now"
           :target-group-id="targetGroupId"
           :failed-groups="failedGroups"
-          @order="(group) => openSchedBoard({ id: group.group_id, name: group.name }, drawer.model)"
-          @override="(group, anchor) => openPopover(group.group_id, anchor)"
-          @undo="(group) => clearExemption(group.exemption!.group_id, group.group_id)"
+          @board="(group) => openSchedBoard({ id: group.group_id, name: group.name }, card?.request_model || null)"
+          @override="(group, mode, anchor) => openPopover(mode, group.group_id, anchor)"
+          @undo="undoOverride"
         />
       </section>
 
-      <!-- Automatic stops -->
+      <!-- Auto states -->
       <section class="mt-8">
         <h3 class="sq-section-title mb-3">{{ t('admin.schedQuality.drawer.autoStates') }}</h3>
         <div v-if="detail.auto_states.length" class="-mx-3 overflow-x-auto">
@@ -111,6 +127,7 @@
 
   <SchedOverridePopover
     :show="popover.open"
+    :mode="popover.mode"
     :anchor="popover.anchor"
     :groups="scopeGroups"
     :default-group-id="popover.groupId"
@@ -140,19 +157,18 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedPauseMark from './SchedPauseMark.vue'
 import SchedDrawerGroups from './SchedDrawerGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
-import SchedRecoverLine from './SchedRecoverLine.vue'
+import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedAutoState, SchedOverrideRequest } from '@/types/schedQuality'
+import type { SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
-import { isRecovering, recoveryLines, useAccountRecovery } from '@/composables/useAccountRecovery'
+import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { useAdminAccessStore } from '@/stores/adminAccess'
-import { fmtCountdown, kindName, parentIdFromKey, statusText } from '@/utils/schedQualityFormat'
+import { fmtCountdown, kindName, parentIdFromKey } from '@/utils/schedQualityFormat'
+import { vRovingTabs } from '@/utils/rovingTabs'
 
-// Account detail drawer (FINAL §7): status, priority, rate and concurrency; per group its lines and per model its
-// evidence, verdict, recovery time and level; the existing automatic stops; exemptions. One instance for the admin
-// UI, opened through useSchedLayers; refreshes every 5 s while open, countdowns run on the local clock.
+// Account quality drawer (design spec B). One instance for the admin UI; opened through useSchedLayers. Refreshes
+// every 5 s while open; countdowns run on the local clock.
 const props = defineProps<{
   /** Opens the IQ check records of an account; the link is hidden when not given. */
   onIqCheck?: (accountId: number) => void
@@ -162,19 +178,20 @@ const props = defineProps<{
   onRecovered?: (accountId: number) => Promise<void> | void
 }>()
 
+// The backend keeps one manual override, the exemption; "demote" and the small tests went with 0.6.5.
+const OVERRIDE_MODES: SchedOverrideMode[] = ['exempt']
+
 const { t, te } = useI18n()
 const { drawer, changed } = useSchedLayers()
 // Write actions need accounts:manage; without it they are not shown.
 const { canManage } = useAdminPermission('accounts')
-const adminAccess = useAdminAccessStore()
-const canViewUsage = computed(() => adminAccess.can('usage:view'))
 const now = useSchedQualityClock()
 const shellRef = ref<{ body: HTMLElement | null; holdFocus: () => () => void } | null>(null)
 const groupsRef = ref<HTMLElement | null>(null)
 
 const poll = useSchedQualityPoll(() => drawer.accountId, (signal) => schedQualityAPI.accountDetail(drawer.accountId!, { signal }))
 const detail = computed(() => poll.data.value)
-// Any quality action (here, in the list, in batches) reloads the open drawer; a recovery waits for this reload.
+// Any quality action (here, in the row menu, in batches) reloads the open drawer; a recovery waits for this reload.
 watch(changed, () => { if (drawer.accountId !== null) trackSchedReload(poll.refresh()) })
 
 // Keep focus inside the drawer when a refresh re-renders the control that had it (spec 0.2, R6).
@@ -182,55 +199,81 @@ let restoreFocus: (() => void) | null = null
 watch(() => poll.data.value, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
 watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
-const statusClass = computed(() => {
-  const value = detail.value
-  if (value?.status === 'disabled') return value.stop?.source === 'manual' ? 'sq-text-3' : 'sq-cool'
-  return value?.status === 'observing' ? 'sq-text-3' : 'sq-text'
-})
-
-// Opened at a group (from a capsule): scroll its rows into view once the detail is in.
+// Model tab: the requested model when the detail has it, else the first one.
+const tab = ref<string | null>(null)
 const targetGroupId = ref<number | null>(null)
 let pendingScroll = true
+
 watch(() => [drawer.accountId, drawer.raise] as const, ([id], previous) => {
   targetGroupId.value = drawer.groupId
   pendingScroll = true
   if (previous && id === previous[0]) void poll.refresh()
-  if (detail.value && id === previous?.[0]) scrollToTarget()
+  if (detail.value && id === previous?.[0]) applyRequest()
 })
-watch(detail, (value) => { if (value && pendingScroll) scrollToTarget() })
 
-function scrollToTarget() {
+watch(detail, (value) => {
+  if (!value) return
+  const models = value.models.map((m) => m.model)
+  if (pendingScroll) applyRequest()
+  else if (!tab.value || !models.includes(tab.value)) tab.value = models[0] ?? null
+})
+
+function applyRequest() {
+  const models = detail.value?.models.map((m) => m.model) ?? []
+  tab.value = drawer.model && models.includes(drawer.model) ? drawer.model : (models[0] ?? null)
   pendingScroll = false
   void nextTick(() => {
     const body = shellRef.value?.body
     if (!body) return
-    if (targetGroupId.value !== null) body.querySelector(`[data-sq-group-row="${targetGroupId.value}"]`)?.scrollIntoView({ block: 'center' })
-    else if (drawer.toGroups && groupsRef.value) groupsRef.value.scrollIntoView({ block: 'start' })
-    else body.scrollTop = 0
+    if (targetGroupId.value !== null) {
+      body.querySelector(`[data-sq-group-row="${targetGroupId.value}"]`)?.scrollIntoView({ block: 'center' })
+    } else if (drawer.toGroups && groupsRef.value) {
+      groupsRef.value.scrollIntoView({ block: 'start' })
+    } else {
+      body.scrollTop = 0
+    }
   })
 }
 
+function selectTab(model: string) {
+  tab.value = model
+  targetGroupId.value = null
+}
+
+const card = computed(() => detail.value?.models.find((m) => m.model === tab.value))
+
 const scopeGroups = computed(() => detail.value?.groups.map((g) => ({ id: g.group_id, name: g.name })) ?? [])
 
-// 恢复 (FINAL §5): any time; its result line shows here and under the account's row.
+// Header actions.
+// 恢复 shows when there is something it clears: a cooling group row or a clearable auto state other than the shared
+// proxy circuit (contract delta F3).
 const { recover } = useAccountRecovery()
+const recoverable = computed(() => {
+  const value = detail.value
+  if (!value) return false
+  return value.groups.some((group) => group.by_model.some((row) => row.state === 'cooling')) ||
+    value.auto_states.some((item) => item.clearable && item.kind !== 'proxy_circuit')
+})
 const recovering = computed(() => !!detail.value && isRecovering(detail.value.account.id))
-const line = computed(() => (detail.value ? recoveryLines.get(detail.value.account.id) : undefined))
 function startRecover() {
   const account = detail.value?.account
-  if (account) void recover(account.id, () => props.onRecovered?.(account.id))
+  if (account) void recover({ id: account.id, name: account.name }, () => props.onRecovered?.(account.id))
 }
 
-// Exemptions: the header button covers every group; group rows set or cancel their own.
-const allGroupsExemption = computed(() => detail.value?.exemptions.find((e) => e.group_id === 0) ?? null)
-function onHeaderExempt(event: MouseEvent) {
-  if (allGroupsExemption.value) void clearExemption(0, 0)
-  else openPopover(0, event.currentTarget as HTMLElement)
+const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)
+const headerOverrideLabel = (mode: SchedOverrideMode) =>
+  allGroupsOverride.value?.mode === mode
+    ? t(mode === 'demote' ? 'admin.schedQuality.action.undoDemote' : 'admin.schedQuality.action.undoExempt')
+    : t(`admin.schedQuality.action.${mode}`)
+
+function onHeaderOverride(mode: SchedOverrideMode, event: MouseEvent) {
+  if (allGroupsOverride.value?.mode === mode) void clearOverride(0, 0)
+  else openPopover(mode, 0, event.currentTarget as HTMLElement)
 }
 
-const popover = reactive({ open: false, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false })
-function openPopover(groupId: number, anchor: HTMLElement) {
-  Object.assign(popover, { open: true, groupId, anchor, busy: false, failed: false })
+const popover = reactive({ open: false, mode: 'exempt' as SchedOverrideMode, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false })
+function openPopover(mode: SchedOverrideMode, groupId: number, anchor: HTMLElement) {
+  Object.assign(popover, { open: true, mode, groupId, anchor, busy: false, failed: false })
 }
 
 async function applyOverride(request: SchedOverrideRequest) {
@@ -257,8 +300,8 @@ function flash<T>(set: Set<T>, key: T) {
   setTimeout(() => set.delete(key), 2000)
 }
 
-/** `groupId` is the exemption to cancel (0 = every group); `markAt` the row (or 0, the header) whose button was clicked. */
-async function clearExemption(groupId: number, markAt: number) {
+/** `markAt` is the row (or 0, the header) whose control was clicked. */
+async function clearOverride(groupId: number, markAt: number) {
   const id = drawer.accountId
   if (id === null) return
   try {
@@ -269,7 +312,11 @@ async function clearExemption(groupId: number, markAt: number) {
   }
 }
 
-// Automatic stops.
+function undoOverride(group: SchedAccountGroup) {
+  void clearOverride(group.override?.all_groups ? 0 : group.group_id, group.group_id)
+}
+
+// Auto states.
 function scopeLabel(item: SchedAutoState) {
   if (item.scope === 'account') return t('admin.schedQuality.scope.account')
   if (item.scope === 'proxy') return t('admin.schedQuality.scope.proxy')

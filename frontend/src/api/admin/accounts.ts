@@ -40,6 +40,9 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
+import type { AccountRecentStatsBatch } from '@/types/schedQuality'
+import { backendSummary } from './schedQuality'
+import { toQualityFilter, toRecentStats, withQualityFilter } from './schedQualityCompat'
 
 /**
  * List all accounts with pagination
@@ -73,7 +76,7 @@ export async function list(
     params: {
       page,
       page_size: pageSize,
-      ...filters
+      ...withQualityFilter(filters)
     },
     signal: options?.signal
   })
@@ -152,7 +155,7 @@ export async function getUpstreamBillingRatesWithEtag(
   if (options?.etag) headers['If-None-Match'] = options.etag
 
   const response = await apiClient.get<UpstreamBillingRatesResponse>('/admin/accounts/upstream-billing-rates', {
-    params: { page, page_size: pageSize, ...filters },
+    params: { page, page_size: pageSize, ...withQualityFilter(filters) },
     headers,
     signal: options?.signal,
     validateStatus: (status) => (status >= 200 && status < 300) || status === 304
@@ -194,7 +197,7 @@ export async function listWithEtag(
     params: {
       page,
       page_size: pageSize,
-      ...filters
+      ...withQualityFilter(filters)
     },
     headers,
     signal: options?.signal,
@@ -580,12 +583,16 @@ export async function bulkUpdate(
   long_context_inherited_count?: number
   results: Array<{ account_id: number; success: boolean; error?: string }>
   }> {
+  // A bulk update by filter carries the list filters in its body; the quality value goes in the backend's words.
+  const filters = Array.isArray(accountIdsOrPayload) ? undefined : accountIdsOrPayload.filters
   const payload = Array.isArray(accountIdsOrPayload)
     ? {
         account_ids: accountIdsOrPayload,
         ...(updates ?? {})
       }
-    : accountIdsOrPayload
+    : filters && typeof filters === 'object'
+      ? { ...accountIdsOrPayload, filters: withQualityFilter(filters as { sched_quality?: string }) }
+      : accountIdsOrPayload
   const { data } = await apiClient.post<{
     success: number
     failed: number
@@ -621,6 +628,14 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
     account_ids: accountIds
   })
   return data
+}
+
+/**
+ * Recent status of up to 1000 accounts; one item per account, by account id. The /recent-stats/batch route is gone
+ * from the backend: the numbers are the last 60 minutes of its scheduling summary (see schedQualityCompat).
+ */
+export async function getRecentStats(accountIds: number[], options?: { signal?: AbortSignal }): Promise<AccountRecentStatsBatch> {
+  return toRecentStats(await backendSummary(accountIds, options))
 }
 
 /** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/guides/upstream-balance.md。 */
@@ -820,7 +835,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "observing" | "substandard" | "exempt" (contract §6.1, accounts/attention). */
+    /** "normal" | "cooling" | "exempt"; sent in the backend's words (see schedQualityCompat). */
     sched_quality?: string
   }
   includeProxies?: boolean
@@ -830,7 +845,8 @@ export async function exportData(options?: {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
-    const { group_category, sched_quality } = options.filters
+    const { group_category } = options.filters
+    const sched_quality = toQualityFilter(options.filters.sched_quality)
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -1249,6 +1265,7 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
+  getRecentStats,
   getUpstreamBalances,
   clearRateLimit,
   resetAccountQuota,

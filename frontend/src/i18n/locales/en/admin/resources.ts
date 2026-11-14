@@ -511,6 +511,7 @@ export default {
     // Usage Records
     usage: {
       title: 'Usage Records',
+      description: 'View and manage all user usage records',
       userFilter: 'User',
       searchUserPlaceholder: 'Search user by email...',
       searchApiKeyPlaceholder: 'Search API key by name...',
@@ -554,6 +555,14 @@ export default {
 	  allUpstreamModelAudit: 'All response model states',
 	  upstreamModelMismatchOnly: 'Mismatched only',
 	  upstreamModelMatchedOnly: 'Matched only',
+      result: 'Result',
+      allResults: 'All results',
+      resultSuccess: 'Success',
+      resultRescued: 'Rescued',
+      resultFailed: 'Failed',
+      resultCanceled: 'Canceled',
+      switches: '{n} switches',
+      requestOutcomes: 'Success {success} · Rescued {rescued} · Failed {failed}',
       ipAddress: 'IP',
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',

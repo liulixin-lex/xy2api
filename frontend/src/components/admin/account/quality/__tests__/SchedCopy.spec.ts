@@ -4,18 +4,16 @@ import { createI18n } from 'vue-i18n'
 import { defineComponent, h } from 'vue'
 
 import zhSched from '@/i18n/locales/zh/admin/schedQuality'
-import type { SchedAccountDetail, SchedAccountSummary, SchedGroupSummary } from '@/types/schedQuality'
+import enSched from '@/i18n/locales/en/admin/schedQuality'
+import { kindName, rejectName } from '@/utils/schedQualityFormat'
+import type { SchedAccountDetail, SchedAccountSummary, SchedBoard } from '@/types/schedQuality'
 import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
+import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import SchedGroupsCell from '../SchedGroupsCell.vue'
-import SchedNumCell from '../SchedNumCell.vue'
-import SchedStatusCell from '../SchedStatusCell.vue'
-import SchedRecoverLine from '../SchedRecoverLine.vue'
-import GroupSchedCell from '@/components/admin/group/GroupSchedCell.vue'
-import { GROUP_SCHED_COLUMNS } from '@/utils/schedQualityFormat'
+import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
 import SchedOverridePopover from '../SchedOverridePopover.vue'
 import SchedPauseMark from '../SchedPauseMark.vue'
@@ -23,13 +21,12 @@ import GroupSchedBoard from '@/components/admin/group/GroupSchedBoard.vue'
 import GroupSchedPolicyField from '@/components/admin/group/GroupSchedPolicyField.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedBoard, openSchedDrawer } from '@/composables/useSchedLayers'
 
-const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupOrder: vi.fn(), getGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
+const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
   return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => true) }) }
 })
-vi.mock('@/stores/adminAccess', () => ({ useAdminAccessStore: () => ({ can: () => true }) }))
 
 // Acceptance item 3 of WP7: every text the new components render (visible text and tips) is data or comes from
 // design/copy.md, and none is a sentence. Existing keys reused by the design (column "操作", close) are listed too.
@@ -45,7 +42,7 @@ const collect = (node: unknown) => {
 collect(messages)
 
 // Data: numbers with units, times, model / account / group names from the fixtures, dashes and separators.
-const DATA = [/gpt-[\w.-]+/g, /acc-[\w-]+|…|晨星组|北辰组/g, /[\d.:,%/+#×s·—→-]+/g]
+const DATA = [/gpt-[\w.-]+/g, /acc-[\w-]+|…|晨星组|北辰组/g, /[\d.:,%/+#×s·—-]+/g]
 function nonData(text: string) {
   let rest = text
   for (const pattern of DATA) rest = rest.replace(pattern, ' ')
@@ -74,10 +71,11 @@ const detail = () => {
   )
   return d
 }
-const groupSummary = (patch: Partial<SchedGroupSummary> = {}): SchedGroupSummary => ({
-  group_id: 53, enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0.7, takeover_idle_seconds: 900,
-  accounts: { normal: 5, below: 1, stopped: 2 }, last60: { ttfo_p50_ms: 7200, failed_rate: 0.008, cache_ratio: 0.78, requests: 1942 }, ...patch
-})
+const board = (): SchedBoard => {
+  const b = structuredClone(boardFixture) as SchedBoard
+  b.accounts.push({ ...structuredClone(b.accounts[0]), account_id: 2, eligible: false, reject: 'model_rate_limited', reject_until: new Date(Date.now() + 60_000).toISOString() })
+  return b
+}
 
 enableAutoUnmount(afterEach)
 beforeEach(() => {
@@ -86,8 +84,9 @@ beforeEach(() => {
   closeSchedBoard()
   document.documentElement.dataset.motion = 'reduced'
   api.accountDetail.mockResolvedValue(detail())
-  api.groupOrder.mockResolvedValue(orderFixture)
+  api.groupBoard.mockResolvedValue(board())
   api.getGroupPolicy.mockResolvedValue(policyFixture)
+  api.previewGroupPolicy.mockResolvedValue({ now: { normal: 3, below: 1 }, after: { normal: 2, below: 2 }, changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', dims: ['error'] }] })
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
@@ -96,24 +95,26 @@ describe('quality UI copy', () => {
     const summary = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
     const Host = defineComponent({
       setup: () => () => [
-        h(SchedStatusCell, { summary }),
-        h(SchedStatusCell, { summary: { ...summary, status: 'observing', reset_at: new Date().toISOString() } }),
-        h(SchedStatusCell, { summary: { ...summary, status: 'disabled', stop: { source: 'auto', reason: 'rate_limit', until: new Date().toISOString() } } }),
-        ...(['ttfo', 'error', 'cache'] as const).map((dim) => h(SchedNumCell, { summary, dim })),
-        h(SchedGroupsCell, { summary, groupName: () => '晨星组' }),
-        h(SchedGroupsCell, { summary: { ...summary, exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }, groupName: () => '晨星组' }),
-        h(SchedRecoverLine, { line: { at: Date.now(), result: { account_id: 479, reset_at: null, cleared: ['quality', 'session_avoid'], kept: [{ kind: 'quota', until: new Date().toISOString() }], failed: [{ kind: 'rate_limit' }] } } }),
-        ...GROUP_SCHED_COLUMNS.map(([col]) => h(GroupSchedCell, { col, summary: groupSummary() })),
+        h(AccountRecentStatsCell, { accountId: 479, stats: { account_id: 479, ttft: { p50_ms: 2800, n: 37, tier: 'good' }, error: null, cache: { ratio: null, n: 0, tier: null } } }),
+        h(AccountRecentStatsCell, { accountId: 480 }),
+        h(SchedGroupsCell, { summary, openai: true, groupName: () => '晨星组' }),
+        h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, openai: true, groupName: () => '' }),
+        h(SchedGroupsCell, { summary: { ...summary, cooling: [{ ...summary.cooling[0], group_id: 54 }] }, openai: true, groupName: () => '北辰组' }),
+        h(SchedGroupsCell, {
+          summary: { ...summary, overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }, { group_id: 53, mode: 'exempt', expires_at: '2026-11-14T10:30:00Z' }] },
+          openai: true,
+          groupName: () => '晨星组'
+        }),
         h(SchedPauseMark, { globalEnabled: false }),
         h(SchedPauseMark, { globalEnabled: true, stale: true }),
         h(SchedAccountDrawer),
         h(GroupSchedBoard),
         h(GroupSchedPolicyField, { groupId: 53 }),
-        h(SchedOverridePopover, { show: true, anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
+        h(SchedOverridePopover, { show: true, mode: 'exempt', anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
         h(SchedBatchDialog, { action: 'reset', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
       ]
     })
-    mount(Host, { attachTo: document.body, global: { plugins: [i18n], stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    mount(Host, { attachTo: document.body, global: { plugins: [i18n] } })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
@@ -127,6 +128,26 @@ describe('quality UI copy', () => {
     expect(texts.flatMap(nonData).filter((token) => token.length > 8)).toEqual([])
     const described = Array.from(document.querySelectorAll('.sr-only'), (el) => el.textContent?.trim() ?? '').filter(Boolean)
     expect(described.length).toBeGreaterThan(0)
-    expect(described.flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
+    expect(described.flatMap((text) => text.split(zhSched.schedQuality.recent.sep)).flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
+  })
+
+  it('names every reject code the board can return (G4 D1) and the auto_states kind (D6) with a short word', () => {
+    // Normal path of the board's admission checks, then the codes a second admission check can pass through.
+    const codes = [
+      'platform_mismatch', 'model_rate_limited', 'not_schedulable', 'quota_auto_pause_5h', 'quota_auto_pause_7d',
+      'model_not_supported', 'profit_threshold', 'profit_invalid_account_rate', 'account_scheduling_threshold',
+      'privacy_not_set', 'runtime_blocked', 'proxy_stream_quarantined', 'shadow_parent_unhealthy',
+      'channel_upstream_restricted', 'channel_pricing_restricted',
+      'quota_auto_reset_pending_5h', 'quota_auto_reset_pending_7d', 'quota_auto_reset_credit_check_5h', 'quota_auto_reset_credit_check_7d'
+    ]
+    const { t, te } = i18n.global
+    const zh = codes.map((code) => rejectName(code, t, te))
+    expect(zh).not.toContain('其他')
+    expect(zh.filter((word) => word.replace(/\s/g, '').length > 4)).toEqual([])
+    expect(Object.keys(zhSched.schedQuality.reject).sort()).toEqual([...codes].sort())
+    expect(Object.keys(enSched.schedQuality.reject).sort()).toEqual([...codes].sort())
+    expect(rejectName('account_nil', t, te)).toBe('其他')
+    expect(kindName('auto_states', t, te)).toBe('自动状态')
+    expect(zhSched.schedQuality.result.skipped).toBe('未执行')
   })
 })

@@ -101,6 +101,7 @@ const emit = defineEmits([
   'sched-action'
 ])
 
+// 恢复 and 豁免: the small tests and the "demote" override went with backend 0.6.5.
 const SCHED_ACTIONS = ['reset', 'exempt'] as const
 const LINK = 'text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200'
 const SEP = 'mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600'
