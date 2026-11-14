@@ -3,83 +3,106 @@
     <TablePageLayout>
       <!-- Filters -->
       <template #filters>
-        <div class="card p-4 sm:p-6">
-          <div class="flex flex-wrap items-end justify-between gap-4">
-            <!-- Left: filter fields -->
-            <div class="flex flex-1 flex-wrap items-end gap-4">
-              <div class="w-full sm:w-auto sm:min-w-[240px]">
-                <label class="input-label">{{ t('admin.audit.filters.q') }}</label>
-                <div class="relative">
-                  <Icon
-                    name="search"
-                    size="md"
-                    class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-                  <input
-                    v-model.trim="filters.q"
-                    type="text"
-                    class="input pl-10"
-                    :placeholder="t('admin.audit.filters.qPlaceholder')"
-                    @keyup.enter="search"
-                  />
-                </div>
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[200px]">
-                <label class="input-label">{{ t('admin.audit.filters.actorEmail') }}</label>
-                <input v-model.trim="filters.actor_email" type="text" class="input" @keyup.enter="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[180px]">
-                <label class="input-label">{{ t('admin.audit.filters.action') }}</label>
-                <input v-model.trim="filters.action" type="text" class="input" @keyup.enter="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[160px]">
-                <label class="input-label">{{ t('admin.audit.filters.clientIp') }}</label>
-                <input v-model.trim="filters.client_ip" type="text" class="input" @keyup.enter="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[140px]">
-                <label class="input-label">{{ t('admin.audit.filters.method') }}</label>
-                <Select v-model="filters.method" :options="methodOptions" @change="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[170px]">
-                <label class="input-label">{{ t('admin.audit.filters.authMethod') }}</label>
-                <Select v-model="filters.auth_method" :options="authMethodOptions" @change="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[140px]">
-                <label class="input-label">{{ t('admin.audit.filters.result') }}</label>
-                <Select v-model="filters.success" :options="resultOptions" @change="search" />
-              </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[170px]">
-                <label class="input-label">{{ t('admin.dashboard.timeRange') }}</label>
-                <Select
-                  :model-value="timeRange"
-                  :options="timeRangeOptions"
-                  @update:model-value="handleTimeRangeChange"
-                />
-              </div>
+        <TableToolbar>
+          <template #search>
+            <div class="relative">
+              <Icon
+                name="search"
+                size="md"
+                class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                v-model.trim="filters.q"
+                type="text"
+                class="input pl-10"
+                :placeholder="t('admin.audit.filters.qPlaceholder')"
+                :aria-label="t('admin.audit.filters.q')"
+                @keyup.enter="search"
+              />
             </div>
-
-            <!-- Right: actions -->
-            <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
-              <button type="button" class="btn btn-primary" :disabled="loading" @click="search">
-                {{ t('common.search') }}
-              </button>
-              <button type="button" class="btn btn-secondary" :disabled="loading" @click="resetFilters">
-                {{ t('common.reset') }}
-              </button>
-              <button v-if="isSuperAdmin" type="button" class="btn btn-danger" @click="openClearDialog">
-                <Icon name="trash" size="sm" class="mr-1.5" />
-                {{ t('admin.audit.clearAll') }}
-              </button>
-            </div>
-          </div>
-        </div>
+          </template>
+          <template #filters>
+            <input
+              v-model.trim="filters.actor_email"
+              type="text"
+              class="input w-[200px]"
+              :placeholder="t('admin.audit.filters.actorEmail')"
+              :aria-label="t('admin.audit.filters.actorEmail')"
+              @keyup.enter="search"
+            />
+            <input
+              v-model.trim="filters.action"
+              type="text"
+              class="input w-[180px]"
+              :placeholder="t('admin.audit.filters.action')"
+              :aria-label="t('admin.audit.filters.action')"
+              @keyup.enter="search"
+            />
+            <input
+              v-model.trim="filters.client_ip"
+              type="text"
+              class="input w-[160px]"
+              :placeholder="t('admin.audit.filters.clientIp')"
+              :aria-label="t('admin.audit.filters.clientIp')"
+              @keyup.enter="search"
+            />
+            <Select
+              v-model="filters.method"
+              :options="methodOptions"
+              :aria-label="t('admin.audit.filters.method')"
+              class="min-w-[140px]"
+              @change="search"
+            />
+            <Select
+              v-model="filters.auth_method"
+              :options="authMethodOptions"
+              :aria-label="t('admin.audit.filters.authMethod')"
+              class="min-w-[170px]"
+              @change="search"
+            />
+            <Select
+              v-model="filters.success"
+              :options="resultOptions"
+              :aria-label="t('admin.audit.filters.result')"
+              class="min-w-[140px]"
+              @change="search"
+            />
+            <Select
+              :model-value="timeRange"
+              :options="timeRangeOptions"
+              :aria-label="t('admin.dashboard.timeRange')"
+              class="min-w-[170px]"
+              @update:model-value="handleTimeRangeChange"
+            />
+          </template>
+          <template #actions>
+            <button type="button" class="btn btn-primary" :disabled="loading" @click="search">
+              {{ t('common.search') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :disabled="loading"
+              :aria-label="t('common.reset')"
+              v-tip="t('common.reset')"
+              @click="resetFilters"
+            >
+              <Icon name="x" size="sm" class="lg:mr-1.5" />
+              <span class="table-toolbar__label">{{ t('common.reset') }}</span>
+            </button>
+            <button
+              v-if="isSuperAdmin"
+              type="button"
+              class="btn btn-danger max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('admin.audit.clearAll')"
+              v-tip="t('admin.audit.clearAll')"
+              @click="openClearDialog"
+            >
+              <Icon name="trash" size="sm" class="lg:mr-1.5" />
+              <span class="table-toolbar__label">{{ t('admin.audit.clearAll') }}</span>
+            </button>
+          </template>
+        </TableToolbar>
       </template>
 
       <!-- Table -->
@@ -358,6 +381,7 @@ import { adminAPI, type AuditLog } from '@/api/admin'
 import { totpAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import type { Column } from '@/components/common/types'
 import Pagination from '@/components/common/Pagination.vue'
@@ -365,6 +389,7 @@ import Select from '@/components/common/Select.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import { useAppStore } from '@/stores'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
@@ -406,7 +431,7 @@ const TIME_RANGE_MINUTES: Record<string, number> = {
 }
 
 const timeRangeOptions = computed(() => [
-  { value: '', label: t('admin.audit.filters.all') },
+  { value: '', label: t('admin.audit.filters.allTime') },
   { value: '30m', label: t('admin.ops.timeRange.30m') },
   { value: '1h', label: t('admin.ops.timeRange.1h') },
   { value: '6h', label: t('admin.ops.timeRange.6h') },
@@ -476,7 +501,7 @@ const columns = computed<Column[]>(() => [
 ])
 
 const methodOptions = computed(() => [
-  { value: '', label: t('admin.audit.filters.all') },
+  { value: '', label: t('admin.audit.filters.allMethods') },
   { value: 'POST', label: 'POST' },
   { value: 'PUT', label: 'PUT' },
   { value: 'PATCH', label: 'PATCH' },
@@ -485,13 +510,13 @@ const methodOptions = computed(() => [
 ])
 
 const authMethodOptions = computed(() => [
-  { value: '', label: t('admin.audit.filters.all') },
+  { value: '', label: t('admin.audit.filters.allAuthMethods') },
   { value: 'jwt', label: 'JWT' },
   { value: 'admin_api_key', label: 'Admin API Key' }
 ])
 
 const resultOptions = computed(() => [
-  { value: '', label: t('admin.audit.filters.all') },
+  { value: '', label: t('admin.audit.filters.allResults') },
   { value: 'true', label: t('admin.audit.filters.resultSuccess') },
   { value: 'false', label: t('admin.audit.filters.resultFailure') }
 ])
