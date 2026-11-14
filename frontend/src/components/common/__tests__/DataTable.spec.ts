@@ -377,6 +377,19 @@ describe('DataTable', () => {
     expect(card.findAll('.table-card__fields [data-field]').map((field) => field.attributes('data-field'))).toEqual(['usage'])
   })
 
+  it('lays a column marked cardFullRow across the whole card, the others in its two columns (7r-6)', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }, { key: 'group', label: 'Group' }, { key: 'usage', label: 'Usage', cardFullRow: true }],
+        data: [{ id: 1, name: 'one', group: 'g', usage: 'bars' }],
+        rowKey: 'id'
+      }
+    })
+    const fields = wrapper.findAll('.table-card__fields [data-field]')
+    expect(fields.map((field) => [field.attributes('data-field'), field.classes('col-span-full')])).toEqual([['group', false], ['usage', true]])
+  })
+
   it('lets a page draw its own card, with any column\'s cell drawn the way the table draws it', () => {
     stubMobileMatchMedia()
     const wrapper = mount(DataTable, {

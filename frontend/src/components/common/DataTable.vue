@@ -121,7 +121,7 @@
             </div>
           </div>
           <dl v-if="cardFields.length" class="table-card__fields">
-            <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field">
+            <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field" :class="{ 'col-span-full': column.cardFullRow }">
               <dt class="table-card__label">{{ column.label }}</dt>
               <dd class="table-card__value">
                 <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">

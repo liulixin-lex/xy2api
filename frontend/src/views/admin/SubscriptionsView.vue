@@ -930,7 +930,8 @@ const allColumns = computed<Column[]>(() => [
     sortable: false
   },
   { key: 'group', label: t('admin.subscriptions.columns.group'), sortable: false },
-  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false },
+  // Its progress bars need the card's width (7r-6).
+  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false, cardFullRow: true },
   { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true },
   { key: 'status', label: t('admin.subscriptions.columns.status'), sortable: true },
   { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false }
