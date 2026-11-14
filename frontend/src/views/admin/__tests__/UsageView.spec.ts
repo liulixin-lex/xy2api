@@ -819,3 +819,70 @@ describe('admin UsageView model audit export', () => {
     wrapper.unmount()
   })
 })
+
+describe('admin UsageView live log', () => {
+  let atTop = true
+  const LiveUsageTableStub = {
+    name: 'UsageTable',
+    props: ['data', 'loading', 'rowClass'],
+    methods: { isAtTop: () => atTop, scrollToTop: () => undefined },
+    template: '<div />',
+  }
+  const page = (...keys: string[]) => ({
+    items: keys.map((key) => {
+      const [source, id] = key.split(':')
+      return { id: Number(id), source: source === 'usage' ? undefined : source, user_id: 1, model: 'm', created_at: '' }
+    }),
+    total: keys.length,
+    pages: 1,
+  })
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    atTop = true
+    Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('follows new records at the top on page 1, newest first, with the list top in view; otherwise only counts them', async () => {
+    list.mockReset().mockResolvedValue(page('usage:2', 'unbilled:2', 'usage:1'))
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: LiveUsageTableStub, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true,
+        EndpointDistributionChart: true, UserTokenRanking: true,
+      } },
+    })
+    await flushPromises()
+    const shown = () => (wrapper.findComponent(LiveUsageTableStub).props('data') as Array<{ id: number; source?: string }>)
+      .map((row) => `${row.source ?? 'usage'}:${row.id}`)
+    expect(shown()).toEqual(['usage:2', 'unbilled:2', 'usage:1']) // the same id from two sources: two rows
+
+    list.mockResolvedValue(page('usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+
+    atTop = false // the user scrolled into the list
+    list.mockResolvedValue(page('usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+    expect((wrapper.vm as any).liveUsage.pending.value).toBe(1)
+
+    atTop = true
+    ;(wrapper.vm as any).handleSort('model', 'asc') // not newest first: no following
+    await flushPromises()
+    list.mockResolvedValue(page('usage:5', 'usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+    expect((wrapper.vm as any).liveUsage.pending.value).toBe(1)
+    wrapper.unmount()
+  })
+})

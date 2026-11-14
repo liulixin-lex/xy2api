@@ -125,12 +125,14 @@
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
+            ref="usageTableRef"
             flat
+            :row-class="usageRowClass"
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
             show-fallback-origin
-            :data="usageLogs"
-            :loading="loading"
+            :data="usageRows"
+            :loading="usageLoading"
             :columns="visibleColumns"
             :server-side-sort="true"
             :default-sort-key="'created_at'"
@@ -139,7 +141,7 @@
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
           />
-          <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
@@ -193,6 +195,7 @@ import { useRoute } from 'vue-router'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
@@ -221,7 +224,7 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const adminSettingsStore = useAdminSettingsStore()
 const route = useRoute()
-const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
+const usageStats = ref<AdminUsageStatsResponse | null>(null); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
@@ -237,9 +240,7 @@ const inboundEndpointStats = ref<EndpointStat[]>([])
 const upstreamEndpointStats = ref<EndpointStat[]>([])
 const endpointPathStats = ref<EndpointStat[]>([])
 const endpointStatsLoading = ref(false)
-let abortController: AbortController | null = null
 let chartReqSeq = 0
-let statsReqSeq = 0
 let modelStatsReqSeq = 0
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
@@ -306,7 +307,7 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, native_compaction_v2: null, billing_type: null, start_date: startDate.value, end_date: endDate.value })
-const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
+const pagination = reactive({ page: 1, page_size: getPersistedPageSize() })
 const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
@@ -411,40 +412,63 @@ const buildUsageListParams = (
   }
 }
 
-const loadLogs = async () => {
-  abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
-  try {
-    const res = await adminAPI.usage.list(
-      buildUsageListParams(pagination.page, pagination.page_size, false),
-      { signal: c.signal }
-    )
-    if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
-  } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
-}
-const loadStats = async (force = false) => {
-  const seq = ++statsReqSeq
+// The list is a live table in log mode: every 5 s the current page is fetched again; on page 1, newest first, with the
+// list's top in view, new records come in at the top (trimmed to the page size); otherwise they are only counted
+// (liveUsage.pending / pendingMore, taken in by liveUsage.applyPending). Usage rows never change once written, so there
+// is no per-row source. The stats cards are a 30 s page task that also runs after every successful load.
+const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
+const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
+const liveUsage = useLiveTable<AdminUsageLog>({
+  getId: usageRowId,
+  fetchPage: (signal) => adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal }),
+  membershipIntervalMs: 5000,
+  tail: {
+    enabled: () => pagination.page === 1 && sortState.sort_by === 'created_at' && sortState.sort_order === 'desc'
+      && (usageTableRef.value?.isAtTop?.() ?? true),
+    pageSize: () => pagination.page_size
+  },
+  tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
+})
+// liveUsage.status, pending, pendingMore and applyPending wait for the live indicator and the "N changes" notice.
+const { rows: usageRows, loading: usageLoading, total: usageTotal } = liveUsage
+const usageRowClass = (row: AdminUsageLog) =>
+  liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined
+const reloadUsage = () => liveUsage.reload().catch((error) => console.error('Failed to load usage logs:', error))
+
+// The endpoint distribution charts come from the stats answer but follow only page opens, filter changes and manual
+// refreshes, not the 30 s beat (spec 8.5); values stay until new ones arrive.
+let endpointStatsDue = true
+let statsNoCache = false
+const askEndpointStats = (noCache = false) => {
+  endpointStatsDue = true
   endpointStatsLoading.value = true
+  if (noCache) statsNoCache = true
+}
+const runStatsTask = async (signal: AbortSignal) => {
+  const withEndpoints = endpointStatsDue
+  const noCache = statsNoCache
+  const requestType = filters.value.request_type
+  const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
   try {
-    const requestType = filters.value.request_type
-    const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const s = await adminAPI.usage.getStats({
       ...filters.value,
       stream: legacyStream === null ? undefined : legacyStream,
-      ...(force ? { nocache: 1 } : {}),
+      ...(noCache ? { nocache: 1 } : {}),
     })
-    if (seq !== statsReqSeq) return
+    if (signal.aborted) return // a load started: the filter may have changed
+    if (noCache) statsNoCache = false
     usageStats.value = s
+    if (!withEndpoints) return
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
     endpointPathStats.value = s.endpoint_paths || []
+    endpointStatsDue = false
+    endpointStatsLoading.value = false
   } catch (error) {
-    if (seq !== statsReqSeq) return
+    if (signal.aborted) return
     console.error('Failed to load usage stats:', error)
-    inboundEndpointStats.value = []
-    upstreamEndpointStats.value = []
-    endpointPathStats.value = []
-  } finally {
-    if (seq === statsReqSeq) endpointStatsLoading.value = false
+    if (withEndpoints) endpointStatsLoading.value = false
+    throw error // the engine retries it on the back-off beat
   }
 }
 
@@ -543,8 +567,9 @@ const loadChartData = async () => {
 const applyFilters = () => {
   pagination.page = 1
   invalidateModelStatsCache()
-  loadLogs()
-  loadStats()
+  usageTableRef.value?.scrollToTop?.()
+  askEndpointStats()
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   errPage.value = 1
@@ -557,8 +582,8 @@ const applyFilters = () => {
 const refreshData = () => {
   void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
-  loadLogs()
-  loadStats(true)
+  askEndpointStats(true)
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
@@ -572,13 +597,13 @@ const resetFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
-const handlePageChange = (p: number) => { pagination.page = p; loadLogs() }
-const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; loadLogs() }
+const handlePageChange = (p: number) => { pagination.page = p; void reloadUsage() }
+const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; void reloadUsage() }
 const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
-  loadLogs()
+  void reloadUsage()
 }
 
 const handleIpGeoBatchFailed = () => {
@@ -835,8 +860,8 @@ onMounted(() => {
   void loadRouteUserFilterLabel()
   void loadRouteAccountFilterLabel()
   if (getSingleQueryValue(route.query.tab) === 'errors') switchTab('errors')
-  loadLogs()
-  loadStats()
+  askEndpointStats()
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   window.setTimeout(() => {
     void loadChartData()
@@ -845,7 +870,7 @@ onMounted(() => {
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

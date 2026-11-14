@@ -1,5 +1,5 @@
 <template>
-  <div :class="flat ? '' : 'card overflow-hidden'">
+  <div ref="rootRef" :class="flat ? '' : 'card overflow-hidden'">
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -18,9 +18,11 @@
     </div>
     <div class="overflow-auto">
       <DataTable
+        ref="tableRef"
         :columns="columns"
         :data="data"
         :row-key="rowKey"
+        :row-class="rowClass"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
@@ -641,6 +643,8 @@ interface Props {
   showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** Passed to DataTable's rowClass (a stable function from the page's setup). */
+  rowClass?: (row: AdminUsageLog, index: number) => unknown
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -670,6 +674,19 @@ const ipGeoBatchLoading = ref(false)
 
 // 后端 0.6.5 起，管理端列表把没有账单的请求（多为失败或取消）和 usage 行排在一起。这些行来自另一张表：
 // id 自成序列，没有费用，常常也没有 Token 数。行键带上来源；费用与 Token 显示 —，不编造 0。
+const rootRef = ref<HTMLElement | null>(null)
+const tableRef = ref<InstanceType<typeof DataTable> | null>(null)
+/**
+ * The list's top is in view and the table has not been scrolled inside itself: new rows may come in at the top
+ * (the live engine's log mode follows the server only then).
+ */
+const isAtTop = () => {
+  if ((tableRef.value?.tableWrapperEl?.scrollTop ?? 0) > 0) return false
+  return (rootRef.value?.getBoundingClientRect().top ?? 0) >= 0
+}
+const scrollToTop = () => tableRef.value?.scrollToTop()
+defineExpose({ isAtTop, scrollToTop })
+
 const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const unbilledWord = (row: AdminUsageLog) =>
