@@ -174,9 +174,13 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
 		return
 	}
+	kind := "migrate"
+	if change.expected.AccountID == 0 {
+		kind = "create"
+	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
+		kind: kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy,
 		skipCommit:      change.skipCommit,
 		ownerReleased:   change.ownerReleased,
@@ -220,7 +224,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if openAIStickyBindingKept(ctx, change.session, change.target) {
 		return
 	}
-	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl)
+	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
 	if err != nil {
 		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", accountID, "error", err)
 		return

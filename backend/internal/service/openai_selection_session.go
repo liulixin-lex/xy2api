@@ -64,8 +64,13 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
 		return nil
 	}
-	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.target != 0 {
-		return nil
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil {
+		pending.mu.Lock()
+		blocked := pending.target != 0 && (!pending.done || pending.kind != "migrate")
+		pending.mu.Unlock()
+		if blocked {
+			return nil
+		}
 	}
 	key := s.cacheKey(sessionHash)
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == groupID && pending.session == strings.TrimSpace(sessionHash) {

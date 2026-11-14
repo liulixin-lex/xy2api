@@ -33,6 +33,7 @@ func TestStickyChangeCommitsOnlySuccessfulTarget(t *testing.T) {
 			CompleteOpenAIStickyChange(ctx, selected.Account.ID, !success, false)
 			if outcome == "success" {
 				require.Equal(t, selected.Account.ID, f.binding.owner)
+				require.Equal(t, []string{"sticky_change:session"}, f.binding.avoidScopes)
 			} else {
 				require.Equal(t, int64(10), f.binding.owner)
 			}

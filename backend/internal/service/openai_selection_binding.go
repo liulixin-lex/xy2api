@@ -24,7 +24,8 @@ type OpenAIStickyAliasCache interface {
 
 type OpenAIStickyVersionedCache interface {
 	GetSessionBinding(context.Context, int64, string) (StickySessionBinding, error)
-	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration) (bool, error)
+	// A successful commit also clears the target from the supplied failure-avoidance scope.
+	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration, ...string) (bool, error)
 	RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error)
 }
 

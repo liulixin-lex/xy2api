@@ -37,21 +37,26 @@ func (c *gatewayCache) GetSessionBinding(ctx context.Context, groupID int64, ses
 }
 
 var commitSessionBindingScript = redis.NewScript(`
+local bindingKeys = tonumber(ARGV[7])
 if ARGV[1] == '0' and ARGV[2] == '' then
-  if redis.call('EXISTS', KEYS[1]) == 1 or (#KEYS == 4 and redis.call('EXISTS', KEYS[3]) == 1) then return 0 end
+  if redis.call('EXISTS', KEYS[1]) == 1 or (bindingKeys == 4 and redis.call('EXISTS', KEYS[3]) == 1) then return 0 end
 else
   if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
 end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[5])
 redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[5])
-if #KEYS == 4 and redis.call('EXISTS', KEYS[3]) == 1 then
+if bindingKeys == 4 and redis.call('EXISTS', KEYS[3]) == 1 then
   redis.call('SET', KEYS[3], ARGV[3], 'PX', ARGV[6])
   redis.call('SET', KEYS[4], ARGV[4], 'PX', ARGV[6])
+end
+if #KEYS > bindingKeys then
+  redis.call('ZREM', KEYS[bindingKeys + 1], ARGV[3])
+  redis.call('HDEL', KEYS[bindingKeys + 2], ARGV[3])
 end
 return 1
 `)
 
-func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, sessionHash string, expected service.StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, sessionHash string, expected service.StickySessionBinding, target int64, ttl time.Duration, avoidSession ...string) (bool, error) {
 	if expected.AccountID < 0 || (expected.AccountID == 0) != (expected.Generation == "") || target <= 0 || sessionHash == "" || ttl <= 0 {
 		return false, errors.New("invalid versioned sticky binding replacement")
 	}
@@ -59,7 +64,11 @@ func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, 
 	if expected.LegacyKey != "" && expected.LegacyKey != sessionHash {
 		keys = append(keys, sessionBindingKeys(groupID, expected.LegacyKey)...)
 	}
-	n, err := commitSessionBindingScript.Run(ctx, c.rdb, keys, expected.AccountID, expected.Generation, target, uuid.NewString(), ttl.Milliseconds(), min(ttl, 10*time.Minute).Milliseconds()).Int64()
+	bindingKeys := len(keys)
+	if len(avoidSession) > 0 && avoidSession[0] != "" {
+		keys = append(keys, sessionKey(resilienceSessionAvoidPrefix, groupID, avoidSession[0]), sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, avoidSession[0]))
+	}
+	n, err := commitSessionBindingScript.Run(ctx, c.rdb, keys, expected.AccountID, expected.Generation, target, uuid.NewString(), ttl.Milliseconds(), min(ttl, 10*time.Minute).Milliseconds(), bindingKeys).Int64()
 	return n == 1, err
 }
 
