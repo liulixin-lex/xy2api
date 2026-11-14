@@ -205,6 +205,9 @@ export function insideLayerAbove(token: symbol, el: Element): boolean {
   return index !== -1 && layers.slice(index + 1).some((layer) => !!layer.root()?.contains(el))
 }
 
+/** Whether any layer is open: a dialog, drawer, popover or menu. */
+export const anyOverlayOpen = () => layers.length > 0
+
 export function isTopOverlay(token: symbol) {
   return layers[layers.length - 1]?.token === token
 }

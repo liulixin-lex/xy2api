@@ -1,67 +1,7 @@
 <template>
   <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed, 'ratio--detailed': detailed }">
-    <HelpTooltip width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="upstream-billing-details">
-      <template #trigger>
-        <span class="ratio__v" data-testid="upstream-billing-rate">{{ primaryValue }}</span>
-      </template>
-      <div class="space-y-1">
-        <template v-if="hasEffectiveRate && data">
-          <p>{{ t('admin.accounts.upstreamBilling.groupRate', { value: data.group_rate_multiplier }) }}</p>
-          <p v-if="data.user_rate_multiplier != null">
-            {{ t('admin.accounts.upstreamBilling.userRate', { value: data.user_rate_multiplier }) }}
-          </p>
-          <p>
-            {{
-              data.peak_rate_enabled
-                ? t('admin.accounts.upstreamBilling.peakRate', {
-                    start: data.peak_start,
-                    end: data.peak_end,
-                    value: data.peak_rate_multiplier,
-                    timezone: data.timezone
-                  })
-                : t('admin.accounts.upstreamBilling.noPeakRate')
-            }}
-          </p>
-          <p>{{ t('admin.accounts.upstreamBilling.effectiveRate', { value: currentEffectiveRate ?? '-' }) }}</p>
-          <p>{{ t('admin.accounts.upstreamBilling.updatedAt', { value: formatDate(snapshot?.received_at) }) }}</p>
-        </template>
-        <template v-else-if="stale && lastDetectedRate != null">
-          <p data-testid="upstream-billing-last-rate">
-            {{ t('admin.accounts.upstreamBilling.lastDetectedRate', { value: lastDetectedRate }) }}
-          </p>
-          <p data-testid="upstream-billing-last-time">
-            {{ t('admin.accounts.upstreamBilling.lastDetectedAt', { value: formatDate(snapshot?.received_at) }) }}
-          </p>
-          <p data-testid="upstream-billing-elapsed">
-            {{ t('admin.accounts.upstreamBilling.elapsedSince', { value: elapsedSinceLastSuccess }) }}
-          </p>
-        </template>
-        <p v-else>{{ statusLabel || '-' }}</p>
-        <p v-if="failureReason" data-testid="upstream-billing-failure">
-          {{ t('admin.accounts.table.ratioFailure', { reason: failureReason }) }}
-        </p>
-        <p
-          v-if="probeEnabled && globalProbeEnabled !== false && nextProbeAt"
-          data-testid="upstream-billing-next-probe"
-        >
-          {{ t('admin.accounts.upstreamBilling.nextProbeAt', { value: formatDate(nextProbeAt) }) }}
-        </p>
-        <p class="mt-2 border-t border-white/15 pt-2" data-testid="upstream-billing-probe-state">
-          {{ t('admin.accounts.upstreamBilling.accountProbeState') }}
-          <span :class="probeEnabled ? 'text-emerald-400' : 'text-red-400'">
-            {{ probeEnabled ? t('admin.accounts.upstreamBilling.enabled') : t('admin.accounts.upstreamBilling.disabled') }}
-          </span>
-        </p>
-        <p
-          v-if="globalProbeEnabled === false"
-          class="mt-1"
-          data-testid="upstream-billing-global-probe-state"
-        >
-          {{ t('admin.accounts.upstreamBilling.globalProbeState') }}
-          <span class="text-red-400">{{ t('admin.accounts.upstreamBilling.disabled') }}</span>
-        </p>
-      </div>
-    </HelpTooltip>
+    <!-- Information only, no control in it: the app's plain tip (7c, 7i-6). -->
+    <span class="ratio__v" v-tip="rateTip" data-testid="upstream-billing-rate">{{ primaryValue }}</span>
     <button
       type="button"
       class="ratio__btn"
@@ -75,9 +15,9 @@
       <Icon name="refresh" size="xs" :class="{ 'animate-spin': probing }" />
     </button>
     <!-- The narrow card's details: what the tip says about a stale or failed probe, in the open (no hover on touch). -->
-    <div v-if="detailed && (stale || failureReason)" class="ratio__note" data-testid="upstream-billing-note">
-      <span v-if="stale && Number.isFinite(receivedAt)">{{ t('admin.accounts.upstreamBilling.lastDetectedAt', { value: formatDate(snapshot?.received_at) }) }}</span>
-      <span v-if="failureReason">{{ t('admin.accounts.table.ratioFailure', { reason: failureReason }) }}</span>
+    <div v-if="detailed && (stale || failureText)" class="ratio__note" data-testid="upstream-billing-note">
+      <span v-if="stale && Number.isFinite(receivedAt)">{{ t('admin.accounts.upstreamBilling.lastDetectedAt', { value: probeTime(snapshot?.received_at) }) }}</span>
+      <span v-if="failureText">{{ failureText }}</span>
     </div>
   </div>
   <span v-else class="ratio__none">—</span>
@@ -86,10 +26,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatDate } from '@/utils/format'
 import { vTip } from '@/utils/tip'
-import { upstreamRateView } from './upstreamBillingRate'
+import { probeFailureText, upstreamRateView } from './upstreamBillingRate'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
 
 const props = withDefaults(defineProps<{
@@ -142,15 +82,37 @@ const primaryValue = computed(() => {
   return '—'
 })
 const dimmed = computed(() => view.value.dimmed)
-const failureReason = computed(() => view.value.failureReason)
-const formatDate = (value?: string) => value
-  ? new Date(value).toLocaleString(undefined, {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  : '-'
+const failureText = computed(() => probeFailureText(view.value.failure, t))
+/** Month, day and 24-hour time in the interface language (never "05:51 PM" in Chinese). */
+const probeTime = (value?: string) =>
+  (value && formatDate(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })) || '-'
+
+/** The hover tip: the rates in force, or the last probe's; why it failed; when it runs next; the probe switches. */
+function rateTip(): string {
+  const key = (name: string) => `admin.accounts.upstreamBilling.${name}`
+  const lines: string[] = []
+  const rates = data.value
+  if (hasEffectiveRate.value && rates) {
+    lines.push(t(key('groupRate'), { value: rates.group_rate_multiplier }))
+    if (rates.user_rate_multiplier != null) lines.push(t(key('userRate'), { value: rates.user_rate_multiplier }))
+    lines.push(rates.peak_rate_enabled
+      ? t(key('peakRate'), { start: rates.peak_start, end: rates.peak_end, value: rates.peak_rate_multiplier, timezone: rates.timezone })
+      : t(key('noPeakRate')))
+    lines.push(t(key('effectiveRate'), { value: currentEffectiveRate.value ?? '-' }))
+    lines.push(t(key('updatedAt'), { value: probeTime(snapshot.value?.received_at) }))
+  } else if (stale.value && lastDetectedRate.value != null) {
+    lines.push(t(key('lastDetectedRate'), { value: lastDetectedRate.value }))
+    lines.push(t(key('lastDetectedAt'), { value: probeTime(snapshot.value?.received_at) }))
+    lines.push(t(key('elapsedSince'), { value: elapsedSinceLastSuccess.value }))
+  } else {
+    lines.push(statusLabel.value || '-')
+  }
+  if (failureText.value) lines.push(failureText.value)
+  if (probeEnabled.value && props.globalProbeEnabled !== false && nextProbeAt.value) lines.push(t(key('nextProbeAt'), { value: probeTime(nextProbeAt.value) }))
+  lines.push(t(key('accountProbeState')) + t(key(probeEnabled.value ? 'enabled' : 'disabled')))
+  if (props.globalProbeEnabled === false) lines.push(t(key('globalProbeState')) + t(key('disabled')))
+  return lines.join('\n')
+}
 </script>
 
 <style scoped>

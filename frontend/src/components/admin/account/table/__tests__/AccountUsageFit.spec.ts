@@ -43,7 +43,8 @@ describe('AccountUsageFit', () => {
     box.dispatchEvent(new Event('mouseenter'))
     vi.advanceTimersByTime(400)
     vi.useRealTimers()
-    expect(document.getElementById('sq-tip')!.textContent!.split('\n')).toEqual(Array.from({ length: 7 }, (_, i) => `W${i + 1}${10 * (i + 1)}%`))
+    // Each window's texts apart, not run together into "W110%" (7i-7).
+    expect(document.getElementById('sq-tip')!.textContent!.split('\n')).toEqual(Array.from({ length: 7 }, (_, i) => `W${i + 1} · ${10 * (i + 1)}%`))
 
     count.value = 4
     await nextTick()

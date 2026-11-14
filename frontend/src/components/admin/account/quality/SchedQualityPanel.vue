@@ -219,7 +219,7 @@ import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecove
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
-import { upstreamRateView } from '@/components/account/upstreamBillingRate'
+import { probeFailureText, upstreamRateView } from '@/components/account/upstreamBillingRate'
 import { RECENT_DIMS, formatThreshold, recentValue, strictestThresholds } from '@/components/admin/account/table/accountRecent'
 import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
@@ -536,7 +536,7 @@ const ratio = computed(() => {
   const view = upstreamRateView(account, now.value)
   if (!view.eligible) return null
   const note = view.lastAttemptAt ? t('admin.schedQuality.panel.lastProbe', { time: formatShortTime(view.lastAttemptAt) }) : t('admin.schedQuality.panel.notProbed')
-  const failure = view.failureReason ? t('admin.accounts.table.ratioFailure', { reason: view.failureReason }) : ''
+  const failure = probeFailureText(view.failure, t)
   return { value: view.shownValue ?? '—', dimmed: view.dimmed, note: [note, failure].filter(Boolean).join(' · ') }
 })
 

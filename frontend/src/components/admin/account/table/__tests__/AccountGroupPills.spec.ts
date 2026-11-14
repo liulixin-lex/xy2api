@@ -3,6 +3,7 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountGroupPills from '../AccountGroupPills.vue'
 import type { AdminGroup } from '@/types'
+import { closeOverlay, openOverlay } from '@/utils/overlayStack'
 
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -33,6 +34,31 @@ describe('AccountGroupPills', () => {
     await first.get('[data-test="group-pill-text"]').trigger('click')
     expect(wrapper.emitted('edit-groups')).toHaveLength(1)
     expect(wrapper.emitted('open-quality')).toHaveLength(1)
+  })
+
+  it('puts a zone\'s tip away on the click that opens a layer, and keeps it away while that layer is open (7i-3)', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountPills(1)
+    const dot = wrapper.get('[data-test="group-pill-dot"]').element
+    const tipShown = () => document.getElementById('sq-tip')?.hidden === false
+    const hover = () => {
+      dot.dispatchEvent(new Event('mouseleave'))
+      dot.dispatchEvent(new Event('mouseenter'))
+      vi.advanceTimersByTime(400)
+    }
+    hover()
+    expect(tipShown()).toBe(true)
+    await wrapper.get('[data-test="group-pill-dot"]').trigger('click')
+    expect(tipShown()).toBe(false)
+    // The panel it opened is open: no tip, so Escape reaches the panel.
+    const panel = Symbol('panel')
+    openOverlay(panel, { modal: false, root: () => null, panel: () => null })
+    hover()
+    expect(tipShown()).toBe(false)
+    closeOverlay(panel)
+    hover()
+    expect(tipShown()).toBe(true)
+    vi.useRealTimers()
   })
 
   it('has no dot without quality data: the whole pill edits', () => {

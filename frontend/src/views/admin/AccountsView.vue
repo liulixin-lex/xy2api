@@ -288,7 +288,7 @@
             </template>
             <template #cell-actions="{ row }">
               <div class="acell acell--end">
-                <button v-if="canManage" type="button" v-tip="t('common.edit')" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op sq-focus" data-test="row-edit" @click="handleEdit(row)">
+                <button v-if="canManage" type="button" v-tip="t('common.edit')" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op acc-op--edit sq-focus" data-test="row-edit" @click="handleEdit(row)">
                   <Icon name="edit" size="sm" />
                 </button>
                 <button type="button" v-tip="t('common.more')" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="acc-op sq-focus" data-test="row-more" @click="openMenu(row, $event)">
@@ -318,6 +318,7 @@
       :groups="groups"
       :anchor="picker.anchor"
       :focus-search="picker.focusSearch"
+      :opener="picker.opener"
       :save="saveGroups"
       @close="picker.account = null"
     />
@@ -368,7 +369,7 @@
  * actions and dialogs. Cells and the toolbar live in components/admin/account/table; rows are never copied into
  * dialogs that edit them (each dialog gets its own snapshot or loads the account).
  */
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -599,6 +600,7 @@ const handleManualRefresh = () => {
 }
 
 // ---- Columns ----
+// The actions header sits at the right, over the icons (text-right also right-aligns the shared header's content; 7i-8).
 const allColumns = computed(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
@@ -622,7 +624,7 @@ const allColumns = computed(() => [
   { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
   { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
   { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
-].map((column) => ({ ...column, class: `acol acol-${column.key}`, headerClass: `acol acol-${column.key}` })))
+].map((column) => ({ ...column, class: `acol acol-${column.key}${column.key === 'actions' ? ' text-right' : ''}`, headerClass: `acol acol-${column.key}` })))
 const PINNED = new Set(['select', 'name', 'actions'])
 const toggleableColumns = computed(() => allColumns.value.filter((column) => !PINNED.has(column.key)))
 const toggleableColumnKeys = computed(() => toggleableColumns.value.map((column) => column.key))
@@ -769,6 +771,8 @@ const handleToggleSchedulable = async (row: LiveAccount, next: boolean) => {
       const updated = await adminAPI.accounts.setSchedulable(row.id, next)
       return { schedulable: updated?.schedulable ?? next }
     })
+    // The quality summary follows at once (dots, the "normal" filter), as after an exemption or a recovery (7i-9).
+    void table.refresh('quality')
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
     showFailure(t('admin.accounts.failedToToggleSchedulable'), error)
@@ -1135,7 +1139,7 @@ const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
 const menu = reactive<{ show: boolean; acc: Account | null; anchorRect: DOMRect | null; opener: HTMLElement | null }>({ show: false, acc: null, anchorRect: null, opener: null })
 
 // ---- The group picker of the groups column (spec 4.3) ----
-const picker = reactive<{ account: Pick<Account, 'id' | 'name' | 'platform'> | null; anchor: HTMLElement | null; focusSearch: boolean }>({ account: null, anchor: null, focusSearch: false })
+const picker = reactive<{ account: Pick<Account, 'id' | 'name' | 'platform'> | null; anchor: HTMLElement | null; focusSearch: boolean; opener: HTMLElement | null }>({ account: null, anchor: null, focusSearch: false, opener: null })
 const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
 /**
  * A pill's text: the picker beside its cell. On the same account's pills an open picker closes (saving a change); on
@@ -1147,14 +1151,14 @@ const groupsAnchor = (el: Element | null | undefined) =>
   el?.closest<HTMLElement>('td') ?? el?.closest('[data-groups-section]')?.querySelector<HTMLElement>('[data-groups-anchor]') ?? null
 const openGroupsEditor = (row: LiveAccount, event: MouseEvent) => {
   const opener = event.currentTarget as HTMLElement | null
-  return openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, event.detail === 0)
+  return openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, event.detail === 0, opener)
 }
 /** The row menu's "edit groups" (any device): beside the row's groups (cell or card section), else its "more" button. */
 const openGroupsFromMenu = (account: Account) => {
   const row = table.record(account.id)
   if (row) void openGroupsEditorAt(row, groupsAnchor(document.querySelector(`[data-groups-opener="${account.id}"]`)) ?? menu.opener, false)
 }
-const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, focusSearch: boolean) => {
+const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, focusSearch: boolean, opener: HTMLElement | null = null) => {
   if (!canPlaceGroups.value) return
   if (picker.account) {
     const same = picker.account.id === row.id
@@ -1162,7 +1166,7 @@ const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, 
     if (same || !closed) return
   }
   // The picker keeps its own copy: background updates do not reach what it edits.
-  Object.assign(picker, { account: { id: row.id, name: row.name, platform: row.platform }, anchor, focusSearch })
+  Object.assign(picker, { account: { id: row.id, name: row.name, platform: row.platform }, anchor, focusSearch, opener })
 }
 /** Closing the picker with a change: only this cell's groups, optimistically; a failure rolls back (the picker tells). */
 const saveGroups = async (groupIds: number[], confirmMixedChannel: boolean) => {
@@ -1421,11 +1425,22 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
     clearSelection()
   }
 })
-// Scrolling the table closes the row menu (scrolling inside the menu does not).
+// Scrolling the table closes the row menu; scrolling inside the menu does not, nor a scroll that leaves its button where
+// it was. The bulk bar going away (a batch recovery ending) makes room above the list: scrolled to the bottom, the list
+// scrolls back by as much and the rows stay; otherwise the rows move up and the menu follows its button (7i-5).
+const menuButtonMoved = () => {
+  const rect = menu.opener?.getBoundingClientRect()
+  return !rect || !menu.anchorRect || rect.top !== menu.anchorRect.top || rect.left !== menu.anchorRect.left
+}
 useEventListener(window, 'scroll', (event: Event) => {
-  if (event.target instanceof Element && event.target.closest('.action-menu-content')) return
-  menu.show = false
+  if (!menu.show || (event.target instanceof Element && event.target.closest('.action-menu-content'))) return
+  if (menuButtonMoved()) menu.show = false
 }, true)
+watch(() => selIds.value.length > 0, async () => {
+  if (!menu.show || !menu.opener) return
+  await nextTick()
+  menu.anchorRect = menu.opener.getBoundingClientRect()
+})
 
 let cancelModalPrefetch: (() => void) | null = null
 onMounted(async () => {
@@ -1636,5 +1651,10 @@ onUnmounted(() => cancelModalPrefetch?.())
     background: var(--color-bg-control-hover);
     color: var(--color-text-primary);
   }
+}
+/* The pencil at the prototype's 14px (7i-8). */
+.acc-op--edit svg {
+  width: 14px;
+  height: 14px;
 }
 </style>

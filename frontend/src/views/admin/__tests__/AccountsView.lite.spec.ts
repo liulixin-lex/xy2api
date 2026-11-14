@@ -4,6 +4,7 @@ import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import { backendSummary } from '@/api/admin/schedQuality'
 
 const {
   listAccounts,
@@ -215,6 +216,19 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('asks for the quality summary at once after a scheduling change, not after a failed one (7i-9)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const asked = vi.mocked(backendSummary).mock.calls.length
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click'); await flushPromises()
+    expect(vi.mocked(backendSummary).mock.calls.length).toBe(asked + 1)
+    setSchedulable.mockRejectedValueOnce(new Error('temporary failure'))
+    await toggle.trigger('click'); await flushPromises()
+    expect(vi.mocked(backendSummary).mock.calls.length).toBe(asked + 1)
+    wrapper.unmount()
+  })
+
   it('lets the latest click win: a second click while the first is pending sends the new value, and the older answer is not written', async () => {
     const pending: Array<(value: unknown) => void> = []
     setSchedulable.mockImplementation(() => new Promise(resolve => pending.push(resolve)))
@@ -382,7 +396,7 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
-  it('keeps the action menu open during internal scrolling but closes it on table scrolling', async () => {
+  it('keeps the action menu open during internal scrolling and a scroll that leaves its button in place, closes it on table scrolling', async () => {
     const wrapper = mountView(false)
     await flushPromises()
 
@@ -396,6 +410,12 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(true)
 
+    // The list scrolling back by the room the bulk bar leaves: the rows, and the menu's button, stay put (7i-5).
+    wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(true)
+
+    wrapper.get('[data-test="row-more"]').element.getBoundingClientRect = () => ({ top: -40, left: 0 }) as DOMRect
     wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(false)

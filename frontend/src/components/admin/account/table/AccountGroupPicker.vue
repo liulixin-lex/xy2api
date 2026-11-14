@@ -112,6 +112,8 @@ const props = defineProps<{
   anchor: HTMLElement | null
   /** Opened from the keyboard: the search field takes focus. */
   focusSearch?: boolean
+  /** The pill (or button) it was opened from: focus goes back to it when the picker closes (7i-4). */
+  opener?: HTMLElement | null
   /** Saves the groups (the page's optimistic edit of the cell); rejects with the request's error. */
   save: (groupIds: number[], confirmMixedChannel: boolean) => Promise<unknown>
 }>()
@@ -193,15 +195,20 @@ onMounted(async () => {
 })
 
 // ---- Closing ----
+/** The conflict's confirm had focus when it was pressed; the save that follows takes the button away (7i-4). */
+let confirmedFromInside = false
 function finish() {
   if (closed) return
   closed = true
-  const hadFocus = !!rootRef.value?.contains(document.activeElement)
+  const active = document.activeElement
+  const hadFocus = !!rootRef.value?.contains(active) || (confirmedFromInside && (!active || active === document.body))
   const id = props.account.id
   emit('close')
   if (hadFocus) {
     void nextTick(() => {
-      const opener = Array.from(document.querySelectorAll<HTMLElement>(`[data-groups-opener="${id}"]`)).find((el) => el.isConnected && !el.matches(':disabled'))
+      const usable = (el: HTMLElement | null | undefined): el is HTMLElement => !!el?.isConnected && !el.matches(':disabled')
+      // The pill it was opened from, else (that pill went with the edit) the account's first one.
+      const opener = usable(props.opener) ? props.opener : Array.from(document.querySelectorAll<HTMLElement>(`[data-groups-opener="${id}"]`)).find(usable)
       opener?.focus({ preventScroll: true })
     })
   }
@@ -268,7 +275,9 @@ async function requestClose(): Promise<boolean> {
 }
 
 function confirmConflict() {
-  if (phase.value === 'conflict') void submit(true)
+  if (phase.value !== 'conflict') return
+  confirmedFromInside = !!rootRef.value?.contains(document.activeElement)
+  void submit(true)
 }
 
 /** The failed edit was rolled back: the cell shows the original groups again. */

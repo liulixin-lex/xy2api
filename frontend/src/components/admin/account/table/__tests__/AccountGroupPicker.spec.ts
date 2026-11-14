@@ -30,12 +30,12 @@ const outside = async () => {
   await flushPromises()
 }
 
-function mountPicker(save = vi.fn().mockResolvedValue(undefined)) {
+function mountPicker(save = vi.fn().mockResolvedValue(undefined), opener: HTMLElement | null = null) {
   const anchor = document.createElement('td')
   document.body.appendChild(anchor)
   const wrapper = mount(AccountGroupPicker, {
     attachTo: document.body,
-    props: { account: { id: 7, name: 'acc-7', platform: 'openai' }, groups, anchor, save }
+    props: { account: { id: 7, name: 'acc-7', platform: 'openai' }, groups, anchor, save, opener }
   })
   return { wrapper, save }
 }
@@ -82,7 +82,13 @@ describe('AccountGroupPicker', () => {
     const save = vi.fn()
       .mockRejectedValueOnce({ status: 409, error: 'mixed_channel_warning', message: 'OpenAI + Gemini' })
       .mockResolvedValueOnce(undefined)
-    const { wrapper } = mountPicker(save)
+    // The account's pills: the picker was opened from the second one.
+    const pills = [1, 2].map(() => {
+      const pill = document.createElement('button')
+      pill.dataset.groupsOpener = '7'
+      return document.body.appendChild(pill)
+    })
+    const { wrapper } = mountPicker(save, pills[1])
     await flushPromises()
     box(2)!.click()
     await outside()
@@ -98,6 +104,8 @@ describe('AccountGroupPicker', () => {
     await flushPromises()
     expect(save).toHaveBeenLastCalledWith([1, 2], true)
     expect(wrapper.emitted('close')).toHaveLength(1)
+    // The save took the confirm button away; focus goes back to the pill the picker came from (7i-4).
+    expect(document.activeElement).toBe(pills[1])
   })
 
   it('below 1024px opens under its anchor and right-aligned with it, or above it when there is no room below', async () => {

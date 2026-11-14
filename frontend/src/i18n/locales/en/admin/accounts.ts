@@ -793,7 +793,23 @@ export default {
         noEligibleAccounts: 'Select API key accounts',
         batchLimit: 'A batch can probe at most 20 accounts',
         batchCompleted: 'Probed {count} account(s)',
-        batchPartial: 'Probe partially completed: {success} succeeded, {failed} failed'
+        batchPartial: 'Probe partially completed: {success} succeeded, {failed} failed',
+        failures: {
+          transport_unavailable: 'probing is unavailable',
+          missing_api_key: 'the account has no API key',
+          unsupported: 'the upstream does not support rate probing',
+          invalid_base_url: 'invalid base URL',
+          proxy_unavailable: 'the proxy is unavailable',
+          request_build_failed: 'the probe request could not be built',
+          request_failed: 'the request did not reach the upstream',
+          empty_response: 'the upstream returned nothing',
+          response_read_failed: 'the upstream response could not be read',
+          response_too_large: 'the upstream response is too large',
+          http_error: 'the upstream returned an error',
+          invalid_response: 'the upstream response was not recognised',
+          other: 'unknown reason',
+          withStatus: '{reason} (HTTP {status})'
+        }
       },
       upstreamBalance: {
         basisLine: 'Basis: {value}',

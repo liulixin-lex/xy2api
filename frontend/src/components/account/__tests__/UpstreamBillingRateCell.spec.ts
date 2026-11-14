@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import UpstreamBillingRateCell from '../UpstreamBillingRateCell.vue'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { Account } from '@/types'
 
 vi.mock('vue-i18n', async () => {
@@ -56,6 +55,16 @@ const billingData = {
   effective_rate_multiplier: 0.9,
   timezone: 'Asia/Shanghai',
   observed_at: '2026-07-13T00:00:00Z'
+}
+
+/** The value's plain tip as hovering shows it, line by line. */
+const tipLines = (el: Element) => {
+  el.dispatchEvent(new Event('mouseenter'))
+  vi.advanceTimersByTime(400)
+  const tip = document.getElementById('sq-tip')
+  const text = tip && !tip.hidden ? tip.textContent ?? '' : ''
+  el.dispatchEvent(new Event('mouseleave'))
+  return text.split('\n')
 }
 
 describe('UpstreamBillingRateCell', () => {
@@ -191,7 +200,8 @@ describe('UpstreamBillingRateCell', () => {
     expect(note).toContain('admin.accounts.table.ratioFailure:')
   })
 
-  it('shows stale snapshot details, local next probe time, and the account probe state', async () => {
+  // 7i-6: information only, so the app's plain tip; times in the interface language, failures in words.
+  it('tells a stale snapshot, the next probe and both probe switches in the plain tip', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
       attachTo: document.body,
       props: {
@@ -211,81 +221,50 @@ describe('UpstreamBillingRateCell', () => {
         now: Date.now()
       }
     })
+    const lines = tipLines(wrapper.get('[data-testid="upstream-billing-rate"]').element)
+    expect(lines.slice(0, 3)).toEqual([
+      'admin.accounts.upstreamBilling.lastDetectedRate:0.6',
+      expect.stringMatching(/^admin\.accounts\.upstreamBilling\.lastDetectedAt:07\D+1[23]\D+\d{2}:\d{2}$/),
+      'admin.accounts.upstreamBilling.elapsedSince:admin.accounts.upstreamBilling.hoursAgo:2'
+    ])
+    expect(lines.join('\n')).not.toMatch(/AM|PM/)
+    expect(lines.slice(3)).toEqual([
+      expect.stringMatching(/^admin\.accounts\.upstreamBilling\.nextProbeAt:/),
+      'admin.accounts.upstreamBilling.accountProbeStateadmin.accounts.upstreamBilling.enabled'
+    ])
 
-    expect(wrapper.getComponent(HelpTooltip).props('widthClass')).toBe('w-max max-w-[calc(100vw-2rem)]')
-    await wrapper.get('[data-testid="upstream-billing-details"]').trigger('mouseenter')
-    await flushPromises()
-
-    const tooltips = document.body.querySelectorAll('[role="tooltip"]')
-    const tooltip = tooltips[tooltips.length - 1] as HTMLElement
-    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.lastDetectedRate:0.6')
-    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.lastDetectedAt:')
-    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.elapsedSince:admin.accounts.upstreamBilling.hoursAgo:2')
-    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.nextProbeAt:')
-    expect(tooltip.textContent).not.toContain('admin.accounts.upstreamBilling.stale')
-    expect(tooltip.querySelector('[data-testid="upstream-billing-probe-state"] span')?.className).toContain('text-emerald-400')
-
-    await wrapper.setProps({
-      account: makeAccount({
-        extra: {
-          upstream_billing_probe_enabled: false,
-          upstream_billing_probe: {
-            status: 'unsupported',
-            last_attempt_at: '2026-07-13T00:00:00Z',
-            next_probe_at: '2026-07-13T01:00:00Z'
-          }
-        }
-      })
-    })
-    expect(tooltip.querySelector('[data-testid="upstream-billing-next-probe"]')).toBeNull()
-    expect(tooltip.querySelector('[data-testid="upstream-billing-probe-state"] span')?.className).toContain('text-red-400')
+    await wrapper.setProps({ globalProbeEnabled: false })
+    expect(tipLines(wrapper.get('[data-testid="upstream-billing-rate"]').element).slice(-2)).toEqual([
+      'admin.accounts.upstreamBilling.accountProbeStateadmin.accounts.upstreamBilling.enabled',
+      'admin.accounts.upstreamBilling.globalProbeStateadmin.accounts.upstreamBilling.disabled'
+    ])
     wrapper.unmount()
   })
 
-  it('stacks the global-off state below the account state and hides it when globally enabled', async () => {
+  it.each([
+    ['http_error', 503, 'admin.accounts.table.ratioFailure:HTTP 503'],
+    ['invalid_response', 200, 'admin.accounts.table.ratioFailure:admin.accounts.upstreamBilling.failures.withStatus:admin.accounts.upstreamBilling.failures.invalid_response,200'],
+    ['request_failed', 0, 'admin.accounts.table.ratioFailure:admin.accounts.upstreamBilling.failures.request_failed'],
+    ['something_new', 0, 'admin.accounts.table.ratioFailure:admin.accounts.upstreamBilling.failures.other']
+  ])('words the failure %s (HTTP %s) instead of showing its code', (code, status, line) => {
     const wrapper = mount(UpstreamBillingRateCell, {
       attachTo: document.body,
       props: {
+        now: Date.now(),
         account: makeAccount({
           extra: {
-            upstream_billing_probe_enabled: true,
             upstream_billing_probe: {
-              status: 'unsupported',
-              last_attempt_at: '2026-07-13T00:00:00Z',
+              status: 'failed',
+              last_error: code,
+              http_status: status,
+              last_attempt_at: '2026-07-13T00:20:00Z',
               next_probe_at: '2026-07-13T01:00:00Z'
             }
           }
-        }),
-        globalProbeEnabled: false,
-        now: Date.now()
+        })
       }
     })
-
-    await wrapper.get('[data-testid="upstream-billing-details"]').trigger('mouseenter')
-    await flushPromises()
-
-    const tooltips = document.body.querySelectorAll('[role="tooltip"]')
-    const tooltip = tooltips[tooltips.length - 1] as HTMLElement
-    const accountState = tooltip.querySelector('[data-testid="upstream-billing-probe-state"]')
-    const globalState = tooltip.querySelector('[data-testid="upstream-billing-global-probe-state"]')
-    expect(accountState?.querySelector('span')?.className).toContain('text-emerald-400')
-    expect(globalState?.textContent).toContain('admin.accounts.upstreamBilling.globalProbeState')
-    expect(globalState?.querySelector('span')?.className).toContain('text-red-400')
-    expect(tooltip.querySelector('[data-testid="upstream-billing-next-probe"]')).toBeNull()
-
-    await wrapper.setProps({ globalProbeEnabled: true })
-    expect(tooltip.querySelector('[data-testid="upstream-billing-global-probe-state"]')).toBeNull()
-    expect(tooltip.querySelector('[data-testid="upstream-billing-next-probe"]')).not.toBeNull()
-
-    await wrapper.setProps({
-      globalProbeEnabled: false,
-      account: makeAccount({
-        extra: { upstream_billing_probe_enabled: false }
-      })
-    })
-    expect(accountState?.querySelector('span')?.className).toContain('text-red-400')
-    expect(tooltip.querySelector('[data-testid="upstream-billing-global-probe-state"]')).not.toBeNull()
-    expect(tooltip.querySelector('[data-testid="upstream-billing-next-probe"]')).toBeNull()
+    expect(tipLines(wrapper.get('[data-testid="upstream-billing-rate"]').element)).toContain(line)
     wrapper.unmount()
   })
 

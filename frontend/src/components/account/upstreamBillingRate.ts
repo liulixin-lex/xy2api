@@ -60,6 +60,35 @@ export function snapshotRate(data: Partial<UpstreamBillingData> | undefined, now
   return isRate(data.effective_rate_multiplier) ? tidy(data.effective_rate_multiplier) : null
 }
 
+/** A failed probe as the backend records it: its reason code and the HTTP status (0 without an answer). */
+export interface ProbeFailure {
+  code: string
+  httpStatus: number
+}
+
+/** The backend's failure codes (service/upstream_billing_probe.go); any other reads "unknown reason". */
+const PROBE_FAILURE_CODES = new Set([
+  'transport_unavailable', 'missing_api_key', 'unsupported', 'invalid_base_url', 'proxy_unavailable', 'request_build_failed',
+  'request_failed', 'empty_response', 'response_read_failed', 'response_too_large', 'http_error', 'invalid_response'
+])
+
+type Translate = (key: string, params?: Record<string, unknown>) => string
+
+/**
+ * The failure in words with its HTTP status, never the raw code (7i-6): "Probe failed: HTTP 503",
+ * "Probe failed: the upstream response was not recognised (HTTP 200)". Empty without a failure.
+ */
+export function probeFailureText(failure: ProbeFailure | null, t: Translate): string {
+  if (!failure) return ''
+  const { code, httpStatus } = failure
+  let reason = `HTTP ${httpStatus}`
+  if (code !== 'http_error' || httpStatus <= 0) {
+    const words = t(`admin.accounts.upstreamBilling.failures.${PROBE_FAILURE_CODES.has(code) ? code : 'other'}`)
+    reason = httpStatus > 0 ? t('admin.accounts.upstreamBilling.failures.withStatus', { reason: words, status: httpStatus }) : words
+  }
+  return t('admin.accounts.table.ratioFailure', { reason })
+}
+
 export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: number) {
   // Probing is open to every API-key platform (any upstream that answers /v1/sub2api/billing).
   const eligible = account.type === 'apikey'
@@ -88,7 +117,8 @@ export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: 
   const rate = snapshot && ['ok', 'failed'].includes(snapshot.status) ? snapshotRate(data, now) : null
   const current = rate != null && validTimestamps && !stale
   const rateText = rate == null ? '' : `${formatMultiplier(rate)}x`
-  const failureReason = snapshot?.status === 'failed' || stale ? snapshot?.last_error?.trim() ?? '' : ''
+  const failureCode = snapshot?.status === 'failed' || stale ? snapshot?.last_error?.trim() ?? '' : ''
+  const failure: ProbeFailure | null = failureCode ? { code: failureCode, httpStatus: snapshot?.http_status ?? 0 } : null
   const lastAttemptAt = typeof snapshot?.last_attempt_at === 'string' && Number.isFinite(Date.parse(snapshot.last_attempt_at)) ? snapshot.last_attempt_at : ''
 
   return {
@@ -110,7 +140,8 @@ export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: 
     shownValue: rateText || null,
     /** Greyed: no current value. */
     dimmed: !current,
-    failureReason,
+    /** Why the last probe failed (shown while it is failed or stale); probeFailureText() words it. */
+    failure,
     lastAttemptAt
   }
 }

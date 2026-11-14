@@ -60,10 +60,15 @@ const title = computed(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A link without an underline (prototype); hovering shows one (7i-8). */
 .account-name__link {
-  text-decoration: underline dotted 1px;
-  text-decoration-color: var(--color-line-control);
+  text-decoration: none;
   text-underline-offset: 3px;
+}
+@media (hover: hover) {
+  .account-name__link:hover {
+    text-decoration: underline;
+  }
 }
 .account-name__sub {
   overflow: hidden;

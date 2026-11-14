@@ -6,10 +6,10 @@
       class="pill pill--empty"
       :disabled="readonly"
       :aria-label="t('admin.accounts.table.pillEmptyLabel', { name: account.name })"
-      v-tip="t('admin.accounts.table.pillEmpty')"
+      v-tip="quietTip('empty', () => t('admin.accounts.table.pillEmpty'))"
       data-test="group-pill-empty"
       :data-groups-opener="account.id"
-      @click="emit('edit-groups', $event)"
+      @click="hush('empty'); emit('edit-groups', $event)"
     >
       <Icon name="plus" size="xs" />
     </button>
@@ -44,10 +44,10 @@
           type="button"
           class="pill__dot"
           :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
-          v-tip="() => pillTip(pill.group, pill.state, 'dot')"
+          v-tip="quietTip(`dot:${pill.group.id}`, () => pillTip(pill.group, pill.state, 'dot'))"
           :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
           data-test="group-pill-dot"
-          @click="emit('open-quality', pill.group.id)"
+          @click="hush(`dot:${pill.group.id}`); emit('open-quality', pill.group.id)"
         >
           <StatusDot :tone="DOT_TONES[pill.state]" />
         </button>
@@ -57,10 +57,10 @@
           :class="{ 'pill__text--latin': pill.latin }"
           :disabled="readonly"
           :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
-          v-tip="() => pillTip(pill.group, pill.state, 'text')"
+          v-tip="quietTip(`text:${pill.group.id}`, () => pillTip(pill.group, pill.state, 'text'))"
           data-test="group-pill-text"
           :data-groups-opener="account.id"
-          @click="emit('edit-groups', $event)"
+          @click="hush(`text:${pill.group.id}`); emit('edit-groups', $event)"
         >{{ pill.text }}</button>
       </span>
     </template>
@@ -86,9 +86,9 @@
         type="button"
         class="pill__dot"
         :aria-label="t('admin.accounts.table.pillMoreWorst', { n: rest.length, state: stateLabel(restWorst.state) })"
-        v-tip="moreTip"
+        v-tip="quietTip('more', moreTip)"
         :data-quality-opener="qualityOpenerKey(account.id, restWorst.group.id)"
-        @click="emit('open-quality', restWorst.group.id)"
+        @click="hush('more'); emit('open-quality', restWorst.group.id)"
       >
         <StatusDot :tone="DOT_TONES[restWorst.state]" />
       </button>
@@ -125,7 +125,8 @@ import { useLiveClock } from '@/composables/useLiveClock'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
-import { showTipNow, vTip } from '@/utils/tip'
+import { anyOverlayOpen } from '@/utils/overlayStack'
+import { hideTip, showTipNow, vTip } from '@/utils/tip'
 import { groupPillText, isLatinPillText } from '@/utils/groupAlias'
 import { groupDotState, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
@@ -187,6 +188,17 @@ function stateDetail(group: AdminGroup, state: GroupDotState): string {
   if (state === 'stopped') return t('admin.accounts.table.pillStopped')
   return ''
 }
+
+/**
+ * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and the tip stays
+ * away while that layer is open, so the first Escape closes the layer (7i-3). Other zones' tips show as usual.
+ */
+let quiet: string | null = null
+const hush = (zone: string) => {
+  quiet = zone
+  hideTip()
+}
+const quietTip = (zone: string, text: () => string) => () => (quiet === zone && anyOverlayOpen() ? '' : text())
 
 function pillTip(group: AdminGroup, state: GroupDotState | null, zone: 'dot' | 'text'): string {
   const head = state

@@ -40,7 +40,17 @@ provide(USAGE_WINDOW_FOLD, {
   folded: (root) => !!root && foldedCount.value > 0 && windows.value.indexOf(root) >= SHOWN_WHEN_FOLDED
 })
 
-const allTip = () => windows.value.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n')
+/** A window's texts (label, percentage, reset time, chips) with " · " between them, not run together (7i-7). */
+function windowText(el: HTMLElement): string {
+  const parts: string[] = []
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim()
+    if (text) parts.push(text)
+  }
+  return parts.join(' · ')
+}
+const allTip = () => windows.value.map(windowText).filter(Boolean).join('\n')
 </script>
 
 <style scoped>

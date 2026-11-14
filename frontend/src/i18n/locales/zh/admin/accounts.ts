@@ -639,7 +639,23 @@ export default {
         noEligibleAccounts: '请选择 API Key 账号',
         batchLimit: '每次最多探测 20 个账号',
         batchCompleted: '已完成 {count} 个账号的倍率探测',
-        batchPartial: '倍率探测部分完成：成功 {success} 个，失败 {failed} 个'
+        batchPartial: '倍率探测部分完成：成功 {success} 个，失败 {failed} 个',
+        failures: {
+          transport_unavailable: '探测通道不可用',
+          missing_api_key: '账号没有 API Key',
+          unsupported: '上游不支持倍率探测',
+          invalid_base_url: 'Base URL 无效',
+          proxy_unavailable: '代理不可用',
+          request_build_failed: '无法生成探测请求',
+          request_failed: '请求未能送达上游',
+          empty_response: '上游没有返回内容',
+          response_read_failed: '读取上游响应失败',
+          response_too_large: '上游响应过大',
+          http_error: '上游返回错误',
+          invalid_response: '上游响应无法识别',
+          other: '原因未知',
+          withStatus: '{reason}（HTTP {status}）'
+        }
       },
       upstreamBalance: {
         basisLine: '口径：{value}',
