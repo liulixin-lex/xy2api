@@ -3066,6 +3066,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService)
 	gatewayTurnModel := reqModel
+	pendingGatewayTurnModel := reqModel
 	resilience.StateFrom(c.Request.Context()).BeginGatewayTurn(firstTurnStartedAt)
 	defer func() { finishUnbilledGatewayRequest(c, apiKey, gatewayTurnModel, true, true, h.gatewayService) }()
 	// Local WS contexts were created before admission; retain the same trace.
@@ -3301,14 +3302,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				// The preceding turn is already frozen before accepting another.
 				finishUnbilledGatewayRequest(c, apiKey, gatewayTurnModel, true, true, h.gatewayService)
-				gatewayTurnModel = model
-				turnStartsMu.Lock()
-				start := turnStarts[turn]
-				turnStartsMu.Unlock()
-				if start.IsZero() {
-					start = time.Now()
-				}
-				resilience.StateFrom(ctx).BeginGatewayTurn(start)
+				pendingGatewayTurnModel = model
 				if err := h.gatewayService.AdvanceOpenAIQualityTurn(ctx, account, payload, model); err != nil {
 					return err
 				}
@@ -3399,7 +3393,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				return checkSimpleModeTurnBilling()
+				if err := checkSimpleModeTurnBilling(); err != nil {
+					return err
+				}
+				// Start a request trace only after the turn has passed its user and
+				// account admission checks. A rejected response.create belongs to the
+				// existing connection, not to a new gateway request row.
+				gatewayTurnModel = pendingGatewayTurnModel
+				turnStartsMu.Lock()
+				start := turnStarts[turn]
+				turnStartsMu.Unlock()
+				if start.IsZero() {
+					start = time.Now()
+				}
+				resilience.StateFrom(ctx).BeginGatewayTurn(start)
+				h.gatewayService.RefreshOpenAISelectionFlags(ctx, apiKey.GroupID, account, gatewayTurnModel)
+				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)

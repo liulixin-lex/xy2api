@@ -42,3 +42,22 @@ func TestSelectionAttemptFlagsFollowSelectedAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshSelectionFlagsReevaluatesFallbackForCurrentTurn(t *testing.T) {
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5))
+	state := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), state)
+	account := selectionFixtureAccount(10, 5)
+	groupID := ptrInt64Selection(7)
+
+	f.svc.RefreshOpenAISelectionFlags(ctx, groupID, &account, "m")
+	fallback, takeover := state.SchedSelectionFlags(account.ID)
+	require.False(t, fallback)
+	require.False(t, takeover)
+
+	f.view.States[fakeSchedViewKey{7, account.ID, "m"}] = schedquality.StateView{Failing: true}
+	f.svc.RefreshOpenAISelectionFlags(ctx, groupID, &account, "m")
+	fallback, takeover = state.SchedSelectionFlags(account.ID)
+	require.True(t, fallback)
+	require.False(t, takeover)
+}

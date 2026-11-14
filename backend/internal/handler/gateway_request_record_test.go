@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -176,6 +177,72 @@ func TestRequestResultWebSocketWithoutRecorder(t *testing.T) {
 				require.EqualValues(t, 1, *row.Result)
 				require.NotNil(t, row.EndToEndFirstOutputMs)
 			}
+		})
+	}
+}
+
+func TestRequestResultRejectedWebSocketTurnDoesNotCreateRequest(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			withHandlerResilience(t, nil)
+			var sends atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := coderws.Accept(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer conn.CloseNow()
+				for {
+					if _, _, err = conn.Read(r.Context()); err != nil {
+						return
+					}
+					sends.Add(1)
+					if conn.Write(r.Context(), coderws.MessageText, []byte(`{"type":"response.completed","response":`+captureResponseJSON+`}`)) != nil {
+						return
+					}
+				}
+			}))
+			defer upstream.Close()
+			rows := &requestRecordRepo{}
+			done := make(chan struct{})
+			h, _, router := captureFixture(t, service.Account{
+				Credentials: map[string]any{"api_key": "synthetic", "base_url": upstream.URL},
+				Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true, "openai_apikey_responses_websockets_v2_mode": mode},
+			}, &compositeWSHTTPUpstream{}, captureOptions{usage: rows, requestDone: done})
+			var userCalls atomic.Int32
+			cache := &concurrencyCacheMock{
+				acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+					return userCalls.Add(1) == 1, nil
+				},
+				acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
+					return true, nil
+				},
+			}
+			h.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 0)
+			server := httptest.NewServer(router)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			defer cancel()
+			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+			require.NoError(t, err)
+			defer conn.CloseNow()
+			payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"synthetic"}`)
+			require.NoError(t, conn.Write(ctx, coderws.MessageText, payload))
+			_, _, err = conn.Read(ctx)
+			require.NoError(t, err)
+			require.NoError(t, conn.Write(ctx, coderws.MessageText, payload))
+			for err == nil {
+				_, _, err = conn.Read(ctx)
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("handler did not exit")
+			}
+			require.EqualValues(t, 1, sends.Load(), "the rejected turn must not reach upstream")
+			require.GreaterOrEqual(t, userCalls.Load(), int32(2))
+			require.Len(t, rows.bills, 1)
+			require.Empty(t, rows.unbilled, "an unadmitted turn must not create a request row")
 		})
 	}
 }
