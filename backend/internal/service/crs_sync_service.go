@@ -155,6 +155,7 @@ type crsConsoleAccount struct {
 	MaxConcurrentTasks int            `json:"maxConcurrentTasks"`
 	Proxy              *crsProxy      `json:"proxy"`
 	Credentials        map[string]any `json:"credentials"`
+	Extra              map[string]any `json:"extra"`
 }
 
 type crsOpenAIResponsesAccount struct {
@@ -487,11 +488,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		}
 		status := mapCRSStatus(src.IsActive, src.Status)
 
-		extra := map[string]any{
-			"crs_account_id": src.ID,
-			"crs_kind":       src.Kind,
-			"crs_synced_at":  now,
+		extra := make(map[string]any, len(src.Extra)+3)
+		for key, value := range src.Extra {
+			extra[key] = value
 		}
+		extra["crs_account_id"] = src.ID
+		extra["crs_kind"] = src.Kind
+		extra["crs_synced_at"] = now
 
 		existing, err := s.accountRepo.GetByCRSAccountID(ctx, src.ID)
 		if err != nil {
