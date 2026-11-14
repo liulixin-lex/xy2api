@@ -23,7 +23,7 @@
               type="button"
               role="radio"
               :aria-checked="duration === option"
-              :class="['sop-hit sop-hit--option sq-focus flex-1 rounded px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-[var(--color-bg-seg-active)] text-fg-primary' : 'text-fg-secondary']"
+              :class="['sop-hit sq-focus flex-1 rounded px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-[var(--color-bg-seg-active)] text-fg-primary' : 'text-fg-secondary']"
               @click="duration = option"
             >{{ t(`admin.schedQuality.override.${option}`) }}</button>
           </div>
@@ -166,19 +166,22 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Touch: the durations (24px) and the two buttons (30px) reach 40px high with an invisible area; side by side, they
-   reach only up and down, into the 12px and 16px around them (7n-3). */
+/* Touch: the durations (24px) and the two buttons (28px; "cancel" inside a 1px border, which an absolute area does
+   not count) reach 40px high with an invisible area centred on them, sized on 40px rather than grown by a margin
+   (7q-8: 28 + 10 came to 38). Wider than 40px already, they reach only up and down, 8px and 6px into the 12px and
+   16px around them (7n-3). */
 @media (pointer: coarse) {
   .sop-hit {
     position: relative;
   }
   .sop-hit::after {
     position: absolute;
-    inset: -5px 0;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 40px);
+    height: max(100%, 40px);
+    transform: translate(-50%, -50%);
     content: '';
-  }
-  .sop-hit--option::after {
-    inset: -8px 0;
   }
 }
 </style>

@@ -674,9 +674,10 @@ const resetColumns = () => {
 }
 
 // Column widths (prototype): fixed widths in two sizes. Compact, the ten default columns and a name column of at
-// least 188px take 1285px. At 1440 with the navigation folded the table's scroll container is 1302px wide, 1287px
+// least 188px take 1286px. At 1440 with the navigation folded the table's scroll container is 1302px wide, 1287px
 // once a classic scrollbar (15px on Windows) takes its reserved gutter, so nothing scrolls sideways (7i-2, 7m-1).
-// Capacity is 154px in both sizes, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1, 7l-11).
+// Capacity is 155px compact and 154px roomy, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1,
+// 7l-11); compact, the amounts need 90px and had 89.5px at 154px, so it takes one more of the 10px back (7q-9).
 // The 10px under 1294 come from the actions (two 28px buttons 4px apart, 4px of padding on the left instead of 12)
 // and today's stats ("用户扣费 $999.99", the widest line, is 104.6px of the 106px left); the other columns are full:
 // status "23h 59m 后恢复" 90.2px of 92, the ratio "9.9999x" and its button 75.1px of 76 (CoreText, 12/13px). The IQ
@@ -685,7 +686,7 @@ const resetColumns = () => {
 // Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
 const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
-  capacity: [154, 154], upstream_billing_rate: [100, 124], today_stats: [130, 152], actions: [76, 104], id: [80, 88],
+  capacity: [155, 154], upstream_billing_rate: [100, 124], today_stats: [130, 152], actions: [76, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
@@ -1528,6 +1529,11 @@ onUnmounted(() => cancelModalPrefetch?.())
   padding: 0 var(--cell-pad-x);
   vertical-align: middle;
   white-space: nowrap;
+}
+/* The recent cell takes its column's size, not the viewport's: an optional column can keep a wide screen in the
+   compact size, where 84px would not fit the 72px left (7q-5). */
+.account-table.is-roomy :deep(.recent:not(.recent--card)) {
+  width: 84px;
 }
 .account-table :deep(th.acol-select),
 .account-table :deep(td.acol-select) {

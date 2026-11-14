@@ -1411,14 +1411,19 @@ defineExpose({
     transform: translateX(100%) scaleX(0.35);
   }
 }
-/* Touch: the 36px sort direction button reaches 40px, its look unchanged (7n-3). */
+/* Touch: the sort direction button (36px, 34px inside its border, which an absolute area does not count) reaches 40px
+   each way with an area sized on 40px, its look unchanged (7n-3, 7q-8). */
 @media (pointer: coarse) {
   .table-cards__sort-order {
     position: relative;
   }
   .table-cards__sort-order::after {
     position: absolute;
-    inset: -2px;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 40px);
+    height: max(100%, 40px);
+    transform: translate(-50%, -50%);
     content: '';
   }
 }

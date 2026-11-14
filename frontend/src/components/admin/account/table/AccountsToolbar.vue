@@ -123,7 +123,7 @@
  * Below 1024px it takes TableToolbar's narrow layout: search on its own row, the filters on one row that scrolls
  * sideways, the active filters as tags wrapping on a row under it (7l-3), the live indicator and the actions last.
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
@@ -346,9 +346,17 @@ async function fit() {
   if (menuOpen.value) placeMenu()
 }
 
-useResizeObserver(rootRef, () => {
+// The filters' row (TableToolbar's filter box, the room left beside the search and the actions) also changes when
+// only the search or the actions change width, which the toolbar's own size does not show; and once a width change
+// is over, everything is measured once more, on the settled layout (7q-7).
+const filterBox = () => filtersRef.value?.parentElement ?? null
+let settleFit: ReturnType<typeof setTimeout> | undefined
+useResizeObserver([rootRef, filterBox], () => {
   void fit()
+  clearTimeout(settleFit)
+  settleFit = setTimeout(() => void fit(), 200)
 })
+onUnmounted(() => clearTimeout(settleFit))
 watch(() => tags.value.map((tag) => `${tag.key}:${tag.text}`).join('|'), () => {
   void fit()
 })

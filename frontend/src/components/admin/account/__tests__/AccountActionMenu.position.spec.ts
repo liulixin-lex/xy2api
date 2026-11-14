@@ -48,7 +48,8 @@ describe('AccountActionMenu viewport positioning', () => {
     setViewport(1024, 768)
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (!this.classList.contains('action-menu-content')) return new DOMRect()
-      return new DOMRect(0, 0, Math.min(208, window.innerWidth - 16), Math.min(menuHeight, window.innerHeight - 16))
+      // Its max-height: the room under the 65px page header, 8px above the bottom.
+      return new DOMRect(0, 0, Math.min(208, window.innerWidth - 16), Math.min(menuHeight, window.innerHeight - 73))
     })
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) { resizeMenu = callback }
@@ -95,13 +96,13 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getLeft() + 208).toBeLessThanOrEqual(382)
   })
 
-  it('constrains an oversized menu and preserves the recover-state action', async () => {
+  it('constrains an oversized menu under the page header and preserves the recover-state action (7q-10)', async () => {
     setViewport(180, 220)
     const wrapper = await mountMenu(new DOMRect(150, 180, 24, 24))
 
-    expect(getTop()).toBe(8)
+    expect(getTop()).toBe(65)
     expect(getLeft()).toBe(8)
-    expect(getMenu().style.maxHeight).toBe('204px')
+    expect(getMenu().style.maxHeight).toBe('147px')
     expect(getMenu().style.maxWidth).toBe('164px')
     expect(getMenu().classList.contains('overflow-y-auto')).toBe(true)
     expect(getMenu().classList.contains('overscroll-contain')).toBe(true)
@@ -127,9 +128,9 @@ describe('AccountActionMenu viewport positioning', () => {
     setViewport(320, 240)
     await flushPromises()
 
-    expect(getTop()).toBe(8)
+    expect(getTop()).toBe(65)
     expect(getLeft()).toBe(104)
-    expect(getMenu().style.maxHeight).toBe('224px')
+    expect(getMenu().style.maxHeight).toBe('167px')
     expect(getMenu().style.maxWidth).toBe('304px')
   })
 

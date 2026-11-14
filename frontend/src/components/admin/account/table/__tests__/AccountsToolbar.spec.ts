@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountsToolbar from '../AccountsToolbar.vue'
@@ -11,12 +11,13 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isSimpleMode: false }) 
 vi.mock('@/stores/groupCategories', () => ({ useGroupCategoriesStore: () => ({ categories: [], reload: vi.fn() }) }))
 
 /**
- * jsdom has no layout. A tag is 90px wide; the tag box has 200px, 24px less once "more filters" shows its count.
+ * jsdom has no layout. A tag is 90px wide; the tag box has `room` (200px), 24px less once "more filters" shows its count.
  */
 const TAG = 90
+let room = 200
 const widthOf = (el: HTMLElement) => {
   if (el.classList.contains('tb-tag')) return el.hidden ? 0 : TAG
-  if (el.classList.contains('tb-tags')) return el.closest('.tb')?.querySelector('[data-test="more-filters-count"]') ? 176 : 200
+  if (el.classList.contains('tb-tags')) return el.closest('.tb')?.querySelector('[data-test="more-filters-count"]') ? room - 24 : room
   return 0
 }
 const saved = {
@@ -49,6 +50,38 @@ describe('AccountsToolbar', () => {
     await flushPromises()
     expect(shownTags(wrapper)).toEqual(['platform'])
     expect(wrapper.get('[data-test="more-filters-count"]').text()).toBe('2')
+    wrapper.unmount()
+  })
+
+  it('folds again when the filter box narrows and once more when the width change is over (7q-7)', async () => {
+    const observed: Element[] = []
+    const callbacks: ResizeObserverCallback[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { callbacks.push(callback) }
+      observe = (el: Element) => { observed.push(el) }
+      disconnect = vi.fn()
+      unobserve = vi.fn()
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      room = 200
+    })
+    const wrapper = mountToolbar({ platform: 'openai', type: 'apikey' })
+    await flushPromises()
+    expect(shownTags(wrapper)).toEqual(['platform', 'type'])
+    // The actions widen (the live indicator's word): only the filter box, not the toolbar, changes size.
+    expect(observed).toContain(wrapper.get('[data-test="toolbar-filters"]').element)
+    room = 150
+    callbacks.forEach((callback) => callback([], {} as ResizeObserver))
+    await flushPromises()
+    expect(shownTags(wrapper)).toEqual(['platform'])
+    // The layout settles after the last size report: measured once more when the change is over.
+    room = 90
+    vi.advanceTimersByTime(200)
+    await flushPromises()
+    expect(shownTags(wrapper)).toEqual([])
     wrapper.unmount()
   })
 

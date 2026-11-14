@@ -140,6 +140,34 @@ describe('AccountGroupPicker', () => {
     expect([picker()!.style.left, picker()!.style.top]).toEqual(['94px', '372px'])
   })
 
+  it('places itself again when its own height changes, whole under the header and on screen (7q-4)', async () => {
+    let resized: ResizeObserverCallback | undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resized = callback }
+      observe = vi.fn()
+      disconnect = vi.fn()
+      unobserve = vi.fn()
+    })
+    let panelHeight = 200
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => panelHeight)
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(280)
+    const anchorRect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ top: 700, bottom: 740, left: 400, right: 600 } as DOMRect)
+    vi.stubGlobal('innerHeight', 900)
+    onTestFinished(() => {
+      ;[height, width, anchorRect].forEach((spy) => spy.mockRestore())
+      vi.unstubAllGlobals()
+    })
+    mountPicker()
+    await flushPromises()
+    expect(picker()!.style.top).toBe('692px')
+
+    // The conflict question makes it 420px high: it moves up so its bottom stays 8px above the screen's.
+    panelHeight = 420
+    resized!([], {} as ResizeObserver)
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(picker()!.style.top).toBe('472px')
+  })
+
   it('closes across 1024px (its anchor goes), saving a change on the way (7l-6)', async () => {
     let wide = true
     const listeners: Array<(event: { matches: boolean }) => void> = []

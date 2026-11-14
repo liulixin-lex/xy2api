@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 
@@ -36,6 +39,13 @@ describe('AccountRecentCell', () => {
     vi.useRealTimers()
     expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.table.recentValue:{"label":"admin.accounts.table.dims.ttfo","value":"2.8s"}\nadmin.accounts.table.recentScope')
     value.dispatchEvent(new Event('mouseleave'))
+  })
+
+  it('takes its column\'s size, never the viewport\'s: 72px, 84px only when the table has the roomy widths (7q-5)', () => {
+    const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+    // An optional column keeps a 1920px screen in the compact widths: 84px there cut "0.7s" to "0.".
+    expect(source('../AccountRecentCell.vue')).not.toContain('@media')
+    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(/\.account-table\.is-roomy :deep\(\.recent:not\(\.recent--card\)\) \{\s*width: 84px;\s*\}/)
   })
 
   it('reads muted with too few samples, and "—" without data', () => {

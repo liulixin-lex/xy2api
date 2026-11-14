@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountGroupPills from '../AccountGroupPills.vue'
@@ -128,5 +128,36 @@ describe('AccountGroupPills', () => {
     expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.table.pillNoQuality:{"name":"Group 1"}')
     plain.unmount()
     window.matchMedia = matchMedia
+  })
+
+  it('keeps a tip a tap brought up through the mouse events after the tap, until a press elsewhere or 4s (7q-6)', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+      window.matchMedia = matchMedia
+    })
+    const wrapper = mountPills(1, false)
+    const pill = wrapper.get('[data-test="group-pill"]')
+    const tap = async (pointerType: string) => {
+      pill.element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType }))
+      await pill.trigger('click')
+    }
+
+    await tap('touch')
+    await pill.trigger('mouseleave')
+    expect(document.getElementById('sq-tip')!.hidden).toBe(false)
+    vi.advanceTimersByTime(4000)
+    expect(document.getElementById('sq-tip')!.hidden).toBe(true)
+
+    await tap('touch')
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }))
+    expect(document.getElementById('sq-tip')!.hidden).toBe(true)
+
+    // A mouse click's tip goes on mouseleave, as a hover tip does.
+    await tap('mouse')
+    await pill.trigger('mouseleave')
+    expect(document.getElementById('sq-tip')!.hidden).toBe(true)
   })
 })

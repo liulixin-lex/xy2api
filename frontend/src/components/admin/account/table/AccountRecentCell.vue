@@ -52,11 +52,6 @@ const lines = computed(() => {
   row-gap: 2px;
   width: 72px;
 }
-@media (min-width: 1680px) {
-  .recent {
-    width: 84px;
-  }
-}
 .recent__k {
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);

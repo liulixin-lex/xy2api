@@ -23,6 +23,19 @@ type TipTarget = HTMLElement & {
 let tipEl: HTMLDivElement | null = null
 let current: TipTarget | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
+/**
+ * A tip a tap or a pen brought up (showTipNow): the browser sends mouse events after the tap, and their mouseleave
+ * would put the tip away at once. It stays until the next press elsewhere, a scroll, Escape or PINNED_MS (7q-6).
+ */
+const PINNED_MS = 4000
+let pinned: TipTarget | null = null
+let pinTimer: ReturnType<typeof setTimeout> | undefined
+function onPressElsewhere(event: Event) {
+  if (!(event.target instanceof Node && pinned?.contains(event.target))) hide()
+}
+/** The kind of the latest press: a mouse click's tip still goes on mouseleave, as a hover tip does. */
+let pressType = ''
+if (typeof window !== 'undefined') window.addEventListener('pointerdown', (event) => { pressType = event.pointerType }, true)
 
 function tip() {
   if (!tipEl || !tipEl.isConnected) {
@@ -74,6 +87,9 @@ function show(target: TipTarget) {
 
 function hide() {
   clearTimeout(timer)
+  clearTimeout(pinTimer)
+  pinned = null
+  document.removeEventListener('pointerdown', onPressElsewhere, true)
   if (tipEl) tipEl.hidden = true
   if (current) setDescribedBy(current, describedBy(current))
   current = null
@@ -103,9 +119,19 @@ export function hideTip() {
   hide()
 }
 
-/** Shows an element's v-tip at once, without the hover delay (a click on "+N" lists what it folds); it hides as usual. */
+/**
+ * Shows an element's v-tip at once, without the hover delay: a click or tap on "+N" lists what it folds, a tap on a
+ * pill tells why it has no dot. After a tap it stays through the mouse events that follow (pinned, above); after a
+ * mouse click it goes on mouseleave, as a hover tip does.
+ */
 export function showTipNow(el: EventTarget | null) {
-  if (el instanceof HTMLElement && (el as TipTarget).__tipHandlers) show(el as TipTarget)
+  if (!(el instanceof HTMLElement && (el as TipTarget).__tipHandlers)) return
+  show(el as TipTarget)
+  if (current !== el || pressType === 'mouse') return
+  pinned = el as TipTarget
+  clearTimeout(pinTimer)
+  pinTimer = setTimeout(hide, PINNED_MS)
+  document.addEventListener('pointerdown', onPressElsewhere, true)
 }
 
 export const vTip: Directive<TipTarget, TipText> = {
@@ -120,7 +146,11 @@ export const vTip: Directive<TipTarget, TipText> = {
         clearTimeout(timer)
         timer = setTimeout(() => show(el), HOVER_DELAY_MS)
       }
-      handlers.mouseleave = () => { if (current === el) hide(); else clearTimeout(timer) }
+      handlers.mouseleave = () => {
+        if (pinned === el) return
+        if (current === el) hide()
+        else clearTimeout(timer)
+      }
     }
     el.__tipHandlers = handlers
     for (const [name, handler] of Object.entries(el.__tipHandlers)) el.addEventListener(name, handler)

@@ -89,7 +89,7 @@
  * Background updates of the row do not reach the selection while it is open.
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useEventListener, useMediaQuery } from '@vueuse/core'
+import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
@@ -317,8 +317,8 @@ useEventListener(document, 'pointerdown', (event: PointerEvent) => {
 const position = reactive({ top: 0, left: 0 })
 const GAP = 4
 const MARGIN = 8
-/** The page header's bottom: the picker never covers it (7l-6). */
-const HEADER = 64
+/** The page header's bottom, its 1px border included: the picker never covers it (7l-6, 7q-4). */
+const HEADER = 65
 const wide = useMediaQuery('(min-width: 1024px)')
 // Across 1024px (a tablet turned) the cell or card it is anchored to goes: it closes, saving a change (7l-6).
 watch(wide, () => void requestClose())
@@ -350,6 +350,9 @@ const schedulePlace = () => {
 }
 useEventListener(window, 'resize', schedulePlace)
 useEventListener(window, 'scroll', schedulePlace, { capture: true, passive: true })
+// Its own height changes too (the conflict question, opened above its anchor): placed again, whole under the header
+// and on screen (7q-4).
+useResizeObserver(rootRef, schedulePlace)
 onUnmounted(() => {
   closed = true
   if (frame) cancelAnimationFrame(frame)
@@ -364,10 +367,10 @@ defineExpose({ requestClose })
   display: grid;
   width: var(--popover-width);
   max-width: calc(100vw - 16px);
-  /* Never taller than the room under the page header (64px) and 8px above the bottom: the list scrolls, the conflict
+  /* Never taller than the room under the page header (65px) and 8px above the bottom: the list scrolls, the conflict
      buttons stay on screen (7l-6). The dynamic viewport, as window.innerHeight in the placement: on iOS Safari the
      bottom never slips under the browser's toolbar (7p-3). */
-  max-height: calc(100dvh - 72px);
+  max-height: calc(100dvh - 73px);
   grid-template-rows: auto minmax(0, 1fr) auto;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-lg);

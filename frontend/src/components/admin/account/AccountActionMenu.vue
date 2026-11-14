@@ -123,12 +123,17 @@ const canPlace = canManage
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()
 const viewportPadding = 8
-const menuPosition = ref({ top: viewportPadding, left: viewportPadding })
+/**
+ * The page header's bottom, its 1px border included: the menu never covers it and scrolls inside when taller than the
+ * room under it (7q-10).
+ */
+const HEADER = 65
+const menuPosition = ref({ top: HEADER, left: viewportPadding })
 const menuStyle = computed(() => ({
   top: `${menuPosition.value.top}px`,
   left: `${menuPosition.value.left}px`,
   maxWidth: `${Math.max(0, viewportWidth.value - viewportPadding * 2)}px`,
-  maxHeight: `${Math.max(0, viewportHeight.value - viewportPadding * 2)}px`
+  maxHeight: `${Math.max(0, viewportHeight.value - HEADER - viewportPadding)}px`
 }))
 
 const updatePosition = () => {
@@ -145,7 +150,7 @@ const updatePosition = () => {
     ? anchor.left + anchor.width / 2 - width / 2
     : anchor.right - width
 
-  menuPosition.value.top = Math.max(viewportPadding, Math.min(top, maxTop))
+  menuPosition.value.top = Math.max(HEADER, Math.min(top, maxTop))
   menuPosition.value.left = Math.max(viewportPadding, Math.min(left, viewportWidth.value - width - viewportPadding))
 }
 
