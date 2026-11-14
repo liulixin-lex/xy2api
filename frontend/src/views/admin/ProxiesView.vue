@@ -2,47 +2,48 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="relative w-full sm:w-64">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.proxies.searchProxies')"
-              class="input pl-10"
-              @input="handleSearch"
-            />
-          </div>
-
-          <div class="w-full sm:w-40">
+        <TableToolbar>
+          <template #search>
+            <div class="relative">
+              <Icon
+                name="search"
+                size="md"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.proxies.searchProxies')"
+                class="input pl-10"
+                @input="handleSearch"
+              />
+            </div>
+          </template>
+          <template #filters>
             <Select
               v-model="filters.protocol"
               :options="protocolOptions"
               :placeholder="t('admin.proxies.allProtocols')"
+              class="w-40"
               @change="handleFilterChange"
             />
-          </div>
-          <div class="w-full sm:w-36">
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.proxies.allStatus')"
+              class="w-36"
               @change="handleFilterChange"
             />
-          </div>
-
-          <!-- Right: All action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          </template>
+          <!-- Below 1024 the row holds refresh, the two checks, a menu with delete, import and export, and create
+               (seven buttons do not fit 390px); from 1024 every action is its own button. -->
+          <template #actions>
             <button
               @click="loadProxies"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -50,46 +51,95 @@
               v-if="canManage"
               @click="handleBatchTest"
               :disabled="batchTesting || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.testConnection')"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('admin.proxies.testConnection')"
+              v-tip="t('admin.proxies.testConnection')"
             >
-              <Icon name="play" size="md" class="mr-2" />
-              {{ t('admin.proxies.testConnection') }}
+              <Icon name="play" size="md" class="lg:mr-2" />
+              <span class="table-toolbar__label">{{ t('admin.proxies.testConnection') }}</span>
             </button>
             <button
               v-if="canManage"
               @click="handleBatchQualityCheck"
               :disabled="batchQualityChecking || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.batchQualityCheck')"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('admin.proxies.batchQualityCheck')"
+              v-tip="t('admin.proxies.batchQualityCheck')"
             >
-              <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
-              {{ t('admin.proxies.batchQualityCheck') }}
+              <Icon name="shield" size="md" class="lg:mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
+              <span class="table-toolbar__label">{{ t('admin.proxies.batchQualityCheck') }}</span>
             </button>
             <button
               v-if="canManage"
               @click="openBatchDelete"
               :disabled="selectedCount === 0"
-              class="btn btn-danger"
-              :title="t('admin.proxies.batchDeleteAction')"
+              class="btn btn-danger max-lg:hidden"
             >
               <Icon name="trash" size="md" class="mr-2" />
               {{ t('admin.proxies.batchDeleteAction') }}
             </button>
             <template v-if="isSuperAdmin">
-              <button @click="showImportData = true" class="btn btn-secondary">
+              <button @click="showImportData = true" class="btn btn-secondary max-lg:hidden">
                 {{ t('admin.proxies.dataImport') }}
               </button>
-              <button @click="showExportDataDialog = true" class="btn btn-secondary">
-                {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
+              <button @click="showExportDataDialog = true" class="btn btn-secondary max-lg:hidden">
+                {{ dataExportLabel }}
               </button>
             </template>
+            <div v-if="canManage || isSuperAdmin" class="relative lg:hidden">
+              <button
+                type="button"
+                class="btn btn-secondary size-[42px] p-0"
+                :aria-label="t('common.more')"
+                aria-haspopup="menu"
+                :aria-expanded="moreMenuOpen"
+                v-tip="t('common.more')"
+                data-test="proxy-more-actions"
+                @click.stop="moreMenuOpen = !moreMenuOpen"
+              >
+                <Icon name="more" size="md" />
+              </button>
+              <div
+                v-if="moreMenuOpen"
+                role="menu"
+                class="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  v-if="canManage"
+                  type="button"
+                  role="menuitem"
+                  :disabled="selectedCount === 0"
+                  class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-dark-700"
+                  @click="openBatchDelete"
+                >
+                  <Icon name="trash" size="sm" />{{ t('admin.proxies.batchDeleteAction') }}
+                </button>
+                <template v-if="isSuperAdmin">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                    @click="showImportData = true"
+                  >
+                    <Icon name="upload" size="sm" />{{ t('admin.proxies.dataImport') }}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                    @click="showExportDataDialog = true"
+                  >
+                    <Icon name="download" size="sm" />{{ dataExportLabel }}
+                  </button>
+                </template>
+              </div>
+            </div>
             <button v-if="canCreateProxies" @click="showCreateModal = true" class="btn btn-primary" data-testid="proxy-create">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
@@ -98,31 +148,16 @@
           :columns="columns"
           :data="proxies"
           :loading="loading"
+          row-key="id"
+          selectable
+          :selected-keys="selectedIds"
+          :selection-label="proxySelectionLabel"
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
           @sort="handleSort"
+          @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <template #header-select>
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              @click.stop
-              @change="toggleSelectAllVisible($event)"
-            />
-          </template>
-
-          <template #cell-select="{ row }">
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="selectedProxyIds.has(row.id)"
-              @click.stop
-              @change="toggleSelectRow(row.id, $event)"
-            />
-          </template>
-
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
           </template>
@@ -987,6 +1022,7 @@ import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -995,6 +1031,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
@@ -1022,7 +1059,6 @@ const editLoaded = reactive({ status: '', expires_at: '' })
 const PROXY_NETWORK_FIELDS = ['protocol', 'host', 'port', 'username', 'password', 'fallback_mode', 'backup_proxy_id'] as const
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
   { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
   { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
@@ -1068,6 +1104,7 @@ const editStatusOptions = computed(() => [
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
+const moreMenuOpen = ref(false)
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
@@ -1104,14 +1141,14 @@ const batchQualityChecking = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
 const {
   selectedSet: selectedProxyIds,
+  selectedIds,
   selectedCount,
-  allVisibleSelected,
   isSelected,
+  setSelectedIds,
   select,
   deselect,
   clear: clearSelectedProxies,
   removeMany: removeSelectedProxies,
-  toggleVisible,
   batchUpdate
 } = useTableSelection<Proxy>({
   rows: proxies,
@@ -1193,19 +1230,15 @@ const isAbortError = (error: unknown) => {
   return maybeError.name === 'AbortError' || maybeError.code === 'ERR_CANCELED'
 }
 
-const toggleSelectRow = (id: number, event: Event) => {
-  const target = event.target as HTMLInputElement
-  if (target.checked) {
-    select(id)
-    return
-  }
-  deselect(id)
+const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
+  setSelectedIds(keys.filter((key): key is number => typeof key === 'number'))
 }
 
-const toggleSelectAllVisible = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
-}
+const proxySelectionLabel = (proxy: Proxy) => proxy.name
+
+const dataExportLabel = computed(() =>
+  selectedCount.value > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport')
+)
 
 const buildProxyQueryFilters = () => ({
   protocol: filters.protocol || undefined,
@@ -2110,19 +2143,20 @@ function copyFormat(value: string) {
   copyMenuProxyId.value = null
 }
 
-function closeCopyMenu() {
+function closeMenus() {
   copyMenuProxyId.value = null
+  moreMenuOpen.value = false
 }
 
 onMounted(() => {
   loadProxies()
   loadBackupProxyOptions()
-  document.addEventListener('click', closeCopyMenu)
+  document.addEventListener('click', closeMenus)
 })
 
 onUnmounted(() => {
   clearTimeout(searchTimeout)
   abortController?.abort()
-  document.removeEventListener('click', closeCopyMenu)
+  document.removeEventListener('click', closeMenus)
 })
 </script>

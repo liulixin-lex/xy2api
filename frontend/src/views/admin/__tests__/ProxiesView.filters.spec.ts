@@ -20,6 +20,7 @@ const mountView = () => shallowMount(ProxiesView, {
   global: {
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
+      TableToolbar: false,
       TablePageLayout: {
         template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
       },
@@ -95,7 +96,7 @@ describe('proxy list filter pagination', () => {
     await wrapper.get('[data-test="page"]').trigger('click')
     await flushPromises()
 
-    await wrapper.get('button[title="common.refresh"]').trigger('click')
+    await wrapper.get('button[aria-label="common.refresh"]').trigger('click')
     await flushPromises()
 
     expect(listProxies.mock.lastCall?.[0]).toBe(2)
