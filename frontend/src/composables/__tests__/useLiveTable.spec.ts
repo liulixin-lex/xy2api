@@ -353,8 +353,11 @@ describe('frozen membership', () => {
     table.sortBy((a, b) => b.usage!.today - a.usage!.today)
     expect(table.ids.value).toEqual([2, 1])
     current = page(row(3), row(4)) // no usage yet
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await table.reload()
     expect([table.ids.value, table.status.value]).toEqual([[3, 4], 'live'])
+    expect(logged).toHaveBeenCalled() // development builds say why
+    logged.mockRestore()
     table.sortBy(null)
     expect(table.ids.value).toEqual([3, 4])
   })
@@ -378,6 +381,23 @@ describe('frozen membership', () => {
     await vi.advanceTimersByTimeAsync(30_000) // its own beat
     expect(table.record(3)!.usage!.today).toBe(100)
     expect(table.ids.value).toEqual([4, 3])
+  })
+
+  it('does not re-sort when the run after a load starts more than 10 s after it', async () => {
+    let current = page(row(1), row(2))
+    const fetch = vi.fn(async (ids: LiveRowId[]): Promise<LivePatches<Row>> => ids.map((id) => [id, { usage: { today: Number(id) } }] as const))
+    const table = engine({ fetchPage: async () => current, sources: [{ intervalMs: 30_000, fetch }] })
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(0)
+    table.sortBy((a, b) => (b.usage?.today ?? 0) - (a.usage?.today ?? 0))
+    current = page(row(3), row(4))
+    table.pause() // a dialog is open: the run after the load waits
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(11_000)
+    table.resume()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(table.record(4)!.usage!.today).toBe(4) // the values landed
+    expect(table.ids.value).toEqual([3, 4]) // without re-ordering the page
   })
 
   it('does not bring back a removed row from a membership check sent before the removal', async () => {

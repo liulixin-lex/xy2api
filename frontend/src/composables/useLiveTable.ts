@@ -35,7 +35,8 @@
  *   optimistic value), and the error goes back to the caller.
  * - Order changes only through active loads and sortBy(compare): the comparator stays in force for every later active
  *   load until sortBy(null), and each source that runs right after a load re-sorts the page once when its values land
- *   (the comparator may read them). Other updates never re-order. A comparator that throws leaves the server's order.
+ *   (the comparator may read them), unless that run starts more than 10 s after the load. Other updates never
+ *   re-order. A comparator that throws leaves the server's order (and logs the error in development builds).
  *   remove(id) takes a row off at once; answers to requests sent before it do not bring the row back.
  *
  *   const table = useLiveTable<Account>({
@@ -134,8 +135,9 @@ export interface LiveTable<T extends object> {
   /**
    * Re-orders the current page now (a local sort the user asked for) and every later active load the same way, until
    * sortBy(null) restores the server's order. Each source that runs right after a load re-sorts the page once when its
-   * values land; updates never re-order. The comparator must tolerate rows whose partial fields have not arrived yet
-   * (right after a page change they are missing); if it throws, the page keeps the server's order.
+   * values land, unless that run starts more than 10 s after the load (it was held back); updates never re-order. The
+   * comparator must tolerate rows whose partial fields have not arrived yet (right after a page change they are
+   * missing); if it throws, the page keeps the server's order and development builds log the error.
    */
   sortBy: (compare: ((a: T, b: T) => number) | null) => void
   /** Takes a row off the page at once (after a delete). */
@@ -147,6 +149,8 @@ export interface LiveTable<T extends object> {
 
 const BACKOFF_MS = [3000, 6000, 12000, 30000]
 const DEFAULT_MEMBERSHIP_MS = 30_000
+/** A source run that starts this long after its load no longer re-sorts the page (it was held back: paused, hidden, retrying). */
+const RESORT_WINDOW_MS = 10_000
 /** setTimeout's longest delay; a larger one fires at once. */
 const MAX_DELAY_MS = 2 ** 31 - 1
 /** A beat in ms: a positive finite number, capped at the timer limit; anything else is 0 (no beat). */
@@ -308,7 +312,8 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     if (!compare) return list
     try {
       return [...list].sort((a, b) => compare(records.get(keyOf(a))!, records.get(keyOf(b))!))
-    } catch {
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('[useLiveTable] the comparator threw; the page keeps the server order', error)
       return list
     }
   }
@@ -369,6 +374,8 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     clearTimer(beat)
     const controller = new AbortController()
     beat.controller = controller
+    // The re-sort belongs to its load: a run held back for long does not re-order the page out of the blue.
+    if (beat.afterLoad && Date.now() - loadedAt > RESORT_WINDOW_MS) beat.afterLoad = false
     const afterLoad = beat.afterLoad
     const job = (async () => {
       try {
@@ -430,6 +437,8 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   }
 
   let generation = 0
+  /** When the last active load succeeded. */
+  let loadedAt = 0
   let active: AbortController | null = null
   /** The last active load failed; it is retried on the back-off beat. */
   let owed = false
@@ -521,6 +530,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
       owed = false
       loadFailures = 0
       loadFailed.value = false
+      loadedAt = Date.now()
       succeeded = true
     } catch (error) {
       if (at !== generation || controller.signal.aborted || isAbort(error)) return

@@ -1306,8 +1306,8 @@ defineExpose({
 .dark .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 theme('colors.dark.700');
 }
-/* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It is positioned
-   absolutely, so it never takes layout space; it does not follow scrolling. */
+/* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout
+   space and needs no script; on the cards it sits on the list's top edge and does not follow the page scroll. */
 .table-progress {
   position: absolute;
   top: 0;
@@ -1317,7 +1317,13 @@ defineExpose({
   overflow: hidden;
   height: 2px;
 }
+/* Desktop: the wrapper is the scroll container at 1024px and up; sticky keeps the bar on the visible top edge and
+   across the visible width after scrolling either way. Its negative margin cancels its height. */
 .table-progress--table {
+  position: sticky;
+  top: 0;
+  left: 0;
+  margin-bottom: -2px;
   z-index: 230; /* above the sticky header cells */
 }
 /* The page header the document scrolls under (--table-sticky-top, 4rem by default): scrollToTop() stops below it. */
