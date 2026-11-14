@@ -36,17 +36,18 @@ func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, 
 }
 
 type selectionBindingFake struct {
-	store      ResilienceStore
-	key        string
-	ttlKeys    []string
-	casKeys    []string
-	owner      int64
-	generation string
-	remaining  time.Duration
-	reads      int
-	events     *[]string
-	casFail    bool
-	casError   bool
+	store       ResilienceStore
+	key         string
+	ttlKeys     []string
+	casKeys     []string
+	avoidScopes []string
+	owner       int64
+	generation  string
+	remaining   time.Duration
+	reads       int
+	events      *[]string
+	casFail     bool
+	casError    bool
 }
 
 func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ int64, key string) (int64, time.Duration, error) {
@@ -57,8 +58,9 @@ func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ i
 	}
 	return f.owner, f.remaining, nil
 }
-func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration) (bool, error) {
+func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, avoidScopes ...string) (bool, error) {
 	f.casKeys = append(f.casKeys, key)
+	f.avoidScopes = append(f.avoidScopes, avoidScopes...)
 	*f.events = append(*f.events, fmt.Sprintf("cas:%d", target))
 	if f.casError {
 		return false, errors.New("cache down")

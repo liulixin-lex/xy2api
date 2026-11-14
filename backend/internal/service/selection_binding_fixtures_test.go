@@ -21,7 +21,7 @@ type selectionRebindCache struct {
 func (c *selectionRebindCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
 	return nil
 }
-func (c *selectionRebindCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration) (bool, error) {
+func (c *selectionRebindCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ ...string) (bool, error) {
 	c.calls++
 	c.mu.Lock()
 	defer c.mu.Unlock()

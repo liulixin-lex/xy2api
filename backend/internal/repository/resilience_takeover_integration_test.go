@@ -51,6 +51,10 @@ func TestStickyBindingAliasesIntegration(t *testing.T) {
 	testStickyBindingAliases(t, integrationRedis.Options().Addr)
 }
 
+func TestStickyBindingSuccessClearsEarlierFailureIntegration(t *testing.T) {
+	testStickyBindingSuccessClearsEarlierFailure(t, integrationRedis.Options().Addr)
+}
+
 func TestSessionAvoidWriteMetadataIntegration(t *testing.T) {
 	testSessionAvoidWriteMetadata(t, integrationRedis.Options().Addr)
 }

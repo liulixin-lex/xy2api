@@ -23,7 +23,7 @@ func (c selectionVersionedCache) GetSessionBinding(ctx context.Context, group in
 	return StickySessionBinding{AccountID: id, Generation: "g1"}, nil
 }
 
-func (c selectionVersionedCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration) (bool, error) {
+func (c selectionVersionedCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ ...string) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sessionBindings[key] != expected.AccountID {
