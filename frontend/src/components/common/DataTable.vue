@@ -1,21 +1,24 @@
 <template>
-  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards space-y-3" :aria-busy="loading ? 'true' : undefined">
+  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
+    <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
+         column (and the select column before it); the other columns follow as label-over-value pairs in two columns,
+         the actions sit in the foot. -->
     <template v-if="showSkeleton">
-      <div v-for="i in 5" :key="i" class="rounded-lg border border-line-strong bg-surface p-4">
-        <div class="space-y-3">
-          <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
-            <div class="h-4 w-20 animate-pulse rounded bg-surface-pill"></div>
-            <div class="h-4 w-32 animate-pulse rounded bg-surface-pill"></div>
-          </div>
-          <div v-if="hasActionsColumn" class="border-t border-line-row pt-3">
-            <div class="h-8 w-full animate-pulse rounded bg-surface-pill"></div>
+      <div v-for="i in 5" :key="i" class="table-card">
+        <div class="table-card__head">
+          <div class="h-4 w-40 animate-pulse rounded bg-surface-pill"></div>
+        </div>
+        <div class="table-card__fields">
+          <div v-for="column in cardFields" :key="column.key" class="table-card__field">
+            <div class="h-3 w-16 animate-pulse rounded bg-surface-pill"></div>
+            <div class="h-4 w-24 animate-pulse rounded bg-surface-pill"></div>
           </div>
         </div>
       </div>
     </template>
 
     <template v-else-if="!data || data.length === 0">
-      <div class="rounded-lg border border-line-strong bg-surface p-12 text-center">
+      <div class="table-cards__full rounded-lg border border-line-strong bg-surface p-12 text-center">
         <slot name="empty">
           <div class="flex flex-col items-center">
             <Icon
@@ -32,7 +35,7 @@
     </template>
 
     <template v-else>
-      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="flex flex-wrap items-center justify-end gap-2 px-1">
+      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="table-cards__full flex flex-wrap items-center justify-end gap-2 px-1">
         <!-- 手机端没有表头，排序放到卡片上方 -->
         <div v-if="mobileSortColumns.length || pageSorts.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
           <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-fg-secondary">
@@ -78,53 +81,55 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
-        class="rounded-lg border p-4"
+        class="table-card"
         :class="[
-          selectable && isRowSelected(row, index)
-            ? 'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10'
-            : 'border-line-strong bg-surface',
-          { 'cursor-pointer': clickableRows },
+          { 'is-selected': selectable && isRowSelected(row, index), 'cursor-pointer': clickableRows },
           rowClass?.(row, index)
         ]"
         @click="clickableRows && emit('rowClick', row)"
       >
-        <div class="space-y-3">
-          <div v-if="selectable" class="flex justify-end">
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-              :checked="isRowSelected(row, index)"
-              :disabled="!isRowSelectable(row)"
-              :aria-label="getRowSelectionLabel(row, index)"
-              data-test="select-row"
-              @click.stop
-              @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
-            />
-          </div>
+        <div class="table-card__head">
+          <input
+            v-if="selectable"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 flex-none rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
+            :checked="isRowSelected(row, index)"
+            :disabled="!isRowSelectable(row)"
+            :aria-label="getRowSelectionLabel(row, index)"
+            data-test="select-row"
+            @click.stop
+            @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
+          />
           <div
-            v-for="column in dataColumns"
+            v-for="column in cardHead"
             :key="column.key"
             :data-field="column.key"
-            class="flex min-w-0 items-start justify-between gap-4"
+            class="table-card__title"
+            :class="{ 'flex-none': column.key === 'select' }"
           >
-            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium uppercase tracking-wider text-fg-secondary">
-              {{ column.label }}
-            </span>
-            <div class="min-w-0 max-w-full text-right text-sm text-fg-primary">
+            <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+              {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+            </slot>
+          </div>
+        </div>
+        <dl v-if="cardFields.length" class="table-card__fields">
+          <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field">
+            <dt class="table-card__label">{{ column.label }}</dt>
+            <dd class="table-card__value">
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
-            </div>
+            </dd>
           </div>
-          <div v-if="hasActionsColumn" class="border-t border-line-row pt-3">
-            <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
-          </div>
+        </dl>
+        <div v-if="hasActionsColumn" class="table-card__foot">
+          <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
         </div>
       </div>
     </template>
 
     <!-- Reload with rows on screen: a thin bar on the top edge of the list; it takes no layout space and the cards stay
-         usable. Last in the list, so the cards' spacing does not change when it comes and goes. -->
+         usable. Last in the list, so nothing before the first card changes when it comes and goes. -->
     <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
       <div class="table-progress__bar"></div>
     </div>
@@ -310,7 +315,8 @@ import DataTableRow from './DataTableRow'
 
 const { t } = useI18n()
 
-const desktopViewportQuery = '(min-width: 768px)'
+// Cards below 1024px, as the shared page layout and the changes pill switch there too (spec 8.6, prototype).
+const desktopViewportQuery = '(min-width: 1024px)'
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
 )
@@ -427,14 +433,17 @@ const attachDesktopTableTracking = () => {
   checkScrollable()
   checkActionsColumnWidth()
   if (tableWrapperRef.value && typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => {
+    const wrapper = tableWrapperRef.value
+    resizeObserver = new ResizeObserver((entries) => {
       checkScrollable()
-      checkActionsColumnWidth()
+      // Only the wrapper's own size changes the room of the actions column; a change of the table alone just
+      // re-checks the sideways scroll (spec 7g-4).
+      if (entries.some((entry) => entry.target === wrapper)) checkActionsColumnWidth()
     })
-    resizeObserver.observe(tableWrapperRef.value)
+    resizeObserver.observe(wrapper)
     // The table too: a page may narrow its columns after the wrapper's resize (the accounts page recomputes its column
     // widths from the new width), and only the table's own size change tells that it no longer scrolls sideways.
-    const table = tableWrapperRef.value.querySelector(':scope > table')
+    const table = wrapper.querySelector(':scope > table')
     if (table) resizeObserver.observe(table)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
@@ -704,6 +713,9 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+/** A card's head: the leading column, with the page's own select column before it when it has one. */
+const cardHead = computed(() => dataColumns.value.slice(0, hasSelectColumn.value ? 2 : 1))
+const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length))
 const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
 const mobileSortSelectId = `data-table-sort-${useId()}`
 // A sort picked here is the table's own sort change: back to the first row (the parent re-orders its page).
@@ -1259,7 +1271,75 @@ defineExpose({
 /* The page header the document scrolls under (--table-sticky-top, 4rem by default): scrollToTop() stops below it. */
 .table-cards {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
   scroll-margin-top: var(--table-sticky-top, 4rem);
+}
+@media (min-width: 768px) {
+  .table-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.table-cards__full {
+  grid-column: 1 / -1;
+}
+.table-card {
+  min-width: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+.table-card.is-selected {
+  border-color: theme('colors.primary.400');
+  background: var(--color-bg-selected);
+}
+.table-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.table-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+}
+/* Label over value, two to a row; a value that cannot wrap scrolls inside its cell instead of widening the card. */
+.table-card__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-line-row);
+}
+.table-card__field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 2px;
+}
+.table-card__label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+.table-card__value {
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+.table-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-line-row);
 }
 .table-progress--cards {
   z-index: 10;

@@ -70,7 +70,7 @@ describe('DataTable row classes', () => {
   it('applies rowClass to mobile cards', () => {
     stubViewport(false)
     const wrapper = mount(DataTable, { props: { columns, data: [{ ...rows(1)[0], dim: true }], rowKey: 'id', rowClass: (row: Row) => row.dim && 'opacity-50' } })
-    expect(wrapper.get('[data-field="name"]').element.closest('.rounded-lg')!.classList).toContain('opacity-50')
+    expect(wrapper.get('[data-field="name"]').element.closest('.table-card')!.classList).toContain('opacity-50')
   })
 })
 
@@ -154,7 +154,7 @@ describe('DataTable mobile progress bar', () => {
   it('comes and goes without changing the list classes or what comes before the first card', async () => {
     stubViewport(false)
     const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' } })
-    const firstCard = wrapper.get('[data-field="name"]').element.closest('.rounded-lg')!
+    const firstCard = wrapper.get('[data-field="name"]').element.closest('.table-card')!
     const before = firstCard.previousElementSibling
     const classes = wrapper.classes()
     await wrapper.setProps({ loading: true })
@@ -165,16 +165,27 @@ describe('DataTable mobile progress bar', () => {
 })
 
 describe('DataTable sideways scroll state', () => {
-  it('drops is-scrollable when the table narrows after the wrapper resized (7e-7)', async () => {
-    stubViewport(true)
-    const observers: Array<{ callback: () => void; targets: Element[] }> = []
+  const observeResizes = () => {
+    const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = []
     vi.stubGlobal('ResizeObserver', class {
       targets: Element[] = []
-      constructor(public callback: () => void) { observers.push(this) }
+      constructor(public callback: ResizeObserverCallback) { observers.push(this) }
       observe(target: Element) { this.targets.push(target) }
       unobserve() {}
       disconnect() {}
     })
+    return (target: Element) => {
+      const observer = observers.find((item) => item.targets.includes(target))!
+      observer.callback([{ target } as unknown as ResizeObserverEntry], observer as unknown as ResizeObserver)
+    }
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('drops is-scrollable when the table narrows after the wrapper resized (7e-7)', async () => {
+    stubViewport(true)
+    const resized = observeResizes()
     const wrapper = mount(DataTable, { props: { columns, data: rows(1), rowKey: 'id' } })
     await nextTick()
     const box = wrapper.get('.table-wrapper').element as HTMLElement
@@ -182,18 +193,36 @@ describe('DataTable sideways scroll state', () => {
     let tableWidth = 1500
     Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 1300 })
     Object.defineProperty(box, 'scrollWidth', { configurable: true, get: () => Math.max(1300, tableWidth) })
-    const observer = observers.find((item) => item.targets.includes(box))!
     // The wrapper narrowed first: the table still has its old width, so it scrolls.
-    observer.callback()
+    resized(box)
     await nextTick()
     expect(box.classList.contains('is-scrollable')).toBe(true)
     // Then the page narrows its columns: only the table changes size, and it is watched too.
-    expect(observer.targets).toContain(table)
     tableWidth = 1290
-    observer.callback()
+    resized(table)
     await nextTick()
     expect(box.classList.contains('is-scrollable')).toBe(false)
     wrapper.unmount()
-    vi.unstubAllGlobals()
+  })
+
+  it('measures the actions column again only when the wrapper resizes, not the table alone (7g-4)', async () => {
+    stubViewport(true)
+    const resized = observeResizes()
+    const wrapper = mount(DataTable, {
+      props: { columns: [...columns, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id' },
+      slots: { 'cell-actions': '<div><button>a</button><button>b</button><button>c</button></div>' }
+    })
+    await nextTick()
+    const box = wrapper.get('.table-wrapper').element as HTMLElement
+    const measured = vi.spyOn(box, 'querySelector')
+    const actionsLookups = () => measured.mock.calls.filter(([selector]) => selector === 'tbody tr:first-child td:last-child').length
+
+    resized(box.querySelector(':scope > table')!)
+    await nextTick()
+    expect(actionsLookups()).toBe(0)
+    resized(box)
+    await nextTick()
+    expect(actionsLookups()).toBe(1)
+    wrapper.unmount()
   })
 })

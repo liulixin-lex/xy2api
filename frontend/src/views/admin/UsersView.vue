@@ -1,13 +1,10 @@
 <template>
   <AppLayout>
     <TablePageLayout>
-      <!-- Single Row: Search, Filters, and Actions -->
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Active Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- Search Box -->
-            <div class="relative w-full md:w-64">
+        <TableToolbar>
+          <template #search>
+            <div class="relative">
               <Icon
                 name="search"
                 size="md"
@@ -21,9 +18,11 @@
                 @input="handleSearch"
               />
             </div>
+          </template>
 
+          <template #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
+            <div v-if="visibleFilters.has('role')" class="w-32">
               <Select
                 v-model="filters.role"
                 :options="[
@@ -37,7 +36,7 @@
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
+            <div v-if="visibleFilters.has('status')" class="w-32">
               <Select
                 v-model="filters.status"
                 :options="[
@@ -50,7 +49,7 @@
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
+            <div v-if="visibleFilters.has('group')" class="w-44">
               <Select
                 v-model="filters.group"
                 :options="groupFilterOptions"
@@ -63,7 +62,7 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-44">
               <Select
                 v-model="filters.apiKeyGroup"
                 :options="apiKeyGroupFilterOptions"
@@ -77,7 +76,7 @@
             <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-full sm:w-36"
+                class="relative w-36"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input
@@ -122,131 +121,127 @@
                 />
               </div>
             </template>
-          </div>
+          </template>
 
-          <!-- Right: Actions and Settings -->
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <!-- Mobile: Secondary buttons (icon only) -->
-            <div class="flex items-center gap-2 md:contents">
-              <!-- Refresh Button -->
+          <template #actions>
+            <!-- Refresh Button -->
+            <button
+              @click="refreshUsers"
+              :disabled="loading"
+              class="btn btn-secondary px-2 md:px-3"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <!-- Filter Settings Dropdown -->
+            <div class="relative" ref="filterDropdownRef">
               <button
-                @click="refreshUsers"
-                :disabled="loading"
+                @click="showFilterDropdown = !showFilterDropdown"
                 class="btn btn-secondary px-2 md:px-3"
-                :title="t('common.refresh')"
+                :title="t('admin.users.filterSettings')"
               >
-                <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+                <Icon name="filter" size="sm" class="md:mr-1.5" />
+                <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
               </button>
-              <!-- Filter Settings Dropdown -->
-              <div class="relative" ref="filterDropdownRef">
-                <button
-                  @click="showFilterDropdown = !showFilterDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.filterSettings')"
-                >
-                  <Icon name="filter" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
-                </button>
-                <!-- Dropdown menu -->
-                <div
-                  v-if="showFilterDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <!-- Built-in filters -->
-                  <button
-                    v-for="filter in builtInFilters"
-                    :key="filter.key"
-                    @click="toggleBuiltInFilter(filter.key)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ filter.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(filter.key)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                  <!-- Divider if custom attributes exist -->
-                  <div
-                    v-if="filterableAttributes.length > 0"
-                    class="my-1 border-t border-gray-100 dark:border-dark-700"
-                  ></div>
-                  <!-- Custom attribute filters -->
-                  <button
-                    v-for="attr in filterableAttributes"
-                    :key="attr.id"
-                    @click="toggleAttributeFilter(attr)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ attr.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(`attr_${attr.id}`)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-              </div>
-              <!-- Column Settings Dropdown -->
-              <div class="relative" ref="columnDropdownRef">
-                <button
-                  @click="showColumnDropdown = !showColumnDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.columnSettings')"
-                >
-                  <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
-                </button>
-                <!-- Dropdown menu -->
-                <div
-                  v-if="showColumnDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <button
-                    v-for="col in toggleableColumns"
-                    :key="col.key"
-                    :disabled="isForcedVisibleColumn(col.key)"
-                    @click="toggleColumn(col.key)"
-                    :class="[
-                      'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
-                      isForcedVisibleColumn(col.key)
-                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
-                    ]"
-                    :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
-                  >
-                    <span>{{ col.label }}</span>
-                    <Icon
-                      v-if="isColumnVisible(col.key)"
-                      name="check"
-                      size="sm"
-                      :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-              </div>
-              <!-- Attributes Config Button -->
-              <button
-                v-if="canManage"
-                @click="showAttributesModal = true"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.attributes.configButton')"
+              <!-- Dropdown menu -->
+              <div
+                v-if="showFilterDropdown"
+                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
               >
-                <Icon name="cog" size="sm" class="md:mr-1.5" />
-                <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
-              </button>
+                <!-- Built-in filters -->
+                <button
+                  v-for="filter in builtInFilters"
+                  :key="filter.key"
+                  @click="toggleBuiltInFilter(filter.key)"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <span>{{ filter.name }}</span>
+                  <Icon
+                    v-if="visibleFilters.has(filter.key)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
+                </button>
+                <!-- Divider if custom attributes exist -->
+                <div
+                  v-if="filterableAttributes.length > 0"
+                  class="my-1 border-t border-gray-100 dark:border-dark-700"
+                ></div>
+                <!-- Custom attribute filters -->
+                <button
+                  v-for="attr in filterableAttributes"
+                  :key="attr.id"
+                  @click="toggleAttributeFilter(attr)"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <span>{{ attr.name }}</span>
+                  <Icon
+                    v-if="visibleFilters.has(`attr_${attr.id}`)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
             </div>
+            <!-- Column Settings Dropdown -->
+            <div class="relative" ref="columnDropdownRef">
+              <button
+                @click="showColumnDropdown = !showColumnDropdown"
+                class="btn btn-secondary px-2 md:px-3"
+                :title="t('admin.users.columnSettings')"
+              >
+                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+              </button>
+              <!-- Dropdown menu -->
+              <div
+                v-if="showColumnDropdown"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  v-for="col in toggleableColumns"
+                  :key="col.key"
+                  :disabled="isForcedVisibleColumn(col.key)"
+                  @click="toggleColumn(col.key)"
+                  :class="[
+                    'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
+                    isForcedVisibleColumn(col.key)
+                      ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
+                  ]"
+                  :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
+                >
+                  <span>{{ col.label }}</span>
+                  <Icon
+                    v-if="isColumnVisible(col.key)"
+                    name="check"
+                    size="sm"
+                    :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
+            </div>
+            <!-- Attributes Config Button -->
+            <button
+              v-if="canManage"
+              @click="showAttributesModal = true"
+              class="btn btn-secondary px-2 md:px-3"
+              :title="t('admin.users.attributes.configButton')"
+            >
+              <Icon name="cog" size="sm" class="md:mr-1.5" />
+              <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
+            </button>
 
             <button
               v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
+              class="btn btn-secondary"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
             >
@@ -256,7 +251,7 @@
 
             <button
               v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
+              class="btn btn-secondary"
               data-test="bulk-disable-users"
               :disabled="bulkStatusUpdating"
               @click="openBulkStatus('disabled')"
@@ -267,7 +262,7 @@
 
             <button
               v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
+              class="btn btn-secondary"
               data-test="bulk-enable-users"
               :disabled="bulkStatusUpdating"
               @click="openBulkStatus('active')"
@@ -278,7 +273,7 @@
 
             <button
               v-if="canManage && selectedCount > 0"
-              class="btn btn-danger flex-1 md:flex-initial"
+              class="btn btn-danger"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
               @click="bulkDeleteIds = [...selectedIds]"
@@ -287,13 +282,12 @@
               {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
             </button>
 
-            <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
+            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.users.createUser') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <!-- Users Table -->
@@ -863,6 +857,7 @@ import type { Column } from '@/components/common/types'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'

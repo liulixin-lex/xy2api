@@ -2,12 +2,9 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
-        >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
+        <TableToolbar>
+          <template #search>
+            <div class="relative">
               <Icon
                 name="search"
                 size="md"
@@ -21,6 +18,8 @@
                 @input="handleSearch"
               />
             </div>
+          </template>
+          <template #filters>
             <Select
               v-model="filters.platform"
               :options="platformFilterOptions"
@@ -44,12 +43,9 @@
               @change="applyGroupFilters"
             />
             <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="applyGroupFilters" />
-          </div>
+          </template>
 
-          <!-- Right: actions -->
-          <div
-            class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
-          >
+          <template #actions>
             <button
               @click="reloadGroups"
               :disabled="loading"
@@ -113,8 +109,8 @@
               <Icon name="plus" size="md" class="mr-2" />
               {{ t("admin.groups.createGroup") }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
@@ -4454,6 +4450,7 @@ import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
+import TableToolbar from "@/components/layout/TableToolbar.vue";
 import GroupCategoryManagerButton from "@/components/admin/group/GroupCategoryManagerButton.vue";
 import GroupCategoryTags from "@/components/admin/group/GroupCategoryTags.vue";
 import GroupCategoryField from "@/components/admin/group/GroupCategoryField.vue";

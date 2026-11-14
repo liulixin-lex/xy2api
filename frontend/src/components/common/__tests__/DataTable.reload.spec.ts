@@ -55,7 +55,7 @@ describe('DataTable reload with rows on screen', () => {
   it('keeps the same cards on the mobile layout while reloading', async () => {
     stubViewport(false)
     const wrapper = mount(DataTable, { props: { columns, data: page(), rowKey: 'id' } })
-    const card = () => wrapper.get('[data-field="name"]').element.closest('.rounded-lg')
+    const card = () => wrapper.get('[data-field="name"]').element.closest('.table-card')
     const before = card()
 
     await wrapper.setProps({ loading: true })

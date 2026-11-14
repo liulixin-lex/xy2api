@@ -91,7 +91,11 @@ onUnmounted(() => {
   @apply px-5 py-4 text-sm text-fg-primary border-b border-line-row;
 }
 
-/* 移动端：恢复正常滚动 */
+/* 移动端：恢复正常滚动；各区之间按原型收紧到 12px */
+.table-page-layout.mobile-mode {
+  @apply gap-3;
+}
+
 .table-page-layout.mobile-mode .table-scroll-container {
   @apply h-auto overflow-visible border-none shadow-none bg-transparent;
 }

@@ -340,33 +340,26 @@ describe('DataTable', () => {
     wrapper.unmount()
   })
 
-  it('keeps the single usage field shrinkable in a 320px mobile card', () => {
+  it('lays a card out as the leading column in the head, the others as label-over-value fields, the actions in the foot', () => {
     stubMobileMatchMedia()
-    const viewport = document.createElement('div')
-    viewport.style.width = '320px'
-    document.body.appendChild(viewport)
     const wrapper = mount(DataTable, {
-      attachTo: viewport,
       props: {
-        columns: [{ key: 'usage', label: 'Usage' }],
-        data: [{ id: 1, usage: 'snapshot' }],
+        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'actions', label: '' }],
+        data: [{ id: 1, name: 'one', usage: 'snapshot' }],
         rowKey: 'id'
       },
       slots: {
-        'cell-usage': '<div data-test="usage-cell">snapshot</div>'
+        'cell-usage': '<div data-test="usage-cell">snapshot</div>',
+        'cell-actions': '<button data-test="edit">edit</button>'
       }
     })
 
-    expect(viewport.style.width).toBe('320px')
-    expect(wrapper.findAll('[data-field="usage"]')).toHaveLength(1)
-    expect(wrapper.find('[data-field="ollama_cloud_usage"]').exists()).toBe(false)
-    const field = wrapper.get('[data-field="usage"]')
-    expect(field.classes()).toContain('min-w-0')
-    expect(field.get('div').classes()).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full']))
-    expect(wrapper.findAll('[data-test="usage-cell"]')).toHaveLength(1)
-
-    wrapper.unmount()
-    viewport.remove()
+    const card = wrapper.get('.table-card')
+    expect(card.get('.table-card__head [data-field="name"]').text()).toBe('one')
+    const field = card.get('.table-card__fields [data-field="usage"]')
+    expect(field.get('dt').text()).toBe('Usage')
+    expect(field.get('dd [data-test="usage-cell"]').text()).toBe('snapshot')
+    expect(card.get('.table-card__foot [data-test="edit"]').exists()).toBe(true)
   })
 
   it('offers current-page select all in the mobile card layout', async () => {
