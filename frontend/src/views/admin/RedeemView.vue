@@ -2,9 +2,8 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="flex-1 sm:max-w-64">
+        <TableToolbar>
+          <template #search>
             <input
               v-model="searchQuery"
               type="text"
@@ -13,48 +12,58 @@
               @input="handleSearch"
             />
             <p v-if="searchNeedsEmail" class="input-hint" data-test="redeem-search-needs-email">{{ t('admin.operatorAccess.searchByEmail') }}</p>
-          </div>
-          <Select
-            v-model="filters.type"
-            :options="filterTypeOptions"
-            class="w-36"
-            @change="loadCodes"
-          />
-          <Select
-            v-model="filters.status"
-            :options="filterStatusOptions"
-            class="w-36"
-            @change="loadCodes"
-          />
-
-          <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          </template>
+          <template #filters>
+            <Select
+              v-model="filters.type"
+              :options="filterTypeOptions"
+              class="w-36"
+              @change="loadCodes"
+            />
+            <Select
+              v-model="filters.status"
+              :options="filterStatusOptions"
+              class="w-36"
+              @change="loadCodes"
+            />
+          </template>
+          <template #actions>
             <button
               @click="loadCodes"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button v-if="has('data.export') && hasIssue" @click="handleExportCodes" class="btn btn-secondary">
-              {{ t('admin.redeem.exportCsv') }}
+            <button
+              v-if="has('data.export') && hasIssue"
+              @click="handleExportCodes"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('admin.redeem.exportCsv')"
+              v-tip="t('admin.redeem.exportCsv')"
+            >
+              <Icon name="download" size="md" class="lg:mr-2" />
+              <span class="table-toolbar__label">{{ t('admin.redeem.exportCsv') }}</span>
             </button>
             <button
               v-if="canIssue"
               data-test="batch-update-open"
               @click="openBatchUpdateDialog"
               :disabled="selectedCount === 0 || batchUpdating"
-              class="btn btn-secondary"
+              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              :aria-label="t('admin.redeem.batchUpdate')"
+              v-tip="t('admin.redeem.batchUpdate')"
             >
-              <Icon name="edit" size="md" class="mr-2" />
-              {{ t('admin.redeem.batchUpdate') }}
+              <Icon name="edit" size="md" class="lg:mr-2" />
+              <span class="table-toolbar__label">{{ t('admin.redeem.batchUpdate') }}</span>
             </button>
             <button v-if="canIssue" @click="showGenerateDialog = true" class="btn btn-primary">
               {{ t('admin.redeem.generateCodes') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
@@ -643,6 +652,7 @@ import type {
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -650,6 +660,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
