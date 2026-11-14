@@ -7,10 +7,11 @@
         class="qpanel"
         :style="{ top: `${top}px`, zIndex: layer.zIndex.value }"
         role="dialog"
-        aria-modal="false"
+        :aria-modal="wide ? 'false' : 'true'"
         :aria-labelledby="titleId"
         tabindex="-1"
         data-quality-panel
+        @keydown.tab="!wide && layer.trapTab($event)"
       >
         <header class="qp-head">
           <div class="qp-title-row">
@@ -195,7 +196,8 @@
  * - Not modal: no backdrop, the table behind stays usable. Its top edge follows the top of the table's visible area
  *   (`anchor`), never above the page header, so the toolbar stays visible and no scrolling row shows above it; it
  *   covers the table's right-hand columns. Below 1024px it takes the whole screen (prototype), with a 44px close
- *   button; nothing is left outside it.
+ *   button, and is modal there (7l-2): focus goes to the title, Tab stays inside, the page behind neither scrolls nor
+ *   takes focus. Crossing 1024px while open switches between the two.
  * - A pointerdown anywhere outside closes it and the click goes on as usual; on another element that opens the
  *   panel (data-quality-opener) the content switches instead; layers opened from the panel are not outside. Escape
  *   and the close button close it too and give focus back to the dot that opened it.
@@ -273,9 +275,11 @@ const shownRow = computed(() => (panel.accountId === null ? undefined : props.ac
 const summary = computed(() => (shownRow.value?.quality !== undefined ? shownRow.value.quality : panel.summary))
 
 // ---- Layer: Escape, focus, outside clicks ----
+const wide = useMediaQuery('(min-width: 1024px)')
 const layer = useOverlayLayer(open, {
   root: rootRef,
-  modal: false,
+  modal: () => !wide.value,
+  initialFocus: () => titleRef.value,
   floor: 40,
   onEscape: () => close(true),
   // A dialog opened from the panel (the proxy confirmation, the account editor) covers it; the panel stays.
@@ -311,7 +315,6 @@ useEventListener(document, 'pointerdown', (event: PointerEvent) => {
 const top = ref(64)
 const headerBottom = () => 4 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
 /** Below 1024px the panel takes the whole screen (prototype): nothing is left outside it to click. */
-const wide = useMediaQuery('(min-width: 1024px)')
 watch(wide, () => {
   if (open.value) place()
 })

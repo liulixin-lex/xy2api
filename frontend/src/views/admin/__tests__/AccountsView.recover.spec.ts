@@ -113,10 +113,13 @@ const TempUnschedStub = defineComponent({
 
 // Turns on the "back of queue" quality filter the way the toolbar does.
 const FiltersStub = defineComponent({
-  props: ['filters'],
+  props: ['filters', 'pause'],
   emits: ['change'],
   setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) })
+    return () => [
+      h('button', { 'data-test': 'filter-cooling', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) }),
+      h('button', { 'data-test': 'pause-table', onClick: () => props.pause() })
+    ]
   }
 })
 
@@ -524,6 +527,23 @@ describe('AccountsView — one summary request per recovery refresh', () => {
     recoverItem()!.click()
     await flushPromises()
     expect(sched.reset).toHaveBeenCalledWith(2)
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).not.toBe('true')
+    wrapper.unmount()
+  })
+
+  // 7l-1: the summary the lock waits for is the one markSchedChanged() asks for by name; asked during the reload, it
+  // runs once the load is over, paused or not.
+  it('lets go of the recovery lock under the quality filter while the table is paused (7l-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    await wrapper.get('[data-test="pause-table"]').trigger('click')
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
     await openMenuFor(wrapper, 2)
     expect(recoverItem()!.getAttribute('aria-disabled')).not.toBe('true')
     wrapper.unmount()

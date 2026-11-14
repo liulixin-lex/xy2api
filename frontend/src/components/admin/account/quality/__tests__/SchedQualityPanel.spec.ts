@@ -357,6 +357,38 @@ describe('SchedQualityPanel', () => {
     expect(panel()!.style.top).toBe('0px')
   })
 
+  it('is modal while it takes the whole screen, and goes back to non-modal from 1024px while open (7l-2)', async () => {
+    let wide = false
+    const listeners: Array<(event: { matches: boolean }) => void> = []
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      get matches() { return query.includes('min-width: 1024px') ? wide : true },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => listeners.push(listener),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }) as unknown as MediaQueryList)
+    onTestFinished(() => media.mockRestore())
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(panel()!.getAttribute('aria-modal')).toBe('true')
+    expect(document.activeElement).toBe(panel()!.querySelector('.qp-name'))
+    expect(document.body.classList.contains('modal-open')).toBe(true)
+    // Tab from the last control comes back to the first.
+    const controls = Array.from(panel()!.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]'))
+    controls.at(-1)!.focus()
+    controls.at(-1)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(controls[0])
+
+    wide = true
+    listeners.forEach((listener) => listener({ matches: true }))
+    await flushPromises()
+    expect(panel()!.getAttribute('aria-modal')).toBe('false')
+    expect(document.body.classList.contains('modal-open')).toBe(false)
+  })
+
   it('reads the recent values from the page\'s row when it has one, and asks for the summary itself otherwise', async () => {
     const alone = mount(Panel, { attachTo: document.body })
     await openOn()
