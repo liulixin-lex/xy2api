@@ -131,7 +131,7 @@
             <button
               @click="refreshUsers"
               :disabled="loading"
-              class="btn btn-secondary px-3 max-lg:h-10 max-lg:w-10 max-lg:p-0"
+              class="btn btn-secondary px-3 table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >

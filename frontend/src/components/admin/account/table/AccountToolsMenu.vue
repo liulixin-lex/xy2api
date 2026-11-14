@@ -3,7 +3,7 @@
     <button
       ref="triggerRef"
       type="button"
-      class="tools-btn"
+      class="tools-btn table-toolbar__icon"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-label="t('admin.accounts.moreActions')"
       v-tip="t('admin.accounts.moreActions')"
@@ -181,8 +181,8 @@ defineExpose({ close: () => { open.value = false } })
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
 }
-/* Below 1280px the button keeps only its icon (a secondary action, 7o-3); below 1024px it is a 40px square like the
-   toolbar's other controls there. */
+/* Below 1280px the button keeps only its icon (a secondary action, 7o-3); below 1024px TableToolbar makes it its 40px
+   square (table-toolbar__icon). */
 @media (max-width: 1279px) {
   .tools-btn {
     width: var(--control-height);
@@ -194,12 +194,6 @@ defineExpose({ close: () => { open.value = false } })
   }
   .tools-btn__icon-narrow {
     display: inline-block;
-  }
-}
-@media (max-width: 1023px) {
-  .tools-btn {
-    width: 40px;
-    height: 40px;
   }
 }
 /* Touch from 1024px: 40px to hit, its look unchanged (7n-3). */

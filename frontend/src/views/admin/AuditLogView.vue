@@ -81,7 +81,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary"
               :disabled="loading"
               :aria-label="t('common.reset')"
               v-tip="t('common.reset')"
@@ -93,7 +93,7 @@
             <button
               v-if="isSuperAdmin"
               type="button"
-              class="btn btn-danger max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-danger"
               :aria-label="t('admin.audit.clearAll')"
               v-tip="t('admin.audit.clearAll')"
               @click="openClearDialog"

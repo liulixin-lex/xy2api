@@ -31,7 +31,7 @@
             <button
               @click="loadCodes"
               :disabled="loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >
@@ -40,7 +40,7 @@
             <button
               v-if="has('data.export') && hasIssue"
               @click="handleExportCodes"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary"
               :aria-label="t('admin.redeem.exportCsv')"
               v-tip="t('admin.redeem.exportCsv')"
             >
@@ -52,7 +52,7 @@
               data-test="batch-update-open"
               @click="openBatchUpdateDialog"
               :disabled="selectedCount === 0 || batchUpdating"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary"
               :aria-label="t('admin.redeem.batchUpdate')"
               v-tip="t('admin.redeem.batchUpdate')"
             >

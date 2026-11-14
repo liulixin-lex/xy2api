@@ -67,7 +67,7 @@
       <template #actions>
       <button
         type="button"
-        class="tb-icon-btn"
+        class="tb-icon-btn table-toolbar__icon"
         :aria-label="t('admin.accounts.table.refresh')"
         v-tip="t('admin.accounts.table.refreshTip')"
         data-test="accounts-refresh"
@@ -737,10 +737,6 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   }
   .tb-sel select,
   .tb-btn {
-    height: 40px;
-  }
-  .tb-icon-btn {
-    width: 40px;
     height: 40px;
   }
 }

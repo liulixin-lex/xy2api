@@ -24,7 +24,7 @@
             <button
               @click="loadCodes"
               :disabled="loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >

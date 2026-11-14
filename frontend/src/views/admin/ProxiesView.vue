@@ -41,7 +41,7 @@
             <button
               @click="loadProxies"
               :disabled="loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >
@@ -51,7 +51,7 @@
               v-if="canManage"
               @click="handleBatchTest"
               :disabled="batchTesting || loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary"
               :aria-label="t('admin.proxies.testConnection')"
               v-tip="t('admin.proxies.testConnection')"
             >
@@ -62,7 +62,7 @@
               v-if="canManage"
               @click="handleBatchQualityCheck"
               :disabled="batchQualityChecking || loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary"
               :aria-label="t('admin.proxies.batchQualityCheck')"
               v-tip="t('admin.proxies.batchQualityCheck')"
             >
@@ -89,7 +89,7 @@
             <div v-if="canManage || isSuperAdmin" class="relative lg:hidden">
               <button
                 type="button"
-                class="btn btn-secondary size-[42px] p-0"
+                class="btn btn-secondary table-toolbar__icon"
                 :aria-label="t('common.more')"
                 aria-haspopup="menu"
                 :aria-expanded="moreMenuOpen"

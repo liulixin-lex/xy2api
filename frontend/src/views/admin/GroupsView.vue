@@ -52,7 +52,7 @@
             <button
               @click="reloadGroups"
               :disabled="loading"
-              class="btn btn-secondary max-lg:h-10 max-lg:w-10 max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >

@@ -22,8 +22,9 @@
  *   indicator on the left and the actions on the right, the primary one included. No row is wider than the page (7n-1).
  *
  * A secondary action puts its text in `<span class="table-toolbar__label">`: below 1024px the text goes and the button
- * is a 40px square with its icon alone, so the button needs an aria-label and a tip (7o-3). The primary action
- * ("create", "add") does not use the class and keeps its text.
+ * is a 40px square with its icon alone, so the button needs an aria-label and a tip (7o-3). A button that is an icon
+ * at every width (refresh) carries `table-toolbar__icon` and is the same square there. This is the only place the
+ * square's size is set, for every page. The primary action ("create", "add") uses neither class and keeps its text.
  */
 </script>
 
@@ -102,7 +103,8 @@
   .table-toolbar :deep(.table-toolbar__label) {
     display: none;
   }
-  .table-toolbar :deep(:has(> .table-toolbar__label)) {
+  .table-toolbar :deep(:has(> .table-toolbar__label)),
+  .table-toolbar :deep(.table-toolbar__icon) {
     width: 40px;
     height: 40px;
     flex: none;

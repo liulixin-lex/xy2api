@@ -85,7 +85,7 @@
             <button
               @click="loadSubscriptions"
               :disabled="loading"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >
@@ -95,7 +95,7 @@
             <div class="relative" ref="columnDropdownRef">
               <button
                 @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-3 max-lg:size-[42px] max-lg:p-0"
+                class="btn btn-secondary px-3"
                 :aria-label="t('admin.users.columnSettings')"
                 v-tip="t('admin.users.columnSettings')"
               >
@@ -145,7 +145,7 @@
             </div>
             <button
               @click="showGuideModal = true"
-              class="btn btn-secondary max-lg:size-[42px] max-lg:p-0"
+              class="btn btn-secondary table-toolbar__icon"
               :aria-label="t('admin.subscriptions.guide.showGuide')"
               v-tip="t('admin.subscriptions.guide.showGuide')"
             >
