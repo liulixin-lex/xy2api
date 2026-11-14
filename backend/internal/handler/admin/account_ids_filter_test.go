@@ -66,6 +66,12 @@ type accountIDsAttention struct{ SchedQualityAdmin }
 func (accountIDsAttention) Attention(context.Context) (service.SchedAdminAttention, error) {
 	return service.SchedAdminAttention{Exempt: []int64{2, 3}}, nil
 }
+func (s accountIDsAttention) AccountFilter(_ context.Context, quality string) (service.SchedQualityFilter, error) {
+	if quality == "normal" {
+		return service.SchedQualityFilter{IDs: []int64{2}}, nil
+	}
+	return service.SchedAdminAttention{Exempt: []int64{2, 3}}.Filter(quality, nil), nil
+}
 
 func TestAccountIDsListPreservesQualityLiteAndETag(t *testing.T) {
 	for _, lite := range []string{"0", "1"} {
@@ -75,12 +81,12 @@ func TestAccountIDsListPreservesQualityLiteAndETag(t *testing.T) {
 			h := &AccountHandler{adminService: svc, schedQuality: accountIDsAttention{}}
 			r := gin.New()
 			r.GET("/accounts", h.List)
-			url := "/accounts?ids=1,2&ids=2&lite=" + lite + "&sched_quality=exempt"
+			url := "/accounts?ids=1,2&ids=2&lite=" + lite + "&sched_quality=normal"
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			require.Equal(t, []int64{1, 2}, svc.ids)
-			require.Equal(t, []int64{2, 3}, svc.quality.IDs)
+			require.Equal(t, []int64{2}, svc.quality.IDs)
 			require.False(t, svc.quality.Exclude)
 			require.NotEmpty(t, w.Header().Get("ETag"))
 			req := httptest.NewRequest(http.MethodGet, url, nil)

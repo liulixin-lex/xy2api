@@ -111,6 +111,74 @@ func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T
 		})
 	}
 }
+
+func TestSchedAdminAccountFilterNormalUsesSummaryConditions(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		globalEnabled   bool
+		stale           bool
+		groupPolicy     bool
+		wantNormal      []int64
+		wantSubstandard []int64
+	}{
+		{name: "attention buckets", globalEnabled: true, groupPolicy: true, wantNormal: []int64{1}, wantSubstandard: []int64{4}},
+		{name: "global quality disabled", globalEnabled: false, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+		{name: "stale view", globalEnabled: true, stale: true, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+		{name: "group policy disabled", globalEnabled: true, groupPolicy: false, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, repo := schedAdminFixture()
+			repo.allPlatforms = true
+			p := e.snapshot
+			now := s.d.Now()
+			p.GlobalEnabled = tc.globalEnabled
+			if tc.stale {
+				p.At = now.Add(-schedquality.ViewMaxAge - time.Nanosecond)
+			}
+			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: tc.groupPolicy}}
+			for id := int64(2); id <= 7; id++ {
+				account := *repo.rows[1]
+				account.ID = id
+				repo.rows[id] = &account
+			}
+			repo.rows[2].Schedulable = false
+			repo.rows[7].Platform = PlatformAnthropic
+			for _, id := range []int64{1, 2, 4, 5, 6} {
+				p.Accounts[id] = schedquality.AccountSummary{Speed: schedquality.SpeedEvidence{N: schedquality.SpeedMinSamples}}
+			}
+			p.GroupRows[4] = []SchedGroupRow{{GroupID: 1, Model: "failing", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}}}}
+			p.Overrides = []SchedOverride{
+				{AccountID: 5, GroupID: 1, Mode: schedquality.OverrideExempt},
+				{AccountID: 6, GroupID: 0, Mode: schedquality.OverrideExempt},
+			}
+
+			filter, err := s.AccountFilter(context.Background(), "normal")
+			require.NoError(t, err)
+			require.False(t, filter.Exclude)
+			require.Equal(t, tc.wantNormal, filter.IDs)
+			for _, category := range []struct {
+				quality string
+				want    []int64
+			}{
+				{quality: "substandard", want: tc.wantSubstandard},
+				{quality: "exempt", want: []int64{5, 6}},
+				{quality: "observing", want: []int64{3}},
+			} {
+				filter, err := s.AccountFilter(context.Background(), category.quality)
+				require.NoError(t, err)
+				require.False(t, filter.Exclude)
+				require.Equal(t, category.want, filter.IDs)
+			}
+
+			attention, err := s.Attention(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSubstandard, attention.Substandard)
+			require.Equal(t, []int64{5, 6}, attention.Exempt)
+			require.Equal(t, []int64{3}, attention.Observing)
+		})
+	}
+}
+
 func TestSchedAdminDetailEvidenceAndEmptyLists(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	p := e.snapshot
