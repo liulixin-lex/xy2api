@@ -28,13 +28,12 @@ func (r *schedQualitySettingRepo) GetMultiple(ctx context.Context, keys []string
 func TestSettingServiceSchedQualityDefaultsAndCachedReads(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name, quality, tests   string
-		wantQuality, wantTests bool
+		name, quality string
+		wantQuality   bool
 	}{
-		{"missing", "", "", true, true},
-		{"enabled", "true", "true", true, true},
-		{"disabled", "false", "false", false, false},
-		{"independent", "false", "true", false, true},
+		{"missing", "", true},
+		{"enabled", "true", true},
+		{"disabled", "false", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetGatewayForwardingSettingsCacheForTest(t)
@@ -42,20 +41,15 @@ func TestSettingServiceSchedQualityDefaultsAndCachedReads(t *testing.T) {
 			if tc.quality != "" {
 				values[SettingKeySchedQualityEnabled] = tc.quality
 			}
-			if tc.tests != "" {
-				values[SettingKeySchedQualityTestEnabled] = tc.tests
-			}
 			repo := &schedQualitySettingRepo{gatewayTTLSettingRepo: &gatewayTTLSettingRepo{data: values}}
 			svc := NewSettingService(repo, &config.Config{})
 			settings, err := svc.GetAllSettings(ctx)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantQuality, settings.SchedQualityEnabled)
-			require.Equal(t, tc.wantTests, settings.SchedQualityTestEnabled)
 			for i := 0; i < 2; i++ {
 				require.Equal(t, tc.wantQuality, svc.SchedQualityEnabled(ctx))
-				require.Equal(t, tc.wantTests, svc.SchedQualityTestEnabled(ctx))
 			}
-			require.Equal(t, 1, repo.reads, "both switches reuse the existing forwarding snapshot")
+			require.Equal(t, 1, repo.reads, "the global switch reuses the forwarding snapshot")
 		})
 	}
 }
@@ -66,11 +60,9 @@ func TestSettingServiceSchedQualityReadFailureDefaultsOn(t *testing.T) {
 	svc := NewSettingService(repo, &config.Config{})
 	ctx := context.Background()
 	require.True(t, svc.SchedQualityEnabled(ctx))
-	require.True(t, svc.SchedQualityTestEnabled(ctx))
 	require.Equal(t, 1, repo.reads)
 	var missing *SettingService
 	require.True(t, missing.SchedQualityEnabled(ctx))
-	require.True(t, missing.SchedQualityTestEnabled(ctx))
 }
 
 func TestSettingServiceSchedQualityInitialDefaults(t *testing.T) {
@@ -78,7 +70,6 @@ func TestSettingServiceSchedQualityInitialDefaults(t *testing.T) {
 	svc := NewSettingService(repo, &config.Config{})
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.Equal(t, "true", repo.data[SettingKeySchedQualityEnabled])
-	require.Equal(t, "true", repo.data[SettingKeySchedQualityTestEnabled])
 }
 
 func TestSettingServiceSchedQualityUpdateRefreshesExistingCache(t *testing.T) {
@@ -90,10 +81,7 @@ func TestSettingServiceSchedQualityUpdateRefreshesExistingCache(t *testing.T) {
 	settings, err := svc.GetAllSettings(ctx)
 	require.NoError(t, err)
 	settings.SchedQualityEnabled = false
-	settings.SchedQualityTestEnabled = false
 	require.NoError(t, svc.UpdateSettings(ctx, settings))
 	require.Equal(t, "false", repo.data[SettingKeySchedQualityEnabled])
-	require.Equal(t, "false", repo.data[SettingKeySchedQualityTestEnabled])
 	require.False(t, svc.SchedQualityEnabled(ctx))
-	require.False(t, svc.SchedQualityTestEnabled(ctx))
 }

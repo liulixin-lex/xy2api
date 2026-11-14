@@ -116,6 +116,7 @@
           <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
+          <slot name="row-detail" :row="row" />
         </div>
       </div>
     </template>
@@ -489,6 +490,11 @@ interface Props {
    * estimated-vs-actual row heights when rows have variable height.
    */
   virtualizeThreshold?: number
+  /**
+   * A row-detail row is open. Virtual scrolling measures only main rows, so the table renders every row while one is
+   * open and goes back to windowing once they are closed.
+   */
+  hasDetails?: boolean
   /** Enable controlled row selection. Stable row keys are strongly recommended. */
   selectable?: boolean
   /** Restrict row and current-page selection; omitted means every row is selectable. */
@@ -828,7 +834,7 @@ const toggleAllVisible = (checked: boolean) => {
 // 是否启用虚拟化:仅桌面端且行数超过阈值时开启。小列表全量渲染,彻底绕开虚拟器的
 // 估算/测量/滚动补偿链路,消除可变行高导致的滚动抖动。
 const shouldVirtualize = computed(() =>
-  isDesktopViewport.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
+  isDesktopViewport.value && !props.hasDetails && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
 )
 
 // 行高只取 ResizeObserver 给出的 borderBoxSize。默认实现在 ref 回调里同步读 offsetHeight,
@@ -887,7 +893,8 @@ const measureElement = (el: any) => {
 }
 
 const measureRowComponent = (instance: any) => {
-  measureElement((instance as ComponentPublicInstance | null)?.$el)
+  const row = instance as (ComponentPublicInstance & { rowEl?: HTMLElement | null }) | null
+  measureElement(row?.rowEl ?? row?.$el)
 }
 
 const onRowClick = (row: any) => emit('rowClick', row)

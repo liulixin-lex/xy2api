@@ -17,7 +17,6 @@ type OpenAIStickyAtomicCache interface {
 }
 
 type openAIStickyPromotionKey struct{}
-type openAIStickyReconciledKey struct{}
 
 func openAIAtomicStickySession(sessionHash string) bool {
 	return strings.HasPrefix(sessionHash, "v2:")
@@ -31,8 +30,14 @@ func markOpenAIStickySpillover(selection *AccountSelectionResult, spillover bool
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) error {
+	if releasePendingOpenAIStickyOwner(ctx, groupID, sessionHash, owner) {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) || s.cache == nil || owner <= 0 {
 		return nil
+	}
+	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, owner); handled {
+		return err
 	}
 	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) {
 		if reporter, ok := s.cache.(interface {
@@ -47,6 +52,19 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.C
 		return cache.DeleteSessionAccountIDIfOwner(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)
 	}
 	return s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+}
+
+func (s *OpenAIGatewayService) deleteOpenAIStickyAliases(ctx context.Context, groupID *int64, sessionHash string, owner int64) (bool, error) {
+	cache, ok := s.cache.(OpenAIStickyAliasCache)
+	legacy := s.openAILegacySessionCacheKey(ctx, sessionHash)
+	if !ok || legacy == "" || (!s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled()) {
+		return false, nil
+	}
+	deleted, err := cache.DeleteSessionBindingAliases(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), legacy, owner)
+	if err == nil && deleted {
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
+	}
+	return true, err
 }
 
 // deleteOpenAIStickyBinding preserves the cache's deletion semantics. Only a

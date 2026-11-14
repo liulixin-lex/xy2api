@@ -29,23 +29,23 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 	_, _ = q.WriteString(`INSERT INTO account_attempt_samples
 		(attempt_id, started_at, finished_at, account_id, group_id, model, request_class,
 		stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens, prev_prompt_tokens,
-		cache_read_tokens, session_key, request_id) VALUES `)
-	args := make([]any, 0, len(rows)*18)
+		cache_read_tokens, session_key, request_id, input_tokens, cache_creation_tokens) VALUES `)
+	args := make([]any, 0, len(rows)*20)
 	for i, row := range rows {
 		if i > 0 {
 			_ = q.WriteByte(',')
 		}
 		_ = q.WriteByte('(')
-		for j := 0; j < 18; j++ {
+		for j := 0; j < 20; j++ {
 			if j > 0 {
 				_ = q.WriteByte(',')
 			}
-			fmt.Fprintf(&q, "$%d", i*18+j+1)
+			fmt.Fprintf(&q, "$%d", i*20+j+1)
 		}
 		_ = q.WriteByte(')')
 		args = append(args, row.AttemptID, row.StartedAt, row.FinishedAt, row.AccountID, row.GroupID,
-			row.Model, row.Class, row.Stream, row.Warm, row.TTFOMs, row.CensoredMs, row.Outcome,
-			row.Detail, row.PromptTokens, row.PrevPromptTokens, row.CacheReadTokens, row.SessionKey, row.RequestID)
+			row.Model, 1, row.Stream, false, row.TTFOMs, row.CensoredMs, row.Outcome,
+			row.Detail, row.PromptTokens, nil, row.CacheReadTokens, row.SessionKey, row.RequestID, row.InputTokens, row.CacheCreationTokens)
 	}
 	_, _ = q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
 	_, err := r.db.ExecContext(ctx, q.String(), args...)
@@ -53,8 +53,8 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 }
 
 const schedAttemptColumns = `attempt_id, started_at, finished_at, account_id, group_id, model,
-	request_class, stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
-	prev_prompt_tokens, cache_read_tokens, session_key, request_id, inserted_at`
+	stream, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
+	cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens`
 
 func (r *schedAttemptRepository) read(ctx context.Context, where string, args ...any) ([]schedquality.AttemptSample, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerReadTimeout)
@@ -75,12 +75,10 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	var result []schedquality.AttemptSample
 	for rows.Next() {
 		var row schedquality.AttemptSample
-		if err := rows.Scan(&row.AttemptID, &row.StartedAt, &row.FinishedAt, &row.AccountID, &row.GroupID,
-			&row.Model, &row.Class, &row.Stream, &row.Warm, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
-			&row.Detail, &row.PromptTokens, &row.PrevPromptTokens, &row.CacheReadTokens, &row.SessionKey,
-			&row.RequestID, &row.InsertedAt); err != nil {
+		if err := rows.Scan(schedAttemptScanTargets(&row)...); err != nil {
 			return nil, err
 		}
+		row.ClientCanceled = row.Outcome == schedquality.Outcome(5)
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -95,10 +93,6 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	return result, nil
 }
 
-func (r *schedAttemptRepository) LoadStartedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
-	return r.read(ctx, `WHERE started_at > $1 ORDER BY started_at, attempt_id`, since)
-}
-
 func (r *schedAttemptRepository) LoadInsertedAfter(ctx context.Context, after time.Time, limit int) ([]schedquality.AttemptSample, time.Time, error) {
 	rows, err := r.read(ctx, `WHERE inserted_at > $1 AND inserted_at <= (
 		SELECT max(inserted_at) FROM (
@@ -111,10 +105,6 @@ func (r *schedAttemptRepository) LoadInsertedAfter(ctx context.Context, after ti
 		latest = rows[len(rows)-1].InsertedAt
 	}
 	return rows, latest, err
-}
-
-func (r *schedAttemptRepository) LoadRecentByAccount(ctx context.Context, accountID int64, limit int) ([]schedquality.AttemptSample, error) {
-	return r.read(ctx, `WHERE account_id = $1 ORDER BY started_at DESC, attempt_id DESC LIMIT NULLIF($2, 0)`, accountID, limit)
 }
 
 func (r *schedAttemptRepository) DeleteBefore(ctx context.Context, t time.Time) (int64, error) {

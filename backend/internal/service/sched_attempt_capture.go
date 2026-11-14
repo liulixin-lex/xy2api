@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -24,41 +25,53 @@ type schedAttemptCapture struct {
 	mu                                         sync.Mutex
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
+	accountID                                  int64
 	attempt                                    SchedAttempt
 	sendErr                                    error
 	started                                    time.Time
 	first, done, client                        bool
 	expectTerminal, terminal, benignIncomplete bool
+	terminalEvent                              string
 	failure                                    *resilience.Outcome
 	usage                                      *SchedAttemptUsage
 }
 
 func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
-	if s.schedAttemptRecorder == nil {
-		return nil
-	}
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
 	st := resilience.StateFrom(ctx)
 	selection, ok := st.SchedSelection()
-	if !ok || selection.AccountID != account.ID {
+	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
+	change := pendingOpenAIStickyChange(ctx)
+	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
+	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}}
+	if change != nil && change.target == account.ID {
+		change.mu.Lock()
+		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
+		change.mu.Unlock()
+	}
+	if !record {
+		st.SetCurrentAttempt(a)
+		return a
+	}
 	groupID, sessionKey := st.SessionIdentity()
-	effort := ""
-	if parsed := extractOpenAIReasoningEffortFromBody(body, gjson.GetBytes(body, "model").String()); parsed != nil {
-		effort = *parsed
-	}
-	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model, StickyWarm: selection.StickyWarm,
-		Effort: effort, BodyBytes: bodyBytes, Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
-	if test, ok := st.SchedTest().(*SchedTestAttempt); ok && test != nil {
-		copy := *test
-		in.Test = &copy
-	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, started: time.Now(), attempt: s.schedAttemptRecorder.Begin(in)}
+	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
+		Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
+	a.attempt = s.schedAttemptRecorder.Begin(in)
 	st.SetCurrentAttempt(a)
 	return a
+}
+
+func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
+	var input, read, creation *int
+	if in.Usage != nil {
+		input, read, creation = &in.Usage.InputTokens, &in.Usage.CacheReadTokens, &in.Usage.CacheCreationTokens
+	}
+	a.state.NoteGatewayAttempt(in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
+	a.attempt.Finish(in)
 }
 func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {
 	a, _ := resilience.StateFrom(ctx).CurrentAttempt().(*schedAttemptCapture)
@@ -80,7 +93,26 @@ func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 	if u == nil || u.InputTokens <= 0 {
 		return nil
 	}
-	return &SchedAttemptUsage{PromptTokens: u.InputTokens, CacheReadTokens: u.CacheReadInputTokens}
+	read, creation := max(u.CacheReadInputTokens, 0), max(u.CacheCreationInputTokens, 0)
+	return &SchedAttemptUsage{
+		PromptTokens:        u.InputTokens,
+		InputTokens:         max(u.InputTokens-read-creation, 0),
+		CacheReadTokens:     read,
+		CacheCreationTokens: creation,
+	}
+}
+
+func isBenignOpenAIIncomplete(payload []byte) bool {
+	root := gjson.ParseBytes(payload)
+	typ := strings.TrimSpace(root.Get("type").String())
+	if typ != "response.incomplete" && strings.TrimSpace(root.Get("status").String()) != "incomplete" {
+		return false
+	}
+	reason := strings.TrimSpace(root.Get("response.incomplete_details.reason").String())
+	if reason == "" {
+		reason = strings.TrimSpace(root.Get("incomplete_details.reason").String())
+	}
+	return reason == "max_output_tokens" || reason == "content_filter"
 }
 func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 	if a == nil {
@@ -112,17 +144,20 @@ func (a *schedAttemptCapture) observe(data []byte) {
 		}
 	}
 	status := root.Get("status").String()
-	if typ == "response.incomplete" || status == "incomplete" {
-		reason := root.Get("response.incomplete_details.reason").String()
-		if reason == "" {
-			reason = root.Get("incomplete_details.reason").String()
-		}
-		if reason == "max_output_tokens" || reason == "content_filter" {
-			a.mu.Lock()
-			a.benignIncomplete = true
-			a.mu.Unlock()
-			return
-		}
+	terminalEvent := typ
+	if terminalEvent == "" && (status == "completed" || status == "failed" || status == "incomplete" || status == "cancelled" || status == "canceled") {
+		terminalEvent = "response." + status
+	}
+	if isOpenAIWSTerminalEvent(terminalEvent) || terminalEvent == "error" {
+		a.mu.Lock()
+		a.terminalEvent = terminalEvent
+		a.mu.Unlock()
+	}
+	if isBenignOpenAIIncomplete(data) {
+		a.mu.Lock()
+		a.benignIncomplete = true
+		a.mu.Unlock()
+		return
 	}
 	failed := typ == "error" || typ == "response.failed" || typ == "response.incomplete" || typ == "response.cancelled" || typ == "response.canceled" || status == "failed" || status == "incomplete" || root.Get("error").IsObject()
 	if !failed {
@@ -171,10 +206,17 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		return
 	}
 	a.done = true
-	if plan.Applied() {
-		a.attempt.FinishOther("budget_cut")
+	noteOpenAIStickyAttemptOutcome(a, false)
+	if a.state.ClientCanceled() {
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+	} else if plan.Applied() || a.first {
+		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceNetwork, Err: context.DeadlineExceeded}).Category)
+		if a.first {
+			detail = string(resilience.CategoryStall)
+		}
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 	} else {
-		a.attempt.FinishTimeout(time.Since(a.started))
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
@@ -184,6 +226,12 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if result != nil {
+		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
+		if result.UpstreamTerminalEvent == "" {
+			result.UpstreamTerminalEvent = a.terminalEvent
+		}
+	}
 	if a.done {
 		return
 	}
@@ -198,44 +246,35 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
-	// This is the sole mapping from send evidence to scheduler outcomes.
-	if a.client || a.ctx.Err() != nil || errors.Is(err, context.Canceled) {
-		if a.first {
-			a.attempt.FinishOK(a.usage)
-		} else {
-			a.attempt.FinishOther("client_cancel")
-		}
-		return
-	}
-	if a.benignIncomplete && a.failure == nil {
-		a.attempt.FinishOK(a.usage)
+	canceled := a.client || a.state.ClientCanceled()
+	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
+		(!a.expectTerminal || a.terminal) &&
+		(result == nil || result.CompletedForDelivery())
+
+	noteOpenAIStickyAttemptOutcome(a, success)
+	// Client cancellation is an explicit delivery fact, never a generic deadline.
+	if canceled {
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
 	failure := a.failure
 	if failure == nil && err != nil {
 		var httpErr *UpstreamFailoverError
-		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 && len(httpErr.ResponseBody) > 0 {
+		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
 			failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
+		} else {
+			failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: err}
 		}
 	}
-	if failure != nil {
-		category := resilience.Classify(*failure, nil).Category
-		switch category {
-		case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryRateLimitReset, resilience.CategoryRateLimit, resilience.CategoryCapacityShed, resilience.CategoryModelUnsupported, resilience.CategoryClientError, resilience.CategoryUpstreamRequestRestriction:
-			a.attempt.FinishOther(string(category))
-			return
-		case resilience.CategoryTransient, resilience.CategoryStall:
-			a.attempt.FinishFault(string(category))
-			return
+	if !success {
+		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
+		if failure != nil {
+			detail = string(classifyUpstreamOutcome(*failure).Category)
 		}
-		a.attempt.FinishFault("unclassified")
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 		return
 	}
-	if err != nil || a.expectTerminal && !a.terminal || result != nil && (result.PartialFailure || result.UpstreamTerminalEvent == "response.failed") {
-		a.attempt.FinishFault("unclassified")
-		return
-	}
-	a.attempt.FinishOK(a.usage)
+	a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: a.usage})
 }
 
 // FinishSchedAttemptAtHandlerExit only repairs outcomes invisible to the service.
@@ -244,11 +283,13 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	if ctx.Err() != nil {
+	if resilience.StateFrom(ctx).ClientCanceled() {
 		a.cancel()
+		CompleteOpenAIStickyChange(ctx, a.accountID, false, true)
 		return
 	}
 	a.finishUnfinished()
+	CompleteOpenAIStickyChange(ctx, a.accountID, false, false)
 }
 func (a *schedAttemptCapture) finishUnfinished() {
 	if a == nil {
@@ -258,13 +299,10 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
-		a.attempt.FinishOther("unfinished")
+		noteOpenAIStickyAttemptOutcome(a, false)
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
 	}
-}
-func schedTestRequest(ctx context.Context) bool {
-	test, ok := resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt)
-	return ok && test != nil
 }
 func observeSchedPayload(c *gin.Context, data []byte, eventType ...string) {
 	if c == nil || c.Request == nil {
@@ -337,10 +375,11 @@ func finishSchedRead(c *gin.Context, err error) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	if errors.Is(err, io.EOF) {
-		err = nil
+	// EOF may precede buffered delivery or a protocol conversion's final
+	// output. The forwarding function owns successful completion.
+	if !errors.Is(err, io.EOF) {
+		currentSchedAttempt(c.Request.Context()).noteError(err)
 	}
-	currentSchedAttempt(c.Request.Context()).finish(nil, err)
 }
 
 func cancelSchedClient(c *gin.Context) {
@@ -359,6 +398,7 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
+	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
 }
 func (t *schedWSTurnCapture) observe(payload []byte) {
@@ -374,12 +414,18 @@ func (t *schedWSTurnCapture) finish(result *OpenAIForwardResult, err error) {
 		err = errors.New("missing terminal event")
 	}
 	t.active.finish(result, err)
+	if t.active != nil {
+		FinishOpenAIStickyForward(t.active.ctx, t.active.accountID, result, err)
+	}
 	t.active = nil
 }
 func (t *schedWSTurnCapture) cancel() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.cancel()
+	if t.active != nil {
+		CompleteOpenAIStickyChange(t.active.ctx, t.active.accountID, false, true)
+	}
 }
 
 func (a *schedAttemptCapture) markTerminal() {
@@ -389,4 +435,14 @@ func (a *schedAttemptCapture) markTerminal() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.terminal = true
+}
+
+// noteGatewayWSOutput runs after a successful client write, unlike the attempt
+// clock which measures receipt from upstream.
+func noteGatewayWSOutput(ctx context.Context, payload []byte) {
+	root := gjson.ParseBytes(payload)
+	disposition := resilience.ResponsesEventOutputDisposition(strings.TrimSpace(root.Get("type").String()), payload)
+	if disposition.Visible || semanticJSONOutput(root) {
+		resilience.StateFrom(ctx).NoteSemanticOutput(time.Now())
+	}
 }

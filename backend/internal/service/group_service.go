@@ -43,7 +43,7 @@ type GroupDuplicateRepository interface {
 	// after an ambiguous idempotency-store failure.
 	FindByDuplicateOperationID(ctx context.Context, operationID string) (*Group, error)
 	// CreateFromSource atomically persists the group, copies the source group's
-	// exact account priorities, and writes the scheduler outbox event.
+	// account memberships, and writes the scheduler outbox event.
 	CreateFromSource(ctx context.Context, group *Group, sourceGroupID int64) error
 }
 

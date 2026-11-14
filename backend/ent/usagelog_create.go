@@ -51,6 +51,76 @@ func (_c *UsageLogCreate) SetRequestID(v string) *UsageLogCreate {
 	return _c
 }
 
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (_c *UsageLogCreate) SetGatewayRequestID(v string) *UsageLogCreate {
+	_c.mutation.SetGatewayRequestID(v)
+	return _c
+}
+
+// SetNillableGatewayRequestID sets the "gateway_request_id" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableGatewayRequestID(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetGatewayRequestID(*v)
+	}
+	return _c
+}
+
+// SetResult sets the "result" field.
+func (_c *UsageLogCreate) SetResult(v int16) *UsageLogCreate {
+	_c.mutation.SetResult(v)
+	return _c
+}
+
+// SetNillableResult sets the "result" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableResult(v *int16) *UsageLogCreate {
+	if v != nil {
+		_c.SetResult(*v)
+	}
+	return _c
+}
+
+// SetSwitches sets the "switches" field.
+func (_c *UsageLogCreate) SetSwitches(v int16) *UsageLogCreate {
+	_c.mutation.SetSwitches(v)
+	return _c
+}
+
+// SetNillableSwitches sets the "switches" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableSwitches(v *int16) *UsageLogCreate {
+	if v != nil {
+		_c.SetSwitches(*v)
+	}
+	return _c
+}
+
+// SetFallback sets the "fallback" field.
+func (_c *UsageLogCreate) SetFallback(v bool) *UsageLogCreate {
+	_c.mutation.SetFallback(v)
+	return _c
+}
+
+// SetNillableFallback sets the "fallback" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableFallback(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetFallback(*v)
+	}
+	return _c
+}
+
+// SetTakeover sets the "takeover" field.
+func (_c *UsageLogCreate) SetTakeover(v bool) *UsageLogCreate {
+	_c.mutation.SetTakeover(v)
+	return _c
+}
+
+// SetNillableTakeover sets the "takeover" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTakeover(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetTakeover(*v)
+	}
+	return _c
+}
+
 // SetModel sets the "model" field.
 func (_c *UsageLogCreate) SetModel(v string) *UsageLogCreate {
 	_c.mutation.SetModel(v)
@@ -1284,6 +1354,26 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 		_node.RequestID = value
 	}
+	if value, ok := _c.mutation.GatewayRequestID(); ok {
+		_spec.SetField(usagelog.FieldGatewayRequestID, field.TypeString, value)
+		_node.GatewayRequestID = &value
+	}
+	if value, ok := _c.mutation.Result(); ok {
+		_spec.SetField(usagelog.FieldResult, field.TypeInt16, value)
+		_node.Result = &value
+	}
+	if value, ok := _c.mutation.Switches(); ok {
+		_spec.SetField(usagelog.FieldSwitches, field.TypeInt16, value)
+		_node.Switches = &value
+	}
+	if value, ok := _c.mutation.Fallback(); ok {
+		_spec.SetField(usagelog.FieldFallback, field.TypeBool, value)
+		_node.Fallback = &value
+	}
+	if value, ok := _c.mutation.Takeover(); ok {
+		_spec.SetField(usagelog.FieldTakeover, field.TypeBool, value)
+		_node.Takeover = &value
+	}
 	if value, ok := _c.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
@@ -1718,6 +1808,108 @@ func (u *UsageLogUpsert) SetRequestID(v string) *UsageLogUpsert {
 // UpdateRequestID sets the "request_id" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateRequestID() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldRequestID)
+	return u
+}
+
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (u *UsageLogUpsert) SetGatewayRequestID(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldGatewayRequestID, v)
+	return u
+}
+
+// UpdateGatewayRequestID sets the "gateway_request_id" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateGatewayRequestID() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldGatewayRequestID)
+	return u
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (u *UsageLogUpsert) ClearGatewayRequestID() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldGatewayRequestID)
+	return u
+}
+
+// SetResult sets the "result" field.
+func (u *UsageLogUpsert) SetResult(v int16) *UsageLogUpsert {
+	u.Set(usagelog.FieldResult, v)
+	return u
+}
+
+// UpdateResult sets the "result" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateResult() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldResult)
+	return u
+}
+
+// AddResult adds v to the "result" field.
+func (u *UsageLogUpsert) AddResult(v int16) *UsageLogUpsert {
+	u.Add(usagelog.FieldResult, v)
+	return u
+}
+
+// ClearResult clears the value of the "result" field.
+func (u *UsageLogUpsert) ClearResult() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldResult)
+	return u
+}
+
+// SetSwitches sets the "switches" field.
+func (u *UsageLogUpsert) SetSwitches(v int16) *UsageLogUpsert {
+	u.Set(usagelog.FieldSwitches, v)
+	return u
+}
+
+// UpdateSwitches sets the "switches" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateSwitches() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldSwitches)
+	return u
+}
+
+// AddSwitches adds v to the "switches" field.
+func (u *UsageLogUpsert) AddSwitches(v int16) *UsageLogUpsert {
+	u.Add(usagelog.FieldSwitches, v)
+	return u
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (u *UsageLogUpsert) ClearSwitches() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldSwitches)
+	return u
+}
+
+// SetFallback sets the "fallback" field.
+func (u *UsageLogUpsert) SetFallback(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldFallback, v)
+	return u
+}
+
+// UpdateFallback sets the "fallback" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateFallback() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldFallback)
+	return u
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (u *UsageLogUpsert) ClearFallback() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldFallback)
+	return u
+}
+
+// SetTakeover sets the "takeover" field.
+func (u *UsageLogUpsert) SetTakeover(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldTakeover, v)
+	return u
+}
+
+// UpdateTakeover sets the "takeover" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTakeover() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTakeover)
+	return u
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (u *UsageLogUpsert) ClearTakeover() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTakeover)
 	return u
 }
 
@@ -3061,6 +3253,125 @@ func (u *UsageLogUpsertOne) SetRequestID(v string) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateRequestID() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateRequestID()
+	})
+}
+
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (u *UsageLogUpsertOne) SetGatewayRequestID(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetGatewayRequestID(v)
+	})
+}
+
+// UpdateGatewayRequestID sets the "gateway_request_id" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateGatewayRequestID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateGatewayRequestID()
+	})
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (u *UsageLogUpsertOne) ClearGatewayRequestID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearGatewayRequestID()
+	})
+}
+
+// SetResult sets the "result" field.
+func (u *UsageLogUpsertOne) SetResult(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResult(v)
+	})
+}
+
+// AddResult adds v to the "result" field.
+func (u *UsageLogUpsertOne) AddResult(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddResult(v)
+	})
+}
+
+// UpdateResult sets the "result" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateResult() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResult()
+	})
+}
+
+// ClearResult clears the value of the "result" field.
+func (u *UsageLogUpsertOne) ClearResult() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResult()
+	})
+}
+
+// SetSwitches sets the "switches" field.
+func (u *UsageLogUpsertOne) SetSwitches(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSwitches(v)
+	})
+}
+
+// AddSwitches adds v to the "switches" field.
+func (u *UsageLogUpsertOne) AddSwitches(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddSwitches(v)
+	})
+}
+
+// UpdateSwitches sets the "switches" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateSwitches() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSwitches()
+	})
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (u *UsageLogUpsertOne) ClearSwitches() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSwitches()
+	})
+}
+
+// SetFallback sets the "fallback" field.
+func (u *UsageLogUpsertOne) SetFallback(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFallback(v)
+	})
+}
+
+// UpdateFallback sets the "fallback" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateFallback() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFallback()
+	})
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (u *UsageLogUpsertOne) ClearFallback() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFallback()
+	})
+}
+
+// SetTakeover sets the "takeover" field.
+func (u *UsageLogUpsertOne) SetTakeover(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTakeover(v)
+	})
+}
+
+// UpdateTakeover sets the "takeover" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTakeover() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTakeover()
+	})
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (u *UsageLogUpsertOne) ClearTakeover() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTakeover()
 	})
 }
 
@@ -4777,6 +5088,125 @@ func (u *UsageLogUpsertBulk) SetRequestID(v string) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateRequestID() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateRequestID()
+	})
+}
+
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (u *UsageLogUpsertBulk) SetGatewayRequestID(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetGatewayRequestID(v)
+	})
+}
+
+// UpdateGatewayRequestID sets the "gateway_request_id" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateGatewayRequestID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateGatewayRequestID()
+	})
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (u *UsageLogUpsertBulk) ClearGatewayRequestID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearGatewayRequestID()
+	})
+}
+
+// SetResult sets the "result" field.
+func (u *UsageLogUpsertBulk) SetResult(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResult(v)
+	})
+}
+
+// AddResult adds v to the "result" field.
+func (u *UsageLogUpsertBulk) AddResult(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddResult(v)
+	})
+}
+
+// UpdateResult sets the "result" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateResult() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResult()
+	})
+}
+
+// ClearResult clears the value of the "result" field.
+func (u *UsageLogUpsertBulk) ClearResult() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResult()
+	})
+}
+
+// SetSwitches sets the "switches" field.
+func (u *UsageLogUpsertBulk) SetSwitches(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSwitches(v)
+	})
+}
+
+// AddSwitches adds v to the "switches" field.
+func (u *UsageLogUpsertBulk) AddSwitches(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddSwitches(v)
+	})
+}
+
+// UpdateSwitches sets the "switches" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateSwitches() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSwitches()
+	})
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (u *UsageLogUpsertBulk) ClearSwitches() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSwitches()
+	})
+}
+
+// SetFallback sets the "fallback" field.
+func (u *UsageLogUpsertBulk) SetFallback(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFallback(v)
+	})
+}
+
+// UpdateFallback sets the "fallback" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateFallback() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFallback()
+	})
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (u *UsageLogUpsertBulk) ClearFallback() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFallback()
+	})
+}
+
+// SetTakeover sets the "takeover" field.
+func (u *UsageLogUpsertBulk) SetTakeover(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTakeover(v)
+	})
+}
+
+// UpdateTakeover sets the "takeover" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTakeover() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTakeover()
+	})
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (u *UsageLogUpsertBulk) ClearTakeover() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTakeover()
 	})
 }
 

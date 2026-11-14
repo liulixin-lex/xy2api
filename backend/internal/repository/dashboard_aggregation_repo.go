@@ -245,7 +245,29 @@ func (r *dashboardAggregationRepository) CleanupUsageLogs(ctx context.Context, c
 	if err := r.cleanupUsageLogsBatches(ctx, cutoff); err != nil {
 		return err
 	}
+	if err := r.cleanupUnbilledRequestsBatches(ctx, cutoff); err != nil {
+		return err
+	}
 	return r.SyncGroupUsageRollups(ctx, service.GroupUsageTodayStart(r.now()))
+}
+
+func (r *dashboardAggregationRepository) cleanupUnbilledRequestsBatches(ctx context.Context, cutoff time.Time) error {
+	for {
+		res, err := r.sql.ExecContext(ctx, `DELETE FROM gateway_unbilled_requests WHERE id IN (
+			SELECT id FROM gateway_unbilled_requests WHERE created_at < $1
+			ORDER BY created_at, id LIMIT $2
+		)`, cutoff.UTC(), usageLogsCleanupBatchSize)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected < usageLogsCleanupBatchSize {
+			return nil
+		}
+	}
 }
 
 func (r *dashboardAggregationRepository) cleanupUsageLogsBatches(ctx context.Context, cutoff time.Time) error {

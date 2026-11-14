@@ -60,7 +60,7 @@ describe('AccountTableFilters', () => {
   })
 
   it('preserves every option and emits a merged filter snapshot plus change for every selection', async () => {
-    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42', sched_quality: 'cooling' }
+    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42', sched_quality: 'substandard' }
     const wrapper = mountFilters(filters)
     const expectedOptions = [
       ['platform', ['', ...CONCRETE_PLATFORM_OPTIONS.map(option => option.value)]],
@@ -70,7 +70,7 @@ describe('AccountTableFilters', () => {
       ['iq_status', ['', 'smart', 'degraded', 'unknown']],
       ['group', ['', 'ungrouped', '42']],
       // One quality-state dropdown after the groups filter (D34, D38).
-      ['sched_quality', ['', 'normal', 'cooling', 'exempt', 'demote']]
+      ['sched_quality', ['', 'observing', 'substandard', 'exempt']]
     ] as const
     let changes = 0
     for (const [index, [key, values]] of expectedOptions.entries()) {

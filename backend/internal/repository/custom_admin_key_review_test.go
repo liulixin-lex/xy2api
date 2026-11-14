@@ -84,6 +84,10 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 			require.NoError(t, db.QueryRow(`SELECT priority,created_at FROM account_groups WHERE account_id=$1 AND group_id=$2`, account.ID, b.ID).Scan(&priority, &created))
 			require.Equal(t, 73, priority, "未授权分组调度优先级不能变化")
 			require.True(t, originalTime.Equal(created), "未授权关联不应被重建")
+			for _, groupID := range ids {
+				require.NoError(t, db.QueryRow(`SELECT priority FROM account_groups WHERE account_id=$1 AND group_id=$2`, account.ID, groupID).Scan(&priority))
+				require.Equal(t, 50, priority, "新增关联使用数据库默认值")
+			}
 		}
 	})
 	t.Run("受限创建绑定与失败回滚", func(t *testing.T) {

@@ -28,6 +28,7 @@ type schedAdminEngine struct {
 	overrides []SchedOverride
 	policy    SchedPolicyRecord
 	policyErr error
+	changes   []SchedPolicyChange
 }
 
 func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
@@ -36,7 +37,7 @@ func (e *schedAdminEngine) Reset(_ context.Context, id int64) (time.Time, error)
 		return time.Time{}, e.resetErr
 	}
 	delete(e.snapshot.GroupRows, id)
-	delete(e.snapshot.Evidence, SchedAccountModel{id, "m"})
+	delete(e.snapshot.Accounts, id)
 	if e.callback != nil {
 		e.callback(id, e.resetAt)
 	}
@@ -215,13 +216,10 @@ func (c *schedAdminTempCache) SchedAdminDeleteTempIf(_ context.Context, _ int64,
 
 func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	engine := &schedAdminEngine{snapshot: &SchedQualitySnapshot{At: now, GlobalEnabled: true, TestsEnabled: true, Evidence: map[SchedAccountModel]schedquality.Summary{}, GroupRows: map[int64][]SchedGroupRow{}, Tests: map[SchedAccountModel]SchedTestRecord{}, Policies: map[int64]SchedPolicyRecord{}}, resetAt: now}
+	engine := &schedAdminEngine{snapshot: &SchedQualitySnapshot{At: now, GlobalEnabled: true, Accounts: map[int64]schedquality.AccountSummary{}, GroupRows: map[int64][]SchedGroupRow{}, Policies: map[int64]SchedPolicyRecord{}}, resetAt: now}
 	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Groups: []*Group{{ID: 1, Name: "group", Platform: PlatformOpenAI}}, Extra: map[string]any{}}}, fail: map[string]error{}}
 	svc := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminGroups{1: {ID: 1, Name: "group", Platform: PlatformOpenAI}}, Now: func() time.Time { return now }})
 	return svc, engine, repo
-}
-func schedAdminEvidence(n int) schedquality.Summary {
-	return schedquality.Summary{Samples: n, Sessions: 4, Speed: schedquality.SpeedSummary{N: n, Sessions: 4, P90Ms: 1234, FailBoundMs: 1000}, Error: schedquality.ErrorSummary{N: n, Sessions: 4, Rate: .1, LCB: .01}, Cache: schedquality.CacheSummary{Turns: n, Sessions: 4, Ratio: .8}}
 }
 func TestSchedAdminClearErrorInvalidatesOAuthToken(t *testing.T) {
 	for _, reset := range []bool{false, true} {
@@ -238,7 +236,7 @@ func TestSchedAdminClearErrorInvalidatesOAuthToken(t *testing.T) {
 					out, err := s.Reset(context.Background(), 1, 9)
 					require.NoError(t, err)
 					require.Empty(t, out.Failed)
-					require.Contains(t, out.Cleared, SchedResetItem{Key: "error", Kind: "error"})
+					require.Contains(t, out.Cleared, "error")
 				} else {
 					ok, err := s.ClearAutoState(context.Background(), 1, "error", 9)
 					require.NoError(t, err)
@@ -252,131 +250,6 @@ func TestSchedAdminClearErrorInvalidatesOAuthToken(t *testing.T) {
 	}
 }
 
-func TestSchedAdminSummaryAggregation(t *testing.T) {
-	s, e, r := schedAdminFixture()
-	p := e.snapshot
-	p.Members = map[int64][]int64{1: {1, 2, 3, 4, 5, 6, 7}}
-	p.At = p.At.Add(-time.Minute - time.Nanosecond)
-	p.Evidence[SchedAccountModel{1, "a"}] = schedAdminEvidence(40)
-	p.Evidence[SchedAccountModel{1, "b"}] = schedAdminEvidence(80)
-	for g := int64(1); g <= 5; g++ {
-		p.GroupRows[1] = append(p.GroupRows[1], SchedGroupRow{GroupID: g, Model: "a", View: schedquality.StateView{State: schedquality.StateCooling}, Summary: schedAdminEvidence(40)})
-	}
-	p.GroupRows[1] = append(p.GroupRows[1], SchedGroupRow{GroupID: 1, Model: "b", View: schedquality.StateView{State: schedquality.StateCooling}}, SchedGroupRow{GroupID: 6, Model: "a", Summary: schedAdminEvidence(40)}, SchedGroupRow{GroupID: 7, Model: "a"})
-	out, err := s.Summary(context.Background(), []int64{1, 2}, "")
-	require.NoError(t, err)
-	require.True(t, out.Stale)
-	require.Equal(t, 1, e.reads)
-	require.Zero(t, r.reads)
-	require.Equal(t, "b", *out.Accounts[0].Model)
-	require.Equal(t, 80, out.Accounts[0].Samples)
-	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 7, Cooling: 5, Normal: 1, Nodata: 1}, out.Accounts[0].Groups)
-	require.Len(t, out.Accounts[0].Cooling, 5)
-	require.Zero(t, out.Accounts[0].CoolingMore)
-	require.Nil(t, out.Accounts[1].Model)
-	require.Nil(t, out.Accounts[1].TTFO.P90Ms)
-	out, err = s.Summary(context.Background(), []int64{1}, "a")
-	require.NoError(t, err)
-	require.Equal(t, 40, out.Accounts[0].Samples)
-	v := p.Evidence[SchedAccountModel{1, "a"}]
-	v.Speed.Sessions = 3
-	v.Error.N = 29
-	p.Evidence[SchedAccountModel{1, "a"}] = v
-	out, err = s.Summary(context.Background(), []int64{1}, "a")
-	require.NoError(t, err)
-	require.Nil(t, out.Accounts[0].TTFO.P90Ms)
-	require.Equal(t, 40, out.Accounts[0].TTFO.N)
-	require.Nil(t, out.Accounts[0].Error.Rate)
-	require.NotNil(t, out.Accounts[0].Cache.Ratio)
-	attention, err := s.Attention(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{1}, attention.Cooling)
-}
-
-func TestSchedAdminSummaryDefaultIndexPreservesResults(t *testing.T) {
-	s, e, repo := schedAdminFixture()
-	for key, samples := range map[SchedAccountModel]int{
-		{1, "b"}: 50, {1, "a"}: 50, {1, "zero"}: 0,
-		{2, "a"}: 30, {2, "z"}: 80,
-		{3, "test-only"}: 0, {99, "unrequested"}: 1000,
-	} {
-		e.snapshot.Evidence[key] = schedAdminEvidence(samples)
-	}
-	e.snapshot.Tests[SchedAccountModel{3, "test-only"}] = SchedTestRecord{Running: true}
-	e.snapshot.Members = map[int64][]int64{1: {1, 2}, 2: {1}, 3: {2}}
-	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "b", View: schedquality.StateView{State: schedquality.StateCooling}, Summary: schedAdminEvidence(50)}}
-	ids := []int64{2, 1, 3, 4, 1}
-	ctx := context.Background()
-	for _, input := range []string{"", "  ", " a "} {
-		out, err := s.Summary(ctx, ids, input)
-		require.NoError(t, err)
-		selected := []string{"z", "a", "", "", "a"}
-		if input == " a " {
-			selected = []string{"a", "a", "a", "a", "a"}
-		}
-		for i, id := range ids {
-			expected, err := s.Summary(ctx, []int64{id}, selected[i])
-			require.NoError(t, err)
-			require.Equal(t, expected.Accounts[0], out.Accounts[i])
-			if selected[i] == "" {
-				require.Nil(t, out.Accounts[i].Model)
-				require.Zero(t, out.Accounts[i].Samples)
-			}
-		}
-		if input == "" {
-			require.Equal(t, "z", *out.Accounts[0].Model)
-			require.Equal(t, "a", *out.Accounts[1].Model)
-		}
-	}
-	require.Zero(t, repo.reads)
-}
-
-func TestSchedAdminDetailTestEvidenceAndLedger(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	p := e.snapshot
-	p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true, TTFTSeconds: 10}}
-	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling, Verdicts: schedquality.Verdicts{Speed: schedquality.VerdictFail, Error: schedquality.VerdictFail, Cache: schedquality.VerdictPass}, FromTest: [3]bool{true, true, true}}, Summary: schedAdminEvidence(100), Test: schedquality.TestSummary{SpeedTurns: 8, SpeedWarm: 6, MaxTTFOMs: 9012, AnyTimeout: true, ErrorTurns: 9, Faults: 2, CacheTurns: 6, CacheRatio: .97}}}
-	p.Tests[SchedAccountModel{1, "m"}] = SchedTestRecord{TestResult: schedquality.TestResult{ID: "test", StartedAt: p.At, Done: true, Turns: []schedquality.TestTurn{{Tier: schedquality.TierSmall, Turn: 3, Warm: true, Outcome: schedquality.OutcomeTimeout}, {Tier: schedquality.TierSmall, Turn: 2, Warm: true, TTFOMs: schedAdminInt(500), Outcome: schedquality.OutcomeOK}, {Tier: schedquality.TierMedium, Turn: 1, Outcome: schedquality.OutcomeOK}}}}
-	ledger := &fakeSchedAttemptStore{}
-	for i := 0; i < 60; i++ {
-		ledger.Rows = append(ledger.Rows, schedquality.AttemptSample{AccountID: 1, StartedAt: p.At.Add(time.Duration(i) * time.Second), Outcome: schedquality.OutcomeOther, Detail: "not counted"})
-	}
-	s.d.Attempts = ledger
-	out, err := s.Detail(context.Background(), 1)
-	require.NoError(t, err)
-	require.Equal(t, 1, e.reads)
-	require.Len(t, out.RecentAttempts, 50)
-	require.Equal(t, "other", out.RecentAttempts[0].Outcome)
-	row := out.Groups[0].ByModel[0]
-	require.Equal(t, "test", *row.TTFO.From)
-	require.Equal(t, 9012, *row.TTFO.P90Ms)
-	require.True(t, row.TTFO.P90Timeout)
-	require.Equal(t, 8, row.TTFO.N)
-	require.InDelta(t, 2.0/9, *row.Error.Rate, .00001)
-	require.Equal(t, .97, *row.Cache.Ratio)
-	require.Equal(t, []*int{schedAdminInt(500), nil}, out.Models[0].Test.Tiers[0].TTFOMs)
-	require.Empty(t, out.Models[0].Test.Tiers[1].TTFOMs)
-	p.GroupRows[1][0].Test.SpeedWarm = 0
-	out, err = s.Detail(context.Background(), 1)
-	require.NoError(t, err)
-	require.Nil(t, out.Groups[0].ByModel[0].TTFO.P90Ms)
-}
-func TestSchedAdminBoardUsesOneSnapshotAndSelectionOrder(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	e.snapshot.Evidence[SchedAccountModel{1, "m"}] = schedAdminEvidence(40)
-	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling, Until: e.resetAt.Add(time.Minute)}}}
-	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Rank: 4, Eligible: false, Reject: "rate_limit", Standing: schedquality.StandBack, Concurrency: 7}}}
-	s.d.Board = board
-	out, err := s.Board(context.Background(), 1, "")
-	require.NoError(t, err)
-	require.Equal(t, 1, e.reads)
-	require.Equal(t, "m", board.model)
-	require.Equal(t, "one", out.Accounts[0].Name)
-	require.Equal(t, 4, out.Accounts[0].Rank)
-	require.Equal(t, "rate_limit", out.Accounts[0].Reject)
-	require.Equal(t, 1234, *out.Accounts[0].TTFO.P90Ms)
-	require.NotNil(t, out.Accounts[0].Until)
-}
 func TestSchedAdminModelTransientScope(t *testing.T) {
 	s, _, _ := schedAdminFixture()
 	transient := newOpenAIAccountModelTransientState(10)
@@ -387,51 +260,10 @@ func TestSchedAdminModelTransientScope(t *testing.T) {
 	require.Contains(t, states, SchedAutoState{Key: "model_transient:m", Kind: "model_transient", Scope: "model", Model: "m", Clearable: true})
 }
 
-func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	ctx := context.Background()
-	o := SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: "operator choice", OperatorID: 7}
-	require.NoError(t, s.SetOverride(ctx, o))
-	require.Len(t, e.overrides, 1)
-	o.GroupID = 9
-	require.Error(t, s.SetOverride(ctx, o))
-	o.GroupID = 0
-	o.ExpiresAt = &e.resetAt
-	require.Error(t, s.SetOverride(ctx, o))
-	require.NoError(t, s.ClearOverride(ctx, 1, 1, 7))
-	require.Empty(t, e.overrides)
-	runner := &fakeSchedTestRunner{}
-	s.d.Tests = runner
-	for _, ticket := range []SchedTestTicket{{Model: "m", TestID: "id", Started: true}, {Model: "m", Why: "already_running"}, {Model: "m", Why: "too_soon"}, {Model: "m", Why: "not_schedulable"}} {
-		runner.Ticket = ticket
-		out, err := s.Test(ctx, 1, "m", 7)
-		require.NoError(t, err)
-		require.Equal(t, ticket.Why, out.Tests[0].Why)
-		require.Equal(t, ticket.Started, out.Tests[0].Started)
-	}
-	for i, m := range []string{"a", "b", "c", "d"} {
-		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(100 - i)
-	}
-	runner.Requests = nil
-	_, err := s.Test(ctx, 1, "", 7)
-	require.NoError(t, err)
-	require.Len(t, runner.Requests, 1)
-	require.Equal(t, "a", runner.Requests[0].Model)
-	require.False(t, runner.Requests[0].Auto)
-	clear(e.snapshot.Evidence)
-	e.snapshot.Evidence[SchedAccountModel{2, "fallback"}] = schedAdminEvidence(90)
-	e.snapshot.GroupRows[2] = []SchedGroupRow{{GroupID: 1, Model: "fallback"}}
-	runner.Requests = nil
-	_, err = s.Test(ctx, 1, "", 7)
-	require.NoError(t, err)
-	require.Len(t, runner.Requests, 1)
-	require.Equal(t, "fallback", runner.Requests[0].Model)
-}
-
 func TestSchedAdminOverrideReasonStripsURLCredentialsBeforeEngine(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	reason := "maintenance https://proxy-user:proxy-secret@relay.example/private; retry socks5://second-user:second-secret@other.example:1080/path done"
-	err := s.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: reason, OperatorID: 7})
+	err := s.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideExempt, Reason: reason, OperatorID: 7})
 	require.NoError(t, err)
 	require.Len(t, e.overrides, 1)
 	require.Equal(t, "maintenance https://***@relay.example/private; retry socks5://***@other.example:1080/path done", e.overrides[0].Reason)
@@ -522,12 +354,12 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	gateway.openaiProxyStreamCircuit.entries[proxy] = openAIProxyStreamCircuitEntry{blockedUntil: e.resetAt.Add(time.Hour)}
 	gateway.openaiOAuth429RetryStartedAt.Store(int64(1), e.resetAt)
 	s.d.Gateway = gateway
-	e.overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideDemote}}
+	e.overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
 	e.OnAccountReset(s.ClearLocal)
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
-	require.Equal(t, e.resetAt, result.ResetAt)
+	require.Equal(t, schedAdminTime(e.resetAt), result.ResetAt)
 	require.Zero(t, counter.count)
 	require.Empty(t, runtime.postOutput.failures)
 	require.Empty(t, runtime.sameSiteHold.accounts)
@@ -541,21 +373,8 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	require.Contains(t, gateway.openaiProxyStreamCircuit.entries, proxy)
 	_, ok := gateway.openaiOAuth429RetryStartedAt.Load(int64(1))
 	require.False(t, ok)
-	cleared := map[string]bool{}
-	for _, item := range result.Cleared {
-		cleared[item.Key] = true
-	}
-	for _, key := range []string{"quality", "same_site", "post_output", "model_transient:m", "temp", "model_limit:old"} {
-		require.True(t, cleared[key], key)
-	}
-	preserved := map[string]string{}
-	for _, x := range result.Preserved {
-		preserved[x.Key] = x.Why
-	}
-	require.Equal(t, "shared_proxy", preserved["proxy_circuit"])
-	require.Equal(t, "iq_gate", preserved["iq:m"])
-	require.Equal(t, "manual_off", preserved["manual_off"])
-	require.Equal(t, "expires_within_10m", preserved["session_avoid"])
+	require.ElementsMatch(t, []string{"quality", "session_avoid", "same_site", "post_output", "model_transient", "temp_balance", "model_limit"}, result.Cleared)
+	require.ElementsMatch(t, []SchedAdminResetKept{{Kind: "proxy_circuit", Until: schedAdminTime(e.resetAt.Add(time.Hour))}, {Kind: "iq_gate"}, {Kind: "manual_off"}}, result.Kept)
 }
 func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T) {
 	s, e, r := schedAdminFixture()
@@ -568,7 +387,9 @@ func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T)
 	s.d.RateLimit = &RateLimitService{openAI403CounterCache: counter}
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Len(t, result.Failed, 2)
+	require.ElementsMatch(t, []SchedAdminResetFailed{{Kind: "quality"}, {Kind: "rate_limit"}}, result.Failed)
+	require.Nil(t, result.ResetAt)
+	require.NotContains(t, result.Cleared, "session_avoid")
 	require.Nil(t, r.rows[1].OverloadUntil)
 	require.NotNil(t, r.rows[1].RateLimitResetAt)
 	require.Zero(t, counter.count)
@@ -582,15 +403,6 @@ func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T)
 	require.Empty(t, runtime.sameSiteHold.accounts)
 	require.Empty(t, runtime.postOutput.failures)
 	require.Empty(t, s.d.Transient.List(1))
-}
-func TestSchedAdminEmptyJSONLists(t *testing.T) {
-	s, _, _ := schedAdminFixture()
-	out, err := s.Detail(context.Background(), 1)
-	require.NoError(t, err)
-	raw, err := json.Marshal(out)
-	require.NoError(t, err)
-	require.Contains(t, string(raw), `"models":[]`)
-	require.Contains(t, string(raw), `"recent_attempts":[]`)
 }
 
 type schedAdminCapabilityClear struct {
@@ -661,8 +473,8 @@ func TestSchedAdminResetPreservesReadonlyAfterReread(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
 	found := map[string]bool{}
-	for _, item := range result.Preserved {
-		found[item.Key] = true
+	for _, item := range result.Kept {
+		found[item.Kind] = true
 	}
 	require.True(t, found["expired"])
 	require.True(t, found["quota_auto_pause"])
@@ -682,7 +494,7 @@ func TestSchedAdminCodexTicketPreserved(t *testing.T) {
 	require.Error(t, err)
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Contains(t, result.Preserved, SchedResetItem{Key: key, Kind: "codex_ticket", Why: "codex_ticket"})
+	require.Contains(t, result.Kept, SchedAdminResetKept{Kind: "codex_ticket"})
 	require.Contains(t, a.Extra, codexAccountTicketConfigKey)
 }
 
@@ -738,16 +550,16 @@ func TestSchedAdminResetCountersOnlyReportFailures(t *testing.T) {
 	s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout, openAIAPIKeyHealth: health}
 	out, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
+	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
 	require.Empty(t, out.Failed)
 	c403.err, timeout.err, health.err = errors.New("403 failed"), errors.New("timeout failed"), errors.New("health failed")
 	out, err = s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
-	require.ElementsMatch(t, []SchedResetItem{
-		{Key: "temp", Kind: "temp_403", Error: "403 failed"},
-		{Key: "temp", Kind: "temp_stream_timeout", Error: "timeout failed"},
-		{Key: "temp", Kind: "temp_health", Error: "health failed"},
+	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
+	require.ElementsMatch(t, []SchedAdminResetFailed{
+		{Kind: "temp_403"},
+		{Kind: "temp_stream_timeout"},
+		{Kind: "temp_health"},
 	}, out.Failed)
 }
 
@@ -762,6 +574,8 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 		{"balance", "balance:exhausted[step=3]: empty"},
 		{"transient", "transient:transport failure"},
 		{"auth", "auth:expired token"},
+		{"rule", `{"source":"unknown-source"}`},
+		{"rule", `unrecognized reason`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.source, func(t *testing.T) {
@@ -799,112 +613,6 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 			_, retry := s.d.Gateway.openaiOAuth429RetryStartedAt.Load(int64(1))
 			require.True(t, retry)
 		})
-	}
-}
-
-func TestSchedAdminSnapshotMembersIncludeUnsampledGroups(t *testing.T) {
-	f := newQualityFixture(t)
-	f.store.Members = map[int64][]int64{10: {1, 2}, 20: {1}, 30: {1}}
-	f.cycle()
-	p := f.e.Snapshot()
-	require.Equal(t, map[int64][]int64{1: {10, 20, 30}, 2: {10}}, p.Members)
-	require.Empty(t, p.GroupRows)
-	s := NewSchedAdminService(SchedAdminDependencies{Engine: f.e, Now: func() time.Time { return f.now }})
-	out, err := s.Summary(context.Background(), []int64{1, 2}, "")
-	require.NoError(t, err)
-	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 3, Nodata: 3}, out.Accounts[0].Groups)
-	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 1, Nodata: 1}, out.Accounts[1].Groups)
-	f.e.members[10][0] = 99
-	require.Equal(t, []int64{10, 20, 30}, p.Members[1])
-}
-
-type schedAdminFailingRunner struct {
-	SchedTestRunner
-	requested []string
-}
-
-func (r *schedAdminFailingRunner) Request(_ context.Context, _ int64, m string, _ bool, _ int64) (SchedTestTicket, error) {
-	r.requested = append(r.requested, m)
-	if m == "b" {
-		return SchedTestTicket{}, errors.New("runner failed")
-	}
-	return SchedTestTicket{Model: m, TestID: m + "-ticket", Started: true}, nil
-}
-func TestSchedAdminTestDefaultSingleModelAndFailure(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	for i, m := range []string{"a", "b", "c"} {
-		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(40 - i)
-	}
-	runner := &schedAdminFailingRunner{}
-	s.d.Tests = runner
-	out, err := s.Test(context.Background(), 1, "", 7)
-	var failures *SchedAdminTestErrors
-	require.NoError(t, err)
-	require.Equal(t, []string{"a"}, runner.requested)
-	require.Len(t, out.Tests, 1)
-	require.Equal(t, "a-ticket", out.Tests[0].TestID)
-	out, err = s.Test(context.Background(), 1, "b", 7)
-	require.ErrorAs(t, err, &failures)
-	require.Equal(t, []string{"b"}, failures.Models)
-	require.Empty(t, out.Tests)
-}
-
-func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
-	s, e, r := schedAdminFixture()
-	a := r.rows[1]
-	a.Type = AccountTypeAPIKey
-	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a", "secondary": "upstream-secondary", "z-alias": "upstream-a"}}
-	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
-	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
-	until := e.resetAt.Add(time.Hour)
-	for i, m := range []string{"upstream-a", "upstream-b"} {
-		id := int64(i + 1)
-		v := schedAdminEvidence(40 + i)
-		v.Speed.P90Ms = 1234 + i
-		e.snapshot.Evidence[SchedAccountModel{id, m}] = v
-		e.snapshot.GroupRows[id] = []SchedGroupRow{{GroupID: 1, Model: m, View: schedquality.StateView{State: schedquality.StateCooling, Level: i + 1, Until: until, Verdicts: schedquality.Verdicts{Speed: schedquality.VerdictFail}}}}
-		e.snapshot.Tests[SchedAccountModel{id, m}] = SchedTestRecord{Running: true}
-	}
-	e.snapshot.Evidence[SchedAccountModel{1, "upstream-secondary"}] = schedAdminEvidence(5)
-	e.snapshot.GroupRows[1] = append(e.snapshot.GroupRows[1], SchedGroupRow{GroupID: 1, Model: "upstream-secondary"})
-	for _, m := range []string{"upstream-secondary", "upstream-tertiary"} {
-		e.snapshot.Evidence[SchedAccountModel{3, m}] = schedAdminEvidence(10)
-		e.snapshot.GroupRows[3] = append(e.snapshot.GroupRows[3], SchedGroupRow{GroupID: 1, Model: m})
-	}
-	e.snapshot.Evidence[SchedAccountModel{3, "upstream-tertiary"}] = schedAdminEvidence(15)
-	e.snapshot.Evidence[SchedAccountModel{3, "unmapped"}] = schedAdminEvidence(200)
-	e.snapshot.GroupRows[3] = append(e.snapshot.GroupRows[3], SchedGroupRow{GroupID: 1, Model: "unmapped"})
-	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1}, {AccountID: 2}, {AccountID: 3}}}
-	s.d.Board = board
-	out, err := s.Board(context.Background(), 1, "")
-	require.NoError(t, err)
-	require.Equal(t, []string{"alias", "secondary", "tertiary"}, out.Models)
-	require.Equal(t, "alias", out.Model)
-	require.Equal(t, "alias", board.model)
-	for i, row := range out.Accounts[:2] {
-		require.Equal(t, []string{"upstream-a", "upstream-b"}[i], row.EvidenceModel)
-		require.Equal(t, 1234+i, *row.TTFO.P90Ms)
-		require.Equal(t, i+1, row.Level)
-		require.Equal(t, "cooling", row.State)
-		require.True(t, row.Testing)
-		require.NotNil(t, row.Until)
-		require.Equal(t, "fail", row.Verdicts.TTFO)
-	}
-	wants := []map[string]string{{"upstream-a": "alias", "upstream-secondary": "secondary"}, {"upstream-b": "alias"}, {"upstream-secondary": "secondary", "upstream-tertiary": "tertiary", "unmapped": ""}}
-	for i, want := range wants {
-		detail, err := s.Detail(context.Background(), int64(i+1))
-		require.NoError(t, err)
-		got := map[string]string{}
-		for _, model := range detail.Models {
-			got[model.Model] = model.RequestModel
-		}
-		require.Equal(t, want, got)
-	}
-	out, err = s.Board(context.Background(), 1, "secondary")
-	require.NoError(t, err)
-	for _, i := range []int{0, 2} {
-		require.Equal(t, "upstream-secondary", out.Accounts[i].EvidenceModel)
-		require.Equal(t, map[int]int{0: 5, 2: 10}[i], out.Accounts[i].TTFO.N)
 	}
 }
 
@@ -961,4 +669,31 @@ func TestSchedAdminSameSiteListChecksSwitchAndGeneration(t *testing.T) {
 			require.Empty(t, state.Why)
 		}
 	}
+}
+
+func TestSchedAdminResetFailureRemovesEarlierClearedKind(t *testing.T) {
+	s, _, r := schedAdminFixture()
+	r.rows[1].Status, r.rows[1].ErrorMessage = StatusError, "auth:403 rejected"
+	s.d.RateLimit = &RateLimitService{openAI403CounterCache: &schedAdminCounter{err: errors.New("private infrastructure detail")}}
+	out, err := s.Reset(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.Equal(t, []SchedAdminResetFailed{{Kind: "error"}}, out.Failed)
+	require.NotContains(t, out.Cleared, "error")
+	require.Contains(t, out.Cleared, "session_avoid")
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "private infrastructure detail")
+}
+
+func (r *schedAdminAccounts) SchedAdminAccountIDs(context.Context) ([]int64, error) {
+	ids := []int64{}
+	for id, a := range r.rows {
+		if a.Platform == PlatformOpenAI {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+func (g schedAdminGroups) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
+	return []int64{1}, nil
 }

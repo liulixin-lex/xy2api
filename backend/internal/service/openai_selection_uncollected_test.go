@@ -14,6 +14,11 @@ import (
 func selectUncollectedEndpoint(t *testing.T, f *selectionRuntimeFixture, endpoint, session string) *Account {
 	t.Helper()
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	return selectUncollectedEndpointWithContext(t, f, ctx, endpoint, session)
+}
+
+func selectUncollectedEndpointWithContext(t *testing.T, f *selectionRuntimeFixture, ctx context.Context, endpoint, session string) *Account {
+	t.Helper()
 	var result *AccountSelectionResult
 	var err error
 	switch endpoint {
@@ -54,7 +59,7 @@ func newUncollectedSelectionFixture(t *testing.T, endpoint string, priority int)
 	return newSelectionRuntimeFixture(t, a, b)
 }
 
-func TestOpenAISelectionUncollectedEndpointsUseOnlyManualStanding(t *testing.T) {
+func TestOpenAISelectionUncollectedEndpointsTreatAllAsNormal(t *testing.T) {
 	for _, endpoint := range []string{"images", "embeddings", "count_tokens", "models", "live", "alpha_search"} {
 		t.Run(endpoint, func(t *testing.T) {
 			f := newUncollectedSelectionFixture(t, endpoint, 1)
@@ -63,12 +68,9 @@ func TestOpenAISelectionUncollectedEndpointsUseOnlyManualStanding(t *testing.T) 
 				model = ""
 			}
 			key := fakeSchedViewKey{7, 1, model}
-			f.view.States[key] = schedquality.StateView{State: schedquality.StateCooling}
-			require.Equal(t, int64(1), selectUncollectedEndpoint(t, f, endpoint, "").ID, "automatic cooling must not affect uncollected traffic")
-			f.view.States[key] = schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}}
-			require.Equal(t, int64(2), selectUncollectedEndpoint(t, f, endpoint, "").ID, "manual override still applies")
-			f.view.States[key] = schedquality.StateView{State: schedquality.StateCooling}
-			require.Equal(t, int64(1), selectUncollectedEndpoint(t, f, endpoint, "").ID)
+			f.view.States[key] = schedquality.StateView{Failing: true}
+			require.Equal(t, int64(1), selectUncollectedEndpoint(t, f, endpoint, "").ID, "automatic failing must not affect uncollected traffic")
+
 		})
 	}
 }
@@ -78,8 +80,7 @@ func TestOpenAISelectionUncollectedEndpointsSkipMigrationAndTakeover(t *testing.
 		t.Run(endpoint, func(t *testing.T) {
 			for _, state := range []schedquality.StateView{
 				{},
-				{State: schedquality.StateCooling},
-				{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}},
+				{Failing: true},
 			} {
 				f := newUncollectedSelectionFixture(t, endpoint, 5)
 				model := "m"
@@ -94,6 +95,20 @@ func TestOpenAISelectionUncollectedEndpointsSkipMigrationAndTakeover(t *testing.
 				require.Empty(t, f.cache.ttlKeys)
 				require.Zero(t, f.loads.batches)
 			}
+		})
+	}
+}
+
+func TestOpenAISelectionManualOnlyFirstBindingKeepsExistingBehavior(t *testing.T) {
+	for _, endpoint := range []string{"images", "alpha_search", "count_tokens", "embeddings", "live"} {
+		t.Run(endpoint, func(t *testing.T) {
+			f := newUncollectedSelectionFixture(t, endpoint, 1)
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			selected := selectUncollectedEndpointWithContext(t, f, ctx, endpoint, "session")
+			require.Nil(t, pendingOpenAIStickyChange(ctx), "ManualOnly does not await a capture terminal")
+			require.NoError(t, f.svc.BindStickySessionAfterProfitAdmission(ctx, ptrInt64Selection(7), "session", selected.ID))
+			require.Equal(t, selected.ID, f.cache.sessionBindings["openai:session"], "the existing initial binding is visible without a Forward completion")
+			require.Empty(t, f.cache.casKeys)
 		})
 	}
 }

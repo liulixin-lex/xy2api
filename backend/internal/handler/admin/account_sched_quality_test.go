@@ -70,7 +70,7 @@ func (s schedQualityAttention) Attention(context.Context) (service.SchedAdminAtt
 
 func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	attention := service.SchedAdminAttention{Cooling: []int64{1, 2}, Exempt: []int64{2, 3}, Demote: []int64{4}}
+	attention := service.SchedAdminAttention{Substandard: []int64{1, 2}, Exempt: []int64{2, 3}, Observing: []int64{4}}
 	for _, route := range []struct {
 		name, method, path, query string
 		register                  func(*gin.Engine, *AccountHandler)
@@ -90,16 +90,16 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 			code                 int
 			want                 []int64
 		}{
-			{name: "cooling", quality: "cooling", code: 200, want: []int64{1, 2}},
+			{name: "substandard", quality: "substandard", code: 200, want: []int64{1, 2}},
 			{name: "exempt", quality: "exempt", code: 200, want: []int64{2, 3}},
-			{name: "demote", quality: "demote", code: 200, want: []int64{4}},
+			{name: "observing", quality: "observing", code: 200, want: []int64{4}},
 			{name: "normal", quality: "normal", code: 200, want: []int64{5, 6}},
 			{name: "exempt_group", quality: "exempt", group: "1", code: 200, want: []int64{2}},
-			{name: "demote_group", quality: "demote", group: "1", code: 200, want: []int64{4}},
+			{name: "observing_group", quality: "observing", group: "1", code: 200, want: []int64{4}},
 			{name: "normal_group", quality: "normal", group: "1", code: 200, want: []int64{6}},
-			{name: "empty_cooling", quality: "cooling", empty: true, code: 200, want: []int64{}},
+			{name: "empty_substandard", quality: "substandard", empty: true, code: 200, want: []int64{}},
 			{name: "empty_exempt", quality: "exempt", empty: true, code: 200, want: []int64{}},
-			{name: "empty_demote", quality: "demote", empty: true, code: 200, want: []int64{}},
+			{name: "empty_observing", quality: "observing", empty: true, code: 200, want: []int64{}},
 			{name: "normal_empty_union", quality: "normal", empty: true, code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
 			{name: "unfiltered", code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
 			{name: "invalid", quality: "unknown", code: 400},
@@ -154,8 +154,12 @@ func TestAccountRecoverStateUsesQualityReset(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("POST", "/accounts/1/recover-state", nil))
 	data := schedAdminHandlerData(t, w)
-	for _, key := range []string{"reset_at", "cleared", "preserved", "failed"} {
+	for _, key := range []string{"account_id", "reset_at", "cleared", "kept", "failed"} {
 		require.Contains(t, data, key)
 	}
+	require.JSONEq(t, `["quality","session_avoid"]`, string(data["cleared"]))
+	require.JSONEq(t, `[]`, string(data["kept"]))
+	require.JSONEq(t, `[]`, string(data["failed"]))
+	require.NotContains(t, data, "preserved")
 	require.NotContains(t, data, "credentials")
 }

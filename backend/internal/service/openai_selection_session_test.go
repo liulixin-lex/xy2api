@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,15 +36,18 @@ func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, 
 }
 
 type selectionBindingFake struct {
-	key       string
-	ttlKeys   []string
-	casKeys   []string
-	owner     int64
-	remaining time.Duration
-	reads     int
-	events    *[]string
-	casFail   bool
-	casError  bool
+	store       ResilienceStore
+	key         string
+	ttlKeys     []string
+	casKeys     []string
+	avoidScopes []string
+	owner       int64
+	generation  string
+	remaining   time.Duration
+	reads       int
+	events      *[]string
+	casFail     bool
+	casError    bool
 }
 
 func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ int64, key string) (int64, time.Duration, error) {
@@ -54,17 +58,26 @@ func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ i
 	}
 	return f.owner, f.remaining, nil
 }
-func (f *selectionBindingFake) CompareAndSwapSessionAccountID(_ context.Context, _ int64, key string, old, target int64, _ time.Duration) (bool, error) {
+func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, avoidScopes ...string) (bool, error) {
 	f.casKeys = append(f.casKeys, key)
+	f.avoidScopes = append(f.avoidScopes, avoidScopes...)
 	*f.events = append(*f.events, fmt.Sprintf("cas:%d", target))
 	if f.casError {
 		return false, errors.New("cache down")
 	}
-	if key != f.key || f.casFail || f.owner != old {
+	if key != f.key || f.casFail || f.owner != expected.AccountID || f.generation != expected.Generation {
 		return false, nil
 	}
 	f.owner = target
+	f.generation += "-next"
 	return true, nil
+}
+
+func (f *selectionBindingFake) GetSessionBinding(_ context.Context, _ int64, key string) (StickySessionBinding, error) {
+	if key != f.key {
+		return StickySessionBinding{}, ErrStickySessionNotFound
+	}
+	return StickySessionBinding{AccountID: f.owner, Generation: f.generation}, nil
 }
 
 type selectionSessionFixture struct {
@@ -80,17 +93,28 @@ type selectionSessionFixture struct {
 
 func selectionNewSessionFixture() *selectionSessionFixture {
 	f := &selectionSessionFixture{now: time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC), owner: selectionTestAccount(10, 5), candidates: []*Account{selectionTestAccount(1, 1), selectionTestAccount(2, 2), selectionTestAccount(3, 3)}}
+	for _, a := range f.candidates {
+		a.GroupIDs = []int64{7}
+	}
 	f.view = selectionTestView(f.now)
 	f.slots = &selectionSlotsFake{failed: map[int64]bool{}, events: &f.events}
-	f.binding = &selectionBindingFake{key: "openai:session", owner: 10, remaining: 29 * time.Minute, events: &f.events}
-	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, slots: f.slots, cache: f.binding, cacheKey: (&OpenAIGatewayService{}).openAISessionCacheKey, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account) *Account {
+	f.binding = &selectionBindingFake{key: "openai:session", owner: 10, generation: "g1", remaining: 29 * time.Minute, events: &f.events}
+	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, slots: f.slots, cache: f.binding, store: newMemResilienceStore(), cacheKey: (&OpenAIGatewayService{}).openAISessionCacheKey, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account) *Account {
 		f.events = append(f.events, fmt.Sprintf("check:%d", a.ID))
 		return a
 	}}
+	f.binding.store = f.session.store
 	return f
 }
 func (f *selectionSessionFixture) selectNow(ctx context.Context) *AccountSelectionResult {
-	return f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{TokenBilled: true})
+	if resilience.StateFrom(ctx) == nil {
+		ctx = resilience.WithRequestState(ctx, resilience.NewRequestState())
+	}
+	result := f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{TokenBilled: true})
+	if result != nil {
+		CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
+	}
+	return result
 }
 func (f *selectionSessionFixture) state(id int64, st schedquality.StateView) {
 	f.view.States[fakeSchedViewKey{7, id, "m"}] = st
@@ -108,9 +132,14 @@ func TestOpenAISelectionSessionCacheKey(t *testing.T) {
 				if mode == "idle" {
 					f.view.Takeovers[7] = fakeSchedTakeover{Idle: time.Minute, Enabled: true}
 				} else if mode == "migration" {
-					f.state(f.owner.ID, schedquality.StateView{State: schedquality.StateCooling})
+					f.state(f.owner.ID, schedquality.StateView{Failing: true})
 				}
-				result := f.session.selectOwner(context.Background(), 7, " session ", "m", f.owner, f.candidates, selectionRequest{})
+				ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+				result := f.session.selectOwner(ctx, 7, " session ", "m", f.owner, f.candidates, selectionRequest{})
+				if result != nil {
+					require.Equal(t, int64(10), f.binding.owner)
+					CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
+				}
 				if legacyOnly {
 					require.Nil(t, result)
 					require.Equal(t, f.owner.ID, f.binding.owner)
@@ -123,7 +152,7 @@ func TestOpenAISelectionSessionCacheKey(t *testing.T) {
 				if mode == "idle" {
 					require.NotEmpty(t, f.binding.ttlKeys)
 				}
-				if mode != "idle" || !legacyOnly {
+				if !legacyOnly {
 					require.Equal(t, []string{"openai:session"}, f.binding.casKeys)
 				} else {
 					require.Empty(t, f.binding.casKeys)
@@ -169,24 +198,16 @@ func TestOpenAISelectionSessionTakeoverRules(t *testing.T) {
 			f.state(1, schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
 		}, false},
 		{"exact_view_max_age", func(f *selectionSessionFixture) { f.view.ViewAt = f.now.Add(-60 * time.Second) }, true},
-		{"manual_back", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}})
+		{"below_target", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{Failing: true})
 		}, false},
-		{"exempt_cooling", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
+		{"exempt_below", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
 		}, true},
-		{"verified_level_four", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{State: schedquality.StateNormal, Level: 4, Since: f.now})
+		{"normal_without_samples", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{})
 		}, true},
-		{"unverified_five_minutes", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now.Add(-5 * time.Minute)})
-		}, false},
-		{"unverified_thirty_minutes", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now.Add(-30 * time.Minute)})
-		}, true},
-		{"unverified_exempt", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
-		}, true},
+		{"wrong_group", func(f *selectionSessionFixture) { f.candidates[0].GroupIDs = []int64{8} }, false},
 		{"recently_full", func(f *selectionSessionFixture) { f.session.marks.Mark(1, f.now.Add(-59*time.Second)) }, false},
 		{"full_expired", func(f *selectionSessionFixture) { f.session.marks.Mark(1, f.now.Add(-60*time.Second)) }, true},
 		{"same_priority", func(f *selectionSessionFixture) { f.candidates[0].Priority = 5 }, false},
@@ -246,10 +267,7 @@ func TestOpenAISelectionSessionRechecksEveryTakeoverCondition(t *testing.T) {
 		name   string
 		change func(*selectionSessionFixture)
 	}{
-		{"unverified", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
-		}},
-		{"back", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }},
+		{"back", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{Failing: true}) }},
 		{"disabled", func(f *selectionSessionFixture) { f.view.Enabled = false }},
 		{"stale", func(f *selectionSessionFixture) { f.view.ViewAt = f.now.Add(-61 * time.Second) }},
 		{"priority", func(f *selectionSessionFixture) { f.candidates[0].Priority = 5 }},
@@ -259,8 +277,6 @@ func TestOpenAISelectionSessionRechecksEveryTakeoverCondition(t *testing.T) {
 		{"admission", func(f *selectionSessionFixture) {
 			f.session.recheck = func(context.Context, *Account) *Account { return nil }
 		}},
-		{"cas_conflict", func(f *selectionSessionFixture) { f.binding.casFail = true }},
-		{"cas_error", func(f *selectionSessionFixture) { f.binding.casError = true }},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -282,21 +298,20 @@ func TestOpenAISelectionSessionMigration(t *testing.T) {
 		want  bool
 	}{
 		{"back_owner", func(*selectionSessionFixture) {}, true},
-		{"unverified_target", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
+		{"normal_without_samples", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{})
 		}, true},
-		{"no_target", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }, false},
+		{"no_target", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{Failing: true}) }, false},
 		{"slot_full", func(f *selectionSessionFixture) { f.slots.failed[1] = true }, false},
 		{"target_became_back", func(f *selectionSessionFixture) {
-			f.slots.after = func(int64) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }
+			f.slots.after = func(int64) { f.state(1, schedquality.StateView{Failing: true}) }
 		}, false},
-		{"cas_conflict", func(f *selectionSessionFixture) { f.binding.casFail = true }, false},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			f := selectionNewSessionFixture()
 			f.candidates = f.candidates[:1]
-			f.state(10, schedquality.StateView{State: schedquality.StateCooling})
+			f.state(10, schedquality.StateView{Failing: true})
 			tt.setup(f)
 			result := f.selectNow(context.Background())
 			if tt.want {
@@ -317,7 +332,7 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	f := selectionNewSessionFixture()
 	f.slots.after = func(id int64) {
 		if id == 1 {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
+			f.state(1, schedquality.StateView{Failing: true})
 		}
 	}
 	result := f.selectNow(context.Background())
@@ -328,4 +343,11 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	require.Equal(t, 1, f.slots.held)
 	result.ReleaseFunc()
 	require.Zero(t, f.slots.held)
+}
+
+func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
+	if f.owner != expected.AccountID || f.generation != expected.Generation {
+		return false, nil
+	}
+	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
 }

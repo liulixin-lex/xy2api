@@ -13,7 +13,6 @@ type selectionKey struct {
 	Priority  int
 	RateKnown bool
 	Rate      float64
-	Affinity  int
 	LoadRate  int
 	LastUsed  int64
 	ID        int64
@@ -23,9 +22,7 @@ type selectionRequest struct {
 	ManualOnly          bool
 	TokenBilled         bool
 	RequireCompact      bool
-	SessionHash         string
 	Loads               map[int64]*AccountLoadInfo
-	Recent              *openAIRecentSessionSuccess
 	OAuthRateMultiplier *float64
 }
 
@@ -34,7 +31,14 @@ var selectionStaleViewWarning struct {
 	at time.Time
 }
 
-func selectionAuto(view schedquality.View, now time.Time) bool {
+// selectionAuto gates the quality layers: a live view and the group's policy enabled.
+func selectionAuto(view schedquality.View, groupID int64, now time.Time) bool {
+	return selectionLive(view, now) && view.GroupEnabled(groupID)
+}
+
+// selectionLive is a fresh view with the global switch on. Takeover needs only
+// this; with the group's policy off every account is simply normal.
+func selectionLive(view schedquality.View, now time.Time) bool {
 	if view == nil {
 		return false
 	}
@@ -59,17 +63,14 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
-		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, now), now)),
-		Priority: acc.Priority, RateKnown: !req.TokenBilled, Affinity: 1, ID: acc.ID,
+		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, groupID, now), now)),
+		Priority: acc.Priority, RateKnown: !req.TokenBilled, ID: acc.ID,
 	}
 	if req.TokenBilled {
 		if rate, ok := openAISchedulingRate(acc, now, req.OAuthRateMultiplier); ok {
 			key.RateKnown = true
 			key.Rate = rate
 		}
-	}
-	if req.Recent != nil && req.SessionHash != "" && !req.Recent.lastSuccess(openAIRecentSessionKey{groupID, req.SessionHash, OpenAIAttemptModel(acc, model)}, acc.ID, now).IsZero() {
-		key.Affinity = 0
 	}
 	if load := req.Loads[acc.ID]; load != nil {
 		key.LoadRate = load.LoadRate
@@ -92,9 +93,6 @@ func selectionLess(a, b selectionKey) bool {
 	}
 	if a.RateKnown && a.Rate != b.Rate {
 		return a.Rate < b.Rate
-	}
-	if a.Affinity != b.Affinity {
-		return a.Affinity < b.Affinity
 	}
 	if a.LoadRate != b.LoadRate {
 		return a.LoadRate < b.LoadRate

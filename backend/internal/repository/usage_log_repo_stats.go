@@ -734,6 +734,10 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		)
 	`, buildWhere(conditions))
 
+	return r.readUsageStats(ctx, query, args, filters, nil)
+}
+
+func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, args []any, filters UsageLogFilters, requestFacts *usagestats.AdminRequestStats) (*UsageStats, error) {
 	stats := &UsageStats{}
 	var totalAccountCost float64
 	useAccountCostForEndpoint := filters.AccountID > 0 && filters.UserID == 0 && filters.APIKeyID == 0
@@ -745,12 +749,14 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 
 	for rows.Next() {
 		var (
+			success, rescued, failed                                             int64
+			p50, cacheRatio                                                      *float64
 			inboundGrouped, upstreamGrouped                                      int
 			inboundEndpoint, upstreamEndpoint                                    sql.NullString
 			requests, inputTokens, outputTokens, cacheCreationTokens, cacheReads int64
 			cost, actualCost, accountCost, averageDurationMs                     float64
 		)
-		if err := rows.Scan(
+		targets := []any{
 			&inboundGrouped,
 			&upstreamGrouped,
 			&inboundEndpoint,
@@ -764,7 +770,11 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			&actualCost,
 			&accountCost,
 			&averageDurationMs,
-		); err != nil {
+		}
+		if requestFacts != nil {
+			targets = append(targets, &success, &rescued, &failed, &p50, &cacheRatio)
+		}
+		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
 
@@ -776,6 +786,10 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 
 		switch {
 		case inboundGrouped == 1 && upstreamGrouped == 1:
+			if requestFacts != nil {
+				requestFacts.Success, requestFacts.Rescued, requestFacts.Failed = success, rescued, failed
+				requestFacts.TTFOP50Ms, requestFacts.CacheRatio = p50, cacheRatio
+			}
 			stats.TotalRequests = requests
 			stats.TotalInputTokens = inputTokens
 			stats.TotalOutputTokens = outputTokens

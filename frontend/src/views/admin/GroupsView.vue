@@ -323,10 +323,11 @@
             </div>
           </template>
 
-          <template #cell-sched_gate="{ row }">
-            <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
+          <template v-for="[key] in GROUP_SCHED_COLUMNS" :key="key" #[`cell-${key}`]="{ row }">
+            <GroupSchedCell v-if="row.platform === 'openai'" :col="key" :summary="schedSummary.byGroup.value.get(row.id)" :loading="schedSummary.loading.value" />
             <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
           </template>
+          <template v-for="head in GROUP_SCHED_HEADS" :key="head" #[`header-group-sq_${head}`]>{{ t(`admin.schedQuality.groupHead.${head}`) }}</template>
 
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
@@ -4443,9 +4444,9 @@ import GroupProfitControlPreview from "@/components/admin/group/GroupProfitContr
 import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyField.vue";
 import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
 import { openSchedBoard } from "@/composables/useSchedLayers";
-import schedQualityAPI from "@/api/admin/schedQuality";
-import type { SchedPolicy } from "@/types/schedQuality";
-import { policyShort } from "@/utils/schedQualityFormat";
+import GroupSchedCell from "@/components/admin/group/GroupSchedCell.vue";
+import { useGroupSchedSummary } from "@/composables/useGroupSchedSummary";
+import { GROUP_SCHED_COLUMNS } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4682,11 +4683,18 @@ const allColumns = computed<Column[]>(() => {
   if (authStore.isSimpleMode) return basic;
   return [
     ...basic.slice(0, 3),
+    // FINAL §7: the scheduling columns come right after the name.
+    ...GROUP_SCHED_COLUMNS.map(([key, head]) => ({
+      key,
+      label: t(`admin.schedQuality.groupCol.${key}`),
+      sortable: false,
+      class: "text-right",
+      ...(head ? { group: `sq_${head}` } : {}),
+    })),
     { key: "billing_type", label: t("admin.groups.columns.billingType"), sortable: true },
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
-    { key: "sched_gate", label: t("admin.schedQuality.policy.column"), sortable: false },
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4794,35 +4802,15 @@ const toggleColumn = (key: string) => {
   if (wasHidden && key === "capacity") {
     loadCapacitySummary();
   }
-  if (wasHidden && key === "sched_gate") {
-    void loadSchedGates();
-  }
+  if (wasHidden && key.startsWith("sq_")) loadSchedSummary();
 };
 
-// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
-const schedGates = reactive(new Map<number, SchedPolicy | null>());
-let schedGateSeq = 0;
-const loadSchedGates = async () => {
-  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
-  const seq = ++schedGateSeq;
-  const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
-  let next = 0;
-  const worker = async () => {
-    while (next < ids.length) {
-      const id = ids[next++];
-      try {
-        const record = await schedQualityAPI.getGroupPolicy(id);
-        if (seq === schedGateSeq) schedGates.set(id, record.policy);
-      } catch {
-        if (seq === schedGateSeq) schedGates.set(id, null);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
-};
-const schedGateText = (group: AdminGroup) => {
-  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
-  return policy?.enabled ? policyShort(policy, t) : "";
+// Scheduling columns (FINAL §7), skipped while all of them are hidden.
+const GROUP_SCHED_HEADS = ["lines", "accounts", "last60"] as const;
+const schedSummary = useGroupSchedSummary();
+const loadSchedSummary = () => {
+  if (authStore.isSimpleMode || !GROUP_SCHED_COLUMNS.some(([key]) => isColumnVisible(key))) return;
+  void schedSummary.refresh(groups.value.filter((group) => group.platform === "openai").map((group) => group.id));
 };
 
 const columns = computed<Column[]>(() =>
@@ -5921,7 +5909,7 @@ const loadGroups = async () => {
     if (hasVisibleCapacityColumn.value) {
       loadCapacitySummary();
     }
-    void loadSchedGates();
+    loadSchedSummary();
   } catch (error: any) {
     if (
       signal.aborted ||

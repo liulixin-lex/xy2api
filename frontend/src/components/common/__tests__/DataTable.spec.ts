@@ -102,6 +102,37 @@ describe('DataTable', () => {
     expect(wrapper.findAll('tbody tr[aria-hidden="true"]')).toHaveLength(0)
   })
 
+  it('renders a full-width detail row under a row whose row-detail slot has content, and keeps row attributes on the row', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }, { key: 'note', label: 'Note' }],
+        data: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }],
+        rowKey: 'id',
+        selectable: true,
+        selectedKeys: []
+      },
+      slots: {
+        'row-detail': `<template #row-detail="{ row }"><span v-if="row.id === 2" data-test="detail">detail of B</span></template>`
+      }
+    })
+    await wrapper.vm.$nextTick()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows.map((tr) => tr.attributes('data-index') ?? 'detail')).toEqual(['0', '1', 'detail'])
+    expect(rows[1].attributes('data-row-id')).toBe('2')
+    expect(rows[2].get('td').attributes('colspan')).toBe('3')
+    expect(rows[2].get('[data-test="detail"]').text()).toBe('detail of B')
+  })
+
+  it('renders every row while a detail row is open, since windowing measures main rows only (RG-010)', async () => {
+    const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
+    const wrapper = mount(DataTable, { props: { columns: [{ key: 'name', label: 'Name' }], data, virtualizeThreshold: 10, hasDetails: true } })
+    await wrapper.vm.$nextTick()
+    expect((wrapper.vm as any).shouldVirtualize).toBe(false)
+    await wrapper.setProps({ hasDetails: false })
+    expect((wrapper.vm as any).shouldVirtualize).toBe(true)
+  })
+
   it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {
     const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {

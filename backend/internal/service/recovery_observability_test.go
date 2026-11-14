@@ -96,6 +96,33 @@ func TestRecordUsageAttemptFirstOutput(t *testing.T) {
 	}
 }
 
+func TestRecordUsagePreservesV064TimingWithGatewayMetadata(t *testing.T) {
+	ctx := resilience.WithGatewayRequestMetadata(context.Background(), &resilience.GatewayRequestMetadata{
+		RequestID: "original-timing", Result: resilience.RequestSuccess,
+		FirstOutputMs: new(int64(220)), DurationMs: 300,
+	})
+	firstToken := 50
+	generic := (&GatewayService{}).buildRecordUsageLog(ctx, &recordUsageCoreInput{},
+		&ForwardResult{Model: "fixture", Duration: 140 * time.Millisecond, FirstTokenMs: &firstToken},
+		&APIKey{}, &User{}, &Account{}, nil, "fixture", 1, 1, 1, 0, false, nil)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo,
+		&openAIRecordUsageBillingRepoStub{}, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{RequestID: "original-timing", Model: "gpt-5.1", Stream: true,
+			Duration: 140 * time.Millisecond, FirstTokenMs: &firstToken},
+		APIKey: &APIKey{ID: 1, Group: &Group{RateMultiplier: 1}}, User: &User{ID: 2},
+		Account: &Account{ID: 3, Type: AccountTypeAPIKey},
+	}))
+	for _, row := range []*UsageLog{generic, usageRepo.lastLog} {
+		// These are the v0.6.4 assignments: result.FirstTokenMs and
+		// result.Duration.Milliseconds(), without gateway timing substitution.
+		require.Equal(t, firstToken, *row.FirstTokenMs)
+		require.Equal(t, 140, *row.DurationMs)
+		require.EqualValues(t, 220, *row.EndToEndFirstOutputMs, "group experience keeps its independent timing")
+	}
+}
+
 func TestEndToEndFirstOutputExcludesProtocolOnlyDelivery(t *testing.T) {
 	for name, payload := range map[string]string{
 		"heartbeat":       ": ping\n\n",

@@ -21,22 +21,6 @@
  },
  {
   "method": "POST",
-  "path": "/accounts/recent-stats/batch",
-  "group": "admin",
-  "reg": "registerAccountRoutes",
-  "module": "accounts",
-  "level": "view",
-  "any_of": [],
-  "flags": [],
-  "target": null,
-  "fields": null,
-  "redact": [
-   "account"
-  ],
-  "ws": false
- },
- {
-  "method": "POST",
   "path": "/accounts",
   "group": "admin",
   "reg": "registerAccountRoutes",
@@ -6993,6 +6977,20 @@
  },
  {
   "method": "GET",
+  "path": "/usage/attempts",
+  "group": "admin",
+  "reg": "registerUsageRoutes",
+  "module": "usage",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
   "path": "/usage/stats",
   "group": "admin",
   "reg": "registerUsageRoutes",
@@ -7918,7 +7916,35 @@
  },
  {
   "method": "GET",
-  "path": "/sched-quality/groups/:id/board",
+  "path": "/sched-quality/groups/:id/order",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": "groups",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/sched-quality/groups/summary",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": "groups",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/sched-quality/groups/:id/policy/preview",
   "group": "admin",
   "reg": "registerSchedQualityRoutes",
   "module": "groups",
@@ -7947,22 +7973,6 @@
  {
   "method": "POST",
   "path": "/sched-quality/accounts/:id/reset",
-  "group": "admin",
-  "reg": "registerSchedQualityRoutes",
-  "module": "accounts",
-  "level": "manage",
-  "any_of": [],
-  "flags": [],
-  "target": null,
-  "fields": null,
-  "redact": [
-   "account"
-  ],
-  "ws": false
- },
- {
-  "method": "POST",
-  "path": "/sched-quality/accounts/:id/test",
   "group": "admin",
   "reg": "registerSchedQualityRoutes",
   "module": "accounts",

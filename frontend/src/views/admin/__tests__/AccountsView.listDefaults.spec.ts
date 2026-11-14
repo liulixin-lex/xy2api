@@ -15,7 +15,6 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -84,7 +83,6 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
-        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -92,7 +90,6 @@ function mountView() {
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
-        AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
         AccountUsageCell: true,
@@ -143,11 +140,11 @@ describe('admin AccountsView list defaults and column order', () => {
   })
 
   // Scenario 35: account ID, created and expires are hidden only for a browser without saved column settings.
-  it('hides account ID, created and expires by default and puts priority right after scheduling', async () => {
+  it('hides account ID, created and expires by default and follows FINAL §7: status, three numbers, groups, priority, rate, capacity, switch', async () => {
     const wrapper = mountView()
     await flushPromises()
     expect(tableColumns(wrapper)).toEqual([
-      'select', 'name', 'platform_type', 'capacity', 'status', 'sq_recent', 'sq_groups', 'schedulable', 'priority',
+      'select', 'name', 'platform_type', 'status', 'sq_ttfo', 'sq_error', 'sq_cache', 'sq_groups', 'priority', 'rate_multiplier', 'capacity', 'schedulable',
       'iq_check', 'groups', 'usage', 'upstream_billing_rate', 'upstream_balance', 'last_used_at', 'actions'
     ])
     expect(localStorage.getItem('account-hidden-columns')).toBeNull()
@@ -188,7 +185,7 @@ describe('admin AccountsView list defaults and column order', () => {
     expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'id'])
 
     await wrapper.get('[data-test="reset-columns"]').trigger('click')
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'capacity'])
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'status'])
     expect(tableColumns(wrapper)).not.toContain('id')
     expect(localStorage.getItem('account-column-order')).toBeNull()
     expect(localStorage.getItem('account-hidden-columns')).toBeNull()

@@ -283,6 +283,7 @@ type OpenAIForwardResult struct {
 	ClientDisconnect      bool
 	// PartialFailure carries metered usage from an incomplete forward; it is never success evidence.
 	PartialFailure     bool
+	BenignIncomplete   bool
 	ImageCount         int
 	ImageSize          string
 	ImageInputSize     string
@@ -314,15 +315,22 @@ func (r *OpenAIForwardResult) SucceededForScheduling() bool {
 	if r != nil && r.PartialFailure {
 		return false
 	}
-	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+	if r == nil || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
 	case "response.completed", "response.done":
 		return true
+	case "response.incomplete":
+		return r.BenignIncomplete
 	default:
 		return false
 	}
+}
+
+// CompletedForDelivery requires a real result and successful client delivery.
+func (r *OpenAIForwardResult) CompletedForDelivery() bool {
+	return r != nil && !r.ClientDisconnect && r.SucceededForScheduling()
 }
 
 const openAIResponsesUpstreamEndpoint = "/v1/responses"
@@ -492,14 +500,12 @@ type OpenAIGatewayService struct {
 	openaiProxyStreamCircuitOnce   sync.Once
 	openaiWSPassthroughDialerOnce  sync.Once
 	openaiModelTransientOnce       sync.Once
-	openaiRecentSessionOnce        sync.Once
 	agentIdentityTaskMu            sync.Mutex
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
 	openaiWSPassthroughDialer      openAIWSClientDialer
 	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
 	openaiModelTransient           *openAIAccountModelTransientState
-	openaiRecentSession            *openAIRecentSessionSuccess
 	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
 	openaiProxyStreamFailOpenLogAt atomic.Int64
 

@@ -1,24 +1,23 @@
 package service
 
 import (
+	"cmp"
 	"context"
-	"errors"
-	"fmt"
-	"math"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 )
 
 // SchedAdminAccountRepository adds conditional, narrowly scoped mutations to account reads.
 type SchedAdminAccountRepository interface {
 	GetByID(context.Context, int64) (*Account, error)
 	GetByIDs(context.Context, []int64) ([]*Account, error)
+	SchedAdminAccountIDs(context.Context) ([]int64, error)
 	SchedAdminClearError(context.Context, int64, string) (bool, error)
 	SchedAdminClear429(context.Context, int64, *time.Time, *time.Time) (bool, error)
 	SchedAdminClearOverload(context.Context, int64, *time.Time) (bool, error)
@@ -28,23 +27,25 @@ type SchedAdminAccountRepository interface {
 }
 type SchedAdminGroupRepository interface {
 	GetByID(context.Context, int64) (*Group, error)
+	GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error)
 }
 type SchedAdminCapability interface {
 	ClearAccountCapabilityLearning(context.Context, int64) error
 }
 
 type SchedAdminDependencies struct {
-	Engine     SchedQualityEngine
-	Board      SchedSelectionBoard
-	Transient  SchedModelTransientAdmin
-	Accounts   SchedAdminAccountRepository
-	Groups     SchedAdminGroupRepository
-	Attempts   SchedAttemptStore
+	Engine    SchedQualityEngine
+	Board     SchedSelectionBoard
+	Transient SchedModelTransientAdmin
+	Accounts  SchedAdminAccountRepository
+	Groups    SchedAdminGroupRepository
+	Usage     interface {
+		GroupLast60(context.Context, []int64, time.Time) (map[int64]usagestats.GroupLast60, error)
+	}
 	RateLimit  *RateLimitService
 	Resilience *ResilienceService
 	Gateway    *OpenAIGatewayService
 	Capability SchedAdminCapability
-	Tests      SchedTestRunner
 	InFlight   func(context.Context, int64) (int, error)
 	Thresholds func(context.Context) map[string]int
 	Now        func() time.Time
@@ -76,12 +77,7 @@ func schedAdminStamp(t time.Time) string {
 	}
 	return ""
 }
-func schedAdminEnough(n, sessions int) bool {
-	return n >= schedquality.MinSamples && sessions >= schedquality.MinSessions
-}
-func schedAdminInt(v int) *int           { return &v }
 func schedAdminFloat(v float64) *float64 { return &v }
-func schedAdminString(v string) *string  { return &v }
 func (s *SchedAdminService) account(ctx context.Context, id int64) (*Account, error) {
 	if id <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_ACCOUNT_ID", "Invalid account id")
@@ -137,7 +133,7 @@ func (s *SchedAdminService) SetOverride(ctx context.Context, o SchedOverride) er
 	if o.GroupID < 0 || !schedAdminMember(a, o.GroupID) {
 		return infraerrors.BadRequest("INVALID_GROUP_MEMBERSHIP", "Account does not belong to this group")
 	}
-	if o.Mode != schedquality.OverrideExempt && o.Mode != schedquality.OverrideDemote {
+	if o.Mode != schedquality.OverrideExempt {
 		return infraerrors.BadRequest("INVALID_OVERRIDE", "Invalid override mode")
 	}
 	o.Reason = operatoraccess.StripURLUserinfo(strings.TrimSpace(o.Reason))
@@ -167,156 +163,48 @@ func (s *SchedAdminService) ClearOverride(ctx context.Context, a, g, op int64) e
 	}
 	return nil
 }
-func schedAdminOverrideMode(m schedquality.Override) string {
-	if m == schedquality.OverrideExempt {
-		return "exempt"
-	}
-	if m == schedquality.OverrideDemote {
-		return "demote"
-	}
-	return ""
+func schedAdminPolicy(r SchedPolicyRecord) SchedAdminPolicy {
+	return SchedAdminPolicy{GroupID: r.GroupID, Version: r.Version, Policy: schedAdminPolicyFields(r.Policy)}
 }
-func (s *SchedAdminService) override(ctx context.Context, p *SchedQualitySnapshot, a, g int64, now time.Time) *SchedAdminOverride {
-	var all, group *SchedOverride
-	for i := range p.Overrides {
-		o := &p.Overrides[i]
-		if o.AccountID != a || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
+func schedAdminGroupPolicy(p *SchedQualitySnapshot, group int64) schedquality.Policy {
+	if record, ok := p.Policies[group]; ok {
+		return record.Policy
+	}
+	return schedquality.DefaultPolicy()
+}
+func schedAdminPolicyFields(p schedquality.Policy) SchedAdminPolicyPolicy {
+	return SchedAdminPolicyPolicy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}
+}
+func (s *SchedAdminService) exemptions(ctx context.Context, p *SchedQualitySnapshot, a *Account, now time.Time) []SchedAdminExemption {
+	out := []SchedAdminExemption{}
+	for _, o := range p.Overrides {
+		if o.AccountID != a.ID || o.Mode != schedquality.OverrideExempt || !schedAdminMember(a, o.GroupID) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
 			continue
 		}
+		reason := operatoraccess.StripURLUserinfo(o.Reason)
+		if scope := operatoraccess.ScopeFrom(ctx); scope != nil && !scope.Has(operatoraccess.FlagAccountsUpstreamAddress) {
+			reason = operatoraccess.ScrubURLs(reason)
+		}
+		x := SchedAdminExemption{GroupID: o.GroupID, Reason: reason}
+		if o.ExpiresAt != nil {
+			x.ExpiresAt = schedAdminTime(*o.ExpiresAt)
+		}
+		out = append(out, x)
+	}
+	slices.SortFunc(out, func(a, b SchedAdminExemption) int { return cmp.Compare(a.GroupID, b.GroupID) })
+	return out
+}
+func schedAdminExemption(rows []SchedAdminExemption, g int64) *SchedAdminExemption {
+	var all *SchedAdminExemption
+	for _, o := range rows {
 		if o.GroupID == g {
-			group = o
+			return &o
 		}
 		if o.GroupID == 0 {
-			all = o
+			all = &o
 		}
 	}
-	o := group
-	if o == nil {
-		o = all
-	}
-	if o == nil {
-		return nil
-	}
-	var expiry *string
-	if o.ExpiresAt != nil {
-		expiry = schedAdminTime(*o.ExpiresAt)
-	}
-	reason := operatoraccess.StripURLUserinfo(o.Reason)
-	if scope := operatoraccess.ScopeFrom(ctx); scope != nil && !scope.Has(operatoraccess.FlagAccountsUpstreamAddress) {
-		reason = operatoraccess.ScrubURLs(reason)
-	}
-	return &SchedAdminOverride{Mode: schedAdminOverrideMode(o.Mode), AllGroups: o.GroupID == 0, ExpiresAt: expiry, Reason: reason}
-}
-func schedAdminModels(p *SchedQualitySnapshot, id int64, groupAccounts map[int64]*Account) []string {
-	counts := map[string]int{}
-	if groupAccounts == nil {
-		for k, v := range p.Evidence {
-			if k.AccountID == id && v.Samples > 0 {
-				counts[k.Model] += v.Samples
-			}
-		}
-	} else {
-		for a, rows := range p.GroupRows {
-			seen := map[string]bool{}
-			for _, r := range rows {
-				if r.GroupID == id && !seen[r.Model] {
-					seen[r.Model] = true
-					v := p.Evidence[SchedAccountModel{a, r.Model}]
-					if model := openAIRequestModelForEvidence(groupAccounts[a], r.Model); v.Samples > 0 && model != "" {
-						counts[model] += v.Samples
-					}
-				}
-			}
-		}
-	}
-	out := make([]string, 0, len(counts))
-	for m := range counts {
-		out = append(out, m)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if counts[out[i]] == counts[out[j]] {
-			return out[i] < out[j]
-		}
-		return counts[out[i]] > counts[out[j]]
-	})
-	return out
-}
-
-// SchedAdminTestErrors reports individual requests that failed after all models were attempted.
-type SchedAdminTestErrors struct {
-	Models []string
-	Err    error
-}
-
-func (e *SchedAdminTestErrors) Error() string { return e.Err.Error() }
-func (e *SchedAdminTestErrors) Unwrap() error { return e.Err }
-
-func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op int64) (SchedAdminTest, error) {
-	out := SchedAdminTest{Tests: []SchedAdminTestTests{}}
-	a, e := s.account(ctx, id)
-	if e != nil {
-		return out, e
-	}
-	if s.d.Tests == nil {
-		return out, infraerrors.ServiceUnavailable("SCHED_TEST_UNAVAILABLE", "Test runner is unavailable")
-	}
-	p := s.snapshot()
-	models := []string{}
-	if strings.TrimSpace(model) != "" {
-		models = append(models, strings.TrimSpace(model))
-	} else {
-		models = schedAdminModels(p, id, nil)
-		if len(models) > schedquality.ManualTestMaxModels {
-			models = models[:schedquality.ManualTestMaxModels]
-		}
-		if len(models) == 0 {
-			counts := map[string]int{}
-			for account, rows := range p.GroupRows {
-				seen := map[string]bool{}
-				for _, r := range rows {
-					if schedAdminMember(a, r.GroupID) && !seen[r.Model] {
-						seen[r.Model] = true
-						counts[r.Model] += p.Evidence[SchedAccountModel{account, r.Model}].Samples
-					}
-				}
-			}
-			best := ""
-			for m, n := range counts {
-				if n > 0 && (best == "" || n > counts[best] || (n == counts[best] && m < best)) {
-					best = m
-				}
-			}
-			if best != "" {
-				models = append(models, best)
-			}
-		}
-	}
-	failures := &SchedAdminTestErrors{}
-	for _, m := range models {
-		t, e := s.d.Tests.Request(ctx, id, m, false, op)
-		if e != nil {
-			failures.Models = append(failures.Models, m)
-			failures.Err = errors.Join(failures.Err, fmt.Errorf("%s: %w", m, e))
-			out.Tests = append(out.Tests, SchedAdminTestTests{Model: m, Why: "error"})
-			continue
-		}
-		out.Tests = append(out.Tests, SchedAdminTestTests(t))
-	}
-	if failures.Err != nil {
-		if len(failures.Models) == len(out.Tests) {
-			out.Tests = []SchedAdminTestTests{}
-		}
-		return out, failures
-	}
-	return out, nil
-}
-func schedAdminPolicy(r SchedPolicyRecord) SchedAdminPolicy {
-	p := r.Policy
-	out := SchedAdminPolicy{GroupID: r.GroupID, Version: r.Version, Policy: SchedAdminPolicyPolicy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}, ClassLimitsMs: map[string]SchedAdminClassLimits{}}
-	for model, v := range schedquality.ClassScaleTable {
-		out.ClassLimitsMs[model] = SchedAdminClassLimits{Light: int(math.Round(p.TTFTSeconds * 1000 * v[0])), Regular: int(math.Round(p.TTFTSeconds * 1000 * v[1])), Heavy: int(math.Round(p.TTFTSeconds * 1000 * v[2])), Xheavy: int(math.Round(p.TTFTSeconds * 1000 * v[3]))}
-	}
-	return out
+	return all
 }
 func (s *SchedAdminService) Policy(ctx context.Context, g int64) (SchedAdminPolicy, error) {
 	if _, e := s.group(ctx, g); e != nil {
@@ -333,8 +221,11 @@ func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, 
 	if group.Platform != PlatformOpenAI {
 		return SchedAdminPolicy{}, infraerrors.BadRequest("INVALID_GROUP_PLATFORM", "Only OpenAI groups support scheduling policies")
 	}
-	if version < 0 || math.IsNaN(p.TTFTSeconds) || math.IsInf(p.TTFTSeconds, 0) || math.IsNaN(p.MaxErrorRate) || math.IsInf(p.MaxErrorRate, 0) || math.IsNaN(p.MinCacheRatio) || math.IsInf(p.MinCacheRatio, 0) || p.TTFTSeconds < schedquality.PolicyTTFTMinSeconds || p.TTFTSeconds > schedquality.PolicyTTFTMaxSeconds || p.MaxErrorRate < 0 || p.MaxErrorRate > 1 || p.MinCacheRatio < 0 || p.MinCacheRatio > 1 || !slices.Contains(schedquality.TakeoverIdleChoices[:], p.TakeoverIdleSeconds) {
-		return SchedAdminPolicy{}, infraerrors.BadRequest("INVALID_POLICY", "Invalid scheduling policy")
+	if version < 0 {
+		return SchedAdminPolicy{}, infraerrors.BadRequest("INVALID_SCHED_POLICY", "Invalid expected version")
+	}
+	if e := ValidateSchedQualityPolicy(p); e != nil {
+		return SchedAdminPolicy{}, e
 	}
 	r, e := s.d.Engine.UpdatePolicy(ctx, g, version, p)
 	if e != nil {

@@ -115,8 +115,10 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	beforeRedis := mini.Dump()
 	capture := &readerRedisCapture{}
 	redisClient.AddHook(capture)
-	quality := service.NewSchedQualityEngineService(nil, nil, nil, nil, nil, nil)
-	summaries := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: quality})
+	quality := service.NewSchedQualityEngineService(nil, nil, nil, nil, nil)
+	// Match production: the shared admin service has its own account repository;
+	// diagnostic SQL below still runs with the restricted reader role.
+	summaries := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: quality, Accounts: readerHealthAccounts{db: writer}})
 	rreader := NewRuntimeReader(&ReaderDB{ro}, repository.NewConcurrencyCache(redisClient, 5, 60), balance, quality, summaries)
 	actor := testReaderActor()
 	actor.UserID = 7007
@@ -331,4 +333,25 @@ func testReaderDualRowAndLegacyModel(t *testing.T, ctx context.Context, reader Q
 	require.True(t, rollup.RetentionLimited)
 	require.Equal(t, "limited", rollup.RetentionStatus)
 
+}
+
+type readerHealthAccounts struct {
+	service.SchedAdminAccountRepository
+	db *sql.DB
+}
+
+func (r readerHealthAccounts) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
+	out := []*service.Account{}
+	for _, id := range ids {
+		a := &service.Account{ID: id}
+		err := r.db.QueryRowContext(ctx, `SELECT platform,status,schedulable FROM accounts WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&a.Platform, &a.Status, &a.Schedulable)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }

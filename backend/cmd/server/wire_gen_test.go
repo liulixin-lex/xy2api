@@ -112,7 +112,6 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // pluginManager
 		nil,                         // resilience
 		nil,                         // schedQuality
-		nil,                         // schedTests
 		nil,                         // schedAttempts
 		schedObs,                    // schedObs
 		&service.ImageTaskService{}, // imageTasks

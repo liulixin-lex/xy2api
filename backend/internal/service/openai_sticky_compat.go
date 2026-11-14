@@ -121,9 +121,6 @@ func (s *OpenAIGatewayService) openAIStickyLegacyTTL(ttl time.Duration) time.Dur
 }
 
 func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	if owner, ok := ctx.Value(openAIStickyReconciledKey{}).(int64); ok && owner > 0 && !s.qualityOwnsSticky(ctx, groupID, sessionHash) {
-		return owner, nil
-	}
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
 		return id, nil
 	}
@@ -134,6 +131,12 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
 		return 0, nil
+	}
+	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok && s.openAISessionHashReadOldFallbackEnabled() {
+		if legacy := s.openAILegacySessionCacheKey(ctx, sessionHash); legacy != "" {
+			binding, err := aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), primaryKey, legacy, true)
+			return binding.AccountID, err
+		}
 	}
 
 	accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), primaryKey)
@@ -159,6 +162,9 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
@@ -194,7 +200,13 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	if legacyKey == "" {
 		return nil
 	}
-	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl)); err != nil {
+	var err error
+	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
+		err = aliases.SyncSessionBindingAlias(ctx, derefGroupID(groupID), primaryKey, legacyKey, accountID, s.openAIStickyLegacyTTL(ttl), true)
+	} else {
+		err = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl))
+	}
+	if err != nil {
 		return err
 	}
 	openAIStickyLegacyDualWriteTotal.Add(1)
@@ -202,6 +214,9 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration, expectedOwner ...int64) error {
+	if change := pendingOpenAIStickyChange(ctx); preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && change.expected.AccountID == 0 {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
@@ -228,12 +243,23 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 
 	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
 	if legacyKey != "" {
-		_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), legacyKey, s.openAIStickyLegacyTTL(ttl))
+		if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
+			var owner int64
+			if len(expectedOwner) > 0 {
+				owner = expectedOwner[0]
+			}
+			_ = aliases.SyncSessionBindingAlias(ctx, derefGroupID(groupID), primaryKey, legacyKey, owner, s.openAIStickyLegacyTTL(ttl), false)
+		} else {
+			_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), legacyKey, s.openAIStickyLegacyTTL(ttl))
+		}
 	}
 	return err
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) error {
+	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
@@ -245,6 +271,9 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 		return nil
 	}
 
+	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, 0); handled {
+		return err
+	}
 	deleted, err := s.deleteOpenAIStickyBinding(ctx, derefGroupID(groupID), primaryKey)
 	confirmed := err == nil
 	if s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled() {

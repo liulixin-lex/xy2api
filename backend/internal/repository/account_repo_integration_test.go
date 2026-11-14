@@ -634,16 +634,16 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 
 func (s *AccountRepoSuite) TestListByGroup() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-list"})
-	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a1", Status: service.StatusActive})
-	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a2", Status: service.StatusActive})
+	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a1", Status: service.StatusActive, Priority: 1})
+	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a2", Status: service.StatusActive, Priority: 9})
 	mustBindAccountToGroup(s.T(), s.client, acc1.ID, group.ID, 2)
 	mustBindAccountToGroup(s.T(), s.client, acc2.ID, group.ID, 1)
 
 	accounts, err := s.repo.ListByGroup(s.ctx, group.ID)
 	s.Require().NoError(err, "ListByGroup")
 	s.Require().Len(accounts, 2)
-	// Should be ordered by priority
-	s.Require().Equal(acc2.ID, accounts[0].ID, "expected acc2 first (priority=1)")
+	// Account priority wins even when the legacy membership priority disagrees.
+	s.Require().Equal(acc1.ID, accounts[0].ID, "account priority must ignore membership priority")
 }
 
 func (s *AccountRepoSuite) TestListActive() {
@@ -704,7 +704,7 @@ func (s *AccountRepoSuite) TestGroupBinding_And_BindGroups() {
 	g2 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g2"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc"})
 
-	s.Require().NoError(s.repo.AddToGroup(s.ctx, account.ID, g1.ID, 10), "AddToGroup")
+	s.Require().NoError(s.repo.AddToGroup(s.ctx, account.ID, g1.ID), "AddToGroup")
 	groups, err := s.repo.GetGroups(s.ctx, account.ID)
 	s.Require().NoError(err, "GetGroups")
 	s.Require().Len(groups, 1, "expected 1 group")
@@ -1761,4 +1761,17 @@ func idsOfAccounts(accounts []service.Account) []int64 {
 		out = append(out, accounts[i].ID)
 	}
 	return out
+}
+
+func (s *AccountRepoSuite) TestCapacityOrderUsesAccountPriority() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "synthetic-capacity-order"})
+	first := mustCreateAccount(s.T(), s.client, &service.Account{Name: "synthetic-first", Priority: 1})
+	second := mustCreateAccount(s.T(), s.client, &service.Account{Name: "synthetic-second", Priority: 9})
+	mustBindAccountToGroup(s.T(), s.client, first.ID, group.ID, 100)
+	mustBindAccountToGroup(s.T(), s.client, second.ID, group.ID, 1)
+	rows, err := s.repo.ListSchedulableCapacityByGroupIDs(s.ctx, []int64{group.ID})
+	s.Require().NoError(err)
+	s.Require().Len(rows, 2)
+	s.Equal(first.ID, rows[0].AccountID, "retained database member priority cannot override account priority")
+	s.Equal(second.ID, rows[1].AccountID)
 }

@@ -269,6 +269,7 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
+	Result    *int16
 	UserID    int64
 	APIKeyID  int64
 	AccountID int64
@@ -390,4 +391,14 @@ type AccountUsageStatsResponse struct {
 	Models            []ModelStat           `json:"models"`
 	Endpoints         []EndpointStat        `json:"endpoints"`
 	UpstreamEndpoints []EndpointStat        `json:"upstream_endpoints"`
+}
+
+// AdminRequestStats adds request outcomes only to the administrative view.
+type AdminRequestStats struct {
+	UsageStats
+	Success    int64    `json:"success"`
+	Rescued    int64    `json:"rescued"`
+	Failed     int64    `json:"failed"`
+	TTFOP50Ms  *float64 `json:"ttfo_p50_ms"`
+	CacheRatio *float64 `json:"cache_ratio"`
 }

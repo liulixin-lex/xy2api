@@ -227,7 +227,7 @@ export default {
     },
     usage: {
       fallback: 'Fallback → {group}',
-      fallbackTitle: 'The original group had no available account and the fallback group served the request; billed by the fallback group, while the user sees only the original group'
+      fallbackTitle: 'Fallback group'
     }
   }
 }

@@ -466,8 +466,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
-	schedCapture.finish(result, handleErr)
+	if result != nil {
+		schedCapture.noteUsage(&result.Usage)
+	}
 	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
+		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 		return s.forwardAsChatCompletions(ctx, c, account, next, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
@@ -965,7 +968,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					// 无条件置位：成功路径防 finalizeStream 重复 [DONE]；写失败意味着连接已不可写，
 					// finalizeStream 的 [DONE] 同样发不出去，统一抑制。
 					clientDisconnected = true
-					cancelSchedClient(c)
 				}
 				return true
 			}

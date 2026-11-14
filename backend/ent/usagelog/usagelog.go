@@ -22,6 +22,16 @@ const (
 	FieldAccountID = "account_id"
 	// FieldRequestID holds the string denoting the request_id field in the database.
 	FieldRequestID = "request_id"
+	// FieldGatewayRequestID holds the string denoting the gateway_request_id field in the database.
+	FieldGatewayRequestID = "gateway_request_id"
+	// FieldResult holds the string denoting the result field in the database.
+	FieldResult = "result"
+	// FieldSwitches holds the string denoting the switches field in the database.
+	FieldSwitches = "switches"
+	// FieldFallback holds the string denoting the fallback field in the database.
+	FieldFallback = "fallback"
+	// FieldTakeover holds the string denoting the takeover field in the database.
+	FieldTakeover = "takeover"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
 	// FieldRequestedModel holds the string denoting the requested_model field in the database.
@@ -208,6 +218,11 @@ var Columns = []string{
 	FieldAPIKeyID,
 	FieldAccountID,
 	FieldRequestID,
+	FieldGatewayRequestID,
+	FieldResult,
+	FieldSwitches,
+	FieldFallback,
+	FieldTakeover,
 	FieldModel,
 	FieldRequestedModel,
 	FieldUpstreamModel,
@@ -386,6 +401,31 @@ func ByAccountID(opts ...sql.OrderTermOption) OrderOption {
 // ByRequestID orders the results by the request_id field.
 func ByRequestID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRequestID, opts...).ToFunc()
+}
+
+// ByGatewayRequestID orders the results by the gateway_request_id field.
+func ByGatewayRequestID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGatewayRequestID, opts...).ToFunc()
+}
+
+// ByResult orders the results by the result field.
+func ByResult(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldResult, opts...).ToFunc()
+}
+
+// BySwitches orders the results by the switches field.
+func BySwitches(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSwitches, opts...).ToFunc()
+}
+
+// ByFallback orders the results by the fallback field.
+func ByFallback(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFallback, opts...).ToFunc()
+}
+
+// ByTakeover orders the results by the takeover field.
+func ByTakeover(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTakeover, opts...).ToFunc()
 }
 
 // ByModel orders the results by the model field.
