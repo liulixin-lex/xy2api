@@ -17,6 +17,7 @@ func TestGatewayRequestMetadataSurvivesBillingIntentAndRead(t *testing.T) {
 	id, result, switches, fallback, takeover := uuid.NewString(), int16(2), int16(1), true, false
 	cmd.Usage.GatewayRequestID, cmd.Usage.Result, cmd.Usage.Switches = &id, &result, &switches
 	cmd.Usage.Fallback, cmd.Usage.Takeover = &fallback, &takeover
+	cmd.Usage.EndToEndDurationMs = new(int64(300))
 	_, err := r.Apply(context.Background(), cmd)
 	require.NoError(t, err)
 	var usageID int64
@@ -30,13 +31,16 @@ func TestGatewayRequestMetadataSurvivesBillingIntentAndRead(t *testing.T) {
 	require.Equal(t, &switches, row.Switches)
 	require.Equal(t, &fallback, row.Fallback)
 	require.Equal(t, &takeover, row.Takeover)
+	require.Equal(t, new(int64(300)), row.EndToEndDurationMs)
 	// Recovery/idempotence keeps the original frozen request facts.
 	result = 3
+	cmd.Usage.EndToEndDurationMs = new(int64(999))
 	_, err = r.Apply(context.Background(), cmd)
 	require.NoError(t, err)
 	row, err = repo.GetByID(context.Background(), usageID)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, *row.Result)
+	require.Equal(t, new(int64(300)), row.EndToEndDurationMs)
 }
 
 func TestGatewayRequestCleanupSharesRetentionAndBillingFilter(t *testing.T) {

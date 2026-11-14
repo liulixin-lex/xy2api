@@ -29,7 +29,7 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
-	for _, name := range []string{"283_recovery_observability.sql", "289_usage_log_attempt_first_output.sql"} {
+	for _, name := range []string{"283_recovery_observability.sql", "289_usage_log_attempt_first_output.sql", "310_sv2_end_to_end_duration.sql"} {
 		migration, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		for i := 0; i < 2; i++ {
@@ -44,12 +44,13 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 	account := mustCreateAccount(t, client, &service.Account{Name: tag})
 	elapsed := int64(28000)
 	attemptElapsed := int64(5000)
+	duration := int64(30000)
 	zero := int64(0)
 	for _, mode := range []string{"single", "batch", "best_effort", "no_result"} {
-		for _, values := range []struct{ endToEnd, attempt *int64 }{
-			{}, {&elapsed, nil}, {&elapsed, &zero}, {&elapsed, &attemptElapsed},
+		for _, values := range []struct{ endToEnd, attempt, duration *int64 }{
+			{}, {&elapsed, nil, nil}, {&elapsed, &zero, &duration}, {&elapsed, &attemptElapsed, &duration}, {&zero, &zero, &zero}, {nil, nil, &duration},
 		} {
-			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "gpt-5", RequestID: tag + "-" + uuid.NewString()[:16], CreatedAt: time.Now(), EndToEndFirstOutputMs: values.endToEnd, AttemptFirstOutputMs: values.attempt}
+			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "gpt-5", RequestID: tag + "-" + uuid.NewString()[:16], CreatedAt: time.Now(), EndToEndFirstOutputMs: values.endToEnd, AttemptFirstOutputMs: values.attempt, EndToEndDurationMs: values.duration}
 			prepared := prepareUsageLogInsert(log)
 			var err error
 			switch mode {
@@ -70,9 +71,11 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 			require.NoError(t, e)
 			require.Equal(t, values.endToEnd, got.EndToEndFirstOutputMs, mode)
 			require.Equal(t, values.attempt, got.AttemptFirstOutputMs, mode)
+			require.Equal(t, values.duration, got.EndToEndDurationMs, mode)
 			entity, err := client.UsageLog.Get(ctx, log.ID)
 			require.NoError(t, err)
 			require.Equal(t, values.attempt, entity.AttemptFirstOutputMs, mode)
+			require.Equal(t, values.duration, entity.EndToEndDurationMs, mode)
 		}
 	}
 	ops := NewOpsRepository(integrationDB)

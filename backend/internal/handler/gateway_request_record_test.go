@@ -176,6 +176,8 @@ func TestRequestResultWebSocketWithoutRecorder(t *testing.T) {
 			for _, row := range rows.bills {
 				require.EqualValues(t, 1, *row.Result)
 				require.NotNil(t, row.EndToEndFirstOutputMs)
+				require.NotNil(t, row.EndToEndDurationMs)
+				require.LessOrEqual(t, *row.EndToEndFirstOutputMs, *row.EndToEndDurationMs)
 			}
 		})
 	}

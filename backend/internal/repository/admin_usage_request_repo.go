@@ -165,10 +165,16 @@ func (r *usageLogRepository) hydrateAdminRequests(ctx context.Context, items []s
 				logs[i] = log
 			}
 		}
-		logs[i].FirstTokenMs = nil
-		if logs[i].EndToEndFirstOutputMs != nil {
-			ms := int(*logs[i].EndToEndFirstOutputMs)
-			logs[i].FirstTokenMs = &ms
+		// Unbilled duration already starts at ingress. Billed rows switch both
+		// display timings together; incomplete/legacy pairs keep attempt timing.
+		if items[i].Source == "unbilled" {
+			if logs[i].EndToEndFirstOutputMs != nil {
+				ms := int(*logs[i].EndToEndFirstOutputMs)
+				logs[i].FirstTokenMs = &ms
+			}
+		} else if logs[i].EndToEndFirstOutputMs != nil && logs[i].EndToEndDurationMs != nil {
+			first, duration := int(*logs[i].EndToEndFirstOutputMs), int(*logs[i].EndToEndDurationMs)
+			logs[i].FirstTokenMs, logs[i].DurationMs = &first, &duration
 		}
 	}
 	if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
