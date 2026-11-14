@@ -78,4 +78,19 @@ describe('ProxiesView selection', () => {
     expect(batchDelete).toHaveBeenCalledWith([9, 11])
     expect(wrapper.get('[data-test="pick"]').text()).toBe('')
   })
+
+  it('closes the narrow actions menu on Escape and gives focus back to its button (7p-4)', async () => {
+    wrapper = mountView()
+    document.body.appendChild(wrapper.element)
+    await flushPromises()
+
+    const more = wrapper.get('[data-test="proxy-more-actions"]')
+    await more.trigger('click')
+    expect(wrapper.find('[role="menu"]').exists()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(more.element)
+  })
 })

@@ -1,5 +1,5 @@
 import { nextTick, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter, type Ref, type WatchSource } from 'vue'
-import { closeOverlay, holdFocus, insideLayerAbove, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
+import { closeOverlay, holdFocus, insideLayerAbove, isTopOverlay, openOverlay, setOverlayModal, syncOverlays, trapTab } from '@/utils/overlayStack'
 
 interface OverlayLayerOptions {
   /** Outermost element of the layer (made inert while a modal layer is above it). */
@@ -47,19 +47,20 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
     closeOverlay(token)
   }
 
+  // A sub-layer closes when a modal layer opens above it.
+  const covered = () => { if (toValue(show)) (options.onCovered ?? options.onEscape)?.() }
+
   watch(
     [() => toValue(show), isModal],
-    async ([open, modal]) => {
+    async ([open, modal], previous) => {
       if (!open) return detach()
-      zIndex.value = openOverlay(token, {
-        floor: options.floor,
-        modal,
-        root: () => options.root.value,
-        panel,
-        // A sub-layer closes when a modal layer opens above it.
-        onCovered: modal ? undefined : () => { if (toValue(show)) (options.onCovered ?? options.onEscape)?.() }
-      })
-      document.addEventListener('keydown', onKeydown)
+      // Only the modal flag changed (the panel crossing 1024px): the layer keeps its place in the stack, under a
+      // dialog or popover opened above it (7p-2).
+      const switched = previous?.[0] === true && setOverlayModal(token, modal, modal ? undefined : covered)
+      if (!switched) {
+        zIndex.value = openOverlay(token, { floor: options.floor, modal, root: () => options.root.value, panel, onCovered: modal ? undefined : covered })
+        document.addEventListener('keydown', onKeydown)
+      }
       await nextTick()
       if (!isTopOverlay(token)) return
       syncOverlays()

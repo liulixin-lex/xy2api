@@ -88,6 +88,7 @@
             </template>
             <div v-if="canManage || isSuperAdmin" class="relative lg:hidden">
               <button
+                ref="moreButtonRef"
                 type="button"
                 class="btn btn-secondary table-toolbar__icon"
                 :aria-label="t('common.more')"
@@ -101,6 +102,7 @@
               </button>
               <div
                 v-if="moreMenuOpen"
+                ref="moreMenuRef"
                 role="menu"
                 class="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
               >
@@ -1015,6 +1017,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -1105,6 +1108,19 @@ const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
 const moreMenuOpen = ref(false)
+const moreButtonRef = ref<HTMLElement | null>(null)
+const moreMenuRef = ref<HTMLElement | null>(null)
+// The narrow "more" menu is a sub-layer like the app's other menus: Escape closes it and focus goes back to its
+// button; a dialog it opens closes it (7p-4).
+useOverlayLayer(moreMenuOpen, {
+  root: moreMenuRef,
+  modal: false,
+  onEscape: () => {
+    moreMenuOpen.value = false
+    moreButtonRef.value?.focus()
+  },
+  onCovered: () => { moreMenuOpen.value = false }
+})
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({

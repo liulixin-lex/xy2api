@@ -2,9 +2,14 @@
   <AppLayout>
     <TablePageLayout>
       <!-- Filters -->
+      <!-- From 1024px the page's own look (7p-1): the framed filter area, a label over each field, the fields flowing
+           beside the search. Below 1024px the shared narrow toolbar: labels hidden, the placeholders and accessible
+           names say what each field is. -->
       <template #filters>
+        <div class="audit-filters lg:card lg:p-6">
         <TableToolbar>
           <template #search>
+            <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.q') }}</label>
             <div class="relative">
               <Icon
                 name="search"
@@ -22,58 +27,79 @@
             </div>
           </template>
           <template #filters>
-            <input
-              v-model.trim="filters.actor_email"
-              type="text"
-              class="input w-[200px]"
-              :placeholder="t('admin.audit.filters.actorEmail')"
-              :aria-label="t('admin.audit.filters.actorEmail')"
-              @keyup.enter="search"
-            />
-            <input
-              v-model.trim="filters.action"
-              type="text"
-              class="input w-[180px]"
-              :placeholder="t('admin.audit.filters.action')"
-              :aria-label="t('admin.audit.filters.action')"
-              @keyup.enter="search"
-            />
-            <input
-              v-model.trim="filters.client_ip"
-              type="text"
-              class="input w-[160px]"
-              :placeholder="t('admin.audit.filters.clientIp')"
-              :aria-label="t('admin.audit.filters.clientIp')"
-              @keyup.enter="search"
-            />
-            <Select
-              v-model="filters.method"
-              :options="methodOptions"
-              :aria-label="t('admin.audit.filters.method')"
-              class="min-w-[140px]"
-              @change="search"
-            />
-            <Select
-              v-model="filters.auth_method"
-              :options="authMethodOptions"
-              :aria-label="t('admin.audit.filters.authMethod')"
-              class="min-w-[170px]"
-              @change="search"
-            />
-            <Select
-              v-model="filters.success"
-              :options="resultOptions"
-              :aria-label="t('admin.audit.filters.result')"
-              class="min-w-[140px]"
-              @change="search"
-            />
-            <Select
-              :model-value="timeRange"
-              :options="timeRangeOptions"
-              :aria-label="t('admin.dashboard.timeRange')"
-              class="min-w-[170px]"
-              @update:model-value="handleTimeRangeChange"
-            />
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.actorEmail') }}</label>
+              <input
+                v-model.trim="filters.actor_email"
+                type="text"
+                class="input w-[200px]"
+                :placeholder="t('admin.audit.filters.actorEmail')"
+                :aria-label="t('admin.audit.filters.actorEmail')"
+                @keyup.enter="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.action') }}</label>
+              <input
+                v-model.trim="filters.action"
+                type="text"
+                class="input w-[180px]"
+                :placeholder="t('admin.audit.filters.action')"
+                :aria-label="t('admin.audit.filters.action')"
+                @keyup.enter="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.clientIp') }}</label>
+              <input
+                v-model.trim="filters.client_ip"
+                type="text"
+                class="input w-[160px]"
+                :placeholder="t('admin.audit.filters.clientIp')"
+                :aria-label="t('admin.audit.filters.clientIp')"
+                @keyup.enter="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.method') }}</label>
+              <Select
+                v-model="filters.method"
+                :options="methodOptions"
+                :aria-label="t('admin.audit.filters.method')"
+                class="min-w-[140px]"
+                @change="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.authMethod') }}</label>
+              <Select
+                v-model="filters.auth_method"
+                :options="authMethodOptions"
+                :aria-label="t('admin.audit.filters.authMethod')"
+                class="min-w-[170px]"
+                @change="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.audit.filters.result') }}</label>
+              <Select
+                v-model="filters.success"
+                :options="resultOptions"
+                :aria-label="t('admin.audit.filters.result')"
+                class="min-w-[140px]"
+                @change="search"
+              />
+            </div>
+            <div>
+              <label class="input-label max-lg:hidden">{{ t('admin.dashboard.timeRange') }}</label>
+              <Select
+                :model-value="timeRange"
+                :options="timeRangeOptions"
+                :aria-label="t('admin.dashboard.timeRange')"
+                class="min-w-[170px]"
+                @update:model-value="handleTimeRangeChange"
+              />
+            </div>
           </template>
           <template #actions>
             <button type="button" class="btn btn-primary" :disabled="loading" @click="search">
@@ -103,6 +129,7 @@
             </button>
           </template>
         </TableToolbar>
+        </div>
       </template>
 
       <!-- Table -->
@@ -710,3 +737,17 @@ function statusDotClass(status: number): string {
 
 onMounted(fetchLogs)
 </script>
+
+<style scoped>
+/* From 1024px the fields flow beside the search in one wrapping group, everything aligned on the inputs' bottom edge,
+   as the page had before the shared toolbar (7p-1). */
+@media (min-width: 1024px) {
+  .audit-filters :deep(.table-toolbar),
+  .audit-filters :deep(.table-toolbar__main) {
+    align-items: flex-end;
+  }
+  .audit-filters :deep(.table-toolbar__filters) {
+    display: contents;
+  }
+}
+</style>

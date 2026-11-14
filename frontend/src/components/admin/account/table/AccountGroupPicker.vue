@@ -363,8 +363,9 @@ defineExpose({ requestClose })
   width: var(--popover-width);
   max-width: calc(100vw - 16px);
   /* Never taller than the room under the page header (64px) and 8px above the bottom: the list scrolls, the conflict
-     buttons stay on screen (7l-6). */
-  max-height: calc(100vh - 72px);
+     buttons stay on screen (7l-6). The dynamic viewport, as window.innerHeight in the placement: on iOS Safari the
+     bottom never slips under the browser's toolbar (7p-3). */
+  max-height: calc(100dvh - 72px);
   grid-template-rows: auto minmax(0, 1fr) auto;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-lg);

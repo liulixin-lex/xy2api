@@ -164,6 +164,19 @@ export function openOverlay(token: symbol, options: OverlayOptions): number {
   return z
 }
 
+/**
+ * Switches an open layer between modal and sub-layer where it stands: the layers opened above it stay above it.
+ * Inert and the scroll lock are re-applied. False when the layer is not open.
+ */
+export function setOverlayModal(token: symbol, modal: boolean, onCovered?: () => void): boolean {
+  const layer = layers.find((item) => item.token === token)
+  if (!layer) return false
+  layer.modal = modal
+  layer.onCovered = onCovered
+  syncOverlays()
+  return true
+}
+
 /** Removes a layer; when it was the top layer, focus moves as described above. */
 export function closeOverlay(token: symbol) {
   const index = layers.findIndex((layer) => layer.token === token)
