@@ -1,7 +1,7 @@
 /**
  * Recent status values (first token, errors, cache) from an account's quality summary, formatted the same way in the
- * accounts table and the quality panel. Whether a value is over its line is the backend's `red` mark; nothing here
- * compares a value with a threshold.
+ * accounts table and the quality panel: the whole account's values over the last hour. Nothing here compares a value
+ * with a threshold; the backend judges each group and model on its own (7k).
  */
 import type { BackendAccountSummary, BackendDim, BackendPolicy } from '@/api/admin/schedQualityTypes'
 

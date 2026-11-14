@@ -143,7 +143,7 @@
                 <div v-for="line in recentLines" :key="line.dim" class="rrow" :data-qp-recent="line.dim">
                   <span class="rrow__k">{{ t(`admin.schedQuality.dim.${line.dim}`) }}</span>
                   <span class="rrow__v" :class="line.cls">{{ line.text }}</span>
-                  <span class="rrow__g"><span v-if="line.over" class="rrow__over">{{ t('admin.schedQuality.panel.over') }}</span><template v-if="line.over"> · </template>{{ t('admin.schedQuality.panel.threshold', { value: line.threshold }) }}</span>
+                  <span class="rrow__g">{{ t('admin.schedQuality.panel.threshold', { value: line.threshold }) }}</span>
                 </div>
                 <div v-if="ratio" class="rrow" data-qp-recent="ratio">
                   <span class="rrow__k">{{ t('admin.schedQuality.panel.ratio') }}</span>
@@ -151,7 +151,7 @@
                   <span class="rrow__g">{{ ratio.note }}</span>
                 </div>
               </div>
-              <p v-if="detail.stop" class="qp-note">{{ t('admin.schedQuality.panel.stoppedNote') }}</p>
+              <p class="qp-note" data-test="qp-threshold-note">{{ t('admin.schedQuality.panel.thresholdNote') }}</p>
             </section>
           </template>
         </div>
@@ -519,14 +519,15 @@ watch(canManage, (allowed) => {
 })
 
 // ---- Thresholds, recent values and the upstream ratio (also readable on touch) ----
+// The values are the whole account's over the last hour; the threshold beside each is the strictest of the groups'
+// policies, which judge per group and model (the groups' marks above): no comparison of the two, no "over the line"
+// here (7k-1).
 const recentLines = computed(() => {
-  const value = detail.value
-  const thresholds = strictestThresholds(value?.groups.map((group) => group.policy) ?? [])
+  const thresholds = strictestThresholds(detail.value?.groups.map((group) => group.policy) ?? [])
   return RECENT_DIMS.map((dim) => {
     const recent = summary.value ? recentValue(summary.value, dim) : null
     const short = !recent?.text || recent.mark.short
-    const over = !short && !!recent?.mark.red && !value?.stop
-    return { dim, text: recent?.text ?? '—', cls: short ? 'rrow__v--na' : over ? 'rrow__v--over' : '', over, threshold: formatThreshold(dim, thresholds[dim]) }
+    return { dim, text: recent?.text ?? '—', cls: short ? 'rrow__v--na' : '', threshold: formatThreshold(dim, thresholds[dim]) }
   })
 })
 
@@ -894,17 +895,11 @@ onScopeDispose(() => running?.kill())
 .rrow__v--na {
   color: var(--color-text-muted);
 }
-.rrow__v--over {
-  color: var(--color-status-back-text);
-}
 .rrow__g {
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
   line-height: var(--line-height-small);
   text-align: right;
-}
-.rrow__over {
-  color: var(--color-status-back-text);
 }
 
 /* Shared by the groups table */

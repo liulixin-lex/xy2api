@@ -376,8 +376,11 @@ describe('SchedQualityPanel', () => {
     expect(backendSummary).not.toHaveBeenCalled()
     const value = (key: string) => document.querySelector(`[data-qp-recent="${key}"] .rrow__v`)!
     expect(value('ttfo').textContent).toBe('12.3s')
-    expect(value('ttfo').classList.contains('rrow__v--over')).toBe(true)
     expect(value('cache').classList.contains('rrow__v--na')).toBe(true)
-    expect(document.querySelector('[data-qp-recent="ttfo"] .rrow__g')!.textContent).toContain('"value":"≤ 10.0s"')
+    // The whole account's value beside the strictest groups' threshold: no "over the line", no amber, a note that the
+    // threshold judges per group and model (7k-1).
+    expect(value('ttfo').className).toBe('rrow__v')
+    expect(document.querySelector('[data-qp-recent="ttfo"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.threshold:{"value":"≤ 10.0s"}')
+    expect(document.querySelector('[data-test="qp-threshold-note"]')!.textContent).toBe('admin.schedQuality.panel.thresholdNote')
   })
 })

@@ -179,8 +179,8 @@ describe('AccountsView quality columns', () => {
     expect([tone(1), tone(2), tone(3), tone(4)]).toEqual([
       'status-dot status-dot--back', 'status-dot status-dot--ok', 'status-dot status-dot--observe', 'status-dot status-dot--off'
     ])
-    // Over the line: amber, from the backend's mark, no threshold in the browser.
-    expect(rowCell(1, 'recent').querySelector('[data-dim="ttfo"]')!.className).toContain('recent__v--over')
+    // The recent values are the whole account's: a red mark (one group and model) does not colour them (7k-2).
+    expect(rowCell(1, 'recent').querySelector('[data-dim="ttfo"]')!.className).toBe('recent__v')
 
     rowCell(1, 'groups').querySelector<HTMLElement>('[data-test="group-pill-dot"]')!.click()
     await flushPromises()

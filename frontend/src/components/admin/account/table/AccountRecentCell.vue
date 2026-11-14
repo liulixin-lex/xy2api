@@ -9,10 +9,11 @@
 
 <script setup lang="ts">
 /**
- * Recent status (prototype): first token, errors and cache on three lines, from the account's quality summary. A value
- * over the line (the backend's `red` mark: one level only) is amber with a dotted underline, never red; too few samples
- * or no data reads muted. The browser judges nothing against a threshold. In the narrow card (`card`) the three sit
- * side by side, each label over its value; the thresholds are in the quality panel.
+ * Recent status (prototype): first token, errors and cache on three lines, from the account's quality summary. These
+ * are the whole account's values over the last hour, so they are never coloured by the summary's `red` mark, which
+ * judges one group and model (7k-2): which group, model and dimension fall short is the group dots' and their tips'
+ * to tell. Too few samples or no data reads muted. In the narrow card (`card`) the three sit side by side, each label
+ * over its value; the thresholds are in the quality panel.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -20,7 +21,7 @@ import type { BackendAccountSummary, BackendMark } from '@/api/admin/schedQualit
 import { vTip } from '@/utils/tip'
 import { formatRecentPercent, formatRecentSeconds } from './accountRecent'
 
-const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'stop'> | null; card?: boolean }>()
+const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'> | null; card?: boolean }>()
 const { t } = useI18n()
 
 type Dim = 'ttfo' | 'error' | 'cache'
@@ -30,10 +31,9 @@ const lines = computed(() => {
     const label = t(`admin.accounts.table.dims.${dim}`)
     if (!mark || value == null) return { dim, label, text: '—', cls: 'recent__v--na', tip: mark ? t('admin.accounts.table.recentNone', { label }) : '' }
     const text = format(value)
-    if (mark.short) return { dim, label, text, cls: 'recent__v--na', tip: t('admin.accounts.table.recentShort', { label, n: mark.n }) }
-    if (mark.red && !q?.stop) return { dim, label, text, cls: 'recent__v--over', tip: t('admin.accounts.table.recentOver', { label, value: text }) }
-    const tip = [t('admin.accounts.table.recentValue', { label, value: text }), q?.stop ? t('admin.accounts.table.recentStopped') : ''].filter(Boolean).join('\n')
-    return { dim, label, text, cls: '', tip }
+    const scope = t('admin.accounts.table.recentScope')
+    if (mark.short) return { dim, label, text, cls: 'recent__v--na', tip: `${t('admin.accounts.table.recentShort', { label, n: mark.n })}\n${scope}` }
+    return { dim, label, text, cls: '', tip: `${t('admin.accounts.table.recentValue', { label, value: text })}\n${scope}` }
   }
   return [
     row('ttfo', q?.ttfo, q?.ttfo.p50_ms, formatRecentSeconds),
@@ -68,11 +68,6 @@ const lines = computed(() => {
   line-height: var(--line-height-body);
   text-align: right;
   white-space: nowrap;
-}
-.recent__v--over {
-  color: var(--color-status-back-text);
-  text-decoration: underline dotted 1px;
-  text-underline-offset: 3px;
 }
 .recent__v--na {
   color: var(--color-text-muted);
