@@ -56,7 +56,7 @@
           <button
             v-if="pageSort || sortKey"
             type="button"
-            class="btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
+            class="table-cards__sort-order btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
             :aria-label="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             :title="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             data-test="mobile-sort-order"
@@ -1404,6 +1404,17 @@ defineExpose({
   }
   to {
     transform: translateX(100%) scaleX(0.35);
+  }
+}
+/* Touch: the 36px sort direction button reaches 40px, its look unchanged (7n-3). */
+@media (pointer: coarse) {
+  .table-cards__sort-order {
+    position: relative;
+  }
+  .table-cards__sort-order::after {
+    position: absolute;
+    inset: -2px;
+    content: '';
   }
 }
 </style>

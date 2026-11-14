@@ -150,10 +150,11 @@ describe('SchedQualityPanel data from the page\'s live table (7f-1)', () => {
   it('backs off with the table after a failure: the page goes stale, and the panel offers a retry', async () => {
     let table!: LiveTable<{ id: number }>
     mount(withSchedHost(SchedQualityPanel, { onTable: (value) => { table = value } }), { attachTo: document.body })
-    api.accountDetail.mockRejectedValue(new Error('down'))
+    api.accountDetail.mockRejectedValue({ status: 500, message: 'account detail unavailable' })
     await openOn(7)
     expect(table.status.value).toBe('stale')
-    expect(panel()!.querySelector('[data-qp-failed]')).not.toBeNull()
+    // "Failed", and why in the backend's words (7n-4).
+    expect(panel()!.querySelector('[data-qp-failed-reason]')!.textContent).toBe('account detail unavailable')
     api.accountDetail.mockImplementation(async (id: number) => detail(id))
     panel()!.querySelector<HTMLElement>('[data-qp-failed] button')!.click()
     await flushPromises()

@@ -202,4 +202,15 @@ defineExpose({ close: () => { open.value = false } })
     height: 40px;
   }
 }
+/* Touch from 1024px: 40px to hit, its look unchanged (7n-3). */
+@media (min-width: 1024px) and (pointer: coarse) {
+  .tools-btn {
+    position: relative;
+  }
+  .tools-btn::after {
+    position: absolute;
+    inset: -4px;
+    content: '';
+  }
+}
 </style>

@@ -23,6 +23,7 @@ import type { BackendAccountDetail, BackendAccountSummary, BackendOrder } from '
 import type { LiveTable, LiveTask } from '@/composables/useLiveTable'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import type { Account } from '@/types'
+import { extractApiErrorMessage } from '@/utils/apiError'
 
 export const SCHED_PANEL_TASK = 'schedPanel'
 export const SCHED_BOARD_TASK = 'schedBoard'
@@ -38,7 +39,9 @@ const panel = shallowReactive({
   /** The summary fetched with the detail when the page's row has none. */
   summary: null as BackendAccountSummary | null,
   /** The open account whose last run failed. */
-  failedId: null as number | null
+  failedId: null as number | null,
+  /** Why it failed, in the backend's words (7n-4). */
+  failedReason: ''
 })
 const board = shallowReactive({
   /** `group id:model` of the data. */
@@ -47,7 +50,7 @@ const board = shallowReactive({
   failedKey: null as string | null
 })
 let refreshTask: ((name: string) => Promise<void>) | null = null
-const forgetPanel = () => Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null })
+const forgetPanel = () => Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
 const forgetBoard = () => Object.assign(board, { key: null, data: null, failedKey: null })
 
 const { drawer, board: boardRequest, changed } = useSchedLayers()
@@ -71,10 +74,10 @@ export function useSchedLayerTasks() {
             ownSummary ? backendSummary([id], { signal }) : Promise.resolve(null)
           ])
           if (signal.aborted || drawer.accountId !== id) return
-          Object.assign(panel, { accountId: id, detail, summary: summary?.accounts.find((item) => item.account_id === id) ?? null, failedId: null })
+          Object.assign(panel, { accountId: id, detail, summary: summary?.accounts.find((item) => item.account_id === id) ?? null, failedId: null, failedReason: '' })
         } catch (error) {
           if (signal.aborted || drawer.accountId !== id) return
-          panel.failedId = id
+          Object.assign(panel, { failedId: id, failedReason: extractApiErrorMessage(error, '') })
           throw error
         }
       }

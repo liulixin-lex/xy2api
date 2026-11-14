@@ -82,4 +82,15 @@ const toggle = () => {
 .live-status--stale:hover {
   color: var(--color-status-back-text);
 }
+/* Touch: 40px high to hit, its look unchanged (7n-3). */
+@media (pointer: coarse) {
+  .live-status {
+    position: relative;
+  }
+  .live-status::after {
+    position: absolute;
+    inset: -4px 0;
+    content: '';
+  }
+}
 </style>

@@ -153,7 +153,7 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
-const ITEM = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
 const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
 
@@ -190,3 +190,12 @@ function onRecover() {
 const rootRef = ref<HTMLElement | null>(null)
 const layer = useOverlayLayer(() => props.show && !!props.anchorRect, { root: rootRef, modal: false, floor: 9998, onEscape: () => emit('close') })
 </script>
+
+<style scoped>
+/* Touch: every item 40px high (7n-3). Stacked with no gap, they cannot reach out unseen without covering each other. */
+@media (pointer: coarse) {
+  .amenu-item {
+    min-height: 40px;
+  }
+}
+</style>

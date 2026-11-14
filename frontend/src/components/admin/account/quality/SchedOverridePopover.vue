@@ -23,7 +23,7 @@
               type="button"
               role="radio"
               :aria-checked="duration === option"
-              :class="['sq-focus flex-1 rounded px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-[var(--color-bg-seg-active)] text-fg-primary' : 'text-fg-secondary']"
+              :class="['sop-hit sop-hit--option sq-focus flex-1 rounded px-2.5 py-1 text-xs font-medium', duration === option ? 'bg-[var(--color-bg-seg-active)] text-fg-primary' : 'text-fg-secondary']"
               @click="duration = option"
             >{{ t(`admin.schedQuality.override.${option}`) }}</button>
           </div>
@@ -32,8 +32,8 @@
         </div>
         <div class="mt-4 flex items-center justify-end gap-2">
           <span v-if="failed" class="sq-fail-word">{{ t('admin.schedQuality.result.failed') }}</span>
-          <button type="button" class="btn btn-secondary btn-sm" @click="emit('close')">{{ t('admin.schedQuality.action.cancel') }}</button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="busy" :aria-busy="busy" @click="confirm">
+          <button type="button" class="sop-hit btn btn-secondary btn-sm" @click="emit('close')">{{ t('admin.schedQuality.action.cancel') }}</button>
+          <button type="button" class="sop-hit btn btn-primary btn-sm" :disabled="busy" :aria-busy="busy" @click="confirm">
             <span v-if="busy" class="spinner h-3.5 w-3.5" aria-hidden="true" />{{ t('admin.schedQuality.action.confirm') }}
           </button>
         </div>
@@ -164,3 +164,21 @@ onUnmounted(() => {
   detach()
 })
 </script>
+
+<style scoped>
+/* Touch: the durations (24px) and the two buttons (30px) reach 40px high with an invisible area; side by side, they
+   reach only up and down, into the 12px and 16px around them (7n-3). */
+@media (pointer: coarse) {
+  .sop-hit {
+    position: relative;
+  }
+  .sop-hit::after {
+    position: absolute;
+    inset: -5px 0;
+    content: '';
+  }
+  .sop-hit--option::after {
+    inset: -8px 0;
+  }
+}
+</style>

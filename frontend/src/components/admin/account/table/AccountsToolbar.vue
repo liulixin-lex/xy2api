@@ -744,6 +744,24 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     height: 40px;
   }
 }
+/* Touch (7n-3): a tag's remove button reaches 40 x 40 with an invisible area, more of it over its own tag than towards
+   the next one (6px, the gap). From 1024px the tag row clips, so it lends the area 8px above and below. */
+@media (pointer: coarse) {
+  .tb-tag__x {
+    position: relative;
+  }
+  .tb-tag__x::after {
+    position: absolute;
+    inset: -10px -6px -10px -14px;
+    content: '';
+  }
+}
+@media (min-width: 1024px) and (pointer: coarse) {
+  .tb-tags {
+    margin-block: -8px;
+    padding-block: 8px;
+  }
+}
 /* 1024–1279: still one row; the search box and filters narrow */
 @media (min-width: 1024px) and (max-width: 1279px) {
   .tb-search {

@@ -63,8 +63,8 @@
         <div class="gp-conflict__msg">
           <Icon name="exclamationTriangle" size="sm" class="gp-conflict__icon" />
           <div>
-            {{ t('admin.accounts.groupPicker.conflict') }}
-            <span v-if="conflictDetail" class="gp-conflict__sub">{{ conflictDetail }}</span>
+            {{ t('admin.accounts.mixedChannelWarningTitle') }}
+            <span class="gp-conflict__sub" data-test="group-picker-conflict-detail">{{ conflictDetails ? t('admin.accounts.mixedChannelWarning', conflictDetails) : t('admin.accounts.groupPicker.conflict') }}</span>
           </div>
         </div>
         <div class="gp-conflict__acts">
@@ -130,7 +130,8 @@ const fresh = ref<Account | null>(null)
 const selected = ref<number[]>([])
 let initial: number[] = []
 const phase = ref<'edit' | 'saving' | 'conflict'>('edit')
-const conflictDetail = ref('')
+/** The groups in conflict as the account editor names them; till the check answers, the short question (7n-4). */
+const conflictDetails = ref<{ groupName: string; currentPlatform: string; otherPlatform: string } | null>(null)
 let closed = false
 
 const layer = useOverlayLayer(() => true, {
@@ -219,6 +220,21 @@ const isMixedChannelConflict = (error: unknown) => {
   return apiError?.status === 409 && apiError.error === 'mixed_channel_warning'
 }
 
+/**
+ * The save's 409 carries only the backend's English sentence; the mixed-channel check names the group and the two
+ * platforms, which the account editor's wording takes (7n-4). Without an answer the short question stands.
+ */
+async function explainConflict() {
+  const groupIds = [...selected.value]
+  try {
+    const { details } = await adminAPI.accounts.checkMixedChannelRisk({ platform: props.account.platform, group_ids: groupIds, account_id: props.account.id })
+    if (phase.value !== 'conflict' || !details) return
+    conflictDetails.value = { groupName: details.group_name || 'Unknown', currentPlatform: details.current_platform || 'Unknown', otherPlatform: details.other_platform || 'Unknown' }
+  } catch {
+    // The short question is enough to decide on.
+  }
+}
+
 /** The save under way: a close asked for meanwhile waits for it. */
 let saving: Promise<void> | null = null
 function submit(confirmMixedChannel: boolean): Promise<void> {
@@ -233,9 +249,10 @@ async function runSave(confirmMixedChannel: boolean) {
     finish()
   } catch (error) {
     if (!confirmMixedChannel && isMixedChannelConflict(error)) {
-      conflictDetail.value = (error as { message?: string }).message ?? ''
+      conflictDetails.value = null
       phase.value = 'conflict'
       focusConfirm()
+      void explainConflict()
       return
     }
     phase.value = 'edit'

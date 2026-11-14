@@ -3,8 +3,8 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import AccountGroupPicker from '../AccountGroupPicker.vue'
 
-const { getById, showError } = vi.hoisted(() => ({ getById: vi.fn(), showError: vi.fn() }))
-vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getById } } }))
+const { getById, checkMixedChannelRisk, showError } = vi.hoisted(() => ({ getById: vi.fn(), checkMixedChannelRisk: vi.fn(), showError: vi.fn() }))
+vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getById, checkMixedChannelRisk } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
 vi.mock('@/stores', () => ({ useAuthStore: () => ({ isSimpleMode: false }) }))
 vi.mock('@/stores/groupCategories', () => ({
@@ -80,8 +80,9 @@ describe('AccountGroupPicker', () => {
 
   it('confirms a mixed-channel conflict inside the picker with the focus on confirm, and sends it again with the flag', async () => {
     const save = vi.fn()
-      .mockRejectedValueOnce({ status: 409, error: 'mixed_channel_warning', message: 'OpenAI + Gemini' })
+      .mockRejectedValueOnce({ status: 409, error: 'mixed_channel_warning', message: "mixed_channel_warning: Group '晨星组' contains both openai and gemini accounts." })
       .mockResolvedValueOnce(undefined)
+    checkMixedChannelRisk.mockResolvedValueOnce({ has_risk: true, details: { group_id: 2, group_name: '晨星组', current_platform: 'openai', other_platform: 'gemini' } })
     // The account's pills: the picker was opened from the second one.
     const pills = [1, 2].map(() => {
       const pill = document.createElement('button')
@@ -94,7 +95,12 @@ describe('AccountGroupPicker', () => {
     await outside()
     await new Promise((resolve) => setTimeout(resolve, 0))
     const confirm = document.querySelector<HTMLElement>('[data-test="group-picker-confirm"]')!
-    expect(picker()!.querySelector('[data-test="group-picker-conflict"]')!.textContent).toContain('OpenAI + Gemini')
+    // In the account editor's words, the group and platforms from the check; never the backend's English (7n-4).
+    expect(checkMixedChannelRisk).toHaveBeenCalledWith({ platform: 'openai', group_ids: [1, 2], account_id: 7 })
+    expect(picker()!.querySelector('[data-test="group-picker-conflict-detail"]')!.textContent).toBe(
+      'admin.accounts.mixedChannelWarning:{"groupName":"晨星组","currentPlatform":"openai","otherPlatform":"gemini"}'
+    )
+    expect(picker()!.querySelector('[data-test="group-picker-conflict"]')!.textContent).not.toContain('contains both')
     expect(document.activeElement).toBe(confirm)
     // Another click outside keeps the question open.
     await outside()

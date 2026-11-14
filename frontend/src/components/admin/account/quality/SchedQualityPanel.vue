@@ -62,6 +62,7 @@
         >
           <div v-if="failed" class="qp-failed" data-qp-failed>
             <span class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
+            <span v-if="panel.failedReason" class="qp-failed__why" data-qp-failed-reason>{{ panel.failedReason }}</span>
             <button type="button" class="btn btn-secondary btn-sm" @click="retry(SCHED_PANEL_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
           </div>
           <div v-else-if="!detail" class="qp-loading" data-qp-loading>
@@ -687,8 +688,16 @@ onScopeDispose(() => running?.kill())
 }
 .qp-failed {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
+}
+.qp-failed__why {
+  min-width: 0;
+  flex: 1 1 12rem;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  overflow-wrap: anywhere;
 }
 
 /* Model tabs: a segmented control as wide as the panel; each tab cuts its own text */
