@@ -124,7 +124,7 @@ func TestReconcileCRSUpstreamBillingProbeExtra(t *testing.T) {
 	t.Run("create drops remote managed fields", func(t *testing.T) {
 		extra := mergeMap(nil, remote)
 		reconcileCRSUpstreamBillingProbeExtra(nil, PlatformOpenAI, AccountTypeAPIKey, map[string]any{"api_key": "new"}, extra)
-		require.NotContains(t, extra, UpstreamBillingProbeEnabledExtraKey)
+		require.Equal(t, true, extra[UpstreamBillingProbeEnabledExtraKey])
 		require.NotContains(t, extra, UpstreamBillingRateSyncEnabledExtraKey)
 		require.NotContains(t, extra, UpstreamBillingProbeExtraKey)
 	})

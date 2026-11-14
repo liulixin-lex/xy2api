@@ -240,6 +240,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
+	service.InitializeNewAccountProbeDefault(account)
 
 	builder := client.Account.Create().
 		SetName(account.Name).

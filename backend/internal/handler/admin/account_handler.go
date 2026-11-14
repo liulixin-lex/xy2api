@@ -2013,6 +2013,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Type:                  item.Type,
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
+				ProbeEnabled:          item.ProbeEnabled,
 				ProxyID:               item.ProxyID,
 				Concurrency:           item.Concurrency,
 				Priority:              item.Priority,

@@ -1169,6 +1169,7 @@ func reconcileCRSUpstreamBillingProbeExtra(
 	targetCredentials map[string]any,
 	extra map[string]any,
 ) {
+	requestedEnabled, hasRequestedEnabled := extra[UpstreamBillingProbeEnabledExtraKey].(bool)
 	for _, key := range []string{
 		UpstreamBillingProbeEnabledExtraKey,
 		UpstreamBillingRateSyncEnabledExtraKey,
@@ -1180,6 +1181,10 @@ func reconcileCRSUpstreamBillingProbeExtra(
 		delete(extra, key)
 	}
 	if existing == nil {
+		if targetType == AccountTypeAPIKey && hasRequestedEnabled {
+			extra[UpstreamBillingProbeEnabledExtraKey] = requestedEnabled
+		}
+		InitializeNewAccountProbeDefault(&Account{Type: targetType, Extra: extra})
 		return
 	}
 	target := &Account{Platform: targetPlatform, Type: targetType, Credentials: targetCredentials}

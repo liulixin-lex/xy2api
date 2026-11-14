@@ -102,8 +102,10 @@ func cloneAccountJSONMap(value map[string]any) (map[string]any, error) {
 }
 
 var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
-	capabilityLearnedResponsesKey: {},
-	capabilityLearnedChatKey:      {},
+	// A duplicate is a new account; the source toggle is not a creation override.
+	UpstreamBillingProbeEnabledExtraKey: {},
+	capabilityLearnedResponsesKey:       {},
+	capabilityLearnedChatKey:            {},
 	// A retry identity belongs to the operation that created one copy, not to later copies.
 	duplicateAccountOperationIDExtraKey: {},
 	// External sync identity belongs to one local account only.
@@ -475,7 +477,19 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
-	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
+	// The probe toggle may be supplied in either the dedicated field or imported extra.
+	requestedProbeEnabled := input.ProbeEnabled
+	if raw, exists := accountExtra[UpstreamBillingProbeEnabledExtraKey]; exists {
+		enabled, ok := raw.(bool)
+		if !ok {
+			return nil, infraerrors.BadRequest("INVALID_UPSTREAM_BILLING_PROBE_ENABLED", "upstream_billing_probe_enabled must be a boolean")
+		}
+		if requestedProbeEnabled != nil && *requestedProbeEnabled != enabled {
+			return nil, infraerrors.BadRequest("CONFLICTING_UPSTREAM_BILLING_PROBE_ENABLED", "conflicting upstream_billing_probe_enabled values")
+		}
+		requestedProbeEnabled = &enabled
+	}
+	// Probe results, rate sync and usage sessions remain system-managed.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
@@ -503,15 +517,16 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if input.IQTargets != nil {
 		account.Extra = MergeOpenAICodexTicketExtra(account.Extra, nil)
 	}
-	if input.ProbeEnabled != nil && *input.ProbeEnabled {
-		if !isUpstreamBillingProbeAccount(account) {
+	if requestedProbeEnabled != nil {
+		if *requestedProbeEnabled && !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
 		}
 		if account.Extra == nil {
 			account.Extra = make(map[string]any)
 		}
-		account.Extra[UpstreamBillingProbeEnabledExtraKey] = true
+		account.Extra[UpstreamBillingProbeEnabledExtraKey] = *requestedProbeEnabled
 	}
+	InitializeNewAccountProbeDefault(account)
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
