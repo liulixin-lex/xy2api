@@ -390,26 +390,22 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
-  it('reloads the list when a list request is in flight as the toggle resolves', async () => {
+  it('keeps the toggled status when a list answer asked for before the toggle settled arrives, without reloading', async () => {
     let finishToggle!: (user: AdminUser) => void
     toggleStatus.mockImplementation(() => new Promise<AdminUser>(resolve => { finishToggle = resolve }))
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
     await getToggleStatusButton(wrapper, 42).trigger('click')
-    listUsers.mockImplementationOnce(() => new Promise(() => {}))
-    await wrapper.get('[data-test="sort-last-used"]').trigger('click')
+    expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0') // at once
+    await wrapper.get('[data-test="sort-last-used"]').trigger('click') // a reload that still reads the old status
     await flushPromises()
     expect(listUsers).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0') // the locked field keeps the new status
 
-    listUsers.mockResolvedValue({
-      items: [createAdminUser({ status: 'disabled' })],
-      total: 1, page: 1, page_size: 20, pages: 1
-    })
     finishToggle(createAdminUser({ status: 'disabled' }))
     await flushPromises()
-
-    expect(listUsers).toHaveBeenCalledTimes(3)
+    expect(listUsers).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0')
     wrapper.unmount()
   })

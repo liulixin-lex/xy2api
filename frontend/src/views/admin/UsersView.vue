@@ -130,7 +130,7 @@
             <div class="flex items-center gap-2 md:contents">
               <!-- Refresh Button -->
               <button
-                @click="loadUsers"
+                @click="refreshUsers"
                 :disabled="loading"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('common.refresh')"
@@ -299,9 +299,11 @@
       <!-- Users Table -->
       <template #table>
         <DataTable
+          ref="usersTableRef"
           :columns="columns"
-          :data="sortedUsers"
+          :data="users"
           :loading="loading"
+          :row-class="userRowClass"
           row-key="id"
           selectable
           :selected-keys="selectedIds"
@@ -354,9 +356,9 @@
             <div class="max-w-xs">
               <span
                 class="block truncate text-sm text-gray-700 dark:text-gray-300"
-                :title="getAttributeValue(row.id, def.id)"
+                :title="getAttributeValue(row, def.id)"
               >
-                {{ getAttributeValue(row.id, def.id) }}
+                {{ getAttributeValue(row, def.id) }}
               </span>
             </div>
           </template>
@@ -492,7 +494,7 @@
               :disabled="!canReadRow(row)"
               @click="handlePlatformQuota(row)"
             >
-              <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
+              <UserPlatformQuotaCell :quotas="row.platform_quotas" />
             </button>
           </template>
 
@@ -579,26 +581,26 @@
 
           <template #cell-usage="{ row }">
             <PlatformUsageBreakdown
-              :today="usageStats[row.id]?.today_actual_cost ?? 0"
-              :total="usageStats[row.id]?.total_actual_cost ?? 0"
-              :by-platform="usageStats[row.id]?.by_platform"
+              :today="row.usage_stats?.today_actual_cost ?? 0"
+              :total="row.usage_stats?.total_actual_cost ?? 0"
+              :by-platform="row.usage_stats?.by_platform"
             />
           </template>
 
           <template #cell-usage_anthropic="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'anthropic')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'anthropic')" />
           </template>
 
           <template #cell-usage_openai="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'openai')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'openai')" />
           </template>
 
           <template #cell-usage_gemini="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'gemini')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'gemini')" />
           </template>
 
           <template #cell-usage_antigravity="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'antigravity')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'antigravity')" />
           </template>
 
           <template #cell-concurrency="{ row }">
@@ -693,9 +695,9 @@
       <!-- Pagination -->
       <template #pagination>
       <Pagination
-        v-if="pagination.total > 0"
+        v-if="usersTotal > 0"
         :page="pagination.page"
-        :total="pagination.total"
+        :total="usersTotal"
         :page-size="pagination.page_size"
         @update:page="handlePageChange"
         @update:pageSize="handlePageSizeChange"
@@ -814,8 +816,8 @@
       @confirm="confirmBulkStatus"
       @cancel="closeBulkStatus"
     />
-    <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
-    <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
+    <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="reloadUsers" />
+    <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="reloadUsers" />
     <BulkEditUserModal
       :show="showBulkEditModal"
       :selected-ids="selectedIds"
@@ -826,19 +828,19 @@
       :show="showPlatformQuotaModal"
       :user="platformQuotaUser"
       @close="closePlatformQuotaModal"
-      @success="loadUsers"
+      @success="reloadUsers"
     />
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
-    <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
-    <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
+    <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="reloadUsers" />
+    <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="reloadUsers" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
-    <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
+    <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="reloadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -854,6 +856,8 @@ const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
+import { useLiveTable, type LivePatches } from '@/composables/useLiveTable'
+import { userUsageOrDefault } from './liveRowDefaults'
 import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
 import type { SelectOption } from '@/components/common/Select.vue'
@@ -907,8 +911,8 @@ const attributeColumns = computed<Column[]>(() =>
 )
 
 // Get formatted attribute value for display in table
-const getAttributeValue = (userId: number, attrId: number): string => {
-  const userAttrs = userAttributeValues.value[userId]
+const getAttributeValue = (row: LiveUser, attrId: number): string => {
+  const userAttrs = row.attribute_values
   if (!userAttrs) return '-'
   const value = userAttrs[attrId]
   if (!value) return '-'
@@ -1059,11 +1063,12 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
-  if (wasHidden && (key === 'usage' || key.startsWith('usage_') || key.startsWith('attr_') || key === 'balance_platform_quota')) {
-    refreshCurrentPageSecondaryData()
-  }
+  // A source skips a hidden column; once it is shown again, that source runs now.
+  if (wasHidden && (key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
+  if (wasHidden && key.startsWith('attr_')) void liveUsers.refresh('attributes')
+  if (wasHidden && key === 'balance_platform_quota') void liveUsers.refresh('quotas')
   if (key === 'subscriptions') {
-    loadUsers()
+    void reloadUsers()
   }
   if (wasHidden && key === 'groups') {
     loadAllGroups()
@@ -1101,8 +1106,6 @@ const columns = computed<Column[]>(() =>
   )
 )
 
-const users = ref<AdminUser[]>([])
-const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
 const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' } => {
@@ -1274,11 +1277,8 @@ const saveFiltersToStorage = () => {
 const getAttributeDefinition = (attrId: number): UserAttributeDefinition | undefined => {
   return attributeDefinitions.value.find(d => d.id === attrId)
 }
-const usageStats = ref<Record<string, BatchUserUsageStats>>({})
-const platformQuotaStats = ref<Record<number, PlatformQuotaItem[]>>({})
-
-const getPlatformUsage = (userId: number, platform: string) =>
-  usageStats.value[userId]?.by_platform?.find((p) => p.platform === platform)
+const getPlatformUsage = (row: LiveUser, platform: string) =>
+  row.usage_stats?.by_platform?.find((p) => p.platform === platform)
 
 // 用量列前端排序：DataTable 工作在 server-side-sort 模式，所有 sortable
 // 字段都会触发后端查询，而用量列数据是异步批量拉取后再合并到当前页，
@@ -1345,8 +1345,8 @@ const toggleUsageSortMenu = (key: string) => {
   openUsageSortMenu.value = openUsageSortMenu.value === key ? null : key
 }
 
-const getUsageValue = (userId: number, key: string, metric: UsageMetric): number => {
-  const stats = usageStats.value[userId]
+const getUsageValue = (row: LiveUser, key: string, metric: UsageMetric): number => {
+  const stats = row.usage_stats
   if (!stats) return 0
   const platform = USAGE_COLUMN_PLATFORMS[key]
   if (platform === null) {
@@ -1357,39 +1357,22 @@ const getUsageValue = (userId: number, key: string, metric: UsageMetric): number
   return metric === 'today' ? p.today_actual_cost ?? 0 : p.total_actual_cost ?? 0
 }
 
-// 在 server-side 排序结果之上叠加用量列的本地排序；无 usageSort 时直接透传原数组。
-// 稳定排序：等值按原 index 保序，避免拉取新用量数据时表行抖动。
-const sortedUsers = computed(() => {
-  const s = usageSort.value
-  if (!s) return users.value
-  return [...users.value]
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const av = getUsageValue(a.row.id, s.key, s.metric)
-      const bv = getUsageValue(b.row.id, s.key, s.metric)
-      if (av !== bv) return s.order === 'asc' ? av - bv : bv - av
-      return a.index - b.index
-    })
-    .map((x) => x.row)
-})
+// The current-page usage sort is the live engine's local sort: it runs when the user picks it, on every later page
+// and once more when a new page's usage lands; passive updates never re-order (spec 8.4a). Rows whose usage has not
+// arrived count as 0; equal values keep the server's order.
+const usageComparator = (s: NonNullable<UsageSortState>) => (a: LiveUser, b: LiveUser) => {
+  const av = getUsageValue(a, s.key, s.metric)
+  const bv = getUsageValue(b, s.key, s.metric)
+  return s.order === 'asc' ? av - bv : bv - av
+}
 
-const {
-  selectedIds,
-  selectedCount,
-  setSelectedIds,
-  clear: clearSelection,
-  removeMany: removeSelectedIds
-} = useTableSelection<AdminUser>({
-  rows: sortedUsers,
-  getId: (user) => user.id
-})
 
 const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
   const ids = keys.filter((key): key is number => typeof key === 'number')
   // Operators never select rows they cannot act on (admins, operators, themselves),
   // so bulk actions never send a target the backend refuses.
   setSelectedIds(isSuperAdmin.value ? ids : ids.filter((id) => {
-    const row = sortedUsers.value.find((user) => user.id === id)
+    const row = users.value.find((user) => user.id === id)
     return !row || canActOn(row)
   }))
 }
@@ -1399,12 +1382,9 @@ const getUserSelectionLabel = (user: AdminUser) =>
 
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
-const userAttributeValues = ref<Record<number, Record<number, string>>>({})
 const pagination = reactive({
   page: 1,
-  page_size: getPersistedPageSize(),
-  total: 0,
-  pages: 0
+  page_size: getPersistedPageSize()
 })
 
 const showCreateModal = ref(false)
@@ -1434,96 +1414,123 @@ const closePlatformQuotaModal = () => {
   showPlatformQuotaModal.value = false
   platformQuotaUser.value = null
 }
-let abortController: AbortController | null = null
-let secondaryDataSeq = 0
-
-const loadUsersSecondaryData = async (
-  userIds: number[],
-  signal?: AbortSignal,
-  expectedSeq?: number
-) => {
-  if (userIds.length === 0) return
-
-  const tasks: Promise<void>[] = []
-
-  if (hasVisibleUsageColumn.value) {
-    tasks.push(
-      (async () => {
-        try {
-          const usageResponse = await adminAPI.dashboard.getBatchUsersUsage(userIds)
-          if (signal?.aborted) return
-          if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-          usageStats.value = usageResponse.stats
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load usage stats:', e)
-        }
-      })()
-    )
+// The list is a live table (spec 8.5): balance, current concurrency and last activity come from the page fetched again
+// with the same query every 10 s, which also counts rows that appeared or went (liveUsers.pending; taken in by
+// liveUsers.applyPending). Usage is a 30 s partial source; platform quotas (one request per user) and attribute values
+// run after each load and on refresh only. The status, pending count and applyPending wait for the live indicator.
+type LiveUser = AdminUser & {
+  usage_stats?: BatchUserUsageStats
+  platform_quotas?: PlatformQuotaItem[]
+  attribute_values?: Record<number, string>
+}
+const userListFilters = () => {
+  const attrFilters: Record<number, string> = {}
+  for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
+    if (value) attrFilters[Number(attrId)] = value
   }
-
-  const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
-  const attributeUserIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
-  if (attributeUserIds.length > 0 && attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
-    tasks.push(
-      (async () => {
-        try {
-          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
-          if (signal?.aborted) return
-          if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-          userAttributeValues.value = attrResponse.attributes
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load user attribute values:', e)
-        }
-      })()
-    )
-  }
-
-  if (hasVisiblePlatformQuotaColumn.value) {
-    tasks.push(
-      (async () => {
-        try {
-          // 无批量端点：对当前页用户逐个拉取，分块并发（每批 6），批间检查中止条件，避免大 pageSize 时请求洪峰
-          // 普通管理员只拉取自己能查看的用户（不含管理员、其他普通管理员和自己）
-          const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
-          const quotaIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
-          const CHUNK = 6
-          for (let i = 0; i < quotaIds.length; i += CHUNK) {
-            if (signal?.aborted) return
-            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const chunk = quotaIds.slice(i, i + CHUNK)
-            const results = await Promise.allSettled(
-              chunk.map((id) => adminAPI.users.getPlatformQuotas(id))
-            )
-            if (signal?.aborted) return
-            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const merged = { ...platformQuotaStats.value }
-            results.forEach((r, idx) => {
-              if (r.status === 'fulfilled') {
-                merged[chunk[idx]] = r.value.platform_quotas || []
-              }
-            })
-            platformQuotaStats.value = merged
-          }
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load platform quotas:', e)
-        }
-      })()
-    )
-  }
-
-  if (tasks.length > 0) {
-    await Promise.allSettled(tasks)
+  return {
+    role: filters.role as any,
+    status: filters.status as any,
+    search: searchQuery.value || undefined,
+    group_name: filters.group || undefined,
+    api_key_group_id: filters.apiKeyGroup ?? undefined,
+    attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
+    // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
+    include_subscriptions: true,
+    sort_by: sortState.sort_by,
+    sort_order: sortState.sort_order
   }
 }
+// Operators only read the users they may view (not admins, other operators or themselves).
+const readableIds = (ids: number[]) => {
+  if (isSuperAdmin.value) return ids
+  const readable = new Set(users.value.filter(canReadRow).map((user) => user.id))
+  return ids.filter((id) => readable.has(id))
+}
+/** Page count as the server reports it, for keeping a page change in range. */
+let serverPages = 0
+const liveUsers = useLiveTable<LiveUser>({
+  getId: (user) => user.id,
+  fetchPage: async (signal) => {
+    const page = await adminAPI.users.list(pagination.page, pagination.page_size, userListFilters(), { signal })
+    serverPages = page.pages
+    return page
+  },
+  membershipIntervalMs: 10_000,
+  // A row whose status or role no longer matches the filter stays in place, dimmed.
+  matches: (user) => (!filters.status || user.status === filters.status) && (!filters.role || user.role === filters.role),
+  sources: [
+    {
+      name: 'usage',
+      intervalMs: 30_000,
+      fetch: async (ids) => {
+        if (!hasVisibleUsageColumn.value) return []
+        const userIds = ids.map(Number)
+        const { stats } = await adminAPI.dashboard.getBatchUsersUsage(userIds)
+        return userIds.map((id) => [id, { usage_stats: userUsageOrDefault(id, stats?.[id]) }] as const)
+      }
+    },
+    {
+      name: 'quotas',
+      intervalMs: 0,
+      fetch: async (ids, signal) => {
+        if (!hasVisiblePlatformQuotaColumn.value) return []
+        // 无批量端点：逐个拉取，分块并发（每批 6），批间检查中止，避免大 pageSize 时请求洪峰
+        const quotaIds = readableIds(ids.map(Number))
+        const patches: Array<readonly [number, Partial<LiveUser>]> = []
+        const CHUNK = 6
+        for (let i = 0; i < quotaIds.length && !signal.aborted; i += CHUNK) {
+          const chunk = quotaIds.slice(i, i + CHUNK)
+          const results = await Promise.allSettled(chunk.map((id) => adminAPI.users.getPlatformQuotas(id)))
+          results.forEach((r, idx) => {
+            if (r.status === 'fulfilled') patches.push([chunk[idx], { platform_quotas: r.value.platform_quotas || [] }])
+          })
+        }
+        return patches
+      }
+    },
+    {
+      name: 'attributes',
+      intervalMs: 0,
+      fetch: async (ids): Promise<LivePatches<LiveUser>> => {
+        if (attributeDefinitions.value.length === 0 || !hasVisibleAttributeColumns.value) return []
+        const attributeUserIds = readableIds(ids.map(Number))
+        if (attributeUserIds.length === 0) return []
+        const response = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
+        const values = response.attributes ?? {}
+        return attributeUserIds.map((id) => [id, { attribute_values: values[id] ?? {} }] as const)
+      }
+    }
+  ]
+})
+const { rows: users, loading, total: usersTotal } = liveUsers
+const {
+  selectedIds,
+  selectedCount,
+  setSelectedIds,
+  clear: clearSelection,
+  removeMany: removeSelectedIds
+} = useTableSelection<AdminUser>({
+  rows: users,
+  getId: (user) => user.id
+})
+const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
+const userRowClass = (row: LiveUser) =>
+  liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
+watch(usageSort, (sort) => liveUsers.sortBy(sort ? usageComparator(sort) : null), { immediate: true })
 
-const refreshCurrentPageSecondaryData = () => {
-  const userIds = users.value.map((u) => u.id)
-  if (userIds.length === 0) return
-  const seq = ++secondaryDataSeq
-  void loadUsersSecondaryData(userIds, undefined, seq)
+const showLoadError = (error: any) => {
+  appStore.showError(error?.response?.data?.detail || error?.message || t('admin.users.failedToLoad'))
+  console.error('Error loading users:', error)
+}
+/** A silent reload: the rows stay on screen and are replaced in place. */
+const reloadUsers = () => liveUsers.reload().catch(showLoadError)
+/** The manual refresh button. */
+const refreshUsers = () => reloadUsers()
+/** A filter or search change: back to the first row, then reload. */
+const applyUserFilters = () => {
+  usersTableRef.value?.scrollToTop()
+  return reloadUsers()
 }
 
 // Action Menu State
@@ -1660,78 +1667,12 @@ const loadAttributeDefinitions = async () => {
 const handleAttributesModalClose = async () => {
   showAttributesModal.value = false
   await loadAttributeDefinitions()
-  loadUsers()
-}
-
-const loadUsers = async () => {
-  abortController?.abort()
-  const currentAbortController = new AbortController()
-  abortController = currentAbortController
-  const { signal } = currentAbortController
-  loading.value = true
-  try {
-    // Build attribute filters from active filters
-    const attrFilters: Record<number, string> = {}
-    for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
-      if (value) {
-        attrFilters[Number(attrId)] = value
-      }
-    }
-
-    const response = await adminAPI.users.list(
-      pagination.page,
-      pagination.page_size,
-      {
-        role: filters.role as any,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        group_name: filters.group || undefined,
-        api_key_group_id: filters.apiKeyGroup ?? undefined,
-        attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
-        // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
-        include_subscriptions: true,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order
-      },
-      { signal }
-    )
-    if (signal.aborted) {
-      return
-    }
-    users.value = response.items
-    pagination.total = response.total
-    pagination.pages = response.pages
-    usageStats.value = {}
-    userAttributeValues.value = {}
-    platformQuotaStats.value = {}
-
-    // Defer heavy secondary data so table can render first.
-    if (response.items.length > 0) {
-      const userIds = response.items.map((u) => u.id)
-      const seq = ++secondaryDataSeq
-      window.setTimeout(() => {
-        if (signal.aborted || seq !== secondaryDataSeq) return
-        void loadUsersSecondaryData(userIds, signal, seq)
-      }, 50)
-    }
-  } catch (error: any) {
-    const errorInfo = error as { name?: string; code?: string }
-    if (errorInfo?.name === 'AbortError' || errorInfo?.name === 'CanceledError' || errorInfo?.code === 'ERR_CANCELED') {
-      return
-    }
-    const message = error.response?.data?.detail || error.message || t('admin.users.failedToLoad')
-    appStore.showError(message)
-    console.error('Error loading users:', error)
-  } finally {
-    if (abortController === currentAbortController) {
-      loading.value = false
-    }
-  }
+  void reloadUsers()
 }
 
 const handleBulkLimitsSuccess = async () => {
   clearSelection()
-  await loadUsers()
+  await reloadUsers()
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -1739,21 +1680,21 @@ const handleSearch = () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
     pagination.page = 1
-    loadUsers()
+    void applyUserFilters()
   }, 300)
 }
 
 const handlePageChange = (page: number) => {
   // 确保页码在有效范围内
-  const validPage = Math.max(1, Math.min(page, pagination.pages || 1))
+  const validPage = Math.max(1, Math.min(page, serverPages || 1))
   pagination.page = validPage
-  loadUsers()
+  void reloadUsers()
 }
 
 const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize
   pagination.page = 1
-  loadUsers()
+  void reloadUsers()
 }
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
@@ -1761,7 +1702,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
-  loadUsers()
+  void reloadUsers()
 }
 
 // Filter helpers
@@ -1785,7 +1726,7 @@ const toggleBuiltInFilter = (key: string) => {
   }
   saveFiltersToStorage()
   pagination.page = 1
-  loadUsers()
+  void applyUserFilters()
 }
 
 // Toggle a custom attribute filter
@@ -1800,7 +1741,7 @@ const toggleAttributeFilter = (attr: UserAttributeDefinition) => {
   }
   saveFiltersToStorage()
   pagination.page = 1
-  loadUsers()
+  void applyUserFilters()
 }
 
 const updateAttributeFilter = (attrId: number, value: string) => {
@@ -1810,7 +1751,7 @@ const updateAttributeFilter = (attrId: number, value: string) => {
 // Apply filter and save to localStorage
 const applyFilter = () => {
   saveFiltersToStorage()
-  loadUsers()
+  void applyUserFilters()
 }
 
 const handleEdit = (user: AdminUser) => {
@@ -1826,21 +1767,16 @@ const closeEditModal = () => {
 const handleToggleStatus = async (user: AdminUser) => {
   const newStatus = user.status === 'active' ? 'disabled' : 'active'
   try {
-    const updated = await adminAPI.users.toggleStatus(user.id, newStatus)
+    // The row shows the new status at once and the field is locked: no list answer sent before the change lands
+    // writes it; a failure rolls it back.
+    await liveUsers.edit(user.id, 'status', newStatus, async () => {
+      const updated = await adminAPI.users.toggleStatus(user.id, newStatus)
+      // 更新接口的响应不含 current_concurrency、subscriptions 等列表专属字段，只回写状态相关字段。
+      return { status: updated.status, updated_at: updated.updated_at }
+    })
     appStore.showSuccess(
       newStatus === 'active' ? t('admin.users.userEnabled') : t('admin.users.userDisabled')
     )
-    if (loading.value) {
-      // 与本次更新并发的列表请求可能读到更新前的状态，重新拉取保证一致。
-      loadUsers()
-      return
-    }
-    // 更新接口的响应不含 current_concurrency、subscriptions 等列表专属字段，只回写状态相关字段。
-    const row = users.value.find((u) => u.id === user.id)
-    if (row) {
-      row.status = updated.status
-      row.updated_at = updated.updated_at
-    }
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToToggle'))
     console.error('Error toggling user status:', error)
@@ -1888,11 +1824,13 @@ const handleDelete = (user: AdminUser) => {
 const confirmDelete = async () => {
   if (!deletingUser.value) return
   try {
-    await adminAPI.users.delete(deletingUser.value.id)
+    const deletedId = deletingUser.value.id
+    await adminAPI.users.delete(deletedId)
     appStore.showSuccess(t('common.success'))
     showDeleteDialog.value = false
     deletingUser.value = null
-    loadUsers()
+    liveUsers.remove(deletedId)
+    removeSelectedIds([deletedId])
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToDelete'))
     console.error('Error deleting user:', error)
@@ -1919,7 +1857,7 @@ const confirmBulkDelete = async () => {
   }
   const failed = ids.length - deletedIds.length
   if (failed > 0) appStore.showError(t('admin.users.bulkDelete.failed', { count: failed }))
-  await loadUsers()
+  await reloadUsers()
   bulkDeleting.value = false
 }
 
@@ -1955,7 +1893,7 @@ const confirmBulkStatus = async () => {
     )
     if (skipped > 0) appStore.showInfo(t('admin.users.bulkStatus.skipped', { count: skipped }))
     clearSelection()
-    await loadUsers()
+    await reloadUsers()
   } catch (error) {
     // 失败时保留选中，便于直接重试。
     appStore.showError(extractApiErrorMessage(error, t('admin.users.bulkStatus.failed')))
@@ -2016,7 +1954,7 @@ onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
   loadSavedColumns()
-  loadUsers()
+  void reloadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
   }
@@ -2031,6 +1969,5 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('scroll', handleScroll, true)
   clearTimeout(searchTimeout)
-  abortController?.abort()
 })
 </script>
