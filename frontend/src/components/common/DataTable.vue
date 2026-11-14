@@ -1,8 +1,8 @@
 <template>
   <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards space-y-3" :aria-busy="loading ? 'true' : undefined">
-    <!-- Reload with rows on screen: a thin bar that stays in view under the page header; it takes no layout space and
-         the cards stay usable. -->
-    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
+    <!-- Reload with rows on screen: a thin bar at the top of the cards in view; it takes no layout space and the cards
+         stay usable. -->
+    <div v-if="refreshing" class="table-progress table-progress--cards" :style="progressStyle" aria-hidden="true" data-test="table-progress">
       <div class="table-progress__bar"></div>
     </div>
     <template v-if="showSkeleton">
@@ -139,8 +139,8 @@
     }"
     :aria-busy="loading ? 'true' : undefined"
   >
-    <!-- Reload with rows on screen: a thin bar pinned to the top of the viewport; it takes no layout space. -->
-    <div v-if="refreshing" class="table-progress table-progress--table" aria-hidden="true" data-test="table-progress">
+    <!-- Reload with rows on screen: a thin bar at the top of the rows in view; it takes no layout space. -->
+    <div v-if="refreshing" class="table-progress table-progress--table" :style="progressStyle" aria-hidden="true" data-test="table-progress">
       <div class="table-progress__bar"></div>
     </div>
     <table class="w-full min-w-max">
@@ -301,6 +301,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, type ComponentPublicInstance } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
+import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
@@ -521,7 +522,9 @@ interface Props {
   selectionLabel?: string | ((row: any) => string)
   /**
    * Extra classes for a desktop row and a mobile card (for example dimming a row that is transitioning or no longer
-   * matches the filter). A desktop row calls it in its own render, so only rows whose answer changes re-render.
+   * matches the filter). A desktop row calls it in its own render, so only rows whose answer changes re-render. Pass a
+   * stable function defined once in setup: an inline arrow in the template is a new function on every render of the
+   * parent and re-renders every row.
    */
   rowClass?: (row: any, index: number) => unknown
 }
@@ -950,17 +953,26 @@ const hasSameRowIdentitySet = (
   return [...currentKeys].every(key => previousKeys.has(key))
 }
 
-const scrollParentOf = (el: HTMLElement) => {
+/**
+ * What the list is seen through: the nearest ancestor that scrolls it (a dialog or drawer body; one that cannot
+ * scroll, such as an overflow-hidden card, does not count) or a fixed overlay, else the document. Its `top` is the
+ * first visible line: the ancestor's top, or under the sticky page header for the document (the list's
+ * scroll-margin-top: 4rem, or --table-sticky-top when a page sets it).
+ */
+const viewOf = (el: HTMLElement) => {
   for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
-    if (/auto|scroll|overlay/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node
+    const style = getComputedStyle(node)
+    const scrolls = /auto|scroll|overlay/.test(style.overflowY) && node.scrollHeight > node.clientHeight
+    if (scrolls || style.position === 'fixed') return { parent: node, top: () => node.getBoundingClientRect().top }
   }
-  return null
+  const header = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+  return { parent: null, top: () => header }
 }
 
 /**
  * Back to the first row: the desktop table scrolls its own wrapper (and the virtualizer) to the top; when the list's
- * top has scrolled above its scroll container or the window (minus its scroll-margin-top, the page header), it is
- * brought back into view. A list that is already in view does not move.
+ * top has scrolled above the first visible line, it is brought back to it. A list that is already in view does not
+ * move.
  */
 function scrollToTop() {
   const wrapper = tableWrapperRef.value
@@ -970,14 +982,44 @@ function scrollToTop() {
   }
   const list = wrapper ?? mobileRootRef.value
   if (!list) return
-  const parent = scrollParentOf(list)
-  const viewTop = parent ? parent.getBoundingClientRect().top : 0
-  const margin = parseFloat(getComputedStyle(list).scrollMarginTop) || 0
-  const delta = list.getBoundingClientRect().top - margin - viewTop
+  const view = viewOf(list)
+  const delta = list.getBoundingClientRect().top - view.top()
   if (delta >= 0) return
-  if (parent) parent.scrollTop += delta
+  if (view.parent) view.parent.scrollTop += delta
   else window.scrollBy(0, delta)
 }
+
+// While reloading, the progress bar rides down to the first visible line of the list, so it shows however far the list
+// is scrolled. CSS sticky cannot do this alone: the desktop wrapper scrolls sideways, which makes it the bar's sticky
+// reference even when the window scrolls (pages that are not a fixed-height table layout, and the table layout below
+// 1024px), and callers wrap the cards in overflow containers. A desktop wrapper that scrolls itself keeps the bar at
+// its top with sticky.
+const progressOffset = ref(0)
+const progressStyle = computed(() => (progressOffset.value ? { transform: `translateY(${progressOffset.value}px)` } : undefined))
+let progressView: ReturnType<typeof viewOf> | null = null
+const placeProgress = () => {
+  const list = tableWrapperRef.value ?? mobileRootRef.value
+  if (!list || !refreshing.value) return
+  if (list === tableWrapperRef.value && list.scrollHeight > list.clientHeight) {
+    progressOffset.value = 0
+    return
+  }
+  if (!progressView) progressView = viewOf(list)
+  const rect = list.getBoundingClientRect()
+  progressOffset.value = Math.round(Math.min(Math.max(progressView.top() - rect.top, 0), Math.max(rect.height - 2, 0)))
+}
+watch(
+  [refreshing, isDesktopViewport],
+  () => {
+    progressView = null
+    progressOffset.value = 0
+    placeProgress()
+  },
+  { flush: 'post' }
+)
+const progressListenerTarget = () => (refreshing.value && typeof window !== 'undefined' ? window : null)
+useEventListener(progressListenerTarget, 'scroll', placeProgress, { capture: true, passive: true })
+useEventListener(progressListenerTarget, 'resize', placeProgress, { passive: true })
 
 // A new batch that shares no row with the old one is another page, filter or sort: start it from the top. A reload
 // after a row action keeps most rows, and a passive update keeps all of them, so neither scrolls. Rows without a
@@ -1309,14 +1351,14 @@ defineExpose({
   z-index: 230; /* above the sticky header cells */
   margin-bottom: -2px;
 }
-/* Mobile cards scroll with the page: the bar sticks under the page header (4rem; a parent may set --table-sticky-top),
-   and scrollToTop() stops there too. Its negative margin cancels its height and the stack's gap below it. */
+/* The page header the document scrolls under (4rem; a page may set --table-sticky-top): the progress bar and
+   scrollToTop() stop below it. */
 .table-cards {
   scroll-margin-top: var(--table-sticky-top, 4rem);
 }
+/* Moved down by script while the list is scrolled; its negative margin cancels its height and the stack's gap. */
 .table-progress--cards {
-  position: sticky;
-  top: var(--table-sticky-top, 4rem);
+  position: relative;
   z-index: 10;
   margin-bottom: calc(-0.75rem - 2px);
   border-radius: 9999px;
