@@ -121,6 +121,7 @@
         <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
           ref="groupsTableRef"
+          class="dense-cells"
           :columns="columns"
           :data="groups"
           :loading="loading"
@@ -313,6 +314,7 @@
             <span v-else class="text-xs text-gray-400">—</span>
           </template>
 
+          <!-- Amounts on the accounts page's three-significant-digit rule, the exact one in the tip (7o-4). -->
           <template #cell-usage="{ row }">
             <div v-if="!row.usage_summary" class="text-xs text-gray-400">—</div>
             <div v-else class="space-y-0.5 text-xs">
@@ -320,31 +322,25 @@
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageToday")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(row.usage_summary.today_cost)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.today_cost)">{{
+                  formatCompactMoney(row.usage_summary.today_cost)
+                }}</span>
               </div>
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageYesterday")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(row.usage_summary.yesterday_cost)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.yesterday_cost)">{{
+                  formatCompactMoney(row.usage_summary.yesterday_cost)
+                }}</span>
               </div>
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageTotal")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(row.usage_summary.total_cost)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.total_cost)">{{
+                  formatCompactMoney(row.usage_summary.total_cost)
+                }}</span>
               </div>
             </div>
           </template>
@@ -4409,6 +4405,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
 import { vTip } from "@/utils/tip";
+import { exactMoneyTip, formatCompactMoney } from "@/utils/compactNumber";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
@@ -7229,3 +7226,13 @@ onUnmounted(() => {
   clearAllAccountSearchState();
 });
 </script>
+
+<style scoped>
+/* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
+   beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
+.dense-cells :deep(thead th),
+.dense-cells :deep(tbody td) {
+  padding-right: var(--cell-pad-x);
+  padding-left: var(--cell-pad-x);
+}
+</style>

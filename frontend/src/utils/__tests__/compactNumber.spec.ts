@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  exactMoneyTip,
   formatCompactMoney,
   formatCompactRequests,
   formatCompactTokens,
@@ -75,5 +76,11 @@ describe('compact numbers', () => {
   it('gives the exact value for the hover tip', () => {
     expect(formatExactMoney(1_234_567.891)).toBe('$1,234,567.89')
     expect(formatExactCount(532_730_000)).toBe('532,730,000')
+  })
+
+  it('tips an amount only when the compact one shortened it (7o-4)', () => {
+    expect(exactMoneyTip(30_135.12)).toBe('$30,135.12')
+    expect(exactMoneyTip(999.99)).toBe('')
+    expect(exactMoneyTip(null)).toBe('')
   })
 })

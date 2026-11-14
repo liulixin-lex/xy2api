@@ -2,7 +2,7 @@
   <div class="group/usage relative text-sm">
     <div class="flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.today') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ today.toFixed(4) }}</span>
+      <span class="font-medium text-gray-900 dark:text-white" v-tip="exactMoneyTip(today)">{{ formatCompactMoney(today) }}</span>
       <Icon
         v-if="hasBreakdown"
         name="infoCircle"
@@ -12,7 +12,7 @@
     </div>
     <div class="mt-0.5 flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.total') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ total.toFixed(4) }}</span>
+      <span class="font-medium text-gray-900 dark:text-white" v-tip="exactMoneyTip(total)">{{ formatCompactMoney(total) }}</span>
     </div>
 
     <div
@@ -46,6 +46,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { exactMoneyTip, formatCompactMoney } from '@/utils/compactNumber'
+import { vTip } from '@/utils/tip'
 import type { PlatformUsage } from '@/api/admin/dashboard'
 
 const props = defineProps<{

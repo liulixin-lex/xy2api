@@ -88,6 +88,12 @@ export function formatExactMoney(value: number | null | undefined): string {
   return `${signOf(value, cents)}$${text}`
 }
 
+/** The tip of a compact amount: the exact one when the compact one shortened it ($1.23K), else none (''). */
+export function exactMoneyTip(value: number | null | undefined): string {
+  const exact = formatExactMoney(value)
+  return exact === formatCompactMoney(value) ? '' : exact
+}
+
 /** The exact count for the hover tip: 1,234,567. */
 export function formatExactCount(value: number | null | undefined): string {
   if (!known(value)) return NO_VALUE

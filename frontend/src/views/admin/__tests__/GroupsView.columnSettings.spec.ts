@@ -454,6 +454,27 @@ describe('admin GroupsView column settings', () => {
     expect(text.indexOf('Yesterday')).toBeLessThan(text.indexOf('Total'))
   })
 
+  it('writes large amounts in three significant digits, never cut, the exact one in the tip (7o-4)', async () => {
+    getUsageSummary.mockResolvedValue([
+      { group_id: 1, today_cost: 30135.12, yesterday_cost: 2.5, total_cost: 1234567 },
+    ])
+
+    const wrapper = await mountView()
+    const text = wrapper.get('[data-test="usage-cell"]').text()
+    expect(text).toContain('Today$30.1K')
+    expect(text).toContain('Total$1.23M')
+
+    document.body.appendChild(wrapper.element)
+    vi.useFakeTimers()
+    const today = wrapper.findAll('[data-test="usage-cell"] span').find((span) => span.text() === '$30.1K')!
+    today.element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    expect(document.getElementById('sq-tip')!.textContent).toBe('$30,135.12')
+    today.element.dispatchEvent(new Event('mouseleave'))
+    vi.useRealTimers()
+    wrapper.unmount()
+  })
+
   it('passes the group concurrency from the capacity summary to the badge', async () => {
     getCapacitySummary.mockResolvedValue([
       { group_id: 1, concurrency_used: 5, concurrency_max: 600, concurrency_group_used: 3, sessions_used: 0, sessions_max: 0, rpm_used: 0, rpm_max: 0 },

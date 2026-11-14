@@ -115,6 +115,7 @@ const DataTableStub = {
         <slot :name="'header-' + col.key" :column="col" />
       </template>
       <div v-for="row in data" :key="row.id">
+        <slot name="cell-email" :value="row.email" :row="row" />
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
         <div :data-test="'actions-' + row.id"><slot name="cell-actions" :row="row" /></div>
       </div>
@@ -382,6 +383,19 @@ describe('admin UsersView', () => {
     }
     const create = wrapper.findAll('button').find((button) => button.text() === 'admin.users.createUser')!
     expect(create.find('.table-toolbar__label').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps a long email to one line, whole in the tip a tap shows (7o-5)', async () => {
+    const email = 'a-very-long-address-for-acceptance@example.test'
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    document.body.appendChild(wrapper.element)
+    const cell = wrapper.get('[data-test="user-email"]')
+    expect(cell.classes()).toContain('truncate')
+    await cell.trigger('click')
+    expect(document.getElementById('sq-tip')!.textContent).toBe(email)
     wrapper.unmount()
   })
 

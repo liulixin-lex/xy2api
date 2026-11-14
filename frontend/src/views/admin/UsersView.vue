@@ -310,6 +310,7 @@
         <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
           ref="usersTableRef"
+          class="dense-cells"
           :columns="columns"
           :data="users"
           :loading="loading"
@@ -327,16 +328,17 @@
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
+          <!-- One line: a long address ends in "…" (a narrow card's head); hovered or tapped, the tip has it whole (7o-5). -->
           <template #cell-email="{ value }">
-            <div class="flex items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2">
               <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
+                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
               >
                 <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
                   {{ value.charAt(0).toUpperCase() }}
                 </span>
               </div>
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
             </div>
           </template>
 
@@ -854,7 +856,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -1988,3 +1990,13 @@ onUnmounted(() => {
   clearTimeout(searchTimeout)
 })
 </script>
+
+<style scoped>
+/* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
+   beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
+.dense-cells :deep(thead th),
+.dense-cells :deep(tbody td) {
+  padding-right: var(--cell-pad-x);
+  padding-left: var(--cell-pad-x);
+}
+</style>
