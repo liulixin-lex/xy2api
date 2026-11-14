@@ -24,6 +24,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -2055,6 +2056,7 @@ type openAIResponsesWSUsageLogCase struct {
 type openAIResponsesWSUsageLogResult struct {
 	log                  *service.UsageLog
 	logs                 []*service.UsageLog
+	unbilled             []*service.GatewayUnbilledRequest
 	upstreamFirstPayload []byte
 	upstreamPayloads     [][]byte
 	clientEvents         [][]byte
@@ -2111,39 +2113,46 @@ func TestOpenAIResponsesWebSocket_QualityPinnedTurnOneUsesAdmissionResult(t *tes
 
 // 后续 turn 的账号满载先短等（≤2 秒）再以 1013 要求重连。
 func TestOpenAIResponsesWebSocket_LaterTurnShortWaitsForBusyAccount(t *testing.T) {
-	for _, row := range []struct {
-		name      string
-		busyTries int32 // 第二个 turn 前若干次抢槽失败；-1 表示一直满
-	}{
-		{"slot frees during the wait", 3},
-		{"still full after the wait", -1},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			var secondTurn atomic.Bool
-			var tries atomic.Int32
-			start := time.Now()
-			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				firstPayload:              `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
-				secondPayload:             `{"type":"response.create","model":"gpt-5.1","input":"next"}`,
-				afterFirstUpstreamRequest: func(*service.ChannelService) error { secondTurn.Store(true); return nil },
-				acquireAccountSlot: func() bool {
-					if !secondTurn.Load() {
-						return true
-					}
-					n := tries.Add(1)
-					return row.busyTries >= 0 && n > row.busyTries
-				},
-				secondTurnCloseExpected: row.busyTries < 0, closeStatus: coderws.StatusTryAgainLater,
-				closeReason: "account is busy, please retry later",
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		for _, row := range []struct {
+			name      string
+			busyTries int32 // 第二个 turn 前若干次抢槽失败；-1 表示一直满
+		}{
+			{"slot frees during the wait", 3},
+			{"still full after the wait", -1},
+		} {
+			t.Run(mode+"/"+row.name, func(t *testing.T) {
+				var secondTurn atomic.Bool
+				var tries atomic.Int32
+				start := time.Now()
+				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload:              `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
+					secondPayload:             `{"type":"response.create","model":"gpt-5.1","input":"next"}`,
+					ingressMode:               mode,
+					afterFirstUpstreamRequest: func(*service.ChannelService) error { secondTurn.Store(true); return nil },
+					acquireAccountSlot: func() bool {
+						if !secondTurn.Load() {
+							return true
+						}
+						n := tries.Add(1)
+						return row.busyTries >= 0 && n > row.busyTries
+					},
+					secondTurnCloseExpected: row.busyTries < 0, closeStatus: coderws.StatusTryAgainLater,
+					closeReason: "account is busy, please retry later",
+				})
+				if row.busyTries >= 0 {
+					require.Len(t, got.logs, 2, "the turn continues once the slot frees")
+					require.Equal(t, row.busyTries+1, tries.Load())
+					return
+				}
+				require.Len(t, got.upstreamPayloads, 1, "the rejected fixed-account turn must not be sent upstream")
+				require.Len(t, got.logs, 1, "the admitted first turn remains billed")
+				require.Len(t, got.unbilled, 1, "fixed-account saturation is recorded as a failed request")
+				require.EqualValues(t, resilience.RequestFailed, got.unbilled[0].Result)
+				require.GreaterOrEqual(t, time.Since(start), 2*time.Second, "1013 only after the short wait")
+				require.Greater(t, tries.Load(), int32(5), "the full account is retried with backoff")
 			})
-			if row.busyTries >= 0 {
-				require.Len(t, got.logs, 2, "the turn continues once the slot frees")
-				require.Equal(t, row.busyTries+1, tries.Load())
-				return
-			}
-			require.GreaterOrEqual(t, time.Since(start), 2*time.Second, "1013 only after the short wait")
-			require.Greater(t, tries.Load(), int32(5), "the full account is retried with backoff")
-		})
+		}
 	}
 }
 
@@ -2343,7 +2352,8 @@ func (s *openAIWSFailoverHandlerAccountRepoStub) SetRateLimited(ctx context.Cont
 
 type openAIWSUsageHandlerUsageLogRepoStub struct {
 	service.UsageLogRepository
-	created chan *service.UsageLog
+	created  chan *service.UsageLog
+	unbilled chan *service.GatewayUnbilledRequest
 }
 
 func (s *openAIWSUsageHandlerUsageLogRepoStub) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
@@ -2351,6 +2361,17 @@ func (s *openAIWSUsageHandlerUsageLogRepoStub) Create(ctx context.Context, log *
 		s.created <- log
 	}
 	return true, nil
+}
+
+func (s *openAIWSUsageHandlerUsageLogRepoStub) CreateUnbilledRequest(_ context.Context, row *service.GatewayUnbilledRequest) error {
+	if s.unbilled != nil {
+		s.unbilled <- row
+	}
+	return nil
+}
+
+func (*openAIWSUsageHandlerUsageLogRepoStub) GroupLast60(context.Context, []int64, time.Time) (map[int64]usagestats.GroupLast60, error) {
+	return nil, nil
 }
 
 type openAIWSUsageHandlerChannelRepoStub struct {
@@ -3204,7 +3225,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 
 	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
-	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{
+		created:  make(chan *service.UsageLog, turnCount),
+		unbilled: make(chan *service.GatewayUnbilledRequest, turnCount),
+	}
 
 	if len(tc.channelMapping) > 0 {
 		channelSvc = service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
@@ -3290,6 +3314,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		apiKey.Group = tc.group
 	}
 	router := gin.New()
+	handlerDone := make(chan struct{})
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
@@ -3297,6 +3322,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
 		}
 		c.Next()
+		close(handlerDone)
 	})
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
@@ -3391,8 +3417,31 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			}
 			require.Contains(t, closeErr.Reason, reason)
 			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
+			select {
+			case <-handlerDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("等待 WebSocket handler 收口超时")
+			}
 			_ = clientConn.CloseNow()
-			return openAIResponsesWSUsageLogResult{}
+			result := openAIResponsesWSUsageLogResult{}
+			for {
+				select {
+				case row := <-usageRepo.created:
+					result.logs = append(result.logs, row)
+				case row := <-usageRepo.unbilled:
+					result.unbilled = append(result.unbilled, row)
+				case payload := <-upstreamPayloadCh:
+					result.upstreamPayloads = append(result.upstreamPayloads, payload)
+				default:
+					if len(result.logs) > 0 {
+						result.log = result.logs[0]
+					}
+					if len(result.upstreamPayloads) > 0 {
+						result.upstreamFirstPayload = result.upstreamPayloads[0]
+					}
+					return result
+				}
+			}
 		}
 		readCompleted()
 	}

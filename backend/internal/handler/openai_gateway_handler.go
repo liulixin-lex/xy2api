@@ -3350,13 +3350,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
 				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || qualityTurnPinned.Load())
-				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
-					reqLog.Info("openai.websocket_turn_profit_vetoed",
-						zap.Int("turn", turn),
-						zap.Int64("account_id", account.ID),
-						zap.String("reason", reason))
-					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
-				}
 				turnPricing.freeze(turnAt)
 				if turn == 1 {
 					return nil
@@ -3370,6 +3363,33 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				if !userAcquired {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
+				}
+				if err := checkSimpleModeTurnBilling(); err != nil {
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					return err
+				}
+				// User-side limits are now cleared. Start this turn's request before
+				// checking the fixed account so account saturation or the profit gate
+				// is recorded as a failed request, while user-side rejects stay excluded.
+				gatewayTurnModel = pendingGatewayTurnModel
+				turnStartsMu.Lock()
+				start := turnStarts[turn]
+				turnStartsMu.Unlock()
+				if start.IsZero() {
+					start = time.Now()
+				}
+				resilience.StateFrom(ctx).BeginGatewayTurn(start)
+				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					reqLog.Info("openai.websocket_turn_profit_vetoed",
+						zap.Int("turn", turn),
+						zap.Int64("account_id", account.ID),
+						zap.String("reason", reason))
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
 				}
 				// A full account gets the sticky short wait before the client
 				// is asked to reconnect; the user's own limit above does not.
@@ -3393,20 +3413,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				if err := checkSimpleModeTurnBilling(); err != nil {
-					return err
-				}
-				// Start a request trace only after the turn has passed its user and
-				// account admission checks. A rejected response.create belongs to the
-				// existing connection, not to a new gateway request row.
-				gatewayTurnModel = pendingGatewayTurnModel
-				turnStartsMu.Lock()
-				start := turnStarts[turn]
-				turnStartsMu.Unlock()
-				if start.IsZero() {
-					start = time.Now()
-				}
-				resilience.StateFrom(ctx).BeginGatewayTurn(start)
 				h.gatewayService.RefreshOpenAISelectionFlags(ctx, apiKey.GroupID, account, gatewayTurnModel)
 				return nil
 			},

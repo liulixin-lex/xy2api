@@ -124,25 +124,34 @@ func TestOpenAIResponsesWebSocket_GroupRateChangeAppliesToNextTurn(t *testing.T)
 }
 
 func TestOpenAIResponsesWebSocket_GroupRateChangeReachesProfitGateOnNextTurn(t *testing.T) {
-	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
-	repo.group.ProfitControlEnabled = true
-	repo.group.ProfitMinMargin = 0.1
-	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	accountRate := 1.0
-	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:          wsGroupPricingFirst,
-		secondPayload:         wsGroupPricingSecond,
-		apiKeyService:         apiKeyService,
-		apiKeyCredential:      wsGroupPricingKey,
-		accountRateMultiplier: &accountRate,
-		// 3.0 → 0.3：账号倍率 1.0 在新售价下已越线，第二个 turn 必须在转发上游前被拒。
-		afterFirstUpstreamRequest: func(*service.ChannelService) error {
-			return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) { group.RateMultiplier = 0.3 })
-		},
-		secondTurnCloseExpected: true,
-		closeStatus:             coderws.StatusTryAgainLater,
-		closeReason:             "no longer eligible for this connection",
-	})
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			repo := newWSGroupPricingAPIKeyRepoStub(3.0)
+			repo.group.ProfitControlEnabled = true
+			repo.group.ProfitMinMargin = 0.1
+			apiKeyService := newWSGroupPricingAPIKeyService(repo)
+			accountRate := 1.0
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:          wsGroupPricingFirst,
+				secondPayload:         wsGroupPricingSecond,
+				ingressMode:           mode,
+				apiKeyService:         apiKeyService,
+				apiKeyCredential:      wsGroupPricingKey,
+				accountRateMultiplier: &accountRate,
+				// 3.0 → 0.3：账号倍率 1.0 在新售价下已越线，第二个 turn 必须在转发上游前被拒。
+				afterFirstUpstreamRequest: func(*service.ChannelService) error {
+					return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) { group.RateMultiplier = 0.3 })
+				},
+				secondTurnCloseExpected: true,
+				closeStatus:             coderws.StatusTryAgainLater,
+				closeReason:             "no longer eligible for this connection",
+			})
+			require.Len(t, got.upstreamPayloads, 1, "profit-vetoed turn must not reach upstream")
+			require.Len(t, got.logs, 1, "the completed first turn remains billed")
+			require.Len(t, got.unbilled, 1, "a fixed-account profit veto is a failed request")
+			require.EqualValues(t, resilience.RequestFailed, got.unbilled[0].Result)
+		})
+	}
 }
 
 func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *testing.T) {
