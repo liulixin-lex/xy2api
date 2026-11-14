@@ -47,7 +47,7 @@ func TestSchedQualityRunCycleLockAndRollback(t *testing.T) {
 		err    error
 	}
 	done := make(chan result, 1)
-	row := q.StateRow{AccountID: a, GroupID: g, Model: "m", State: q.StateCooling, Level: 1, Reason: q.ReasonSpeed, Since: time.Now(), Until: time.Now().Add(time.Minute)}
+	row := q.StateRow{AccountID: a, GroupID: g, Model: "m", State: q.StateCooling, Level: 1, Since: time.Now(), Until: time.Now().Add(time.Minute)}
 	go func() {
 		locked, err := r.RunCycle(ctx, func(tx service.SchedQualityTx) error {
 			if err := tx.Upsert([]q.StateRow{row}); err != nil {
@@ -346,22 +346,33 @@ func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
 		_, err := integrationDB.ExecContext(ctx, `DELETE FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies)
 		require.NoError(t, err)
 	})
-	for _, bad := range []string{`[]`, `{"v4":{"enabled":"invalid"}}`, `{"v4":{"enabled":true,"ttft_seconds":-1}}`} {
-		raw := fmt.Sprintf(`{"version":7,"groups":{"%d":{"v4":%s},"%d":%s,"%d":{"v4":%s,"v3":"invalid legacy"},"bad-id":{}}}`, valid, v4, invalid, bad, validV4, v4)
-		_, err := integrationDB.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyGroupQualityGatePolicies, raw)
-		require.NoError(t, err)
-		policies, err := r.LoadPolicies(ctx)
-		require.NoError(t, err)
-		require.Equal(t, p, policies[valid].Policy)
-		require.Equal(t, p, policies[validV4].Policy, "unused invalid v3 must not mask a valid v4")
-		require.Equal(t, q.DefaultPolicy(), policies[invalid].Policy)
-		require.Equal(t, int64(7), policies[invalid].Version)
-		saved, err := r.SavePolicy(ctx, valid, 7, p)
-		require.NoError(t, err, "an unrelated invalid entry cannot prevent CAS writes")
-		require.Equal(t, int64(8), saved.Version)
-		var after string
-		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&after))
-		require.Equal(t, bad, gjson.Get(after, fmt.Sprintf("groups.%d", invalid)).Raw)
+	for _, tc := range []struct {
+		name string
+		bad  string
+		want q.Policy
+	}{
+		{name: "unreadable policy object", bad: `[]`, want: q.DefaultPolicy()},
+		{name: "malformed field keeps valid siblings", bad: `{"v4":{"enabled":"invalid","ttft_seconds":12,"max_error_rate":0.01,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}`, want: q.Policy{TTFTSeconds: 12, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 0}},
+		{name: "invalid numeric values are preserved", bad: `{"v4":{"enabled":true,"ttft_seconds":-1,"max_error_rate":0.8,"min_cache_ratio":1.2,"takeover_idle_seconds":300}}`, want: q.Policy{Enabled: true, TTFTSeconds: -1, MaxErrorRate: .8, MinCacheRatio: 1.2, TakeoverIdleSeconds: 300}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := tc.bad
+			raw := fmt.Sprintf(`{"version":7,"groups":{"%d":{"v4":%s},"%d":%s,"%d":{"v4":%s,"v3":"invalid legacy"},"bad-id":{}}}`, valid, v4, invalid, bad, validV4, v4)
+			_, err := integrationDB.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyGroupQualityGatePolicies, raw)
+			require.NoError(t, err)
+			policies, err := r.LoadPolicies(ctx)
+			require.NoError(t, err)
+			require.Equal(t, p, policies[valid].Policy)
+			require.Equal(t, p, policies[validV4].Policy, "unused invalid v3 must not mask a valid v4")
+			require.Equal(t, tc.want, policies[invalid].Policy)
+			require.Equal(t, int64(7), policies[invalid].Version)
+			saved, err := r.SavePolicy(ctx, valid, 7, p)
+			require.NoError(t, err, "an unrelated invalid entry cannot prevent CAS writes")
+			require.Equal(t, int64(8), saved.Version)
+			var after string
+			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&after))
+			require.Equal(t, bad, gjson.Get(after, fmt.Sprintf("groups.%d", invalid)).Raw)
+		})
 	}
 	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"sched_quality.invalid_policy"`))
 }
