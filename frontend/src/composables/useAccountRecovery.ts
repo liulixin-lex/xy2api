@@ -4,6 +4,7 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { Account } from '@/types'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { markSchedChanged } from '@/composables/useSchedLayers'
 import { activeStreamOnly, type AccountWithCapability } from '@/utils/accountCapability'
@@ -58,14 +59,19 @@ export function useAccountRecovery() {
     pending.add(account.id)
     try {
       let ok = false
+      let reason = ''
       try {
         // Kept items (session avoidance and the like) are not failures.
         ok = (await schedQualityAPI.reset(account.id)).failed.length === 0
-      } catch {
-        // A request error is a failure.
+      } catch (error) {
+        // A request error is a failure; the backend's reason goes into the toast.
+        reason = extractApiErrorMessage(error, '').trim()
       }
       if (ok) appStore.showSuccess(t('admin.schedQuality.recover.ok', { name: account.name }))
-      else appStore.showError(t('admin.schedQuality.recover.failed', { name: account.name }))
+      else {
+        const action = t('admin.schedQuality.recover.failed', { name: account.name })
+        appStore.showError(reason ? t('admin.accounts.failedWithReason', { action, reason }) : action)
+      }
       await Promise.all([markSchedChanged(), refresh?.()])
     } finally {
       pending.delete(account.id)

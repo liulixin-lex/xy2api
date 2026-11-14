@@ -2,6 +2,7 @@ import openaiTotp from './openaiTotp'
 
 export default {
     accounts: {
+      failedWithReason: '{action}：{reason}',
       groupPicker: {
         search: '搜索别名或全名',
         searchLabel: '搜索分组',

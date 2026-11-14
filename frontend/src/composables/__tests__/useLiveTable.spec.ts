@@ -279,7 +279,7 @@ describe('frozen membership', () => {
 
     await vi.advanceTimersByTimeAsync(30_000)
     expect(table.ids.value).toEqual([1, 2, 3])
-    expect(table.pending.value).toBe(2) // 4 appeared, 3 went
+    expect(table.pending.value).toBe(1) // 4 appeared and pushed 3 off: one change (spec 7e-11)
     expect(table.isDimmed(3)).toBe(true) // gone
     expect(table.isDimmed(2)).toBe(true) // no longer matches the filter
     expect(table.isDimmed(1)).toBe(false)
@@ -289,6 +289,21 @@ describe('frozen membership', () => {
     expect(table.ids.value).toEqual([4, 2, 1])
     expect(table.pending.value).toBe(0)
     expect(table.isDimmed(3)).toBe(false)
+  })
+
+  // 7e-11: a new account counted as "2 changes" (the new row plus the one it pushed off the page).
+  it('counts the new rows when some appeared, else the rows that went', async () => {
+    let server = page(row(1), row(2), row(3))
+    const table = engine({ fetchPage: async () => server, membershipIntervalMs: 30_000 })
+    await table.reload()
+    server = page(row(1))
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(table.pending.value).toBe(2) // 2 and 3 went, nothing new
+    table.remove(2)
+    expect(table.pending.value).toBe(1)
+    server = page(row(5), row(6), row(1))
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(table.pending.value).toBe(2) // 5 and 6 appeared; 3 went with them
   })
 
   it('takes a removed row off the page at once, with its count', async () => {
@@ -302,7 +317,7 @@ describe('frozen membership', () => {
 
     server = { items: [row(1), row(4)], total: 8 } // 3 went elsewhere, 4 appeared
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(table.pending.value).toBe(2)
+    expect(table.pending.value).toBe(1) // the new row is the change
     table.remove(3) // already out of the server's total
     expect(table.ids.value).toEqual([1])
     expect(table.pending.value).toBe(1)

@@ -178,6 +178,8 @@ async function openMenuFor(wrapper: ReturnType<typeof mountView>, id: number) {
   vm(wrapper).openMenu(vm(wrapper).rows.find((a) => a.id === id), { currentTarget: document.body })
   await flushPromises()
 }
+/** The live table's rows refresh: every row on the page, by id (the active load sends no ids). */
+const rowReads = () => listAccounts.mock.calls.filter(([, , params]) => typeof params?.ids === 'string').map(([, , params]) => params.ids)
 const recoverItem = () => document.querySelector<HTMLElement>('[data-test="menu-recover-state"]')
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>('[data-test="row"]')).map((el) => Number(el.dataset.id))
 const deferred = <T = unknown>() => {
@@ -193,8 +195,14 @@ beforeEach(() => {
   perms.manage = true
   document.documentElement.dataset.motion = 'reduced'
   Object.values(toast).forEach((fn) => fn.mockReset())
-  listAccounts.mockReset().mockResolvedValue({ items: ROWS, total: 4, page: 1, page_size: 20, pages: 1 })
-  getById.mockReset().mockImplementation(async (id: number) => ({ ...ROWS.find((a) => a.id === id), status: 'active' }))
+  // The page load answers ROWS; a rows read (by id) answers the accounts as a recovery leaves them.
+  listAccounts.mockReset().mockImplementation(async (_page: number, _size: number, params?: { ids?: string }) => {
+    if (!params?.ids) return { items: ROWS, total: 4, page: 1, page_size: 20, pages: 1 }
+    const ids = params.ids.split(',').map(Number)
+    const items = ROWS.filter((a) => ids.includes(a.id)).map((a) => ({ ...a, status: 'active' }))
+    return { items, total: items.length, page: 1, page_size: ids.length, pages: 1 }
+  })
+  getById.mockReset()
   backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 1), summaryOf(3, 0), summaryOf(4, 0)] })
   sched.reset.mockReset().mockResolvedValue(clean)
   sched.accountDetail.mockReset().mockReturnValue(new Promise(() => {}))
@@ -257,7 +265,9 @@ describe('AccountsView — recover state', () => {
     await flushPromises()
     expect(toast.showSuccess.mock.calls).toEqual([['admin.schedQuality.recover.ok:{"name":"acc-1"}']])
     expect(toast.showError).not.toHaveBeenCalled()
-    expect(getById).toHaveBeenCalledWith(1)
+    // The page's rows are read again through the live table, never getById (7d-9).
+    expect(rowReads()).toEqual(['1,2,3,4'])
+    expect(getById).not.toHaveBeenCalled()
     expect(backendSummary.mock.calls.length).toBeGreaterThan(summaries)
     // The row holds the account read back, never the reset result, and the menu no longer offers recovery.
     await openMenuFor(wrapper, 1)
@@ -280,10 +290,11 @@ describe('AccountsView — recover state', () => {
     await flushPromises()
     expect(toast.showError.mock.calls).toEqual([
       ['admin.schedQuality.recover.failed:{"name":"acc-1"}'],
-      ['admin.schedQuality.recover.failed:{"name":"acc-2"}']
+      // A request error carries the backend's reason.
+      [`admin.accounts.failedWithReason:${JSON.stringify({ action: 'admin.schedQuality.recover.failed:{"name":"acc-2"}', reason: 'down' })}`]
     ])
     expect(toast.showSuccess).not.toHaveBeenCalled()
-    expect(getById.mock.calls.map(([id]) => id)).toEqual([1, 2])
+    expect(rowReads()).toHaveLength(2)
     wrapper.unmount()
   })
 
@@ -307,7 +318,6 @@ describe('AccountsView — recover state', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     await flushPromises()
     listAccounts.mockResolvedValue({ items: [ROWS[0]], total: 1, page: 1, page_size: 20, pages: 1 })
-    getById.mockResolvedValue({ ...ROWS[1], status: 'active' })
     const loads = listAccounts.mock.calls.length
     await openMenuFor(wrapper, 2)
     recoverItem()!.click()
@@ -375,7 +385,7 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     await openMenuFor(wrapper, 2)
     recoverItem()!.click()
     await flushPromises()
-    expect(getById).toHaveBeenCalledWith(2)
+    expect(rowReads()).toHaveLength(1)
     await openMenuFor(wrapper, 2)
     expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
     recoverItem()!.click()
@@ -402,7 +412,7 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     document.querySelector<HTMLElement>('[data-qp-trigger="reset"]')!.click()
     await flushPromises()
     expect(sched.reset).toHaveBeenCalledWith(2)
-    expect(getById).toHaveBeenCalledWith(2)
+    expect(rowReads()).toHaveLength(1)
     expect(backendSummary.mock.calls.length).toBe(before + 1)
     expect(document.querySelector('[data-qp-trigger="reset"]')!.getAttribute('aria-busy')).toBe('true')
     summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(2, 0)] })
@@ -411,32 +421,33 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     wrapper.unmount()
   })
 
-  it('drops a late row read when a newer list load landed meanwhile (P0-2)', async () => {
+  it('drops the recovery row read when a newer list load landed meanwhile: the live table orders it (P0-2, 7d-9)', async () => {
     const wrapper = mountView()
     await flushPromises()
     const stale = deferred()
-    getById.mockReturnValueOnce(stale.promise)
+    // The next list request is the recovery's rows read.
+    listAccounts.mockReturnValueOnce(stale.promise)
     await openMenuFor(wrapper, 1)
     recoverItem()!.click()
     await flushPromises()
-    expect(getById).toHaveBeenCalledWith(1)
+    expect(rowReads()).toEqual(['1,2,3,4'])
     listAccounts.mockResolvedValue({ items: ROWS.map((a) => (a.id === 1 ? { ...a, name: 'newer row', status: 'error' } : a)), total: 4, page: 1, page_size: 20, pages: 1 })
     await vm(wrapper).reload()
     expect(vm(wrapper).rows[0].name).toBe('newer row')
-    stale.resolve({ ...ROWS[0], name: 'older row', status: 'active' })
+    stale.resolve({ items: [{ ...ROWS[0], name: 'older row', status: 'active' }], total: 1, page: 1, page_size: 4, pages: 1 })
     await flushPromises()
     expect(vm(wrapper).rows[0].name).toBe('newer row')
     wrapper.unmount()
   })
 
-  it('keeps the batch accounts locked until the list reload is in (P0-1)', async () => {
+  it('keeps the batch accounts locked until the rows read is in (P0-1)', async () => {
     const wrapper = mountView()
     await flushPromises()
     document.querySelector<HTMLInputElement>('[data-test="row"] input')!.click()
     await flushPromises()
     await wrapper.get('[data-test="select-page"]').trigger('click')
     const list = deferred()
-    // The reload after the batch waits; the summary follows it on its own (the live table runs it after the load).
+    // The rows read after the batch waits.
     listAccounts.mockReturnValue(list.promise)
     await wrapper.get('[data-test="bulk-sched-reset"]').trigger('click')
     await flushPromises()
@@ -449,7 +460,35 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
 
     list.resolve({ items: ROWS.map((a) => ({ ...a, status: 'active' })), total: 4, page: 1, page_size: 20, pages: 1 })
     await flushPromises()
+    expect(rowReads()).toHaveLength(1)
     expect(wrapper.findComponent(BulkBarStub).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('under the quality filter holds the lock until the summary after the reload is in, not just the reload (7d-8)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    const summary = deferred()
+    backendSummary.mockReturnValueOnce(summary.promise)
+    const loads = listAccounts.mock.calls.length
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    // The reload is in (row 2 still on it), the summary after it is not: the row still reads "cooling", and stays locked.
+    expect(listAccounts.mock.calls.length).toBe(loads + 1)
+    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'substandard' })
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
+
+    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 0), summaryOf(3, 0), summaryOf(4, 0)] })
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushPromises()
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()).toBeNull()
     wrapper.unmount()
   })
 })

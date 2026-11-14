@@ -28,13 +28,15 @@ export const PRIVACY_UNSET_FILTER = '__unset__'
 /**
  * The quality filter against the account's summary, as the backend's filter decides it: observing by the account
  * status, exempt by any exemption, substandard by a substandard model that is not exempt while the account is not
- * stopped, normal by none of these. Without a summary yet there is nothing to judge: it matches.
+ * stopped and quality scheduling is active (`active`: switched on, view fresh), normal by none of these. Without a
+ * summary yet there is nothing to judge: it matches. Whether the group's own policy is enabled is not in the summary;
+ * the backend's answer decides that, and the browser does not dim for it.
  */
-export function qualityMatches(quality: AccountQualityView | null | undefined, filter: string): boolean {
+export function qualityMatches(quality: AccountQualityView | null | undefined, filter: string, active = true): boolean {
   if (!filter || !quality) return true
   const observing = quality.status === 'observing'
   const exempt = quality.exemptions.length > 0
-  const substandard = !quality.stop && quality.substandard.some((item) => !item.exempt)
+  const substandard = active && !quality.stop && quality.substandard.some((item) => !item.exempt)
   switch (filter) {
     case 'observing':
       return observing
@@ -49,16 +51,20 @@ export function qualityMatches(quality: AccountQualityView | null | undefined, f
   }
 }
 
-const future = (value: string | null | undefined, now: number) => {
+/** The clock is read only for a time the row has, so a row without one does not follow the page clock. */
+const future = (value: string | null | undefined, now: () => number) => {
   const time = value ? new Date(value).getTime() : Number.NaN
-  return Number.isFinite(time) && time > now
+  return Number.isFinite(time) && time > now()
 }
 
 export interface AccountMatchContext {
-  now: number
+  /** The page clock (useLiveClock): a rate limit or a pause that ends dims the row at that second. */
+  now: () => number
   /** The group-category filter (from the group categories store). */
   matchesCategory: (groupIds: number[], category: string) => boolean
   quality?: AccountQualityView | null
+  /** Quality scheduling is switched on and its view fresh (see qualitySchedulingActive). */
+  qualityActive?: boolean
 }
 
 export function accountMatchesFilters(account: Account, filters: AccountListFilters, context: AccountMatchContext): boolean {
@@ -80,7 +86,8 @@ export function accountMatchesFilters(account: Account, filters: AccountListFilt
       return false
     }
   }
-  const groupIds = account.group_ids ?? account.groups?.map((group) => group.id) ?? []
+  // group_ids is the row's only group list (the backend omits it when empty; merges write [] then).
+  const groupIds = account.group_ids ?? []
   if (!context.matchesCategory(groupIds, filters.group_category ?? '')) return false
   if (filters.group) {
     if (filters.group === UNGROUPED_GROUP_FILTER) {
@@ -99,5 +106,5 @@ export function accountMatchesFilters(account: Account, filters: AccountListFilt
   }
   const search = String(filters.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
-  return qualityMatches(context.quality, filters.sched_quality ?? '')
+  return qualityMatches(context.quality, filters.sched_quality ?? '', context.qualityActive ?? true)
 }

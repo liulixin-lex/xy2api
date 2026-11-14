@@ -165,7 +165,8 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     wrapper.findComponent(AccountActionMenu).vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('duplicate failed')
+    // The action's words with the backend's reason (spec 7e-13).
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     consoleError.mockRestore()
     wrapper.unmount()
   })

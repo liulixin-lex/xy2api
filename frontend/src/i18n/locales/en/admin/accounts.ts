@@ -2,6 +2,7 @@ import openaiTotp from './openaiTotp'
 
 export default {
     accounts: {
+      failedWithReason: '{action}: {reason}',
       groupPicker: {
         search: 'Search alias or name',
         searchLabel: 'Search groups',

@@ -4,7 +4,8 @@
  * - Page: the account list (lite=1) with the page's filters and server sort.
  * - Rows of the page, every 3 s: the same list with `ids` (whole rows; page 1, page size = the id count). The group
  *   filter goes along, as it decides the group concurrency the rows carry.
- * - Quality summary, every 5 s: the backend's own shape, a value (or null) for every id.
+ * - Quality summary, every 5 s: the backend's own shape, a value (or null) for every id. qualityLanded() waits for
+ *   the next one (a recovery holds its lock until the rows show the summary after it).
  * - Today's stats and upstream balances, every 30 s: batch endpoints with defaults for every id.
  * - Usage windows: after each load only, from a 5-minute cache (a manual refresh skips the cache).
  * - Membership check: every 30 s (the engine's default); rows that no longer match the filters are dimmed in place.
@@ -35,6 +36,8 @@ export interface AccountsLiveOptions {
   matches: (row: LiveAccount) => boolean
   /** The summary's page-wide flags (quality scheduling switched off, a stale view). */
   onQualityMeta?: (meta: { global_enabled: boolean; stale: boolean }) => void
+  /** A page answer arrived for these page and size (the pagination bar follows it, not the click). */
+  onPageShown?: (page: { page: number; pageSize: number }) => void
 }
 
 export const ROW_BEAT_MS = 3000
@@ -62,6 +65,20 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
   let pages = 0
   let balanceForbidden = false
   let forceUsage = false
+  /** Quality runs started so far, and the callers waiting for one started after a given run to be written. */
+  let qualityRuns = 0
+  const qualityWaiters: Array<{ after: number; resolve: () => void }> = []
+  const settleQuality = (run: number) => {
+    // The engine writes the answer once fetch returns; the waiters hear of it after that.
+    setTimeout(() => {
+      for (const waiter of [...qualityWaiters]) {
+        if (waiter.after < run) {
+          qualityWaiters.splice(qualityWaiters.indexOf(waiter), 1)
+          waiter.resolve()
+        }
+      }
+    }, 0)
+  }
   const usageCache = new Map<number, { usage: AccountUsageInfo | null; error: string | null; at: number }>()
 
   const table: LiveTable<LiveAccount> = useLiveTable<LiveAccount>({
@@ -70,6 +87,8 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
       const { page, pageSize } = options.page()
       const result = await adminAPI.accounts.list(page, pageSize, { ...options.filters(), ...options.sort(), lite: '1' }, { signal })
       pages = result.pages ?? 0
+      // A newer load aborts this one; only the answer that is shown moves the pagination bar.
+      if (!signal.aborted) options.onPageShown?.({ page, pageSize })
       return { items: result.items as LiveAccount[], total: result.total }
     },
     matches: options.matches,
@@ -88,13 +107,18 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
         name: 'quality',
         intervalMs: QUALITY_BEAT_MS,
         fetch: async (ids, signal) => {
-          if (!options.wants.quality()) return []
+          const run = ++qualityRuns
+          if (!options.wants.quality()) {
+            settleQuality(run)
+            return []
+          }
           const byId = new Map<number, BackendAccountSummary>()
           for (const part of chunk(numericIds(ids), QUALITY_MAX_IDS)) {
             const summary = await backendSummary(part, { signal })
             options.onQualityMeta?.({ global_enabled: summary.global_enabled, stale: summary.stale })
             for (const account of summary.accounts) byId.set(account.account_id, account)
           }
+          settleQuality(run)
           return ids.map((id) => [id, { quality: byId.get(Number(id)) ?? null }] as const)
         }
       },
@@ -172,6 +196,21 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
       table.mergeRows([[id, { usage_info: usage, usage_error: null }]])
     },
     /** A changed account's usage is asked again on the next run. */
-    forgetUsage: (ids: number[]) => ids.forEach((id) => usageCache.delete(id))
+    forgetUsage: (ids: number[]) => ids.forEach((id) => usageCache.delete(id)),
+    /**
+     * Resolves once a quality summary asked for after this call is on the rows (a run already on its way does not
+     * count: it may predate the change). An aborted or failed run does not count either; the engine retries, and after
+     * `timeoutMs` it resolves anyway so a long outage holds nothing for ever.
+     */
+    qualityLanded: (timeoutMs = 15_000) =>
+      new Promise<void>((resolve) => {
+        const waiter = { after: qualityRuns, resolve: () => { clearTimeout(timer); resolve() } }
+        const timer = setTimeout(() => {
+          const index = qualityWaiters.indexOf(waiter)
+          if (index !== -1) qualityWaiters.splice(index, 1)
+          resolve()
+        }, timeoutMs)
+        qualityWaiters.push(waiter)
+      })
   }
 }

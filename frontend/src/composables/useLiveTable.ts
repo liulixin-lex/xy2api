@@ -21,7 +21,8 @@
  *   stats cards do not wait a whole beat.
  * - Sources refresh the rows of the current page on their own beat without changing membership or order; tasks are
  *   page-level jobs on the same scheduler (they run with no rows too). refresh(name) runs one of them now. The
- *   membership check (default every 30 s) counts rows that appeared or went (`pending`) and dims gone rows in place;
+ *   membership check (default every 30 s) counts the change (`pending`: the rows that appeared, or with none the
+ *   rows that went; a new row that pushes one off the page is one change) and dims gone rows in place;
  *   applyPending() takes them in. With `tail` (usage records) the page follows the server's order while
  *   `tail.enabled()` holds; otherwise new rows are only counted (`pendingMore` once a full page is waiting: "N+").
  * - Beats are setTimeout chains started after a request ends; a source never overlaps itself. They skip while an active
@@ -231,6 +232,10 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   const loading = ref(false)
   const pending = ref(0)
   const pendingMore = ref(false)
+  /** New rows the last membership check found (not in log mode). */
+  let addedCount = 0
+  /** The change to announce: the new rows, or with none the rows that went. */
+  const countPending = () => { pending.value = addedCount > 0 ? addedCount : gone.size }
   const gone = shallowReactive(new Set<string>())
   const paused = ref(false)
   const hidden = ref(pageHidden())
@@ -475,30 +480,31 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
       const items = withoutRemoved(page.items, requestedAt)
       total.value = page.total - (page.items.length - items.length)
       const shown = new Set(ids.value.map(keyOf))
-      const added: T[] = []
+      const newRows: T[] = []
       for (const row of items) {
         const key = keyOf(getId(row))
         if (shown.has(key)) applyRow(key, row, requestedAt, true)
-        else added.push(row)
+        else newRows.push(row)
       }
       if (options.tail) {
         const size = options.tail.pageSize()
         if (options.tail.enabled()) {
-          for (const row of added) upsert(row, requestedAt)
+          for (const row of newRows) upsert(row, requestedAt)
           served = items.map(getId).slice(0, size)
           show(served)
           pending.value = 0
           pendingMore.value = false
         } else {
-          pending.value = added.length
-          pendingMore.value = added.length >= size
+          pending.value = newRows.length
+          pendingMore.value = newRows.length >= size
         }
         return
       }
       const fresh = new Set(items.map((row) => keyOf(getId(row))))
       gone.clear()
       for (const id of ids.value) if (!fresh.has(keyOf(id))) gone.add(keyOf(id))
-      pending.value = added.length + gone.size
+      addedCount = newRows.length
+      countPending()
     })
   }
 
@@ -526,6 +532,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
       total.value = page.total - (page.items.length - items.length)
       pending.value = 0
       pendingMore.value = false
+      addedCount = 0
       gone.clear()
       owed = false
       loadFailures = 0
@@ -606,7 +613,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     const next = ids.value.filter((x) => keyOf(x) !== key)
     // A row the membership check found gone is already out of the server's total.
     const wasGone = gone.delete(key)
-    if (wasGone) pending.value = Math.max(0, pending.value - 1)
+    if (wasGone) countPending()
     if (next.length !== ids.value.length) {
       ids.value = next
       if (!wasGone) total.value = Math.max(0, total.value - 1)

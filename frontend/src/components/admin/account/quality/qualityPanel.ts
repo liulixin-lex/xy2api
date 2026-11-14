@@ -4,7 +4,7 @@
  *
  * A group's state for the selected model, first match wins (the same order as the pills' dots, spec 4.3):
  * stopped (the whole account takes no part) → exempt (the group's or the all-groups exemption) → back (the model is
- * substandard in the group) → observe (the account is still observed, or the group has no row for this model yet) →
+ * substandard in the group while quality scheduling is on, fresh and the group's policy enabled) → observe (the account is still observed, or the group has no row for this model yet) →
  * ok. Each dimension's mark is the backend's verdict for that group and model; nothing is judged here.
  */
 import type { BackendAccountDetail, BackendDetailGroup, BackendDim, BackendGroupModel } from '@/api/admin/schedQualityTypes'
@@ -20,11 +20,22 @@ export function panelModels(detail: Pick<BackendAccountDetail, 'groups'>): strin
 export const modelRow = (group: BackendDetailGroup, model: string | null): BackendGroupModel | undefined =>
   model === null ? undefined : group.by_model.find((row) => row.model === model)
 
-export function groupModelState(detail: Pick<BackendAccountDetail, 'stop' | 'status'>, group: BackendDetailGroup, model: string | null): GroupDotState {
+/**
+ * The backend moves an account to the back only while quality scheduling is switched on, its view is fresh and the
+ * group's policy is enabled; otherwise a failing row is evidence, not a place in the order.
+ */
+const movesToBack = (detail: Partial<Pick<BackendAccountDetail, 'global_enabled' | 'stale'>>, group: BackendDetailGroup) =>
+  detail.global_enabled !== false && detail.stale !== true && group.policy.enabled !== false
+
+export function groupModelState(
+  detail: Pick<BackendAccountDetail, 'stop' | 'status'> & Partial<Pick<BackendAccountDetail, 'global_enabled' | 'stale'>>,
+  group: BackendDetailGroup,
+  model: string | null
+): GroupDotState {
   if (detail.stop) return 'stopped'
   if (group.exemption) return 'exempt'
   const row = modelRow(group, model)
-  if (row?.failing) return 'back'
+  if (row?.failing && movesToBack(detail, group)) return 'back'
   if (detail.status === 'observing' || !row) return 'observe'
   return 'ok'
 }
@@ -36,7 +47,7 @@ export function dimMark(row: BackendGroupModel | undefined, dim: BackendDim): Pa
 }
 
 /** Models with a group at the back (the amber mark on their tab). */
-export function backModels(detail: Pick<BackendAccountDetail, 'stop' | 'status' | 'groups'>): Set<string> {
+export function backModels(detail: Pick<BackendAccountDetail, 'stop' | 'status' | 'groups'> & Partial<Pick<BackendAccountDetail, 'global_enabled' | 'stale'>>): Set<string> {
   const out = new Set<string>()
   for (const model of panelModels(detail)) {
     if (detail.groups.some((group) => groupModelState(detail, group, model) === 'back')) out.add(model)

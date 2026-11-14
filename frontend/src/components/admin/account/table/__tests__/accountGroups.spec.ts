@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { groupDotState, groupPillText, isLatinPillText, orderGroups, splitPills, worstDotState, type AccountQualityView } from '../accountGroups'
+import { groupDotState, groupPillText, isLatinPillText, orderGroups, splitPills, worstDotState, type AccountQualityView, qualitySchedulingActive } from '../accountGroups'
 
 const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView => ({
   status: 'normal',
@@ -35,6 +35,16 @@ describe('group dot state', () => {
   it('counts an exemption for every group (group 0) and only this group\'s substandard models', () => {
     expect(groupDotState(quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 7)).toBe('exempt')
     expect(groupDotState(quality({ substandard: [back(2, 'gpt-6')] }), 1)).toBe('ok')
+  })
+
+  // 7d-2: the backend moves nobody to the back while quality scheduling is off or its view is stale.
+  it('shows no back dot while quality scheduling is not active, and says so', () => {
+    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6')] }), 1, false)).toBe('ok')
+    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6')], status: 'observing' }), 1, false)).toBe('observe')
+    expect(qualitySchedulingActive({ global_enabled: false, stale: false })).toBe(false)
+    expect(qualitySchedulingActive({ global_enabled: true, stale: true })).toBe(false)
+    expect(qualitySchedulingActive({ global_enabled: true, stale: false })).toBe(true)
+    expect(qualitySchedulingActive(null)).toBe(true)
   })
 
   it('is back as soon as any one model of the group is substandard', () => {

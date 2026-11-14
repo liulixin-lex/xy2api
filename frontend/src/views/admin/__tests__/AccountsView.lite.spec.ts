@@ -242,7 +242,7 @@ describe('admin AccountsView lite account list', () => {
     await toggle.trigger('click'); await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
     expect(toggle.attributes('disabled')).toBeUndefined()
-    expect(showError).toHaveBeenCalledWith('admin.accounts.failedToToggleSchedulable')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     await toggle.trigger('click'); await flushPromises()
     expect(setSchedulable).toHaveBeenCalledTimes(2)
     expect(toggle.attributes('aria-checked')).toBe('false')
@@ -275,7 +275,7 @@ describe('admin AccountsView lite account list', () => {
     expect(toggle.attributes('aria-checked')).toBe('false')
     rejectToggle(new Error('temporary failure')); await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
-    expect(showError).toHaveBeenCalledWith('admin.accounts.failedToToggleSchedulable')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     wrapper.unmount()
   })
 
@@ -486,7 +486,7 @@ describe('admin AccountsView lite account list', () => {
     await wrapper.get('[data-test="row-edit"]').trigger('click')
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('detail failed')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     // 编辑弹窗按需挂载：从未打开时不渲染，打开过则内容为空
     const editModal = wrapper.find('[data-test="edit-account"]')
     expect(editModal.exists() ? editModal.text() : '').toBe('')

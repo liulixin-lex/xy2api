@@ -273,6 +273,7 @@ describe('admin AccountsView select all filtered results', () => {
 
     expect(wrapper.get('[data-test="selected-count"]').text()).toBe('20')
     expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('false')
-    expect(showError).toHaveBeenCalledWith('admin.accounts.bulkActions.selectAllFailed')
+    // The action's words with the backend's reason (spec 7e-13).
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
   })
 })

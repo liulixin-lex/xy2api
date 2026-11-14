@@ -147,3 +147,39 @@ describe('admin AccountsView per-page batches', () => {
     expect(getBatchTodayStats).not.toHaveBeenCalled()
   })
 })
+
+// The pagination bar shows the range of the rows on screen, not of the page asked for (7e-12).
+describe('admin AccountsView pagination range', () => {
+  const row = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'apikey', status: 'active', schedulable: true })
+
+  it('moves to the new page once its rows are in, and stays put when that load fails', async () => {
+    localStorage.clear()
+    getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
+    let answer!: (value: unknown) => void
+    let fail!: (error: unknown) => void
+    listAccounts
+      .mockReset()
+      .mockResolvedValueOnce({ items: [row(1, 'busy'), row(2, 'quiet')], total: 6, page: 1, page_size: 2, pages: 3 })
+      .mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+      .mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    const wrapper = mountView()
+    await flushPromises()
+    const bar = () => wrapper.getComponent({ name: 'Pagination' })
+    expect(bar().props('page')).toBe(1)
+
+    bar().vm.$emit('update:page', 2)
+    await flushPromises()
+    // The old rows are still on screen (dimmed): so is their range.
+    expect(bar().props('page')).toBe(1)
+    answer({ items: [row(3, 'next'), row(4, 'later')], total: 6, page: 2, page_size: 2, pages: 3 })
+    await flushPromises()
+    expect(bar().props('page')).toBe(2)
+
+    bar().vm.$emit('update:page', 3)
+    await flushPromises()
+    fail(new Error('down'))
+    await flushPromises()
+    expect(bar().props('page')).toBe(2)
+    wrapper.unmount()
+  })
+})

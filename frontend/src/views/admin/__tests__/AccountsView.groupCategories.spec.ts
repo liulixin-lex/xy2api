@@ -222,6 +222,39 @@ describe('admin AccountsView group categories', () => {
     wrapper.unmount()
   })
 
+  it('empties the cell when an edit leaves the account in no group: the answer has no group_ids (7d-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(pillTexts(wrapper)).toEqual(['Alp', 'Gam'])
+    // The backend omits an empty group_ids (and an empty limit, here max_sessions).
+    const { group_ids: _omitted, ...answer } = { ...listRow, max_sessions: undefined }
+    ;(wrapper.vm as unknown as { handleAccountUpdated: (a: unknown) => void }).handleAccountUpdated({ ...answer, name: 'acc-7' })
+    await flushPromises()
+
+    expect(pillTexts(wrapper)).toEqual([])
+    expect(wrapper.find('[data-account-name="acc-7"] [data-test="group-pill-empty"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the groups structure of the full answer out of the row when the picker removes the last groups (7d-1)', async () => {
+    const { group_ids: _omitted, ...withoutGroupIds } = freshAccount
+    updateAccount.mockResolvedValue({ ...withoutGroupIds, account_groups: [{ group_id: 3 }] })
+    const wrapper = mountView()
+    await flushPromises()
+    await openGroupPicker(wrapper)
+    await tick(1, false)
+    await tick(3, false)
+    await clickOutside()
+
+    expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [] })
+    expect(pillTexts(wrapper)).toEqual([])
+    expect(wrapper.find('[data-account-name="acc-7"] [data-test="group-pill-empty"]').exists()).toBe(true)
+    const row = (wrapper.vm as unknown as { rows: Array<Record<string, unknown>> }).rows[0]
+    expect(row.group_ids).toEqual([])
+    expect('groups' in row || 'account_groups' in row).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows the new groups in the cell while saving and puts the old ones back when the save fails', async () => {
     let fail!: (error: unknown) => void
     updateAccount.mockReturnValue(new Promise((_, reject) => { fail = reject }))

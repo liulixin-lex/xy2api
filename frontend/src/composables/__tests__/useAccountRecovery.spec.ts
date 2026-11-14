@@ -91,7 +91,8 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     ['everything cleared', async () => clean, 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
     ['only kept items (nothing cleared)', async () => ({ reset_at: 'x', cleared: [], preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }], failed: [] }), 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
     ['a failed item in a 200 answer', async () => ({ ...clean, failed: [{ key: 'rate_limit', kind: 'rate_limit', error: 'x' }] }), 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}'],
-    ['a request error', async () => { throw new Error('down') }, 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}']
+    // A request error carries the backend's reason after the action's words (spec 7e-13).
+    ['a request error', async () => { throw { status: 500, message: 'down' } }, 'showError', 'admin.accounts.failedWithReason:{"action":"admin.schedQuality.recover.failed:{\\"name\\":\\"acc-1\\"}","reason":"down"}']
   ] as const)('gives exactly one toast for %s, then refreshes', async (_name, answer, kind, text) => {
     api.reset.mockImplementation(answer)
     const { recovery } = withRecovery()

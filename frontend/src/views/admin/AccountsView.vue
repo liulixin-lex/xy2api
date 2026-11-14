@@ -104,6 +104,7 @@
                   :account="row"
                   :groups="groupsOf(row)"
                   :quality="row.platform === 'openai' ? row.quality ?? null : null"
+                  :quality-active="qualityActive"
                   :readonly="!canPlaceGroups"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
@@ -237,7 +238,7 @@
         </div>
       </template>
       <template #pagination>
-        <Pagination v-if="total > 0" :page="pagination.page" :total="total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+        <Pagination v-if="total > 0" :page="shownPage.page" :total="total" :page-size="shownPage.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
       </template>
     </TablePageLayout>
     <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
@@ -338,7 +339,8 @@ import AccountTodayCell from '@/components/admin/account/table/AccountTodayCell.
 import AccountToolsMenu, { type AccountToolAction } from '@/components/admin/account/table/AccountToolsMenu.vue'
 import AccountsToolbar, { type ToolbarFilters } from '@/components/admin/account/table/AccountsToolbar.vue'
 import { accountMatchesFilters, type AccountListFilters } from '@/components/admin/account/table/accountFilters'
-import { orderGroups } from '@/components/admin/account/table/accountGroups'
+import { orderGroups, qualitySchedulingActive } from '@/components/admin/account/table/accountGroups'
+import { accountRowPatch } from '@/components/admin/account/table/accountRow'
 import { useAccountsLiveTable, type LiveAccount } from '@/components/admin/account/table/useAccountsLiveTable'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
@@ -450,6 +452,10 @@ const pagination = reactive({ page: 1, page_size: getPersistedPageSize() })
 const listFilters = (): AccountListFilters => ({ ...filters, search: search.value.trim() })
 
 const qualityMeta = ref<{ global_enabled: boolean; stale: boolean } | null>(null)
+/** Quality scheduling moves accounts only while it is switched on and its view is fresh (spec 7d-2). */
+const qualityActive = computed(() => qualitySchedulingActive(qualityMeta.value))
+/** The page the pagination bar shows: the one whose rows are on screen (it follows them, not the click). */
+const shownPage = reactive({ page: pagination.page, page_size: pagination.page_size })
 const live = useAccountsLiveTable({
   page: () => ({ page: pagination.page, pageSize: pagination.page_size }),
   filters: listFilters,
@@ -461,10 +467,12 @@ const live = useAccountsLiveTable({
     balance: () => isColumnVisible('upstream_balance'),
     usage: () => isColumnVisible('usage')
   },
-  matches: (row) => accountMatchesFilters(row, listFilters(), { now: Date.now(), matchesCategory: groupCategories.matchesFilter, quality: row.quality }),
+  matches: (row) =>
+    accountMatchesFilters(row, listFilters(), { now: () => now.value, matchesCategory: groupCategories.matchesFilter, quality: row.quality, qualityActive: qualityActive.value }),
   onQualityMeta: (meta) => {
     qualityMeta.value = meta
-  }
+  },
+  onPageShown: (page) => Object.assign(shownPage, { page: page.page, page_size: page.pageSize })
 })
 const table = live.table
 const { rows, loading, total, pending, status: liveStatus } = table
@@ -475,14 +483,17 @@ const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 const toolbarRef = ref<InstanceType<typeof AccountsToolbar> | null>(null)
 const accountTableRef = ref<HTMLElement | null>(null)
 
+/** A failure toast: the action's own words, then the backend's reason when it gave one (spec 7e-13). */
+const showFailure = (action: string, error: unknown) => {
+  const reason = extractApiErrorMessage(error, '').trim()
+  appStore.showError(reason && reason !== action ? t('admin.accounts.failedWithReason', { action, reason }) : action)
+}
 const showLoadError = (error: unknown) => {
   console.error('Failed to load accounts:', error)
-  appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  showFailure(t('common.error'), error)
 }
-/** Active loads that landed: a late single-row read started before one of them is dropped. */
-let loadsDone = 0
 /** An active load: rows stay on screen and are replaced in place. */
-const reload = () => table.reload().then(() => { loadsDone++ }, showLoadError)
+const reload = () => table.reload().catch(showLoadError)
 const applyPending = () => table.applyPending().catch(showLoadError)
 
 /** A filter change (or a search): back to the first page and the first row, then load. */
@@ -662,7 +673,8 @@ useSwipeSelect(accountTableRef, {
 
 // ---- Rows: merges from action answers, edits through the engine ----
 /** An action's answer for one account: its fields are merged (the live row keeps the rest, e.g. concurrency). */
-const mergeAccount = (account: Account) => table.mergeRows([[account.id, account as LiveAccount]])
+/** A full account into its row: list fields it leaves out are written empty, its groups structure stays out (7d-1). */
+const mergeAccount = (account: Account) => table.mergeRows([[account.id, accountRowPatch<LiveAccount>(account)]])
 const handleAccountUpdated = (account: Account) => {
   mergeAccount(account)
   live.forgetUsage([account.id])
@@ -678,7 +690,7 @@ const handleToggleSchedulable = async (row: LiveAccount, next: boolean) => {
     })
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
-    appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
+    showFailure(t('admin.accounts.failedToToggleSchedulable'), error)
   } finally {
     togglingSchedulable.delete(row.id)
   }
@@ -692,7 +704,7 @@ const handleToggleIQCheck = async (row: LiveAccount, enabled: boolean) => {
     }))
   } catch (error) {
     console.error('Failed to toggle IQ check:', error)
-    appStore.showError(t('admin.accounts.iqFailed'))
+    showFailure(t('admin.accounts.iqFailed'), error)
   }
 }
 const savePriority = async (row: LiveAccount, priority: number) => {
@@ -740,7 +752,7 @@ const handleProbeUpstreamBilling = async (row: LiveAccount) => {
     if (result.snapshot) patchProbeSnapshot(row.id, result.snapshot)
   } catch (error) {
     console.error('Failed to probe upstream billing:', error)
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+    showFailure(t('admin.accounts.upstreamBilling.probeFailed'), error)
   } finally {
     probingUpstreamBilling.delete(row.id)
   }
@@ -758,7 +770,7 @@ const handleBulkProbeUpstreamBilling = async () => {
     else appStore.showSuccess(t('admin.accounts.upstreamBilling.batchCompleted', { count: results.length }))
   } catch (error) {
     console.error('Failed to probe upstream billing in batch:', error)
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+    showFailure(t('admin.accounts.upstreamBilling.probeFailed'), error)
   } finally {
     ids.forEach((id) => probingUpstreamBilling.delete(id))
   }
@@ -780,7 +792,7 @@ const handleBulkDelete = async () => {
     await reload()
   } catch (error) {
     console.error('Failed to bulk delete accounts:', error)
-    appStore.showError(String(error))
+    showFailure(t('admin.accounts.failedToDelete'), error)
   }
 }
 const handleBulkResetStatus = async () => {
@@ -795,7 +807,7 @@ const handleBulkResetStatus = async () => {
     void reload()
   } catch (error) {
     console.error('Failed to bulk reset status:', error)
-    appStore.showError(String(error))
+    showFailure(t('common.error'), error)
   }
 }
 const handleBulkRefreshToken = async () => {
@@ -814,7 +826,7 @@ const handleBulkRefreshToken = async () => {
     void reload()
   } catch (error) {
     console.error('Failed to bulk refresh token:', error)
-    appStore.showError(String(error))
+    showFailure(t('common.error'), error)
   }
 }
 type BulkResult = { success?: number; failed?: number; success_ids?: number[]; failed_ids?: number[]; results?: Array<{ account_id: number; success: boolean }> }
@@ -856,7 +868,7 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
-    appStore.showError(t('common.error'))
+    showFailure(t('admin.accounts.failedToToggleSchedulable'), error)
   } finally {
     ids.forEach((id) => togglingSchedulable.delete(id))
   }
@@ -874,7 +886,7 @@ const handleSelectAllResults = async () => {
   } catch (error) {
     if (version !== selectionRequestVersion) return
     console.error('Failed to select all account results:', error)
-    appStore.showError(t('admin.accounts.bulkActions.selectAllFailed'))
+    showFailure(t('admin.accounts.bulkActions.selectAllFailed'), error)
   } finally {
     if (version === selectionRequestVersion) selectingAllResults.value = false
   }
@@ -922,8 +934,8 @@ const handleRunIQCheck = async (account: Account) => {
   try {
     reportIQRun(await adminAPI.accounts.runIQCheck(account.id))
     void table.refresh('rows')
-  } catch {
-    appStore.showError(t('admin.accounts.iqFailed'))
+  } catch (error) {
+    showFailure(t('admin.accounts.iqFailed'), error)
   }
 }
 const runningIQBatch = ref(false)
@@ -935,8 +947,8 @@ const handleBulkRunIQCheck = async () => {
   try {
     reportIQRun(await adminAPI.accounts.runIQCheckBatch(ids))
     void table.refresh('rows')
-  } catch {
-    appStore.showError(t('admin.accounts.iqFailed'))
+  } catch (error) {
+    showFailure(t('admin.accounts.iqFailed'), error)
   } finally {
     runningIQBatch.value = false
   }
@@ -969,25 +981,28 @@ const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
 }
 const { recover: recoverAccount, recoverMany, batchRunning: recoveryBatchRunning } = useAccountRecovery()
 const menuRecoverable = (account: Account | null) => !!account && canRecover(account, table.record(account.id)?.quality, Date.now())
-const rereadAfterRecover = async (id: number) => {
-  const loadsBefore = loadsDone
-  try {
-    const fresh = await adminAPI.accounts.getById(id)
-    if (loadsDone === loadsBefore) mergeAccount(fresh)
-  } catch (error) {
-    console.error('Failed to reload account after recovery:', error)
-  }
+/**
+ * After a recovery the page's rows are read again through the live table, which orders this read after every earlier
+ * one (its own retries, merges and 3 s refreshes included); the summary comes in through markSchedChanged (7d-9).
+ * Under the quality filter the page loads again instead. A summary asked for during a load only runs once the load is
+ * over, so the summary after the load is waited for here: the recovery holds its lock until no row reads
+ * "recoverable" from a summary older than the recovery (7d-8).
+ */
+const readAfterRecovery = async () => {
+  if (!filters.sched_quality) return table.refresh('rows')
+  const summary = live.qualityLanded()
+  await reload()
+  // No rows, no summary: nothing is left to read "recoverable".
+  if (table.rows.value.length) await summary
 }
-/** After a recovery: the row is read again (the summary through markSchedChanged); under the quality filter the page loads again. */
 const refreshAfterRecover = async (id: number) => {
   if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
-  if (filters.sched_quality) await reload()
-  else await rereadAfterRecover(id)
+  await readAfterRecovery()
 }
 const recoverOne = (account: Account) => recoverAccount({ id: account.id, name: account.name }, () => refreshAfterRecover(account.id))
 // Recovered accounts leave the selection; failed and not-run ones stay for a retry.
 const handleBatchRecover = async (ids: number[]) => {
-  const { recovered } = await recoverMany(ids, reload)
+  const { recovered } = await recoverMany(ids, readAfterRecovery)
   removeSelectedAccounts(recovered)
 }
 
@@ -1058,7 +1073,8 @@ const saveGroups = async (groupIds: number[], confirmMixedChannel: boolean) => {
   if (id === undefined) return
   await table.edit(id, 'group_ids', groupIds, async () => {
     const updated = await adminAPI.accounts.update(id, confirmMixedChannel ? { group_ids: groupIds, confirm_mixed_channel_risk: true } : { group_ids: groupIds })
-    return updated as Partial<LiveAccount>
+    // Out of the last group: the answer has no group_ids, and the row gets [] (7d-1).
+    return accountRowPatch<LiveAccount>(updated)
   })
   // The dots follow the new groups at once.
   void table.refresh('quality')
@@ -1071,7 +1087,7 @@ const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise
     return await adminAPI.accounts.getById(account.id)
   } catch (error) {
     console.error('Failed to load account details:', error)
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    showFailure(t('common.error'), error)
     return null
   } finally {
     loadingDetails.delete(account.id)
@@ -1135,7 +1151,7 @@ const handleDuplicateAccount = async (account: Account) => {
     void reload()
   } catch (error: any) {
     console.error('Failed to duplicate account:', error)
-    appStore.showError(error?.message || t('admin.accounts.duplicateFailed'))
+    showFailure(t('admin.accounts.duplicateFailed'), error)
   } finally {
     duplicating.delete(account.id)
   }
@@ -1147,6 +1163,7 @@ const handleRefresh = async (account: Account) => {
     if (result.warning) appStore.showWarning(result.message)
   } catch (error) {
     console.error('Failed to refresh credentials:', error)
+    showFailure(t('admin.accounts.failedToRefresh'), error)
   }
 }
 const handleResetQuota = async (account: Account) => {
@@ -1155,6 +1172,7 @@ const handleResetQuota = async (account: Account) => {
     appStore.showSuccess(t('common.success'))
   } catch (error) {
     console.error('Failed to reset quota:', error)
+    showFailure(t('common.error'), error)
   }
 }
 const privacyResult = (account: Account): { type: 'success' | 'error'; key: string } => {
@@ -1178,7 +1196,7 @@ const handleSetPrivacy = async (account: Account) => {
     else appStore.showError(t(result.key))
   } catch (error: any) {
     console.error('Failed to set privacy:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.privacyFailed'))
+    showFailure(t('admin.accounts.privacyFailed'), error)
   }
 }
 const onRevertFallback = async (account: Account) => {
@@ -1188,7 +1206,7 @@ const onRevertFallback = async (account: Account) => {
     void reload()
   } catch (error: any) {
     console.error('Failed to revert proxy fallback:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.revertProxyFailed'))
+    showFailure(t('admin.accounts.revertProxyFailed'), error)
   }
 }
 const handleCreateSparkShadow = (account: Account) => {
@@ -1206,7 +1224,7 @@ const confirmCreateSparkShadow = async () => {
     void reload()
   } catch (error: any) {
     console.error('Failed to create spark shadow:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
+    showFailure(t('admin.accounts.createSparkShadowFailed'), error)
   }
 }
 const handleDelete = (account: Account) => { deletingAcc.value = account; showDeleteDialog.value = true }
@@ -1222,6 +1240,7 @@ const confirmDelete = async () => {
     removeSelectedAccounts([account.id])
   } catch (error) {
     console.error('Failed to delete account:', error)
+    showFailure(t('admin.accounts.failedToDelete'), error)
   }
 }
 
@@ -1258,7 +1277,7 @@ const handleExportData = async () => {
     } else if (isStepUpBlocked(error)) {
       appStore.showError(stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' ? t('stepUp.adminApiKeyForbidden') : t('stepUp.notEnabled'))
     } else {
-      appStore.showError(error?.message || t('admin.accounts.dataExportFailed'))
+      showFailure(t('admin.accounts.dataExportFailed'), error)
     }
   } finally {
     exportingData.value = false
