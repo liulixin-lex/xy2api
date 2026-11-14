@@ -968,7 +968,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					// 无条件置位：成功路径防 finalizeStream 重复 [DONE]；写失败意味着连接已不可写，
 					// finalizeStream 的 [DONE] 同样发不出去，统一抑制。
 					clientDisconnected = true
-					cancelSchedClient(c)
 				}
 				return true
 			}

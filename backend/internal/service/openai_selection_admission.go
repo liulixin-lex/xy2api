@@ -2,34 +2,10 @@ package service
 
 import (
 	"context"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
-
-// openAIRequestModelForEvidence reverses model mapping without checking admission.
-func openAIRequestModelForEvidence(account *Account, evidenceModel string) string {
-	evidenceModel = strings.TrimSpace(evidenceModel)
-	if account == nil || evidenceModel == "" {
-		return ""
-	}
-	models := []string{evidenceModel}
-	for model := range account.GetModelMapping() {
-		if strings.TrimSpace(model) != "" && !strings.ContainsAny(model, "*?") && model != evidenceModel {
-			models = append(models, model)
-		}
-	}
-	sort.Strings(models[1:])
-	for _, model := range models {
-		if OpenAIAttemptModel(account, model) != evidenceModel || !account.IsModelSupported(model) {
-			continue
-		}
-		return model
-	}
-	return ""
-}
 
 // Keep the scheduler's view dependency explicit for W0 wiring. A nil view is
 // equivalent to a disabled quality system and therefore leaves accounts front.
