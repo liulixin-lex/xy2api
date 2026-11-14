@@ -763,7 +763,7 @@ const accountToolsDropdownStyle = computed(() => ({
   width: `${accountToolsDropdownPosition.width}px`
 }))
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['id', 'today_stats', 'proxy', 'rate_multiplier', 'created_at', 'expires_at', 'notes']
+const DEFAULT_HIDDEN_COLUMNS = ['id', 'today_stats', 'proxy', 'created_at', 'expires_at', 'notes']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
 const ACCOUNT_COLUMN_ORDER_KEY = 'account-column-order'
 
@@ -2133,12 +2133,14 @@ const allColumns = computed(() => {
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
-    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    // FINAL §7: 状态｜首字·报错·缓存｜分组｜优先级｜倍率｜并发｜开关, then the other columns.
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     ...SCHED_DIMS.map(dim => ({ key: `sq_${dim}`, label: t(`admin.schedQuality.dim.${dim}`), sortable: false, class: 'text-right' })),
     { key: 'sq_groups', label: t('admin.schedQuality.list.groups'), sortable: false },
-    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true, class: 'text-right' },
+    { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
+    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
@@ -2148,7 +2150,6 @@ const allColumns = computed(() => {
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
-    { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
     { key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
