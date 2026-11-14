@@ -6,7 +6,7 @@
       :type="view.state === 'temp' ? 'button' : undefined"
       class="account-status__label"
       :class="{
-        'status-text-normal': view.state === 'ok',
+        'status-text-normal': view.state === 'ok' || view.state === 'paused',
         'account-status__label--error': view.state === 'error',
         'account-status__label--button': view.state === 'temp'
       }"
@@ -21,9 +21,10 @@
 
 <script setup lang="ts">
 /**
- * Status column (prototype): a dot and a word. Normal reads in the secondary colour; paused (scheduling off) is the
- * shared hollow ring; rate limited, overloaded and temporarily unschedulable carry a small code and a countdown on
- * the page's shared clock; an error is red with its reason. Model-level limits are counted and listed in the tip.
+ * Status column (prototype): a dot and a word. Normal and paused (scheduling off, the shared hollow ring) read in the
+ * shared secondary status text; rate limited, overloaded and temporarily unschedulable carry a small code and a
+ * countdown on the page's shared clock; an error is red with its reason. Model-level limits are counted and listed in
+ * the tip. Only a row with an end time reads the clock, so the others do not redraw every second (7d-5).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -44,15 +45,16 @@ interface View { state: State; tone: StatusDotTone; label: string; code?: string
 
 const exceeded = (used?: number | null, limit?: number | null) => typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
 
-// Countdowns and the state they end read the page's shared clock (one tick a second for the whole page).
+/** Time left until `until` on the page's shared clock; without an end time the clock is not read. */
+const left = (until: string | null | undefined) => (until ? msLeft(until, now.value) : null)
+
 const view = computed<View>(() => {
   const a = props.account
-  const at = now.value
   if (a.status === 'error') return { state: 'error', tone: 'error', label: t('admin.accounts.status.error') }
   if (a.status !== 'active') return { state: 'inactive', tone: 'off', label: t('admin.accounts.status.inactive') }
-  if (msLeft(a.rate_limit_reset_at, at) !== null) return { state: 'limited', tone: 'back', label: t('admin.accounts.status.rateLimited'), code: '429', until: a.rate_limit_reset_at }
-  if (msLeft(a.overload_until, at) !== null) return { state: 'overloaded', tone: 'back', label: t('admin.accounts.status.overloaded'), code: '529', until: a.overload_until }
-  if (msLeft(a.temp_unschedulable_until, at) !== null) return { state: 'temp', tone: 'back', label: t('admin.accounts.status.tempUnschedulable'), until: a.temp_unschedulable_until }
+  if (left(a.rate_limit_reset_at) !== null) return { state: 'limited', tone: 'back', label: t('admin.accounts.status.rateLimited'), code: '429', until: a.rate_limit_reset_at }
+  if (left(a.overload_until) !== null) return { state: 'overloaded', tone: 'back', label: t('admin.accounts.status.overloaded'), code: '529', until: a.overload_until }
+  if (left(a.temp_unschedulable_until) !== null) return { state: 'temp', tone: 'back', label: t('admin.accounts.status.tempUnschedulable'), until: a.temp_unschedulable_until }
   if (exceeded(a.quota_used, a.quota_limit) || exceeded(a.quota_daily_used, a.quota_daily_limit) || exceeded(a.quota_weekly_used, a.quota_weekly_limit)) {
     return { state: 'quota', tone: 'back', label: t('admin.accounts.status.quotaExceeded') }
   }
@@ -63,9 +65,8 @@ const view = computed<View>(() => {
 type ModelLimit = { model: string; reset_at: string }
 const modelLimits = computed<ModelLimit[]>(() => {
   const limits = (props.account.extra as Record<string, unknown> | undefined)?.model_rate_limits as Record<string, { rate_limit_reset_at: string }> | undefined
-  const at = now.value
   return Object.entries(limits ?? {})
-    .filter(([model, info]) => !model.startsWith(IQ_GATE_KEY_PREFIX) && msLeft(info.rate_limit_reset_at, at) !== null)
+    .filter(([model, info]) => !model.startsWith(IQ_GATE_KEY_PREFIX) && left(info?.rate_limit_reset_at) !== null)
     .map(([model, info]) => ({ model, reset_at: info.rate_limit_reset_at }))
 })
 
@@ -73,8 +74,8 @@ const detail = computed(() => {
   const state = view.value.state
   if (state === 'error') return props.account.error_message?.trim() ?? ''
   if (view.value.until) {
-    const left = msLeft(view.value.until, now.value)
-    return left === null ? '' : t('admin.accounts.table.statusUntil', { time: formatRemaining(t, left) })
+    const ms = left(view.value.until)
+    return ms === null ? '' : t('admin.accounts.table.statusUntil', { time: formatRemaining(t, ms) })
   }
   if (modelLimits.value.length) return t('admin.accounts.table.modelLimits', { n: modelLimits.value.length })
   return ''
@@ -84,14 +85,20 @@ const tip = () => {
   const lines: string[] = []
   if (view.value.state === 'error' && props.account.error_message) lines.push(props.account.error_message)
   if (view.value.state === 'temp' && props.account.temp_unschedulable_reason) lines.push(props.account.temp_unschedulable_reason)
-  if (view.value.until) lines.push(t('admin.accounts.status.tempUnschedulableUntil', { time: formatShortTime(view.value.until) }))
+  // The countdown line may be cut at narrow widths: the tip has it whole, with the end time.
+  if (view.value.until) {
+    if (detail.value) lines.push(detail.value)
+    lines.push(t('admin.accounts.status.tempUnschedulableUntil', { time: formatShortTime(view.value.until) }))
+  }
   for (const limit of modelLimits.value) lines.push(t('admin.accounts.status.modelRateLimitedUntil', { model: limit.model, time: formatShortTime(limit.reset_at) }))
   return lines.join('\n')
 }
 </script>
 
 <style scoped>
+/* The words take the cell's primary colour; .status-text-normal (shared) sets normal and paused apart (7e-4). */
 .account-status {
+  color: var(--color-text-primary);
   display: grid;
   grid-template-columns: 12px auto;
   row-gap: 2px;
@@ -107,7 +114,6 @@ const tip = () => {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-text-primary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
   white-space: nowrap;

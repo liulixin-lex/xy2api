@@ -10,7 +10,8 @@
 <script setup lang="ts">
 /**
  * Today's stats (spec 7a, 7b): four compact lines (requests, tokens, account cost, user charge), labels left and values
- * right, every number on the same three-significant-digit rule; the full value shows on hover.
+ * right, every number on the same three-significant-digit rule; the full value shows on hover. Before the stats are in,
+ * every line reads "—", not 0 (7d-6).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

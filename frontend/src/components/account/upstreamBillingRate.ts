@@ -1,9 +1,10 @@
 /**
  * What the upstream ratio column and the quality panel show for an API-key account's billing probe, from the row's
- * snapshot (extra.upstream_billing_probe) and the page clock. Pure: no timers, no requests.
+ * snapshot (extra.upstream_billing_probe) and the page clock. Pure: no timers, no requests. The rate follows one rule
+ * (snapshotRate) whether the snapshot is fresh or stale; staleness only greys it.
  */
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, UpstreamBillingData, UpstreamBillingProbeSnapshot } from '@/types'
 
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
 
@@ -26,6 +27,35 @@ const minuteInTimeZone = (timestamp: number, timeZone?: string) => {
   } catch {
     return null
   }
+}
+
+const isRate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const tidy = (value: number) => Number(value.toPrecision(12))
+
+/**
+ * The rate a probe snapshot's data carries at `now`; null when it carries none. One rule whether the snapshot is fresh
+ * or stale (7e-10):
+ * - the declared rate (resolved_rate_multiplier) with the peak coefficient of the moment, when the data has the
+ *   shape the backend's probe writes (token scope, a boolean peak_rate_enabled, and with peaks on a valid window,
+ *   multiplier and timezone); this is the backend's own upstreamBillingRateAt, which scheduling uses;
+ * - otherwise the rate the probe saw (effective_rate_multiplier), as the backend's list sort does for snapshots
+ *   without the full shape.
+ */
+export function snapshotRate(data: Partial<UpstreamBillingData> | undefined, now: number): number | null {
+  if (!data) return null
+  const base = data.resolved_rate_multiplier
+  if (data.billing_scope === 'token' && isRate(base) && typeof data.peak_rate_enabled === 'boolean') {
+    if (!data.peak_rate_enabled) return tidy(base)
+    const start = parseMinute(data.peak_start)
+    const end = parseMinute(data.peak_end)
+    const minute = minuteInTimeZone(now, data.timezone)
+    const peak = data.peak_rate_multiplier
+    if (start != null && end != null && minute != null && start < end && isRate(peak)) {
+      const value = minute >= start && minute < end ? base * peak : base
+      if (Number.isFinite(value)) return tidy(value)
+    }
+  }
+  return isRate(data.effective_rate_multiplier) ? tidy(data.effective_rate_multiplier) : null
 }
 
 export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: number) {
@@ -51,32 +81,11 @@ export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: 
     else stale = !validTimestamps || now > freshUntil
   }
 
-  let currentEffectiveRate: number | null = null
-  if (data && data.billing_scope === 'token') {
-    const base = data.resolved_rate_multiplier
-    if (typeof base === 'number' && Number.isFinite(base) && base >= 0 && typeof data.peak_rate_enabled === 'boolean') {
-      if (!data.peak_rate_enabled) currentEffectiveRate = base
-      else {
-        const start = parseMinute(data.peak_start)
-        const end = parseMinute(data.peak_end)
-        const minute = minuteInTimeZone(now, data.timezone)
-        const peak = data.peak_rate_multiplier
-        if (start != null && end != null && minute != null && start < end && typeof peak === 'number' && Number.isFinite(peak) && peak >= 0) {
-          const value = minute >= start && minute < end ? base * peak : base
-          currentEffectiveRate = Number.isFinite(value) ? value : null
-        }
-      }
-    }
-  }
-
-  const detected = data?.effective_rate_multiplier
-  const lastDetectedRate = typeof detected === 'number' && Number.isFinite(detected) && detected >= 0 ? Number(detected.toPrecision(12)) : null
-  const effectiveRate = !validTimestamps || stale || !['ok', 'failed'].includes(snapshot?.status ?? '') || currentEffectiveRate == null
-    ? '-'
-    : `${formatMultiplier(currentEffectiveRate)}x`
-  const hasEffectiveRate = effectiveRate !== '-'
-  // Stale: the last value stays, greyed; the tip gives the last probe time and the failure.
-  const staleValue = stale && lastDetectedRate != null ? `${formatMultiplier(lastDetectedRate)}x` : ''
+  // A probe that succeeded (or failed after a success, keeping its data) and carries a rate shows it: in full while
+  // the snapshot is fresh, greyed once it is stale.
+  const rate = snapshot && ['ok', 'failed'].includes(snapshot.status) ? snapshotRate(data, now) : null
+  const current = rate != null && validTimestamps && !stale
+  const rateText = rate == null ? '' : `${formatMultiplier(rate)}x`
   const failureReason = snapshot?.status === 'failed' || stale ? snapshot?.last_error?.trim() ?? '' : ''
   const lastAttemptAt = typeof snapshot?.last_attempt_at === 'string' && Number.isFinite(Date.parse(snapshot.last_attempt_at)) ? snapshot.last_attempt_at : ''
 
@@ -88,15 +97,17 @@ export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: 
     nextProbeAt,
     receivedAt,
     stale,
-    currentEffectiveRate,
-    lastDetectedRate,
-    effectiveRate,
-    hasEffectiveRate,
-    staleValue,
+    /** The rate in force now; null unless the snapshot is fresh. */
+    currentEffectiveRate: current ? rate : null,
+    /** The snapshot's rate, fresh or not (the stale tip names it). */
+    lastDetectedRate: rate,
+    effectiveRate: current ? rateText : '-',
+    hasEffectiveRate: current,
+    staleValue: current ? '' : rateText,
     /** The value to show; null when there is none ("—" or a status word). */
-    shownValue: hasEffectiveRate ? effectiveRate : staleValue || null,
+    shownValue: rateText || null,
     /** Greyed: no current value. */
-    dimmed: !hasEffectiveRate,
+    dimmed: !current,
     failureReason,
     lastAttemptAt
   }

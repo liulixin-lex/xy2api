@@ -62,11 +62,10 @@
       <button
         type="button"
         class="pill__text"
-        :disabled="readonly"
         :aria-label="t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
         v-tip="moreTip"
-        :data-groups-opener="account.id"
-        @click="emit('edit-groups', $event)"
+        data-test="group-pill-more-text"
+        @click="showTipNow($event.currentTarget)"
       >+{{ rest.length }}</button>
     </span>
   </div>
@@ -75,9 +74,10 @@
 <script setup lang="ts">
 /**
  * Groups column (spec 4.3, prototype): a fixed 3×3 grid of pills in the groups page's order. One to three pills sit in
- * one row, centred; more fill from the top. With more than nine the ninth is "+N" with the worst folded state. Each
- * pill has two hit zones: the dot opens the quality panel on that group, the text edits the account's groups. Non-
- * OpenAI accounts have no quality data and no dot.
+ * one row, centred; more fill from the top. With more than nine the ninth is "+N" with the worst folded state; hovering
+ * or clicking its text lists every folded group (spec 4.3, 7d-7), its dot opens the worst one. Each pill has two hit
+ * zones: the dot opens the quality panel on that group, the text edits the account's groups. Non-OpenAI accounts have
+ * no quality data and no dot.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -87,7 +87,7 @@ import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 import { groupDotState, groupPillText, isLatinPillText, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 

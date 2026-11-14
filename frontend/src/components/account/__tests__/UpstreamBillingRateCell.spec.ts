@@ -114,8 +114,8 @@ describe('UpstreamBillingRateCell', () => {
       }
     })
     const wrapper = mount(UpstreamBillingRateCell, { props: { account, now: Date.now() } })
-    // Stale (spec 4.5): the last value stays, greyed, and no "expired" word is shown.
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    // Stale (spec 4.5, 7e-10): the value by the same rule as a fresh one (the rate in force now), greyed; no "expired" word.
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
     expect(wrapper.classes()).toContain('ratio--stale')
 
     await wrapper.setProps({
@@ -161,7 +161,7 @@ describe('UpstreamBillingRateCell', () => {
         }
       })
     })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
     expect(wrapper.classes()).toContain('ratio--stale')
   })
 
@@ -192,7 +192,7 @@ describe('UpstreamBillingRateCell', () => {
 
     const tooltips = document.body.querySelectorAll('[role="tooltip"]')
     const tooltip = tooltips[tooltips.length - 1] as HTMLElement
-    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.lastDetectedRate:0.9')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.lastDetectedRate:0.6')
     expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.lastDetectedAt:')
     expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.elapsedSince:admin.accounts.upstreamBilling.hoursAgo:2')
     expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.nextProbeAt:')
@@ -280,6 +280,29 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.text()).toBe('—')
   })
 
+  it('shows a successful snapshot\'s rate fresh and stale alike, whatever fields it carries (7e-10)', async () => {
+    // The shape the acceptance data had: no peak flag, another scope; the probe's rate is still a rate.
+    const seeded = (fresh: boolean) => makeAccount({
+      extra: {
+        upstream_billing_probe: {
+          status: 'ok',
+          data: { object: 'billing_rate', schema_version: 1, billing_scope: 'api_key', group_rate_multiplier: 1.2, resolved_rate_multiplier: 1.2, effective_rate_multiplier: 1.2, observed_at: '2026-07-13T00:00:00Z' } as never,
+          received_at: '2026-07-13T00:00:00Z',
+          fresh_until: fresh ? '2026-07-13T04:00:00Z' : '2026-07-13T00:10:00Z',
+          last_attempt_at: '2026-07-13T00:00:00Z',
+          next_probe_at: '2026-07-20T00:00:00Z'
+        }
+      }
+    })
+    const wrapper = mount(UpstreamBillingRateCell, { props: { account: seeded(true), now: Date.now() } })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.20x')
+    expect(wrapper.classes()).not.toContain('ratio--stale')
+
+    await wrapper.setProps({ account: seeded(false) })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.20x')
+    expect(wrapper.classes()).toContain('ratio--stale')
+  })
+
   it('fails neutral for malformed data and timestamps', async () => {
     const malformedAccount = (
       dataOverrides: Partial<typeof billingData> = {},
@@ -310,15 +333,15 @@ describe('UpstreamBillingRateCell', () => {
 
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('—')
     await wrapper.setProps({ account: malformedAccount({ billing_scope: 'request' as 'token' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('—')
-    await wrapper.setProps({ account: malformedAccount({}, { received_at: 'not-a-time' }) })
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    await wrapper.setProps({ account: malformedAccount({}, { received_at: 'not-a-time' }) })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
     await wrapper.setProps({ account: malformedAccount({}, { received_at: '2026-07-13T00:31:00Z' }) })
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
     await wrapper.setProps({ account: malformedAccount({}, { received_at: '2026-07-13T00:36:00Z' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
     await wrapper.setProps({ account: malformedAccount({}, { fresh_until: '2026-07-12T23:59:00Z' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
 
     await wrapper.setProps({
       account: makeAccount({

@@ -1,9 +1,11 @@
 <template>
-  <div>
+  <!-- data-usage-window / -stats: the accounts table fits windows into its row and moves the chips to the tip. -->
+  <div data-usage-window>
     <!-- Window stats row (above progress bar) -->
     <div
       v-if="windowStats && (windowStats.requests > 0 || windowStats.tokens > 0)"
       class="mb-0.5 flex items-center"
+      data-usage-window-stats
     >
       <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
         <span class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">

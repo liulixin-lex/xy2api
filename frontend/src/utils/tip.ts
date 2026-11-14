@@ -94,6 +94,11 @@ const keyboardFocus = (el: HTMLElement) => {
   }
 }
 
+/** Shows an element's v-tip at once, without the hover delay (a click on "+N" lists what it folds); it hides as usual. */
+export function showTipNow(el: EventTarget | null) {
+  if (el instanceof HTMLElement && (el as TipTarget).__tipHandlers) show(el as TipTarget)
+}
+
 export const vTip: Directive<TipTarget, TipText> = {
   mounted(el, binding) {
     el.__tipText = binding.value ?? ''

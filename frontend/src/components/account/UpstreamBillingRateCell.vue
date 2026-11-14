@@ -188,7 +188,7 @@ const formatDate = (value?: string) => value
 }
 /* The refresh icon shows while the cell is hovered (on touch screens it always shows). */
 @media (hover: hover) {
-  :global(td:hover) .ratio__btn {
+  td:hover .ratio__btn {
     opacity: 1;
   }
   .ratio__btn:hover {

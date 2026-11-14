@@ -51,6 +51,27 @@ describe('compact numbers', () => {
     expect(formatCompactTokens(1_200_000)).toBe('1.20M')
   })
 
+  it('rounds money on its decimal value: 9.995 is $10.00, 1.005 is $1.01 (7d-4)', () => {
+    expect(formatCompactMoney(9.995)).toBe('$10.00')
+    expect(formatCompactMoney(1.005)).toBe('$1.01')
+    expect(formatExactMoney(9.995)).toBe('$10.00')
+    expect(formatExactMoney(1.005)).toBe('$1.01')
+    expect(formatCompactMoney(-1.005)).toBe('-$1.01')
+  })
+
+  it('writes no sign on an amount that rounds to zero, and "—" when there is no number (7d-4, 7d-6)', () => {
+    expect(formatCompactMoney(-0.001)).toBe('$0.00')
+    expect(formatExactMoney(-0.004)).toBe('$0.00')
+    expect(formatCompactRequests(-0.4)).toBe('0')
+    for (const value of [null, undefined, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(formatCompactMoney(value)).toBe('—')
+      expect(formatExactMoney(value)).toBe('—')
+      expect(formatCompactRequests(value)).toBe('—')
+      expect(formatCompactTokens(value)).toBe('—')
+      expect(formatExactCount(value)).toBe('—')
+    }
+  })
+
   it('gives the exact value for the hover tip', () => {
     expect(formatExactMoney(1_234_567.891)).toBe('$1,234,567.89')
     expect(formatExactCount(532_730_000)).toBe('532,730,000')

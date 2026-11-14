@@ -115,7 +115,7 @@
               <div class="acell"><AccountRecentCell :quality="row.platform === 'openai' ? row.quality ?? null : null" /></div>
             </template>
             <template #cell-iq_check="{ row }">
-              <div class="acell"><AccountIQCell :account="row" :disabled="!canManage" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" /></div>
+              <div class="acell"><AccountIQCell :account="row" :disabled="!canManage" :busy="togglingIQ.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" /></div>
             </template>
             <template #cell-capacity="{ row }">
               <div class="acell"><AccountCapacityCell :account="row" /></div>
@@ -163,16 +163,18 @@
             </template>
             <template #cell-usage="{ row }">
               <div class="acell">
-                <AccountUsageCell
-                  :account="row"
-                  :today-stats="row.today_stats ?? null"
-                  :hide-today-stats="isColumnVisible('today_stats')"
-                  :batched-usage="row.usage_info ?? null"
-                  :batched-usage-error="row.usage_error ?? null"
-                  :request-batched-usage="requestUsage"
-                  @account-updated="handleAccountUpdated"
-                  @usage-loaded="(usage: AccountUsageInfo) => live.noteUsage(row.id, usage)"
-                />
+                <AccountUsageFit>
+                  <AccountUsageCell
+                    :account="row"
+                    :today-stats="row.today_stats ?? null"
+                    :hide-today-stats="isColumnVisible('today_stats')"
+                    :batched-usage="row.usage_info ?? null"
+                    :batched-usage-error="row.usage_error ?? null"
+                    :request-batched-usage="requestUsage"
+                    @account-updated="handleAccountUpdated"
+                    @usage-loaded="(usage: AccountUsageInfo) => live.noteUsage(row.id, usage)"
+                  />
+                </AccountUsageFit>
               </div>
             </template>
             <template #cell-proxy="{ row }">
@@ -324,7 +326,7 @@ import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
-import { IQ_BUILTIN_MODELS, iqRunSummary, isIQBuiltinModel } from '@/components/admin/account/iqCheckPresentation'
+import { IQ_BUILTIN_MODELS, iqRunSummary, iqTargetsSwitched } from '@/components/admin/account/iqCheckPresentation'
 import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
@@ -336,6 +338,7 @@ import AccountRecentCell from '@/components/admin/account/table/AccountRecentCel
 import AccountStatusCell from '@/components/admin/account/table/AccountStatusCell.vue'
 import AccountSwitch from '@/components/admin/account/table/AccountSwitch.vue'
 import AccountTodayCell from '@/components/admin/account/table/AccountTodayCell.vue'
+import AccountUsageFit from '@/components/admin/account/table/AccountUsageFit.vue'
 import AccountToolsMenu, { type AccountToolAction } from '@/components/admin/account/table/AccountToolsMenu.vue'
 import AccountsToolbar, { type ToolbarFilters } from '@/components/admin/account/table/AccountsToolbar.vue'
 import { accountMatchesFilters, type AccountListFilters } from '@/components/admin/account/table/accountFilters'
@@ -596,7 +599,7 @@ const resetColumns = () => {
 // Column widths (prototype): fixed widths in two sizes; from 1440 the ten default columns fit with no sideways scroll.
 // Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
 const COLUMN_WIDTHS: Record<string, [number, number]> = {
-  select: [36, 40], status: [116, 136], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
+  select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
   capacity: [120, 140], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
@@ -695,16 +698,21 @@ const handleToggleSchedulable = async (row: LiveAccount, next: boolean) => {
     togglingSchedulable.delete(row.id)
   }
 }
-// The list switch turns both built-in targets on or off; custom targets keep their own setting.
+// The list switch turns both built-in targets on or off; custom targets keep their own setting. Like the scheduling
+// switch it flips at once (an account without built-in targets yet gets them on the row) and shows busy until the
+// answer; a failure puts the old targets back (7e-1).
+const togglingIQ = reactive(new Set<number>())
 const handleToggleIQCheck = async (row: LiveAccount, enabled: boolean) => {
-  const optimistic = (row.iq_targets ?? []).map((target) => (isIQBuiltinModel(target.model) ? { ...target, enabled } : target))
+  togglingIQ.add(row.id)
   try {
-    await table.edit(row.id, 'iq_targets', optimistic, async () => ({
+    await table.edit(row.id, 'iq_targets', iqTargetsSwitched(row.iq_targets, enabled), async () => ({
       iq_targets: await adminAPI.accounts.setIQCheck(row.id, { targets: IQ_BUILTIN_MODELS.map((model) => ({ model, enabled })) })
     }))
   } catch (error) {
     console.error('Failed to toggle IQ check:', error)
     showFailure(t('admin.accounts.iqFailed'), error)
+  } finally {
+    togglingIQ.delete(row.id)
   }
 }
 const savePriority = async (row: LiveAccount, priority: number) => {

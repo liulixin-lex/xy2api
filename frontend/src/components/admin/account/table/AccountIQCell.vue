@@ -1,6 +1,6 @@
 <template>
   <div v-if="account.platform === 'openai'" class="iq" :class="{ 'iq--off': !enabled }" data-testid="iq-check-cell">
-    <AccountSwitch :checked="enabled" :label="t('admin.accounts.iqCheck') + ' · ' + account.name" :disabled="disabled" @toggle="emit('toggle', $event)" />
+    <AccountSwitch :checked="enabled" :label="t('admin.accounts.iqCheck') + ' · ' + account.name" :disabled="disabled" :busy="busy" @toggle="emit('toggle', $event)" />
     <button
       v-if="lines.length"
       type="button"
@@ -38,7 +38,7 @@ import { vTip } from '@/utils/tip'
 import AccountSwitch from './AccountSwitch.vue'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 
-const props = defineProps<{ account: Account; disabled?: boolean }>()
+const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ toggle: [enabled: boolean]; records: [] }>()
 const { t } = useI18n()
 const now = useLiveClock()
