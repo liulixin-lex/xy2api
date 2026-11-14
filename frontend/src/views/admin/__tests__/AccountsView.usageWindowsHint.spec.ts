@@ -18,14 +18,14 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -105,7 +105,7 @@ function mountView() {
         Pagination: true,
         ConfirmDialog: true,
         AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-        AccountTableFilters: {
+        AccountsToolbar: {
           props: ['groups'],
           template: '<div data-test="account-filters" :data-group-count="groups.length"></div>'
         },
@@ -173,19 +173,20 @@ describe('admin AccountsView usage windows hint', () => {
   })
 
   it('shows the capacity, scheduling and usage windows headers as plain names (ui-proposal 6.1 #12)', async () => {
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     const wrapper = mountView()
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="plain-header"]').map(header => header.text())).toEqual([
-      'admin.accounts.columns.capacity',
       'admin.accounts.columns.schedulable',
+      'admin.accounts.columns.capacity',
       'admin.accounts.columns.usageWindows'
     ])
     expect(wrapper.findAll('[data-test="plain-header"] [data-test="usage-windows-hint"]')).toHaveLength(0)
   })
 
   it('keeps Ollama Cloud in the single usage column and ignores legacy column preferences', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['ollama_cloud_usage']))
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['ollama_cloud_usage']))
     const wrapper = mountView()
     await flushPromises()
 

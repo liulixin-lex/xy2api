@@ -18,7 +18,7 @@ export default {
     filter: {
       all: '全部质量状态',
       normal: '正常',
-      cooling: '冷却中',
+      cooling: '后排',
       exempt: '豁免',
       observing: '观察中',
       demote: '后排',
@@ -26,7 +26,7 @@ export default {
     more: '+{n}',
     state: {
       normal: '正常',
-      cooling: '冷却',
+      cooling: '后排',
       testing: '测试中',
       nodata: '暂无数据',
       demoted: '后排',

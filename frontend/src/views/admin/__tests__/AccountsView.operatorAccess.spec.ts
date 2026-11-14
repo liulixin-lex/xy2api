@@ -12,14 +12,14 @@ const { listAccounts, getUpstreamBalances } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBalances,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBillingRatesWithEtag: vi.fn().mockResolvedValue({ notModified: true, etag: null, data: null }),
@@ -78,10 +78,9 @@ function mountView() {
         HelpTooltip: { template: '<span><slot name="trigger" /></span>' },
         AccountColumnSettings: true,
         AccountPriorityCell: true,
-        AccountGroupsCellButton: { emits: ['open'], template: '<button data-test="open-groups" @click="$emit(\'open\')">groups</button>' },
+        AccountGroupPills: { emits: ['edit-groups'], template: '<button data-test="open-groups" @click="$emit(\'edit-groups\')">groups</button>' },
         AccountGroupsDialog: { props: ['account'], template: '<div data-test="groups-dialog" :data-account-id="account?.id" />' },
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
-        AccountTableFilters: true,
+        AccountsToolbar: { template: '<div><slot name="more-actions" /></div>' },
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -159,7 +158,7 @@ function seedOperator(modules: Partial<Record<AdminModuleId, AdminLevel>>, flags
 }
 
 const toolsMenuText = async (wrapper: ReturnType<typeof mountView>) => {
-  await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+  await wrapper.get('[data-test="account-tools"]').trigger('click')
   return wrapper.text()
 }
 
@@ -236,6 +235,7 @@ describe('admin AccountsView for operators', () => {
 
   it('stops polling upstream balances after a 403', async () => {
     seedOperator({ accounts: 'view' })
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     getUpstreamBalances.mockReset().mockRejectedValue({ status: 403, reason: 'ADMIN_PERMISSION_DENIED' })
     mountView()
     await flushPromises()
@@ -269,7 +269,7 @@ describe('admin AccountsView for operators', () => {
       const wrapper = mountView()
       await flushPromises()
       for (const title of ['admin.errorPassthrough.title', 'admin.tlsFingerprintProfiles.title']) {
-        await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+        await wrapper.get('[data-test="account-tools"]').trigger('click')
         await wrapper.findAll('button.account-tools-menu-item').find(button => button.text().includes(title))!.trigger('click')
         await flushPromises()
       }

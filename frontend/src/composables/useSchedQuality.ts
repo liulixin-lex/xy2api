@@ -1,61 +1,10 @@
 import { onScopeDispose, ref, shallowRef, watch, type WatchSource } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
-import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedAccountSummary, SchedAccountsSummary } from '@/types/schedQuality'
 
 /** Refresh period of the drawer and the group board while they are open. */
 export const SCHED_QUALITY_POLL_MS = 5000
 
 const pageHidden = () => typeof document !== 'undefined' && document.hidden
-
-/**
- * Summary of the accounts on the current list page. The view calls refresh() wherever it refreshes the list
- * (load, page change, incremental refresh). Like the list's incremental refresh, a call is skipped while the page is
- * hidden or `paused()` is true (a dialog or the drawer is open); the next list refresh catches up. `force` skips the
- * pause only: the refresh right after an action (a recovery) must not wait for the drawer to close.
- */
-export function useSchedQualitySummary(paused: () => boolean = () => false) {
-  const view = shallowRef<Omit<SchedAccountsSummary, 'accounts'> | null>(null)
-  const byAccount = shallowRef(new Map<number, SchedAccountSummary>())
-  const state = ref<'idle' | 'loading' | 'loaded' | 'failed'>('idle')
-  let seq = 0
-  let controller: AbortController | null = null
-
-  async function refresh(accountIds: number[], options: { force?: boolean } = {}) {
-    if (pageHidden() || (paused() && !options.force)) return
-    controller?.abort()
-    controller = null
-    const current = ++seq
-    if (!accountIds.length) {
-      byAccount.value = new Map()
-      state.value = 'loaded'
-      return
-    }
-    const ctrl = new AbortController()
-    controller = ctrl
-    state.value = 'loading'
-    try {
-      const { accounts, ...rest } = await schedQualityAPI.summary(accountIds, { signal: ctrl.signal })
-      if (current !== seq) return
-      view.value = rest
-      byAccount.value = new Map(accounts.map((account) => [account.account_id, account]))
-      state.value = 'loaded'
-    } catch (error) {
-      if (current !== seq) return
-      state.value = 'failed'
-      console.error('Failed to load quality summary:', error)
-    } finally {
-      if (controller === ctrl) controller = null
-    }
-  }
-
-  onScopeDispose(() => {
-    seq++
-    controller?.abort()
-  })
-
-  return { view, byAccount, state, refresh }
-}
 
 /**
  * Loads while `key` is not null (the drawer's account, the board's group and model), then every 5 s; ticks are

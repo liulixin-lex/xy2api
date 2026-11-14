@@ -24,14 +24,14 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchDelete: vi.fn(),
@@ -99,9 +99,9 @@ const AccountBulkActionsBarStub = {
   `
 }
 
-const AccountTableFiltersStub = {
+const AccountsToolbarStub = {
   emits: ['change'],
-  template: '<button data-test="change-filter" @click="$emit(\'change\')">change filter</button>'
+  template: '<button data-test="change-filter" @click="$emit(\'change\', { platform: \'openai\' })">change filter</button>'
 }
 
 // The bulk bar shows only while something is selected (R2 ui-proposal 6.1 #7): tick the first row to bring it up.
@@ -123,7 +123,7 @@ const mountView = () => mount(AccountsView, {
       Pagination: true,
       ConfirmDialog: true,
       AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-      AccountTableFilters: AccountTableFiltersStub,
+      AccountsToolbar: AccountsToolbarStub,
       AccountBulkActionsBar: AccountBulkActionsBarStub,
       AccountActionMenu: true,
       ImportDataModal: true,

@@ -8,14 +8,14 @@ const { listAccounts } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -72,8 +72,7 @@ function mountView() {
         },
         DataTable: DataTableStub,
         VueDraggable: VueDraggableStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
-        AccountTableFilters: true,
+        AccountsToolbar: { template: '<div><slot name="more-actions" /></div>' },
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -127,74 +126,64 @@ describe('admin AccountsView list defaults and column order', () => {
     expect(listAccounts.mock.calls[0][2]).toEqual(expect.objectContaining({ sort_by: 'priority', sort_order: 'asc' }))
   })
 
-  it('applies the saved column order between the pinned columns', async () => {
-    // The column settings always save the full list; here "last used" was dragged to the top.
-    localStorage.setItem('account-column-order', JSON.stringify([
-      'last_used_at', 'id', 'platform_type', 'capacity', 'status', 'schedulable', 'iq_check', 'groups',
-      'today_stats', 'usage', 'proxy', 'priority', 'rate_multiplier',
-      'upstream_billing_rate', 'created_at', 'expires_at', 'notes'
-    ]))
-    const wrapper = mountView()
-    await flushPromises()
-
-    const columns = tableColumns(wrapper)
-    expect(columns.slice(0, 5)).toEqual(['select', 'name', 'last_used_at', 'platform_type', 'capacity'])
-    expect(columns.at(-1)).toBe('actions')
-  })
-
-  // Scenario 35: account ID, created and expires are hidden only for a browser without saved column settings.
-  it('hides account ID, created and expires by default and puts priority right after scheduling', async () => {
+  it('shows the ten columns of the redesign by default, today\'s stats included (spec 4.1)', async () => {
     const wrapper = mountView()
     await flushPromises()
     expect(tableColumns(wrapper)).toEqual([
-      'select', 'name', 'platform_type', 'capacity', 'status', 'sq_recent', 'sq_groups', 'schedulable', 'priority',
-      'iq_check', 'groups', 'usage', 'upstream_billing_rate', 'upstream_balance', 'last_used_at', 'actions'
+      'select', 'name', 'status', 'schedulable', 'groups', 'sq_recent', 'iq_check', 'capacity', 'upstream_billing_rate', 'today_stats', 'actions'
     ])
-    expect(localStorage.getItem('account-hidden-columns')).toBeNull()
+    expect(localStorage.getItem('account-hidden-columns-v2')).toBeNull()
   })
 
-  it('keeps saved column settings as they are', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['notes', 'proxy']))
+  it('starts over from the defaults when only the old column settings are saved', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'status']))
+    localStorage.setItem('account-column-order', JSON.stringify(['notes', 'status']))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'status', 'schedulable'])
+    expect(tableColumns(wrapper)).toContain('today_stats')
+  })
+
+  it('applies the saved column settings between the pinned columns', async () => {
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['notes', 'proxy']))
+    localStorage.setItem('account-column-order-v2', JSON.stringify([
+      'last_used_at', 'status', 'schedulable', 'groups', 'sq_recent', 'iq_check', 'capacity', 'upstream_billing_rate', 'today_stats',
+      'id', 'platform_type', 'priority', 'usage', 'proxy', 'rate_multiplier', 'upstream_balance', 'created_at', 'expires_at', 'notes'
+    ]))
     const wrapper = mountView()
     await flushPromises()
     const columns = tableColumns(wrapper)
+    expect(columns.slice(0, 4)).toEqual(['select', 'name', 'last_used_at', 'status'])
     expect(columns).toEqual(expect.arrayContaining(['id', 'created_at', 'expires_at', 'today_stats', 'rate_multiplier']))
     expect(columns).not.toContain('notes')
-    expect(columns).not.toContain('proxy')
+    expect(columns.at(-1)).toBe('actions')
   })
 
   it('reorders the table and saves the order when a column is dragged in the column settings', async () => {
-    localStorage.setItem('account-hidden-columns', '[]')
     const wrapper = mountView()
     await flushPromises()
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'id', 'platform_type'])
-
-    await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    await wrapper.get('[data-test="account-tools"]').trigger('click')
     await wrapper.get('[data-test="swap-first-two"]').trigger('click')
 
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'id'])
-    expect(JSON.parse(localStorage.getItem('account-column-order') || '[]').slice(0, 2)).toEqual(['platform_type', 'id'])
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'schedulable', 'status'])
+    expect(JSON.parse(localStorage.getItem('account-column-order-v2') || '[]').slice(0, 2)).toEqual(['schedulable', 'status'])
   })
 
   it('restores both visibility and order with "restore default columns", offered only when either differs', async () => {
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    await wrapper.get('[data-test="account-tools"]').trigger('click')
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
 
-    // Show the account ID column and drag platform/type before it.
-    await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
     await wrapper.get('[data-test="swap-first-two"]').trigger('click')
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'id'])
-
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(true)
     await wrapper.get('[data-test="reset-columns"]').trigger('click')
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'capacity'])
-    expect(tableColumns(wrapper)).not.toContain('id')
-    expect(localStorage.getItem('account-column-order')).toBeNull()
-    expect(localStorage.getItem('account-hidden-columns')).toBeNull()
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'status', 'schedulable'])
+    expect(localStorage.getItem('account-column-order-v2')).toBeNull()
+    expect(localStorage.getItem('account-hidden-columns-v2')).toBeNull()
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
 
-    // Only the visibility differing from the default also offers it.
+    // A visibility that differs from the default offers it too.
     await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(true)
   })

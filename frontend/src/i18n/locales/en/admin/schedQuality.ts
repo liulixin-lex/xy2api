@@ -18,7 +18,7 @@ export default {
     filter: {
       all: 'All quality states',
       normal: 'Normal',
-      cooling: 'Cooling',
+      cooling: 'Back of queue',
       exempt: 'Exempt',
       observing: 'Observing',
       demote: 'Demoted',
@@ -26,7 +26,7 @@ export default {
     more: '+{n}',
     state: {
       normal: 'Normal',
-      cooling: 'Cooling',
+      cooling: 'Back of queue',
       testing: 'Testing',
       nodata: 'No data',
       demoted: 'Demoted',

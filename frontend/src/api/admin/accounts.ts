@@ -40,9 +40,7 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
-import type { AccountRecentStatsBatch } from '@/types/schedQuality'
-import { backendSummary } from './schedQuality'
-import { toQualityFilter, toRecentStats, withQualityFilter } from './schedQualityCompat'
+import { toQualityFilter, withQualityFilter } from './schedQualityCompat'
 
 /**
  * List all accounts with pagination
@@ -67,6 +65,8 @@ export async function list(
     lite?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    /** Only these accounts (comma separated, at most 1000), intersected with the other filters; still paginated. */
+    ids?: string
   },
   options?: {
     signal?: AbortSignal
@@ -630,13 +630,6 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   return data
 }
 
-/**
- * Recent status of up to 1000 accounts; one item per account, by account id. The /recent-stats/batch route is gone
- * from the backend: the numbers are the last 60 minutes of its scheduling summary (see schedQualityCompat).
- */
-export async function getRecentStats(accountIds: number[], options?: { signal?: AbortSignal }): Promise<AccountRecentStatsBatch> {
-  return toRecentStats(await backendSummary(accountIds, options))
-}
 
 /** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/guides/upstream-balance.md。 */
 export type UpstreamBalanceState = 'ok' | 'unavailable' | 'not_applicable'
@@ -1265,7 +1258,6 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
-  getRecentStats,
   getUpstreamBalances,
   clearRateLimit,
   resetAccountQuota,

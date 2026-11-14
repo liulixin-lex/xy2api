@@ -25,7 +25,7 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -34,7 +34,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       update: updateAccount,
       getBatchTodayStats: vi.fn(async () => ({ stats: {} })),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn(async () => ({ enabled: true })),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchClearError: vi.fn(),
@@ -84,10 +84,10 @@ const listRow = {
 const freshAccount = { ...listRow, groups: [groups[2], groups[0]] }
 
 const DataTableStub = defineComponent({
-  props: { data: { type: Array, default: () => [] } },
+  props: { data: { type: Array, default: () => [] }, rowClass: { type: Function, default: undefined } },
   template: `
     <div>
-      <div v-for="row in data" :key="row.id" :data-account-name="row.name">
+      <div v-for="row in data" :key="row.id" :data-account-name="row.name" :class="rowClass?.(row)">
         <slot name="cell-select" :row="row" />
         <slot name="cell-groups" :row="row" />
       </div>
@@ -95,10 +95,10 @@ const DataTableStub = defineComponent({
   `
 })
 
-const AccountTableFiltersStub = defineComponent({
+const AccountsToolbarStub = defineComponent({
   props: ['filters'],
-  emits: ['update:filters', 'change'],
-  template: `<button data-test="pick-category" @click="$emit('update:filters', { ...filters, group_category: '3' }); $emit('change')">pick</button>`
+  emits: ['change'],
+  template: `<button data-test="pick-category" @click="$emit('change', { ...filters, group_category: '3' })">pick</button>`
 })
 
 const AccountBulkActionsBarStub = defineComponent({
@@ -114,8 +114,7 @@ function mountView() {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
-        AccountTableFilters: AccountTableFiltersStub,
+        AccountsToolbar: AccountsToolbarStub,
         AccountBulkActionsBar: AccountBulkActionsBarStub,
         BaseDialog: { props: ['show', 'title'], emits: ['close'], template: '<div v-if="show" data-test="base-dialog"><h3>{{ title }}</h3><slot /><slot name="footer" /></div>' },
         Pagination: true,
@@ -150,7 +149,7 @@ function mountView() {
 type View = ReturnType<typeof mountView>
 
 const openGroupsDialog = async (wrapper: View) => {
-  await wrapper.get('[data-account-name="acc-7"] [data-testid="account-groups-cell"]').trigger('click')
+  await wrapper.get('[data-account-name="acc-7"] [data-test="group-pill-text"]').trigger('click')
   await flushPromises()
 }
 const groupCheckbox = (wrapper: View, id: number) =>
@@ -185,7 +184,8 @@ describe('admin AccountsView group categories', () => {
     updateAccount.mockResolvedValue({ ...freshAccount, group_ids: [3, 1, 2] })
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.get('[data-account-name="acc-7"]').text()).toContain('Gamma')
+    // Pills in the groups page order, each with its automatic text (no alias set)
+    expect(wrapper.findAll('[data-account-name="acc-7"] [data-test="group-pill-text"]').map((pill) => pill.text())).toEqual(['Alp', 'Gam'])
 
     await openGroupsDialog(wrapper)
     expect(getById).toHaveBeenCalledWith(7)
@@ -200,15 +200,12 @@ describe('admin AccountsView group categories', () => {
     expect(updateAccount).toHaveBeenCalledTimes(1)
     expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [3, 1, 2] })
     expect(wrapper.find('[data-test="account-groups-dialog"]').exists()).toBe(false)
-    // 第三个分组收进“+1”，完整名单在单元格的 title 里
-    const cell = wrapper.get('[data-account-name="acc-7"] [data-testid="account-groups-cell"]')
-    expect(cell.text()).toContain('+1')
-    // 不再用原生 title 拼全部分组名（设计 A.9），被省略的分组在编辑弹窗里看
-    expect(cell.attributes('title')).toBeUndefined()
+    // The saved groups show at once, in the groups page order
+    expect(wrapper.findAll('[data-account-name="acc-7"] [data-test="group-pill-text"]').map((pill) => pill.text())).toEqual(['Alp', 'Bet', 'Gam'])
     wrapper.unmount()
   })
 
-  it('carries group_category into the list, select-all, bulk edit, export and upstream billing filters', async () => {
+  it('carries group_category into the list, select-all, bulk edit and export filters', async () => {
     const wrapper = mountView()
     await flushPromises()
     await pickCategory(wrapper)
@@ -220,14 +217,13 @@ describe('admin AccountsView group categories', () => {
     await flushPromises()
     expect(listAccounts).toHaveBeenLastCalledWith(1, 1000, expect.objectContaining({ group_category: '3', lite: '1' }))
 
+    // Bulk edit by filter and the export share one filter snapshot
     const vm = wrapper.vm as unknown as Record<string, () => Record<string, unknown>>
-    expect(vm.buildBulkEditFilterSnapshot()).toMatchObject({ group_category: '3' })
-    expect(vm.buildAccountQueryFilters()).toMatchObject({ group_category: '3' })
-    expect(vm.buildUpstreamBillingRateFilters()).toMatchObject({ group_category: '3' })
+    expect(vm.buildFilterSnapshot()).toMatchObject({ group_category: '3' })
     wrapper.unmount()
   })
 
-  it('removes a saved row that no longer matches the category filter', async () => {
+  it('keeps a saved row that no longer matches the category filter in place, dimmed', async () => {
     updateAccount.mockResolvedValue({ ...freshAccount, group_ids: [3] })
     const wrapper = mountView()
     await flushPromises()
@@ -239,27 +235,7 @@ describe('admin AccountsView group categories', () => {
     await flushPromises()
 
     expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [3] })
-    expect(wrapper.find('[data-account-name="acc-7"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('skips auto-refresh while the group dialog is open', async () => {
-    vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
-    const wrapper = mountView()
-    await flushPromises()
-
-    await openGroupsDialog(wrapper)
-    await vi.advanceTimersByTimeAsync(7000)
-    expect(listWithEtag).not.toHaveBeenCalled()
-
-    await wrapper.findAll('[data-test="base-dialog"] button').find((button) => button.text() === 'common.cancel')!.trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-test="account-groups-dialog"]').exists()).toBe(false)
-    await vi.advanceTimersByTimeAsync(7000)
-    expect(listWithEtag).toHaveBeenCalled()
-    expect(updateAccount).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-account-name="acc-7"]').classes()).toContain('opacity-60')
     wrapper.unmount()
   })
 })

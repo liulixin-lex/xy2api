@@ -1,14 +1,8 @@
 <template>
-  <div v-if="eligible" class="flex h-6 min-w-[7rem] items-center gap-1">
-    <HelpTooltip class="-ml-1" width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="upstream-billing-details">
+  <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed }">
+    <HelpTooltip width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="upstream-billing-details">
       <template #trigger>
-        <span
-          class="cursor-help border-b border-dotted border-gray-300 text-sm font-medium dark:border-dark-600"
-          :class="hasEffectiveRate ? 'font-mono text-gray-800 dark:text-gray-200' : statusClass || 'text-gray-400 dark:text-gray-500'"
-          data-testid="upstream-billing-rate"
-        >
-          {{ primaryValue }}
-        </span>
+        <span class="ratio__v" data-testid="upstream-billing-rate">{{ primaryValue }}</span>
       </template>
       <div class="space-y-1">
         <template v-if="hasEffectiveRate && data">
@@ -43,6 +37,9 @@
           </p>
         </template>
         <p v-else>{{ statusLabel || '-' }}</p>
+        <p v-if="failureReason" data-testid="upstream-billing-failure">
+          {{ t('admin.accounts.table.ratioFailure', { reason: failureReason }) }}
+        </p>
         <p
           v-if="probeEnabled && globalProbeEnabled !== false && nextProbeAt"
           data-testid="upstream-billing-next-probe"
@@ -65,22 +62,20 @@
         </p>
       </div>
     </HelpTooltip>
-    <span v-if="hasEffectiveRate && statusLabel" :class="statusClass" class="whitespace-nowrap text-[10px] font-medium">
-      {{ statusLabel }}
-    </span>
     <button
       type="button"
-      class="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+      class="ratio__btn"
+      :class="{ 'ratio__btn--busy': probing }"
       :disabled="probing"
       :aria-label="t('admin.accounts.upstreamBilling.manualProbe')"
-      :title="t('admin.accounts.upstreamBilling.manualProbe')"
+      v-tip="t('admin.accounts.table.ratioProbe')"
       data-testid="upstream-billing-probe"
       @click="$emit('probe')"
     >
       <Icon name="refresh" size="xs" :class="{ 'animate-spin': probing }" />
     </button>
   </div>
-  <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+  <span v-else class="ratio__none">—</span>
 </template>
 
 <script setup lang="ts">
@@ -88,6 +83,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
 
@@ -201,15 +197,17 @@ const statusLabel = computed(() => {
   if (snapshot.value.status === 'failed') return t('admin.accounts.upstreamBilling.failed')
   return ''
 })
-const statusClass = computed(() => {
-  if (!snapshot.value) return 'text-gray-400 dark:text-gray-500'
-  if (snapshot.value.status === 'unsupported') return 'text-gray-500 dark:text-gray-400'
-  if (stale.value) return 'text-amber-600 dark:text-amber-400'
-  if (snapshot.value.status === 'failed') return 'text-red-600 dark:text-red-400'
-  return ''
-})
 const hasEffectiveRate = computed(() => effectiveRate.value !== '-')
-const primaryValue = computed(() => hasEffectiveRate.value ? effectiveRate.value : statusLabel.value || '-')
+// Stale: the last value stays, greyed, with the last probe time and the failure in the tip; no "expired" word.
+const staleValue = computed(() => (stale.value && lastDetectedRate.value != null ? `${formatMultiplier(lastDetectedRate.value)}x` : ''))
+const primaryValue = computed(() => {
+  if (hasEffectiveRate.value) return effectiveRate.value
+  if (staleValue.value) return staleValue.value
+  if (snapshot.value?.status === 'unsupported') return statusLabel.value
+  return '—'
+})
+const dimmed = computed(() => !hasEffectiveRate.value)
+const failureReason = computed(() => (snapshot.value?.status === 'failed' || stale.value ? snapshot.value?.last_error?.trim() ?? '' : ''))
 const formatDate = (value?: string) => value
   ? new Date(value).toLocaleString(undefined, {
       month: '2-digit',
@@ -219,3 +217,60 @@ const formatDate = (value?: string) => value
     })
   : '-'
 </script>
+
+<style scoped>
+.ratio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ratio__v {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  white-space: nowrap;
+  cursor: help;
+}
+.ratio--stale .ratio__v,
+.ratio__none {
+  color: var(--color-text-muted);
+}
+.ratio__btn {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
+}
+.ratio__btn:focus-visible,
+.ratio__btn--busy {
+  opacity: 1;
+}
+.ratio__btn:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
+/* The refresh icon shows while the cell is hovered (on touch screens it always shows). */
+@media (hover: hover) {
+  :global(td:hover) .ratio__btn {
+    opacity: 1;
+  }
+  .ratio__btn:hover {
+    background: var(--color-bg-control-hover);
+    color: var(--color-text-primary);
+  }
+}
+@media (hover: none) {
+  .ratio__btn {
+    opacity: 1;
+  }
+}
+</style>

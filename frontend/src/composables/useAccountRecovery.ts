@@ -2,7 +2,7 @@ import { onScopeDispose, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { Account } from '@/types'
-import type { SchedAccountSummary } from '@/types/schedQuality'
+import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import { useAppStore } from '@/stores/app'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { markSchedChanged } from '@/composables/useSchedLayers'
@@ -30,13 +30,13 @@ function activeUntil(value: string | null | undefined, now: number) {
  * Manual off, schedulable off, quota, expiry, IQ gate, parent block, overrides and recent stats are not counted.
  * Without a summary yet, only the row decides.
  */
-export function canRecover(row: RecoverableRow, summary: Pick<SchedAccountSummary, 'groups'> | undefined, now: number): boolean {
+export function canRecover(row: RecoverableRow, summary: Pick<BackendAccountSummary, 'substandard'> | null | undefined, now: number): boolean {
   if (row.status === 'error') return true
   if ([row.rate_limit_reset_at, row.overload_until, row.temp_unschedulable_until].some((at) => activeUntil(at, now))) return true
   const limits = row.extra?.model_rate_limits ?? {}
   if (Object.entries(limits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && activeUntil(info?.rate_limit_reset_at, now))) return true
   if (activeStreamOnly(row.capability_learned, now).length) return true
-  return (summary?.groups.cooling ?? 0) > 0
+  return (summary?.substandard.length ?? 0) > 0
 }
 
 const pending = reactive(new Set<number>())

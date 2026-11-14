@@ -36,7 +36,7 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -44,7 +44,7 @@ vi.mock('@/api/admin', () => ({
       listWithEtag,
       getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -222,7 +222,7 @@ describe('admin AccountsView bulk edit scope', () => {
   })
 
   it('renders the created_at column once the saved column settings show it', async () => {
-    localStorage.setItem('account-hidden-columns', '[]')
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     listAccounts.mockResolvedValue({
       items: [
         {

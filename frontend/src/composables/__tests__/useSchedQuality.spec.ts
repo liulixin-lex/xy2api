@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 
-import type { SchedAccountsSummary } from '@/types/schedQuality'
-import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-
-const { summary } = vi.hoisted(() => ({ summary: vi.fn() }))
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary } }))
-
-import { secondsUntil, useSchedQualityPoll, useSchedQualitySummary } from '../useSchedQuality'
+import { secondsUntil, useSchedQualityPoll } from '../useSchedQuality'
 import { useLiveClock } from '../useLiveClock'
 
 let hidden = false
@@ -16,38 +10,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve))
 beforeEach(() => {
   hidden = false
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
-  summary.mockReset().mockResolvedValue(summaryFixture as SchedAccountsSummary)
 })
 
 afterEach(() => {
   vi.useRealTimers()
-})
-
-describe('useSchedQualitySummary', () => {
-  it('keys the summary by account and skips while the page is hidden or paused', async () => {
-    const paused = ref(false)
-    const scope = effectScope()
-    const result = scope.run(() => useSchedQualitySummary(() => paused.value))!
-
-    await result.refresh([479, 503])
-    expect(summary).toHaveBeenCalledWith([479, 503], expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    expect(result.state.value).toBe('loaded')
-    expect(result.byAccount.value.get(479)?.cooling[0].group_id).toBe(53)
-    expect(result.view.value).toEqual({ at: '…', stale: false, global_enabled: true })
-
-    hidden = true
-    await result.refresh([479])
-    hidden = false
-    paused.value = true
-    await result.refresh([479])
-    expect(summary).toHaveBeenCalledTimes(1)
-
-    paused.value = false
-    await result.refresh([])
-    expect(summary).toHaveBeenCalledTimes(1)
-    expect(result.byAccount.value.size).toBe(0)
-    scope.stop()
-  })
 })
 
 describe('useSchedQualityPoll', () => {
@@ -148,7 +114,6 @@ describe('cooling countdown', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(secondsUntil(until, now.value)).toBe(0)
     expect(secondsUntil(null, now.value)).toBeNull()
-    expect(summary).not.toHaveBeenCalled()
     scope.stop()
   })
 })

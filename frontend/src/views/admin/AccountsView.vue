@@ -2,482 +2,245 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
-          <AccountTableFilters
-            ref="filtersRef"
-            v-model:searchQuery="params.search"
-            :filters="params"
-            :groups="groups"
-            @update:filters="(newFilters) => Object.assign(params, newFilters)"
-            @change="debouncedReload"
-            @update:searchQuery="debouncedReload"
-          />
-          <AccountTableActions
-            :loading="loading"
-            :can-create="canManage"
-            @refresh="handleManualRefresh"
-            @create="showCreate = true"
-          >
-            <template #after>
-              <!-- Auto Refresh Dropdown -->
-              <div class="relative" ref="autoRefreshDropdownRef">
-                <button
-                  @click="
-                    showAutoRefreshDropdown = !showAutoRefreshDropdown;
-                    showAccountToolsDropdown = false
-                  "
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.accounts.autoRefresh')"
-                >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '']" />
-                  <span class="hidden md:inline">
-                    {{
-                      autoRefreshEnabled
-                        ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
-                        : t('admin.accounts.autoRefresh')
-                    }}
-                  </span>
-                </button>
-                <div
-                  v-if="showAutoRefreshDropdown"
-                  class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
-                >
-                  <div class="p-2">
-                    <button
-                      @click="setAutoRefreshEnabled(!autoRefreshEnabled)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ t('admin.accounts.enableAutoRefresh') }}</span>
-                      <Icon v-if="autoRefreshEnabled" name="check" size="sm" class="text-primary-500" />
-                    </button>
-                    <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-                    <button
-                      v-for="sec in autoRefreshIntervals"
-                      :key="sec"
-                      @click="setAutoRefreshInterval(sec)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ autoRefreshIntervalLabel(sec) }}</span>
-                      <Icon v-if="autoRefreshIntervalSeconds === sec" name="check" size="sm" class="text-primary-500" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- More Tools Dropdown -->
-              <div class="relative" ref="accountToolsDropdownRef">
-                <button
-                  ref="accountToolsTriggerRef"
-                  @click="toggleAccountToolsDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.accounts.moreActions')"
-                  :aria-expanded="showAccountToolsDropdown"
-                >
-                  <Icon name="more" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1 hidden md:inline" />
-                </button>
-                <Teleport to="body">
-                  <div
-                    v-if="showAccountToolsDropdown"
-                    class="fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
-                    :style="[accountToolsDropdownStyle, { zIndex: accountToolsLayer.zIndex.value }]"
-                    @click.stop
-                    ref="accountToolsMenuRef"
-                  >
-                    <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
-                      <template v-if="canManage">
-                      <button class="account-tools-menu-item" data-test="tools-bulk-edit-filtered" @click="openBulkEditFilteredFromMenu">
-                        <span class="account-tools-menu-icon bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
-                          <Icon name="edit" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.bulkEdit.submit') }}</span>
-                      </button>
-                      <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
-                      </template>
-                      <!-- 数据导入、导出与 CRS 同步只对超级管理员开放 -->
-                      <template v-if="isSuperAdmin">
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.dataActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item" @click="openSyncFromCrs">
-                        <span class="account-tools-menu-icon bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
-                          <Icon name="sync" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openImportData">
-                        <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
-                          <Icon name="upload" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
-                      </button>
-                      <button v-if="authStore.isAdmin" data-test="openai-login-import" class="account-tools-menu-item" @click="openOpenAILogin">
-                        <span class="account-tools-menu-icon bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300"><Icon name="shield" size="sm" /></span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.openaiTotp.loginTitle') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
-                        <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
-                          <Icon name="download" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">
-                          {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
-                        </span>
-                        <span
-                          v-if="selIds.length"
-                          class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
-                        >
-                          {{ t('admin.accounts.selectedCount', { count: selIds.length }) }}
-                        </span>
-                      </button>
-
-                      <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
-                      </template>
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.toolActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item" @click="openErrorPassthrough">
-                        <span class="account-tools-menu-icon bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300">
-                          <Icon name="shield" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
-                        <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                          <Icon name="lock" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
-                      </button>
-
-                      <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
-                      <div class="px-2 py-2">
-                        <div class="flex items-center justify-between gap-3">
-                          <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                            {{ t('admin.accounts.viewColumns') }}
-                          </span>
-                          <Icon name="grid" size="sm" class="text-gray-400" />
-                        </div>
-                      </div>
-                      <AccountColumnSettings
-                        :columns="orderedToggleableColumns"
-                        :is-visible="isColumnVisible"
-                        :customized="!columnsAtDefault"
-                        @toggle="toggleColumn"
-                        @reorder="setColumnOrder"
-                        @reset="resetColumns"
-                      />
-                    </div>
-                  </div>
-                </Teleport>
-              </div>
-            </template>
-          </AccountTableActions>
-        </div>
-        <div
-          v-if="hasPendingListSync"
-          class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+        <AccountsToolbar
+          ref="toolbarRef"
+          :filters="filters"
+          :search="search"
+          :groups="groups"
+          :live-status="liveStatus"
+          :pause="table.pause"
+          :resume="table.resume"
+          :refreshing="loading"
+          :can-create="canManage"
+          @update:search="onSearchInput"
+          @change="applyFilters"
+          @refresh="handleManualRefresh"
+          @create="showCreate = true"
         >
-          <span>{{ t('admin.accounts.listPendingSyncHint') }}</span>
-          <button
-            class="btn btn-secondary px-2 py-1 text-xs"
-            @click="syncPendingListChanges"
-          >
-            {{ t('admin.accounts.listPendingSyncAction') }}
-          </button>
-        </div>
+          <template #more-actions>
+            <AccountToolsMenu
+              :can-manage="canManage"
+              :is-super-admin="isSuperAdmin"
+              :is-admin="authStore.isAdmin"
+              :selected-count="selIds.length"
+              :columns="orderedToggleableColumns"
+              :is-visible="isColumnVisible"
+              :customized="!columnsAtDefault"
+              @action="handleToolAction"
+              @toggle-column="toggleColumn"
+              @reorder-columns="setColumnOrder"
+              @reset-columns="resetColumns"
+            />
+          </template>
+        </AccountsToolbar>
       </template>
       <template #table>
         <AccountBulkActionsBar
           v-if="canManage && selIds.length > 0"
           :selected-ids="selIds"
-          :total-results="pagination.total"
+          :total-results="total"
           :selecting-all="selectingAllResults"
           :all-results-selected="allResultsSelected"
+          :iq-busy="runningIQBatch"
+          :scheduling-busy="selIds.some((id) => togglingSchedulable.has(id))"
+          :sched-busy="sqBatchBusy"
+          :recover-busy="recoveryBatchRunning || selIds.some(isRecovering)"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
-          :iq-busy="runningIQBatch"
           @run-iq-check="handleBulkRunIQCheck"
           @edit-selected="openBulkEditSelected"
           @clear="clearSelection"
-          @select-page="selectPage"
+          @select-page="selectCurrentPage"
           @select-all-results="handleSelectAllResults"
-          :scheduling-busy="selIds.some(id => togglingSchedulable.has(id))"
           @toggle-schedulable="handleBulkToggleSchedulable"
-          :sched-busy="sqBatchBusy"
-          :recover-busy="recoveryBatchRunning || selIds.some(isRecovering)"
           @sched-action="openSchedBatch"
         />
-        <div ref="accountTableRef" class="account-table flex min-h-0 flex-1 flex-col overflow-hidden">
-        <DataTable
-          ref="dataTableRef"
-          :columns="cols"
-          :data="accounts"
-          :loading="loading"
-          row-key="id"
-          :server-side-sort="true"
-          @sort="handleSort"
-          default-sort-key="last_used_at"
-          default-sort-order="desc"
-          :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
-          :estimate-row-height="156"
-          :overscan="5"
-          :virtualize-threshold="50"
-        >
-          <template #header-select>
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
-              :checked="allVisibleSelected"
-              :disabled="!canManage"
-              @click.stop
-              @change="toggleSelectAllVisible($event)"
-            />
-          </template>
-          <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" :disabled="!canManage" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50" />
-          </template>
-          <template #cell-id="{ value }">
-            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
-          </template>
-          <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
-              <HelpTooltip
-                v-if="accountHomepageUrl(row)"
-                :content="accountHomepageUrl(row)"
-                width-class="w-max max-w-sm break-all"
-                class="-ml-1 self-start"
-              >
-                <template #trigger>
-                  <a
-                    :href="accountHomepageUrl(row)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="block max-w-[160px] truncate border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
-                    @mouseenter="titleWhenCut"
-                  >
-                    {{ value }}
-                  </a>
-                </template>
-              </HelpTooltip>
-              <span v-else class="block max-w-[160px] truncate font-medium text-gray-900 dark:text-white" @mouseenter="titleWhenCut">{{ value }}</span>
-              <span
-                v-if="accountDisplayEmail(row)"
-                class="max-w-[9rem] truncate text-xs text-gray-500 dark:text-gray-400"
-                :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
-              >
-                {{ accountDisplayEmail(row) }}
-              </span>
-            </div>
-          </template>
-          <template #cell-notes="{ value }">
-            <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
-          </template>
-          <template #cell-platform_type="{ row }">
-            <div class="flex min-w-0 flex-col gap-1">
-              <div class="flex flex-wrap items-center gap-1">
-                <PlatformTypeBadge :platform="row.platform" :type="row.type"
-                  :auth-mode="getOpenAIAuthMode(row)"
-                  :plan-type="getAccountPlanType(row)"
-                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
-                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at" />
-                <span
-                  v-if="getAntigravityTierLabel(row)"
-                  :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
-                >
-                  {{ getAntigravityTierLabel(row) }}
+        <div ref="accountTableRef" class="account-table relative flex min-h-0 flex-1 flex-col overflow-hidden" :class="{ 'is-roomy': columnLayout.roomy }" :style="columnLayout.vars">
+          <PendingChangesPill :count="pending" :label="changesText" :tip="t('admin.accounts.table.changesTip')" @merge="applyPending" />
+          <DataTable
+            ref="dataTableRef"
+            :columns="cols"
+            :data="rows"
+            :loading="loading"
+            row-key="id"
+            :row-class="accountRowClass"
+            :server-side-sort="true"
+            default-sort-key="last_used_at"
+            default-sort-order="desc"
+            :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
+            :estimate-row-height="78"
+            :overscan="5"
+            :virtualize-threshold="50"
+            @sort="handleSort"
+          >
+            <template #header-select>
+              <input type="checkbox" class="acc-check" :checked="allVisibleSelected" :disabled="!canManage" :aria-label="t('common.selectAll')" @click.stop @change="toggleVisible(($event.target as HTMLInputElement).checked)" />
+            </template>
+            <template #cell-select="{ row }">
+              <div class="acell acell--row"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></div>
+            </template>
+            <template #cell-name="{ row }">
+              <div class="acell"><AccountNameCell :account="row" /></div>
+            </template>
+            <template #cell-status="{ row }">
+              <div class="acell">
+                <AccountStatusCell :account="row" @show-temp-unsched="handleShowTempUnsched" />
+                <AccountStreamOnlyBadge :account="row" @cleared="mergeAccount($event as Account)" />
+              </div>
+            </template>
+            <template #cell-schedulable="{ row }">
+              <div class="acell acell--row">
+                <AccountSwitch :checked="row.schedulable" :label="t('admin.accounts.columns.schedulable') + ' · ' + row.name" :disabled="!canManage" :busy="togglingSchedulable.has(row.id)" @toggle="handleToggleSchedulable(row, $event)" />
+              </div>
+            </template>
+            <template #header-groups="{ column }">
+              <span class="inline-flex items-center gap-1.5">{{ column.label }}<SchedPauseMark :global-enabled="qualityMeta?.global_enabled" :stale="qualityMeta?.stale" /></span>
+            </template>
+            <template #cell-groups="{ row }">
+              <div class="acell">
+                <AccountGroupPills
+                  :account="row"
+                  :groups="groupsOf(row)"
+                  :quality="row.platform === 'openai' ? row.quality ?? null : null"
+                  :readonly="!canPlaceGroups"
+                  @open-quality="(groupId: number) => openQuality(row, groupId)"
+                  @edit-groups="openGroupsEditor(row)"
+                />
+              </div>
+            </template>
+            <template #cell-sq_recent="{ row }">
+              <div class="acell"><AccountRecentCell :quality="row.platform === 'openai' ? row.quality ?? null : null" /></div>
+            </template>
+            <template #cell-iq_check="{ row }">
+              <div class="acell"><AccountIQCell :account="row" :disabled="!canManage" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" /></div>
+            </template>
+            <template #cell-capacity="{ row }">
+              <div class="acell"><AccountCapacityCell :account="row" /></div>
+            </template>
+            <template #header-upstream_billing_rate="{ column }">
+              <div class="flex items-center gap-1">
+                <span>{{ column.label }}</span>
+                <span @click.stop><HelpTooltip :content="t('admin.accounts.upstreamBilling.trustWarning')" width-class="w-80" /></span>
+              </div>
+            </template>
+            <template #cell-upstream_billing_rate="{ row }">
+              <div class="acell">
+                <UpstreamBillingRateCell :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
+              </div>
+            </template>
+            <template #cell-today_stats="{ row }">
+              <div class="acell"><AccountTodayCell :stats="row.today_stats" /></div>
+            </template>
+            <template #cell-id="{ value }">
+              <div class="acell"><span class="font-mono text-xs text-fg-secondary">#{{ value }}</span></div>
+            </template>
+            <template #cell-platform_type="{ row }">
+              <div class="acell">
+                <div class="flex flex-wrap items-center gap-1">
+                  <PlatformTypeBadge
+                    :platform="row.platform"
+                    :type="row.type"
+                    :auth-mode="getOpenAIAuthMode(row)"
+                    :plan-type="getAccountPlanType(row)"
+                    :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
+                    :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
+                  />
+                  <span v-if="antigravityTier(row)" :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', antigravityTier(row)?.className]">{{ antigravityTier(row)?.label }}</span>
+                </div>
+                <div v-if="openAICompactMeta(row)" :class="['inline-flex items-center gap-1.5 pl-0.5 text-[11px] font-medium leading-4', openAICompactMeta(row)?.className]" :title="openAICompactTitle(row)">
+                  <span :class="['h-1.5 w-1.5 rounded-full', openAICompactMeta(row)?.dotClass]" />
+                  <span>{{ openAICompactMeta(row)?.label }}</span>
+                </div>
+              </div>
+            </template>
+            <template #cell-priority="{ row }">
+              <div class="acell acell--row">
+                <AccountPriorityCell :account="row" :save="(priority: number) => savePriority(row, priority)" @error="(message: string) => appStore.showError(message)" />
+              </div>
+            </template>
+            <template #cell-usage="{ row }">
+              <div class="acell">
+                <AccountUsageCell
+                  :account="row"
+                  :today-stats="row.today_stats ?? null"
+                  :hide-today-stats="isColumnVisible('today_stats')"
+                  :batched-usage="row.usage_info ?? null"
+                  :batched-usage-error="row.usage_error ?? null"
+                  :request-batched-usage="requestUsage"
+                  @account-updated="handleAccountUpdated"
+                  @usage-loaded="(usage: AccountUsageInfo) => live.noteUsage(row.id, usage)"
+                />
+              </div>
+            </template>
+            <template #cell-proxy="{ row }">
+              <div class="acell">
+                <div v-if="row.proxy" class="flex items-center gap-2">
+                  <span class="text-sm text-fg-primary">{{ row.proxy.name }}</span>
+                  <span v-if="row.proxy.country_code" class="text-xs text-fg-secondary">({{ row.proxy.country_code }})</span>
+                </div>
+                <span v-else class="text-sm text-fg-muted">-</span>
+                <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
+                  <span class="text-fg-secondary">{{ formatDateTime(row.proxy.expires_at) }}</span>
+                  <span :class="proxyExpiryBadgeClass(row.proxy.expires_at, row.proxy.status)">{{ proxyExpiryText(row.proxy) }}</span>
+                </div>
+                <div v-if="row.proxy_fallback_origin_id" class="flex items-center gap-1">
+                  <span class="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">{{ t('admin.accounts.fallbackActive') }}</span>
+                  <button v-if="isSuperAdmin" class="rounded border border-line-control px-1.5 py-0.5 text-xs text-fg-secondary hover:bg-surface-control-hover" data-testid="revert-proxy-fallback" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
+                </div>
+              </div>
+            </template>
+            <template #cell-rate_multiplier="{ row }">
+              <div class="acell acell--row">
+                <span class="inline-flex items-center gap-1 text-sm text-fg-primary">
+                  <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
+                  <span v-if="row.extra?.upstream_billing_rate_sync_enabled === true" class="inline-flex cursor-help text-fg-secondary" :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')" :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')" data-testid="account-rate-sync-indicator"><Icon name="sync" size="xs" /></span>
                 </span>
               </div>
-              <div
-                v-if="getOpenAICompactMeta(row)"
-                :class="[
-                  'inline-flex items-center gap-1.5 pl-0.5 text-[11px] font-medium leading-4',
-                  getOpenAICompactMeta(row)?.className
-                ]"
-                :title="getOpenAICompactTitle(row)"
-              >
-                <span :class="['h-1.5 w-1.5 rounded-full', getOpenAICompactMeta(row)?.dotClass]" />
-                <span>{{ getOpenAICompactMeta(row)?.label }}</span>
+            </template>
+            <template #cell-upstream_balance="{ row }">
+              <div class="acell"><UpstreamBalanceCell :item="row.upstream_balance ?? undefined" :now="now" /></div>
+            </template>
+            <template #cell-last_used_at="{ value }">
+              <div class="acell"><span class="text-sm text-fg-secondary">{{ formatRelativeTime(value) }}</span></div>
+            </template>
+            <template #cell-created_at="{ value }">
+              <div class="acell"><span class="text-sm text-fg-secondary">{{ formatDateTime(value) }}</span></div>
+            </template>
+            <template #cell-expires_at="{ row, value }">
+              <div class="acell">
+                <span class="text-sm text-fg-secondary">{{ formatExpiresAt(value) }}</span>
+                <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
+                  <span v-if="isExpired(value)" class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{{ t('admin.accounts.expired') }}</span>
+                  <span v-if="row.auto_pause_on_expired && value" class="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ t('admin.accounts.autoPauseOnExpired') }}</span>
+                </div>
               </div>
-            </div>
-          </template>
-          <template #cell-capacity="{ row }">
-            <AccountCapacityCell :account="row" />
-          </template>
-          <template #cell-status="{ row }">
-            <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-            <AccountStreamOnlyBadge :account="row" @cleared="patchAccountInList($event as Account)" />
-          </template>
-          <template #header-sq_groups="{ column }">
-            <span class="inline-flex items-center gap-1.5">{{ column.label }}<SchedPauseMark :global-enabled="sqSummary.view.value?.global_enabled" :stale="sqSummary.view.value?.stale" /></span>
-          </template>
-          <template #cell-sq_recent="{ row }">
-            <AccountRecentStatsCell
-              :account-id="row.id"
-              :stats="recentStats.byAccount.value.get(row.id)"
-              :loading="recentStats.loading.value"
-              :link="canViewUsage"
-            />
-          </template>
-          <template #cell-sq_groups="{ row }">
-            <SchedGroupsCell
-              :summary="sqSummary.byAccount.value.get(row.id)"
-              :loading="sqLoading(row.id)"
-              :openai="row.platform === 'openai'"
-              :group-name="sqGroupName"
-              :fresh="sqFresh"
-              @open="(target) => openSchedFromGroups(row, target)"
-            />
-          </template>
-          <template #mobile-sort-extra>
-            <div v-if="!hiddenColumns.has('sq_groups')" class="flex items-center gap-2">
-              <SchedPauseMark :global-enabled="sqSummary.view.value?.global_enabled" :stale="sqSummary.view.value?.stale" />
-            </div>
-          </template>
-          <template #cell-schedulable="{ row }">
-            <div class="flex flex-col items-start gap-1.5">
-            <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="!canManage || togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
-              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out motion-reduce:transition-none" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
-            </button>
-            </div>
-          </template>
-          <template #cell-iq_check="{ row }">
-            <IQCheckCell :account="row" :busy="!canManage || togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
-          </template>
-          <template #cell-today_stats="{ row }">
-            <AccountTodayStatsCell
-              :stats="todayStatsByAccountId[String(row.id)] ?? null"
-              :loading="todayStatsLoading"
-              :error="todayStatsError"
-            />
-          </template>
-          <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :readonly="!canPlaceGroups" @open="canPlaceGroups && (groupsDialogAccount = row)" />
-          </template>
-          <template #cell-usage="{ row }">
-            <AccountUsageCell
-              :account="row"
-              :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
-              :today-stats-loading="todayStatsLoading"
-              :hide-today-stats="!hiddenColumns.has('today_stats')"
-              :manual-refresh-token="usageManualRefreshToken"
-              :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
-              :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
-              :batched-usage-loading="usageBatchLoadingByAccountId[String(row.id)] === true"
-              :request-batched-usage="isDesktopViewport ? queueBatchedUsage : null"
-              @account-updated="handleAccountUpdated"
-              @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
-            />
-          </template>
-          <template #cell-proxy="{ row }">
-            <div class="flex flex-col gap-1">
-              <div v-if="row.proxy" class="flex items-center gap-2">
-                <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
-                <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
-                  ({{ row.proxy.country_code }})
-                </span>
+            </template>
+            <template #cell-notes="{ value }">
+              <div class="acell">
+                <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-fg-secondary">{{ value }}</span>
+                <span v-else class="text-sm text-fg-muted">-</span>
               </div>
-              <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
-              <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
-                <span class="text-gray-600 dark:text-gray-300">{{ formatDateTime(row.proxy.expires_at) }}</span>
-                <span :class="proxyExpiryBadge(row.proxy)">{{ proxyExpiryText(row.proxy) }}</span>
+            </template>
+            <template #cell-actions="{ row }">
+              <div class="acell acell--end">
+                <button v-if="canManage" type="button" v-tip="t('common.edit')" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op sq-focus" data-test="row-edit" @click="handleEdit(row)">
+                  <Icon name="edit" size="sm" />
+                </button>
+                <button type="button" v-tip="t('common.more')" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="acc-op sq-focus" data-test="row-more" @click="openMenu(row, $event)">
+                  <Icon name="more" size="sm" />
+                </button>
               </div>
-              <div v-if="row.proxy_fallback_origin_id" class="flex items-center gap-1">
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">
-                  {{ t('admin.accounts.fallbackActive') }}
-                </span>
-                <button v-if="isSuperAdmin" class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" data-testid="revert-proxy-fallback" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
-              </div>
-            </div>
-          </template>
-          <template #cell-rate_multiplier="{ row }">
-            <span class="inline-flex items-center gap-1 text-sm font-mono text-gray-700 dark:text-gray-300">
-              <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
-              <span
-                v-if="row.extra?.upstream_billing_rate_sync_enabled === true"
-                class="inline-flex cursor-help text-emerald-600 dark:text-emerald-400"
-                :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')"
-                :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')"
-                data-testid="account-rate-sync-indicator"
-              >
-                <Icon name="sync" size="xs" />
-              </span>
-            </span>
-          </template>
-          <template #header-upstream_billing_rate="{ column }">
-            <div class="flex items-center gap-1">
-              <span>{{ column.label }}</span>
-              <span @click.stop>
-                <HelpTooltip :content="t('admin.accounts.upstreamBilling.trustWarning')" width-class="w-80" />
-              </span>
-            </div>
-          </template>
-          <template #cell-upstream_billing_rate="{ row }">
-            <UpstreamBillingRateCell
-              :account="row"
-              :global-probe-enabled="upstreamBillingProbeGloballyEnabled"
-              :now="upstreamBillingNow"
-              :probing="probingUpstreamBilling.has(row.id)"
-              @probe="handleProbeUpstreamBilling(row)"
-            />
-          </template>
-          <template #cell-upstream_balance="{ row }">
-            <UpstreamBalanceCell :item="upstreamBalanceByAccountId[String(row.id)]" :now="upstreamBalanceNow" />
-          </template>
-          <template #cell-priority="{ row }">
-            <AccountPriorityCell
-              :account="row"
-              @updated="handleAccountUpdated"
-              @error="(message: string) => appStore.showError(message)"
-            />
-          </template>
-          <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatRelativeTime(value) }}</span>
-          </template>
-          <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
-          </template>
-          <template #cell-expires_at="{ row, value }">
-            <div class="flex flex-col items-start gap-1">
-              <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatExpiresAt(value) }}</span>
-              <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
-                <span
-                  v-if="isExpired(value)"
-                  class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                >
-                  {{ t('admin.accounts.expired') }}
-                </span>
-                <span
-                  v-if="row.auto_pause_on_expired && value"
-                  class="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                >
-                  {{ t('admin.accounts.autoPauseOnExpired') }}
-                </span>
-              </div>
-            </div>
-          </template>
-          <template #cell-actions="{ row }">
-            <div class="flex items-center">
-              <button v-if="canManage" type="button" v-tip="t('common.edit')" :aria-label="`${t('common.edit')} ${row.name}`" class="sq-focus inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400" data-test="row-edit" @click="handleEdit(row)">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-              </button>
-              <button type="button" v-tip="t('common.more')" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="sq-focus inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white" data-test="row-more" @click="openMenu(row, $event)">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-              </button>
-            </div>
-          </template>
-        </DataTable>
+            </template>
+          </DataTable>
         </div>
       </template>
-      <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
+      <template #pagination>
+        <Pagination v-if="total > 0" :page="pagination.page" :total="total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+      </template>
     </TablePageLayout>
-    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="handleAccountCreated" />
+    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal v-if="editModalMounted" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal v-if="reAuthModalMounted" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal v-if="testModalMounted" :show="showTest" :account="testingAcc" @close="closeTestModal" />
@@ -485,10 +248,10 @@
     <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
-    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
+    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal v-if="importModalMounted" :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
       v-if="bulkEditModalMounted"
@@ -502,14 +265,14 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" :recovering="!!tempUnschedAcc && isRecovering(tempUnschedAcc.id)" @recover="recoverOne" />
+    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" :recovering="!!tempUnschedAcc && isRecovering(tempUnschedAcc.id)" @close="showTempUnsched = false" @recover="recoverOne" />
     <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" :on-recovered="refreshAfterRecover" />
-    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="load()" @recover="handleBatchRecover" />
+    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="reload" @recover="handleBatchRecover" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
-      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-        <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
+      <label class="flex items-center gap-2 text-sm text-fg-primary">
+        <input v-model="includeProxyOnExport" type="checkbox" class="acc-check" />
         <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
       </label>
     </ConfirmDialog>
@@ -520,75 +283,76 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, shallowRef, toRaw, watch } from 'vue'
-import { useOverlayLayer } from '@/composables/useOverlayLayer'
-import { useEventListener, useIntervalFn } from '@vueuse/core'
+/**
+ * Account management (spec 4): the table on the live engine (useAccountsLiveTable), the toolbar, and the page's
+ * actions and dialogs. Cells and the toolbar live in components/admin/account/table; rows are never copied into
+ * dialogs that edit them (each dialog gets its own snapshot or loads the account).
+ */
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { useAppStore } from '@/stores/app'
-import { useAuthStore } from '@/stores/auth'
-import { useGroupCategoriesStore } from '@/stores/groupCategories'
-import { useAdminAccessStore } from '@/stores/adminAccess'
-import { useAdminPermission } from '@/composables/useAdminPermission'
 import { adminAPI } from '@/api/admin'
-import { useTableLoader } from '@/composables/useTableLoader'
-import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
-import { useTableSelection } from '@/composables/useTableSelection'
-import { useLazyMount, prefetchWhenIdle, defineLazyComponent } from '@/composables/useLazyMount'
-import { useColumnOrder } from '@/composables/useColumnOrder'
-import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
-import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { IQ_RUN_BATCH_LIMIT } from '@/api/admin/accounts'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
-import SchedGroupsCell from '@/components/admin/account/quality/SchedGroupsCell.vue'
-import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
-import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
-import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
-import { useSchedQualitySummary } from '@/composables/useSchedQuality'
-import { useAccountRecentStats } from '@/composables/useAccountRecentStats'
-import { openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
-import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
-import { vTip } from '@/utils/tip'
-import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
-import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
-import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
-import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
-import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
-import IQCheckCell from '@/components/account/IQCheckCell.vue'
-import { IQ_BUILTIN_MODELS, iqAccountVerdict, iqRunSummary } from '@/components/admin/account/iqCheckPresentation'
-import { IQ_RUN_BATCH_LIMIT } from '@/api/admin/accounts'
-import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
-import type { SelectOption } from '@/components/common/Select.vue'
-import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
-import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
-import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
-import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCellButton.vue'
-import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
-import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
-import UpstreamBalanceCell from '@/components/account/UpstreamBalanceCell.vue'
-import type { UpstreamBalanceItem } from '@/api/admin/accounts'
-import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
+import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
+import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
+import { IQ_BUILTIN_MODELS, iqRunSummary, isIQBuiltinModel } from '@/components/admin/account/iqCheckPresentation'
+import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
+import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
+import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
+import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
+import AccountIQCell from '@/components/admin/account/table/AccountIQCell.vue'
+import AccountNameCell from '@/components/admin/account/table/AccountNameCell.vue'
+import AccountRecentCell from '@/components/admin/account/table/AccountRecentCell.vue'
+import AccountStatusCell from '@/components/admin/account/table/AccountStatusCell.vue'
+import AccountSwitch from '@/components/admin/account/table/AccountSwitch.vue'
+import AccountTodayCell from '@/components/admin/account/table/AccountTodayCell.vue'
+import AccountToolsMenu, { type AccountToolAction } from '@/components/admin/account/table/AccountToolsMenu.vue'
+import AccountsToolbar, { type ToolbarFilters } from '@/components/admin/account/table/AccountsToolbar.vue'
+import { accountMatchesFilters, type AccountListFilters } from '@/components/admin/account/table/accountFilters'
+import { orderGroups } from '@/components/admin/account/table/accountGroups'
+import { useAccountsLiveTable, type LiveAccount } from '@/components/admin/account/table/useAccountsLiveTable'
+import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
+import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
+import UpstreamBalanceCell from '@/components/account/UpstreamBalanceCell.vue'
+import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
+import { useColumnOrder } from '@/composables/useColumnOrder'
+import { defineLazyComponent, prefetchWhenIdle, useLazyMount } from '@/composables/useLazyMount'
+import { useLiveClock } from '@/composables/useLiveClock'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { isStepUpBlocked, isStepUpCancelled, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
+import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
+import { useTableSelection } from '@/composables/useTableSelection'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { useGroupCategoriesStore } from '@/stores/groupCategories'
+import type { Account, AccountListItem, AccountPlatform, AccountType, AccountUsageInfo, AdminGroup, ClaudeModel, IQRunAccount, IQRunTarget, IQTargetSummary, Proxy as AccountProxy, UpstreamBillingProbeSnapshot } from '@/types'
+import type { SelectOption } from '@/components/common/Select.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
-import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { formatDateTime, formatRelativeTime } from '@/utils/format'
-import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import { sanitizeUrl } from '@/utils/url'
-import { getFloatingPanelPosition } from '@/utils/floatingPanel'
+import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { formatMultiplier } from '@/utils/formatters'
-import type { IQRunAccount, IQRunTarget, IQTargetSummary } from '@/types'
-import type { Account, AccountListItem, AccountPlatform, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { vTip } from '@/utils/tip'
+import { getAccountPlanType, getAntigravityTier, getOpenAIAuthMode, getOpenAICompactMeta, getOpenAICompactTitle } from './accountRowMeta'
 
 const IQCheckResultsModal = defineLazyComponent(() => import('@/components/admin/account/IQCheckResultsModal.vue'))
-// 弹窗按需加载：新建/编辑账号等弹窗体量远大于列表本身，打包进页面 chunk 会拖慢账号页首开。
-// 首次打开才挂载（useLazyMount），页面空闲时预取最常用的新建/编辑弹窗。
+// Dialogs load on first use; the create and edit dialogs are prefetched while the page is idle.
 const loadCreateAccountModal = () => import('@/components/account/CreateAccountModal.vue')
 const loadEditAccountModal = () => import('@/components/account/EditAccountModal.vue')
 const CreateAccountModal = defineLazyComponent(loadCreateAccountModal)
@@ -605,1686 +369,255 @@ const AccountStatsModal = defineLazyComponent(() => import('@/components/admin/a
 const ScheduledTestsPanel = defineLazyComponent(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
 const ErrorPassthroughRulesModal = defineLazyComponent(() => import('@/components/admin/ErrorPassthroughRulesModal.vue'))
 const TLSFingerprintProfilesModal = defineLazyComponent(() => import('@/components/admin/TLSFingerprintProfilesModal.vue'))
+
 const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-const adminAccess = useAdminAccessStore()
+const groupCategories = useGroupCategoriesStore()
 const { canManage, isSuperAdmin } = useAdminPermission('accounts')
 // Account management includes placing accounts into groups and removing them.
 const canPlaceGroups = canManage
+const now = useLiveClock()
+
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
-const groupCategories = useGroupCategoriesStore()
-const groupsDialogAccount = ref<AccountListItem | null>(null)
-const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
-const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] => {
-  const groupIDs = account.group_ids ?? []
-  if (groupIDs.length === 0) return []
-  return groupIDs.map(id => groupsByID.value.get(id)).filter((group): group is AdminGroup => Boolean(group))
-}
-const accountTableRef = ref<HTMLElement | null>(null)
-const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
-type AccountBulkEditTarget =
-  | {
-      mode: 'selected'
-      accountIds: number[]
-      selectedPlatforms: AccountPlatform[]
-      selectedTypes: AccountType[]
-    }
-  | {
-      mode: 'filtered'
-      filters: {
-        platform?: string
-        type?: string
-        status?: string
-        group?: string
-        group_category?: string
-        search?: string
-        privacy_mode?: string
-        iq_status?: string
-        sched_quality?: string
-        sort_by?: string
-        sort_order?: AccountSortOrder
-      }
-      previewCount: number
-      selectedPlatforms: AccountPlatform[]
-      selectedTypes: AccountType[]
-    }
-const selPlatforms = computed<AccountPlatform[]>(() => {
-  const platforms = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
-      .map(a => a.platform)
-  )
-  return [...platforms]
-})
-const selTypes = computed<AccountType[]>(() => {
-  const types = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
-      .map(a => a.type)
-  )
-  return [...types]
-})
-const showCreate = ref(false)
-const showEdit = ref(false)
-const showSync = ref(false)
-const showImportData = ref(false)
-const showOpenAILogin = ref(false)
-const openAITotpAccount = ref<Account | null>(null)
-const showExportDataDialog = ref(false)
-const includeProxyOnExport = ref(true)
-const showBulkEdit = ref(false)
-const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
-const showTempUnsched = ref(false)
-const showDeleteDialog = ref(false)
-const showCreateShadowDialog = ref(false)
-const showReAuth = ref(false)
-const showTest = ref(false)
-const showStats = ref(false)
-const showErrorPassthrough = ref(false)
-const showTLSFingerprintProfiles = ref(false)
-const edAcc = ref<Account | null>(null)
-const tempUnschedAcc = ref<Account | null>(null)
-const deletingAcc = ref<Account | null>(null)
-const creatingShadowAcc = ref<Account | null>(null)
-const reAuthAcc = ref<Account | null>(null)
-const testingAcc = ref<Account | null>(null)
-const statsAcc = ref<Account | null>(null)
-const showSchedulePanel = ref(false)
-const createModalMounted = useLazyMount(showCreate)
-const editModalMounted = useLazyMount(showEdit)
-const reAuthModalMounted = useLazyMount(showReAuth)
-const testModalMounted = useLazyMount(showTest)
-const statsModalMounted = useLazyMount(showStats)
-const schedulePanelMounted = useLazyMount(showSchedulePanel)
-const syncModalMounted = useLazyMount(showSync)
-const importModalMounted = useLazyMount(showImportData)
-const bulkEditModalMounted = useLazyMount(showBulkEdit)
-const tempUnschedModalMounted = useLazyMount(showTempUnsched)
-const errorPassthroughModalMounted = useLazyMount(showErrorPassthrough)
-const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
-const scheduleAcc = ref<Account | null>(null)
-const scheduleModelOptions = ref<SelectOption[]>([])
-const togglingSchedulable = ref(new Set<number>())
-let schedulingMutationVersion = 0
-const confirmedSchedulingUpdates = new Map<number, { version: number; schedulable: boolean }>()
-// 单个开关乐观更新：点下去立即翻转，失败再恢复；请求期间返回的列表沿用正在提交的值，避免开关来回跳
-const pendingSchedulable = new Map<number, boolean>()
-const togglingIQCheck = ref(new Set<number>())
-const iqRecordsAccount = ref<Account | null>(null)
-const handleIQSummaryUpdated = (targets: IQTargetSummary[]) => {
-  const account = iqRecordsAccount.value
-  if (!account) return
-  iqRecordsAccount.value = { ...account, iq_targets: targets }
-  const current = accounts.value.find(item => item.id === account.id)
-  if (current) patchAccountInList({ ...current, iq_targets: targets })
-}
-const reportIQRun = (results: IQRunTarget[] | IQRunAccount[]) => {
-  const { queued, rejected, reasons } = iqRunSummary(results)
-  const reasonText = reasons.map(reason => te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason).join(', ')
-  if (rejected) appStore.showError(t('admin.accounts.iqRunPartial', { queued, rejected, reasons: reasonText }))
-  else appStore.showSuccess(t('admin.accounts.iqQueued', { count: queued }))
-}
-const handleRunIQCheck = async (account: Account) => {
-  try { reportIQRun(await adminAPI.accounts.runIQCheck(account.id)); await refreshAccountsIncrementally() }
-  catch { appStore.showError(t('admin.accounts.iqFailed')) }
-}
-const runningIQBatch = ref(false)
-const handleBulkRunIQCheck = async () => {
-  // Selection can span pages; the server rejects non-OpenAI accounts per target.
-  const ids = [...selIds.value]
-  if (ids.length > IQ_RUN_BATCH_LIMIT) { appStore.showError(t('admin.accounts.iqBatchLimit', { limit: IQ_RUN_BATCH_LIMIT })); return }
-  runningIQBatch.value = true
+const groupsById = computed(() => new Map(groups.value.map((group) => [group.id, group])))
+/** The row's groups in the groups page's order. */
+const groupsOf = (row: Pick<AccountListItem, 'group_ids'>) =>
+  orderGroups((row.group_ids ?? []).flatMap((id) => groupsById.value.get(id) ?? []))
+
+// ---- Columns: visibility and order (new storage keys: old settings start over, today's stats shown) ----
+const HIDDEN_COLUMNS_KEY = 'account-hidden-columns-v2'
+const ACCOUNT_COLUMN_ORDER_KEY = 'account-column-order-v2'
+const DEFAULT_HIDDEN_COLUMNS = ['id', 'platform_type', 'priority', 'usage', 'proxy', 'rate_multiplier', 'upstream_balance', 'last_used_at', 'created_at', 'expires_at', 'notes']
+const hiddenColumns = reactive(new Set<string>())
+const loadSavedColumns = () => {
   try {
-    reportIQRun(await adminAPI.accounts.runIQCheckBatch(ids))
-    await refreshAccountsIncrementally()
-  } catch { appStore.showError(t('admin.accounts.iqFailed')) }
-  finally { runningIQBatch.value = false }
+    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
+    const keys = saved ? (JSON.parse(saved) as string[]) : DEFAULT_HIDDEN_COLUMNS
+    keys.forEach((key) => hiddenColumns.add(key))
+  } catch {
+    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
+  }
 }
-const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
-const exportingData = ref(false)
-const probingUpstreamBilling = reactive(new Set<number>())
-const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
-const upstreamBillingNow = ref(Date.now())
-const upstreamBillingRateETag = ref<string | null>(null)
-const upstreamBillingRateRefreshing = ref(false)
-let upstreamBillingRateAbortController: AbortController | null = null
-useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
+loadSavedColumns()
+const saveColumns = () => {
+  try {
+    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
+  } catch (error) {
+    console.error('Failed to save columns:', error)
+  }
+}
+const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 
-// Account tools dropdown
-const showAccountToolsDropdown = ref(false)
-const accountToolsDropdownRef = ref<HTMLElement | null>(null)
-const accountToolsTriggerRef = ref<HTMLElement | null>(null)
-// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
-// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
-const accountToolsMenuRef = ref<HTMLElement | null>(null)
-const accountToolsLayer = useOverlayLayer(() => showAccountToolsDropdown.value, { root: accountToolsMenuRef, modal: false, floor: 9999, onEscape: () => { showAccountToolsDropdown.value = false } })
-const accountToolsDropdownPosition = reactive({
-  top: null as number | null,
-  bottom: null as number | null,
-  left: 16,
-  width: 320,
-  maxHeight: 0
-})
-const accountToolsDropdownStyle = computed(() => ({
-  top: accountToolsDropdownPosition.top == null ? 'auto' : `${accountToolsDropdownPosition.top}px`,
-  bottom: accountToolsDropdownPosition.bottom == null ? 'auto' : `${accountToolsDropdownPosition.bottom}px`,
-  left: `${accountToolsDropdownPosition.left}px`,
-  width: `${accountToolsDropdownPosition.width}px`
-}))
-const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['id', 'today_stats', 'proxy', 'rate_multiplier', 'created_at', 'expires_at', 'notes']
-const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
-const ACCOUNT_COLUMN_ORDER_KEY = 'account-column-order'
-
-// Sorting settings
-// v2：默认改为最近使用倒序（2026-10-19），旧键里保存的排序一律从新默认重新开始。
+// Sorting (kept from before: last use, newest first, unless a sort was chosen)
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
-type AccountSortOrder = 'asc' | 'desc'
-type AccountSortState = {
-  sort_by: string
-  sort_order: AccountSortOrder
-}
-const ACCOUNT_SORTABLE_KEYS = new Set([
-  'id',
-  'name',
-  'status',
-  'schedulable',
-  'priority',
-  'rate_multiplier',
-  'upstream_billing_rate',
-  'last_used_at',
-  'created_at',
-  'expires_at'
-])
-const loadInitialAccountSortState = (): AccountSortState => {
-  const fallback: AccountSortState = { sort_by: 'last_used_at', sort_order: 'desc' }
+type SortOrder = 'asc' | 'desc'
+const SORTABLE_KEYS = new Set(['id', 'name', 'status', 'schedulable', 'priority', 'rate_multiplier', 'upstream_billing_rate', 'last_used_at', 'created_at', 'expires_at'])
+const loadInitialSort = (): { sort_by: string; sort_order: SortOrder } => {
+  const fallback = { sort_by: 'last_used_at', sort_order: 'desc' as SortOrder }
   try {
-    const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
-    if (!raw) return fallback
-    const parsed = JSON.parse(raw) as { key?: string; order?: string }
-    const key = typeof parsed.key === 'string' ? parsed.key : ''
-    if (!ACCOUNT_SORTABLE_KEYS.has(key)) return fallback
-    return {
-      sort_by: key,
-      sort_order: parsed.order === 'desc' ? 'desc' : 'asc'
-    }
+    const parsed = JSON.parse(localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY) ?? 'null') as { key?: string; order?: string } | null
+    if (!parsed || typeof parsed.key !== 'string' || !SORTABLE_KEYS.has(parsed.key)) return fallback
+    return { sort_by: parsed.key, sort_order: parsed.order === 'desc' ? 'desc' : 'asc' }
   } catch {
     return fallback
   }
 }
-const sortState = reactive<AccountSortState>(loadInitialAccountSortState())
+const sortState = reactive(loadInitialSort())
 
-// Auto refresh settings
-const showAutoRefreshDropdown = ref(false)
-const autoRefreshDropdownRef = ref<HTMLElement | null>(null)
-const AUTO_REFRESH_STORAGE_KEY = 'account-auto-refresh'
-const autoRefreshIntervals = [5, 10, 15, 30] as const
-const autoRefreshEnabled = ref(false)
-const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30)
-const autoRefreshCountdown = ref(0)
-const autoRefreshETag = ref<string | null>(null)
-const autoRefreshFetching = ref(false)
-const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
-const autoRefreshSilentUntil = ref(0)
-const hasPendingListSync = ref(false)
-const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
-const todayStatsLoading = ref(false)
-const todayStatsError = ref<string | null>(null)
-const todayStatsReqSeq = ref(0)
-const pendingTodayStatsRefresh = ref(false)
-const usageManualRefreshToken = ref(0)
+// ---- Filters, search and the page ----
+const filters = reactive<Required<ToolbarFilters>>({ platform: '', status: '', group: '', sched_quality: '', type: '', privacy_mode: '', iq_status: '', group_category: '' })
+const search = ref('')
+const pagination = reactive({ page: 1, page_size: getPersistedPageSize() })
+const listFilters = (): AccountListFilters => ({ ...filters, search: search.value.trim() })
 
-const desktopViewportQuery = '(min-width: 768px)'
-const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
-)
-let desktopViewportMediaQuery: MediaQueryList | null = null
-let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
-
-const usageBatchByAccountId = ref<Record<string, AccountUsageInfo | null>>({})
-const usageBatchErrorByAccountId = ref<Record<string, string | null>>({})
-const usageBatchLoadingByAccountId = ref<Record<string, boolean>>({})
-const usageBatchRequestTokenByAccountId = ref<Record<string, number>>({})
-const usageBatchCache = new Map<number, { data: AccountUsageInfo; ts: number }>()
-const USAGE_BATCH_CACHE_TTL = 5 * 60 * 1000
-const pendingUsageBatchIds = new Set<number>()
-let usageBatchFlushTimer: ReturnType<typeof setTimeout> | null = null
-let queuedUsageBatchForce = false
-let usageBatchRequestToken = 0
-
-const buildDefaultTodayStats = (): WindowStats => ({
-  requests: 0,
-  tokens: 0,
-  cost: 0,
-  standard_cost: 0,
-  user_cost: 0
+const qualityMeta = ref<{ global_enabled: boolean; stale: boolean } | null>(null)
+const live = useAccountsLiveTable({
+  page: () => ({ page: pagination.page, pageSize: pagination.page_size }),
+  filters: listFilters,
+  sort: () => ({ sort_by: sortState.sort_by, sort_order: sortState.sort_order }),
+  wants: {
+    // Managers need the summary even with the quality columns hidden: the row menu's "recover state" reads it.
+    quality: () => canManage.value || isColumnVisible('groups') || isColumnVisible('sq_recent'),
+    today: () => isColumnVisible('today_stats') || isColumnVisible('usage'),
+    balance: () => isColumnVisible('upstream_balance'),
+    usage: () => isColumnVisible('usage')
+  },
+  matches: (row) => accountMatchesFilters(row, listFilters(), { now: Date.now(), matchesCategory: groupCategories.matchesFilter, quality: row.quality }),
+  onQualityMeta: (meta) => {
+    qualityMeta.value = meta
+  }
 })
+const table = live.table
+const { rows, loading, total, pending, status: liveStatus } = table
+const accountRowClass = (row: LiveAccount) => (table.transitioning.value || table.isDimmed(row.id) ? 'opacity-60' : undefined)
+const changesText = (n: string) => t('admin.accounts.table.changes', { n })
 
-const accountSupportsBatchUsage = (account: Account) => {
-  if (account.platform === 'anthropic') {
-    return account.type === 'oauth' || account.type === 'setup-token'
-  }
-  if (account.platform === 'gemini') return true
-  if (account.platform === 'antigravity') return account.type === 'oauth'
-  if (account.platform === 'openai') return account.type === 'oauth'
-  if (account.platform === 'grok') return account.type === 'oauth'
-  return false
+const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
+const toolbarRef = ref<InstanceType<typeof AccountsToolbar> | null>(null)
+const accountTableRef = ref<HTMLElement | null>(null)
+
+const showLoadError = (error: unknown) => {
+  console.error('Failed to load accounts:', error)
+  appStore.showError(extractApiErrorMessage(error, t('common.error')))
+}
+/** Active loads that landed: a late single-row read started before one of them is dropped. */
+let loadsDone = 0
+/** An active load: rows stay on screen and are replaced in place. */
+const reload = () => table.reload().then(() => { loadsDone++ }, showLoadError)
+const applyPending = () => table.applyPending().catch(showLoadError)
+
+/** A filter change (or a search): back to the first page and the first row, then load. */
+const applyFilters = (next?: ToolbarFilters) => {
+  if (next) Object.assign(filters, next)
+  clearSelection()
+  pagination.page = 1
+  dataTableRef.value?.scrollToTop?.()
+  return reload()
+}
+const debouncedSearch = useDebounceFn(() => applyFilters(), 300)
+const onSearchInput = (value: string) => {
+  search.value = value
+  void debouncedSearch()
+}
+const handleSort = (key: string, order: SortOrder) => {
+  sortState.sort_by = key
+  sortState.sort_order = order
+  pagination.page = 1
+  void reload()
+}
+const handlePageChange = (page: number) => {
+  pagination.page = Math.max(1, Math.min(page, live.pages() || 1))
+  void reload()
+}
+const handlePageSizeChange = (size: number) => {
+  pagination.page_size = size
+  pagination.page = 1
+  void reload()
+}
+/** Sync now and re-sort by the current sort and filters; the usage windows skip their cache. */
+const handleManualRefresh = () => {
+  live.forceUsageRefresh()
+  void loadUpstreamBillingProbeGlobalState()
+  return reload()
 }
 
-const setUsageBatchLoading = (accountID: number, loadingState: boolean) => {
-  usageBatchLoadingByAccountId.value = {
-    ...usageBatchLoadingByAccountId.value,
-    [String(accountID)]: loadingState
-  }
-}
-
-const setUsageBatchState = (accountID: number, usage: AccountUsageInfo | null, error: string | null) => {
-  const key = String(accountID)
-  usageBatchByAccountId.value = {
-    ...usageBatchByAccountId.value,
-    [key]: usage
-  }
-  usageBatchErrorByAccountId.value = {
-    ...usageBatchErrorByAccountId.value,
-    [key]: error
-  }
-}
-
-const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) => {
-  if (usageBatchByAccountId.value[String(accountID)] === usage) return
-  setUsageBatchState(accountID, usage, null)
-}
-
-const flushQueuedUsageBatch = async () => {
-  usageBatchFlushTimer = null
-  const accountIDs = Array.from(pendingUsageBatchIds)
-  const force = queuedUsageBatchForce
-  pendingUsageBatchIds.clear()
-  queuedUsageBatchForce = false
-
-  if (accountIDs.length === 0) return
-
-  const requestTokensByAccount = accountIDs.reduce<Record<string, number>>((acc, accountID) => {
-    acc[String(accountID)] = usageBatchRequestTokenByAccountId.value[String(accountID)] ?? 0
-    return acc
-  }, {})
-
-  try {
-    const result = await adminAPI.accounts.getBatchUsage(accountIDs, force)
-
-    const usageMap = result.usage ?? {}
-    const errorMap = result.errors ?? {}
-    const now = Date.now()
-    const nextUsage = { ...usageBatchByAccountId.value }
-    const nextErrors = { ...usageBatchErrorByAccountId.value }
-    const nextLoading = { ...usageBatchLoadingByAccountId.value }
-
-    for (const accountID of accountIDs) {
-      const key = String(accountID)
-      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== requestTokensByAccount[key]) {
-        continue
-      }
-      const usage = usageMap[key] ?? null
-      nextUsage[key] = usage
-      nextErrors[key] = errorMap[key] ?? null
-      nextLoading[key] = false
-      if (usage) {
-        usageBatchCache.set(accountID, { data: usage, ts: now })
-      } else {
-        usageBatchCache.delete(accountID)
-      }
-    }
-
-    usageBatchByAccountId.value = nextUsage
-    usageBatchErrorByAccountId.value = nextErrors
-    usageBatchLoadingByAccountId.value = nextLoading
-  } catch (error) {
-    const nextErrors = { ...usageBatchErrorByAccountId.value }
-    const nextLoading = { ...usageBatchLoadingByAccountId.value }
-    for (const accountID of accountIDs) {
-      const key = String(accountID)
-      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== requestTokensByAccount[key]) {
-        continue
-      }
-      nextErrors[key] = 'Failed'
-      nextLoading[key] = false
-    }
-    usageBatchErrorByAccountId.value = nextErrors
-    usageBatchLoadingByAccountId.value = nextLoading
-    console.error('Failed to load account usage batch:', error)
-  }
-}
-
-const queueBatchedUsage = (account: Account, options?: { force?: boolean }) => {
-  if (!isDesktopViewport.value) return
-  if (!accountSupportsBatchUsage(account)) return
-
-  const force = options?.force === true
-  const cacheKey = account.id
-  const key = String(cacheKey)
-
-  if (force) {
-    usageBatchCache.delete(cacheKey)
-  } else {
-    const cached = usageBatchCache.get(cacheKey)
-    if (cached && Date.now() - cached.ts < USAGE_BATCH_CACHE_TTL) {
-      setUsageBatchState(cacheKey, cached.data, null)
-      setUsageBatchLoading(cacheKey, false)
-      return
-    }
-  }
-
-  usageBatchErrorByAccountId.value = {
-    ...usageBatchErrorByAccountId.value,
-    [key]: null
-  }
-  usageBatchRequestTokenByAccountId.value = {
-    ...usageBatchRequestTokenByAccountId.value,
-    [key]: ++usageBatchRequestToken
-  }
-  setUsageBatchLoading(cacheKey, true)
-  pendingUsageBatchIds.add(cacheKey)
-  queuedUsageBatchForce = queuedUsageBatchForce || force
-
-  if (usageBatchFlushTimer !== null) return
-  usageBatchFlushTimer = setTimeout(() => {
-    void flushQueuedUsageBatch()
-  }, 0)
-}
-
-const refreshTodayStatsBatch = async () => {
-  // Why this checks both columns:
-  // - today_stats column shows dedicated today's metrics.
-  // - usage column also embeds today's stats for Key/Bedrock rows.
-  // So we only skip fetching when BOTH columns are hidden.
-  if (hiddenColumns.has('today_stats') && hiddenColumns.has('usage')) {
-    todayStatsLoading.value = false
-    todayStatsError.value = null
-    return
-  }
-
-  const accountIDs = accounts.value.map(account => account.id)
-  const reqSeq = ++todayStatsReqSeq.value
-  if (accountIDs.length === 0) {
-    todayStatsByAccountId.value = {}
-    todayStatsError.value = null
-    todayStatsLoading.value = false
-    return
-  }
-
-  todayStatsLoading.value = true
-  todayStatsError.value = null
-
-  try {
-    const result = await adminAPI.accounts.getBatchTodayStats(accountIDs)
-    if (reqSeq !== todayStatsReqSeq.value) return
-    const serverStats = result.stats ?? {}
-    const nextStats: Record<string, WindowStats> = {}
-    for (const accountID of accountIDs) {
-      const key = String(accountID)
-      nextStats[key] = serverStats[key] ?? buildDefaultTodayStats()
-    }
-    todayStatsByAccountId.value = nextStats
-  } catch (error) {
-    if (reqSeq !== todayStatsReqSeq.value) return
-    todayStatsError.value = 'Failed'
-    console.error('Failed to load account today stats:', error)
-  } finally {
-    if (reqSeq === todayStatsReqSeq.value) {
-      todayStatsLoading.value = false
-    }
-  }
-}
-
-const autoRefreshIntervalLabel = (sec: number) => {
-  if (sec === 5) return t('admin.accounts.refreshInterval5s')
-  if (sec === 10) return t('admin.accounts.refreshInterval10s')
-  if (sec === 15) return t('admin.accounts.refreshInterval15s')
-  if (sec === 30) return t('admin.accounts.refreshInterval30s')
-  return `${sec}s`
-}
-
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as string[]
-      parsed.forEach(key => {
-        hiddenColumns.add(key)
-      })
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach(key => {
-        hiddenColumns.add(key)
-      })
-    }
-  } catch (e) {
-    console.error('Failed to load saved columns:', e)
-    DEFAULT_HIDDEN_COLUMNS.forEach(key => {
-      hiddenColumns.add(key)
-    })
-  }
-}
-
-const saveColumnsToStorage = () => {
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-  } catch (e) {
-    console.error('Failed to save columns:', e)
-  }
-}
-
-const loadSavedAutoRefresh = () => {
-  try {
-    const saved = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY)
-    if (!saved) return
-    const parsed = JSON.parse(saved) as { enabled?: boolean; interval_seconds?: number }
-    autoRefreshEnabled.value = parsed.enabled === true
-    const interval = Number(parsed.interval_seconds)
-    if (autoRefreshIntervals.includes(interval as any)) {
-      autoRefreshIntervalSeconds.value = interval as any
-    }
-  } catch (e) {
-    console.error('Failed to load saved auto refresh settings:', e)
-  }
-}
-
-const saveAutoRefreshToStorage = () => {
-  try {
-    localStorage.setItem(
-      AUTO_REFRESH_STORAGE_KEY,
-      JSON.stringify({
-        enabled: autoRefreshEnabled.value,
-        interval_seconds: autoRefreshIntervalSeconds.value
-      })
-    )
-  } catch (e) {
-    console.error('Failed to save auto refresh settings:', e)
-  }
-}
-
-if (typeof window !== 'undefined') {
-  loadSavedColumns()
-  loadSavedAutoRefresh()
-}
-
-const setAutoRefreshEnabled = (enabled: boolean) => {
-  autoRefreshEnabled.value = enabled
-  saveAutoRefreshToStorage()
-  if (enabled) {
-    autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-    resumeAutoRefresh()
-  } else {
-    pauseAutoRefresh()
-    autoRefreshCountdown.value = 0
-  }
-}
-
-const setAutoRefreshInterval = (seconds: (typeof autoRefreshIntervals)[number]) => {
-  autoRefreshIntervalSeconds.value = seconds
-  saveAutoRefreshToStorage()
-  if (autoRefreshEnabled.value) {
-    autoRefreshCountdown.value = seconds
-  }
-}
-
+// ---- Columns ----
+const allColumns = computed(() => [
+  { key: 'select', label: '', sortable: false },
+  { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+  { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+  { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
+  { key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false },
+  { key: 'sq_recent', label: t('admin.schedQuality.list.recent'), sortable: false },
+  { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false },
+  { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+  { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
+  { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
+  { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
+  { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
+  { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
+  { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false },
+  { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
+  { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
+  { key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false },
+  { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
+  { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
+  { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
+  { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
+  { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
+].map((column) => ({ ...column, class: `acol acol-${column.key}`, headerClass: `acol acol-${column.key}` })))
+const PINNED = new Set(['select', 'name', 'actions'])
+const toggleableColumns = computed(() => allColumns.value.filter((column) => !PINNED.has(column.key)))
+const toggleableColumnKeys = computed(() => toggleableColumns.value.map((column) => column.key))
+const { orderedKeys: columnOrder, isCustomized: columnOrderCustomized, setOrder: setColumnOrder, resetOrder: resetColumnOrder } = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)
+const orderedToggleableColumns = computed(() => {
+  const byKey = new Map(toggleableColumns.value.map((column) => [column.key, column]))
+  return columnOrder.value.flatMap((key) => byKey.get(key) ?? [])
+})
+const columnsAtDefault = computed(() =>
+  !columnOrderCustomized.value && toggleableColumnKeys.value.every((key) => hiddenColumns.has(key) === DEFAULT_HIDDEN_COLUMNS.includes(key))
+)
+const cols = computed(() => {
+  const pinned = (key: string) => allColumns.value.filter((column) => column.key === key)
+  return [...pinned('select'), ...pinned('name'), ...orderedToggleableColumns.value.filter((column) => !hiddenColumns.has(column.key)), ...pinned('actions')]
+})
+// A column that loads its own data asks for it once it is shown again.
+const COLUMN_SOURCES: Record<string, string> = { groups: 'quality', sq_recent: 'quality', today_stats: 'today', usage: 'usage', upstream_balance: 'balance' }
 const toggleColumn = (key: string) => {
   const wasHidden = hiddenColumns.has(key)
-  if (hiddenColumns.has(key)) {
-    hiddenColumns.delete(key)
-  } else {
-    hiddenColumns.add(key)
+  if (wasHidden) hiddenColumns.delete(key)
+  else hiddenColumns.add(key)
+  saveColumns()
+  if (wasHidden && COLUMN_SOURCES[key]) void table.refresh(COLUMN_SOURCES[key])
+}
+const resetColumns = () => {
+  const shown = toggleableColumnKeys.value.filter((key) => hiddenColumns.has(key) && !DEFAULT_HIDDEN_COLUMNS.includes(key))
+  resetColumnOrder()
+  hiddenColumns.clear()
+  DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
+  try {
+    localStorage.removeItem(HIDDEN_COLUMNS_KEY)
+  } catch (error) {
+    console.error('Failed to reset columns:', error)
   }
-  saveColumnsToStorage()
-  if (wasHidden) refreshShownColumns([key])
-  else if (key === 'sq_recent') recentStats.cancel()
+  new Set(shown.flatMap((key) => COLUMN_SOURCES[key] ?? [])).forEach((name) => void table.refresh(name))
 }
 
-// Columns that load their own data fetch it once they are shown again.
-const refreshShownColumns = (keys: string[]) => {
-  if (keys.includes('sq_recent')) refreshRecentStats()
-  if (keys.includes('sq_groups')) refreshSchedSummary()
-  if (keys.includes('today_stats') || keys.includes('usage')) {
-    refreshTodayStatsBatch().catch((error) => {
-      console.error('Failed to load account today stats after showing column:', error)
-    })
-  }
-  if (keys.includes('upstream_balance')) void refreshUpstreamBalances()
+// Column widths (prototype): fixed widths in two sizes; from 1440 the ten default columns fit with no sideways scroll.
+// Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
+const COLUMN_WIDTHS: Record<string, [number, number]> = {
+  select: [36, 40], status: [116, 136], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
+  capacity: [120, 140], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
+  platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
+  upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
-
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-
-const {
-  items: accounts,
-  loading,
-  params,
-  pagination,
-  load: baseLoad,
-  reload: baseReload,
-  debouncedReload: baseDebouncedReload,
-  handlePageChange: baseHandlePageChange,
-  handlePageSizeChange: baseHandlePageSizeChange
-} = useTableLoader<AccountListItem, any>({
-  fetchFn: async (...args: Parameters<typeof adminAPI.accounts.list>): ReturnType<typeof adminAPI.accounts.list> => {
-    const version = schedulingMutationVersion
-    const result = await adminAPI.accounts.list(...args)
-    return { ...result, items: result.items.map(account => {
-      const pending = pendingSchedulable.get(account.id)
-      if (pending !== undefined) return { ...account, schedulable: pending }
-      const update = confirmedSchedulingUpdates.get(account.id)
-      return update && update.version > version ? { ...account, schedulable: update.schedulable } : account
-    }) }
-  },
-  initialParams: {
-    platform: '',
-    type: '',
-    status: '',
-    privacy_mode: '',
-    iq_status: '',
-    group: '',
-    group_category: '',
-    search: '',
-    lite: '1',
-    sort_by: sortState.sort_by,
-    sort_order: sortState.sort_order
-  }
+const NAME_MIN = 140
+const NAME_MAX = 300
+const tableWidth = ref(0)
+useResizeObserver(accountTableRef, (entries) => {
+  tableWidth.value = entries[0]?.contentRect.width ?? 0
+})
+const columnLayout = computed(() => {
+  const keys = cols.value.map((column) => column.key).filter((key) => key !== 'name')
+  const sum = (size: 0 | 1) => keys.reduce((total, key) => total + (COLUMN_WIDTHS[key]?.[size] ?? 120), 0)
+  const roomy = tableWidth.value >= sum(1) + NAME_MAX
+  const size = roomy ? 1 : 0
+  const share = Math.max(0, (tableWidth.value - 2 - sum(size) - NAME_MAX) / keys.length)
+  const vars: Record<string, string> = { '--acc-share': `${share}px`, '--acc-min': `${sum(size) + NAME_MIN}px` }
+  for (const key of keys) vars[`--acc-w-${key}`] = `${COLUMN_WIDTHS[key]?.[size] ?? 120}px`
+  return { roomy, vars }
 })
 
-const {
-  selectedSet,
-  selectedIds: selIds,
-  allVisibleSelected,
-  isSelected,
-  setSelectedIds,
-  select,
-  deselect,
-  toggle: toggleSel,
-  clear: clearSelectedIds,
-  removeMany: removeSelectedAccounts,
-  toggleVisible,
-  selectVisible: selectCurrentPage,
-  batchUpdate
-} = useTableSelection<AccountListItem>({
-  rows: accounts,
-  getId: (account) => account.id
-})
-
+// ---- Selection ----
+const { selectedSet, selectedIds: selIds, allVisibleSelected, isSelected, setSelectedIds, select, deselect, toggle: toggleSel, clear: clearSelectedIds, removeMany: removeSelectedAccounts, toggleVisible, selectVisible: selectCurrentPage, batchUpdate } =
+  useTableSelection<LiveAccount>({ rows, getId: (account) => account.id })
 const selectingAllResults = ref(false)
 const selectedAllResultIDs = ref<Set<number> | null>(null)
-const selectionRequestVersion = ref(0)
+let selectionRequestVersion = 0
 const allResultsSelected = computed(() => {
   const snapshot = selectedAllResultIDs.value
   if (!snapshot || snapshot.size === 0 || snapshot.size !== selectedSet.value.size) return false
-  return Array.from(snapshot).every(id => selectedSet.value.has(id))
+  return Array.from(snapshot).every((id) => selectedSet.value.has(id))
 })
-
 const clearSelection = () => {
-  selectionRequestVersion.value++
+  selectionRequestVersion++
   selectingAllResults.value = false
   selectedAllResultIDs.value = null
   clearSelectedIds()
 }
-
-const selectPage = () => {
-  selectCurrentPage()
-}
-
-const swipeVirtualContext: SwipeSelectVirtualContext = {
-  getVirtualizer: () => dataTableRef.value?.virtualizer ?? null,
-  getSortedData: () => dataTableRef.value?.sortedData ?? accounts.value,
-  getRowId: (row: any) => row.id,
-}
-
-useSwipeSelect(accountTableRef, {
-  isSelected,
-  select: (id) => { if (canManage.value) select(id) },
-  deselect: (id) => { if (canManage.value) deselect(id) },
-  batchUpdate: (updater) => { if (canManage.value) batchUpdate(updater) }
-}, swipeVirtualContext)
-
-const resetAutoRefreshCache = () => {
-  autoRefreshETag.value = null
-  upstreamBillingRateETag.value = null
-}
-
-type AccountLoadOptions = {
-  refreshTodayStats?: boolean
-  /** After a recovery: the summary refreshes even with a layer open, and the load waits for it. */
-  forceSummary?: boolean
-}
-
-const load = async (options: AccountLoadOptions = {}) => {
-  const requestParams = params as any
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = false
-  requestParams.lite = '1'
-  await baseLoad()
-  const summary = refreshSchedSummary({ force: options.forceSummary })
-  refreshRecentStats()
-  if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
-  if (options.forceSummary) await summary
-}
-
-const reload = async () => {
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = false
-  await baseReload()
-  refreshSchedSummary()
-  refreshRecentStats()
-  await refreshTodayStatsBatch()
-}
-
-const buildUpstreamBillingRateFilters = () => {
-  const rawParams = toRaw(params) as Record<string, unknown>
-  return {
-    platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
-    type: typeof rawParams.type === 'string' ? rawParams.type : '',
-    status: typeof rawParams.status === 'string' ? rawParams.status : '',
-    group: typeof rawParams.group === 'string' ? rawParams.group : '',
-    search: typeof rawParams.search === 'string' ? rawParams.search : '',
-    privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
-    iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
-    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
-    group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
-    sort_by: sortState.sort_by,
-    sort_order: sortState.sort_order
-  }
-}
-
-const sameAccountIDOrder = (left: number[], right: number[]) =>
-  left.length === right.length && left.every((id, index) => id === right[index])
-
-const upstreamBillingRateContextKey = () => JSON.stringify({
-  page: pagination.page,
-  pageSize: pagination.page_size,
-  filters: buildUpstreamBillingRateFilters()
-})
-
-const applyUpstreamBillingRateSnapshots = async (
-  result: NonNullable<Awaited<ReturnType<typeof adminAPI.accounts.getUpstreamBillingRatesWithEtag>>['data']>
-) => {
-  const nextIDs = result.items.map(item => item.account_id)
-  const currentIDs = accounts.value.map(account => account.id)
-
-  // The compact response cannot fill a row that crossed a page boundary.
-  // Only that case needs the expensive, full account-list request.
-  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
-    try {
-      await load({ refreshTodayStats: false })
-    } catch (error) {
-      console.error('Failed to reconcile upstream billing sort:', error)
-    }
-    return
-  }
-
-  const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
-  let changed = false
-  const nextAccounts = accounts.value.map(account => {
-    const item = itemsByID.get(account.id)
-    if (!item) return account
-    const nextSnapshot = item.snapshot ?? null
-    const previousSnapshot = account.extra?.upstream_billing_probe ?? null
-    if (JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot)) return account
-
-    const nextExtra = { ...(account.extra ?? {}) }
-    if (nextSnapshot) nextExtra.upstream_billing_probe = nextSnapshot
-    else delete nextExtra.upstream_billing_probe
-    const nextAccount = {
-      ...account,
-      ...(typeof nextSnapshot?.synced_rate_multiplier === 'number'
-        ? { rate_multiplier: nextSnapshot.synced_rate_multiplier }
-        : {}),
-      extra: nextExtra
-    }
-    syncAccountRefs(nextAccount)
-    changed = true
-    return nextAccount
-  })
-
-  if (changed) {
-    accounts.value = nextAccounts
-    upstreamBillingNow.value = Date.now()
-  }
-}
-
-const refreshUpstreamBillingRates = async (force = false) => {
-  if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
-  if (!force && (
-    probingUpstreamBilling.size > 0 ||
-    isAnyModalOpen.value ||
-    menu.show ||
-    showAccountToolsDropdown.value ||
-    showAutoRefreshDropdown.value ||
-    (typeof document !== 'undefined' && document.hidden)
-  )) return
-
-  const controller = new AbortController()
-  upstreamBillingRateAbortController = controller
-  upstreamBillingRateRefreshing.value = true
-  try {
-    const requestContextKey = upstreamBillingRateContextKey()
-    const result = await adminAPI.accounts.getUpstreamBillingRatesWithEtag(
-      pagination.page,
-      pagination.page_size,
-      buildUpstreamBillingRateFilters(),
-      { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
-    )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
-    if (result.etag) upstreamBillingRateETag.value = result.etag
-    if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
-  } catch (error) {
-    const refreshError = error as { name?: string; code?: string }
-    if (refreshError.name !== 'AbortError' && refreshError.name !== 'CanceledError' && refreshError.code !== 'ERR_CANCELED') {
-      console.error('Failed to refresh upstream billing rates:', error)
-    }
-  } finally {
-    if (upstreamBillingRateAbortController === controller) upstreamBillingRateAbortController = null
-    upstreamBillingRateRefreshing.value = false
-  }
-}
-
-const refreshUpstreamBillingSortedList = async (force = false) => {
-  if (!force && sortState.sort_by !== 'upstream_billing_rate') return
-  await refreshUpstreamBillingRates(force)
-}
-
-useIntervalFn(() => { void refreshUpstreamBillingRates() }, 5 * 60_000, { immediate: false })
-
-const debouncedReload = () => {
-  clearSelection()
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = true
-  baseDebouncedReload()
-}
-
-const handlePageChange = (page: number) => {
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = true
-  baseHandlePageChange(page)
-}
-
-const handlePageSizeChange = (size: number) => {
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = true
-  baseHandlePageSizeChange(size)
-}
-
-const handleSort = (key: string, order: AccountSortOrder) => {
-  sortState.sort_by = key
-  sortState.sort_order = order
-  const requestParams = params as any
-  requestParams.sort_by = key
-  requestParams.sort_order = order
-  pagination.page = 1
-  hasPendingListSync.value = false
-  resetAutoRefreshCache()
-  pendingTodayStatsRefresh.value = true
-  load()
-}
-
-watch(loading, (isLoading, wasLoading) => {
-  if (wasLoading && !isLoading) {
-    upstreamBillingNow.value = Date.now()
-  }
-  if (wasLoading && !isLoading && pendingTodayStatsRefresh.value) {
-    pendingTodayStatsRefresh.value = false
-    refreshSchedSummary()
-    refreshRecentStats()
-    refreshTodayStatsBatch().catch((error) => {
-      console.error('Failed to refresh account today stats after table load:', error)
-    })
-  }
-})
-
-watch(accounts, (rows) => {
-  const visibleIDs = new Set(rows.map((row) => String(row.id)))
-  usageBatchByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchErrorByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchErrorByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchLoadingByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchLoadingByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchRequestTokenByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchRequestTokenByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-})
-
-// ---- Quality scheduling: the groups column, the drawer and batches (design spec A, contract delta D, F).
-const { drawer: sqDrawer, board: sqBoard } = useSchedLayers()
-const sqBatch = reactive<{ action: SchedBatchAction | null; accounts: Array<{ id: number; name: string }>; anchor: HTMLElement | null }>({
-  action: null,
-  accounts: [],
-  anchor: null
-})
-const sqLayersOpen = computed(() =>
-  sqDrawer.accountId !== null || sqBoard.groupId !== null || sqBatch.action !== null
-)
-// Refreshed with the list; skipped while the page is hidden or a dialog / the drawer is open (spec A.6). Managers
-// get it even with the groups column hidden: the row menu decides "recover state" from it (contract delta F1).
-const sqSummary = useSchedQualitySummary(() => isAnyModalOpen.value)
-// `force` also refreshes with a layer open (after a recovery); the promise settles when the summary is in.
-const refreshSchedSummary = (options: { force?: boolean } = {}) =>
-  canManage.value || !hiddenColumns.has('sq_groups') ? sqSummary.refresh(accounts.value.map(account => account.id), options) : Promise.resolve()
-// With the quality filter on, an override or membership change can move a row out of the result (contract delta
-// D2): closing the drawer, a quality layer or the groups dialog reloads the list, not only the summary.
-watch(sqLayersOpen, (open) => {
-  if (open) return
-  if (params.sched_quality) void load()
-  else refreshSchedSummary()
-})
-watch(() => groupsDialogAccount.value !== null, (open) => { if (!open && params.sched_quality) void load() })
-const sqLoading = (id: number) => sqSummary.state.value === 'loading' && !sqSummary.byAccount.value.has(id)
-const sqGroupName = (id: number) => groupsByID.value.get(id)?.name ?? `#${id}`
-const sqOpenAIGroups = computed(() => groups.value.filter(group => group.platform === 'openai').map(group => ({ id: group.id, name: group.name })))
-
-// A capsule gets its one-time emphasis only when a row already on screen newly shows it on refresh (spec F.3).
-const sqFresh = shallowRef(new Set<string>())
-let sqSeen = new Set<string>()
-let sqShownAccounts = new Set<number>()
-watch(sqSummary.byAccount, (map) => {
-  const keys = new Set<string>()
-  const fresh = new Set<string>()
-  for (const summary of map.values()) {
-    for (const item of summary.cooling) {
-      const key = `${summary.account_id}:${item.group_id}:${item.testing ? 'testing' : 'cooling'}`
-      keys.add(key)
-      if (sqShownAccounts.has(summary.account_id) && !sqSeen.has(key)) fresh.add(key)
-    }
-  }
-  sqSeen = keys
-  sqShownAccounts = new Set(map.keys())
-  sqFresh.value = fresh
-  if (fresh.size) setTimeout(() => { if (sqFresh.value === fresh) sqFresh.value = new Set() }, 1000)
-})
-
-// Capsules open the drawer on their own model and group.
-const openSchedFromGroups = (row: AccountListItem, target: { model: string | null; groupId?: number; toGroups?: boolean }) =>
-  openSchedDrawer({ id: row.id, name: row.name }, { model: target.model, groupId: target.groupId ?? null, toGroups: target.toGroups })
-
-// ---- 近期状况 (contract delta C4): the page's accounts, after the list; not requested while the column is hidden.
-const recentStats = useAccountRecentStats()
-const refreshRecentStats = () => {
-  if (!hiddenColumns.has('sq_recent')) void recentStats.refresh(accounts.value.map(account => account.id))
-}
-const canViewUsage = computed(() => adminAccess.can('usage:view'))
-
-// One batch at a time: a closed batch is busy until the answers still on their way are in.
-const sqBatchBusy = ref(false)
-const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
-  if (sqBatchBusy.value || sqBatch.action !== null) return
-  const names = new Map(accounts.value.map(account => [account.id, account.name]))
-  sqBatch.accounts = selIds.value.map(id => ({ id, name: names.get(id) ?? `#${id}` }))
-  sqBatch.anchor = anchor
-  sqBatch.action = action
-}
-
-// "Recover state" (contract delta F): the row menu, the drawer and the temporary-pause dialog run it at once; the
-// batch confirms the count first. After a recovery the row is read again from the server (nothing is patched from the
-// reset result) and the summary is refreshed, even with the drawer open; under the quality filter, and after a batch,
-// the list is loaded again instead. The recovery lock holds until these are in.
-const { recover: recoverAccount, recoverMany, batchRunning: recoveryBatchRunning } = useAccountRecovery()
-const menuRecoverable = (a: Account | null) => !!a && canRecover(a, sqSummary.byAccount.value.get(a.id), Date.now())
-// A list load or row update that landed meanwhile replaced the row object and wins over this late read.
-const rereadAfterRecover = async (id: number) => {
-  const before = accounts.value.find(account => account.id === id)
-  try {
-    const fresh = await adminAPI.accounts.getById(id)
-    if (accounts.value.find(account => account.id === id) === before) patchAccountInList(fresh)
-  } catch (error) {
-    console.error('Failed to reload account after recovery:', error)
-  }
-}
-// One list load with one summary request, refreshed even with the drawer open.
-const reloadAfterRecover = () => load({ forceSummary: true })
-const refreshAfterRecover = async (id: number) => {
-  if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
-  enterAutoRefreshSilentWindow()
-  if (params.sched_quality) await reloadAfterRecover()
-  else await Promise.all([rereadAfterRecover(id), refreshSchedSummary({ force: true })])
-}
-const recoverOne = (a: Account) => recoverAccount({ id: a.id, name: a.name }, () => refreshAfterRecover(a.id))
-// Recovered accounts leave the selection; failed and not-run ones stay for a retry.
-const handleBatchRecover = async (ids: number[]) => {
-  const { recovered } = await recoverMany(ids, reloadAfterRecover)
-  removeSelectedAccounts(recovered)
-}
-const openIqRecordsById = async (id: number) => {
-  const account = await loadAccountDetails({ id })
-  if (account) iqRecordsAccount.value = account
-}
-const openEditById = (id: number) => handleEdit({ id } as AccountListItem)
-
-const isAnyModalOpen = computed(() => {
-  return (
-    showCreate.value ||
-    showEdit.value ||
-    showSync.value ||
-    showImportData.value ||
-    showOpenAILogin.value ||
-    openAITotpAccount.value !== null ||
-    showExportDataDialog.value ||
-    showBulkEdit.value ||
-    showTempUnsched.value ||
-    showDeleteDialog.value ||
-    showReAuth.value ||
-    showTest.value ||
-    showStats.value ||
-    showSchedulePanel.value ||
-    showErrorPassthrough.value ||
-    groupsDialogAccount.value !== null ||
-    showTLSFingerprintProfiles.value ||
-    sqLayersOpen.value
-  )
-})
-
-// 上游余额列（xy-upstream-balance）：每 30 秒读一次后端缓存（后端每分钟采集），只请求当前页账号；
-// 与“自动刷新”互不相关。弹窗打开、页面隐藏或该列隐藏时不请求；菜单打开时只跳过定时轮询。
-const UPSTREAM_BALANCE_POLL_MS = 30_000
-// 后端单次最多接受 200 个 id，超出返回 400。
-const UPSTREAM_BALANCE_MAX_IDS = 200
-const upstreamBalanceByAccountId = ref<Record<string, UpstreamBalanceItem>>({})
-// 本机时钟与服务端的偏差，按每次成功响应的 server_time 校正；单元格的“现在”= Date.now() + 偏差。
-let upstreamBalanceClockOffsetMs = 0
-const upstreamBalanceNow = ref(Date.now())
-// 请求代次：新请求、账号增删改、卸载都会 +1，旧代次的响应一律丢弃。
-let upstreamBalanceReqSeq = 0
-let upstreamBalanceAbortController: AbortController | null = null
-// 每个账号行的“身份版本”：取决定后端余额指纹的配置字段（平台、类型、代理、脱敏后的凭据与 has_* 标记）。
-// 不用 updated_at：网关每 10 秒回写最近使用时间时也会刷新它。别处改了地址、代理等配置时行被原位替换、
-// id 集合不变，只能靠版本变化发现。列表看不到的密钥轮换由后端指纹在下一次轮询内隐藏旧值。
-let upstreamBalanceRowVersions = new Map<number, string>()
-let upstreamBalanceIdKeySeen = ''
-// 403 后停止余额请求：只在页面重新挂载，或权限刷新后仍有 accounts:view 时恢复（普通管理员被撤权时只有一次 403）。
-let upstreamBalanceForbidden = false
-const isForbiddenError = (error: unknown) => (error as { status?: number } | null)?.status === 403
-watch(() => adminAccess.version, () => {
-  if (adminAccess.can('accounts:view')) upstreamBalanceForbidden = false
-})
-const stableStringify = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  if (value && typeof value === 'object') {
-    const entries = Object.keys(value as Record<string, unknown>)
-      .sort()
-      .map(key => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`)
-    return `{${entries.join(',')}}`
-  }
-  return JSON.stringify(value ?? null)
-}
-const upstreamBalanceRowVersion = (account: Pick<Account, 'platform' | 'type' | 'proxy_id' | 'credentials' | 'credentials_status'>) =>
-  stableStringify([account.platform, account.type, account.proxy_id ?? null, account.credentials ?? null, account.credentials_status ?? null])
-const upstreamBalanceIdKey = (rows: Array<{ id: number }>) => rows.map(row => row.id).sort((a, b) => a - b).join(',')
-
-const tickUpstreamBalanceNow = () => {
-  upstreamBalanceNow.value = Date.now() + upstreamBalanceClockOffsetMs
-}
-
-const isAbortLikeError = (error: unknown) => {
-  const refreshError = error as { name?: string; code?: string } | null
-  return refreshError?.name === 'AbortError' || refreshError?.name === 'CanceledError' || refreshError?.code === 'ERR_CANCELED'
-}
-
-const abortUpstreamBalanceRequests = () => {
-  upstreamBalanceReqSeq += 1
-  upstreamBalanceAbortController?.abort()
-  upstreamBalanceAbortController = null
-}
-
-// 账号创建、修改、删除后：作废进行中的请求，并丢掉这些账号的缓存值，避免旧身份的余额在新配置下闪回。
-const invalidateUpstreamBalances = (accountIDs: number[] = []) => {
-  abortUpstreamBalanceRequests()
-  if (accountIDs.length === 0) return
-  const next = { ...upstreamBalanceByAccountId.value }
-  for (const id of accountIDs) delete next[String(id)]
-  upstreamBalanceByAccountId.value = next
-}
-
-const refreshUpstreamBalances = async () => {
-  if (upstreamBalanceForbidden) return
-  if (hiddenColumns.has('upstream_balance') || isAnyModalOpen.value) return
-  if (typeof document !== 'undefined' && document.hidden) return
-  const accountIDs = accounts.value.map(account => account.id)
-  abortUpstreamBalanceRequests()
-  const reqSeq = upstreamBalanceReqSeq
-  if (accountIDs.length === 0) {
-    upstreamBalanceByAccountId.value = {}
-    return
-  }
-  const controller = new AbortController()
-  upstreamBalanceAbortController = controller
-  try {
-    // 后端单次最多 200 个 id：按页内顺序分片并行请求，再按 account_id 合并。
-    const chunks: number[][] = []
-    for (let i = 0; i < accountIDs.length; i += UPSTREAM_BALANCE_MAX_IDS) {
-      chunks.push(accountIDs.slice(i, i + UPSTREAM_BALANCE_MAX_IDS))
-    }
-    // 时钟偏差按每个分片响应到达的那一刻计算，取最后到达的一个；慢分片不会拿别的分片的 server_time 去比。
-    let clockOffsetSample: number | null = null
-    const results = await Promise.allSettled(
-      chunks.map(async (chunk) => {
-        const result = await adminAPI.accounts.getUpstreamBalances(chunk, { signal: controller.signal })
-        const serverMs = Date.parse(result?.server_time ?? '')
-        if (Number.isFinite(serverMs)) clockOffsetSample = serverMs - Date.now()
-        return result
-      })
-    )
-    if (reqSeq !== upstreamBalanceReqSeq) return
-    if (clockOffsetSample !== null) upstreamBalanceClockOffsetMs = clockOffsetSample
-    const previous = upstreamBalanceByAccountId.value
-    const next: Record<string, UpstreamBalanceItem> = {}
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        for (const item of result.value?.items ?? []) next[String(item.account_id)] = item
-        return
-      }
-      if (isForbiddenError(result.reason)) upstreamBalanceForbidden = true
-      // 失败的分片保留这些账号上一次的值（配置变了的账号在发现时已删掉，不会被带回来）。
-      for (const id of chunks[index]) {
-        const key = String(id)
-        if (previous[key]) next[key] = previous[key]
-      }
-      if (!isAbortLikeError(result.reason)) {
-        console.error('Failed to load upstream balances:', result.reason)
-      }
-    })
-    upstreamBalanceByAccountId.value = next
-    tickUpstreamBalanceNow()
-  } catch (error) {
-    if (isForbiddenError(error)) upstreamBalanceForbidden = true
-    if (reqSeq !== upstreamBalanceReqSeq) return
-    if (!isAbortLikeError(error)) console.error('Failed to load upstream balances:', error)
-  } finally {
-    if (upstreamBalanceAbortController === controller) upstreamBalanceAbortController = null
-  }
-}
-
-const pollUpstreamBalances = () => {
-  tickUpstreamBalanceNow()
-  if (loading.value) return
-  if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
-  void refreshUpstreamBalances()
-}
-useIntervalFn(pollUpstreamBalances, UPSTREAM_BALANCE_POLL_MS)
-
-// 当前页账号变化时只用这一个监听，一次变化最多发一次请求：
-// - 切页、改每页条数、筛选或增删行使 id 集合变化（只是重新排序不算）；
-// - 同一批账号里有行的身份版本变了（自动刷新、重载或别的管理员改了配置）：先删掉这些账号的旧值，
-//   请求返回前显示 —，重查失败也不会把旧值带回来。
-// 运行时字段（并发数、会话数、最近使用时间、updated_at）的变化不会多发请求。
-watch(accounts, (rows) => {
-  const idKey = upstreamBalanceIdKey(rows)
-  const idChanged = idKey !== upstreamBalanceIdKeySeen
-  upstreamBalanceIdKeySeen = idKey
-  const versions = new Map<number, string>()
-  const changedIDs: number[] = []
-  for (const row of rows) {
-    const version = upstreamBalanceRowVersion(row)
-    const known = upstreamBalanceRowVersions.get(row.id)
-    if (known !== undefined && known !== version) changedIDs.push(row.id)
-    versions.set(row.id, version)
-  }
-  upstreamBalanceRowVersions = versions
-  if (changedIDs.length > 0) invalidateUpstreamBalances(changedIDs)
-  else if (idChanged) abortUpstreamBalanceRequests()
-  if (idChanged || changedIDs.length > 0) void refreshUpstreamBalances()
-})
-const invalidateCurrentPageUpstreamBalances = () => {
-  invalidateUpstreamBalances(accounts.value.map(account => account.id))
-}
-// 弹窗关闭后立即补一次（弹窗打开期间轮询被跳过）。
-watch(isAnyModalOpen, (open, wasOpen) => {
-  if (wasOpen && !open) void refreshUpstreamBalances()
-})
-// 页面重新可见时立即补一次。
-useEventListener(document, 'visibilitychange', () => {
-  if (!document.hidden) void refreshUpstreamBalances()
-})
-
-const enterAutoRefreshSilentWindow = () => {
-  autoRefreshSilentUntil.value = Date.now() + AUTO_REFRESH_SILENT_WINDOW_MS
-  autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-}
-
-const inAutoRefreshSilentWindow = () => {
-  return Date.now() < autoRefreshSilentUntil.value
-}
-
-const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
-  return (
-    current.updated_at !== next.updated_at ||
-    current.current_concurrency !== next.current_concurrency ||
-    current.current_group_concurrency !== next.current_group_concurrency ||
-    current.current_window_cost !== next.current_window_cost ||
-    current.active_sessions !== next.active_sessions ||
-    current.schedulable !== next.schedulable ||
-    current.rate_multiplier !== next.rate_multiplier ||
-    current.status !== next.status ||
-    current.rate_limit_reset_at !== next.rate_limit_reset_at ||
-    current.overload_until !== next.overload_until ||
-    current.temp_unschedulable_until !== next.temp_unschedulable_until ||
-    buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next) ||
-    buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next)
-  )
-}
-
-const syncAccountRefs = (nextAccount: Account) => {
-  if (edAcc.value?.id === nextAccount.id) edAcc.value = nextAccount
-  if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
-  if (tempUnschedAcc.value?.id === nextAccount.id) tempUnschedAcc.value = nextAccount
-  if (deletingAcc.value?.id === nextAccount.id) deletingAcc.value = nextAccount
-  if (menu.acc?.id === nextAccount.id) menu.acc = nextAccount
-}
-
-const mergeAccountsIncrementally = (nextRows: Account[]) => {
-  const currentRows = accounts.value
-  const currentByID = new Map(currentRows.map(row => [row.id, row]))
-  let changed = nextRows.length !== currentRows.length
-  const mergedRows = nextRows.map((nextRow) => {
-    const currentRow = currentByID.get(nextRow.id)
-    if (!currentRow) {
-      changed = true
-      return nextRow
-    }
-    if (shouldReplaceAutoRefreshRow(currentRow, nextRow)) {
-      changed = true
-      syncAccountRefs(nextRow)
-      return nextRow
-    }
-    return currentRow
-  })
-  if (!changed) {
-    for (let i = 0; i < mergedRows.length; i += 1) {
-      if (mergedRows[i].id !== currentRows[i]?.id) {
-        changed = true
-        break
-      }
-    }
-  }
-  if (changed) {
-    accounts.value = mergedRows
-  }
-}
-
-const refreshAccountsIncrementally = async () => {
-  if (autoRefreshFetching.value) return
-  autoRefreshFetching.value = true
-  const schedulingVersion = schedulingMutationVersion
-  try {
-    const result = await adminAPI.accounts.listWithEtag(
-      pagination.page,
-      pagination.page_size,
-      toRaw(params) as {
-        platform?: string
-        type?: string
-        status?: string
-        privacy_mode?: string
-        group?: string
-        search?: string
-        sort_by?: string
-        sort_order?: AccountSortOrder
-
-      },
-      { etag: autoRefreshETag.value }
-    )
-
-    if (schedulingVersion !== schedulingMutationVersion || togglingSchedulable.value.size > 0) return
-    if (result.etag) {
-      autoRefreshETag.value = result.etag
-    }
-    if (!result.notModified && result.data) {
-      pagination.total = result.data.total || 0
-      pagination.pages = result.data.pages || 0
-      mergeAccountsIncrementally(result.data.items || [])
-      hasPendingListSync.value = false
-    }
-    upstreamBillingNow.value = Date.now()
-
-    refreshSchedSummary()
-    refreshRecentStats()
-    await refreshTodayStatsBatch()
-  } catch (error) {
-    console.error('Auto refresh failed:', error)
-  } finally {
-    autoRefreshFetching.value = false
-  }
-}
-
-const handleManualRefresh = async () => {
-  await Promise.all([load(), loadUpstreamBillingProbeGlobalState()])
-  // Force usage cells to refetch /usage on explicit user refresh.
-  usageManualRefreshToken.value += 1
-}
-
-const loadUpstreamBillingProbeGlobalState = async () => {
-  try {
-    const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
-    upstreamBillingProbeGloballyEnabled.value = settings.enabled
-  } catch (error) {
-    console.error('Failed to load upstream billing probe settings:', error)
-  }
-}
-
-const closeAccountToolsDropdown = () => {
-  showAccountToolsDropdown.value = false
-}
-
-const updateAccountToolsDropdownPosition = () => {
-  const trigger = accountToolsTriggerRef.value
-  if (!trigger) return
-
-  const position = getFloatingPanelPosition(
-    trigger.getBoundingClientRect(),
-    document.documentElement.clientWidth || window.innerWidth,
-    window.innerHeight
-  )
-  Object.assign(accountToolsDropdownPosition, position)
-}
-
-const toggleAccountToolsDropdown = () => {
-  const nextVisible = !showAccountToolsDropdown.value
-  showAutoRefreshDropdown.value = false
-  if (nextVisible) updateAccountToolsDropdownPosition()
-  showAccountToolsDropdown.value = nextVisible
-}
-
-const openSyncFromCrs = () => {
-  closeAccountToolsDropdown()
-  showSync.value = true
-}
-
-const openOpenAILogin = () => {
-  closeAccountToolsDropdown()
-  if (authStore.isAdmin) showOpenAILogin.value = true
-}
-const handleManageOpenAITotp = (account: Account) => {
-  if (authStore.isAdmin && account.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null) openAITotpAccount.value = account
-}
-
-const openImportData = () => {
-  closeAccountToolsDropdown()
-  showImportData.value = true
-}
-
-const openExportDataDialogFromMenu = () => {
-  closeAccountToolsDropdown()
-  openExportDataDialog()
-}
-
-const openBulkEditFilteredFromMenu = () => {
-  closeAccountToolsDropdown()
-  void openBulkEditFiltered()
-}
-
-const openErrorPassthrough = () => {
-  closeAccountToolsDropdown()
-  showErrorPassthrough.value = true
-}
-
-const openTLSFingerprintProfiles = () => {
-  closeAccountToolsDropdown()
-  showTLSFingerprintProfiles.value = true
-}
-
-const syncPendingListChanges = async () => {
-  hasPendingListSync.value = false
-  await load()
-  // Keep behavior consistent with manual refresh.
-  usageManualRefreshToken.value += 1
-}
-
-const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
-  async () => {
-    if (!autoRefreshEnabled.value) return
-    if (document.hidden) return
-    if (loading.value || autoRefreshFetching.value) return
-    if (isAnyModalOpen.value) return
-    if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
-    if (inAutoRefreshSilentWindow()) {
-      autoRefreshCountdown.value = Math.max(
-        0,
-        Math.ceil((autoRefreshSilentUntil.value - Date.now()) / 1000)
-      )
-      return
-    }
-
-    if (autoRefreshCountdown.value <= 0) {
-      autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-      await refreshAccountsIncrementally()
-      return
-    }
-
-    autoRefreshCountdown.value -= 1
-  },
-  1000,
-  { immediate: false }
-)
-
-const GROK_QUOTA_SIGNAL_MAX_AGE_MS = 24 * 60 * 60 * 1000
-const GROK_QUOTA_SIGNAL_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
-
-function firstNonBlankString(...values: unknown[]): string | undefined {
-  return values.find((value): value is string => (
-    typeof value === 'string' && value.trim().length > 0
-  ))
-}
-
-function normalizeGrokPlanKey(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, '')
-}
-
-function grokPersistedQuotaSnapshot(extra: Record<string, any>): Record<string, any> | undefined {
-  const usage = extra.grok_usage_snapshot
-  if (usage && typeof usage === 'object' && !Array.isArray(usage)) {
-    return usage as Record<string, any>
-  }
-  const legacy = extra.grok_quota_snapshot
-  if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
-    return legacy as Record<string, any>
-  }
-  return undefined
-}
-
-function isGrokQuotaTimestampFresh(raw: unknown): boolean {
-  const value = String(raw || '').trim()
-  if (!value) return false
-  const observedAt = Date.parse(value)
-  if (!Number.isFinite(observedAt)) return false
-  const age = Date.now() - observedAt
-  return age <= GROK_QUOTA_SIGNAL_MAX_AGE_MS && age >= -GROK_QUOTA_SIGNAL_MAX_FUTURE_SKEW_MS
-}
-
-function isGrok45ResponsesQuotaModel(model: unknown): boolean {
-  const value = String(model || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^(x-ai|xai)\//, '')
-  return value === 'grok-4.5' || value.startsWith('grok-4.5-')
-}
-
-function grokQuotaLooksHeavy(snapshot: Record<string, any> | undefined): boolean {
-  const req = Number(snapshot?.requests?.limit ?? 0)
-  const tok = Number(snapshot?.tokens?.limit ?? 0)
-  return req >= 8300 || tok >= 53_000_000
-}
-
-function grok45ResponsesPlanIsHeavy(snapshot: Record<string, any> | undefined): boolean {
-  if (!snapshot) return false
-  const hint = normalizeGrokPlanKey(snapshot.plan_from_45_responses)
-  if (hint === 'supergrokheavy' && isGrokQuotaTimestampFresh(snapshot.plan_from_45_responses_at)) {
-    return true
-  }
-  const observedAt = snapshot.last_headers_seen_at || snapshot.updated_at
-  return (
-    isGrok45ResponsesQuotaModel(snapshot.model) &&
-    isGrokQuotaTimestampFresh(observedAt) &&
-    grokQuotaLooksHeavy(snapshot)
-  )
-}
-
-// JWT / unambiguous credentials outrank snapshots. SuperGrokPro is ambiguous
-// (covers SuperGrok and Heavy). 8300/53M only upgrades when the window came
-// from grok-4.5 Responses (or a carried 4.5 hint).
-function getAccountPlanType(row: any): string | undefined {
-  if (!row) return undefined
-  if (row.platform === 'grok') {
-    const extra = (row.extra || {}) as Record<string, any>
-    const billing = extra.grok_billing_snapshot as Record<string, any> | undefined
-    const usage = extra.grok_usage_snapshot as Record<string, any> | undefined
-    const legacyQuota = extra.grok_quota_snapshot as Record<string, any> | undefined
-    const quota = grokPersistedQuotaSnapshot(extra)
-    const cred = firstNonBlankString(row.credentials?.subscription_tier)
-    const credKey = normalizeGrokPlanKey(cred)
-    if (credKey && credKey !== 'supergrokpro') {
-      return cred
-    }
-    if (
-      grok45ResponsesPlanIsHeavy(quota) &&
-      (credKey === 'supergrokpro' ||
-        normalizeGrokPlanKey(billing?.plan) === 'supergrok' ||
-        normalizeGrokPlanKey(billing?.plan) === 'supergrokpro')
-    ) {
-      return 'SuperGrok Heavy'
-    }
-    if (credKey === 'supergrokpro') {
-      return firstNonBlankString(billing?.plan) || 'SuperGrok'
-    }
-    return firstNonBlankString(
-      billing?.plan,
-      usage?.subscription_tier,
-      legacyQuota?.subscription_tier,
-      extra.subscription_tier,
-      row.credentials?.plan_type,
-      row.parent_plan_type
-    )
-  }
-  return firstNonBlankString(row.credentials?.plan_type, row.parent_plan_type)
-}
-
-function getOpenAIAuthMode(row: any): string | undefined {
-  if (!row || row.platform !== 'openai' || row.type !== 'oauth') return undefined
-  const authMode = row.credentials?.auth_mode
-  return typeof authMode === 'string' && authMode.trim() ? authMode : undefined
-}
-
-// Antigravity 订阅等级辅助函数
-function getAntigravityTierFromRow(row: any): string | null {
-  if (row.platform !== 'antigravity') return null
-  const extra = row.extra as Record<string, unknown> | undefined
-  if (!extra) return null
-  const lca = extra.load_code_assist as Record<string, unknown> | undefined
-  if (!lca) return null
-  const paid = lca.paidTier as Record<string, unknown> | undefined
-  if (paid && typeof paid.id === 'string') return paid.id
-  const current = lca.currentTier as Record<string, unknown> | undefined
-  if (current && typeof current.id === 'string') return current.id
-  return null
-}
-
-function getAntigravityTierLabel(row: any): string | null {
-  const tier = getAntigravityTierFromRow(row)
-  switch (tier) {
-    case 'free-tier': return t('admin.accounts.tier.free')
-    case 'g1-pro-tier': return t('admin.accounts.tier.pro')
-    case 'g1-ultra-tier': return t('admin.accounts.tier.ultra')
-    default: return null
-  }
-}
-
-// 账号显示邮箱:优先账号自身(extra/credentials),影子账号回退母账号 parent_email。
-// 供名称单元格 v-if/标题/文本三处共用,避免同一回退链在模板里重复三次。
-function accountDisplayEmail(row: any): string {
-  return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
-}
-
-function accountHomepageUrl(row: Account): string {
-  if (row.type !== 'apikey' || typeof row.credentials?.base_url !== 'string') return ''
-  const baseUrl = sanitizeUrl(row.credentials.base_url)
-  return baseUrl ? new URL(baseUrl).origin : ''
-}
-
-type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
-
-function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
-  if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
-  const extra = row.extra as Record<string, unknown> | undefined
-  const mode = typeof extra?.openai_compact_mode === 'string' ? extra.openai_compact_mode : 'auto'
-  if (mode === 'force_on') return 'active'
-  if (mode === 'force_off') return 'blocked'
-  if (typeof extra?.openai_compact_supported === 'boolean') {
-    return extra.openai_compact_supported ? 'active' : 'blocked'
-  }
-  return 'auto'
-}
-
-function getOpenAICompactMeta(row: any): { label: string; className: string; dotClass: string } | null {
-  const state = getOpenAICompactState(row)
-  if (!state) return null
-  switch (state) {
-    case 'active':
-      return {
-        label: t('admin.accounts.openai.compactSupported'),
-        className: 'text-emerald-600 dark:text-emerald-300',
-        dotClass: 'bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.14)]'
-      }
-    case 'blocked':
-      return {
-        label: t('admin.accounts.openai.compactUnsupported'),
-        className: 'text-rose-600 dark:text-rose-300',
-        dotClass: 'bg-rose-500 shadow-[0_0_0_2px_rgba(244,63,94,0.14)]'
-      }
-    case 'auto':
-      return {
-        label: t('admin.accounts.openai.compactAuto'),
-        className: 'text-slate-500 dark:text-slate-400',
-        dotClass: 'bg-slate-300 dark:bg-slate-500'
-      }
-  }
-}
-
-function getOpenAICompactTitle(row: any): string {
-  const extra = row.extra as Record<string, unknown> | undefined
-  const checkedAt = typeof extra?.openai_compact_checked_at === 'string' ? extra.openai_compact_checked_at : ''
-  const label = getOpenAICompactMeta(row)?.label || ''
-  if (!checkedAt) return label
-  return `${label} | ${t('admin.accounts.openai.compactLastChecked')}: ${formatDateTime(new Date(checkedAt))}`
-}
-
-function getAntigravityTierClass(row: any): string {
-  const tier = getAntigravityTierFromRow(row)
-  switch (tier) {
-    case 'free-tier': return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
-    case 'g1-pro-tier': return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
-    case 'g1-ultra-tier': return 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300'
-    default: return ''
-  }
-}
-
-// All available columns
-const allColumns = computed(() => {
-  const c = [
-    { key: 'select', label: '', sortable: false },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
-    { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
-    { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
-    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
-    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
-    { key: 'sq_recent', label: t('admin.schedQuality.list.recent'), sortable: false },
-    { key: 'sq_groups', label: t('admin.schedQuality.list.groups'), sortable: false },
-    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true, class: 'text-right' },
-    { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false }
-  ]
-  if (!authStore.isSimpleMode) {
-    c.push({ key: 'groups', label: t('admin.schedQuality.list.membership'), sortable: false })
-  }
-  c.push({ key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false })
-  c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
-  c.push(
-    { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
-    { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
-    { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
-    { key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false },
-    { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
-    { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
-    { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
-    { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
-    { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
-  )
-  return c
-})
-
-// Columns that can be toggled (exclude select, name, and actions)
-const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
-)
-
-// 列显示里可拖动调整顺序；选择、名称列固定在左，操作列固定在右（表格里是吸附列）。
-const toggleableColumnKeys = computed(() => toggleableColumns.value.map(col => col.key))
-const {
-  orderedKeys: columnOrder,
-  isCustomized: columnOrderCustomized,
-  setOrder: setColumnOrder,
-  resetOrder: resetColumnOrder
-} = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)
-const orderedToggleableColumns = computed(() => {
-  const byKey = new Map(toggleableColumns.value.map(col => [col.key, col]))
-  return columnOrder.value.flatMap(key => byKey.get(key) ?? [])
-})
-
-// "Restore default columns" (D32): visibility and order together; offered only when either differs from the default.
-const columnsAtDefault = computed(() =>
-  !columnOrderCustomized.value &&
-  toggleableColumnKeys.value.every(key => hiddenColumns.has(key) === DEFAULT_HIDDEN_COLUMNS.includes(key))
-)
-const resetColumns = () => {
-  const shown = toggleableColumnKeys.value.filter(key => hiddenColumns.has(key) && !DEFAULT_HIDDEN_COLUMNS.includes(key))
-  resetColumnOrder()
-  hiddenColumns.clear()
-  DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
-  try {
-    localStorage.removeItem(HIDDEN_COLUMNS_KEY)
-  } catch (e) {
-    console.error('Failed to reset columns:', e)
-  }
-  refreshShownColumns(shown)
-}
-
-// Filtered columns based on visibility, in the user's column order
-const cols = computed(() => {
-  const pinned = (key: string) => allColumns.value.filter(col => col.key === key)
-  return [
-    ...pinned('select'),
-    ...pinned('name'),
-    ...orderedToggleableColumns.value.filter(col => !hiddenColumns.has(col.key)),
-    ...pinned('actions')
-  ]
-})
-
-const accountDetailLoading = new Set<number>()
-const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {
-  if (accountDetailLoading.has(account.id)) return null
-  accountDetailLoading.add(account.id)
-  try {
-    return await adminAPI.accounts.getById(account.id)
-  } catch (error) {
-    console.error('Failed to load account details:', error)
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
-    return null
-  } finally {
-    accountDetailLoading.delete(account.id)
-  }
-}
-
-const handleEdit = async (a: AccountListItem) => {
-  const account = await loadAccountDetails(a)
-  if (!account) return
-  edAcc.value = account
-  showEdit.value = true
-}
-const openMenu = (a: Account, e: MouseEvent) => {
-  menu.acc = a
-  const target = e.currentTarget as HTMLElement
-  menu.anchorRect = target.getBoundingClientRect()
-  menu.show = true
-}
+const selectedRows = computed(() => rows.value.filter((account) => isSelected(account.id)))
+const selPlatforms = computed<AccountPlatform[]>(() => [...new Set(selectedRows.value.map((account) => account.platform))])
+const selTypes = computed<AccountType[]>(() => [...new Set(selectedRows.value.map((account) => account.type))])
 // Shift+click on a checkbox sets every row between it and the last one clicked, in the order shown.
 let selectionAnchor: number | null = null
 let rowCheckShift = false
-const noteRowCheckShift = (event: MouseEvent) => { rowCheckShift = event.shiftKey }
+const noteRowCheckShift = (event: MouseEvent) => {
+  rowCheckShift = event.shiftKey
+}
 const handleRowCheck = (id: number, event: Event) => {
-  const ids = accounts.value.map(account => account.id)
+  const ids = rows.value.map((account) => account.id)
   const from = selectionAnchor === null ? -1 : ids.indexOf(selectionAnchor)
   const to = ids.indexOf(id)
   const shift = rowCheckShift
@@ -2292,34 +625,137 @@ const handleRowCheck = (id: number, event: Event) => {
   if (shift && from !== -1 && to !== -1 && from !== to) {
     const range = ids.slice(Math.min(from, to), Math.max(from, to) + 1)
     const checked = (event.target as HTMLInputElement).checked
-    batchUpdate(draft => range.forEach(rowId => (checked ? draft.add(rowId) : draft.delete(rowId))))
+    batchUpdate((draft) => range.forEach((rowId) => (checked ? draft.add(rowId) : draft.delete(rowId))))
   } else {
     toggleSel(id)
   }
   selectionAnchor = id
 }
-// A name cut off at 160px shows in full on hover.
-const titleWhenCut = (event: MouseEvent) => {
-  const el = event.currentTarget as HTMLElement
-  if (el.scrollWidth > el.clientWidth) el.title = el.textContent?.trim() ?? ''
-  else el.removeAttribute('title')
+const swipeVirtualContext: SwipeSelectVirtualContext = {
+  getVirtualizer: () => dataTableRef.value?.virtualizer ?? null,
+  getSortedData: () => dataTableRef.value?.sortedData ?? rows.value,
+  getRowId: (row: any) => row.id
 }
-const toggleSelectAllVisible = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
+useSwipeSelect(accountTableRef, {
+  isSelected,
+  select: (id) => { if (canManage.value) select(id) },
+  deselect: (id) => { if (canManage.value) deselect(id) },
+  batchUpdate: (updater) => { if (canManage.value) batchUpdate(updater) }
+}, swipeVirtualContext)
+
+// ---- Rows: merges from action answers, edits through the engine ----
+/** An action's answer for one account: its fields are merged (the live row keeps the rest, e.g. concurrency). */
+const mergeAccount = (account: Account) => table.mergeRows([[account.id, account as LiveAccount]])
+const handleAccountUpdated = (account: Account) => {
+  mergeAccount(account)
+  live.forgetUsage([account.id])
+  if (isColumnVisible('upstream_balance')) void table.refresh('balance')
 }
-const handleBulkDelete = async () => {
-  const accountIds = [...selIds.value]
-  if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: accountIds.length }))) return
+const togglingSchedulable = reactive(new Set<number>())
+const handleToggleSchedulable = async (row: LiveAccount, next: boolean) => {
+  togglingSchedulable.add(row.id)
   try {
-    const result = await adminAPI.accounts.batchDelete(accountIds)
-    invalidateUpstreamBalances(accountIds)
+    await table.edit(row.id, 'schedulable', next, async () => {
+      const updated = await adminAPI.accounts.setSchedulable(row.id, next)
+      return { schedulable: updated?.schedulable ?? next }
+    })
+  } catch (error) {
+    console.error('Failed to toggle schedulable:', error)
+    appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
+  } finally {
+    togglingSchedulable.delete(row.id)
+  }
+}
+// The list switch turns both built-in targets on or off; custom targets keep their own setting.
+const handleToggleIQCheck = async (row: LiveAccount, enabled: boolean) => {
+  const optimistic = (row.iq_targets ?? []).map((target) => (isIQBuiltinModel(target.model) ? { ...target, enabled } : target))
+  try {
+    await table.edit(row.id, 'iq_targets', optimistic, async () => ({
+      iq_targets: await adminAPI.accounts.setIQCheck(row.id, { targets: IQ_BUILTIN_MODELS.map((model) => ({ model, enabled })) })
+    }))
+  } catch (error) {
+    console.error('Failed to toggle IQ check:', error)
+    appStore.showError(t('admin.accounts.iqFailed'))
+  }
+}
+const savePriority = async (row: LiveAccount, priority: number) => {
+  await table.edit(row.id, 'priority', priority, async () => {
+    const updated = await adminAPI.accounts.update(row.id, { priority })
+    return { priority: updated.priority }
+  })
+}
+const handleIQSummaryUpdated = (targets: IQTargetSummary[]) => {
+  const account = iqRecordsAccount.value
+  if (!account) return
+  iqRecordsAccount.value = { ...account, iq_targets: targets }
+  table.mergeRows([[account.id, { iq_targets: targets }]])
+}
+/** The usage cell asks again (a changed OpenAI snapshot, a probe): the next usage run skips the cache for it. */
+const requestUsage = (account: Account, options?: { force?: boolean }) => {
+  if (!options?.force) return
+  live.forgetUsage([account.id])
+  void table.refresh('usage')
+}
+
+// ---- Upstream billing: a probe updates its own cell only ----
+const probingUpstreamBilling = reactive(new Set<number>())
+const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
+const loadUpstreamBillingProbeGlobalState = async () => {
+  try {
+    upstreamBillingProbeGloballyEnabled.value = (await adminAPI.accounts.getUpstreamBillingProbeSettings()).enabled
+  } catch (error) {
+    console.error('Failed to load upstream billing probe settings:', error)
+  }
+}
+const patchProbeSnapshot = (id: number, snapshot: UpstreamBillingProbeSnapshot) => {
+  const row = table.record(id)
+  if (!row) return
+  table.mergeRows([[id, {
+    ...(typeof snapshot.synced_rate_multiplier === 'number' ? { rate_multiplier: snapshot.synced_rate_multiplier } : {}),
+    extra: { ...row.extra, upstream_billing_probe: snapshot }
+  }]])
+}
+const handleProbeUpstreamBilling = async (row: LiveAccount) => {
+  if (!canManage.value || probingUpstreamBilling.has(row.id)) return
+  probingUpstreamBilling.add(row.id)
+  try {
+    const result = await adminAPI.accounts.probeUpstreamBilling(row.id)
+    if (result.snapshot) patchProbeSnapshot(row.id, result.snapshot)
+  } catch (error) {
+    console.error('Failed to probe upstream billing:', error)
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+  } finally {
+    probingUpstreamBilling.delete(row.id)
+  }
+}
+const handleBulkProbeUpstreamBilling = async () => {
+  const ids = [...selIds.value]
+  if (ids.length === 0) return appStore.showError(t('admin.accounts.upstreamBilling.noEligibleAccounts'))
+  if (ids.length > 20) return appStore.showError(t('admin.accounts.upstreamBilling.batchLimit'))
+  ids.forEach((id) => probingUpstreamBilling.add(id))
+  try {
+    const results = await adminAPI.accounts.probeUpstreamBillingBatch(ids)
+    results.forEach((result) => { if (result.snapshot) patchProbeSnapshot(result.account_id, result.snapshot) })
+    const failed = results.filter((result) => result.error).length
+    if (failed > 0) appStore.showError(t('admin.accounts.upstreamBilling.batchPartial', { success: results.length - failed, failed }))
+    else appStore.showSuccess(t('admin.accounts.upstreamBilling.batchCompleted', { count: results.length }))
+  } catch (error) {
+    console.error('Failed to probe upstream billing in batch:', error)
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+  } finally {
+    ids.forEach((id) => probingUpstreamBilling.delete(id))
+  }
+}
+
+// ---- Bulk actions ----
+const handleBulkDelete = async () => {
+  const ids = [...selIds.value]
+  if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: ids.length }))) return
+  try {
+    const result = await adminAPI.accounts.batchDelete(ids)
     if (result.failed > 0) {
-      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', {
-        success: result.success,
-        failed: result.failed
-      }))
-      setSelectedIds(result.failed_ids?.length ? result.failed_ids : accountIds)
+      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+      setSelectedIds(result.failed_ids?.length ? result.failed_ids : ids)
     } else {
       appStore.showSuccess(t('admin.accounts.bulkActions.deleteSuccess', { count: result.success }))
       clearSelection()
@@ -2334,13 +770,12 @@ const handleBulkResetStatus = async () => {
   if (!confirm(t('common.confirm'))) return
   try {
     const result = await adminAPI.accounts.batchClearError(selIds.value)
-    if (result.failed > 0) {
-      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
-    } else {
+    if (result.failed > 0) appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+    else {
       appStore.showSuccess(t('admin.accounts.bulkActions.resetStatusSuccess', { count: result.success }))
       clearSelection()
     }
-    reload()
+    void reload()
   } catch (error) {
     console.error('Failed to bulk reset status:', error)
     appStore.showError(String(error))
@@ -2348,449 +783,434 @@ const handleBulkResetStatus = async () => {
 }
 const handleBulkRefreshToken = async () => {
   if (!confirm(t('common.confirm'))) return
-  const accountIds = [...selIds.value]
+  const ids = [...selIds.value]
   try {
-    const result = await adminAPI.accounts.batchRefresh(accountIds)
+    const result = await adminAPI.accounts.batchRefresh(ids)
     if (result.failed > 0) {
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
-      const failedIds = result.errors?.map(error => error.account_id) ?? []
-      setSelectedIds(failedIds.length > 0 ? failedIds : accountIds)
+      const failedIds = result.errors?.map((error) => error.account_id) ?? []
+      setSelectedIds(failedIds.length > 0 ? failedIds : ids)
     } else {
       appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
       clearSelection()
     }
-    reload()
+    void reload()
   } catch (error) {
     console.error('Failed to bulk refresh token:', error)
     appStore.showError(String(error))
   }
 }
-const handleBulkProbeUpstreamBilling = async () => {
-  const accountIDs = [...selIds.value]
-  if (accountIDs.length === 0) {
-    appStore.showError(t('admin.accounts.upstreamBilling.noEligibleAccounts'))
-    return
+type BulkResult = { success?: number; failed?: number; success_ids?: number[]; failed_ids?: number[]; results?: Array<{ account_id: number; success: boolean }> }
+/** Which accounts a bulk scheduling update changed, from whichever shape the answer has. */
+const bulkOutcome = (result: BulkResult, ids: number[]) => {
+  const successIds = result.success_ids ?? result.results?.filter((item) => item.success).map((item) => item.account_id) ?? []
+  const failedIds = result.failed_ids ?? result.results?.filter((item) => !item.success).map((item) => item.account_id) ?? []
+  const hasCounts = typeof result.success === 'number' || typeof result.failed === 'number'
+  const successCount = typeof result.success === 'number' ? result.success : successIds.length
+  const failedCount = typeof result.failed === 'number' ? result.failed : failedIds.length
+  if (!successIds.length && !failedIds.length && hasCounts && failedCount === 0 && successCount === ids.length && ids.length > 0) {
+    return { successIds: ids, failedIds: [], successCount, failedCount, known: true }
   }
-  if (accountIDs.length > 20) {
-    appStore.showError(t('admin.accounts.upstreamBilling.batchLimit'))
-    return
-  }
-  accountIDs.forEach(id => probingUpstreamBilling.add(id))
-  try {
-    const results = await adminAPI.accounts.probeUpstreamBillingBatch(accountIDs)
-    let patched = false
-    results.forEach(result => {
-      if (result.snapshot) {
-        patchUpstreamBillingSnapshot(result.account_id, result.snapshot)
-        patched = true
-      }
-    })
-    if (patched) await refreshAccountsAfterUpstreamBillingProbe()
-    const failed = results.filter(result => result.error).length
-    if (failed > 0) {
-      appStore.showError(t('admin.accounts.upstreamBilling.batchPartial', { success: results.length - failed, failed }))
-    } else {
-      appStore.showSuccess(t('admin.accounts.upstreamBilling.batchCompleted', { count: results.length }))
-    }
-  } catch (error) {
-    console.error('Failed to probe upstream billing in batch:', error)
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
-  } finally {
-    accountIDs.forEach(id => probingUpstreamBilling.delete(id))
-  }
+  return { successIds, failedIds, successCount, failedCount, known: successIds.length > 0 || failedIds.length > 0 || hasCounts }
 }
-const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
-  if (accountIds.length === 0) return
-  const version = ++schedulingMutationVersion
-  for (const id of accountIds) confirmedSchedulingUpdates.set(id, { version, schedulable })
-  const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
-}
-const normalizeBulkSchedulableResult = (
-  result: {
-    success?: number
-    failed?: number
-    success_ids?: number[]
-    failed_ids?: number[]
-    results?: Array<{ account_id: number; success: boolean }>
-  },
-  accountIds: number[]
-) => {
-  const responseSuccessIds = Array.isArray(result.success_ids) ? result.success_ids : []
-  const responseFailedIds = Array.isArray(result.failed_ids) ? result.failed_ids : []
-  if (responseSuccessIds.length > 0 || responseFailedIds.length > 0) {
-    return {
-      successIds: responseSuccessIds,
-      failedIds: responseFailedIds,
-      successCount: typeof result.success === 'number' ? result.success : responseSuccessIds.length,
-      failedCount: typeof result.failed === 'number' ? result.failed : responseFailedIds.length,
-      hasIds: true,
-      hasCounts: true
-    }
-  }
-
-  const results = Array.isArray(result.results) ? result.results : []
-  if (results.length > 0) {
-    const successIds = results.filter(item => item.success).map(item => item.account_id)
-    const failedIds = results.filter(item => !item.success).map(item => item.account_id)
-    return {
-      successIds,
-      failedIds,
-      successCount: typeof result.success === 'number' ? result.success : successIds.length,
-      failedCount: typeof result.failed === 'number' ? result.failed : failedIds.length,
-      hasIds: true,
-      hasCounts: true
-    }
-  }
-
-  const hasExplicitCounts = typeof result.success === 'number' || typeof result.failed === 'number'
-  const successCount = typeof result.success === 'number' ? result.success : 0
-  const failedCount = typeof result.failed === 'number' ? result.failed : 0
-  if (hasExplicitCounts && failedCount === 0 && successCount === accountIds.length && accountIds.length > 0) {
-    return {
-      successIds: accountIds,
-      failedIds: [],
-      successCount,
-      failedCount,
-      hasIds: true,
-      hasCounts: true
-    }
-  }
-
-  return {
-    successIds: [],
-    failedIds: [],
-    successCount,
-    failedCount,
-    hasIds: false,
-    hasCounts: hasExplicitCounts
-  }
-}
+/** Every selected switch flips at once and stays locked until the answer; the ones that failed roll back. */
 const handleBulkToggleSchedulable = async (schedulable: boolean) => {
-  const accountIds = [...selIds.value]
-  if (!accountIds.length || accountIds.some(id => togglingSchedulable.value.has(id))) return
-  accountIds.forEach(id => togglingSchedulable.value.add(id))
-  schedulingMutationVersion++
-  enterAutoRefreshSilentWindow()
+  const ids = [...selIds.value]
+  if (!ids.length || ids.some((id) => togglingSchedulable.has(id))) return
+  ids.forEach((id) => togglingSchedulable.add(id))
+  const outcome = adminAPI.accounts.bulkUpdate(ids, { schedulable }).then((result) => bulkOutcome(result, ids))
   try {
-    const result = await adminAPI.accounts.bulkUpdate(accountIds, { schedulable })
-    const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
-    if (!hasIds && !hasCounts) {
+    await Promise.allSettled(ids.map((id) => table.edit(id, 'schedulable', schedulable, async () => {
+      const { successIds } = await outcome
+      if (!successIds.includes(id)) throw new Error('not updated')
+      return { schedulable }
+    })))
+    const { failedIds, successCount, failedCount, known } = await outcome
+    if (!known) {
       appStore.showError(t('admin.accounts.bulkSchedulableResultUnknown'))
-      setSelectedIds(accountIds)
-      load().catch((error) => {
-        console.error('Failed to refresh accounts:', error)
-      })
-      return
-    }
-    if (successIds.length > 0) {
-      updateSchedulableInList(successIds, schedulable)
-    }
-    if (successCount > 0 && failedCount === 0) {
-      const message = schedulable
-        ? t('admin.accounts.bulkSchedulableEnabled', { count: successCount })
-        : t('admin.accounts.bulkSchedulableDisabled', { count: successCount })
-      appStore.showSuccess(message)
-    }
-    if (failedCount > 0) {
-      const message = hasCounts || hasIds
-        ? t('admin.accounts.bulkSchedulablePartial', { success: successCount, failed: failedCount })
-        : t('admin.accounts.bulkSchedulableResultUnknown')
-      appStore.showError(message)
-      setSelectedIds(failedIds.length > 0 ? failedIds : accountIds)
+      setSelectedIds(ids)
+      void reload()
+    } else if (failedCount > 0) {
+      appStore.showError(t('admin.accounts.bulkSchedulablePartial', { success: successCount, failed: failedCount }))
+      setSelectedIds(failedIds.length ? failedIds : ids)
     } else {
-      if (hasIds) clearSelection()
-      else setSelectedIds(accountIds)
+      appStore.showSuccess(schedulable ? t('admin.accounts.bulkSchedulableEnabled', { count: successCount }) : t('admin.accounts.bulkSchedulableDisabled', { count: successCount }))
+      clearSelection()
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
     appStore.showError(t('common.error'))
   } finally {
-    accountIds.forEach(id => togglingSchedulable.value.delete(id))
-    schedulingMutationVersion++
-    enterAutoRefreshSilentWindow()
+    ids.forEach((id) => togglingSchedulable.delete(id))
   }
 }
-const buildBulkEditFilterSnapshot = () => {
-  const rawParams = toRaw(params) as Record<string, unknown>
-  const sortOrder: AccountSortOrder = rawParams.sort_order === 'desc' ? 'desc' : 'asc'
-  return {
-    platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
-    type: typeof rawParams.type === 'string' ? rawParams.type : '',
-    status: typeof rawParams.status === 'string' ? rawParams.status : '',
-    group: typeof rawParams.group === 'string' ? rawParams.group : '',
-    search: typeof rawParams.search === 'string' ? rawParams.search : '',
-    privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
-    iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
-    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
-    group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
-    sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
-    sort_order: sortOrder
-  }
-}
-
+const buildFilterSnapshot = () => ({ ...listFilters(), sort_by: sortState.sort_by, sort_order: sortState.sort_order })
 const handleSelectAllResults = async () => {
-  if (selectingAllResults.value || pagination.total === 0) return
-
-  const requestVersion = ++selectionRequestVersion.value
-  const filters = buildBulkEditFilterSnapshot()
+  if (selectingAllResults.value || total.value === 0) return
+  const version = ++selectionRequestVersion
   selectingAllResults.value = true
   try {
-    const ids = await fetchAllAccountIds(
-      (page, pageSize, requestFilters) => adminAPI.accounts.list(page, pageSize, requestFilters),
-      filters
-    )
-    if (requestVersion !== selectionRequestVersion.value) return
-
+    const ids = await fetchAllAccountIds((page, pageSize, requestFilters) => adminAPI.accounts.list(page, pageSize, requestFilters), buildFilterSnapshot())
+    if (version !== selectionRequestVersion) return
     setSelectedIds(ids)
     selectedAllResultIDs.value = new Set(ids)
   } catch (error) {
-    if (requestVersion !== selectionRequestVersion.value) return
+    if (version !== selectionRequestVersion) return
     console.error('Failed to select all account results:', error)
     appStore.showError(t('admin.accounts.bulkActions.selectAllFailed'))
   } finally {
-    if (requestVersion === selectionRequestVersion.value) {
-      selectingAllResults.value = false
-    }
+    if (version === selectionRequestVersion) selectingAllResults.value = false
   }
 }
-
-const collectSelectionMetadata = (rows: Account[]) => {
-  const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
-  const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
-}
-
+type BulkEditTarget =
+  | { mode: 'selected'; accountIds: number[]; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[] }
+  | { mode: 'filtered'; filters: ReturnType<typeof buildFilterSnapshot>; previewCount: number; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[] }
+const showBulkEdit = ref(false)
+const bulkEditTarget = ref<BulkEditTarget | null>(null)
 const openBulkEditSelected = () => {
-  bulkEditTarget.value = {
-    mode: 'selected',
-    accountIds: [...selIds.value],
-    selectedPlatforms: [...selPlatforms.value],
-    selectedTypes: [...selTypes.value]
-  }
+  bulkEditTarget.value = { mode: 'selected', accountIds: [...selIds.value], selectedPlatforms: [...selPlatforms.value], selectedTypes: [...selTypes.value] }
   showBulkEdit.value = true
 }
-
 const openBulkEditFiltered = async () => {
-  const filters = buildBulkEditFilterSnapshot()
-  const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
+  const snapshot = buildFilterSnapshot()
+  const preview = await adminAPI.accounts.list(1, 100, snapshot)
   bulkEditTarget.value = {
     mode: 'filtered',
-    filters,
+    filters: snapshot,
     previewCount: preview.total,
-    selectedPlatforms,
-    selectedTypes
+    selectedPlatforms: [...new Set(preview.items.map((account) => account.platform))],
+    selectedTypes: [...new Set(preview.items.map((account) => account.type))]
   }
   showBulkEdit.value = true
 }
-
 const handleBulkUpdated = () => {
-  // 按筛选批量编辑时改动范围不止所选行：作废当前页全部账号；按所选编辑时用打开时保存的 id。
-  const target = bulkEditTarget.value
-  if (target?.mode === 'selected') invalidateUpstreamBalances([...target.accountIds])
-  else if (target?.mode === 'filtered') invalidateCurrentPageUpstreamBalances()
-  else invalidateUpstreamBalances([...selIds.value])
   showBulkEdit.value = false
   bulkEditTarget.value = null
   clearSelection()
-  reload()
+  void reload()
 }
-const handleDataImported = () => { showImportData.value = false; invalidateCurrentPageUpstreamBalances(); reload() }
-const handleCrsSynced = () => { invalidateCurrentPageUpstreamBalances(); reload() }
-const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
-const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
-const buildAccountQueryFilters = () => ({
-  platform: params.platform || '',
-  type: params.type || '',
-  status: params.status || '',
-  group: params.group || '',
-  privacy_mode: params.privacy_mode || '',
-  iq_status: params.iq_status || '',
-  sched_quality: params.sched_quality || '',
-  group_category: params.group_category || '',
-  search: params.search || '',
-  sort_by: sortState.sort_by,
-  sort_order: sortState.sort_order
-})
-const accountMatchesCurrentFilters = (account: Account) => {
-  const filters = buildAccountQueryFilters()
-  if (filters.platform && account.platform !== filters.platform) return false
-  if (filters.type && account.type !== filters.type) return false
-  if (filters.iq_status && (account.platform !== 'openai' || iqAccountVerdict(account.iq_targets) !== filters.iq_status)) return false
-  if (filters.status) {
-    const now = Date.now()
-    const rateLimitResetAt = account.rate_limit_reset_at ? new Date(account.rate_limit_reset_at).getTime() : Number.NaN
-    const isRateLimited = Number.isFinite(rateLimitResetAt) && rateLimitResetAt > now
-    const tempUnschedUntil = account.temp_unschedulable_until ? new Date(account.temp_unschedulable_until).getTime() : Number.NaN
-    const isTempUnschedulable = Number.isFinite(tempUnschedUntil) && tempUnschedUntil > now
-
-    if (filters.status === 'active') {
-      if (account.status !== 'active' || isRateLimited || isTempUnschedulable || !account.schedulable) return false
-    } else if (filters.status === 'rate_limited') {
-      if (account.status !== 'active' || !isRateLimited || isTempUnschedulable) return false
-    } else if (filters.status === 'temp_unschedulable') {
-      if (account.status !== 'active' || !isTempUnschedulable) return false
-    } else if (filters.status === 'unschedulable') {
-      if (account.status !== 'active' || account.schedulable || isRateLimited || isTempUnschedulable) return false
-    } else if (account.status !== filters.status) {
-      return false
-    }
-  }
-  if (!groupCategories.matchesFilter(account.group_ids ?? account.groups?.map((group) => group.id) ?? [], filters.group_category)) return false
-  if (filters.group) {
-    const groupIds = account.group_ids ?? account.groups?.map((group) => group.id) ?? []
-    if (filters.group === ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE) {
-      if (groupIds.length > 0) return false
-    } else if (!groupIds.includes(Number(filters.group))) {
-      return false
-    }
-  }
-  const privacyMode = typeof account.extra?.privacy_mode === 'string' ? account.extra.privacy_mode : ''
-  if (filters.privacy_mode) {
-    if (filters.privacy_mode === ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE) {
-      if (privacyMode.trim() !== '') return false
-    } else if (privacyMode !== filters.privacy_mode) {
-      return false
-    }
-  }
-  const search = String(filters.search || '').trim().toLowerCase()
-  if (search && !account.name.toLowerCase().includes(search)) return false
-  return true
-}
-const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Account => ({
-  ...updatedAccount,
-  current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
-  current_group_concurrency: updatedAccount.current_group_concurrency ?? oldAccount.current_group_concurrency,
-  current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
-  active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions
-})
-
-const syncPaginationAfterLocalRemoval = () => {
-  const nextTotal = Math.max(0, pagination.total - 1)
-  pagination.total = nextTotal
-  pagination.pages = nextTotal > 0 ? Math.ceil(nextTotal / pagination.page_size) : 0
-
-  const maxPage = Math.max(1, pagination.pages || 1)
-
-  if (pagination.page > maxPage) {
-    pagination.page = maxPage
-  }
-  // 行被本地移除后不立刻全量补页，改为提示用户手动同步。
-  hasPendingListSync.value = nextTotal > 0
+const handleDataImported = () => {
+  showImportData.value = false
+  void reload()
 }
 
-const patchAccountInList = (updatedAccount: Account) => {
-  const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
-  if (index === -1) return
-  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
-  if (!accountMatchesCurrentFilters(mergedAccount)) {
-    accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
-    syncPaginationAfterLocalRemoval()
-    removeSelectedAccounts([mergedAccount.id])
-    if (menu.acc?.id === mergedAccount.id) {
-      menu.show = false
-      menu.acc = null
-    }
-    return
-  }
-  const nextAccounts = [...accounts.value]
-  nextAccounts[index] = mergedAccount
-  accounts.value = nextAccounts
-  syncAccountRefs(mergedAccount)
+// ---- IQ runs ----
+const reportIQRun = (results: IQRunTarget[] | IQRunAccount[]) => {
+  const { queued, rejected, reasons } = iqRunSummary(results)
+  const reasonText = reasons.map((reason) => (te(`admin.accounts.iqReasons.${reason}`) ? t(`admin.accounts.iqReasons.${reason}`) : reason)).join(', ')
+  if (rejected) appStore.showError(t('admin.accounts.iqRunPartial', { queued, rejected, reasons: reasonText }))
+  else appStore.showSuccess(t('admin.accounts.iqQueued', { count: queued }))
 }
-const patchUpstreamBillingSnapshot = (accountID: number, snapshot: UpstreamBillingProbeSnapshot) => {
-  const account = accounts.value.find(item => item.id === accountID)
-  if (!account) return
-  upstreamBillingNow.value = Date.now()
-  patchAccountInList({
-    ...account,
-    ...(typeof snapshot.synced_rate_multiplier === 'number'
-      ? { rate_multiplier: snapshot.synced_rate_multiplier }
-      : {}),
-    extra: { ...account.extra, upstream_billing_probe: snapshot }
-  })
-}
-const refreshAccountsAfterUpstreamBillingProbe = async () => {
-  await refreshUpstreamBillingSortedList(true)
-}
-const handleProbeUpstreamBilling = async (account: Account) => {
-  if (!canManage.value) return
-  if (probingUpstreamBilling.has(account.id)) return
-  probingUpstreamBilling.add(account.id)
+const handleRunIQCheck = async (account: Account) => {
   try {
-    const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
-    if (result.snapshot) {
-      patchUpstreamBillingSnapshot(account.id, result.snapshot)
-      await refreshAccountsAfterUpstreamBillingProbe()
-    }
-  } catch (error) {
-    console.error('Failed to probe upstream billing:', error)
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.probeFailed')))
+    reportIQRun(await adminAPI.accounts.runIQCheck(account.id))
+    void table.refresh('rows')
+  } catch {
+    appStore.showError(t('admin.accounts.iqFailed'))
+  }
+}
+const runningIQBatch = ref(false)
+const handleBulkRunIQCheck = async () => {
+  // Selection can span pages; the server rejects non-OpenAI accounts per target.
+  const ids = [...selIds.value]
+  if (ids.length > IQ_RUN_BATCH_LIMIT) return appStore.showError(t('admin.accounts.iqBatchLimit', { limit: IQ_RUN_BATCH_LIMIT }))
+  runningIQBatch.value = true
+  try {
+    reportIQRun(await adminAPI.accounts.runIQCheckBatch(ids))
+    void table.refresh('rows')
+  } catch {
+    appStore.showError(t('admin.accounts.iqFailed'))
   } finally {
-    probingUpstreamBilling.delete(account.id)
+    runningIQBatch.value = false
   }
 }
-const handleAccountUpdated = (updatedAccount: Account) => {
-  patchAccountInList(updatedAccount)
-  enterAutoRefreshSilentWindow()
-  invalidateUpstreamBalances([updatedAccount.id])
-  // 已在此处作废并重查，记下新版本，避免版本监听再发一次请求。
-  if (upstreamBalanceRowVersions.has(updatedAccount.id)) {
-    upstreamBalanceRowVersions.set(updatedAccount.id, upstreamBalanceRowVersion(updatedAccount))
+
+// ---- Quality: the panel, batches and recovery ----
+const { drawer: sqDrawer, board: sqBoard } = useSchedLayers()
+const sqBatch = reactive<{ action: SchedBatchAction | null; accounts: Array<{ id: number; name: string }>; anchor: HTMLElement | null }>({ action: null, accounts: [], anchor: null })
+const sqBatchBusy = ref(false)
+const sqLayersOpen = computed(() => sqDrawer.accountId !== null || sqBoard.groupId !== null || sqBatch.action !== null)
+// A closed panel or batch may have changed exemptions: the summary is asked again at once.
+watch(sqLayersOpen, (open) => {
+  if (!open) void table.refresh('quality')
+})
+const sqOpenAIGroups = computed(() => groups.value.filter((group) => group.platform === 'openai').map((group) => ({ id: group.id, name: group.name })))
+/** The pill's dot: the quality panel on that group, with its substandard model's tab when it has one. */
+const openQuality = (row: LiveAccount, groupId: number) => {
+  const model = row.quality?.substandard.find((item) => item.group_id === groupId)?.model ?? null
+  openSchedDrawer({ id: row.id, name: row.name }, { groupId, model })
+}
+const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
+  if (sqBatchBusy.value || sqBatch.action !== null) return
+  sqBatch.accounts = selIds.value.map((id) => ({ id, name: table.record(id)?.name ?? `#${id}` }))
+  sqBatch.anchor = anchor
+  sqBatch.action = action
+}
+const { recover: recoverAccount, recoverMany, batchRunning: recoveryBatchRunning } = useAccountRecovery()
+const menuRecoverable = (account: Account | null) => !!account && canRecover(account, table.record(account.id)?.quality, Date.now())
+const rereadAfterRecover = async (id: number) => {
+  const loadsBefore = loadsDone
+  try {
+    const fresh = await adminAPI.accounts.getById(id)
+    if (loadsDone === loadsBefore) mergeAccount(fresh)
+  } catch (error) {
+    console.error('Failed to reload account after recovery:', error)
   }
-  void refreshUpstreamBalances()
 }
-const handleAccountCreated = () => {
-  invalidateUpstreamBalances()
-  reload()
+/** After a recovery: the row and its summary are read again; under the quality filter the page loads again. */
+const refreshAfterRecover = async (id: number) => {
+  if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
+  if (filters.sched_quality) await reload()
+  else await Promise.all([rereadAfterRecover(id), table.refresh('quality')])
 }
-const formatExportTimestamp = () => {
-  const now = new Date()
-  const pad2 = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
+const recoverOne = (account: Account) => recoverAccount({ id: account.id, name: account.name }, () => refreshAfterRecover(account.id))
+// Recovered accounts leave the selection; failed and not-run ones stay for a retry.
+const handleBatchRecover = async (ids: number[]) => {
+  const { recovered } = await recoverMany(ids, reload)
+  removeSelectedAccounts(recovered)
 }
-const openExportDataDialog = () => {
-  includeProxyOnExport.value = true
-  showExportDataDialog.value = true
+
+// ---- Dialogs and the row menu ----
+const showCreate = ref(false)
+const showEdit = ref(false)
+const showSync = ref(false)
+const showImportData = ref(false)
+const showOpenAILogin = ref(false)
+const openAITotpAccount = ref<Account | null>(null)
+const showExportDataDialog = ref(false)
+const includeProxyOnExport = ref(true)
+const showTempUnsched = ref(false)
+const showDeleteDialog = ref(false)
+const showCreateShadowDialog = ref(false)
+const showReAuth = ref(false)
+const showTest = ref(false)
+const showStats = ref(false)
+const showErrorPassthrough = ref(false)
+const showTLSFingerprintProfiles = ref(false)
+const showSchedulePanel = ref(false)
+const edAcc = ref<Account | null>(null)
+const tempUnschedAcc = ref<Account | null>(null)
+const deletingAcc = ref<Account | null>(null)
+const creatingShadowAcc = ref<Account | null>(null)
+const reAuthAcc = ref<Account | null>(null)
+const testingAcc = ref<Account | null>(null)
+const statsAcc = ref<Account | null>(null)
+const scheduleAcc = ref<Account | null>(null)
+const scheduleModelOptions = ref<SelectOption[]>([])
+const iqRecordsAccount = ref<Account | null>(null)
+const groupsDialogAccount = ref<AccountListItem | null>(null)
+const createModalMounted = useLazyMount(showCreate)
+const editModalMounted = useLazyMount(showEdit)
+const reAuthModalMounted = useLazyMount(showReAuth)
+const testModalMounted = useLazyMount(showTest)
+const statsModalMounted = useLazyMount(showStats)
+const schedulePanelMounted = useLazyMount(showSchedulePanel)
+const syncModalMounted = useLazyMount(showSync)
+const importModalMounted = useLazyMount(showImportData)
+const bulkEditModalMounted = useLazyMount(showBulkEdit)
+const tempUnschedModalMounted = useLazyMount(showTempUnsched)
+const errorPassthroughModalMounted = useLazyMount(showErrorPassthrough)
+const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
+const menu = reactive<{ show: boolean; acc: Account | null; anchorRect: DOMRect | null }>({ show: false, acc: null, anchorRect: null })
+
+const openGroupsEditor = (row: LiveAccount) => {
+  // The dialog gets its own copy: background updates do not reach what it edits.
+  if (canPlaceGroups.value) groupsDialogAccount.value = { ...row }
+}
+const loadingDetails = new Set<number>()
+const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {
+  if (loadingDetails.has(account.id)) return null
+  loadingDetails.add(account.id)
+  try {
+    return await adminAPI.accounts.getById(account.id)
+  } catch (error) {
+    console.error('Failed to load account details:', error)
+    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    return null
+  } finally {
+    loadingDetails.delete(account.id)
+  }
+}
+const handleEdit = async (account: Pick<AccountListItem, 'id'>) => {
+  const detail = await loadAccountDetails(account)
+  if (!detail) return
+  edAcc.value = detail
+  showEdit.value = true
+}
+const openEditById = (id: number) => handleEdit({ id })
+const openIqRecordsById = async (id: number) => {
+  const detail = await loadAccountDetails({ id })
+  if (detail) iqRecordsAccount.value = detail
+}
+const openMenu = (account: Account, event: MouseEvent) => {
+  menu.acc = account
+  menu.anchorRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  menu.show = true
+}
+const handleTest = async (account: AccountListItem) => {
+  const detail = await loadAccountDetails(account)
+  if (!detail) return
+  testingAcc.value = detail
+  showTest.value = true
+}
+const handleViewStats = async (account: AccountListItem) => {
+  const detail = await loadAccountDetails(account)
+  if (!detail) return
+  statsAcc.value = detail
+  showStats.value = true
+}
+const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
+const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
+const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
+const handleSchedule = async (account: Account) => {
+  scheduleAcc.value = account
+  scheduleModelOptions.value = []
+  showSchedulePanel.value = true
+  try {
+    const models = await adminAPI.accounts.getAvailableModels(account.id)
+    scheduleModelOptions.value = models.map((model: ClaudeModel) => ({ value: model.id, label: model.display_name || model.id }))
+  } catch {
+    scheduleModelOptions.value = []
+  }
+}
+const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
+const handleReAuth = (account: Account) => { reAuthAcc.value = { ...account }; showReAuth.value = true }
+const handleShowTempUnsched = (account: Account) => { tempUnschedAcc.value = { ...account }; showTempUnsched.value = true }
+const handleManageOpenAITotp = (account: Account) => {
+  if (authStore.isAdmin && account.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null) openAITotpAccount.value = account
+}
+const duplicating = new Set<number>()
+const handleDuplicateAccount = async (account: Account) => {
+  if (duplicating.has(account.id)) return
+  duplicating.add(account.id)
+  try {
+    const duplicate = await adminAPI.accounts.duplicate(account.id)
+    appStore.showSuccess(t('admin.accounts.duplicateSuccess', { name: duplicate.name }))
+    void reload()
+  } catch (error: any) {
+    console.error('Failed to duplicate account:', error)
+    appStore.showError(error?.message || t('admin.accounts.duplicateFailed'))
+  } finally {
+    duplicating.delete(account.id)
+  }
+}
+const handleRefresh = async (account: Account) => {
+  try {
+    const result = await adminAPI.accounts.refreshCredentials(account.id)
+    mergeAccount(result.account)
+    if (result.warning) appStore.showWarning(result.message)
+  } catch (error) {
+    console.error('Failed to refresh credentials:', error)
+  }
+}
+const handleResetQuota = async (account: Account) => {
+  try {
+    mergeAccount(await adminAPI.accounts.resetAccountQuota(account.id))
+    appStore.showSuccess(t('common.success'))
+  } catch (error) {
+    console.error('Failed to reset quota:', error)
+  }
+}
+const privacyResult = (account: Account): { type: 'success' | 'error'; key: string } => {
+  const mode = typeof account.extra?.privacy_mode === 'string' ? account.extra.privacy_mode : ''
+  if (account.platform === 'openai') {
+    if (mode === 'training_off') return { type: 'success', key: 'admin.accounts.privacyTrainingOff' }
+    if (mode === 'training_set_cf_blocked') return { type: 'error', key: 'admin.accounts.privacyCfBlocked' }
+    return { type: 'error', key: 'admin.accounts.privacyFailed' }
+  }
+  if (account.platform === 'antigravity') {
+    return mode === 'privacy_set' ? { type: 'success', key: 'admin.accounts.privacyAntigravitySet' } : { type: 'error', key: 'admin.accounts.privacyAntigravityFailed' }
+  }
+  return { type: 'error', key: 'admin.accounts.privacyFailed' }
+}
+const handleSetPrivacy = async (account: Account) => {
+  try {
+    const updated = await adminAPI.accounts.setPrivacy(account.id)
+    mergeAccount(updated)
+    const result = privacyResult(updated)
+    if (result.type === 'success') appStore.showSuccess(t(result.key))
+    else appStore.showError(t(result.key))
+  } catch (error: any) {
+    console.error('Failed to set privacy:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.privacyFailed'))
+  }
+}
+const onRevertFallback = async (account: Account) => {
+  try {
+    await adminAPI.accounts.revertProxyFallback(account.id)
+    appStore.showSuccess(t('admin.accounts.revertProxySuccess'))
+    void reload()
+  } catch (error: any) {
+    console.error('Failed to revert proxy fallback:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.revertProxyFailed'))
+  }
+}
+const handleCreateSparkShadow = (account: Account) => {
+  creatingShadowAcc.value = account
+  showCreateShadowDialog.value = true
+}
+const confirmCreateSparkShadow = async () => {
+  const account = creatingShadowAcc.value
+  if (!account) return
+  try {
+    await adminAPI.accounts.createSparkShadow(account.id, { name: `${account.name} (Spark)` })
+    showCreateShadowDialog.value = false
+    creatingShadowAcc.value = null
+    appStore.showSuccess(t('admin.accounts.createSparkShadowSuccess'))
+    void reload()
+  } catch (error: any) {
+    console.error('Failed to create spark shadow:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
+  }
+}
+const handleDelete = (account: Account) => { deletingAcc.value = account; showDeleteDialog.value = true }
+/** A deleted account leaves the page at once and leaves the selection. */
+const confirmDelete = async () => {
+  const account = deletingAcc.value
+  if (!account) return
+  try {
+    await adminAPI.accounts.delete(account.id)
+    showDeleteDialog.value = false
+    deletingAcc.value = null
+    table.remove(account.id)
+    removeSelectedAccounts([account.id])
+  } catch (error) {
+    console.error('Failed to delete account:', error)
+  }
+}
+
+// ---- Export ----
+const accountExportStepUp = useStepUp()
+const exportingData = ref(false)
+const exportTimestamp = () => {
+  const date = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }
 const handleExportData = async () => {
   if (exportingData.value) return
   exportingData.value = true
   try {
-    const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
+    const payload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
       selIds.value.length > 0
         ? { ids: selIds.value, includeProxies: includeProxyOnExport.value }
-        : {
-            includeProxies: includeProxyOnExport.value,
-            filters: buildAccountQueryFilters()
-          }
+        : { includeProxies: includeProxyOnExport.value, filters: buildFilterSnapshot() }
     ))
-    const timestamp = formatExportTimestamp()
-    const filename = `xy2api-account-${timestamp}.json`
-    const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = filename
+    link.download = `xy2api-account-${exportTimestamp()}.json`
     link.click()
     URL.revokeObjectURL(url)
-    // spark 影子账号被后端排除出备份(其凭据透传母账号、调度配置不可经凭据型导入重建);
-    // 跳过非零时明确提示用户,避免「下载成功但少了账号」的静默丢失。
-    if (dataPayload.skipped_shadows && dataPayload.skipped_shadows > 0) {
-      appStore.showWarning(t('admin.accounts.dataExportedSkippedShadows', { count: dataPayload.skipped_shadows }))
-    } else {
-      appStore.showSuccess(t('admin.accounts.dataExported'))
-    }
+    // Spark shadow accounts are left out of backups; say so when any were skipped.
+    if (payload.skipped_shadows && payload.skipped_shadows > 0) appStore.showWarning(t('admin.accounts.dataExportedSkippedShadows', { count: payload.skipped_shadows }))
+    else appStore.showSuccess(t('admin.accounts.dataExported'))
   } catch (error: any) {
     if (isStepUpCancelled(error)) {
-      // 用户主动取消 step-up 验证，静默返回，不弹错误提示。
+      // Cancelled by the user: nothing to say.
     } else if (isStepUpBlocked(error)) {
-      appStore.showError(
-        stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
-          ? t('stepUp.adminApiKeyForbidden')
-          : t('stepUp.notEnabled')
-      )
+      appStore.showError(stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' ? t('stepUp.adminApiKeyForbidden') : t('stepUp.notEnabled'))
     } else {
       appStore.showError(error?.message || t('admin.accounts.dataExportFailed'))
     }
@@ -2799,334 +1219,181 @@ const handleExportData = async () => {
     showExportDataDialog.value = false
   }
 }
-const accountExportStepUp = useStepUp()
-const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
-const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
-const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
-const handleTest = async (a: AccountListItem) => {
-  const account = await loadAccountDetails(a)
-  if (!account) return
-  testingAcc.value = account
-  showTest.value = true
-}
-const handleViewStats = async (a: AccountListItem) => {
-  const account = await loadAccountDetails(a)
-  if (!account) return
-  statsAcc.value = account
-  showStats.value = true
-}
-const handleSchedule = async (a: Account) => {
-  scheduleAcc.value = a
-  scheduleModelOptions.value = []
-  showSchedulePanel.value = true
-  try {
-    const models = await adminAPI.accounts.getAvailableModels(a.id)
-    scheduleModelOptions.value = models.map((m: ClaudeModel) => ({ value: m.id, label: m.display_name || m.id }))
-  } catch {
-    scheduleModelOptions.value = []
-  }
-}
-const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
-const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
-const duplicatingAccountIDs = new Set<number>()
-const handleDuplicateAccount = async (a: Account) => {
-  if (duplicatingAccountIDs.has(a.id)) return
-  duplicatingAccountIDs.add(a.id)
-  try {
-    const duplicate = await adminAPI.accounts.duplicate(a.id)
-    appStore.showSuccess(t('admin.accounts.duplicateSuccess', { name: duplicate.name }))
-    reload()
-  } catch (error: any) {
-    console.error('Failed to duplicate account:', error)
-    appStore.showError(error?.message || t('admin.accounts.duplicateFailed'))
-  } finally {
-    duplicatingAccountIDs.delete(a.id)
-  }
-}
-const handleRefresh = async (a: Account) => {
-  try {
-    const result = await adminAPI.accounts.refreshCredentials(a.id)
-    patchAccountInList(result.account)
-    enterAutoRefreshSilentWindow()
-    if (result.warning) appStore.showWarning(result.message)
-  } catch (error) {
-    console.error('Failed to refresh credentials:', error)
-  }
-}
-const handleResetQuota = async (a: Account) => {
-  try {
-    const updated = await adminAPI.accounts.resetAccountQuota(a.id)
-    patchAccountInList(updated)
-    enterAutoRefreshSilentWindow()
-    appStore.showSuccess(t('common.success'))
-  } catch (error) {
-    console.error('Failed to reset quota:', error)
+
+const handleToolAction = (action: AccountToolAction) => {
+  switch (action) {
+    case 'bulk-edit-filtered': return void openBulkEditFiltered()
+    case 'sync-crs': showSync.value = true; return
+    case 'import': showImportData.value = true; return
+    case 'openai-login': if (authStore.isAdmin) showOpenAILogin.value = true; return
+    case 'export': includeProxyOnExport.value = true; showExportDataDialog.value = true; return
+    case 'error-passthrough': showErrorPassthrough.value = true; return
+    case 'tls-profiles': showTLSFingerprintProfiles.value = true
   }
 }
 
-const privacyResultMessageKey = (account: Account): { type: 'success' | 'error'; key: string } => {
-  const mode = typeof account.extra?.privacy_mode === 'string' ? account.extra.privacy_mode : ''
-  if (account.platform === 'openai') {
-    switch (mode) {
-      case 'training_off':
-        return { type: 'success', key: 'admin.accounts.privacyTrainingOff' }
-      case 'training_set_cf_blocked':
-        return { type: 'error', key: 'admin.accounts.privacyCfBlocked' }
-      default:
-        return { type: 'error', key: 'admin.accounts.privacyFailed' }
-    }
-  }
-  if (account.platform === 'antigravity') {
-    if (mode === 'privacy_set') {
-      return { type: 'success', key: 'admin.accounts.privacyAntigravitySet' }
-    }
-    return { type: 'error', key: 'admin.accounts.privacyAntigravityFailed' }
-  }
-  return { type: 'error', key: 'admin.accounts.privacyFailed' }
-}
-
-const handleSetPrivacy = async (a: Account) => {
-  try {
-    const updated = await adminAPI.accounts.setPrivacy(a.id)
-    patchAccountInList(updated)
-    enterAutoRefreshSilentWindow()
-    const result = privacyResultMessageKey(updated)
-    if (result.type === 'success') {
-      appStore.showSuccess(t(result.key))
-    } else {
-      appStore.showError(t(result.key))
-    }
-  } catch (error: any) {
-    console.error('Failed to set privacy:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.privacyFailed'))
-  }
-}
-const onRevertFallback = async (a: Account) => {
-  try {
-    await adminAPI.accounts.revertProxyFallback(a.id)
-    appStore.showSuccess(t('admin.accounts.revertProxySuccess'))
-    reload()
-  } catch (error: any) {
-    console.error('Failed to revert proxy fallback:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.revertProxyFailed'))
-  }
-}
-const handleCreateSparkShadow = (a: Account) => {
-  creatingShadowAcc.value = a
-  showCreateShadowDialog.value = true
-}
-const confirmCreateSparkShadow = async () => {
-  const a = creatingShadowAcc.value
-  if (!a) return
-  try {
-    await adminAPI.accounts.createSparkShadow(a.id, { name: `${a.name} (Spark)` })
-    showCreateShadowDialog.value = false
-    creatingShadowAcc.value = null
-    appStore.showSuccess(t('admin.accounts.createSparkShadowSuccess'))
-    reload()
-  } catch (error: any) {
-    console.error('Failed to create spark shadow:', error)
-    appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
-  }
-}
-const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); invalidateUpstreamBalances([deletingAcc.value.id]); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
-const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
-  accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))
-}
-const handleToggleSchedulable = async (a: Account) => {
-  if (togglingSchedulable.value.has(a.id)) return
-  const previousSchedulable = a.schedulable
-  const nextSchedulable = !previousSchedulable
-  togglingSchedulable.value.add(a.id)
-  schedulingMutationVersion++
-  enterAutoRefreshSilentWindow()
-  pendingSchedulable.set(a.id, nextSchedulable)
-  setSchedulableLocally(a.id, nextSchedulable)
-  try {
-    const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
-    pendingSchedulable.delete(a.id)
-    updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
-    enterAutoRefreshSilentWindow()
-  } catch (error) {
-    pendingSchedulable.delete(a.id)
-    setSchedulableLocally(a.id, previousSchedulable)
-    console.error('Failed to toggle schedulable:', error)
-    appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
-  } finally {
-    togglingSchedulable.value.delete(a.id)
-    schedulingMutationVersion++
-  }
-}
-// The list switch turns both built-in targets on or off; custom targets keep their own setting.
-const handleToggleIQCheck = async (a: Account, enabled: boolean) => {
-  if (togglingIQCheck.value.has(a.id)) return
-  togglingIQCheck.value.add(a.id)
-  try {
-    const targets = await adminAPI.accounts.setIQCheck(a.id, { targets: IQ_BUILTIN_MODELS.map(model => ({ model, enabled })) })
-    patchAccountInList({ ...a, iq_targets: targets })
-    enterAutoRefreshSilentWindow()
-  } catch (error) {
-    console.error('Failed to toggle IQ check:', error)
-    appStore.showError(t('admin.accounts.iqFailed'))
-  } finally { togglingIQCheck.value.delete(a.id) }
-}
-const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const formatExpiresAt = (value: number | null) => {
-  if (!value) return '-'
-  return formatDateTime(
-    new Date(value * 1000),
-    {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    },
-    'sv-SE'
-  )
-}
-const isExpired = (value: number | null) => {
-  if (!value) return false
-  return value * 1000 <= Date.now()
-}
-// 所绑定代理的有效期(逻辑同 /admin/proxies,见 utils/proxyExpiry)
-const proxyExpiryBadge = (p: AccountProxy): string => proxyExpiryBadgeClass(p.expires_at, p.status)
-const proxyExpiryText = (p: AccountProxy): string => {
-  const { key, params } = proxyExpiryLabelKey(p.expires_at, p.status)
+// ---- Cells: small helpers ----
+const antigravityTier = (row: Account) => getAntigravityTier(row, t)
+const openAICompactMeta = (row: Account) => getOpenAICompactMeta(row, t)
+const openAICompactTitle = (row: Account) => getOpenAICompactTitle(row, t)
+const proxyExpiryText = (proxy: AccountProxy) => {
+  const { key, params } = proxyExpiryLabelKey(proxy.expires_at, proxy.status)
   return params ? t(key, params) : t(key)
 }
+const formatExpiresAt = (value: number | null) =>
+  value ? formatDateTime(new Date(value * 1000), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, 'sv-SE') : '-'
+const isExpired = (value: number | null) => !!value && value * 1000 <= now.value
 
-// 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。
-const handleScroll = (event: Event) => {
-  if (event.target instanceof Element && event.target.closest('.action-menu-content')) return
-  menu.show = false
-  if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
-}
-
-const handleViewportResize = () => {
-  if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
-}
-
-// Keys (ui-proposal 6.1 #11): "/" focuses the search box outside text fields; Escape clears the selection. Listened
-// to on window, so menus, dialogs and the drawer (document listeners) handle Escape first and mark it handled.
-const filtersRef = ref<{ $el?: HTMLElement } | null>(null)
-const isTyping = (target: EventTarget | null) =>
-  target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-const handleListKeys = (event: KeyboardEvent) => {
+// ---- Keys and scrolling ----
+// "/" focuses the search box outside text fields; Escape clears the selection. Menus, dialogs and the panel handle
+// Escape first (document listeners) and mark it handled.
+const isTyping = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+useEventListener(window, 'keydown', (event: KeyboardEvent) => {
   if (event.defaultPrevented || event.isComposing || document.body.classList.contains('modal-open')) return
   if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !isTyping(event.target)) {
-    const search = filtersRef.value?.$el?.querySelector<HTMLInputElement>('input')
-    if (!search) return
     event.preventDefault()
-    search.focus()
-  } else if (event.key === 'Escape') {
-    if (showAutoRefreshDropdown.value) showAutoRefreshDropdown.value = false
-    else if (selIds.value.length && !isTyping(event.target)) clearSelection()
+    toolbarRef.value?.focusSearch()
+  } else if (event.key === 'Escape' && selIds.value.length && !isTyping(event.target)) {
+    clearSelection()
   }
-}
-useEventListener(window, 'keydown', handleListKeys)
-
-// 点击外部关闭顶部下拉菜单
-const handleClickOutside = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (accountToolsDropdownRef.value && !accountToolsDropdownRef.value.contains(target)) {
-    showAccountToolsDropdown.value = false
-  }
-  if (autoRefreshDropdownRef.value && !autoRefreshDropdownRef.value.contains(target)) {
-    showAutoRefreshDropdown.value = false
-  }
-}
-
-onMounted(async () => {
-  if (typeof window !== 'undefined') {
-    desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
-    isDesktopViewport.value = desktopViewportMediaQuery.matches
-    desktopViewportListener = (event: MediaQueryListEvent) => {
-      isDesktopViewport.value = event.matches
-    }
-    if (typeof desktopViewportMediaQuery.addEventListener === 'function') {
-      desktopViewportMediaQuery.addEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.addListener(desktopViewportListener)
-    }
-  }
-
-  load()
-  loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
-    adminAPI.proxies.getAll(),
-    adminAPI.groups.getAll()
-  ])
-  if (proxiesResult.status === 'fulfilled') {
-    proxies.value = proxiesResult.value
-  } else {
-    console.error('Failed to load proxies:', proxiesResult.reason)
-  }
-  if (groupsResult.status === 'fulfilled') {
-    groups.value = groupsResult.value
-  } else {
-    console.error('Failed to load groups:', groupsResult.reason)
-  }
-  window.addEventListener('scroll', handleScroll, true)
-  window.addEventListener('resize', handleViewportResize)
-  document.addEventListener('click', handleClickOutside)
-
-  if (autoRefreshEnabled.value) {
-    autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-    resumeAutoRefresh()
-  } else {
-    pauseAutoRefresh()
-  }
-  cancelModalPrefetch = prefetchWhenIdle([loadCreateAccountModal, loadEditAccountModal], 3000)
 })
+// Scrolling the table closes the row menu (scrolling inside the menu does not).
+useEventListener(window, 'scroll', (event: Event) => {
+  if (event.target instanceof Element && event.target.closest('.action-menu-content')) return
+  menu.show = false
+}, true)
 
 let cancelModalPrefetch: (() => void) | null = null
-
-onUnmounted(() => {
-  cancelModalPrefetch?.()
-  upstreamBillingRateAbortController?.abort()
-  abortUpstreamBalanceRequests()
-  if (usageBatchFlushTimer !== null) {
-    clearTimeout(usageBatchFlushTimer)
-    usageBatchFlushTimer = null
-  }
-  pendingUsageBatchIds.clear()
-  window.removeEventListener('scroll', handleScroll, true)
-  window.removeEventListener('resize', handleViewportResize)
-  document.removeEventListener('click', handleClickOutside)
-  if (desktopViewportMediaQuery && desktopViewportListener) {
-    if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
-      desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.removeListener(desktopViewportListener)
-    }
-  }
-  desktopViewportListener = null
-  desktopViewportMediaQuery = null
+onMounted(async () => {
+  void reload()
+  void loadUpstreamBillingProbeGlobalState()
+  cancelModalPrefetch = prefetchWhenIdle([loadCreateAccountModal, loadEditAccountModal], 3000)
+  const [proxiesResult, groupsResult] = await Promise.allSettled([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
+  if (proxiesResult.status === 'fulfilled') proxies.value = proxiesResult.value
+  else console.error('Failed to load proxies:', proxiesResult.reason)
+  if (groupsResult.status === 'fulfilled') groups.value = groupsResult.value
+  else console.error('Failed to load groups:', groupsResult.reason)
 })
+onUnmounted(() => cancelModalPrefetch?.())
 </script>
 
 <style scoped>
-/* Account table only (ui-proposal 6.2): cells 12px high, 8px wide, faint row lines; DataTable's defaults stay. */
+/* The accounts table only (prototype): fixed 78px rows, 40px header, the column widths above; other table pages keep
+   the shared table's own spacing. */
+.account-table :deep(.table-wrapper) {
+  --select-col-width: calc(var(--acc-w-select, 36px) + var(--acc-share, 0px));
+}
+.account-table :deep(.table-wrapper > table) {
+  width: 100%;
+  min-width: var(--acc-min, 1200px);
+  table-layout: fixed;
+}
+.account-table :deep(thead th) {
+  height: var(--header-height);
+  padding: 0 var(--cell-pad-x);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: normal;
+  line-height: var(--line-height-small);
+  text-transform: none;
+  white-space: nowrap;
+}
 .account-table :deep(tbody td) {
-  padding: 12px 8px;
+  height: calc(var(--row-height) - 1px);
+  padding: 0 var(--cell-pad-x);
+  vertical-align: middle;
+  white-space: nowrap;
 }
-
-.account-table :deep(.table-wrapper .table-row-border) {
-  border-top-color: theme('colors.gray.100');
+.account-table :deep(th.acol-select),
+.account-table :deep(td.acol-select) {
+  padding: 0 0 0 12px;
 }
-
-:global(.dark) .account-table :deep(.table-wrapper .table-row-border) {
-  border-top-color: theme('colors.dark.800');
+.account-table :deep(th.acol-groups),
+.account-table :deep(td.acol-groups) {
+  padding: 0 8px;
 }
-
-.account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700;
+.account-table :deep(th.acol-actions),
+.account-table :deep(td.acol-actions) {
+  text-align: right;
 }
+.account-table :deep(.acell) {
+  display: flex;
+  height: calc(var(--row-height) - 1px);
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+}
+.account-table :deep(.acell--row) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+}
+.account-table :deep(.acell--end) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+/* Column widths: each column's own width plus an even share of the room left over (see columnLayout). */
+.account-table :deep(th.acol) {
+  width: calc(var(--acc-w, 120px) + var(--acc-share, 0px));
+}
+.account-table :deep(th.acol-name) {
+  width: auto;
+}
+.account-table :deep(th.acol-select) { --acc-w: var(--acc-w-select); }
+.account-table :deep(th.acol-status) { --acc-w: var(--acc-w-status); }
+.account-table :deep(th.acol-schedulable) { --acc-w: var(--acc-w-schedulable); }
+.account-table :deep(th.acol-groups) { --acc-w: var(--acc-w-groups); }
+.account-table :deep(th.acol-sq_recent) { --acc-w: var(--acc-w-sq_recent); }
+.account-table :deep(th.acol-iq_check) { --acc-w: var(--acc-w-iq_check); }
+.account-table :deep(th.acol-capacity) { --acc-w: var(--acc-w-capacity); }
+.account-table :deep(th.acol-upstream_billing_rate) { --acc-w: var(--acc-w-upstream_billing_rate); }
+.account-table :deep(th.acol-today_stats) { --acc-w: var(--acc-w-today_stats); }
+.account-table :deep(th.acol-actions) { --acc-w: var(--acc-w-actions); }
+.account-table :deep(th.acol-id) { --acc-w: var(--acc-w-id); }
+.account-table :deep(th.acol-platform_type) { --acc-w: var(--acc-w-platform_type); }
+.account-table :deep(th.acol-priority) { --acc-w: var(--acc-w-priority); }
+.account-table :deep(th.acol-usage) { --acc-w: var(--acc-w-usage); }
+.account-table :deep(th.acol-proxy) { --acc-w: var(--acc-w-proxy); }
+.account-table :deep(th.acol-rate_multiplier) { --acc-w: var(--acc-w-rate_multiplier); }
+.account-table :deep(th.acol-upstream_balance) { --acc-w: var(--acc-w-upstream_balance); }
+.account-table :deep(th.acol-last_used_at) { --acc-w: var(--acc-w-last_used_at); }
+.account-table :deep(th.acol-created_at) { --acc-w: var(--acc-w-created_at); }
+.account-table :deep(th.acol-expires_at) { --acc-w: var(--acc-w-expires_at); }
+.account-table :deep(th.acol-notes) { --acc-w: var(--acc-w-notes); }
 
-.account-tools-menu-icon {
-  @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
+.acc-check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 3px;
+  border-color: var(--color-line-control);
+  background-color: var(--color-bg-control);
+  color: theme('colors.primary.600');
+  cursor: pointer;
+}
+.acc-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.acc-op {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+@media (hover: hover) {
+  .acc-op:hover {
+    background: var(--color-bg-control-hover);
+    color: var(--color-text-primary);
+  }
 }
 </style>

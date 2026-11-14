@@ -8,14 +8,14 @@ const { listAccounts } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -66,8 +66,7 @@ function mountView() {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: DataTableStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
-        AccountTableFilters: true,
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -110,12 +109,18 @@ describe('admin AccountsView priority column preferences', () => {
     })
   })
 
-  it('shows priority as a sortable column for fresh preferences', async () => {
+  it('hides priority by default: it is one of the optional columns (spec 4.1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-column="priority"]').exists()).toBe(false)
+  })
+
+  it('sorts by priority on the server once the column is shown', async () => {
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     const wrapper = mountView()
     await flushPromises()
 
     expect(wrapper.get('[data-column="priority"]').text()).toBe('sortable')
-
     await wrapper.get('[data-test="sort-priority"]').trigger('click')
     await flushPromises()
 
@@ -125,28 +130,5 @@ describe('admin AccountsView priority column preferences', () => {
       expect.objectContaining({ sort_by: 'priority', sort_order: 'desc' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
-  })
-
-  it('preserves an existing preference that explicitly hides priority', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['priority', 'today_stats']))
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.find('[data-column="priority"]').exists()).toBe(false)
-    expect(JSON.parse(localStorage.getItem('account-hidden-columns') || '[]')).toEqual([
-      'priority',
-      'today_stats'
-    ])
-  })
-
-  it('keeps priority visible with older saved preferences', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats']))
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.get('[data-column="priority"]').text()).toBe('sortable')
-    expect(JSON.parse(localStorage.getItem('account-hidden-columns') || '[]')).toEqual(['today_stats'])
   })
 })

@@ -5,13 +5,16 @@ import type { Directive } from 'vue'
  * leave, blur, scroll or Escape (Escape only closes the tip, not the layer under it). One shared element with
  * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
  * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
+ * The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
  */
 const TIP_ID = 'sq-tip'
 const HOVER_DELAY_MS = 400
 const GAP = 6
 
+type TipText = string | null | undefined | (() => string)
+
 type TipTarget = HTMLElement & {
-  __tipText?: string
+  __tipText?: TipText
   __tipHandlers?: Record<string, (event: Event) => void>
 }
 
@@ -41,6 +44,11 @@ function place(target: HTMLElement, el: HTMLElement) {
   el.style.top = `${above >= 8 ? above : rect.bottom + GAP}px`
 }
 
+const tipText = (target: TipTarget) => {
+  const value = target.__tipText
+  return (typeof value === 'function' ? value() : value) ?? ''
+}
+
 const describedBy = (el: HTMLElement) => (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== TIP_ID)
 const setDescribedBy = (el: HTMLElement, ids: string[]) => {
   if (ids.length) el.setAttribute('aria-describedby', ids.join(' '))
@@ -49,7 +57,7 @@ const setDescribedBy = (el: HTMLElement, ids: string[]) => {
 
 function show(target: TipTarget) {
   clearTimeout(timer)
-  const text = target.__tipText
+  const text = tipText(target)
   if (!text || !target.isConnected) return
   if (current && current !== target) hide()
   const el = tip()
@@ -86,7 +94,7 @@ const keyboardFocus = (el: HTMLElement) => {
   }
 }
 
-export const vTip: Directive<TipTarget, string | null | undefined> = {
+export const vTip: Directive<TipTarget, TipText> = {
   mounted(el, binding) {
     el.__tipText = binding.value ?? ''
     const handlers: Record<string, (event: Event) => void> = {
@@ -106,9 +114,10 @@ export const vTip: Directive<TipTarget, string | null | undefined> = {
   updated(el, binding) {
     el.__tipText = binding.value ?? ''
     if (current !== el) return
-    if (!el.__tipText) hide()
+    const text = tipText(el)
+    if (!text) hide()
     else if (tipEl) {
-      tipEl.textContent = el.__tipText
+      tipEl.textContent = text
       place(el, tipEl)
     }
   },

@@ -9,7 +9,7 @@ const { listAccounts, clearCapabilityLearning } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin/accountCapability', async () => {
   const actual = await vi.importActual<typeof import('@/api/admin/accountCapability')>('@/api/admin/accountCapability')
   return { ...actual, clearCapabilityLearning }
@@ -21,7 +21,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -71,9 +71,8 @@ function mountView() {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: DataTableStub,
-        AccountStatusIndicator: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
-        AccountTableActions: true,
-        AccountTableFilters: true,
+        AccountStatusCell: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,

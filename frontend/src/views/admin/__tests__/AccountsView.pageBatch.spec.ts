@@ -9,14 +9,14 @@ const { listAccounts, getBatchTodayStats } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -60,8 +60,7 @@ function mountView() {
         },
         DataTable: DataTableStub,
         AccountStatusIndicator: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
-        AccountTableActions: true,
-        AccountTableFilters: true,
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -85,7 +84,7 @@ function mountView() {
   })
 }
 
-// Per-page batches (today stats) follow every table loader path, not only load().
+// Today's stats (a partial source of the live table) run after every active load: first load, page, page size, filter.
 describe('admin AccountsView per-page batches', () => {
   const row = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'apikey', status: 'active', schedulable: true })
 
@@ -128,13 +127,11 @@ describe('admin AccountsView per-page batches', () => {
     expect(getBatchTodayStats).toHaveBeenLastCalledWith([3])
   })
 
-  it('asks again after the debounced filter reload', async () => {
-    vi.useFakeTimers()
+  it('asks again after a filter change', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
-    await vi.advanceTimersByTimeAsync(300)
+    wrapper.getComponent({ name: 'AccountsToolbar' }).vm.$emit('change', { platform: 'openai' })
     await flushPromises()
 
     expect(listAccounts).toHaveBeenCalledTimes(2)
@@ -143,7 +140,7 @@ describe('admin AccountsView per-page batches', () => {
   })
 
   it('skips the request while every column that shows it is hidden, and ignores unknown saved columns', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'usage', 'retired_column']))
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['today_stats', 'usage', 'retired_column']))
     mountView()
     await flushPromises()
     expect(listAccounts).toHaveBeenCalledTimes(1)

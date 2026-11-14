@@ -26,7 +26,10 @@ const NOW = Date.parse('2026-11-12T12:00:00Z')
 const at = (ms: number) => new Date(NOW + ms).toISOString()
 const row = (patch: Partial<RecoverableRow> = {}): RecoverableRow =>
   ({ status: 'active', rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null, extra: {}, capability_learned: null, ...patch })
-const summary = (cooling: number) => ({ groups: { total: 2, normal: 2 - cooling, cooling, nodata: 0 } })
+// The backend's own summary: `cooling` substandard models (the account is at the back of those groups).
+const summary = (cooling: number) => ({
+  substandard: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', dims: ['ttfo' as const], until: '', other_group: false, exempt: false }))
+})
 
 describe('canRecover (contract delta F1, scenario 37)', () => {
   it('is off for a normal account and for states a recovery cannot clear', () => {
@@ -35,8 +38,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
     expect(canRecover(row({ status: 'inactive' }), summary(0), NOW)).toBe(false)
     expect(canRecover({ ...row(), schedulable: false, quota_used: 10, quota_limit: 10 } as RecoverableRow, summary(0), NOW)).toBe(false)
     expect(canRecover(row({ extra: { model_rate_limits: { 'iq:gpt-6-astra': { rate_limited_at: at(-1000), rate_limit_reset_at: at(3_600_000) } } } }), summary(0), NOW)).toBe(false)
-    // Overrides alone (no cooling group).
-    expect(canRecover(row(), { ...summary(0), overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }] } as never, NOW)).toBe(false)
+    // Exemptions alone (no substandard model).
+    expect(canRecover(row(), { ...summary(0), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(false)
   })
 
   it('is on for an error status, an unexpired account limit, a non-IQ model limit, a stream-only mark or a cooling group', () => {
@@ -49,8 +52,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
       'gpt-6.1-sol': { rate_limited_at: at(-1000), rate_limit_reset_at: at(60_000) }
     } } }), undefined, NOW)).toBe(true)
     expect(canRecover(row({ capability_learned: [{ protocol: 'responses', mode: 'stream_only', expires_at: at(60_000) }] }), undefined, NOW)).toBe(true)
-    // A cooling group counts even when an override hides it from the groups column.
-    expect(canRecover(row(), { ...summary(1), overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }] } as never, NOW)).toBe(true)
+    // A substandard model counts even when an exemption covers its group.
+    expect(canRecover(row(), { ...summary(1), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(true)
   })
 
   it('counts an end time equal to now as ended, and a missing or invalid one as none', () => {
