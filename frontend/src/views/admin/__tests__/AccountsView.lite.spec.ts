@@ -7,7 +7,6 @@ import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 
 const {
   listAccounts,
-  listWithEtag,
   getById,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
@@ -21,7 +20,6 @@ const {
   showInfo
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getById: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -42,7 +40,6 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       getById,
-      listWithEtag,
       getBatchTodayStats,
       getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
@@ -182,7 +179,6 @@ describe('admin AccountsView lite account list', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
-    listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })

@@ -42,7 +42,6 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
       getById,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),

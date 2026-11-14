@@ -5,7 +5,6 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
-  listWithEtag,
   batchRefresh,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
@@ -14,7 +13,6 @@ const {
   showError
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   batchRefresh: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -29,7 +27,6 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats,
       getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
@@ -153,7 +150,6 @@ describe('admin AccountsView select all filtered results', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset()
-    listWithEtag.mockReset()
     batchRefresh.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
@@ -161,11 +157,6 @@ describe('admin AccountsView select all filtered results', () => {
     getAllGroups.mockReset()
     showError.mockReset()
 
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
-    })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])

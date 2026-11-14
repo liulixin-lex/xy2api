@@ -11,8 +11,6 @@ vi.mock('@/api/admin/schedQuality', () => ({
 
 const {
   listAccounts,
-  listWithEtag,
-  getUpstreamBillingRatesWithEtag,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -23,8 +21,6 @@ const {
   showSuccess
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
-  getUpstreamBillingRatesWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -41,8 +37,6 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
-      getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
       getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
@@ -138,8 +132,6 @@ describe('admin AccountsView bulk edit scope', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
-    listWithEtag.mockReset()
-    getUpstreamBillingRatesWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
@@ -155,16 +147,6 @@ describe('admin AccountsView bulk edit scope', () => {
       page: 1,
       page_size: 20,
       pages: 0
-    })
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
-    })
-    getUpstreamBillingRatesWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
     })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })

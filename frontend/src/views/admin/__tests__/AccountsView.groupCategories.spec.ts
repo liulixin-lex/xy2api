@@ -7,7 +7,6 @@ import { backendSummary } from '@/api/admin/schedQuality'
 
 const {
   listAccounts,
-  listWithEtag,
   getById,
   updateAccount,
   getAllGroups,
@@ -16,7 +15,6 @@ const {
   showSuccess
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getById: vi.fn(),
   updateAccount: vi.fn(),
   getAllGroups: vi.fn(),
@@ -31,7 +29,6 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getById,
       update: updateAccount,
       getBatchTodayStats: vi.fn(async () => ({ stats: {} })),
@@ -179,7 +176,6 @@ describe('admin AccountsView group categories', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
-    listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'etag', data: null })
     getById.mockReset().mockResolvedValue(freshAccount)
     updateAccount.mockReset()
     getAllGroups.mockReset().mockResolvedValue(groups)

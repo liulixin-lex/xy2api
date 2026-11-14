@@ -3,9 +3,8 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
 
-const { listAccounts, listWithEtag, getUpstreamBalances } = vi.hoisted(() => ({
+const { listAccounts, getUpstreamBalances } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getUpstreamBalances: vi.fn()
 }))
 
@@ -15,12 +14,10 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
       getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBalances,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
-      getUpstreamBillingRatesWithEtag: vi.fn().mockResolvedValue({ notModified: true, etag: null, data: null }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
