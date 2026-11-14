@@ -60,7 +60,7 @@ func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) 
 	change.mu.Lock()
 	if change.activeAttempt == attempt {
 		change.attemptSucceeded = success
-		change.attemptCanceled = attempt.client || errors.Is(attempt.ctx.Err(), context.Canceled)
+		change.attemptCanceled = attempt.client || attempt.state.ClientCanceled()
 	}
 	change.mu.Unlock()
 }
@@ -75,9 +75,8 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	change.mu.Lock()
 	succeeded, attemptCanceled := change.attemptSucceeded, change.attemptCanceled
 	change.mu.Unlock()
-	canceled := attemptCanceled || errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect)
-	success := succeeded && err == nil && ctx.Err() == nil && result != nil && !result.PartialFailure && !canceled &&
-		(result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done")
+	canceled := attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
+	success := succeeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
 	CompleteOpenAIStickyChange(ctx, accountID, success, canceled)
 }
 
