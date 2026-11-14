@@ -2,12 +2,16 @@ package service
 
 import (
 	"strings"
+	"unicode"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"golang.org/x/text/width"
 )
 
 func normalizeGroupAlias(alias string) (string, error) {
+	if strings.IndexFunc(alias, unicode.IsControl) >= 0 {
+		return "", infraerrors.BadRequest("INVALID_GROUP_ALIAS", "alias must not contain control characters")
+	}
 	alias = strings.TrimSpace(alias)
 	halfWidths := 0
 	for _, r := range alias {
