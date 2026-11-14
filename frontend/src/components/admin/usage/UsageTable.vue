@@ -16,6 +16,8 @@
         {{ ipGeoBatchLoading ? t('usage.ipGeo.batchFetching') : t('usage.ipGeo.batchFetch') }}
       </button>
     </div>
+    <!-- Right above the table, under the IP lookup bar: the usage page's "N new records" anchor. -->
+    <slot name="above-table" />
     <div class="overflow-auto">
       <DataTable
         ref="tableRef"

@@ -128,12 +128,6 @@
 
         <!-- overflow-clip, not hidden: the sticky anchor below must follow the page scroll -->
         <div v-show="activeTab === 'usage'" class="overflow-clip rounded-b-2xl">
-          <!-- "N new records" shows only while the list is away from its top (new records come in by themselves there),
-               so from 1024px it rides this zero-height anchor: in the header band while the list's top is in view,
-               under the page header once it has scrolled away. Below 1024px it is fixed under the top bar anyway. -->
-          <div class="sticky top-16 z-10 h-0">
-            <PendingChangesPill :count="pending" :more="pendingMore" :label="newRecordsText" @merge="applyPending" />
-          </div>
           <UsageTable
             ref="usageTableRef"
             flat
@@ -150,7 +144,18 @@
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
-          />
+          >
+            <!-- "N new records" shows only while the list is away from its top (new records come in by themselves
+                 there), so from 1024px it rides this zero-height anchor right above the table, under the IP lookup bar
+                 (7j-4): in the header band while the list's top is in view, under the page header once it has
+                 scrolled away. Below 1024px the anchor is no layer of its own and the pill, fixed under the top bar,
+                 stacks as on the users and groups pages. -->
+            <template #above-table>
+              <div class="h-0 lg:sticky lg:top-16 lg:z-10">
+                <PendingChangesPill :count="pending" :more="pendingMore" :label="newRecordsText" @merge="applyPending" />
+              </div>
+            </template>
+          </UsageTable>
           <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">

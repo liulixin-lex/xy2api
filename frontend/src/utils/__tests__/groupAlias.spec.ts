@@ -22,12 +22,15 @@ describe('pill text', () => {
 })
 
 describe('alias length', () => {
-  // The cases of the backend's TestNormalizeGroupAlias (control characters aside: only the backend checks those).
+  // The cases of the backend's TestNormalizeGroupAlias (control characters aside: only the backend checks those), and
+  // those where the two used to differ (7j-2): the prolonged sound mark and Bopomofo are wide, a flag's two letters
+  // narrow, and a byte-order mark is not trimmed.
   it.each([
     ['', true], ['  中文 ', true], ['ABC', true], ['123', true], ['A稳', true], ['稳A', true], ['ＡＢ', true],
     ['ｶﾀｶ', true], ['αβγ', true], ['😀😀', true],
     ['AB12', false], ['AB稳', false], ['中AB', false], ['ＡＢＣ', false], ['中文字', false], ['ｶﾀｶﾅ', false],
-    ['αβγδ', false], ['中文A', false]
+    ['αβγδ', false], ['中文A', false],
+    ['AーB', false], ['ㄅㄆㄇ', false], ['🇨🇳A', true], ['中文\uFEFF', false]
   ])('%s fits: %s', (alias, fits) => {
     expect(groupAliasFits(alias)).toBe(fits)
   })

@@ -1344,7 +1344,8 @@ defineExpose({
   min-width: 0;
   color: var(--color-text-primary);
 }
-/* Label over value, two to a row; a value that cannot wrap scrolls inside its cell instead of widening the card. */
+/* Label over value, two to a row; long text wraps. A value never clips: menus and tips that open from a cell would be
+   cut at its edge (7j-1). */
 .table-card__fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1367,7 +1368,6 @@ defineExpose({
 .table-card__value {
   min-width: 0;
   margin: 0;
-  overflow-x: auto;
   overflow-wrap: anywhere;
   color: var(--color-text-primary);
   font-size: var(--font-size-body);

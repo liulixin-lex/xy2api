@@ -168,6 +168,7 @@ const isAbort = (error: unknown) => {
 }
 const keyOf = (id: LiveRowId) => String(id)
 const hasOwn = (target: object, key: string) => Object.prototype.hasOwnProperty.call(target, key)
+const IDLE = Symbol('idle')
 const backoff = (failures: number) => BACKOFF_MS[Math.min(failures, BACKOFF_MS.length) - 1]
 
 /** Value equality for JSON data (primitives, arrays, plain objects); Dates compare by time, other objects by identity. */
@@ -200,7 +201,8 @@ interface Beat {
   followsLoad: boolean
   /** The next run is the one right after an active load: a source re-sorts the page once its values land. */
   afterLoad: boolean
-  run: (signal: AbortSignal, afterLoad: boolean) => Promise<void>
+  /** IDLE: it had nothing to do this time (the membership check held back); the failure count stays as it was. */
+  run: (signal: AbortSignal, afterLoad: boolean) => Promise<void | typeof IDLE>
   timer: ReturnType<typeof setTimeout> | null
   controller: AbortController | null
   /** The run in flight, aborted or not: a beat never starts while it is set. */
@@ -388,9 +390,10 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     const afterLoad = beat.afterLoad
     const job = (async () => {
       try {
-        await beat.run(controller.signal, afterLoad)
+        const outcome = await beat.run(controller.signal, afterLoad)
         if (!controller.signal.aborted) {
-          beat.failures = 0
+          // An idle run asked nothing: it neither clears a failure nor shows the table "live" again (7j-5).
+          if (outcome !== IDLE) beat.failures = 0
           beat.endedAt = Date.now()
           // Aborted or failed, the run that brings the values after a load is still owed (refresh, retry).
           if (afterLoad) beat.afterLoad = false
@@ -477,7 +480,8 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   if (membershipMs > 0) {
     addBeat(undefined, membershipMs, false, async (signal) => {
       // The page on screen is not the current query while a failed load is owed; its retry settles membership.
-      if (owed || options.membershipActive?.() === false) return
+      if (owed) return
+      if (options.membershipActive?.() === false) return IDLE
       const requestedAt = ++stamp
       const page = await options.fetchPage(signal)
       if (signal.aborted) return

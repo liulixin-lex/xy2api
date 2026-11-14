@@ -246,7 +246,8 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="min-w-[280px] space-y-2">
+            <!-- The fixed 280px only in the wide table: a narrow card's field is narrower (7j-1). -->
+            <div class="space-y-2 lg:min-w-[280px]">
               <!-- Daily Usage -->
               <div v-if="row.group?.daily_limit_usd" class="usage-row">
                 <div class="flex items-center gap-2">

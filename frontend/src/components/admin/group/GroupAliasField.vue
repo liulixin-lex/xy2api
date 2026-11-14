@@ -6,6 +6,7 @@
     <div class="flex flex-wrap items-center gap-3">
       <input
         :id="id"
+        ref="inputRef"
         v-model="alias"
         type="text"
         class="input w-28 flex-none"
@@ -31,7 +32,8 @@
  * The alias input of the group forms (spec 6): a live preview with the accounts page's group pill, the automatic text
  * while it is empty, and the length rule (utils/groupAlias) as an inline error. The form checks groupAliasFits()
  * before it submits; a backend rejection (INVALID_GROUP_ALIAS) is shown here through showServerError() until the
- * alias changes.
+ * alias changes. Either way the input takes focus, which scrolls it into view: it sits high in a long form whose save
+ * button is at the bottom (7j-3).
  */
 import { computed, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -43,6 +45,8 @@ const alias = defineModel<string>({ required: true })
 const { t } = useI18n()
 const id = `group-alias-${useId()}`
 
+const inputRef = ref<HTMLInputElement | null>(null)
+const focus = () => inputRef.value?.focus()
 const serverError = ref('')
 watch(alias, () => {
   serverError.value = ''
@@ -50,8 +54,10 @@ watch(alias, () => {
 const error = computed(() => serverError.value || (groupAliasFits(alias.value) ? '' : t('admin.groups.alias.tooLong')))
 
 defineExpose({
+  focus,
   showServerError: () => {
     serverError.value = t('admin.groups.alias.invalid')
+    focus()
   }
 })
 </script>

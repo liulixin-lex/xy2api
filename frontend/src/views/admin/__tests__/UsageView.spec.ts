@@ -826,7 +826,8 @@ describe('admin UsageView live log', () => {
     name: 'UsageTable',
     props: ['data', 'loading', 'rowClass'],
     methods: { isAtTop: () => atTop, scrollToTop: () => undefined },
-    template: '<div />',
+    // The "N new records" anchor sits in the table's above-table slot (7j-4).
+    template: '<div><slot name="above-table" /></div>',
   }
   const page = (...keys: string[]) => ({
     items: keys.map((key) => {

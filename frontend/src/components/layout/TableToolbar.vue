@@ -94,4 +94,19 @@
     scroll-padding-inline: 24px;
   }
 }
+/* A mouse cannot swipe: it gets a thin scrollbar to reach the filters off screen; touch keeps it hidden (7j-6). */
+@media (max-width: 1023px) and (pointer: fine) {
+  .table-toolbar__filters {
+    scrollbar-color: var(--color-line-control) transparent;
+    scrollbar-width: thin;
+  }
+  .table-toolbar__filters::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .table-toolbar__filters::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: var(--color-line-control);
+  }
+}
 </style>

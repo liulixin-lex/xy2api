@@ -841,6 +841,30 @@ describe('scheduling', () => {
     expect(fetchPage).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps a failed membership check failing while it is held back: the idle beats clear nothing (7j-5)', async () => {
+    const active = ref(true)
+    let down = false
+    const fetchPage = vi.fn(async () => {
+      if (down) throw new Error('down')
+      return page(row(1))
+    })
+    const table = engine({ fetchPage, membershipIntervalMs: 5000, membershipActive: () => active.value })
+    await table.reload()
+    down = true
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(table.status.value).toBe('stale')
+
+    active.value = false
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+    expect(table.status.value).toBe('stale')
+
+    down = false
+    active.value = true
+    await vi.advanceTimersByTimeAsync(0)
+    expect(table.status.value).toBe('live')
+  })
+
   it('pauses and resumes by hand, catching up on resume', async () => {
     const fetch = vi.fn(async () => [] as Array<readonly [LiveRowId, Partial<Row>]>)
     const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, complete: true, fetch }] })

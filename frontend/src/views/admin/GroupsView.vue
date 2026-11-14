@@ -6157,7 +6157,10 @@ const handleCreateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
-  if (!groupAliasFits(createForm.alias)) return; // the alias field shows why
+  if (!groupAliasFits(createForm.alias)) {
+    createAliasFieldRef.value?.focus(); // the alias field shows why
+    return;
+  }
   if (
     supportsReasoningEffortPolicyPlatform(createForm.platform) &&
     createReasoningEffortPolicyRef.value &&
@@ -6507,7 +6510,10 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
-  if (!groupAliasFits(editForm.alias)) return; // the alias field shows why
+  if (!groupAliasFits(editForm.alias)) {
+    editAliasFieldRef.value?.focus(); // the alias field shows why
+    return;
+  }
   if (
     supportsReasoningEffortPolicyPlatform(editForm.platform) &&
     editReasoningEffortPolicyRef.value &&
