@@ -1,5 +1,5 @@
 <template>
-  <span :class="['sq-capsule sq-capsule--manual', { 'sq-capsule--all': allGroups }]" data-sq-override="exempt">
+  <span class="sq-capsule sq-capsule--manual" data-sq-override="exempt">
     <svg class="sq-capsule__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.9 8.3-7 10-4.1-1.7-7-5.6-7-10V6z" /></svg>
     <template v-if="allGroups"><span class="sq-capsule__name">{{ t('admin.schedQuality.override.allGroups') }}</span>{{ ' ' }}</template>
     <span class="sq-capsule__state">{{ t('admin.schedQuality.state.exempted') }}</span>

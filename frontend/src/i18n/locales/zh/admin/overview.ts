@@ -889,7 +889,6 @@ export default {
         duplicateModel: '模型 {model} 已有配置，请合并后保存'
       },
       title: '分组管理',
-      description: '管理 API 密钥分组和费率配置',
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',

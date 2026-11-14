@@ -50,7 +50,7 @@ const schedQualityLedgerPageSize = 5000
 
 var _ SchedQualityEngine = (*SchedQualityEngineService)(nil)
 
-func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, _ SchedTestRunner, switches schedQualitySwitches, now func() time.Time, obs SchedObs) *SchedQualityEngineService {
+func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, switches schedQualitySwitches, now func() time.Time, obs SchedObs) *SchedQualityEngineService {
 	if now == nil {
 		now = time.Now
 	}
@@ -269,7 +269,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	} else {
 		s.processedAt = horizon
 		for _, decision := range decisions {
-			logSchedDecision(ctx, decision)
+			LogSchedQualityDecision(ctx, decision)
 			if decision.Action == "enter" || decision.Action == "renew" {
 				s.obs.Count("cooled", 1)
 			} else {

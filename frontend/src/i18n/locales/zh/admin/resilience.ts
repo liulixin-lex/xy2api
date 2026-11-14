@@ -227,7 +227,7 @@ export default {
     },
     usage: {
       fallback: '兜底 → {group}',
-      fallbackTitle: '原分组无可用账号，由兜底分组承接；按兜底分组计费，用户只看到原分组'
+      fallbackTitle: '兜底分组承接'
     }
   }
 }

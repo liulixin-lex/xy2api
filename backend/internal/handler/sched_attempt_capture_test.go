@@ -56,10 +56,6 @@ func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.Sch
 		a.sample.PromptTokens = &u.PromptTokens
 		a.sample.CacheReadTokens = &u.CacheReadTokens
 	}
-	if a.in.Test != nil {
-		a.in.Test.Sink(a.sample)
-		return
-	}
 	a.owner.mu.Lock()
 	a.owner.samples = append(a.owner.samples, a.sample)
 	a.owner.mu.Unlock()
@@ -429,7 +425,6 @@ func TestSchedCaptureA15BorrowedRepairStaysCold(t *testing.T) {
 	require.Len(t, rec.samples, 2)
 	for _, row := range rec.samples {
 		require.Equal(t, int64(2), row.AccountID)
-		require.False(t, row.Warm)
 	}
 	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
 	require.Equal(t, schedquality.OutcomeOK, rec.samples[1].Outcome)
@@ -525,7 +520,6 @@ func TestSchedCaptureA8WebSocketHTTPBridge(t *testing.T) {
 			require.Equal(t, schedquality.OutcomeOK, row.Outcome, row.Detail)
 			require.NotNil(t, row.TTFOMs)
 			require.Equal(t, 100000, *row.PromptTokens)
-			require.False(t, row.Warm)
 		case <-ctx.Done():
 			t.Fatal("missing bridge sample")
 		}

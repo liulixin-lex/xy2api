@@ -69,7 +69,7 @@ func TestEvaluateCacheEligibility(t *testing.T) {
 		want   int
 	}{
 		{"continuation", func(s *AttemptSample) {}, 1},
-		{"cold", func(s *AttemptSample) { s.Continuation = false; s.Warm = true }, 0},
+		{"cold", func(s *AttemptSample) { s.Continuation = false }, 0},
 		{"no-session", func(s *AttemptSample) { s.SessionKey = "" }, 0},
 		{"unknown-usage", func(s *AttemptSample) { s.CacheReadTokens = nil }, 0},
 		{"unknown-writes", func(s *AttemptSample) { s.CacheCreationTokens = nil }, 0},
