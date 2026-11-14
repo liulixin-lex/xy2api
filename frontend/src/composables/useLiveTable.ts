@@ -9,8 +9,11 @@
  *   as a whole when any field its slots read changes. No answer changes a row's id, not even its type.
  * - Rows from reload(), the membership check, sources marked `complete` and mergeRows(…, { complete: true }) are whole
  *   rows: a field the previous whole row of that record carried and this one leaves out is removed (the backend omits
- *   empty fields); a field under edit goes once the edit is over. Fields only other sources write are kept: those
- *   sources set the fields they carry and nothing else.
+ *   empty fields); a field under edit goes once the edit is over. Fields only other sources write are kept.
+ * - A partial source (not `complete`) sets the fields it carries and nothing else, so it must answer every requested
+ *   id with every field it is responsible for, empty values given explicitly (0, null, []): a field it leaves out is
+ *   never cleared, and a count the backend omits once it drops to 0 would keep showing its last value. Fill the
+ *   defaults in its fetch function (as the accounts page does with buildDefaultTodayStats).
  * - reload() is the active load (page, filter, sort, manual refresh): it replaces the id list and never clears the rows
  *   on screen (`transitioning` meanwhile); stale answers are dropped. A failed load turns `status` to 'stale' and is
  *   retried on the back-off beat; the caller of reload() also gets the error. After every load that succeeds (the
@@ -23,14 +26,17 @@
  *   `tail.enabled()` holds; otherwise new rows are only counted (`pendingMore` once a full page is waiting: "N+").
  * - Beats are setTimeout chains started after a request ends; a source never overlaps itself. They skip while an active
  *   load runs, stop while the tab is hidden or paused, catch up at once on visible / online / resume (unless they ran
- *   within their own beat), back off 3, 6, 12, 30 s after failures, and abort on dispose.
+ *   within their own beat), back off 3, 6, 12, 30 s after failures, and abort on dispose. `intervalMs: 0` makes a
+ *   source or task load-only: it runs after each successful active load and on refresh(name), never on a timer or a
+ *   catch-up, and after a failure it still retries 3, 6, 12, 30 s later until it succeeds.
  * - edit() writes a value at once and locks the field: no background answer writes it, nor any answer to a request
  *   sent before the edit settled. The latest edit's answer is written when it succeeds; an older edit's answer never
  *   is. When the latest edit fails the field returns to the value the server last confirmed (if it still shows the
  *   optimistic value), and the error goes back to the caller.
  * - Order changes only through active loads and sortBy(compare): the comparator stays in force for every later active
- *   load until sortBy(null); updates never re-order. remove(id) takes a row off at once; answers to requests sent
- *   before it do not bring the row back.
+ *   load until sortBy(null), and each source that runs right after a load re-sorts the page once when its values land
+ *   (the comparator may read them). Other updates never re-order. A comparator that throws leaves the server's order.
+ *   remove(id) takes a row off at once; answers to requests sent before it do not bring the row back.
  *
  *   const table = useLiveTable<Account>({
  *     getId: (row) => row.id,
@@ -53,10 +59,19 @@ export interface LivePage<T> {
   total: number
 }
 
+/**
+ * Values for the rows of the current page from another endpoint. A partial source (not `complete`) must answer every
+ * requested id with every field it is responsible for, empty values given explicitly (0, null, []): leaving a field
+ * out never clears it. Fill the defaults in `fetch`.
+ */
 export interface LiveSource<T> {
   /** For refresh(name). */
   name?: string
-  /** Pause between the end of one request and the next one, in ms. */
+  /**
+   * Pause between the end of one request and the next one, in ms. 0 makes the source load-only: it runs after each
+   * successful active load and on refresh(name), with no beat of its own (failures are still retried). A value that
+   * is not a positive finite number counts as 0; values above setTimeout's limit (about 24.8 days) are capped.
+   */
   intervalMs: number
   /** Every answer is a whole row: fields it leaves out are removed from the record. */
   complete?: boolean
@@ -71,6 +86,7 @@ export interface LiveSource<T> {
  */
 export interface LiveTask {
   name?: string
+  /** As for sources: 0 runs the task only after each successful active load and on refresh(name). */
   intervalMs: number
   run: (signal: AbortSignal) => Promise<void>
 }
@@ -81,7 +97,7 @@ export interface LiveTableOptions<T extends object> {
   fetchPage: (signal: AbortSignal) => Promise<LivePage<T>>
   sources?: LiveSource<T>[]
   tasks?: LiveTask[]
-  /** Membership check beat in ms; 0 turns it off. Default 30 s. */
+  /** Membership check beat in ms; 0 (or anything that is not a positive finite number) turns it off. Default 30 s. */
   membershipIntervalMs?: number
   /** A row on the page that no longer matches the filter is dimmed in place. */
   matches?: (row: T) => boolean
@@ -111,11 +127,15 @@ export interface LiveTable<T extends object> {
   /**
    * Runs the named sources and tasks now, paused or not, and resolves when their answer is in. Before the first load
    * or during an active load it is remembered and runs as soon as that load ends; the promise then resolves at once.
+   * reload() needs no refresh() after it: partial sources, load-only sources and page tasks run once on their own
+   * after every successful load.
    */
   refresh: (name: string) => Promise<void>
   /**
    * Re-orders the current page now (a local sort the user asked for) and every later active load the same way, until
-   * sortBy(null) restores the server's order. Updates never re-order.
+   * sortBy(null) restores the server's order. Each source that runs right after a load re-sorts the page once when its
+   * values land; updates never re-order. The comparator must tolerate rows whose partial fields have not arrived yet
+   * (right after a page change they are missing); if it throws, the page keeps the server's order.
    */
   sortBy: (compare: ((a: T, b: T) => number) | null) => void
   /** Takes a row off the page at once (after a delete). */
@@ -127,6 +147,10 @@ export interface LiveTable<T extends object> {
 
 const BACKOFF_MS = [3000, 6000, 12000, 30000]
 const DEFAULT_MEMBERSHIP_MS = 30_000
+/** setTimeout's longest delay; a larger one fires at once. */
+const MAX_DELAY_MS = 2 ** 31 - 1
+/** A beat in ms: a positive finite number, capped at the timer limit; anything else is 0 (no beat). */
+const beatMs = (ms: number | undefined) => (typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_DELAY_MS) : 0)
 
 const pageHidden = () => typeof document !== 'undefined' && document.hidden
 const isAbort = (error: unknown) => {
@@ -161,10 +185,13 @@ function entriesOf<T>(patches: LivePatches<T>): Iterable<readonly [LiveRowId, Pa
 
 interface Beat {
   name?: string
+  /** 0: no beat of its own (load-only). */
   intervalMs: number
-  /** Runs right after every successful active load: partial sources and page tasks. */
+  /** Runs right after every successful active load: partial and load-only sources, page tasks. */
   followsLoad: boolean
-  run: (signal: AbortSignal) => Promise<void>
+  /** The next run is the one right after an active load: a source re-sorts the page once its values land. */
+  afterLoad: boolean
+  run: (signal: AbortSignal, afterLoad: boolean) => Promise<void>
   timer: ReturnType<typeof setTimeout> | null
   controller: AbortController | null
   /** The run in flight, aborted or not: a beat never starts while it is set. */
@@ -275,9 +302,20 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     for (const [key, at] of removed) if (at < requestedAt) removed.delete(key)
     return kept
   }
+  /** The list sorted by the comparator; the list as it is when there is none or it throws. */
   const ordered = (list: LiveRowId[]) => {
     const compare = order
-    return compare ? [...list].sort((a, b) => compare(records.get(keyOf(a))!, records.get(keyOf(b))!)) : list
+    if (!compare) return list
+    try {
+      return [...list].sort((a, b) => compare(records.get(keyOf(a))!, records.get(keyOf(b))!))
+    } catch {
+      return list
+    }
+  }
+  /** The rows on the page in the server's order. */
+  const servedOnPage = () => {
+    const shown = new Set(ids.value.map(keyOf))
+    return served.filter((id) => shown.has(keyOf(id)))
   }
   /** Shows these ids in this order; records, guards and dim marks of ids off the page go. */
   function show(next: LiveRowId[]) {
@@ -295,14 +333,16 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   let started = false
   let disposed = false
   const running = () => started && !disposed && !paused.value && !hidden.value
-  const delayOf = (beat: Beat) => (beat.failures ? Math.max(beat.intervalMs, backoff(beat.failures)) : beat.intervalMs)
+  /** When the next run is due after the last one; null for a load-only beat that is not retrying a failure. */
+  const delayOf = (beat: Beat) => (beat.failures ? Math.max(beat.intervalMs, backoff(beat.failures)) : beat.intervalMs || null)
 
   function clearTimer(beat: Beat) {
     if (beat.timer !== null) clearTimeout(beat.timer)
     beat.timer = null
   }
-  function schedule(beat: Beat, delay: number) {
+  function schedule(beat: Beat, delay: number | null) {
     clearTimer(beat)
+    if (delay === null) return
     beat.timer = setTimeout(() => {
       beat.timer = null
       want(beat, false)
@@ -329,12 +369,15 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     clearTimer(beat)
     const controller = new AbortController()
     beat.controller = controller
+    const afterLoad = beat.afterLoad
     const job = (async () => {
       try {
-        await beat.run(controller.signal)
+        await beat.run(controller.signal, afterLoad)
         if (!controller.signal.aborted) {
           beat.failures = 0
           beat.endedAt = Date.now()
+          // Aborted or failed, the run that brings the values after a load is still owed (refresh, retry).
+          if (afterLoad) beat.afterLoad = false
         }
       } catch (error) {
         if (!controller.signal.aborted && !isAbort(error)) beat.failures++
@@ -355,7 +398,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   /** After an active load: run what asked to run (after a success: partial sources and tasks), schedule the rest. */
   function resumeBeats(succeeded: boolean) {
     for (const beat of beats) {
-      if (succeeded && beat.followsLoad) beat.again = true
+      if (succeeded && beat.followsLoad) beat.again = beat.afterLoad = true
       if (beat.again) drive(beat)
       else if (running()) schedule(beat, delayOf(beat))
     }
@@ -371,13 +414,20 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     const now = Date.now()
     for (const beat of beats) {
       if (beat.inflight) continue // its end schedules the next run
-      const due = beat.endedAt + delayOf(beat) - now
-      if (beat.again || beat.failures > 0 || due <= 0) want(beat, false)
-      else schedule(beat, due)
+      const delay = delayOf(beat)
+      if (beat.again || beat.failures > 0) want(beat, false)
+      else if (delay === null) continue // load-only: nothing to catch up
+      else if (beat.endedAt + delay <= now) want(beat, false)
+      else schedule(beat, beat.endedAt + delay - now)
     }
   }
-  const addBeat = (name: string | undefined, intervalMs: number, followsLoad: boolean, run: Beat['run']) =>
-    beats.push({ name, intervalMs, followsLoad, run, timer: null, controller: null, inflight: null, failures: 0, endedAt: 0, again: false, forced: false })
+  const addBeat = (name: string | undefined, intervalMs: number, followsLoad: boolean, run: Beat['run']) => {
+    const ms = beatMs(intervalMs)
+    beats.push({
+      name, intervalMs: ms, followsLoad: followsLoad || ms === 0, afterLoad: false, run,
+      timer: null, controller: null, inflight: null, failures: 0, endedAt: 0, again: false, forced: false
+    })
+  }
 
   let generation = 0
   let active: AbortController | null = null
@@ -392,17 +442,20 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
 
   for (const source of options.sources ?? []) {
     const complete = source.complete === true
-    addBeat(source.name, source.intervalMs, !complete, async (signal) => {
+    addBeat(source.name, source.intervalMs, !complete, async (signal, afterLoad) => {
       if (!ids.value.length) return
       const requestedAt = ++stamp
       const patches = await source.fetch([...ids.value], signal)
       // An active load or refresh(name) aborts the run; an answer that ignores the signal is still dropped.
-      if (!signal.aborted) applyPatches(patches, requestedAt, complete)
+      if (signal.aborted) return
+      applyPatches(patches, requestedAt, complete)
+      // The load sorted the page before these values were in; it is still that one sort the user asked for.
+      if (afterLoad && order) show(ordered(servedOnPage()))
     })
   }
-  for (const task of options.tasks ?? []) addBeat(task.name, task.intervalMs, true, task.run)
+  for (const task of options.tasks ?? []) addBeat(task.name, task.intervalMs, true, (signal) => task.run(signal))
 
-  const membershipMs = options.membershipIntervalMs ?? DEFAULT_MEMBERSHIP_MS
+  const membershipMs = beatMs(options.membershipIntervalMs ?? DEFAULT_MEMBERSHIP_MS)
   if (membershipMs > 0) {
     addBeat(undefined, membershipMs, false, async (signal) => {
       // The page on screen is not the current query while a failed load is owed; its retry settles membership.
@@ -554,8 +607,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   }
   function sortBy(compare: ((a: T, b: T) => number) | null) {
     order = compare
-    const shown = new Set(ids.value.map(keyOf))
-    show(compare ? ordered([...ids.value]) : served.filter((id) => shown.has(keyOf(id))))
+    show(ordered(servedOnPage()))
   }
   async function refresh(name: string) {
     await Promise.all(beats.filter((beat) => beat.name === name).map(async (beat) => {
