@@ -362,6 +362,21 @@ describe('DataTable', () => {
     expect(card.get('.table-card__foot [data-test="edit"]').exists()).toBe(true)
   })
 
+  it('puts a column marked cardHeadEnd at the right of the card\'s head, not among the fields', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'status', label: 'Status', cardHeadEnd: true }],
+        data: [{ id: 1, name: 'one', usage: 'snapshot', status: 'active' }],
+        rowKey: 'id'
+      },
+      slots: { 'cell-status': '<span data-test="status-cell">{{ params.value }}</span>' }
+    })
+    const card = wrapper.get('.table-card')
+    expect(card.get('.table-card__head .table-card__end [data-test="status-cell"]').text()).toBe('active')
+    expect(card.findAll('.table-card__fields [data-field]').map((field) => field.attributes('data-field'))).toEqual(['usage'])
+  })
+
   it('lets a page draw its own card, with any column\'s cell drawn the way the table draws it', () => {
     stubMobileMatchMedia()
     const wrapper = mount(DataTable, {

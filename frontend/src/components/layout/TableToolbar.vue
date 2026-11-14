@@ -16,8 +16,8 @@
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
  * - from 1024px one row: the search and the filters on the left (the filters wrap), then the live indicator (#status)
  *   and the actions on the right;
- * - below 1024px the search has a row of its own, the filters keep to one row that scrolls sideways (select menus
- *   open in the body, so the scroll does not clip them), and the last row holds the live indicator on the left and the
+ * - below 1024px the search has a row of its own, the filters keep to one row that scrolls sideways out to the
+ *   screen's edges (select menus open in the body, so the scroll does not clip them), and the last row holds the live indicator on the left and the
  *   actions on the right, the primary one included.
  */
 </script>
@@ -69,10 +69,15 @@
   .table-toolbar__search {
     width: 100%;
   }
+  /* The filter row scrolls out to the screen's edges (prototype): it reaches across the page padding of AppLayout's
+     main, where every page puts its toolbar, full width below 1024px (16px, 24px from 768px). */
   .table-toolbar__filters {
     flex-wrap: nowrap;
     gap: 8px;
+    margin-inline: -16px;
+    padding-inline: 16px;
     overflow-x: auto;
+    scroll-padding-inline: 16px;
     scrollbar-width: none;
   }
   .table-toolbar__filters::-webkit-scrollbar {
@@ -80,6 +85,13 @@
   }
   .table-toolbar__status {
     margin-right: auto;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .table-toolbar__filters {
+    margin-inline: -24px;
+    padding-inline: 24px;
+    scroll-padding-inline: 24px;
   }
 }
 </style>

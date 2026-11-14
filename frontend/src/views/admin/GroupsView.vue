@@ -142,53 +142,20 @@
             >
           </template>
 
+          <!-- Platform and billing type as plain text, the way the accounts page's name column names the platform. -->
           <template #cell-platform="{ value }">
-            <span
-              :class="[
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                value === 'anthropic'
-                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                  : value === 'openai'
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : value === 'antigravity'
-                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                      : value === 'grok'
-                        ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                        : value === 'kimi'
-                          ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
-                          : value === 'zhipu'
-                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-                            : value === 'deepseek'
-                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-                              : value === 'minimax'
-                                ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                              : value === 'opencode_go'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-              ]"
-            >
-              <PlatformIcon :platform="value" size="xs" />
-              {{ t("admin.groups.platforms." + value, platformLabel(value)) }}
-            </span>
+            {{ t("admin.groups.platforms." + value, platformLabel(value)) }}
           </template>
 
           <template #cell-billing_type="{ row }">
             <div class="space-y-1">
-              <!-- Type Badge -->
-              <span
-                :class="[
-                  'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                  row.subscription_type === 'subscription'
-                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-                ]"
-              >
+              <div>
                 {{
                   row.subscription_type === "subscription"
                     ? t("admin.groups.subscription.subscription")
                     : t("admin.groups.subscription.standard")
                 }}
-              </span>
+              </div>
               <!-- Subscription Limits - compact single line -->
               <div
                 v-if="row.subscription_type === 'subscription'"
@@ -4687,7 +4654,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "id", label: t("admin.groups.columns.id"), sortable: true },
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
     { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true },
-    { key: "status", label: t("admin.groups.columns.status"), sortable: true },
+    { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
   if (authStore.isSimpleMode) return basic;

@@ -1,8 +1,8 @@
 <template>
   <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
     <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
-         column (and the select column before it); the other columns follow as label-over-value pairs in two columns,
-         the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
+         column (and the select column before it), and at its right any column marked `cardHeadEnd`; the other columns
+         follow as label-over-value pairs in two columns, the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
          column's cell the way the table does. -->
     <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="table-card">
@@ -110,6 +110,11 @@
               class="table-card__title"
               :class="{ 'flex-none': column.key === 'select' }"
             >
+              <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+              </slot>
+            </div>
+            <div v-for="column in cardHeadEnd" :key="column.key" :data-field="column.key" class="table-card__end">
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
@@ -727,7 +732,8 @@ const CardCell: FunctionalComponent<{ column: Column; row: any }> = ({ column, r
 CardCell.props = ['column', 'row']
 /** A card's head: the leading column, with the page's own select column before it when it has one. */
 const cardHead = computed(() => dataColumns.value.slice(0, hasSelectColumn.value ? 2 : 1))
-const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length))
+const cardHeadEnd = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => column.cardHeadEnd))
+const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => !column.cardHeadEnd))
 const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
 const mobileSortSelectId = `data-table-sort-${useId()}`
 // A sort picked here is the table's own sort change: back to the first row (the parent re-orders its page).
@@ -1330,6 +1336,12 @@ defineExpose({
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+}
+.table-card__end {
+  flex: none;
+  max-width: 50%;
+  min-width: 0;
   color: var(--color-text-primary);
 }
 /* Label over value, two to a row; a value that cannot wrap scrolls inside its cell instead of widening the card. */
