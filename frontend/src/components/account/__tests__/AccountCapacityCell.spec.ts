@@ -90,3 +90,23 @@ describe('AccountCapacityCell look', () => {
     expect(mountCell({}).find('.cap__l').exists()).toBe(false)
   })
 })
+
+// 7i-1: amounts from $1,000 take the three-digit abbreviation; a value the column cuts off is marked and told in full.
+describe('AccountCapacityCell fit', () => {
+  it('abbreviates an amount from $1,000, the tip keeping the exact one', () => {
+    const wrapper = mountCell({ platform: 'anthropic', type: 'oauth', window_cost_limit: 1500, current_window_cost: 1234.5 })
+    expect(text(wrapper.get('[data-cap="window_cost"] .cap__v'))).toBe('$1.23K/$1.50K')
+    expect(tipOf(wrapper.get('[data-cap="window_cost"]').element)).toBe('admin.accounts.capacity.windowCost.normal\n$1234.50 / $1500.00')
+  })
+
+  it('tells the whole value in the tip only when the column cuts it off', () => {
+    const wrapper = mountCell({ platform: 'anthropic', type: 'oauth', base_rpm: 1200, current_rpm: 1100, rpm_strategy: 'tiered' })
+    const chip = wrapper.get('[data-cap="rpm"]')
+    const tip = 'admin.accounts.capacity.rpm.tieredWarning'
+    expect(tipOf(chip.element)).toBe(tip)
+    const value = chip.get('.cap__v').element
+    Object.defineProperty(value, 'scrollWidth', { value: 80, configurable: true })
+    Object.defineProperty(value, 'clientWidth', { value: 60, configurable: true })
+    expect(tipOf(chip.element)).toBe(`${tip}\n1100 / 1200 [T]`)
+  })
+})

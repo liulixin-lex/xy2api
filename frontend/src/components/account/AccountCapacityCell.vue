@@ -7,10 +7,10 @@
       class="cap__chip"
       :class="{ 'cap__chip--zero': line.used === 0 && !line.full, 'cap__chip--full': line.full }"
       :data-cap="line.key"
-      v-tip="line.tip"
+      v-tip="() => tipOf(line)"
     >
       <span v-if="lines.length > 1" class="cap__l">{{ line.label }}</span>
-      <span class="cap__v">{{ line.current }} / {{ line.max }}</span>
+      <span :ref="(el) => { values[line.key] = el as HTMLElement | null }" class="cap__v">{{ line.current }} / {{ line.max }}</span>
       <template v-if="line.group != null">
         <span class="cap__v">/</span>
         <span class="cap__group" data-test="capacity-group-current">{{ line.group }}</span>
@@ -27,11 +27,14 @@
  * Anthropic OAuth / setup-token the 5h window cost, sessions and RPM when limited; for API key and Bedrock the
  * daily, weekly and total quota when set. The look is the prototype's: a neutral chip with the UI font's tabular
  * digits, no icons (a short label names each line when there are several), greyed while nothing is in use, amber only
- * when the limit is reached. Money drops whole ".00" so a line fits the column; the tip has the exact amounts.
+ * when the limit is reached. Money drops whole ".00" so a line fits the column, and from $1,000 takes the three-digit
+ * abbreviation ($1.23K); the tip has the exact amounts. A value that still does not fit ends in an ellipsis, never cut
+ * off unmarked (7i-1), and its tip then carries the whole value.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
+import { formatCompactMoney } from '@/utils/compactNumber'
 import { vTip } from '@/utils/tip'
 
 const props = defineProps<{
@@ -53,9 +56,10 @@ interface CapLine {
 }
 
 const exactMoney = (value: number | null | undefined) => `$${(value ?? 0).toFixed(2)}`
-/** $4.20, $30 (a whole amount without ".00"). */
+/** $4.20, $30 (a whole amount without ".00"); from $1,000 $1.23K, $12.3K … */
 const shortMoney = (value: number | null | undefined) => {
   const cents = Math.round((value ?? 0) * 100)
+  if (cents >= 100_000) return formatCompactMoney(value)
   return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`
 }
 const withAmounts = (tip: string, used: number, limit: number) => [tip, `${exactMoney(used)} / ${exactMoney(limit)}`].filter(Boolean).join('\n')
@@ -152,6 +156,18 @@ function quotaLine(key: string, label: string, used: number | null | undefined, 
   return { key, label, current: shortMoney(value), max: shortMoney(limit), used: value, full: value >= limit, tip: withAmounts(tip, value, limit) }
 }
 
+/** Each line's value element: the tip tells the whole value of one the column cuts off. */
+const values: Record<string, HTMLElement | null> = {}
+const cut = (key: string) => {
+  const el = values[key]
+  return !!el && el.scrollWidth > el.clientWidth
+}
+/** The line's tip; for a cut-off value without exact amounts in it already, the whole value after it. */
+const tipOf = (line: CapLine) => {
+  const whole = line.tip.includes(' / ') || !cut(line.key) ? '' : [`${line.current} / ${line.max}`, line.suffix].filter(Boolean).join(' ')
+  return [line.tip, whole].filter(Boolean).join('\n')
+}
+
 const lines = computed<CapLine[]>(() => {
   const a = props.account
   return [
@@ -169,6 +185,8 @@ const lines = computed<CapLine[]>(() => {
 <style scoped>
 .cap {
   display: grid;
+  /* The column, not the chip's text, sizes the track: a chip wider than the column shrinks and its value ends in "…". */
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   gap: 1px;
   min-width: 0;
@@ -192,6 +210,15 @@ const lines = computed<CapLine[]>(() => {
 .cap--multi .cap__chip {
   height: 15px;
   line-height: 15px;
+}
+.cap__chip > * {
+  flex: none;
+}
+.cap__chip > .cap__v {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cap__l,
 .cap__group,

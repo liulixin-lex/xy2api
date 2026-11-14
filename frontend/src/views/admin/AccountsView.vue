@@ -672,15 +672,17 @@ const resetColumns = () => {
   new Set(shown.flatMap((key) => COLUMN_SOURCES[key] ?? [])).forEach((name) => void table.refresh(name))
 }
 
-// Column widths (prototype): fixed widths in two sizes; from 1440 the ten default columns fit with no sideways scroll.
-// Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
+// Column widths (prototype): fixed widths in two sizes. Compact, the ten default columns and a name column of at
+// least 188px take 1294px, so at 1440 with the navigation folded (1302px for the table) nothing scrolls sideways (7i-2);
+// capacity is 154px there, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1). Wider tables share
+// the room left over evenly between the columns instead of the name column (at most 300px).
 const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
-  capacity: [132, 144], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
+  capacity: [154, 144], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
-const NAME_MIN = 140
+const NAME_MIN = 188
 const NAME_MAX = 300
 const tableWidth = ref(0)
 useResizeObserver(accountTableRef, (entries) => {
