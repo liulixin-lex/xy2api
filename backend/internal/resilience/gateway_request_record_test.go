@@ -119,3 +119,28 @@ func TestGatewayRequestTurnClearsSelectionAndPending(t *testing.T) {
 	require.True(t, first.Fallback)
 	require.True(t, first.Takeover)
 }
+
+func TestGatewayRequestTimingUsesIngressAndFreezesBeforeNextTurn(t *testing.T) {
+	for _, billing := range []bool{false, true} {
+		st := NewRequestState()
+		started := time.Now().Add(-time.Second)
+		st.InitDelivery(context.Background(), started, nil)
+		st.EnableGatewayRequest(time.Now()) // Admission happens after ingress.
+		st.NoteSemanticOutput(started.Add(900 * time.Millisecond))
+		st.CompleteGatewayForward(true, false)
+		before := time.Since(started).Milliseconds()
+		meta, _ := st.ClaimGatewayRequest(billing)
+		require.Equal(t, started, meta.StartedAt)
+		require.EqualValues(t, 900, *meta.FirstOutputMs)
+		require.GreaterOrEqual(t, int64(meta.DurationMs), before)
+		require.LessOrEqual(t, int64(meta.DurationMs), time.Since(started).Milliseconds())
+		require.LessOrEqual(t, *meta.FirstOutputMs, int64(meta.DurationMs))
+		ctx := WithGatewayRequestMetadata(context.Background(), meta)
+		nextStarted := time.Now()
+		st.BeginGatewayTurn(nextStarted)
+		next, _ := st.ClaimGatewayRequest(billing)
+		require.Equal(t, nextStarted, next.StartedAt)
+		require.LessOrEqual(t, int64(next.DurationMs), time.Since(nextStarted).Milliseconds(), "new turn must not inherit connection duration")
+		require.Equal(t, meta, GatewayRequestMetadataFromContext(ctx), "queued billing keeps the completed turn's timings")
+	}
+}

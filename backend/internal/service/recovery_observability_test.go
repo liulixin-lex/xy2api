@@ -96,6 +96,39 @@ func TestRecordUsageAttemptFirstOutput(t *testing.T) {
 	}
 }
 
+func TestRecordUsageEndToEndDurationUsesFrozenGatewaySnapshot(t *testing.T) {
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	started := time.Now().Add(-time.Second)
+	st.InitDelivery(ctx, started, nil)
+	st.EnableGatewayRequest(time.Now())
+	st.NoteSemanticOutput(started.Add(900 * time.Millisecond))
+	st.CompleteGatewayForward(true, false)
+	meta, _ := st.ClaimGatewayRequest(true)
+	ctx = resilience.WithGatewayRequestMetadata(ctx, meta)
+	st.BeginGatewayTurn(time.Now()) // A delayed billing task must not read this turn.
+	firstToken := 50
+	generic := (&GatewayService{}).buildRecordUsageLog(ctx, &recordUsageCoreInput{},
+		&ForwardResult{Model: "fixture", Duration: 100 * time.Millisecond, FirstTokenMs: &firstToken},
+		&APIKey{}, &User{}, &Account{}, nil, "fixture", 1, 1, 1, 0, false, nil)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo,
+		&openAIRecordUsageBillingRepoStub{}, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{RequestID: "frozen-duration", Model: "gpt-5.1", Stream: true,
+			Duration: 100 * time.Millisecond, FirstTokenMs: &firstToken},
+		APIKey: &APIKey{ID: 1, Group: &Group{RateMultiplier: 1}}, User: &User{ID: 2},
+		Account: &Account{ID: 3, Type: AccountTypeAPIKey},
+	}))
+	for _, row := range []*UsageLog{generic, usageRepo.lastLog} {
+		require.EqualValues(t, meta.DurationMs, *row.EndToEndDurationMs)
+		require.EqualValues(t, 900, *row.EndToEndFirstOutputMs)
+		require.LessOrEqual(t, *row.EndToEndFirstOutputMs, *row.EndToEndDurationMs)
+		require.Equal(t, 100, *row.DurationMs, "billing keeps attempt duration")
+		require.Equal(t, firstToken, *row.FirstTokenMs, "user-side timing keeps attempt scope")
+	}
+}
+
 func TestEndToEndFirstOutputExcludesProtocolOnlyDelivery(t *testing.T) {
 	for name, payload := range map[string]string{
 		"heartbeat":       ": ping\n\n",

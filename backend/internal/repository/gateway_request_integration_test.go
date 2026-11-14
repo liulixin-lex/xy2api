@@ -81,6 +81,7 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 		RequestID: "billing-fixture", Model: "fixture", CreatedAt: at, InputTokens: 10, CacheReadTokens: 90,
 		TotalCost: 1, ActualCost: 0.5}
 	usage.EndToEndFirstOutputMs = &ms
+	usage.EndToEndDurationMs = new(int64(200))
 	_, err := repo.Create(ctx, usage)
 	require.NoError(t, err)
 	gatewayID := uuid.NewString()
@@ -130,8 +131,8 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 			require.True(t, *row.TTFOOver)
 			require.False(t, row.HasAttempts)
 		case row.Result == nil:
-			require.Nil(t, row.Log.FirstTokenMs, "never substitute attempt timing for missing user timing")
-			require.Nil(t, row.TTFOOver)
+			require.Equal(t, legacyFirst, *row.Log.FirstTokenMs, "incomplete end-to-end pair falls back to attempt timing")
+			require.True(t, *row.TTFOOver)
 		case *row.Result == 4:
 			require.Nil(t, row.InputTokens)
 			require.Nil(t, row.Log.Account)

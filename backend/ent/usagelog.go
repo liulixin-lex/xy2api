@@ -99,6 +99,8 @@ type UsageLog struct {
 	Stream bool `json:"stream,omitempty"`
 	// DurationMs holds the value of the "duration_ms" field.
 	DurationMs *int `json:"duration_ms,omitempty"`
+	// EndToEndDurationMs holds the value of the "end_to_end_duration_ms" field.
+	EndToEndDurationMs *int64 `json:"end_to_end_duration_ms,omitempty"`
 	// EndToEndFirstOutputMs holds the value of the "end_to_end_first_output_ms" field.
 	EndToEndFirstOutputMs *int64 `json:"end_to_end_first_output_ms,omitempty"`
 	// AttemptFirstOutputMs holds the value of the "attempt_first_output_ms" field.
@@ -260,7 +262,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
 			values[i] = new(sql.NullInt64)
 		case usagelog.FieldRequestID, usagelog.FieldGatewayRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy, usagelog.FieldAnchorBasis, usagelog.FieldClientFamily, usagelog.FieldCancelStage, usagelog.FieldCdnObserved, usagelog.FieldBudgetStartMode:
 			values[i] = new(sql.NullString)
@@ -531,6 +533,13 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DurationMs = new(int)
 				*_m.DurationMs = int(value.Int64)
+			}
+		case usagelog.FieldEndToEndDurationMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field end_to_end_duration_ms", values[i])
+			} else if value.Valid {
+				_m.EndToEndDurationMs = new(int64)
+				*_m.EndToEndDurationMs = value.Int64
 			}
 		case usagelog.FieldEndToEndFirstOutputMs:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -987,6 +996,11 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	if v := _m.DurationMs; v != nil {
 		builder.WriteString("duration_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.EndToEndDurationMs; v != nil {
+		builder.WriteString("end_to_end_duration_ms=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")

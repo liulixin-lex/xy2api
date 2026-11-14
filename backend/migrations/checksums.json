@@ -354,6 +354,7 @@
     "306_sv2_usage_results.sql": "5593c8ee8554a8781e98465fa0086cf5ee46b96056524a801b9b1f4a84f64155",
     "307_sv2_unbilled_requests.sql": "6be51be010ef2da50897a2ea996955d7afd0ea3afc33d18e2d831310fb810beb",
     "308_sv2_ops_request_id.sql": "ea2015d9809d97f84168afff88b9e7b9a232f3ab13428cc11b9ec8396b1c95fd",
-    "309_sv2_request_indexes_notx.sql": "9c344ea25598673a2631e90d0154336d89f7f03c95c58009ec9260a023042f6d"
+    "309_sv2_request_indexes_notx.sql": "9c344ea25598673a2631e90d0154336d89f7f03c95c58009ec9260a023042f6d",
+    "310_sv2_end_to_end_duration.sql": "499d112a7aac490bae0d706d56315fcb6acf6eaf705d8c0f23818eba5f0ee2b7"
   }
 }
