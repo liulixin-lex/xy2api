@@ -127,7 +127,7 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
 .iq__v {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
@@ -150,9 +150,10 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
   font-size: var(--font-size-small);
   line-height: var(--line-height-small);
 }
+/* 9px, 2px from its word: "检测中" fits the compact column whole (7m-1). */
 .iq__spin {
-  width: 11px;
-  height: 11px;
+  width: 9px;
+  height: 9px;
   color: var(--color-status-info);
   animation: spin 1.1s linear infinite;
 }
