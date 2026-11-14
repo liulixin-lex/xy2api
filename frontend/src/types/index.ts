@@ -647,6 +647,8 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  /** The short name on the accounts table's group pills (at most 2 Chinese characters or 3 other characters); empty: none. */
+  alias?: string
   system_prompt_config?: GroupSystemPromptConfig
   // 无号兜底分组（网关韧性，仅管理员可见）：兜底只是内部路由，用户侧接口不再下发。
   availability_fallback_group_id?: number | null
