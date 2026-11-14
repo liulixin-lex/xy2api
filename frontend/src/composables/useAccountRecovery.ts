@@ -11,8 +11,8 @@ import { activeStreamOnly, type AccountWithCapability } from '@/utils/accountCap
 import { IQ_GATE_KEY_PREFIX } from '@/components/admin/account/iqCheckPresentation'
 
 // "Recover state" (contract delta F): one click runs the existing reset, one toast tells the result. The row menu,
-// the drawer and the temporary-pause dialog share one lock per account with the batch recovery; it holds until the
-// request and every refresh after it are done: the page's (row, summary, list) and the open drawer's.
+// the quality panel and the temporary-pause dialog share one lock per account with the batch recovery; it holds until
+// the request and every refresh after it are done: the page's (row, summary, list) and the open panel's.
 
 export type RecoverableRow = Pick<Account, 'status' | 'rate_limit_reset_at' | 'overload_until' | 'temp_unschedulable_until' | 'extra'> &
   Pick<AccountWithCapability, 'capability_learned'>
@@ -53,7 +53,7 @@ export function useAccountRecovery() {
   let disposed = false
   onScopeDispose(() => { disposed = true })
 
-  /** One account: the reset, one toast, then `refresh` (the page's row, summary, list) with the open drawer's reload. */
+  /** One account: the reset, one toast, then `refresh` (the page's row, summary, list) with the open panel's reload. */
   async function recover(account: { id: number; name: string }, refresh?: () => Promise<unknown> | void) {
     if (!canManage.value || pending.has(account.id)) return
     pending.add(account.id)

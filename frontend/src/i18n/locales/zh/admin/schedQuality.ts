@@ -175,7 +175,6 @@ export default {
     },
     settings: {
       enabled: '质量调度',
-      tests: '主动测试',
       oauthRate: 'OAuth 倍率',
       accountRate: '账号倍率',
     },

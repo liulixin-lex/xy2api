@@ -16,7 +16,11 @@ const mountCell = (targets: IQTargetSummary[]) =>
   mount(AccountIQCell, { props: { account: { id: 1, name: 'acc-1', platform: 'openai', iq_targets: targets, extra: {} } as never } })
 
 describe('AccountIQCell', () => {
-  it('shows two models and counts the rest as +N, whose tip lists every model with its state', () => {
+  it('shows two models and counts the rest as +N, whose tip lists every model with its state; two or fewer have no +N', () => {
+    const two = mountCell([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'smart')])
+    expect(two.findAll('[data-testid="iq-target-tag"]')).toHaveLength(2)
+    expect(two.find('[data-test="iq-more"]').exists()).toBe(false)
+
     const wrapper = mountCell([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'degraded'), target('gpt-5', 'smart', 'paused')])
     expect(wrapper.findAll('[data-testid="iq-target-tag"]').map((el) => el.text())).toEqual(['Astra', 'Sol'])
     const more = wrapper.get('[data-test="iq-more"]')
@@ -43,11 +47,5 @@ describe('AccountIQCell', () => {
     const none = mountCell([target('gpt-6-astra', 'unknown')])
     expect(none.find('.iq__v').exists()).toBe(false)
     expect(none.get('.iq__none').text()).toBe('—')
-  })
-
-  it('has no +N with two models or fewer', () => {
-    const wrapper = mountCell([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'smart')])
-    expect(wrapper.findAll('[data-testid="iq-target-tag"]')).toHaveLength(2)
-    expect(wrapper.find('[data-test="iq-more"]').exists()).toBe(false)
   })
 })

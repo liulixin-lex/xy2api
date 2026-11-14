@@ -202,7 +202,6 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
     "admin.schedQuality.settings.enabled": "质量调度",
-    "admin.schedQuality.settings.tests": "主动测试",
     "admin.schedQuality.settings.oauthRate": "OAuth 倍率",
     "admin.schedQuality.settings.accountRate": "账号倍率",
     "admin.schedQuality.state.invalid": "无效",

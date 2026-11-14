@@ -237,7 +237,7 @@ export function trapTab(event: KeyboardEvent, panel: HTMLElement | null) {
   }
 }
 
-export function focusableIn(root: HTMLElement): HTMLElement[] {
+function focusableIn(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, summary, [tabindex]'))
     .filter((element) => !element.matches(':disabled, [tabindex="-1"]') &&
       !element.closest('[hidden], [inert], [aria-hidden="true"]') &&

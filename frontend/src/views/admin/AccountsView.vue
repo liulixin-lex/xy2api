@@ -1061,7 +1061,8 @@ const picker = reactive<{ account: Pick<Account, 'id' | 'name' | 'platform'> | n
 const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
 /**
  * A pill's text: the picker beside its cell. On the same account's pills an open picker closes (saving a change); on
- * another account's it closes first and the new one opens once it has (not while a conflict waits for an answer).
+ * another account's it closes first and the new one opens once it has: after a save under way too (the latest click
+ * wins), not when that save stops on a conflict to confirm.
  */
 const openGroupsEditor = async (row: LiveAccount, event: MouseEvent) => {
   if (!canPlaceGroups.value) return
@@ -1081,8 +1082,8 @@ const saveGroups = async (groupIds: number[], confirmMixedChannel: boolean) => {
   if (id === undefined) return
   await table.edit(id, 'group_ids', groupIds, async () => {
     const updated = await adminAPI.accounts.update(id, confirmMixedChannel ? { group_ids: groupIds, confirm_mixed_channel_risk: true } : { group_ids: groupIds })
-    // Out of the last group: the answer has no group_ids, and the row gets [] (7d-1).
-    return accountRowPatch<LiveAccount>(updated)
+    // Only this cell goes back into the row (7f-3); out of the last group the answer has no group_ids (7d-1).
+    return { group_ids: updated.group_ids ?? [] }
   })
   // The dots follow the new groups at once.
   void table.refresh('quality')

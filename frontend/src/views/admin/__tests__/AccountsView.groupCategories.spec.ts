@@ -232,9 +232,10 @@ describe('admin AccountsView group categories', () => {
     wrapper.unmount()
   })
 
-  it('keeps the groups structure of the full answer out of the row when the picker removes the last groups (7d-1)', async () => {
+  it('writes back only the groups cell when the picker removes the last groups (7d-1, 7f-3)', async () => {
     const { group_ids: _omitted, ...withoutGroupIds } = freshAccount
-    updateAccount.mockResolvedValue({ ...withoutGroupIds, account_groups: [{ group_id: 3 }] })
+    // The full answer: other fields than the groups must not reach the row.
+    updateAccount.mockResolvedValue({ ...withoutGroupIds, name: 'renamed elsewhere', credentials: { api_key: 'sk-full' }, account_groups: [{ group_id: 3 }] })
     const wrapper = mountView()
     await flushPromises()
     await openGroupPicker(wrapper)
@@ -248,6 +249,42 @@ describe('admin AccountsView group categories', () => {
     const row = (wrapper.vm as unknown as { rows: Array<Record<string, unknown>> }).rows[0]
     expect(row.group_ids).toEqual([])
     expect('groups' in row || 'account_groups' in row).toBe(false)
+    expect(row.name).toBe('acc-7')
+    expect(row.credentials).toEqual({})
+    wrapper.unmount()
+  })
+
+  it('opens the picker another account\'s pill asked for once the save under way is done; a conflict drops that click (7f-5)', async () => {
+    listAccounts.mockResolvedValue({ items: [listRow, { ...listRow, id: 8, name: 'acc-8' }], total: 2, page: 1, page_size: 20, pages: 1 })
+    let answer!: (value: unknown) => void
+    updateAccount.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const otherPill = () => wrapper.get('[data-account-name="acc-8"] [data-test="group-pill-text"]')
+    await openGroupPicker(wrapper)
+    await tick(2, true)
+    await clickOutside()
+    expect(document.querySelector('[data-test="group-picker-foot"]')!.textContent).toContain('admin.accounts.groupPicker.saving')
+
+    await otherPill().trigger('click')
+    await flushPromises()
+    expect(getById).not.toHaveBeenCalledWith(8)
+    answer({ ...freshAccount, group_ids: [3, 1, 2] })
+    await flushPromises()
+    expect(getById).toHaveBeenLastCalledWith(8)
+    expect(document.querySelector('[data-group-picker]')).not.toBeNull()
+
+    // A save that stops on a mixed-channel conflict keeps the picker on the confirmation and drops the click.
+    getById.mockClear()
+    let conflict!: (error: unknown) => void
+    updateAccount.mockReturnValueOnce(new Promise((_, reject) => { conflict = reject }))
+    await tick(2, true)
+    await clickOutside()
+    await wrapper.get('[data-account-name="acc-7"] [data-test="group-pill-text"]').trigger('click')
+    conflict({ status: 409, error: 'mixed_channel_warning', message: 'mixed' })
+    await flushPromises()
+    expect(document.querySelector('[data-test="group-picker-conflict"]')).not.toBeNull()
+    expect(getById).not.toHaveBeenCalledWith(7)
     wrapper.unmount()
   })
 

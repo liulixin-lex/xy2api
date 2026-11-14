@@ -175,7 +175,6 @@ export default {
     },
     settings: {
       enabled: 'Quality scheduling',
-      tests: 'Active tests',
       oauthRate: 'OAuth rate',
       accountRate: 'Account rate',
     },

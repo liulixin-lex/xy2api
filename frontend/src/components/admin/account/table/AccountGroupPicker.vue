@@ -212,7 +212,13 @@ const isMixedChannelConflict = (error: unknown) => {
   return apiError?.status === 409 && apiError.error === 'mixed_channel_warning'
 }
 
-async function submit(confirmMixedChannel: boolean) {
+/** The save under way: a close asked for meanwhile waits for it. */
+let saving: Promise<void> | null = null
+function submit(confirmMixedChannel: boolean): Promise<void> {
+  saving = runSave(confirmMixedChannel).finally(() => { saving = null })
+  return saving
+}
+async function runSave(confirmMixedChannel: boolean) {
   phase.value = 'saving'
   try {
     await props.save([...selected.value], confirmMixedChannel)
@@ -240,7 +246,8 @@ function focusConfirm() {
 
 /**
  * Closes the picker: at once without a change, else after the save. Resolves true once it is closed, false while it
- * stays open (saving, or a conflict to confirm).
+ * stays open (a conflict to confirm). Asked during a save, it answers when that save is over (7f-5): the page then
+ * opens the picker another pill asked for, unless the save stopped on a conflict.
  */
 async function requestClose(): Promise<boolean> {
   if (closed) return true
@@ -248,7 +255,10 @@ async function requestClose(): Promise<boolean> {
     focusConfirm()
     return false
   }
-  if (phase.value === 'saving') return false
+  if (saving) {
+    await saving
+    return closed
+  }
   if (!fresh.value || sameIdList(selected.value, initial)) {
     finish()
     return true
