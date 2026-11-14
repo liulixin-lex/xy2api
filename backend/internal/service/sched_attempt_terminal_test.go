@@ -29,7 +29,9 @@ func TestSchedAttemptTerminalRetainsEvidence(t *testing.T) {
 		{name: "internal_cancel_is_failure", err: context.Canceled, outcome: 3},
 		{name: "first_output_deadline", timeout: true, outcome: 2},
 		{name: "post_output_timeout", first: true, timeout: true, outcome: 3},
-		{name: "incomplete_is_failure", first: true, event: `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`, outcome: 3},
+		{name: "max_output_tokens_is_success", first: true, event: `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`, outcome: 1},
+		{name: "content_filter_is_success", first: true, event: `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}`, outcome: 1},
+		{name: "unknown_incomplete_is_failure", first: true, event: `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"unknown"}}}`, outcome: 3},
 		{name: "upstream_cancel_is_failure", event: `{"type":"response.cancelled"}`, outcome: 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

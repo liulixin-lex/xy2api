@@ -75,6 +75,31 @@ func RequestID(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldRequestID, v))
 }
 
+// GatewayRequestID applies equality check predicate on the "gateway_request_id" field. It's identical to GatewayRequestIDEQ.
+func GatewayRequestID(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldGatewayRequestID, v))
+}
+
+// Result applies equality check predicate on the "result" field. It's identical to ResultEQ.
+func Result(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResult, v))
+}
+
+// Switches applies equality check predicate on the "switches" field. It's identical to SwitchesEQ.
+func Switches(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSwitches, v))
+}
+
+// Fallback applies equality check predicate on the "fallback" field. It's identical to FallbackEQ.
+func Fallback(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldFallback, v))
+}
+
+// Takeover applies equality check predicate on the "takeover" field. It's identical to TakeoverEQ.
+func Takeover(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTakeover, v))
+}
+
 // Model applies equality check predicate on the "model" field. It's identical to ModelEQ.
 func Model(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))
@@ -518,6 +543,221 @@ func RequestIDEqualFold(v string) predicate.UsageLog {
 // RequestIDContainsFold applies the ContainsFold predicate on the "request_id" field.
 func RequestIDContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldRequestID, v))
+}
+
+// GatewayRequestIDEQ applies the EQ predicate on the "gateway_request_id" field.
+func GatewayRequestIDEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDNEQ applies the NEQ predicate on the "gateway_request_id" field.
+func GatewayRequestIDNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDIn applies the In predicate on the "gateway_request_id" field.
+func GatewayRequestIDIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldGatewayRequestID, vs...))
+}
+
+// GatewayRequestIDNotIn applies the NotIn predicate on the "gateway_request_id" field.
+func GatewayRequestIDNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldGatewayRequestID, vs...))
+}
+
+// GatewayRequestIDGT applies the GT predicate on the "gateway_request_id" field.
+func GatewayRequestIDGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDGTE applies the GTE predicate on the "gateway_request_id" field.
+func GatewayRequestIDGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDLT applies the LT predicate on the "gateway_request_id" field.
+func GatewayRequestIDLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDLTE applies the LTE predicate on the "gateway_request_id" field.
+func GatewayRequestIDLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDContains applies the Contains predicate on the "gateway_request_id" field.
+func GatewayRequestIDContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDHasPrefix applies the HasPrefix predicate on the "gateway_request_id" field.
+func GatewayRequestIDHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDHasSuffix applies the HasSuffix predicate on the "gateway_request_id" field.
+func GatewayRequestIDHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDIsNil applies the IsNil predicate on the "gateway_request_id" field.
+func GatewayRequestIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldGatewayRequestID))
+}
+
+// GatewayRequestIDNotNil applies the NotNil predicate on the "gateway_request_id" field.
+func GatewayRequestIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldGatewayRequestID))
+}
+
+// GatewayRequestIDEqualFold applies the EqualFold predicate on the "gateway_request_id" field.
+func GatewayRequestIDEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldGatewayRequestID, v))
+}
+
+// GatewayRequestIDContainsFold applies the ContainsFold predicate on the "gateway_request_id" field.
+func GatewayRequestIDContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldGatewayRequestID, v))
+}
+
+// ResultEQ applies the EQ predicate on the "result" field.
+func ResultEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResult, v))
+}
+
+// ResultNEQ applies the NEQ predicate on the "result" field.
+func ResultNEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldResult, v))
+}
+
+// ResultIn applies the In predicate on the "result" field.
+func ResultIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldResult, vs...))
+}
+
+// ResultNotIn applies the NotIn predicate on the "result" field.
+func ResultNotIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldResult, vs...))
+}
+
+// ResultGT applies the GT predicate on the "result" field.
+func ResultGT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldResult, v))
+}
+
+// ResultGTE applies the GTE predicate on the "result" field.
+func ResultGTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldResult, v))
+}
+
+// ResultLT applies the LT predicate on the "result" field.
+func ResultLT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldResult, v))
+}
+
+// ResultLTE applies the LTE predicate on the "result" field.
+func ResultLTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldResult, v))
+}
+
+// ResultIsNil applies the IsNil predicate on the "result" field.
+func ResultIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldResult))
+}
+
+// ResultNotNil applies the NotNil predicate on the "result" field.
+func ResultNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldResult))
+}
+
+// SwitchesEQ applies the EQ predicate on the "switches" field.
+func SwitchesEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSwitches, v))
+}
+
+// SwitchesNEQ applies the NEQ predicate on the "switches" field.
+func SwitchesNEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldSwitches, v))
+}
+
+// SwitchesIn applies the In predicate on the "switches" field.
+func SwitchesIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldSwitches, vs...))
+}
+
+// SwitchesNotIn applies the NotIn predicate on the "switches" field.
+func SwitchesNotIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldSwitches, vs...))
+}
+
+// SwitchesGT applies the GT predicate on the "switches" field.
+func SwitchesGT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldSwitches, v))
+}
+
+// SwitchesGTE applies the GTE predicate on the "switches" field.
+func SwitchesGTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldSwitches, v))
+}
+
+// SwitchesLT applies the LT predicate on the "switches" field.
+func SwitchesLT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldSwitches, v))
+}
+
+// SwitchesLTE applies the LTE predicate on the "switches" field.
+func SwitchesLTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldSwitches, v))
+}
+
+// SwitchesIsNil applies the IsNil predicate on the "switches" field.
+func SwitchesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSwitches))
+}
+
+// SwitchesNotNil applies the NotNil predicate on the "switches" field.
+func SwitchesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSwitches))
+}
+
+// FallbackEQ applies the EQ predicate on the "fallback" field.
+func FallbackEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldFallback, v))
+}
+
+// FallbackNEQ applies the NEQ predicate on the "fallback" field.
+func FallbackNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldFallback, v))
+}
+
+// FallbackIsNil applies the IsNil predicate on the "fallback" field.
+func FallbackIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldFallback))
+}
+
+// FallbackNotNil applies the NotNil predicate on the "fallback" field.
+func FallbackNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldFallback))
+}
+
+// TakeoverEQ applies the EQ predicate on the "takeover" field.
+func TakeoverEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTakeover, v))
+}
+
+// TakeoverNEQ applies the NEQ predicate on the "takeover" field.
+func TakeoverNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTakeover, v))
+}
+
+// TakeoverIsNil applies the IsNil predicate on the "takeover" field.
+func TakeoverIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTakeover))
+}
+
+// TakeoverNotNil applies the NotNil predicate on the "takeover" field.
+func TakeoverNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTakeover))
 }
 
 // ModelEQ applies the EQ predicate on the "model" field.
