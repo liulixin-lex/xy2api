@@ -128,6 +128,12 @@ describe('AccountsView cards (spec 4.6)', () => {
     document.querySelector<HTMLElement>('[data-test="menu-edit-groups"]')!.click()
     await flushPromises()
     expect(document.querySelector('[data-group-picker]')!.getAttribute('aria-label')).toContain('acc-1')
+    // Closed from inside, it gives focus back to the "more" button it came from (7l-4).
+    document.querySelector<HTMLElement>('[data-group-picker] input')!.focus()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(document.querySelector('[data-group-picker]')).toBeNull()
+    expect(document.activeElement).toBe(card(1).querySelector('[data-test="row-more"]'))
     wrapper.unmount()
   })
 

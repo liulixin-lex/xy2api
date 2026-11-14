@@ -277,13 +277,15 @@ function foldTags(): ToolbarFilterKey[] {
  */
 async function foldTagsUntilStable(): Promise<ToolbarFilterKey[]> {
   let next = foldTags()
-  for (;;) {
+  // Measuring only means anything from 1024px; the width can cross it between two rounds (7l-7).
+  while (wide.value) {
     folded.value = next
     await nextTick()
     const again = foldTags()
     if (again.length === next.length) return next
     next = again
   }
+  return next
 }
 /** The direct filters run past the filter row's box (TableToolbar's filters slot, the room left after the search). */
 const filtersOverflow = () => {
@@ -291,7 +293,10 @@ const filtersOverflow = () => {
   const row = filtersRef.value?.parentElement?.getBoundingClientRect()
   return !!filters && !!row && filters.right + 8 > row.right + 0.5
 }
-/** Below 1024px the filter row scrolls sideways: nothing is measured, every tag sits in "more filters". */
+/**
+ * Below 1024px the filter row scrolls sideways and the tags wrap on a row of their own under it (prototype at 390,
+ * 7l-3): nothing is measured or folded, so "more filters" counts nothing.
+ */
 const wide = useMediaQuery('(min-width: 1024px)')
 watch(wide, () => {
   void fit()
@@ -306,24 +311,19 @@ async function fit() {
     refit = true
     return
   }
-  if (!wide.value) {
-    folded.value = tags.value.map((tag) => tag.key)
-    foldedSelects.value = []
-    if (menuOpen.value) placeMenu()
-    return
-  }
   fitting = true
   try {
     do {
       refit = false
       folded.value = []
       foldedSelects.value = []
+      if (!wide.value) break
       await nextTick()
       const next = await foldTagsUntilStable()
-      if (next.length === tags.value.length) {
+      if (wide.value && next.length === tags.value.length) {
         const selects: ToolbarFilterKey[] = []
         for (const key of DIRECT_FOLD_ORDER) {
-          if (!filtersOverflow()) break
+          if (!wide.value || !filtersOverflow()) break
           selects.push(key)
           foldedSelects.value = [...selects]
           await nextTick()
@@ -337,6 +337,11 @@ async function fit() {
     } while (refit)
   } finally {
     fitting = false
+  }
+  // The width crossed 1024px while measuring: nothing stays folded (7l-7).
+  if (!wide.value) {
+    folded.value = []
+    foldedSelects.value = []
   }
   if (menuOpen.value) placeMenu()
 }
@@ -434,6 +439,51 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   gap: 6px;
   min-width: 0;
   overflow: hidden;
+}
+/* Below 1024px (prototype at 390, 7l-3): the shared filter box steps aside, so the selects scroll sideways on their own
+   row, reaching out to the screen's edges as TableToolbar's row does, and the tags wrap on a row under it. */
+@media (max-width: 1023px) {
+  .tb :deep(.table-toolbar__filters) {
+    display: contents;
+  }
+  .tb-filters {
+    margin-inline: -16px;
+    padding-inline: 16px;
+    overflow-x: auto;
+    scroll-padding-inline: 16px;
+    scrollbar-width: none;
+  }
+  .tb-filters::-webkit-scrollbar {
+    display: none;
+  }
+  .tb-tags {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+  .tb-tags:empty {
+    display: none;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .tb-filters {
+    margin-inline: -24px;
+    padding-inline: 24px;
+    scroll-padding-inline: 24px;
+  }
+}
+@media (max-width: 1023px) and (pointer: fine) {
+  .tb-filters {
+    scrollbar-color: var(--color-line-control) transparent;
+    scrollbar-width: thin;
+  }
+  .tb-filters::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .tb-filters::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: var(--color-line-control);
+  }
 }
 .tb-search {
   position: relative;
@@ -690,9 +740,6 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-icon-btn {
     width: 40px;
     height: 40px;
-  }
-  .tb-tags {
-    display: none;
   }
 }
 /* 1024–1279: still one row; the search box and filters narrow */

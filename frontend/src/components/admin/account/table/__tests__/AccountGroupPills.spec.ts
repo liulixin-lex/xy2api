@@ -80,7 +80,7 @@ describe('AccountGroupPills', () => {
     )
   })
 
-  it('on a touch screen opens the quality panel from the whole pill, at any width; a pill with no dot opens nothing (spec 4.3)', async () => {
+  it('on a touch screen opens the quality panel from the whole pill, at any width; a pill with no dot shows its full name (spec 4.3, 7l-5)', async () => {
     const matchMedia = window.matchMedia
     window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
     const wrapper = mountPills(12)
@@ -93,7 +93,9 @@ describe('AccountGroupPills', () => {
     wrapper.unmount()
 
     const plain = mountPills(1, false)
-    expect(plain.get('[data-test="group-pill"]').element.tagName).toBe('SPAN')
+    await plain.get('[data-test="group-pill"]').trigger('click')
+    expect(plain.emitted('open-quality')).toBeUndefined()
+    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.table.pillNoQuality:{"name":"Group 1"}')
     plain.unmount()
     window.matchMedia = matchMedia
   })

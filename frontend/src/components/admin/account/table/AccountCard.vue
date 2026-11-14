@@ -106,6 +106,10 @@ const moreId = `acard-more-${useId()}`
   margin-left: auto;
   gap: 4px;
 }
+/* The switches (scheduling, IQ check) reach 40px high to a finger, their look unchanged (7l-10). */
+.acard :deep(.account-switch::after) {
+  inset: -12px -8px;
+}
 /* Touch-sized row actions (at least 40px). */
 .acard__ops :slotted(button) {
   width: 40px;

@@ -1153,10 +1153,13 @@ const openGroupsEditor = (row: LiveAccount, event: MouseEvent) => {
   const opener = event.currentTarget as HTMLElement | null
   return openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, event.detail === 0, opener)
 }
-/** The row menu's "edit groups" (any device): beside the row's groups (cell or card section), else its "more" button. */
+/**
+ * The row menu's "edit groups" (any device): beside the row's groups (cell or card section, found from the pills, which
+ * a touch screen draws without an editing zone), else its "more" button, which takes focus back (7l-4).
+ */
 const openGroupsFromMenu = (account: Account) => {
   const row = table.record(account.id)
-  if (row) void openGroupsEditorAt(row, groupsAnchor(document.querySelector(`[data-groups-opener="${account.id}"]`)) ?? menu.opener, false)
+  if (row) void openGroupsEditorAt(row, groupsAnchor(document.querySelector(`[data-groups-cell="${account.id}"]`)) ?? menu.opener, false, menu.opener)
 }
 const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, focusSearch: boolean, opener: HTMLElement | null = null) => {
   if (!canPlaceGroups.value) return

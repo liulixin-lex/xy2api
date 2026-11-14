@@ -52,15 +52,17 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
-  it('below 1024px keeps every tag in "more filters", whose menu lists them for removal', async () => {
+  it('below 1024px shows every tag on its own row, each removable, and "more filters" counts nothing (prototype, 7l-3)', async () => {
     const matchMedia = window.matchMedia
     window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
     const wrapper = mountToolbar({ platform: 'openai', type: 'apikey' })
     await flushPromises()
-    expect(shownTags(wrapper)).toEqual([])
-    expect(wrapper.get('[data-test="more-filters-count"]').text()).toBe('2')
+    expect(shownTags(wrapper)).toEqual(['platform', 'type'])
+    expect(wrapper.find('[data-test="more-filters-count"]').exists()).toBe(false)
     await wrapper.get('[data-test="more-filters"]').trigger('click')
-    expect(wrapper.findAll('[data-test="more-filters-menu"] .tb-tag')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="more-filters-menu"] .tb-tag')).toHaveLength(0)
+    await wrapper.get('[data-test="filter-tags"] .tb-tag[data-key="type"] .tb-tag__x').trigger('click')
+    expect(wrapper.emitted('change')!.at(-1)![0]).toMatchObject({ type: '' })
     wrapper.unmount()
     window.matchMedia = matchMedia
   })

@@ -134,6 +134,30 @@ describe('AccountGroupPicker', () => {
     expect([picker()!.style.left, picker()!.style.top]).toEqual(['94px', '372px'])
   })
 
+  it('closes across 1024px (its anchor goes), saving a change on the way (7l-6)', async () => {
+    let wide = true
+    const listeners: Array<(event: { matches: boolean }) => void> = []
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      get matches() { return wide },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => listeners.push(listener),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }) as unknown as MediaQueryList)
+    onTestFinished(() => media.mockRestore())
+    const { wrapper, save } = mountPicker()
+    await flushPromises()
+    box(2)!.click()
+    wide = false
+    listeners.forEach((listener) => listener({ matches: false }))
+    await flushPromises()
+    expect(save).toHaveBeenCalledWith([1, 2], false)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
   it('cancelling the conflict closes without sending again (the failed edit already put the old groups back)', async () => {
     const save = vi.fn().mockRejectedValue({ status: 409, error: 'mixed_channel_warning', message: '' })
     const { wrapper } = mountPicker(save)

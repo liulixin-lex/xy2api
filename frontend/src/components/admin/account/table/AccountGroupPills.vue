@@ -1,5 +1,5 @@
 <template>
-  <div class="pills" :class="{ 'pills--center': groups.length <= 3, 'pills--card': card }" data-test="group-pills">
+  <div class="pills" :class="{ 'pills--center': groups.length <= 3, 'pills--card': card }" :data-groups-cell="account.id" data-test="group-pills">
     <button
       v-if="!groups.length"
       type="button"
@@ -29,9 +29,19 @@
         <span class="pill__dot"><StatusDot :tone="DOT_TONES[pill.state]" /></span>
         <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
       </button>
-      <span v-else-if="coarse" class="pill pill--nodot" :data-group-id="pill.group.id" data-test="group-pill">
+      <!-- No dot, nothing to open: a tap shows the group's full name, as "+N" lists what it folds (7l-5). -->
+      <button
+        v-else-if="coarse"
+        type="button"
+        class="pill pill--nodot pill--whole"
+        :data-group-id="pill.group.id"
+        :aria-label="t('admin.accounts.table.pillNoQuality', { name: pill.group.name })"
+        v-tip="t('admin.accounts.table.pillNoQuality', { name: pill.group.name })"
+        data-test="group-pill"
+        @click="showTipNow($event.currentTarget)"
+      >
         <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
-      </span>
+      </button>
       <span
         v-else
         class="pill"

@@ -88,7 +88,7 @@
  * sends it again with the risk flag, cancelling keeps the original groups (the failed edit was rolled back).
  * Background updates of the row do not reach the selection while it is open.
  */
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useEventListener, useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
@@ -298,7 +298,11 @@ useEventListener(document, 'pointerdown', (event: PointerEvent) => {
 const position = reactive({ top: 0, left: 0 })
 const GAP = 4
 const MARGIN = 8
+/** The page header's bottom: the picker never covers it (7l-6). */
+const HEADER = 64
 const wide = useMediaQuery('(min-width: 1024px)')
+// Across 1024px (a tablet turned) the cell or card it is anchored to goes: it closes, saving a change (7l-6).
+watch(wide, () => void requestClose())
 function place() {
   const panel = rootRef.value
   const anchor = props.anchor
@@ -308,7 +312,7 @@ function place() {
   const height = panel.offsetHeight
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth
   const clampLeft = (left: number) => Math.round(Math.max(MARGIN, Math.min(left, viewportWidth - width - MARGIN)))
-  const clampTop = (top: number) => Math.round(Math.max(MARGIN, Math.min(top, window.innerHeight - height - MARGIN)))
+  const clampTop = (top: number) => Math.round(Math.max(HEADER, Math.min(top, window.innerHeight - height - MARGIN)))
   if (!wide.value) {
     position.left = clampLeft(rect.right - width)
     const below = rect.bottom + GAP
@@ -341,6 +345,10 @@ defineExpose({ requestClose })
   display: grid;
   width: var(--popover-width);
   max-width: calc(100vw - 16px);
+  /* Never taller than the room under the page header (64px) and 8px above the bottom: the list scrolls, the conflict
+     buttons stay on screen (7l-6). */
+  max-height: calc(100vh - 72px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-lg);
   background: var(--color-bg-raised);
@@ -423,6 +431,7 @@ defineExpose({ requestClose })
   outline-offset: -1px;
 }
 .gp-list {
+  min-height: 0;
   max-height: 252px;
   overflow-y: auto;
   overscroll-behavior: contain;
