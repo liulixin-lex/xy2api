@@ -328,7 +328,8 @@
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <!-- One line: a long address ends in "…" (a narrow card's head); hovered or tapped, the tip has it whole (7o-5). -->
+          <!-- One line: a long address ends in "…", in a narrow card's head and past 240px in the wide table, where it would
+               widen the table (7r-7); hovered or tapped, the tip has it whole (7o-5). -->
           <template #cell-email="{ value }">
             <div class="flex min-w-0 items-center gap-2">
               <div
@@ -338,7 +339,7 @@
                   {{ value.charAt(0).toUpperCase() }}
                 </span>
               </div>
-              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
+              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white lg:max-w-60" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
             </div>
           </template>
 
