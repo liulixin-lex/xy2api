@@ -29,7 +29,9 @@ export default defineComponent({
     selectionLabel: { type: String, default: '' },
     clickable: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
-    cellSlots: { type: Object as PropType<Slots>, required: true }
+    cellSlots: { type: Object as PropType<Slots>, required: true },
+    /** Called in this row's render: only rows whose classes change re-render. */
+    rowClass: { type: Function as PropType<(row: any, index: number) => unknown>, default: undefined }
   },
   emits: {
     toggle: (_row: any, _index: number, _checked: boolean) => true,
@@ -91,7 +93,8 @@ export default defineComponent({
             {
               'cursor-pointer': props.clickable,
               'bg-primary-50/40 dark:bg-primary-900/10': props.selectable && props.selected
-            }
+            },
+            props.rowClass?.(props.row, props.index)
           ],
           onClick: () => {
             if (props.clickable) emit('rowClick', props.row)

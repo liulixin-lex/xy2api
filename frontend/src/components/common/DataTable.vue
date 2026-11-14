@@ -1,5 +1,10 @@
 <template>
-  <div v-if="!isDesktopViewport" :class="['space-y-3', { relative: refreshing }]" :aria-busy="loading ? 'true' : undefined">
+  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards space-y-3" :aria-busy="loading ? 'true' : undefined">
+    <!-- Reload with rows on screen: a thin bar that stays in view under the page header; it takes no layout space and
+         the cards stay usable. -->
+    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
     <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
@@ -56,7 +61,7 @@
             :aria-label="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             :title="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             data-test="mobile-sort-order"
-            @click="pageSort ? emit('pageSort', pageSort.key) : handleSort(sortKey)"
+            @click="pageSort ? choosePageSort(pageSort.key) : handleSort(sortKey)"
           >
             <Icon :name="mobileSortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
           </button>
@@ -79,10 +84,13 @@
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
         class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
-        :class="{
-          'cursor-pointer': clickableRows,
-          'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10': selectable && isRowSelected(row, index)
-        }"
+        :class="[
+          {
+            'cursor-pointer': clickableRows,
+            'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10': selectable && isRowSelected(row, index)
+          },
+          rowClass?.(row, index)
+        ]"
         @click="clickableRows && emit('rowClick', row)"
       >
         <div class="space-y-3">
@@ -119,11 +127,6 @@
         </div>
       </div>
     </template>
-
-    <!-- Reload with rows on screen: a thin bar over the list; the cards stay and remain usable. -->
-    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
-      <div class="table-progress__bar"></div>
-    </div>
   </div>
 
   <div
@@ -280,6 +283,7 @@
             :clickable="clickableRows"
             :expanded="actionsExpanded"
             :cell-slots="$slots"
+            :row-class="rowClass"
             @toggle="toggleRowSelection"
             @row-click="onRowClick"
           />
@@ -319,6 +323,7 @@ const emit = defineEmits<{
 
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
+const mobileRootRef = ref<HTMLElement | null>(null)
 const isScrollable = ref(false)
 const actionsColumnNeedsExpanding = ref(false)
 
@@ -514,6 +519,11 @@ interface Props {
   pageSort?: { key: string; order: 'asc' | 'desc' } | null
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /**
+   * Extra classes for a desktop row and a mobile card (for example dimming a row that is transitioning or no longer
+   * matches the filter). A desktop row calls it in its own render, so only rows whose answer changes re-render.
+   */
+  rowClass?: (row: any, index: number) => unknown
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -688,9 +698,14 @@ const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? i
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
 const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
 const mobileSortSelectId = `data-table-sort-${useId()}`
+// A sort picked here is the table's own sort change: back to the first row (the parent re-orders its page).
+const choosePageSort = (key: string) => {
+  scrollToTop()
+  emit('pageSort', key)
+}
 const onMobileSortChange = (key: string) => {
   if (props.pageSorts.some((option) => option.key === key)) {
-    emit('pageSort', key)
+    choosePageSort(key)
     return
   }
   if (props.pageSort) emit('pageSort', '')
@@ -757,6 +772,7 @@ watch(actionsExpanded, async () => {
 })
 
 const handleSort = (key: string) => {
+  scrollToTop()
   let newOrder: 'asc' | 'desc' = 'asc'
   if (sortKey.value === key) {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
@@ -934,9 +950,49 @@ const hasSameRowIdentitySet = (
   return [...currentKeys].every(key => previousKeys.has(key))
 }
 
+const scrollParentOf = (el: HTMLElement) => {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    if (/auto|scroll|overlay/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node
+  }
+  return null
+}
+
+/**
+ * Back to the first row: the desktop table scrolls its own wrapper (and the virtualizer) to the top; when the list's
+ * top has scrolled above its scroll container or the window (minus its scroll-margin-top, the page header), it is
+ * brought back into view. A list that is already in view does not move.
+ */
+function scrollToTop() {
+  const wrapper = tableWrapperRef.value
+  if (wrapper) {
+    if (shouldVirtualize.value) rowVirtualizer.value.scrollToOffset(0)
+    wrapper.scrollTop = 0
+  }
+  const list = wrapper ?? mobileRootRef.value
+  if (!list) return
+  const parent = scrollParentOf(list)
+  const viewTop = parent ? parent.getBoundingClientRect().top : 0
+  const margin = parseFloat(getComputedStyle(list).scrollMarginTop) || 0
+  const delta = list.getBoundingClientRect().top - margin - viewTop
+  if (delta >= 0) return
+  if (parent) parent.scrollTop += delta
+  else window.scrollBy(0, delta)
+}
+
+// A new batch that shares no row with the old one is another page, filter or sort: start it from the top. A reload
+// after a row action keeps most rows, and a passive update keeps all of them, so neither scrolls. Rows without a
+// stable key cannot be compared across reloads and never scroll on their own.
+const isStableKey = (key: RowIdentityToken) => typeof key === 'string' || typeof key === 'number'
+const sharesNoRow = (current: RowIdentityToken[], previous: RowIdentityToken[]) => {
+  if (!current.length || !previous.length || ![...current, ...previous].every(isStableKey)) return false
+  const previousKeys = new Set(previous)
+  return !current.some((key) => previousKeys.has(key))
+}
+
 watch(
   rowIdentityKeys,
   (current, previous) => {
+    if (sharesNoRow(current, previous)) scrollToTop()
     if (hasSameRowIdentitySet(current, previous)) return
 
     // The virtualizer owns caches across option updates. A new page/filter result
@@ -1059,6 +1115,7 @@ watch(
 )
 
 defineExpose({
+  scrollToTop,
   virtualizer: rowVirtualizer,
   shouldVirtualize,
   sortedData,
@@ -1070,6 +1127,7 @@ defineExpose({
 <style scoped>
 /* 表格横向滚动 */
 .table-wrapper {
+  scroll-margin-top: var(--table-sticky-top, 4rem);
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
   overflow-x: auto;
@@ -1251,13 +1309,16 @@ defineExpose({
   z-index: 230; /* above the sticky header cells */
   margin-bottom: -2px;
 }
+/* Mobile cards scroll with the page: the bar sticks under the page header (4rem; a parent may set --table-sticky-top),
+   and scrollToTop() stops there too. Its negative margin cancels its height and the stack's gap below it. */
+.table-cards {
+  scroll-margin-top: var(--table-sticky-top, 4rem);
+}
 .table-progress--cards {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
+  position: sticky;
+  top: var(--table-sticky-top, 4rem);
   z-index: 10;
-  margin: 0 !important; /* not part of the card stack's spacing */
+  margin-bottom: calc(-0.75rem - 2px);
   border-radius: 9999px;
 }
 .table-progress__bar {
