@@ -126,7 +126,7 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 		}
 		add("capability_learned", "capability_learned", &until, true, "")
 	}
-	if !a.Schedulable || a.Status == StatusDisabled {
+	if !a.Schedulable || a.Status == StatusDisabled || a.Status == StatusInactive {
 		add("manual_off", "manual_off", nil, false, "manual_off")
 	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
