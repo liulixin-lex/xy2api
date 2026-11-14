@@ -133,7 +133,7 @@ describe('useSchedQualityPoll', () => {
   })
 })
 
-describe('cooling countdown', () => {
+describe('recovery countdown', () => {
   it('counts down from until on the local clock without any request', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-11T12:04:00Z'))

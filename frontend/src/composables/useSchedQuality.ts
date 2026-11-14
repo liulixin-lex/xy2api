@@ -141,7 +141,7 @@ export function useSchedQualityPoll<T>(key: WatchSource<string | number | null>,
   return { data, error, loading, refresh }
 }
 
-/** A clock for cooling countdowns: it ticks every second from local time, so no request is made for them. */
+/** A clock for recovery countdowns: it ticks every second from local time, so no request is made for them. */
 export function useSchedQualityClock() {
   const now = ref(Date.now())
   useIntervalFn(() => {

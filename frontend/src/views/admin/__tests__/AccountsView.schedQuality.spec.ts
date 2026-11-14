@@ -94,22 +94,22 @@ const BulkBarStub = defineComponent({
   }
 })
 
-// Turns on the "cooling" filter the way the real filter bar does.
+// Turns on the "substandard" filter the way the real filter bar does.
 const FiltersStub = defineComponent({
   props: ['filters'],
   emits: ['update:filters', 'change'],
   setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'substandard' }); emit('change') } })
+    return () => h('button', { 'data-test': 'filter-substandard', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'substandard' }); emit('change') } })
   }
 })
 
 const account = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [53] })
 const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
 const summaries = (): SchedAccountSummary[] => [
-  { ...structuredClone(base), account_id: 1, model: 'gpt-6.1-sol' },
-  { ...structuredClone(base), account_id: 2, model: 'gpt-6-astra', ttfo: { p90_ms: 9100, timeout: false, n: 140 }, cooling: [] },
-  { ...structuredClone(base), account_id: 3, model: 'gpt-6.1-sol', ttfo: { p90_ms: null, timeout: true, n: 90 }, cooling: [] },
-  { ...structuredClone(base), account_id: 4, model: null, ttfo: { p90_ms: null, timeout: false, n: 0 }, cooling: [] }
+  { ...structuredClone(base), account_id: 1 },
+  { ...structuredClone(base), account_id: 2, ttfo: { p50_ms: 9100, n: 140, short: false, red: false }, substandard: [] },
+  { ...structuredClone(base), account_id: 3, ttfo: { p50_ms: null, n: 90, short: false, red: false }, substandard: [] },
+  { ...structuredClone(base), account_id: 4, ttfo: { p50_ms: null, n: 0, short: true, red: false }, substandard: [] }
 ]
 
 function mountView(stubs: Record<string, unknown> = {}) {
@@ -249,7 +249,7 @@ describe('AccountsView quality columns', () => {
     listAccounts.mockResolvedValue({ items: many, total: 6, page: 1, page_size: 20, pages: 1 })
     const pending: Array<() => void> = []
     sched.setOverride.mockReset().mockImplementation(() => new Promise<void>((resolve) => pending.push(resolve)))
-    sched.reset.mockReset().mockResolvedValue({ reset_at: null, cleared: [], preserved: [], failed: [] })
+    sched.reset.mockReset().mockImplementation(async (account_id: number) => ({ account_id, reset_at: null, cleared: [], kept: [], failed: [] }))
     const wrapper = mountView()
     await flushPromises()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
@@ -284,7 +284,7 @@ describe('AccountsView quality columns', () => {
     wrapper.unmount()
   })
 
-  it('keeps the cooling filter in the secondary account queries: select all results and edit by filter (K24)', async () => {
+  it('keeps the substandard filter in the secondary account queries: select all results and edit by filter', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findComponent(FiltersStub).trigger('click')

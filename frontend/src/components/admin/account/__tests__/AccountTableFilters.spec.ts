@@ -60,7 +60,7 @@ describe('AccountTableFilters', () => {
   })
 
   it('preserves every option and emits a merged filter snapshot plus change for every selection', async () => {
-    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42', sched_quality: 'cooling' }
+    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42', sched_quality: 'substandard' }
     const wrapper = mountFilters(filters)
     const expectedOptions = [
       ['platform', ['', ...CONCRETE_PLATFORM_OPTIONS.map(option => option.value)]],
