@@ -37,6 +37,11 @@ export interface BackendSubstandard {
   until: string
   other_group: boolean
   exempt: boolean
+  /**
+   * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
+   * view fresh and the group's policy enabled (the computation the backend's quality filter uses).
+   */
+  effective: boolean
 }
 
 export interface BackendAccountSummary {

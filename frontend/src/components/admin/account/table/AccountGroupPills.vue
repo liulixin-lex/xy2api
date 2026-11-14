@@ -97,8 +97,6 @@ const props = defineProps<{
   groups: AdminGroup[]
   /** The account's quality summary; null for accounts without quality data. */
   quality: AccountQualityView | null
-  /** Quality scheduling is switched on and its view fresh; otherwise no group shows at the back. */
-  qualityActive?: boolean
   readonly?: boolean
 }>()
 const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
@@ -109,7 +107,7 @@ const DOT_TONES: Record<GroupDotState, StatusDotTone> = { ok: 'ok', back: 'back'
 const STATE_KEYS: Record<GroupDotState, string> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
 const stateLabel = (state: GroupDotState) => t(`admin.accounts.table.dotStates.${STATE_KEYS[state]}`)
 
-const stateOf = (group: AdminGroup): GroupDotState | null => (props.quality ? groupDotState(props.quality, group.id, props.qualityActive !== false) : null)
+const stateOf = (group: AdminGroup): GroupDotState | null => (props.quality ? groupDotState(props.quality, group.id) : null)
 
 const split = computed(() => splitPills(props.groups))
 const shownPills = computed(() =>

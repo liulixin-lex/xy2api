@@ -26,26 +26,28 @@ export const UNGROUPED_GROUP_FILTER = 'ungrouped'
 export const PRIVACY_UNSET_FILTER = '__unset__'
 
 /**
- * The quality filter against the account's summary, as the backend's filter decides it: observing by the account
- * status, exempt by any exemption, substandard by a substandard model that is not exempt while the account is not
- * stopped and quality scheduling is active (`active`: switched on, view fresh), normal by none of these. Without a
- * summary yet there is nothing to judge: it matches. Whether the group's own policy is enabled is not in the summary;
- * the backend's answer decides that, and the browser does not dim for it.
+ * The quality filter against the account's summary, as the backend's filter decides it (sched_admin_summary.go,
+ * attention): only OpenAI accounts take part in any of the four; observing by the summary status, exempt by any
+ * exemption, back of queue by a substandard record in effect while the account is not stopped, normal by status
+ * normal (not stopped, not observed) with no exemption and no record in effect. An account the summary answered
+ * without (`null`) matches none. Before the first summary of the row is in (`undefined`) nothing is judged: it matches,
+ * so the rows of a fresh page do not dim for the moment the summary takes.
  */
-export function qualityMatches(quality: AccountQualityView | null | undefined, filter: string, active = true): boolean {
-  if (!filter || !quality) return true
-  const observing = quality.status === 'observing'
-  const exempt = quality.exemptions.length > 0
-  const substandard = active && !quality.stop && quality.substandard.some((item) => !item.exempt)
+export function qualityMatches(platform: string, quality: AccountQualityView | null | undefined, filter: string): boolean {
+  if (!filter) return true
+  if (platform !== 'openai') return false
+  if (quality === undefined) return true
+  if (quality === null) return false
+  const back = !quality.stop && quality.substandard.some((item) => item.effective)
   switch (filter) {
     case 'observing':
-      return observing
+      return quality.status === 'observing'
     case 'exempt':
-      return exempt
+      return quality.exemptions.length > 0
     case 'substandard':
-      return substandard
+      return back
     case 'normal':
-      return !observing && !exempt && !substandard
+      return quality.status === 'normal' && quality.exemptions.length === 0 && !back
     default:
       return true
   }
@@ -62,9 +64,8 @@ export interface AccountMatchContext {
   now: () => number
   /** The group-category filter (from the group categories store). */
   matchesCategory: (groupIds: number[], category: string) => boolean
+  /** The row's quality summary: undefined until the first one is in, null when it answered without the account. */
   quality?: AccountQualityView | null
-  /** Quality scheduling is switched on and its view fresh (see qualitySchedulingActive). */
-  qualityActive?: boolean
 }
 
 export function accountMatchesFilters(account: Account, filters: AccountListFilters, context: AccountMatchContext): boolean {
@@ -106,5 +107,5 @@ export function accountMatchesFilters(account: Account, filters: AccountListFilt
   }
   const search = String(filters.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
-  return qualityMatches(context.quality, filters.sched_quality ?? '', context.qualityActive ?? true)
+  return qualityMatches(account.platform, context.quality, filters.sched_quality ?? '')
 }

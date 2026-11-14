@@ -131,7 +131,7 @@ const summaryOf = (id: number, cooling: number): BackendAccountSummary => ({
   ttfo: { n: 30, short: false, red: cooling > 0, p50_ms: 2800 },
   error: { n: 100, short: false, red: false, rate: 0 },
   cache: { n: 40, short: false, red: false, ratio: 0.9 },
-  substandard: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false }] : [],
+  substandard: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }] : [],
   exemptions: []
 })
 

@@ -10,26 +10,18 @@ export type GroupDotState = 'stopped' | 'exempt' | 'back' | 'observe' | 'ok'
 export type AccountQualityView = Pick<BackendAccountSummary, 'status' | 'stop' | 'substandard' | 'exemptions'>
 
 /**
- * Whether quality scheduling moves accounts at all: it is switched on and its view is fresh. Otherwise the backend
- * puts no account at the back, though the summary still lists substandard models (the summary's global_enabled and
- * stale; unknown before the first summary, which counts as active).
- */
-export const qualitySchedulingActive = (meta: { global_enabled: boolean; stale: boolean } | null | undefined) =>
-  !meta || (meta.global_enabled && !meta.stale)
-
-/**
  * The dot for one group, first match wins:
  * 1 stopped: the whole account takes no part in scheduling (`stop` set);
  * 2 exempt: an exemption for this group or for every group (group_id 0);
- * 3 back: any model of this group is substandard (the account is moved to the back of the group's order), while
- *   quality scheduling is active (`active`: switched on, view fresh);
+ * 3 back: a substandard record of this group that is in effect (the backend's `effective`: the account really is
+ *   at the back of the group's order);
  * 4 observe: the account is still observed (too few samples);
  * 5 ok.
  */
-export function groupDotState(quality: AccountQualityView, groupId: number, active = true): GroupDotState {
+export function groupDotState(quality: AccountQualityView, groupId: number): GroupDotState {
   if (quality.stop) return 'stopped'
   if (quality.exemptions.some((exemption) => exemption.group_id === groupId || exemption.group_id === 0)) return 'exempt'
-  if (active && quality.substandard.some((item) => item.group_id === groupId)) return 'back'
+  if (quality.substandard.some((item) => item.group_id === groupId && item.effective)) return 'back'
   if (quality.status === 'observing') return 'observe'
   return 'ok'
 }

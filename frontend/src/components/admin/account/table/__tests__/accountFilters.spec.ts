@@ -11,27 +11,43 @@ const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView =>
   exemptions: [],
   ...patch
 })
-const substandard = (exempt = false) => ({ group_id: 1, model: 'gpt-6', dims: ['error' as const], until: '', other_group: false, exempt })
+const substandard = (effective = true) => ({ group_id: 1, model: 'gpt-6', dims: ['error' as const], until: '', other_group: false, exempt: !effective, effective })
+const stop = { source: 'auto', reason: 'error', until: null }
 
+// The four options as the backend filters them (sched_admin_summary.go, attention), spec 7e and 9.5–9.6.
 describe('quality filter', () => {
-  it('matches each of normal, substandard, exempt and observing the way the backend filters', () => {
-    expect(qualityMatches(quality(), 'normal')).toBe(true)
-    expect(qualityMatches(quality({ substandard: [substandard()] }), 'substandard')).toBe(true)
-    expect(qualityMatches(quality({ substandard: [substandard()] }), 'normal')).toBe(false)
-    expect(qualityMatches(quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 'exempt')).toBe(true)
-    expect(qualityMatches(quality({ status: 'observing' }), 'observing')).toBe(true)
-    expect(qualityMatches(quality({ status: 'observing' }), 'normal')).toBe(false)
+  it('matches each of normal, back of queue, exempt and observing the way the backend filters', () => {
+    expect(qualityMatches('openai', quality(), 'normal')).toBe(true)
+    expect(qualityMatches('openai', quality({ substandard: [substandard()] }), 'substandard')).toBe(true)
+    expect(qualityMatches('openai', quality({ substandard: [substandard()] }), 'normal')).toBe(false)
+    expect(qualityMatches('openai', quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 'exempt')).toBe(true)
+    expect(qualityMatches('openai', quality({ status: 'observing' }), 'observing')).toBe(true)
+    expect(qualityMatches('openai', quality({ status: 'observing' }), 'normal')).toBe(false)
   })
 
-  it('does not count an exempt or stopped account\'s substandard models as substandard', () => {
-    expect(qualityMatches(quality({ substandard: [substandard(true)] }), 'substandard')).toBe(false)
-    const stopped = quality({ stop: { source: 'auto', reason: 'error', until: null }, substandard: [substandard()] })
-    expect(qualityMatches(stopped, 'substandard')).toBe(false)
-    expect(qualityMatches(stopped, 'normal')).toBe(true)
+  it('takes only records in effect for the back of queue, and none while the account is stopped', () => {
+    expect(qualityMatches('openai', quality({ substandard: [substandard(false)] }), 'substandard')).toBe(false)
+    expect(qualityMatches('openai', quality({ substandard: [substandard(false)] }), 'normal')).toBe(true)
+    expect(qualityMatches('openai', quality({ status: 'disabled', stop, substandard: [substandard()] }), 'substandard')).toBe(false)
   })
 
-  it('matches while the summary has not arrived', () => {
-    expect(qualityMatches(undefined, 'substandard')).toBe(true)
+  it('calls normal only an OpenAI account with status normal, no exemption and no record in effect', () => {
+    expect(qualityMatches('openai', quality({ exemptions: [{ group_id: 1, expires_at: null, reason: '' }] }), 'normal')).toBe(false)
+    expect(qualityMatches('openai', quality({ status: 'disabled', stop }), 'normal')).toBe(false)
+    expect(qualityMatches('gemini', quality(), 'normal')).toBe(false)
+    expect(qualityMatches('openai', null, 'normal')).toBe(false)
+  })
+
+  it('matches none of the four for an account outside OpenAI or without a summary', () => {
+    for (const filter of ['normal', 'substandard', 'exempt', 'observing']) {
+      expect(qualityMatches('anthropic', quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }], status: 'observing' }), filter)).toBe(false)
+      expect(qualityMatches('openai', null, filter)).toBe(false)
+    }
+  })
+
+  it('judges nothing before the row\'s first summary is in', () => {
+    expect(qualityMatches('openai', undefined, 'substandard')).toBe(true)
+    expect(qualityMatches('openai', undefined, 'normal')).toBe(true)
   })
 
   it('takes part in the row match next to the other filters', () => {
@@ -40,15 +56,6 @@ describe('quality filter', () => {
     expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality({ substandard: [substandard()] }) })).toBe(true)
     expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality() })).toBe(false)
     expect(accountMatchesFilters(account, { platform: 'gemini' }, { ...context, quality: quality() })).toBe(false)
-  })
-
-  // 7d-2: with quality scheduling off or its view stale the backend puts nobody at the back.
-  it('does not take a substandard model for the back while quality scheduling is off or stale: "normal" keeps the row', () => {
-    const listed = quality({ substandard: [substandard()] })
-    expect(qualityMatches(listed, 'normal', false)).toBe(true)
-    expect(qualityMatches(listed, 'substandard', false)).toBe(false)
-    const account = { id: 1, name: 'a', platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [1] } as unknown as Account
-    expect(accountMatchesFilters(account, { sched_quality: 'normal' }, { now: () => 0, matchesCategory: () => true, quality: listed, qualityActive: false })).toBe(true)
   })
 })
 

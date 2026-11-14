@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { groupDotState, groupPillText, isLatinPillText, orderGroups, splitPills, worstDotState, type AccountQualityView, qualitySchedulingActive } from '../accountGroups'
+import { groupDotState, groupPillText, isLatinPillText, orderGroups, splitPills, worstDotState, type AccountQualityView } from '../accountGroups'
 
 const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView => ({
   status: 'normal',
@@ -9,7 +9,7 @@ const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView =>
   exemptions: [],
   ...patch
 })
-const back = (groupId: number, model: string) => ({ group_id: groupId, model, dims: ['ttfo' as const], until: '', other_group: false, exempt: false })
+const back = (groupId: number, model: string, effective = true) => ({ group_id: groupId, model, dims: ['ttfo' as const], until: '', other_group: false, exempt: false, effective })
 
 describe('group dot state', () => {
   it('derives the five states', () => {
@@ -37,14 +37,12 @@ describe('group dot state', () => {
     expect(groupDotState(quality({ substandard: [back(2, 'gpt-6')] }), 1)).toBe('ok')
   })
 
-  // 7d-2: the backend moves nobody to the back while quality scheduling is off or its view is stale.
-  it('shows no back dot while quality scheduling is not active, and says so', () => {
-    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6')] }), 1, false)).toBe('ok')
-    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6')], status: 'observing' }), 1, false)).toBe('observe')
-    expect(qualitySchedulingActive({ global_enabled: false, stale: false })).toBe(false)
-    expect(qualitySchedulingActive({ global_enabled: true, stale: true })).toBe(false)
-    expect(qualitySchedulingActive({ global_enabled: true, stale: false })).toBe(true)
-    expect(qualitySchedulingActive(null)).toBe(true)
+  // 7f-2, spec 9.6: a substandard record not in effect (quality scheduling off, a stale view, the group's policy off)
+  // puts nobody at the back: the dot reads as if it were not there.
+  it('is back only for a record in effect', () => {
+    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6', false)] }), 1)).toBe('ok')
+    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6', false)], status: 'observing' }), 1)).toBe('observe')
+    expect(groupDotState(quality({ substandard: [back(1, 'gpt-6', false), back(1, 'gpt-6.1-sol')] }), 1)).toBe('back')
   })
 
   it('is back as soon as any one model of the group is substandard', () => {

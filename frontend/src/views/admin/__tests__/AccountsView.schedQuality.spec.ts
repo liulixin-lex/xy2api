@@ -104,7 +104,7 @@ const summaryOf = (id: number, patch: Partial<BackendAccountSummary> = {}): Back
   ...patch
 })
 const summaries = () => [
-  summaryOf(1, { substandard: [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false }], ttfo: { n: 30, short: false, red: true, p50_ms: 9100 } }),
+  summaryOf(1, { substandard: [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }], ttfo: { n: 30, short: false, red: true, p50_ms: 9100 } }),
   summaryOf(2),
   summaryOf(3, { status: 'observing' }),
   summaryOf(4, { stop: { source: 'manual', reason: 'manual_off', until: null } })

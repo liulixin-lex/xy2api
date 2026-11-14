@@ -104,7 +104,6 @@
                   :account="row"
                   :groups="groupsOf(row)"
                   :quality="row.platform === 'openai' ? row.quality ?? null : null"
-                  :quality-active="qualityActive"
                   :readonly="!canPlaceGroups"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
@@ -340,7 +339,7 @@ import AccountUsageFit from '@/components/admin/account/table/AccountUsageFit.vu
 import AccountToolsMenu, { type AccountToolAction } from '@/components/admin/account/table/AccountToolsMenu.vue'
 import AccountsToolbar, { type ToolbarFilters } from '@/components/admin/account/table/AccountsToolbar.vue'
 import { accountMatchesFilters, type AccountListFilters } from '@/components/admin/account/table/accountFilters'
-import { orderGroups, qualitySchedulingActive } from '@/components/admin/account/table/accountGroups'
+import { orderGroups } from '@/components/admin/account/table/accountGroups'
 import { accountRowPatch } from '@/components/admin/account/table/accountRow'
 import { useAccountsLiveTable, type LiveAccount } from '@/components/admin/account/table/useAccountsLiveTable'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -453,8 +452,6 @@ const pagination = reactive({ page: 1, page_size: getPersistedPageSize() })
 const listFilters = (): AccountListFilters => ({ ...filters, search: search.value.trim() })
 
 const qualityMeta = ref<{ global_enabled: boolean; stale: boolean } | null>(null)
-/** Quality scheduling moves accounts only while it is switched on and its view is fresh (spec 7d-2). */
-const qualityActive = computed(() => qualitySchedulingActive(qualityMeta.value))
 /** The page the pagination bar shows: the one whose rows are on screen (it follows them, not the click). */
 const shownPage = reactive({ page: pagination.page, page_size: pagination.page_size })
 // The quality panel's and the group board's data come with the table's beat (spec 7f-1).
@@ -464,14 +461,15 @@ const live = useAccountsLiveTable({
   filters: listFilters,
   sort: () => ({ sort_by: sortState.sort_by, sort_order: sortState.sort_order }),
   wants: {
-    // Managers need the summary even with the quality columns hidden: the row menu's "recover state" reads it.
-    quality: () => canManage.value || isColumnVisible('groups') || isColumnVisible('sq_recent'),
+    // Managers need the summary even with the quality columns hidden: the row menu's "recover state" reads it. The
+    // quality filter needs it to tell whether a row still matches.
+    quality: () => canManage.value || isColumnVisible('groups') || isColumnVisible('sq_recent') || !!filters.sched_quality,
     today: () => isColumnVisible('today_stats') || isColumnVisible('usage'),
     balance: () => isColumnVisible('upstream_balance'),
     usage: () => isColumnVisible('usage')
   },
   matches: (row) =>
-    accountMatchesFilters(row, listFilters(), { now: () => now.value, matchesCategory: groupCategories.matchesFilter, quality: row.quality, qualityActive: qualityActive.value }),
+    accountMatchesFilters(row, listFilters(), { now: () => now.value, matchesCategory: groupCategories.matchesFilter, quality: row.quality }),
   onQualityMeta: (meta) => {
     qualityMeta.value = meta
   },
@@ -978,9 +976,9 @@ const panelGroupInfo = (id: number) => groupsById.value.get(id)
 /** The panel's top edge follows the table's. */
 const panelAnchor = () => accountTableRef.value
 const sqOpenAIGroups = computed(() => groups.value.filter((group) => group.platform === 'openai').map((group) => ({ id: group.id, name: group.name })))
-/** The pill's dot: the quality panel on that group, with its substandard model's tab when it has one. */
+/** The pill's dot: the quality panel on that group, with the tab of its model at the back when it has one. */
 const openQuality = (row: LiveAccount, groupId: number) => {
-  const model = row.quality?.substandard.find((item) => item.group_id === groupId)?.model ?? null
+  const model = row.quality?.substandard.find((item) => item.group_id === groupId && item.effective)?.model ?? null
   openSchedDrawer({ id: row.id, name: row.name }, { groupId, model })
 }
 const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {

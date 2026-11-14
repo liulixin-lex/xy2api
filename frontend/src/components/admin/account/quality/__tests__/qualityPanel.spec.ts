@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
 import { backModels, dimMark, groupModelState, pickModelTab } from '../qualityPanel'
+import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const row = (model: string, failing: boolean): BackendGroupModel => {
   const dim = (verdict: string) => ({ scope: 'own', window_min: 60, n: 10, lcb: null, verdict, bad: 0 })
@@ -34,6 +35,26 @@ describe('quality panel state', () => {
     // Only a model with a group at the back gets the tab mark; an exempt group is not at the back.
     const detail = { ...normal, groups: [back, group(2, [row('b', true)], true)] }
     expect([...backModels(detail)]).toEqual(['a'])
+  })
+
+  // 7f-2: the detail has no `effective`; the panel reads the same three conditions the backend's flag stands for, so
+  // the panel and the group's dot (which reads the summary's flag) say the same.
+  it('is back only while quality scheduling is on, fresh and the group\'s policy enabled, as the group\'s dot says', () => {
+    const failing = group(1, [row('a', true)])
+    const off = { ...failing, policy: { ...failing.policy, enabled: false } }
+    const summary = (effective: boolean) => ({ status: 'normal', stop: null, exemptions: [], substandard: [{ group_id: 1, model: 'a', dims: ['ttfo' as const], until: '', other_group: false, exempt: false, effective }] })
+    const cases = [
+      { detail: { stop: null, status: 'normal', global_enabled: true, stale: false, groups: [failing] }, effective: true },
+      { detail: { stop: null, status: 'normal', global_enabled: false, stale: false, groups: [failing] }, effective: false },
+      { detail: { stop: null, status: 'normal', global_enabled: true, stale: true, groups: [failing] }, effective: false },
+      { detail: { stop: null, status: 'normal', global_enabled: true, stale: false, groups: [off] }, effective: false }
+    ]
+    for (const { detail, effective } of cases) {
+      const panel = groupModelState(detail, detail.groups[0], 'a')
+      expect(panel).toBe(groupDotState(summary(effective), 1))
+      expect(panel).toBe(effective ? 'back' : 'ok')
+      expect(backModels(detail).has('a')).toBe(effective)
+    }
   })
 
   it('shows the requested tab when the detail has it, else keeps the one shown, else the first', () => {
