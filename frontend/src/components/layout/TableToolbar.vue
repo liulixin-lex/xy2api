@@ -14,9 +14,10 @@
 <script setup lang="ts">
 /**
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
- * - from 1024px one row: the search and the filters on the left (the filters wrap), then the live indicator (#status)
- *   and the actions on the right. When the actions do not fit beside the search, the whole action area moves to a row
- *   of its own, on the right, its buttons wrapping inside it: it never covers the search or leaves the screen (7o-2);
+ * - from 1024px one row: the search and the filters on the left, then the live indicator (#status) and the actions on
+ *   the right. When the actions do not fit beside the search and all the filters, the whole action area moves to a
+ *   row of its own, on the right, its buttons wrapping inside it: it never covers the search or leaves the screen, and
+ *   the filters stay beside the search as long as they fit there, wrapping only as a group (7o-2, 7r-5);
  * - below 1024px the search has a row of its own, the filters keep to one row that scrolls sideways out to the
  *   screen's edges (select menus open in the body, so the scroll does not clip them), and the last row holds the live
  *   indicator on the left and the actions on the right, the primary one included. No row is wider than the page (7n-1).
@@ -37,11 +38,12 @@
   gap: 12px;
   min-width: 0;
 }
-/* Its basis is the search box: the actions share its row as long as they fit beside it, then the main part grows into
-   the room left (the filters wrapping in it). */
+/* Its basis is its content, the search and every filter in a row: the actions share that row when they fit beside it,
+   else they take the next one, and the main part grows into the room left. A smaller basis kept the actions on the
+   first row and squeezed the filters under the search, one above the other (7r-5). */
 .table-toolbar__main {
   display: flex;
-  flex: 1 1 16rem;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
@@ -80,8 +82,8 @@
     align-items: stretch;
     gap: 8px;
   }
-  /* Its 16rem basis is for the wide row; in the column it would be a height, an empty band under the filters (7q-2):
-     here it is as tall as its rows. */
+  /* Its basis and growth are for the wide row; in the column they would be about a height (an empty band under the
+     filters, 7q-2): here it is as tall as its rows. */
   .table-toolbar__main {
     flex: none;
   }

@@ -415,7 +415,10 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     align-items: center;
     gap: 8px;
   }
+  /* Its basis stays the search box's, not the shared one (its content, 7r-5): one row whatever the tags, the actions
+     at their size and the tags folding into the room they leave. */
   .tb :deep(.table-toolbar__main) {
+    flex: 1 1 16rem;
     flex-wrap: nowrap;
     gap: 8px;
   }
