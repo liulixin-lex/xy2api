@@ -60,8 +60,6 @@ func applyGatewayRequestMetadata(ctx context.Context, row *UsageLog) {
 	row.GatewayRequestID, row.Result, row.Switches = &meta.RequestID, &meta.Result, &meta.Switches
 	row.Fallback, row.Takeover = &meta.Fallback, &meta.Takeover
 	row.EndToEndFirstOutputMs = meta.FirstOutputMs
-	duration := int64(meta.DurationMs)
-	row.EndToEndDurationMs = &duration
 }
 
 func createUnbilledGatewayRequest(ctx context.Context, repo UsageLogRepository, row *GatewayUnbilledRequest) error {

@@ -25,7 +25,7 @@ const adminRequestsCTE = `WITH requests AS (
 		created_at, user_id, api_key_id, account_id, group_id, model, requested_model, request_id,
 		request_type, stream, openai_ws_mode, native_compaction_v2, billing_type, billing_mode,
 		upstream_model_mismatch, origin_group_id, upstream_model, model_mapping_chain, image_count,
-		end_to_end_first_output_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens,
+		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens,
 		cache_creation_tokens, total_cost, actual_cost, account_stats_cost, account_rate_multiplier,
 		inbound_endpoint, upstream_endpoint
 	FROM usage_logs
@@ -34,7 +34,7 @@ const adminRequestsCTE = `WITH requests AS (
 		created_at, user_id, api_key_id, account_id, group_id, model, model, request_id,
 		request_type, stream, request_type=3, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, 0,
-		first_output_ms, duration_ms, input_tokens, NULL, cache_read_tokens,
+		first_output_ms, first_output_ms, duration_ms, input_tokens, NULL, cache_read_tokens,
 		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL
 	FROM gateway_unbilled_requests
 ) `
@@ -74,7 +74,7 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 	}
 	query := adminRequestsCTE + `SELECT source, id, gateway_request_id, result, switches, fallback, takeover,
 		created_at, user_id, api_key_id, account_id, group_id, model, request_type, stream,
-		end_to_end_first_output_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
 		FROM requests ` + where + " ORDER BY " + adminRequestOrderBy(params)
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 	rows, err := r.sql.QueryContext(ctx, query, append(args, limit+1, params.Offset())...)
@@ -89,7 +89,7 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 		l := &row.Log
 		if err := rows.Scan(&row.Source, &l.ID, &row.GatewayRequestID, &row.Result, &row.Switches, &row.Fallback, &row.Takeover,
 			&l.CreatedAt, &l.UserID, &l.APIKeyID, &accountID, &l.GroupID, &l.Model, &requestType, &l.Stream,
-			&l.EndToEndFirstOutputMs, &l.DurationMs, &row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CacheCreationTokens); err != nil {
+			&l.EndToEndFirstOutputMs, &l.FirstTokenMs, &l.DurationMs, &row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CacheCreationTokens); err != nil {
 			_ = rows.Close()
 			return nil, nil, err
 		}
@@ -164,17 +164,6 @@ func (r *usageLogRepository) hydrateAdminRequests(ctx context.Context, items []s
 			if log, ok := byID[logs[i].ID]; ok {
 				logs[i] = log
 			}
-		}
-		// Unbilled duration already starts at ingress. Billed rows switch both
-		// display timings together; incomplete/legacy pairs keep attempt timing.
-		if items[i].Source == "unbilled" {
-			if logs[i].EndToEndFirstOutputMs != nil {
-				ms := int(*logs[i].EndToEndFirstOutputMs)
-				logs[i].FirstTokenMs = &ms
-			}
-		} else if logs[i].EndToEndFirstOutputMs != nil && logs[i].EndToEndDurationMs != nil {
-			first, duration := int(*logs[i].EndToEndFirstOutputMs), int(*logs[i].EndToEndDurationMs)
-			logs[i].FirstTokenMs, logs[i].DurationMs = &first, &duration
 		}
 	}
 	if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
