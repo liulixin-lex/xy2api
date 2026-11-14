@@ -13,4 +13,8 @@ describe('TableToolbar below 1024px', () => {
     expect(column).toContain('flex-direction: column')
     expect(column).toContain('flex-wrap: nowrap')
   })
+
+  it('makes the main part as tall as its rows: its 16rem basis would be a height there (7q-2)', () => {
+    expect(narrow).toMatch(/\n {2}\.table-toolbar__main \{\s*flex: none;\s*\}/)
+  })
 })

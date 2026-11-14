@@ -80,6 +80,11 @@
     align-items: stretch;
     gap: 8px;
   }
+  /* Its 16rem basis is for the wide row; in the column it would be a height, an empty band under the filters (7q-2):
+     here it is as tall as its rows. */
+  .table-toolbar__main {
+    flex: none;
+  }
   .table-toolbar__search {
     width: 100%;
   }
