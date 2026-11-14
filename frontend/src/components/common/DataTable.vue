@@ -1,6 +1,6 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
-    <template v-if="loading">
+  <div v-if="!isDesktopViewport" :class="['space-y-3', { relative: refreshing }]" :aria-busy="loading ? 'true' : undefined">
+    <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
           <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
@@ -119,6 +119,11 @@
         </div>
       </div>
     </template>
+
+    <!-- Reload with rows on screen: a thin bar over the list; the cards stay and remain usable. -->
+    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
   </div>
 
   <div
@@ -129,7 +134,12 @@
       'actions-expanded': actionsExpanded,
       'is-scrollable': isScrollable
     }"
+    :aria-busy="loading ? 'true' : undefined"
   >
+    <!-- Reload with rows on screen: a thin bar pinned to the top of the viewport; it takes no layout space. -->
+    <div v-if="refreshing" class="table-progress table-progress--table" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
     <table class="w-full min-w-max">
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
         <tr v-for="(headerRow, rowIndex) in headerRows" :key="rowIndex">
@@ -212,8 +222,8 @@
         </tr>
       </thead>
       <tbody class="table-body bg-white dark:bg-dark-900">
-        <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i" class="table-row-border">
+        <!-- Loading skeleton: only while there is nothing to show yet -->
+        <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
           <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </td>
@@ -518,6 +528,12 @@ const props = withDefaults(defineProps<Props>(), {
   pageSorts: () => [],
   pageSort: null
 })
+
+// A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
+// skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
+const hasRows = computed(() => (props.data?.length ?? 0) > 0)
+const showSkeleton = computed(() => props.loading && !hasRows.value)
+const refreshing = computed(() => props.loading && hasRows.value)
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -1221,6 +1237,47 @@ defineExpose({
 
 .dark .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 theme('colors.dark.700');
+}
+/* Reload progress: a 2px bar at the top of the table in the primary colour. It never takes layout space. */
+.table-progress {
+  pointer-events: none;
+  overflow: hidden;
+  height: 2px;
+}
+.table-progress--table {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 230; /* above the sticky header cells */
+  margin-bottom: -2px;
+}
+.table-progress--cards {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 10;
+  margin: 0 !important; /* not part of the card stack's spacing */
+  border-radius: 9999px;
+}
+.table-progress__bar {
+  height: 100%;
+  width: 100%;
+  background: theme('colors.primary.500');
+  transform-origin: left center;
+  animation: table-progress-slide 1.1s linear infinite;
+}
+.dark .table-progress__bar {
+  background: theme('colors.primary.400');
+}
+/* With reduced motion the animation is cut short and the bar rests as a full-width line. */
+@keyframes table-progress-slide {
+  from {
+    transform: translateX(-100%) scaleX(0.35);
+  }
+  to {
+    transform: translateX(100%) scaleX(0.35);
+  }
 }
 </style>
 
