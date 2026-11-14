@@ -53,15 +53,20 @@ export function qualityMatches(platform: string, quality: AccountQualityView | n
   }
 }
 
-/** The clock is read only for a time the row has, so a row without one does not follow the page clock. */
-const future = (value: string | null | undefined, now: () => number) => {
+/**
+ * The ticking clock is read only for a time still ahead, so a row without one, or with one already past (the backend
+ * keeps it), does not follow the page clock (7g-1).
+ */
+const future = (value: string | null | undefined, context: AccountMatchContext) => {
   const time = value ? new Date(value).getTime() : Number.NaN
-  return Number.isFinite(time) && time > now()
+  return Number.isFinite(time) && time > context.currentTime() && time > context.now()
 }
 
 export interface AccountMatchContext {
   /** The page clock (useLiveClock): a rate limit or a pause that ends dims the row at that second. */
   now: () => number
+  /** The same time read without following the clock (useLiveClock's currentTime). */
+  currentTime: () => number
   /** The group-category filter (from the group categories store). */
   matchesCategory: (groupIds: number[], category: string) => boolean
   /** The row's quality summary: undefined until the first one is in, null when it answered without the account. */
@@ -73,8 +78,8 @@ export function accountMatchesFilters(account: Account, filters: AccountListFilt
   if (filters.type && account.type !== filters.type) return false
   if (filters.iq_status && (account.platform !== 'openai' || iqAccountVerdict(account.iq_targets) !== filters.iq_status)) return false
   if (filters.status) {
-    const rateLimited = future(account.rate_limit_reset_at, context.now)
-    const tempUnschedulable = future(account.temp_unschedulable_until, context.now)
+    const rateLimited = future(account.rate_limit_reset_at, context)
+    const tempUnschedulable = future(account.temp_unschedulable_until, context)
     if (filters.status === 'active') {
       if (account.status !== 'active' || rateLimited || tempUnschedulable || !account.schedulable) return false
     } else if (filters.status === 'rate_limited') {

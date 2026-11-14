@@ -52,7 +52,7 @@ describe('quality filter', () => {
 
   it('takes part in the row match next to the other filters', () => {
     const account = { id: 1, name: 'a', platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [1] } as unknown as Account
-    const context = { now: () => Date.now(), matchesCategory: () => true }
+    const context = { now: () => Date.now(), currentTime: () => Date.now(), matchesCategory: () => true }
     expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality({ substandard: [substandard()] }) })).toBe(true)
     expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality() })).toBe(false)
     expect(accountMatchesFilters(account, { platform: 'gemini' }, { ...context, quality: quality() })).toBe(false)
@@ -64,24 +64,26 @@ describe('row match', () => {
 
   // 7d-1: the row's group_ids is its only group list; the full structure's groups are no fallback.
   it('reads the groups from group_ids only: a row without them is ungrouped even with stale group objects', () => {
-    const context = { now: () => 0, matchesCategory: () => true }
+    const context = { now: () => 0, currentTime: () => 0, matchesCategory: () => true }
     const stale = { ...base, groups: [{ id: 3, name: 'g3' }] } as unknown as Account
     expect(accountMatchesFilters(stale, { group: 'ungrouped' }, context)).toBe(true)
     expect(accountMatchesFilters(stale, { group: '3' }, context)).toBe(false)
     expect(accountMatchesFilters({ ...base, group_ids: [3] } as Account, { group: '3' }, context)).toBe(true)
   })
 
-  // 7d-10: a rate limit that ends turns the "rate limited" filter's row into a mismatch at that second.
-  it('judges the time filters on the clock it is given, and reads it only for a row with such a time', () => {
+  // 7d-10: a rate limit that ends turns the "rate limited" filter's row into a mismatch at that second. 7g-1: only a
+  // time still ahead reads the ticking clock; one already past (the backend keeps it) does not.
+  it('judges the time filters on the clock it is given, and reads the ticking clock only for a time still ahead', () => {
     let now = 1_000
     const reads = { n: 0 }
-    const clock = () => { reads.n++; return now }
+    const context = { now: () => { reads.n++; return now }, currentTime: () => now, matchesCategory: () => true }
     const limited = { ...base, rate_limit_reset_at: new Date(2_000).toISOString() } as Account
-    expect(accountMatchesFilters(limited, { status: 'rate_limited' }, { now: clock, matchesCategory: () => true })).toBe(true)
+    expect(accountMatchesFilters(limited, { status: 'rate_limited' }, context)).toBe(true)
+    expect(reads.n).toBe(1)
     now = 3_000
-    expect(accountMatchesFilters(limited, { status: 'rate_limited' }, { now: clock, matchesCategory: () => true })).toBe(false)
     reads.n = 0
-    accountMatchesFilters(base, { status: 'rate_limited' }, { now: clock, matchesCategory: () => true })
+    expect(accountMatchesFilters(limited, { status: 'rate_limited' }, context)).toBe(false)
+    accountMatchesFilters(base, { status: 'rate_limited' }, context)
     expect(reads.n).toBe(0)
   })
 })

@@ -10,7 +10,7 @@
 import type { Account } from '@/types'
 
 /** List fields the backend omits when empty (backend/internal/handler/dto/types.go, AccountListItem). */
-export const LIST_FIELDS_OMITTED_WHEN_EMPTY = [
+const LIST_FIELDS_OMITTED_WHEN_EMPTY = [
   'credentials', 'credentials_status', 'extra', 'ollama_cloud_usage', 'codex_turn_tickets', 'opencode_go_usage',
   'proxy_fallback_origin_name', 'load_factor', 'window_cost_limit', 'window_cost_sticky_reserve', 'max_sessions',
   'session_idle_timeout_minutes', 'base_rpm', 'rpm_strategy', 'rpm_sticky_buffer', 'user_msg_queue_mode',

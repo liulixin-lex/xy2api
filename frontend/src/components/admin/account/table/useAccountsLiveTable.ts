@@ -5,11 +5,12 @@
  * - Rows of the page, every 3 s: the same list with `ids` (whole rows; page 1, page size = the id count). The group
  *   filter goes along, as it decides the group concurrency the rows carry.
  * - Quality summary, every 5 s: the backend's own shape, a value (or null) for every id. qualityLanded() waits for
- *   the next one (a recovery holds its lock until the rows show the summary after it).
+ *   the next one (a recovery holds its lock until the rows show the summary after it, or that summary fails).
  * - Today's stats and upstream balances, every 30 s: batch endpoints with defaults for every id.
  * - Usage windows: after each load only, from a 5-minute cache (a manual refresh skips the cache).
  * - Membership check: every 30 s (the engine's default); rows that no longer match the filters are dimmed in place.
  */
+import { onScopeDispose } from 'vue'
 import { adminAPI } from '@/api/admin'
 import { backendSummary } from '@/api/admin/schedQuality'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
@@ -70,17 +71,19 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
   /** Quality runs started so far, and the callers waiting for one started after a given run to be written. */
   let qualityRuns = 0
   const qualityWaiters: Array<{ after: number; resolve: () => void }> = []
-  const settleQuality = (run: number) => {
-    // The engine writes the answer once fetch returns; the waiters hear of it after that.
-    setTimeout(() => {
-      for (const waiter of [...qualityWaiters]) {
-        if (waiter.after < run) {
-          qualityWaiters.splice(qualityWaiters.indexOf(waiter), 1)
-          waiter.resolve()
-        }
+  /** Lets go of the callers waiting for a run started up to `run`. */
+  const releaseQuality = (run: number) => {
+    for (const waiter of [...qualityWaiters]) {
+      if (waiter.after < run) {
+        qualityWaiters.splice(qualityWaiters.indexOf(waiter), 1)
+        waiter.resolve()
       }
-    }, 0)
+    }
   }
+  // The engine writes the answer once fetch returns; the waiters hear of it after that.
+  const settleQuality = (run: number) => setTimeout(() => releaseQuality(run), 0)
+  // Leaving the page: nobody is left to wait for (7g-2).
+  onScopeDispose(() => releaseQuality(Number.POSITIVE_INFINITY))
   const usageCache = new Map<number, { usage: AccountUsageInfo | null; error: string | null; at: number }>()
 
   const table: LiveTable<LiveAccount> = useLiveTable<LiveAccount>({
@@ -116,10 +119,16 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
             return []
           }
           const byId = new Map<number, BackendAccountSummary>()
-          for (const part of chunk(numericIds(ids), QUALITY_MAX_IDS)) {
-            const summary = await backendSummary(part, { signal })
-            options.onQualityMeta?.({ global_enabled: summary.global_enabled, stale: summary.stale })
-            for (const account of summary.accounts) byId.set(account.account_id, account)
+          try {
+            for (const part of chunk(numericIds(ids), QUALITY_MAX_IDS)) {
+              const summary = await backendSummary(part, { signal })
+              options.onQualityMeta?.({ global_enabled: summary.global_enabled, stale: summary.stale })
+              for (const account of summary.accounts) byId.set(account.account_id, account)
+            }
+          } catch (error) {
+            // A failed summary (not an aborted one: its run is owed again) ends the wait: the lock holds no longer (7g-2).
+            if (!signal.aborted) releaseQuality(run)
+            throw error
           }
           settleQuality(run)
           return ids.map((id) => [id, { quality: byId.get(Number(id)) ?? null }] as const)
@@ -202,18 +211,12 @@ export function useAccountsLiveTable(options: AccountsLiveOptions) {
     forgetUsage: (ids: number[]) => ids.forEach((id) => usageCache.delete(id)),
     /**
      * Resolves once a quality summary asked for after this call is on the rows (a run already on its way does not
-     * count: it may predate the change). An aborted or failed run does not count either; the engine retries, and after
-     * `timeoutMs` it resolves anyway so a long outage holds nothing for ever.
+     * count: it may predate the change), or once such a summary fails; an aborted run does not count, the engine runs
+     * it again. Leaving the page resolves it too.
      */
-    qualityLanded: (timeoutMs = 15_000) =>
+    qualityLanded: () =>
       new Promise<void>((resolve) => {
-        const waiter = { after: qualityRuns, resolve: () => { clearTimeout(timer); resolve() } }
-        const timer = setTimeout(() => {
-          const index = qualityWaiters.indexOf(waiter)
-          if (index !== -1) qualityWaiters.splice(index, 1)
-          resolve()
-        }, timeoutMs)
-        qualityWaiters.push(waiter)
+        qualityWaiters.push({ after: qualityRuns, resolve })
       })
   }
 }

@@ -89,12 +89,11 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
 import type { BackendDim, BackendOrderRow } from '@/api/admin/schedQualityTypes'
-import { secondsUntil } from '@/composables/useSchedQuality'
 import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { DASH, fmtCountdown, rejectName, SCHED_DIMS } from '@/utils/schedQualityFormat'
+import { DASH, fmtCountdown, rejectName, SCHED_DIMS, secondsUntil } from '@/utils/schedQualityFormat'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
 // re-sorted here), fetched every 5 s by the host page's live table while open (useSchedLayerData). Accounts that take

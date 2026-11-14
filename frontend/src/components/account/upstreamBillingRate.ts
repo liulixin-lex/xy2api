@@ -37,9 +37,11 @@ const tidy = (value: number) => Number(value.toPrecision(12))
  * or stale (7e-10):
  * - the declared rate (resolved_rate_multiplier) with the peak coefficient of the moment, when the data has the
  *   shape the backend's probe writes (token scope, a boolean peak_rate_enabled, and with peaks on a valid window,
- *   multiplier and timezone); this is the backend's own upstreamBillingRateAt, which scheduling uses;
+ *   multiplier and timezone); this follows the backend's upstreamBillingRateAt, which scheduling uses;
  * - otherwise the rate the probe saw (effective_rate_multiplier), as the backend's list sort does for snapshots
  *   without the full shape.
+ * One case differs (7g-5): a snapshot with the full shape whose peak settings are invalid is an empty value to the
+ * backend's sort, while this shows the rate the probe saw. No writer produces such a snapshot today.
  */
 export function snapshotRate(data: Partial<UpstreamBillingData> | undefined, now: number): number | null {
   if (!data) return null

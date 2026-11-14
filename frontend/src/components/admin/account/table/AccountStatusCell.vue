@@ -24,12 +24,13 @@
  * Status column (prototype): a dot and a word. Normal and paused (scheduling off, the shared hollow ring) read in the
  * shared secondary status text; rate limited, overloaded and temporarily unschedulable carry a small code and a
  * countdown on the page's shared clock; an error is red with its reason. Model-level limits are counted and listed in
- * the tip. Only a row with an end time reads the clock, so the others do not redraw every second (7d-5).
+ * the tip. Only a row with an end time still ahead reads the clock, so the others do not redraw every second (7d-5,
+ * 7g-1: the backend keeps an end time after it passes).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
-import { useLiveClock } from '@/composables/useLiveClock'
+import { currentTime, useLiveClock } from '@/composables/useLiveClock'
 import { IQ_GATE_KEY_PREFIX } from '@/components/admin/account/iqCheckPresentation'
 import type { Account } from '@/types'
 import { vTip } from '@/utils/tip'
@@ -45,8 +46,8 @@ interface View { state: State; tone: StatusDotTone; label: string; code?: string
 
 const exceeded = (used?: number | null, limit?: number | null) => typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
 
-/** Time left until `until` on the page's shared clock; without an end time the clock is not read. */
-const left = (until: string | null | undefined) => (until ? msLeft(until, now.value) : null)
+/** Time left until `until` on the page's shared clock; the clock is read only for an end time still ahead. */
+const left = (until: string | null | undefined) => (msLeft(until, currentTime()) === null ? null : msLeft(until, now.value))
 
 const view = computed<View>(() => {
   const a = props.account

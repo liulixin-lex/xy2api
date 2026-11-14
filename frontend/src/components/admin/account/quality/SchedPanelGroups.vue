@@ -77,8 +77,7 @@ import type { BackendAccountDetail, BackendDetailGroup } from '@/api/admin/sched
 import type { GroupDotState } from '@/components/admin/account/table/accountGroups'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { RECENT_DIMS } from '@/components/admin/account/table/accountRecent'
-import { secondsUntil } from '@/composables/useSchedQuality'
-import { fmtCountdown } from '@/utils/schedQualityFormat'
+import { fmtCountdown, secondsUntil } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 import { dimMark, groupModelState, modelRow } from './qualityPanel'
 

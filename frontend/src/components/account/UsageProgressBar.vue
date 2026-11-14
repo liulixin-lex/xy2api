@@ -1,6 +1,7 @@
 <template>
-  <!-- data-usage-window / -stats: the accounts table fits windows into its row and moves the chips to the tip. -->
-  <div data-usage-window>
+  <!-- data-usage-window / -stats: the accounts table keeps windows to one line each and moves the chips to the tip;
+       inside the table's fold (USAGE_WINDOW_FOLD) a window past the third is folded when there are more than four. -->
+  <div ref="rootRef" data-usage-window :data-usage-folded="folded || undefined">
     <!-- Window stats row (above progress bar) -->
     <div
       v-if="windowStats && (windowStats.requests > 0 || windowStats.tokens > 0)"
@@ -63,8 +64,20 @@
   </div>
 </template>
 
+<script lang="ts">
+import type { InjectionKey, Ref } from 'vue'
+
+/** A container that folds usage windows by their count (the accounts table's usage column); windows sign in to it. */
+export interface UsageWindowFold {
+  add: (root: Ref<HTMLElement | null>) => void
+  remove: (root: Ref<HTMLElement | null>) => void
+  folded: (root: HTMLElement | null) => boolean
+}
+export const USAGE_WINDOW_FOLD: InjectionKey<UsageWindowFold> = Symbol('usage-window-fold')
+</script>
+
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
@@ -87,6 +100,12 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+
+const rootRef = ref<HTMLElement | null>(null)
+const fold = inject(USAGE_WINDOW_FOLD, null)
+const folded = computed(() => !!fold && fold.folded(rootRef.value))
+onMounted(() => fold?.add(rootRef))
+onBeforeUnmount(() => fold?.remove(rootRef))
 
 // Reactive clock for countdown — only runs when a reset time is shown,
 // to avoid creating many idle timers across large account lists.

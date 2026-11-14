@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { effectScope } from 'vue'
 
-import { secondsUntil } from '../useSchedQuality'
-import { useLiveClock } from '../useLiveClock'
+import { secondsUntil } from '../schedQualityFormat'
+import { useLiveClock } from '@/composables/useLiveClock'
 
 afterEach(() => {
   vi.useRealTimers()

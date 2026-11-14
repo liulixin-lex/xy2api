@@ -15,7 +15,7 @@
         <header class="qp-head">
           <div class="qp-title-row">
             <div class="qp-title">
-              <h2 :id="titleId" class="qp-name">{{ (fresh && detail?.account.name) || drawer.accountName }}</h2>
+              <h2 :id="titleId" ref="titleRef" class="qp-name" tabindex="-1">{{ (fresh && detail?.account.name) || drawer.accountName }}</h2>
               <div class="qp-sub">{{ subline }}</div>
             </div>
             <button type="button" class="qp-close" :aria-label="t('admin.schedQuality.aria.close')" data-qp-close @click="close(true)">
@@ -49,13 +49,14 @@
           </div>
         </header>
 
-        <!-- Switched to another account: the previous one's content stays, dimmed and out of reach, until the new one lands. -->
+        <!-- Switched to another account: the previous one's content stays, dimmed and out of reach, until the new one lands
+             (a failure shows its retry instead, within reach: 7h-1). -->
         <div
           ref="bodyRef"
           class="qp-body"
-          :class="{ 'opacity-60': detail && !fresh }"
-          :inert="(detail && !fresh) || undefined"
-          :aria-busy="detail && !fresh ? 'true' : undefined"
+          :class="{ 'opacity-60': switching }"
+          :inert="switching || undefined"
+          :aria-busy="switching ? 'true' : undefined"
           data-qp-body
         >
           <div v-if="failed" class="qp-failed" data-qp-failed>
@@ -209,7 +210,6 @@ import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
-import { secondsUntil } from '@/composables/useSchedQuality'
 import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
@@ -223,7 +223,7 @@ import { RECENT_DIMS, formatThreshold, recentValue, strictestThresholds } from '
 import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { platformLabel } from '@/utils/platformColors'
-import { fmtCountdown, kindName, parentIdFromKey } from '@/utils/schedQualityFormat'
+import { fmtCountdown, kindName, parentIdFromKey, secondsUntil } from '@/utils/schedQualityFormat'
 import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
 import { allGroupsExemption, backModels, closesPanel, panelModels, panelRecoverable, pickModelTab } from './qualityPanel'
@@ -254,6 +254,7 @@ const { canManage } = useAdminPermission('accounts')
 const now = useLiveClock()
 const titleId = `qp-title-${useId()}`
 const rootRef = ref<HTMLElement | null>(null)
+const titleRef = ref<HTMLElement | null>(null)
 const bodyRef = ref<HTMLElement | null>(null)
 const open = computed(() => drawer.accountId !== null)
 
@@ -264,6 +265,8 @@ const row = computed(() => (drawer.accountId === null ? undefined : props.accoun
 const detail = computed(() => panel.detail)
 const fresh = computed(() => panel.accountId !== null && panel.accountId === drawer.accountId)
 const failed = computed(() => !fresh.value && drawer.accountId !== null && panel.failedId === drawer.accountId)
+/** The previous account's content is shown while the new one is on its way (not once it failed). */
+const switching = computed(() => !!detail.value && !fresh.value && !failed.value)
 const shownRow = computed(() => (panel.accountId === null ? undefined : props.account?.(panel.accountId)))
 // The row's summary when the page's table carries one (the same numbers as its cells); otherwise the fetched one.
 const summary = computed(() => (shownRow.value?.quality !== undefined ? shownRow.value.quality : panel.summary))
@@ -353,6 +356,13 @@ let pendingRequest = true
 watch(() => [drawer.accountId, drawer.raise] as const, ([id]) => {
   pendingRequest = true
   if (id !== null && fresh.value) applyRequest(false)
+})
+
+// The small layers opened for one account (the exemption popover, the proxy confirmation) close when the account
+// changes: confirming them would act on the new one (7h-2).
+watch(() => drawer.accountId, () => {
+  popover.open = false
+  proxyItem.value = null
 })
 
 watch(detail, (value, previous) => {
@@ -457,7 +467,8 @@ function gotoOf(item: BackendAutoState): { label: string; run: () => void } | nu
   if (item.kind === 'iq_gate' && props.onIqCheck) return { label: t('admin.schedQuality.goto.iq'), run: () => props.onIqCheck!(id) }
   if (item.kind === 'parent_blocked') {
     const parent = parentIdFromKey(item.key)
-    return parent === null ? null : { label: t('admin.schedQuality.goto.parent'), run: () => openSchedDrawer({ id: parent }) }
+    // The button goes with the old content: focus moves to the title, which reads the new account's name (7h-3).
+    return parent === null ? null : { label: t('admin.schedQuality.goto.parent'), run: () => { openSchedDrawer({ id: parent }); titleRef.value?.focus() } }
   }
   if (['manual_off', 'expired', 'quota'].includes(item.kind) && props.onEdit) {
     return { label: t('admin.schedQuality.goto.edit'), run: () => props.onEdit!(id) }
@@ -581,6 +592,15 @@ onScopeDispose(() => running?.kill())
   line-height: var(--line-height-title);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Focused when the panel switches to another account from inside (7h-3); the ring only for keyboard use. */
+.qp-name:focus {
+  outline: none;
+}
+.qp-name:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: 2px;
 }
 .qp-sub {
   color: var(--color-text-secondary);

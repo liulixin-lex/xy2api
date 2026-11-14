@@ -162,6 +162,46 @@ describe('SchedQualityPanel data from the page\'s live table (7f-1)', () => {
   })
 })
 
+describe('SchedQualityPanel switching accounts (7h)', () => {
+  it('keeps the retry within reach when the new account fails to load (7h-1)', async () => {
+    mount(Panel, { attachTo: document.body })
+    await openOn(7)
+    api.accountDetail.mockRejectedValueOnce(new Error('down'))
+    await openOn(8)
+    const body = panel()!.querySelector<HTMLElement>('[data-qp-body]')!
+    expect(body.hasAttribute('inert')).toBe(false)
+    expect(body.classList.contains('opacity-60')).toBe(false)
+    panel()!.querySelector<HTMLElement>('[data-qp-failed] button')!.click()
+    await flushPromises()
+    expect(api.accountDetail).toHaveBeenLastCalledWith(8, expect.anything())
+    expect(panel()!.querySelector('.qp-meta')).not.toBeNull()
+  })
+
+  it('closes the exemption popover when the panel switches to another account (7h-2)', async () => {
+    mount(Panel, { attachTo: document.body })
+    await openOn(7)
+    groupRow(54).querySelector<HTMLElement>('[data-qp-trigger="exempt:54"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover]')).not.toBeNull()
+    await openOn(8)
+    expect(document.querySelector('[data-sq-popover]')).toBeNull()
+    expect(api.setOverride).not.toHaveBeenCalled()
+  })
+
+  it('moves focus to the title when it goes to the parent account from inside (7h-3)', async () => {
+    api.accountDetail.mockImplementation(async (id: number) => ({
+      ...detail(id),
+      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, shared: 0, clearable: false, why: 'parent_blocked' }]
+    }))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7)
+    document.querySelector<HTMLElement>('[data-qp-trigger="goto:parent_blocked:12"]')!.click()
+    await flushPromises()
+    expect(api.accountDetail).toHaveBeenLastCalledWith(12, expect.anything())
+    expect(document.activeElement).toBe(panel()!.querySelector('h2'))
+  })
+})
+
 describe('SchedQualityPanel', () => {
   it('opened from a dot: picks the tab of the model the group is at the back for, and marks that group row', async () => {
     mount(Panel, { attachTo: document.body })

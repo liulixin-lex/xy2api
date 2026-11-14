@@ -351,7 +351,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useColumnOrder } from '@/composables/useColumnOrder'
 import { defineLazyComponent, prefetchWhenIdle, useLazyMount } from '@/composables/useLazyMount'
-import { useLiveClock } from '@/composables/useLiveClock'
+import { currentTime, useLiveClock } from '@/composables/useLiveClock'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isStepUpBlocked, isStepUpCancelled, stepUpBlockReason, useStepUp } from '@/composables/useStepUp'
@@ -469,7 +469,7 @@ const live = useAccountsLiveTable({
     usage: () => isColumnVisible('usage')
   },
   matches: (row) =>
-    accountMatchesFilters(row, listFilters(), { now: () => now.value, matchesCategory: groupCategories.matchesFilter, quality: row.quality }),
+    accountMatchesFilters(row, listFilters(), { now: () => now.value, currentTime, matchesCategory: groupCategories.matchesFilter, quality: row.quality }),
   onQualityMeta: (meta) => {
     qualityMeta.value = meta
   },
@@ -1316,7 +1316,8 @@ const proxyExpiryText = (proxy: AccountProxy) => {
 }
 const formatExpiresAt = (value: number | null) =>
   value ? formatDateTime(new Date(value * 1000), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, 'sv-SE') : '-'
-const isExpired = (value: number | null) => !!value && value * 1000 <= now.value
+// An expiry already past is read without following the clock (7g-1); one still ahead follows it to the second.
+const isExpired = (value: number | null) => !!value && (value * 1000 <= currentTime() || value * 1000 <= now.value)
 
 // ---- Keys and scrolling ----
 // "/" focuses the search box outside text fields; Escape clears the selection. Menus, dialogs and the panel handle

@@ -4,12 +4,12 @@ import { nextTick, ref } from 'vue'
 
 import AccountStatusCell from '../AccountStatusCell.vue'
 
-// The page clock, moved by hand; `t` counts how often the cell works out its words.
+// The page clock (and its untracked read), moved by hand with at(); `t` counts how often the cell works out its words.
 const { clock, t } = vi.hoisted(() => ({
-  clock: { now: null as unknown as { value: number } },
+  clock: { now: null as unknown as { value: number }, plain: 0 },
   t: { fn: null as unknown as ReturnType<typeof import('vitest').vi.fn> }
 }))
-vi.mock('@/composables/useLiveClock', () => ({ useLiveClock: () => clock.now }))
+vi.mock('@/composables/useLiveClock', () => ({ useLiveClock: () => clock.now, currentTime: () => clock.plain }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({ t: (...args: [string, Record<string, unknown>?]) => t.fn(...args) })
@@ -22,8 +22,14 @@ const account = (patch: Record<string, unknown> = {}) =>
 const mountCell = (patch: Record<string, unknown> = {}) => mount(AccountStatusCell, { props: { account: account(patch) } })
 const state = (patch: Record<string, unknown>) => mountCell(patch).get('[data-test="account-status"]').attributes('data-state')
 
+const at = (time: number) => {
+  clock.plain = time
+  clock.now.value = time
+}
+
 beforeEach(() => {
   clock.now = ref(NOW)
+  clock.plain = NOW
   t.fn = vi.fn((key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key))
 })
 afterEach(() => {
@@ -49,20 +55,23 @@ describe('AccountStatusCell', () => {
   it('counts down on the page clock and ends the state when the time is up', async () => {
     const wrapper = mountCell({ rate_limit_reset_at: later(90) })
     expect(wrapper.get('.account-status__detail').text()).toContain('"time":"common.time.countdown.hoursMinutes:{\\"h\\":1,\\"m\\":30}"')
-    clock.now.value = NOW + 60 * 60_000
+    at(NOW + 60 * 60_000)
     await nextTick()
     expect(wrapper.get('.account-status__detail').text()).toContain('common.time.countdown.minutes:{\\"m\\":30}')
-    clock.now.value = NOW + 91 * 60_000
+    at(NOW + 91 * 60_000)
     await nextTick()
     expect(wrapper.get('[data-test="account-status"]').attributes('data-state')).toBe('ok')
   })
 
-  it('does not work out a row without an end time again when the clock ticks (7d-5)', async () => {
-    mountCell({})
+  it.each([
+    ['without an end time (7d-5)', {}],
+    ['whose end time has passed (7g-1)', { rate_limit_reset_at: later(-5), temp_unschedulable_until: later(-1) }]
+  ])('does not work out a row %s again when the clock ticks', async (_, patch) => {
+    mountCell(patch)
     const calls = t.fn.mock.calls.length
-    clock.now.value = NOW + 1000
+    at(NOW + 1000)
     await nextTick()
-    clock.now.value = NOW + 2000
+    at(NOW + 2000)
     await nextTick()
     expect(t.fn.mock.calls.length).toBe(calls)
   })

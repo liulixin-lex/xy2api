@@ -513,6 +513,22 @@ describe('AccountsView — one summary request per recovery refresh', () => {
     wrapper.unmount()
   })
 
+  it('lets go of the recovery lock as soon as the summary after it fails, with no timer (7g-2)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    backendSummary.mockRejectedValue(new Error('down'))
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledWith(2)
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).not.toBe('true')
+    wrapper.unmount()
+  })
+
   it('sends one summary request after a batch recovery', async () => {
     const wrapper = mountView()
     await flushPromises()

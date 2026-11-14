@@ -1,79 +1,46 @@
 <template>
-  <div ref="box" class="usage-fit" data-test="usage-fit" v-tip="allTip">
-    <div ref="inner" class="usage-fit__inner"><slot /></div>
-    <span v-if="hiddenCount" class="usage-fit__more" data-test="usage-more">{{ t('admin.accounts.table.usageMore', { n: hiddenCount }) }}</span>
+  <div class="usage-fit" data-test="usage-fit" v-tip="allTip">
+    <div class="usage-fit__inner"><slot /></div>
+    <span v-if="foldedCount" class="usage-fit__more" data-test="usage-more">{{ t('admin.accounts.table.usageMore', { n: foldedCount }) }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * The usage windows column inside the accounts table's fixed 78px row (7e-6). The windows sit closer together and
- * each one keeps to a single line (its request / token / cost chips go to the tip); when they still do not fit, the
- * last windows are folded and "+N" counts them. Hovering the cell lists every window with its chips.
+ * The usage windows column inside the accounts table's fixed 78px row (7e-6, 7g-3). Each window keeps to a single
+ * line (its request / token / cost chips go to the tip), so the count decides: up to four windows all show; with more,
+ * the first three show and "+N" counts the rest. Hovering the cell lists every window with its chips.
  *
- * A window is any element marked data-usage-window (UsageProgressBar marks its root). Fitting measures the rendered
- * cell, so it runs after each change of the content and of the cell's size.
+ * The windows (UsageProgressBar) sign in through USAGE_WINDOW_FOLD as they mount and leave as they unmount; nothing is
+ * measured or observed.
  */
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, provide, shallowReactive, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { USAGE_WINDOW_FOLD } from '@/components/account/UsageProgressBar.vue'
 import { vTip } from '@/utils/tip'
 
-const HIDDEN_ATTR = 'data-usage-folded'
-/** Height of the "+N" line, kept free once something is folded. */
-const MORE_LINE_PX = 14
+/** At most this many windows show in full; past it, SHOWN_WHEN_FOLDED show and "+N" stands for the rest. */
+const MAX_SHOWN = 4
+const SHOWN_WHEN_FOLDED = 3
 
 const { t } = useI18n()
-const box = ref<HTMLElement | null>(null)
-const inner = ref<HTMLElement | null>(null)
-const hiddenCount = ref(0)
+const roots = shallowReactive(new Set<Ref<HTMLElement | null>>())
+/** The windows in the order they are on screen (one may mount after its neighbours). */
+const windows = computed(() =>
+  [...roots]
+    .map((root) => root.value)
+    .filter((el): el is HTMLElement => !!el)
+    .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+)
+const foldedCount = computed(() => (windows.value.length > MAX_SHOWN ? windows.value.length - SHOWN_WHEN_FOLDED : 0))
 
-const windows = () => Array.from(inner.value?.querySelectorAll<HTMLElement>('[data-usage-window]') ?? [])
-const overflows = (room: number) => (inner.value?.scrollHeight ?? 0) > room
-
-/** Shows every window, then folds from the last one until the rest fit with room for "+N". */
-function fit() {
-  const all = windows()
-  all.forEach((el) => el.removeAttribute(HIDDEN_ATTR))
-  const height = box.value?.clientHeight ?? 0
-  let folded = 0
-  if (height > 0 && overflows(height)) {
-    for (let index = all.length - 1; index >= 0 && overflows(height - MORE_LINE_PX); index--) {
-      all[index].setAttribute(HIDDEN_ATTR, '')
-      folded++
-    }
-  }
-  hiddenCount.value = folded
-}
-
-const allTip = () => windows().map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n')
-
-let frame = 0
-const schedule = () => {
-  cancelAnimationFrame(frame)
-  frame = requestAnimationFrame(() => void nextTick(fit))
-}
-let mutations: MutationObserver | null = null
-let resizes: ResizeObserver | null = null
-onMounted(() => {
-  fit()
-  // Content changes (a usage answer, a window appearing) and size changes (the column, the row) fit again. Folding
-  // only changes an attribute, which is not observed, so fitting never triggers itself.
-  if (inner.value && typeof MutationObserver !== 'undefined') {
-    mutations = new MutationObserver(schedule)
-    mutations.observe(inner.value, { childList: true, subtree: true, characterData: true })
-  }
-  if (box.value && typeof ResizeObserver !== 'undefined') {
-    resizes = new ResizeObserver(schedule)
-    resizes.observe(box.value)
-  }
-})
-onBeforeUnmount(() => {
-  cancelAnimationFrame(frame)
-  mutations?.disconnect()
-  resizes?.disconnect()
+provide(USAGE_WINDOW_FOLD, {
+  add: (root) => roots.add(root),
+  remove: (root) => roots.delete(root),
+  folded: (root) => !!root && foldedCount.value > 0 && windows.value.indexOf(root) >= SHOWN_WHEN_FOLDED
 })
 
-defineExpose({ fit })
+const allTip = () => windows.value.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n')
 </script>
 
 <style scoped>

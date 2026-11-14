@@ -40,7 +40,7 @@ function abbreviate(n: number, perK: number): string {
   return String(n)
 }
 
-export const NO_VALUE = '—'
+const NO_VALUE = '—'
 
 const known = (value: number | null | undefined): value is number => typeof value === 'number' && Number.isFinite(value)
 
