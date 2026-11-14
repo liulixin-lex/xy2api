@@ -69,7 +69,10 @@
                 :aria-label="t('admin.groups.columnSettings')"
                 v-tip="t('admin.groups.columnSettings')"
               >
-                <Icon name="grid" size="md" class="mr-2" />
+                <!-- The columns icon of the other pages' column settings: "grid" is the category manager's (7r-7). -->
+                <svg class="mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
                 <span class="table-toolbar__label">{{ t("admin.groups.columnSettings") }}</span>
               </button>
               <div
@@ -158,20 +161,21 @@
                     : t("admin.groups.subscription.standard")
                 }}
               </div>
-              <!-- Subscription Limits - compact single line -->
+              <!-- Subscription limits one to a line, amounts on the three-significant-digit rule with the exact one in the
+                   tip: the widest line is "$999.99 / $999.99/日", so the column never passes about 145px (7r-2). -->
               <div
                 v-if="row.subscription_type === 'subscription'"
-                class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400"
+                class="space-y-0.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400"
+                data-test="group-limits"
               >
-                <div
+                <template
                   v-if="
                     row.daily_limit_usd ||
                     row.weekly_limit_usd ||
                     row.monthly_limit_usd
                   "
-                  class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                 >
-                  <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
+                  <div v-if="row.daily_limit_usd">
                     <span
                       v-if="!row.usage_summary"
                       class="font-medium text-gray-400 dark:text-gray-500"
@@ -185,51 +189,35 @@
                           row.daily_limit_usd
                         )
                       "
-                      >{{
-                        formatUsd(row.usage_summary.today_cost)
-                      }}</span
+                      v-tip="exactMoneyTip(row.usage_summary.today_cost)"
+                      >{{ formatCompactMoney(row.usage_summary.today_cost) }}</span
                     >
                     <span class="text-gray-400 dark:text-gray-500">
-                      / {{ formatUsd(row.daily_limit_usd) }}/{{
+                      / <span v-tip="exactMoneyTip(row.daily_limit_usd)">{{ formatCompactMoney(row.daily_limit_usd) }}</span>/{{
                         t("admin.groups.limitDay")
                       }}</span
                     >
-                  </span>
-                  <span
-                    v-if="
-                      row.daily_limit_usd &&
-                      (row.weekly_limit_usd || row.monthly_limit_usd)
-                    "
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.weekly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.weekly_limit_usd) }}/{{
+                  </div>
+                  <div v-if="row.weekly_limit_usd">
+                    <span v-tip="exactMoneyTip(row.weekly_limit_usd)">{{ formatCompactMoney(row.weekly_limit_usd) }}</span>/{{
                       t("admin.groups.limitWeek")
-                    }}</span
-                  >
-                  <span
-                    v-if="row.weekly_limit_usd && row.monthly_limit_usd"
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.monthly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.monthly_limit_usd) }}/{{
+                    }}
+                  </div>
+                  <div v-if="row.monthly_limit_usd">
+                    <span v-tip="exactMoneyTip(row.monthly_limit_usd)">{{ formatCompactMoney(row.monthly_limit_usd) }}</span>/{{
                       t("admin.groups.limitMonth")
-                    }}</span
-                  >
-                </div>
-                <span v-else class="text-gray-400 dark:text-gray-500">{{
+                    }}
+                  </div>
+                </template>
+                <div v-else class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.subscription.noLimit")
-                }}</span>
+                }}</div>
                 <div class="text-gray-400 dark:text-gray-500">
                   {{ t("admin.groups.usageTotal") }}
-                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    >{{
-                      row.usage_summary
-                        ? formatUsd(row.usage_summary.total_cost)
-                        : "—"
-                    }}</span
+                  <span
+                    class="ml-1 font-medium text-gray-600 dark:text-gray-300"
+                    v-tip="exactMoneyTip(row.usage_summary?.total_cost)"
+                    >{{ formatCompactMoney(row.usage_summary?.total_cost) }}</span
                   >
                 </div>
               </div>
@@ -5943,15 +5931,6 @@ const confirmUnsupportedLive = () => {
 const cancelUnsupportedLive = () => {
   pendingLiveForm.value = null;
 };
-
-const formatCost = (cost: number): string => {
-  if (cost >= 1000) return cost.toFixed(0);
-  if (cost >= 100) return cost.toFixed(1);
-  return cost.toFixed(2);
-};
-
-const formatUsd = (cost: number | null | undefined): string =>
-  `$${formatCost(cost ?? 0)}`;
 
 const getQuotaUsageClass = (
   used: number,

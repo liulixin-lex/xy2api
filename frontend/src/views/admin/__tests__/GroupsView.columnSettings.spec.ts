@@ -172,6 +172,9 @@ const DataTableStub = {
       <div v-if="data.length" data-test="capacity-cell">
         <slot name="cell-capacity" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="billing-cell">
+        <slot name="cell-billing_type" :row="data[0]" />
+      </div>
     </div>
   `,
 }
@@ -471,6 +474,38 @@ describe('admin GroupsView column settings', () => {
     vi.advanceTimersByTime(400)
     expect(document.getElementById('sq-tip')!.textContent).toBe('$30,135.12')
     today.element.dispatchEvent(new Event('mouseleave'))
+    vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('writes subscription limits one to a line in three significant digits, the exact one in the tip (7r-2)', async () => {
+    listGroups.mockResolvedValue({
+      items: [createGroup({ subscription_type: 'subscription', daily_limit_usd: 100, weekly_limit_usd: 500, monthly_limit_usd: 2000 })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getUsageSummary.mockResolvedValue([
+      { group_id: 1, today_cost: 12.5, yesterday_cost: 0, total_cost: 1234567 },
+    ])
+
+    const wrapper = await mountView()
+    const lines = wrapper.findAll('[data-test="group-limits"] > div').map((line) => line.text().replace(/\s+/g, ''))
+    expect(lines).toEqual([
+      '$12.50/$100.00/admin.groups.limitDay',
+      '$500.00/admin.groups.limitWeek',
+      '$2.00K/admin.groups.limitMonth',
+      'Total$1.23M',
+    ])
+
+    document.body.appendChild(wrapper.element)
+    vi.useFakeTimers()
+    const monthly = wrapper.findAll('[data-test="billing-cell"] span').find((span) => span.text() === '$2.00K')!
+    monthly.element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    expect(document.getElementById('sq-tip')!.textContent).toBe('$2,000.00')
+    monthly.element.dispatchEvent(new Event('mouseleave'))
     vi.useRealTimers()
     wrapper.unmount()
   })
