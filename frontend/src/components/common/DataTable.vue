@@ -1412,18 +1412,21 @@ defineExpose({
   }
 }
 /* Touch: the sort direction button (36px, 34px inside its border, which an absolute area does not count) reaches 40px
-   each way with an area sized on 40px, its look unchanged (7n-3, 7q-8). */
+   each way with an area sized on 40px, its look unchanged (7n-3, 7q-8). The area grows down and to the sides, never
+   up: the button can sit at the top edge of a clipping container (the accounts table), which would cut 2px off it.
+   From the top of the inside of the border it reaches 40px down, 5px past the button into the 8px gap above the first
+   card; sideways 2px past each edge, into the 8px gaps of its row. */
 @media (pointer: coarse) {
   .table-cards__sort-order {
     position: relative;
   }
   .table-cards__sort-order::after {
     position: absolute;
-    top: 50%;
+    top: 0;
     left: 50%;
     width: max(100%, 40px);
     height: max(100%, 40px);
-    transform: translate(-50%, -50%);
+    transform: translateX(-50%);
     content: '';
   }
 }
