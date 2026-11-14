@@ -31,7 +31,14 @@ var selectionStaleViewWarning struct {
 	at time.Time
 }
 
+// selectionAuto gates the quality layers: a live view and the group's policy enabled.
 func selectionAuto(view schedquality.View, groupID int64, now time.Time) bool {
+	return selectionLive(view, now) && view.GroupEnabled(groupID)
+}
+
+// selectionLive is a fresh view with the global switch on. Takeover needs only
+// this; with the group's policy off every account is simply normal.
+func selectionLive(view schedquality.View, now time.Time) bool {
 	if view == nil {
 		return false
 	}
@@ -44,7 +51,7 @@ func selectionAuto(view schedquality.View, groupID int64, now time.Time) bool {
 		selectionStaleViewWarning.Unlock()
 		return false
 	}
-	return view.GlobalEnabled() && view.GroupEnabled(groupID)
+	return view.GlobalEnabled()
 }
 
 func selectionState(view schedquality.View, groupID int64, account *Account, model string) schedquality.StateView {

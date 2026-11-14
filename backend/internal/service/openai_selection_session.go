@@ -31,7 +31,7 @@ type selectionSession struct {
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
-	if !selectionAuto(view, groupID, now) {
+	if !selectionLive(view, now) {
 		return false
 	}
 	idle, enabled := view.TakeoverIdle(groupID)
@@ -57,7 +57,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 	if migrate {
 		return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandBack && schedquality.StandingOf(state, auto, now) == schedquality.StandFront
 	}
-	return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandFront && target.Priority < owner.Priority && schedquality.StandingOf(state, auto, now) == schedquality.StandFront && !s.marks.Recently(target.ID, now)
+	return selectionLive(view, now) && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandFront && target.Priority < owner.Priority && schedquality.StandingOf(state, auto, now) == schedquality.StandFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
