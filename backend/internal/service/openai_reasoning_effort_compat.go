@@ -184,7 +184,7 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 			return body, false, err
 		}
 	}
-	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none")
+	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none" && effort != "none")
 	if err != nil {
 		return body, false, err
 	}

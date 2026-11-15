@@ -90,6 +90,11 @@ func TestM1ResolvedTargetPolicy(t *testing.T) {
 			}
 		}
 	}
+	minimalBody := []byte(`{"max_tokens":8192,"output_config":{"effort":"minimal"}}`)
+	minimalOut, _, minimalErr := applyFinalReasoningEffortForAccount(m1EffortContext(minimalBody), nil, account, minimalBody, "claude-haiku-5-5", "anthropic")
+	require.NoError(t, minimalErr)
+	require.Equal(t, "disabled", gjson.GetBytes(minimalOut, "thinking.type").String())
+	require.Equal(t, "low", gjson.GetBytes(minimalOut, "output_config.effort").String())
 	modeBody := []byte(`{"output_config":{"effort":"high","format":{"type":"json_schema","schema":{"type":"object"}}},"thinking":{"type":"disabled"}}`)
 	modeOut, _, modeErr := applyFinalReasoningEffortForAccount(m1EffortContext(modeBody), nil, account, modeBody, "claude-haiku-5-5", "anthropic")
 	require.NoError(t, modeErr)
