@@ -171,3 +171,8 @@ func finalizeBridgeAnthropicBlocks(state *ChatCompletionsToAnthropicStreamState)
 	flow.queue = nil
 	return events
 }
+
+// Truncated or filtered bridge tool input stays as received; no {} is added.
+func bridgeTruncatedToolFinish(state *ChatCompletionsToAnthropicStreamState) bool {
+	return bridgeEnabled(state.Bridge) && (state.FinishReason == "length" || state.FinishReason == "content_filter")
+}
