@@ -1604,6 +1604,9 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
+	bridgeParts         []bridgeChatPart
+	bridgePartOpen      bool
+	bridgeMessageClosed bool
 	bridgeSlots         chatToolSlots
 	bridgeErr           error
 	bridgeLateReasoning strings.Builder
@@ -1871,13 +1874,16 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	}
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)
+	if bridgeEnabled(state.Bridge) {
+		events = append(events, closeBridgeChatPart(state)...)
+	}
 
 	// Close a reasoning item that never transitioned to content (reasoning-only
 	// or empty completion).
 	events = append(events, closeChatReasoningItem(state)...)
 	events = append(events, synthesizeChatReasoningFallbackMessage(state)...)
 
-	if state.MessageItemID != "" {
+	if state.MessageItemID != "" && !state.bridgeMessageClosed {
 		if state.TextPartOpen {
 			events = append(events, chatToResponsesEvent(state, "response.output_text.done", &ResponsesStreamEvent{
 				OutputIndex:  state.MessageIndex,
@@ -2017,6 +2023,9 @@ func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Resp
 }
 
 func synthesizeChatReasoningFallbackMessage(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if len(state.bridgeParts) > 0 {
+		return nil
+	}
 	if state == nil ||
 		state.MessageItemID != "" ||
 		state.Text.Len() > 0 ||
@@ -2258,7 +2267,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			}},
 		})
 	}
-	if state.MessageItemID != "" || len(state.ToolCalls) == 0 {
+	if state.MessageItemID != "" || (len(state.ToolCalls) == 0 && len(state.bridgeParts) == 0) {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
 			ID:   nonEmpty(state.MessageItemID, generateItemID()),
@@ -2321,14 +2330,18 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	}
 	if bridgeEnabled(state.Bridge) {
 		indices := make(map[string]int)
+		for _, part := range state.bridgeParts {
+			outputs = append(outputs, part.output)
+			indices[part.output.ID] = part.index
+		}
 		for slot, id := range state.ToolItemIDs {
 			indices[id] = state.ToolOutputIndex[slot]
 		}
 		for _, output := range outputs {
-			if output.Type == "reasoning" {
+			if output.Type == "reasoning" && output.ID == state.ReasoningItemID {
 				indices[output.ID] = state.ReasoningIndex
 			}
-			if output.Type == "message" {
+			if output.Type == "message" && output.ID == state.MessageItemID {
 				indices[output.ID] = state.MessageIndex
 			}
 		}

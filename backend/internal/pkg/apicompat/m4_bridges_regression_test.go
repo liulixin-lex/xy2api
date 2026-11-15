@@ -712,3 +712,87 @@ func TestM4LateReasoningSealed(t *testing.T) {
 		})
 	}
 }
+
+func TestM4TypedChatOutput(t *testing.T) {
+	content := json.RawMessage(`[{"type":"thinking","thinking":"THINK"},{"type":"text","text":"ANSWER"},{"type":"thinking","thinking":{"text":"NEXT"}}]`)
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+	resp := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: content, ReasoningContent: "DUPLICATE"}, FinishReason: "stop"}}}
+	out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Output) != 3 || out.Output[0].Summary[0].Text != "THINK" || out.Output[1].Content[0].Text != "ANSWER" || out.Output[2].Summary[0].Text != "NEXT" {
+		t.Fatalf("output=%+v", out.Output)
+	}
+	anth, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(resp, "m", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anth.Content) != 3 || anth.Content[0].Thinking != "THINK" || anth.Content[1].Text != "ANSWER" || anth.Content[2].Thinking != "NEXT" {
+		t.Fatalf("content=%+v", anth.Content)
+	}
+	raw := []byte(`{"choices":[{"index":0,"delta":{"reasoning_content":"DUPLICATE","content":` + string(content) + `},"finish_reason":"stop"}]}`)
+	state := NewChatCompletionsToResponsesStreamState("m")
+	state.Bridge = opts.Bridge
+	events := ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw, state)
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+	if state.Err() != nil {
+		t.Fatal(state.Err())
+	}
+	terminal := events[len(events)-1].Response
+	if len(terminal.Output) != 3 {
+		t.Fatalf("terminal=%+v", terminal.Output)
+	}
+	added := map[int]string{}
+	texts := map[string]string{}
+	for _, e := range events {
+		if e.Type == "response.output_item.added" {
+			added[e.OutputIndex] = e.Item.ID
+		}
+		if e.Type == "response.reasoning_summary_text.delta" || e.Type == "response.output_text.delta" {
+			texts[e.ItemID] += e.Delta
+		}
+		if e.Type == "response.output_item.done" && added[e.OutputIndex] != e.Item.ID {
+			t.Fatal("done ID changed")
+		}
+	}
+	for i, item := range terminal.Output {
+		if item.ID != added[i] {
+			t.Fatal("terminal ID/index changed")
+		}
+		want := ""
+		if item.Type == "reasoning" {
+			want = item.Summary[0].Text
+		} else {
+			want = item.Content[0].Text
+		}
+		if want != texts[item.ID] {
+			t.Fatalf("terminal differs from deltas: %+v", item)
+		}
+	}
+	as := NewChatCompletionsToAnthropicStreamState("m")
+	as.Bridge = opts.Bridge
+	ae := ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(raw, as)
+	ae = append(ae, FinalizeChatCompletionsAnthropicStream(as)...)
+	var got []string
+	for _, e := range ae {
+		if e.Delta != nil {
+			if e.Delta.Type == "thinking_delta" {
+				got = append(got, e.Delta.Thinking)
+			}
+			if e.Delta.Type == "text_delta" {
+				got = append(got, e.Delta.Text)
+			}
+		}
+	}
+	if !reflect.DeepEqual(got, []string{"THINK", "ANSWER", "NEXT"}) {
+		t.Fatalf("deltas=%v", got)
+	}
+	bad := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: json.RawMessage(`[{"type":"unknown","text":"x"}]`)}}}}
+	if _, err := ChatCompletionsResponseToResponsesWithBridgeOptions(bad, "m", nil, nil, false, nil, opts); err == nil {
+		t.Fatal("unknown output part accepted")
+	}
+	if _, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(bad, "m", opts); err == nil {
+		t.Fatal("unknown output part accepted")
+	}
+}

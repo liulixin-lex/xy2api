@@ -16,7 +16,7 @@ type bridgeAnthropicFlow struct {
 	active    int
 }
 
-func consumeBridgeAnthropicChunk(chunk *ChatCompletionsChunk, state *ChatCompletionsToAnthropicStreamState) []AnthropicStreamEvent {
+func consumeBridgeAnthropicChunk(chunk *ChatCompletionsChunk, state *ChatCompletionsToAnthropicStreamState, parts map[int][]ChatOutputPart) []AnthropicStreamEvent {
 	if state.bridgeFlow == nil {
 		state.bridgeFlow = &bridgeAnthropicFlow{calls: make(map[int]*ChatToolCall), active: -1}
 	}
@@ -32,13 +32,16 @@ func consumeBridgeAnthropicChunk(chunk *ChatCompletionsChunk, state *ChatComplet
 		}
 		events = append(events, emitBridgeAnthropicText(state, kind, text)...)
 	}
-	for _, choice := range chunk.Choices {
+	for position, choice := range chunk.Choices {
 		if choice.Index != 0 {
 			state.bridgeErr = bridgeConversionError("choices.index", fmt.Errorf("unsupported choice index %d", choice.Index))
 			return events
 		}
-		if reasoning := choice.Delta.reasoningText(); reasoning != nil {
+		if reasoning := choice.Delta.reasoningText(); reasoning != nil && !hasThinkingPart(parts[position]) {
 			appendText("thinking", *reasoning)
+		}
+		for _, part := range parts[position] {
+			appendText(part.Kind, part.Text)
 		}
 		if choice.Delta.Content != nil {
 			appendText("text", *choice.Delta.Content)

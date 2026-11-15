@@ -635,6 +635,10 @@ func ChatCompletionsChunkToAnthropicEvents(
 	chunk *ChatCompletionsChunk,
 	state *ChatCompletionsToAnthropicStreamState,
 ) []AnthropicStreamEvent {
+	return chatCompletionsChunkToAnthropicEventsWithParts(chunk, state, nil)
+}
+
+func chatCompletionsChunkToAnthropicEventsWithParts(chunk *ChatCompletionsChunk, state *ChatCompletionsToAnthropicStreamState, parts map[int][]ChatOutputPart) []AnthropicStreamEvent {
 	if chunk == nil || state == nil || state.Err() != nil {
 		return nil
 	}
@@ -656,7 +660,7 @@ func ChatCompletionsChunkToAnthropicEvents(
 	}
 
 	if bridgeEnabled(state.Bridge) {
-		return consumeBridgeAnthropicChunk(chunk, state)
+		return consumeBridgeAnthropicChunk(chunk, state, parts)
 	}
 	var events []AnthropicStreamEvent
 	events = append(events, ensureCCAnthropicMessageStart(state)...)
