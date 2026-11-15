@@ -51,6 +51,7 @@ export default {
         },
         switch: {
           on: 'var(--color-switch-on)',
+          'on-hover': 'var(--color-switch-on-hover)',
           off: 'var(--color-switch-off)',
           thumb: 'var(--color-switch-thumb)',
           'thumb-off': 'var(--color-switch-thumb-off)'

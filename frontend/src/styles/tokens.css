@@ -34,8 +34,8 @@
   --color-text-muted: #5f6b7d;
   --color-text-muted-on-pill: #5f6b7d;
 
-  /* Switches (scheduling and IQ checks): a soft teal, the full brand teal stays for primary buttons and focus */
-  --color-switch-on: oklch(0.57 0.07 185);
+  /* Switches (scheduling and IQ checks): the brand teal (primary-500) in both themes (12.2) */
+  --color-switch-on: #14b8a6;
   --color-switch-off: #858f9f;
   --color-switch-thumb: #ffffff;
   --color-switch-thumb-off: #ffffff;
@@ -58,6 +58,8 @@
 
   /* Second round (spec 12): a ticked row under the pointer, still told apart from a hovered or a ticked one */
   --color-bg-selected-hover: #d9f0eb;
+  /* A switch that is on, under the pointer (primary-600) */
+  --color-switch-on-hover: #0d9488;
 
   /* Tooltips */
   --color-tooltip-bg: #111827;
@@ -140,7 +142,7 @@
   --color-text-muted: #8b96a7;
   --color-text-muted-on-pill: oklch(0.665 0.032 260);
 
-  --color-switch-on: oklch(0.54 0.05 182);
+  --color-switch-on: #14b8a6;
   --color-switch-off: #46526a;
   --color-switch-thumb: #ffffff;
   --color-switch-thumb-off: #c7d0dc;
@@ -160,6 +162,7 @@
   --color-status-info-text: #60a5fa;
 
   --color-bg-selected-hover: #163039;
+  --color-switch-on-hover: #0d9488;
 
   --color-tooltip-bg: #222c40;
   --color-tooltip-text: #e3e8ef;
