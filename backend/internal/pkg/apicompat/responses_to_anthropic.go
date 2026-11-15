@@ -279,6 +279,8 @@ type responsesAnthropicReasoning struct {
 	signature     string
 	signatureSent bool
 	rawConflict   bool
+	closed        bool
+	rawSelected   bool
 }
 
 // ResponsesEventToAnthropicState tracks state for converting a sequence of
@@ -937,6 +939,9 @@ func resToAnthEmitReasoning(r *responsesAnthropicReasoning, text string, state *
 
 func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	r := resToAnthReasoningOf(evt, state)
+	if r.closed {
+		return nil
+	}
 	parts, index := r.raw, evt.ContentIndex
 	summary := strings.HasPrefix(evt.Type, "response.reasoning_summary")
 	if summary {
@@ -962,11 +967,17 @@ func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEv
 	if summary {
 		return resToAnthEmitReasoning(r, resToAnthJoinReasoning(r.summary), state)
 	}
+	if state.activeReasoning != r && resToAnthJoinReasoning(r.raw) != "" {
+		return resToAnthOpenReasoning(r, state)
+	}
 	return nil
 }
 
 func resToAnthRecoverReasoning(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	r := resToAnthReasoningOf(evt, state)
+	if r.closed && r.rawSelected {
+		return nil
+	}
 	item := evt.Item
 	summary := resToAnthJoinReasoning(r.summary)
 	// A supplied nonempty summary is authoritative; raw text never overrides it.
@@ -1355,6 +1366,21 @@ func closeCurrentBlock(state *ResponsesEventToAnthropicState) []AnthropicStreamE
 	// Emit signature_delta before stop so Claude clients retain encrypted
 	// reasoning for the next turn (required for Grok multi-turn cache).
 	if state.CurrentBlockType == "thinking" {
+		if r := state.activeReasoning; r != nil && !r.closed {
+			if resToAnthJoinReasoning(r.summary) == "" {
+				raw := resToAnthJoinReasoning(r.raw)
+				if r.rawConflict || !strings.HasPrefix(raw, r.delivered) {
+					state.fail("reasoning", "reasoning completion disagrees with its deltas")
+					return nil
+				}
+				if len(raw) > len(r.delivered) {
+					events = append(events, AnthropicStreamEvent{Type: "content_block_delta", Index: &idx, Delta: &AnthropicDelta{Type: "thinking_delta", Thinking: raw[len(r.delivered):]}})
+					r.delivered = raw
+				}
+				r.rawSelected = true
+			}
+			r.closed = true
+		}
 		if sig := strings.TrimSpace(state.PendingThinkingSignature); sig != "" {
 			events = append(events, AnthropicStreamEvent{
 				Type:  "content_block_delta",

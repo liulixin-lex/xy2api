@@ -785,3 +785,64 @@ func TestM3ReviewR1DeferredReasoningIdentity(t *testing.T) {
 	require.Equal(t, "answer", collectAnthropicText(events))
 	requireAnthropicBlockLifecycle(t, events)
 }
+
+func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
+	for _, mode := range []string{"done only", "empty terminal", "text empty terminal", "text full terminal", "late summary"} {
+		t.Run(mode, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			var events []AnthropicStreamEvent
+			feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+			if mode != "done only" {
+				feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "reasoning", ID: "rs_1", EncryptedContent: "signature"}})
+				feed(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "rs_1", Delta: "raw "})
+				feed(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "rs_1", Delta: "thought"})
+			}
+			feed(&ResponsesStreamEvent{Type: "response.reasoning_text.done", ItemID: "rs_1", Text: "raw thought"})
+			hasText := strings.HasPrefix(mode, "text") || mode == "late summary"
+			if hasText {
+				feed(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: 1, Item: &ResponsesOutput{Type: "message", ID: "msg_1"}})
+				feed(&ResponsesStreamEvent{Type: "response.output_text.delta", OutputIndex: 1, ItemID: "msg_1", Delta: "answer"})
+			}
+			resp := &ResponsesResponse{Status: "completed"}
+			if mode == "text full terminal" {
+				resp.Output = []ResponsesOutput{{Type: "reasoning", ID: "rs_1", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw thought"}}}}
+			}
+			if mode == "late summary" {
+				feed(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: "rs_1", Delta: "late summary"})
+				feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning", ID: "rs_1", Summary: []ResponsesSummary{{Type: "summary_text", Text: "late summary"}}}})
+			}
+			feed(&ResponsesStreamEvent{Type: "response.completed", Response: resp})
+			require.NoError(t, st.Err())
+			thought := ""
+			rawAt, textAt := -1, -1
+			starts, signatures := 0, 0
+			for _, e := range events {
+				if e.ContentBlock != nil && e.ContentBlock.Type == "thinking" {
+					starts++
+				}
+				if e.Delta != nil {
+					thought += e.Delta.Thinking
+					if e.Delta.Thinking != "" {
+						rawAt = *e.Index
+					}
+					if e.Delta.Text != "" {
+						textAt = *e.Index
+					}
+					if e.Delta.Type == "signature_delta" {
+						signatures++
+						require.Equal(t, rawAt, *e.Index)
+					}
+				}
+			}
+			require.Equal(t, "raw thought", thought)
+			require.Equal(t, 1, starts)
+			if hasText {
+				require.Less(t, rawAt, textAt)
+			}
+			if mode != "done only" {
+				require.Equal(t, 1, signatures)
+			}
+			requireAnthropicBlockLifecycle(t, events)
+		})
+	}
+}
