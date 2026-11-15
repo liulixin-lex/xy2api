@@ -2,10 +2,10 @@ package resilience
 
 import (
 	"context"
-	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 )
 
 const (
@@ -46,7 +46,7 @@ type gatewayRequestTrace struct {
 	TerminalEventSeen  *bool
 	TerminalEventValid *bool
 	ResponseBodyType   *string
-	excluded           bool //nolint:unused // M8 owns Enable/Exclude/Claim wiring after the foundation.
+	excluded           bool
 
 	started                    time.Time
 	sends                      int
@@ -61,9 +61,21 @@ type gatewayRequestTrace struct {
 }
 
 // EnableGatewayRequest is called only after ingress validation, before account
-// selection. Excluded endpoints never enable this trace.
-func (s *RequestState) EnableGatewayRequest(at time.Time) {
+// selection. The legacy single-argument call enables text statistics.
+func (s *RequestState) EnableGatewayRequest(at time.Time, scopes ...GatewayRequestScope) {
 	if s == nil {
+		return
+	}
+	scope := GatewayRequestScopeText
+	if len(scopes) > 1 {
+		return
+	}
+	if len(scopes) == 1 {
+		scope = scopes[0]
+	}
+	switch scope {
+	case GatewayRequestScopeText, GatewayRequestScopeImage, GatewayRequestScopeEmbedding:
+	default:
 		return
 	}
 	s.mu.Lock()
@@ -74,18 +86,24 @@ func (s *RequestState) EnableGatewayRequest(at time.Time) {
 			at = s.d.started
 		}
 		s.d.mu.Unlock()
-		s.gatewayRecord = &gatewayRequestTrace{started: at}
+		s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: scope}
 	}
 }
 
-// ExcludeGatewayRequest keeps opaque/binary forwarding on its existing billing path.
+// ExcludeGatewayRequest disables text statistics while preserving correlation
+// and facts for a trace that has already been admitted.
 func (s *RequestState) ExcludeGatewayRequest() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.gatewayRecord = nil
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if r := s.gatewayRecord; r != nil && r.final == nil {
+		r.excluded = true
+		if r.RequestScope == GatewayRequestScopeText {
+			r.RequestScope = ""
+		}
+	}
 }
 
 func (s *RequestState) GatewayRequestEnabled() bool {
@@ -94,7 +112,8 @@ func (s *RequestState) GatewayRequestEnabled() bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.gatewayRecord != nil
+	r := s.gatewayRecord
+	return r != nil && !r.excluded && (r.RequestScope == "" || r.RequestScope == GatewayRequestScopeText)
 }
 
 // BeginGatewayTurn starts an admitted logical turn, not a new connection. All
@@ -133,6 +152,8 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 	r.takeover = s.selectionFlags.accountID == accountID && s.selectionFlags.takeover
 	r.sends++
 	r.complete = false
+	r.UsageObserved, r.UsageSource = nil, nil
+	r.TerminalEventSeen, r.TerminalEventValid, r.ResponseBodyType = nil, nil, nil
 }
 
 // NoteGatewaySend also serves native WS sends, which have no HTTP boundary.
@@ -215,9 +236,12 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 		case r.complete:
 			result = RequestSuccess
 		}
-		r.final = &GatewayRequestMetadata{RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
+		r.final = cloneGatewayRequest(&GatewayRequestMetadata{RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
-			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation}
+			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
+			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
+			UsageObserved: r.UsageObserved, UsageSource: r.UsageSource, TerminalEventSeen: r.TerminalEventSeen,
+			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing
 	}
 	writeUnbilled := !r.billing && !r.claimed
@@ -238,6 +262,25 @@ func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
 		return &n
 	}
 	v.InputTokens, v.CacheReadTokens, v.CacheCreationTokens = copyInt(in.InputTokens), copyInt(in.CacheReadTokens), copyInt(in.CacheCreationTokens)
+	copyBool := func(p *bool) *bool {
+		if p == nil {
+			return nil
+		}
+		n := *p
+		return &n
+	}
+	copyString := func(p *string) *string {
+		if p == nil {
+			return nil
+		}
+		n := *p
+		return &n
+	}
+	v.UsageObserved = copyBool(in.UsageObserved)
+	v.UsageSource = copyString(in.UsageSource)
+	v.TerminalEventSeen, v.TerminalEventValid = copyBool(in.TerminalEventSeen), copyBool(in.TerminalEventValid)
+	v.ResponseBodyType = copyString(in.ResponseBodyType)
+	v.ConversionNotices = append([]apicompat.ConversionNotice(nil), in.ConversionNotices...)
 	if in.FirstOutputMs != nil {
 		n := *in.FirstOutputMs
 		v.FirstOutputMs = &n
