@@ -110,6 +110,10 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 			chatBody = policyBody
 		}
 	}
+	chatBody, err = finalizeM7ReasoningPolicy(ctx, c, account, chatBody, upstreamModel, "chat", PreOutputProtocolAnthropic)
+	if err != nil {
+		return nil, err
+	}
 	// Provider normalization and policy caps can both change the converted effort.
 	// Use the final outbound value for usage logs and billing.
 	var reasoningEffort *string

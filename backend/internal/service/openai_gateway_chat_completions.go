@@ -426,6 +426,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	upstreamCtx, firstEvent := s.armOpenAICompatFirstEvent(ctx, upstreamCtx, account, clientStream, upstreamModel,
 		gjson.GetBytes(responsesBody, "reasoning.effort").String(), startTime)
 	defer firstEvent.close()
+	responsesBody, err = finalizeM7ReasoningPolicy(ctx, c, account, responsesBody, upstreamModel, "responses", PreOutputProtocolChat)
+	if err != nil {
+		return nil, err
+	}
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {

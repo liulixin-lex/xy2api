@@ -99,9 +99,9 @@ func TestNativeAnthropicPassthroughRecordsOutputConfigEffort(t *testing.T) {
 	require.Equal(t, "low", *result.ReasoningEffort)
 }
 
-func TestNativeAnthropicPassthroughThinkingEnabledFallback(t *testing.T) {
+func TestNativeAnthropicPassthroughThinkingDoesNotInventEffort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	// 未显式传 effort，但 thinking 已启用：k3 属于 passback-required 白名单，应兜底记为 high。
+	// thinking alone is not an actual wire effort.
 	body := []byte(`{"model":"k3","max_tokens":32,"stream":false,` +
 		`"thinking":{"type":"enabled","budget_tokens":1024},` +
 		`"messages":[{"role":"user","content":"hi"}]}`)
@@ -112,8 +112,8 @@ func TestNativeAnthropicPassthroughThinkingEnabledFallback(t *testing.T) {
 		adaptiveProtocolTestContext("/v1/messages", body), nativeAnthropicTestAccount(), body, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.NotNil(t, result.ReasoningEffort)
-	require.Equal(t, "high", *result.ReasoningEffort)
+	require.Nil(t, result.ReasoningEffort)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "output_config.effort").Exists())
 }
 
 func TestNativeAnthropicPassthroughStreamRecordsEffort(t *testing.T) {

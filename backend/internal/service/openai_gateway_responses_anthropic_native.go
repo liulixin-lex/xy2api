@@ -113,6 +113,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, err
 	}
 
+	anthropicBody, err = finalizeM7ReasoningPolicy(ctx, c, account, anthropicBody, upstreamModel, "anthropic", PreOutputProtocolResponses)
+	if err != nil {
+		return nil, err
+	}
 	// 与 /v1/messages 直通路径相同的 pre-filter。
 	anthropicBody = StripEmptyTextBlocks(anthropicBody)
 	anthropicBody = FilterWebSearchHistoryBlocks(anthropicBody, upstreamModel)

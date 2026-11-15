@@ -107,9 +107,11 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 
 	// A committed stream gets the refusal as its error frame.
 	c, w = newResilienceTestContext(t)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
 	(&GatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), service.PlatformAnthropic, true)
-	require.Contains(t, w.Body.String(), `"type":"invalid_request_error","code":"content_policy_violation"`)
+	require.Contains(t, w.Body.String(), `"type":"invalid_request_error"`)
+	require.NotContains(t, w.Body.String(), `"code":`)
 }
 
 func TestContentRefusalMessageIsScrubbed(t *testing.T) {

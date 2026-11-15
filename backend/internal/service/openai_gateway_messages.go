@@ -336,6 +336,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 	}
 
+	responsesBody, err = finalizeM7ReasoningPolicy(ctx, c, account, responsesBody, upstreamModel, "responses", PreOutputProtocolAnthropic)
+	if err != nil {
+		return nil, err
+	}
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).

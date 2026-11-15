@@ -84,3 +84,17 @@ func recordM7RejectedFieldReplay(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 }
+
+// Provider conversion may change effort after the pre-conversion validation.
+// Reproject an explicitly configured group policy on the final body. M1 caches
+// its mapping for this target, so this does not apply mappings a second time.
+func finalizeM7ReasoningPolicy(ctx context.Context, c *gin.Context, account *Account, body []byte, model, wireProtocol, inboundProtocol string) ([]byte, error) {
+	policy, _ := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+	if policy.maxEffort == "" && len(policy.mappings) == 0 && c != nil && c.Request != nil {
+		policy, _ = c.Request.Context().Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+	}
+	if policy.maxEffort == "" && len(policy.mappings) == 0 {
+		return body, nil
+	}
+	return applyM7FinalReasoning(ctx, c, account, body, model, wireProtocol, inboundProtocol)
+}

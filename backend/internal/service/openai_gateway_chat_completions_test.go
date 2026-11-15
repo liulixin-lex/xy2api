@@ -1311,7 +1311,8 @@ func TestGPT61SolRejectsDisabledReasoningBeforeForwarding(t *testing.T) {
 		require.Error(t, validateGPT61SolCompatRequest([]byte(body), "gpt-6.1-sol"))
 		require.NoError(t, validateGPT61SolCompatRequest([]byte(body), "gpt-6-sol"))
 	}
-	for _, field := range []string{`"reasoning_effort":"none"`, `"reasoning_effort":"minimal"`, `"tools":[{"type":"function","function":{"name":"lookup"}}]`} {
+	// none/minimal forwarding is covered by TestM7ConversionRequestHandoffs; only the tools capability remains a local rejection.
+	for _, field := range []string{`"tools":[{"type":"function","function":{"name":"lookup"}}]`} {
 		body := []byte(`{"model":"public",` + field + `,"messages":[{"role":"user","content":"hello"}]}`)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -1352,16 +1353,14 @@ func TestGPT61SolMessagesEffortAliasesPreserveIntent(t *testing.T) {
 	}
 }
 
-func TestGPT61SolOnlyChatFallbackRejectsToolsAndDisabledReasoning(t *testing.T) {
+func TestGPT61SolOnlyChatFallbackRejectsTools(t *testing.T) {
 	for _, responses := range []bool{false, true} {
 		bodies := []string{
 			`{"model":"public","max_tokens":100,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`,
-			`{"model":"public","max_tokens":100,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"}}`,
 		}
 		if responses {
 			bodies = []string{
 				`{"model":"public","input":"hi","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`,
-				`{"model":"public","input":"hi","reasoning":{"effort":"none"}}`,
 			}
 		}
 		for _, body := range bodies {
