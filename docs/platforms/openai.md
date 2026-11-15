@@ -74,6 +74,8 @@ Chat 流式工具参数可从 arguments.done、item.done 或结束快照补齐�
 
 Responses reasoning 输出逐项优先使用非空 `summary_text`，否则使用 `content.reasoning_text`；流式先缓存原文，到该项结束仍无摘要才发送原文，不读取密文或其他 part。
 
+JSON 与 SSE 使用相同结束原因规则：长度截断为 `length`、过滤为 `content_filter`，它们优先于工具停因；失败或未知原因走上游错误。拒答正文保留在 message.refusal / delta.refusal。新转换出口仅在调用方已认证终态后收尾。
+
 ## 客户端配置
 
 ### Codex CLI

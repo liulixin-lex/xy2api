@@ -211,8 +211,20 @@ func TestResponsesStreamEventUnmarshal_ToolSearchObjectArguments(t *testing.T) {
 }
 
 func TestSealedFunctionAndRefusalFieldsPreserved(t *testing.T) {
+	part := ResponsesContentPart{Type: "refusal", Refusal: "declined"}
+	for _, event := range []ResponsesStreamEvent{{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "message", Content: []ResponsesContentPart{part}}}, {Type: "response.content_part.done", Part: &part}} {
+		wire, err := json.Marshal(event)
+		require.NoError(t, err)
+		require.Contains(t, string(wire), `"refusal":"declined"`)
+		require.NotContains(t, string(wire), `"text":""`)
+	}
+
 	for _, fields := range []string{``, `,"encrypted_content":null,"encrypted_function_args":null`, `,"encrypted_content":"","encrypted_function_args":[]`, `,"encrypted_content":"opaque","encrypted_function_args":["opaque"]`} {
-		raw := `{"type":"function_call","id":"i","call_id":"c","name":"f","arguments":"raw"` + fields + `}`
+		arguments := "raw"
+		if fields == "" {
+			arguments = "{}"
+		}
+		raw := `{"type":"function_call","id":"i","call_id":"c","name":"f","arguments":"` + arguments + `"` + fields + `}`
 		var item ResponsesOutput
 		require.NoError(t, json.Unmarshal([]byte(raw), &item))
 		var expected map[string]json.RawMessage

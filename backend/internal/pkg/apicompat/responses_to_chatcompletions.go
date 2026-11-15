@@ -77,7 +77,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 		msg.ReasoningContent = reasoningText
 	}
 
-	finishReason := responsesStatusToChatFinishReason(resp.Status, resp.IncompleteDetails, toolCalls)
+	finishReason := responsesStatusToChatFinishReason(resp.Status, resp.IncompleteDetails, toolCalls, refusalText != "")
 
 	out.Choices = []ChatChoice{{
 		Index:        0,
@@ -90,26 +90,13 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 	return out
 }
 
-func responsesStatusToChatFinishReason(status string, details *ResponsesIncompleteDetails, toolCalls []ChatToolCall) string {
-	switch status {
-	case "incomplete":
-		if details != nil {
-			switch details.Reason {
-			case "max_output_tokens":
-				return "length"
-			case "content_filter":
-				return "content_filter"
-			}
-		}
-		return "stop"
-	case "completed":
-		if len(toolCalls) > 0 {
-			return "tool_calls"
-		}
-		return "stop"
-	default:
-		return "stop"
+func responsesStatusToChatFinishReason(status string, details *ResponsesIncompleteDetails, toolCalls []ChatToolCall, hasRefusal bool) string {
+	reason := ""
+	if details != nil {
+		reason = details.Reason
 	}
+	_, finish, _ := ProjectTerminal("responses", "chat", status, reason, len(toolCalls) > 0, hasRefusal)
+	return finish
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +106,9 @@ func responsesStatusToChatFinishReason(status string, details *ResponsesIncomple
 // ResponsesEventToChatState tracks state for converting a sequence of Responses
 // SSE events into Chat Completions SSE chunks.
 type ResponsesEventToChatState struct {
+	visible                *BufferedResponseAccumulator
+	visibleSent            map[*bufferedOutputSlot]map[int]string
+	SawRefusal             bool
 	reasoning              *BufferedResponseAccumulator
 	reasoningSent          map[*bufferedOutputSlot]string
 	reasoningCarrier       map[*bufferedOutputSlot]string
@@ -162,6 +152,8 @@ func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEvent
 		return resToChatHandleCreated(evt, state)
 	case "response.output_text.delta":
 		return resToChatHandleTextDelta(evt, state)
+	case "response.output_text.done", "response.refusal.done", "response.content_part.added", "response.content_part.done":
+		return resToChatHandleVisibleEvent(evt, state)
 	case "response.refusal.delta":
 		return resToChatHandleRefusalDelta(evt, state)
 	case "response.output_item.added":
@@ -257,20 +249,10 @@ func resToChatHandleCreated(evt *ResponsesStreamEvent, state *ResponsesEventToCh
 }
 
 func resToChatHandleTextDelta(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	if evt.Delta == "" {
-		return nil
-	}
-	state.SawText = true
-	content := evt.Delta
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{Content: &content})}
+	return resToChatHandleVisibleEvent(evt, state)
 }
-
 func resToChatHandleRefusalDelta(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	if evt.Delta == "" {
-		return nil
-	}
-	refusal := evt.Delta
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{Refusal: &refusal})}
+	return resToChatHandleVisibleEvent(evt, state)
 }
 
 func resToChatToolSnapshot(item ResponsesOutput, index int, known, complete, terminal bool, state *ResponsesEventToChatState) []ChatCompletionsChunk {
@@ -319,6 +301,9 @@ func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 	if evt.Item != nil && evt.Item.Type == "reasoning" {
 		return resToChatHandleReasoningDelta(evt, state)
 	}
+	if evt.Item != nil && evt.Item.Type == "message" {
+		return resToChatHandleVisibleEvent(evt, state)
+	}
 	if evt.Item == nil {
 		return nil
 	}
@@ -328,6 +313,9 @@ func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 func resToChatHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
 	if evt.Item != nil && evt.Item.Type == "reasoning" {
 		return resToChatHandleReasoningDelta(evt, state)
+	}
+	if evt.Item != nil && evt.Item.Type == "message" {
+		return resToChatHandleVisibleEvent(evt, state)
 	}
 	if evt.Item == nil {
 		return nil
@@ -492,65 +480,144 @@ func resToChatRecoverTerminalReasoning(resp *ResponsesResponse, state *Responses
 	return chunks
 }
 
-func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	recovered := resToChatRecoverTerminalReasoning(evt.Response, state)
-	recovered = append(recovered, resToChatRecoverTerminalTools(evt.Response, state)...)
-	recovered = append(recovered, resToChatValidateTools(evt.Response, state)...)
-	if state.err != nil {
+func resToChatHandleVisibleEvent(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if state.visible == nil {
+		state.visible = NewBufferedResponseAccumulator()
+		state.visibleSent = map[*bufferedOutputSlot]map[int]string{}
+	}
+	state.visible.ProcessEvent(evt)
+	if state.visible.Err() != nil {
+		state.err = state.visible.Err()
 		return nil
 	}
-	state.Finalized = true
-	finishReason := "stop"
+	return resToChatRecoverVisible(state)
+}
 
+func resToChatRecoverVisible(state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	var chunks []ChatCompletionsChunk
+	for _, slot := range state.visible.slots {
+		if state.visibleSent[slot] == nil {
+			state.visibleSent[slot] = map[int]string{}
+		}
+		indices := make([]int, 0, len(slot.parts))
+		for i := range slot.parts {
+			indices = append(indices, i)
+		}
+		sort.Ints(indices)
+		for _, i := range indices {
+			part := slot.parts[i]
+			text := part.Text
+			if part.Type == "refusal" {
+				text = part.Refusal
+				state.SawRefusal = state.SawRefusal || text != ""
+			} else if part.Type != "output_text" {
+				continue
+			}
+			sent := state.visibleSent[slot][i]
+			if !strings.HasPrefix(text, sent) {
+				state.err = toolTrackingError("content", "content snapshot conflicts with delivered prefix")
+				return nil
+			}
+			suffix := text[len(sent):]
+			state.visibleSent[slot][i] = text
+			if suffix == "" {
+				continue
+			}
+			delta := ChatDelta{}
+			if part.Type == "refusal" {
+				delta.Refusal = &suffix
+			} else {
+				delta.Content = &suffix
+				state.SawText = true
+			}
+			chunks = append(chunks, makeChatDeltaChunk(state, delta))
+		}
+	}
+	return chunks
+}
+
+func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
 	if evt.Usage != nil {
 		state.Usage = chatUsageFromResponsesUsage(evt.Usage)
 	}
-	if evt.Response != nil {
-		if evt.Response.Usage != nil {
-			state.Usage = chatUsageFromResponsesUsage(evt.Response.Usage)
-		}
-		if evt.Response.ServiceTier != "" {
-			state.ServiceTier = evt.Response.ServiceTier
-		}
-
-		switch evt.Response.Status {
-		case "incomplete":
-			if evt.Response.IncompleteDetails != nil {
-				switch evt.Response.IncompleteDetails.Reason {
-				case "max_output_tokens":
-					finishReason = "length"
-				case "content_filter":
-					finishReason = "content_filter"
-				}
-			}
-		case "completed":
-			if state.SawToolCall {
-				finishReason = "tool_calls"
-			}
-		}
-	} else if state.SawToolCall {
-		finishReason = "tool_calls"
+	resp := evt.Response
+	if resp == nil {
+		state.err = toolTrackingError("response", "missing terminal response")
+		return nil
 	}
-
-	var chunks []ChatCompletionsChunk
-	chunks = append(chunks, makeChatFinishChunk(state, finishReason))
-	if evt.Response != nil {
-		chunks[0].PromptCacheDiagnostics = evt.Response.PromptCacheDiagnostics
+	if resp.Usage != nil {
+		state.Usage = chatUsageFromResponsesUsage(resp.Usage)
 	}
-
+	if resp.ServiceTier != "" {
+		state.ServiceTier = resp.ServiceTier
+	}
+	if evt.Type == "response.failed" {
+		state.err = toolTrackingError("status", "upstream response failed")
+		return nil
+	}
+	if err := ValidateResponsesForChat(resp); err != nil {
+		state.err = err
+		return nil
+	}
+	recovered := resToChatRecoverTerminalReasoning(resp, state)
+	if state.err != nil {
+		return nil
+	}
+	recovered = append(recovered, resToChatRecoverTerminalTools(resp, state)...)
+	if state.err != nil {
+		return nil
+	}
+	recovered = append(recovered, resToChatValidateTools(resp, state)...)
+	if state.err != nil {
+		return nil
+	}
+	if state.visible == nil {
+		state.visible = NewBufferedResponseAccumulator()
+		state.visibleSent = map[*bufferedOutputSlot]map[int]string{}
+	}
+	for i, item := range resp.Output {
+		if item.Type == "message" {
+			state.visible.snapshot(item, i, true, 3)
+		}
+	}
+	if state.visible.Err() != nil {
+		state.err = state.visible.Err()
+		return nil
+	}
+	recovered = append(recovered, resToChatRecoverVisible(state)...)
+	if state.err != nil {
+		return nil
+	}
+	reason := ""
+	if resp.IncompleteDetails != nil {
+		reason = resp.IncompleteDetails.Reason
+	}
+	_, finishReason, err := ProjectTerminal("responses", "chat", resp.Status, reason, state.SawToolCall, state.SawRefusal)
+	if err != nil {
+		state.err = err
+		return nil
+	}
+	state.Finalized = true
+	finish := makeChatFinishChunk(state, finishReason)
+	finish.PromptCacheDiagnostics = resp.PromptCacheDiagnostics
+	recovered = append(recovered, finish)
 	if state.IncludeUsage && state.Usage != nil {
-		chunks = append(chunks, ChatCompletionsChunk{
-			ID:          state.ID,
-			Object:      "chat.completion.chunk",
-			Created:     state.Created,
-			Model:       state.Model,
-			ServiceTier: state.ServiceTier,
-			Choices:     []ChatChunkChoice{},
-			Usage:       state.Usage,
-		})
+		recovered = append(recovered, ChatCompletionsChunk{ID: state.ID, Object: "chat.completion.chunk", Created: state.Created, Model: state.Model, ServiceTier: state.ServiceTier, Choices: []ChatChunkChoice{}, Usage: state.Usage})
 	}
+	return recovered
+}
 
-	return append(recovered, chunks...)
+// FinalizeResponsesChatStreamWithTerminal only closes an independently
+// authenticated stream. The legacy finalizer remains unchanged for old callers.
+func FinalizeResponsesChatStreamWithTerminal(state *ResponsesEventToChatState, terminalEligible bool) []ChatCompletionsChunk {
+	if state.Finalized || state.err != nil {
+		return nil
+	}
+	if !terminalEligible {
+		state.err = toolTrackingError("response", "missing authenticated terminal")
+		return nil
+	}
+	return resToChatHandleCompleted(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed"}}, state)
 }
 
 func chatUsageFromResponsesUsage(u *ResponsesUsage) *ChatUsage {
@@ -904,7 +971,7 @@ func (a *BufferedResponseAccumulator) ProcessEvent(event *ResponsesStreamEvent) 
 			}
 			snapshot := *event.Response
 			snapshot.Output = a.BuildOutput()
-			if err := ValidateResponsesForChat(&snapshot); err != nil && a.err == nil {
+			if err := validateResponsesChatTools(&snapshot); err != nil && a.err == nil {
 				a.err = err
 			}
 		}
@@ -1088,7 +1155,7 @@ func (a *BufferedResponseAccumulator) SupplementResponseOutput(resp *ResponsesRe
 	if a.HasContent() {
 		resp.Output = a.BuildOutput()
 	}
-	if err := ValidateResponsesForChat(resp); err != nil {
+	if err := validateResponsesChatTools(resp); err != nil {
 		a.err = err
 	}
 }
