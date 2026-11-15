@@ -612,6 +612,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if currentTerminal.Valid {
 				eventType = currentTerminal.EventType
 			}
+			if sawFailedEvent && !currentTerminal.Failure {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				suppressCurrentEvent = true
+				return
+			}
 			if created := gjson.GetBytes(dataBytes, "response.created_at"); created.Exists() {
 				responseCreatedAt = created.Int()
 			}
@@ -648,19 +653,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventHasBlankPlaceholder = true
 			}
 			observeOpenAIPreludeCreated(preludeTrace, eventType)
-			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
-				(eventType == "response.completed" || eventType == "response.done") {
-				// A later successful terminal is authoritative over a pending bare
-				// error. Keep its usage and terminal visible to the client.
-				sawBareError = false
-				sawFailedEvent = false
-				terminalFailurePending = false
-				suppressCurrentEvent = false
-				bareErrorPayload = nil
-				bareErrorWrappedStatus = 0
-				bareErrorAccountSideEffectsPending = false
-				failedMessage = ""
-			}
+
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
@@ -880,6 +873,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				dataBytes = sanitizedData
 				data = string(sanitizedData)
 				line = "data: " + data
+			}
+			if currentTerminal.Failure && currentTerminal.EventType == "error" && !codexFailureTerminal && strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String()) == "" {
+				frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, openAIResponsesFailureSource(dataBytes, usage, responseCreatedAt), failedMessage)
+				line = strings.TrimSuffix(frame, "\n\n")
 			}
 			// Replace model in response if needed.
 			if needModelReplace {
@@ -2038,7 +2035,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalSSEEvent, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, openAIStreamErrorField(terminalPayload, "code").String())
 	}
 	finalResponse, ok := openAIResponsesTerminalResponse(terminal, terminalPayload)
 
@@ -2321,7 +2318,7 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	return updated, !bytes.Equal(updated, payload)
 }
 
-func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string) error {
+func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string, code ...string) error {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
@@ -2335,12 +2332,11 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	writeOpenAICollaborationErrorJSON(c, http.StatusBadGateway, gin.H{
-		"error": gin.H{
-			"type":    "upstream_error",
-			"message": message,
-		},
-	})
+	errorBody := gin.H{"type": "upstream_error", "message": message}
+	if len(code) > 0 && code[0] != "" {
+		errorBody["type"], errorBody["code"] = "server_error", code[0]
+	}
+	writeOpenAICollaborationErrorJSON(c, http.StatusBadGateway, gin.H{"error": errorBody})
 	return fmt.Errorf("non-streaming openai protocol error: %s", message)
 }
 

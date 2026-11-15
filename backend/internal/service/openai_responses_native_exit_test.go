@@ -307,3 +307,37 @@ func TestM6DoneStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestM6UntypedError(t *testing.T) {
+	completed := m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`)
+	prefix := m6Frame(`{"type":"response.created","response":{"id":"r1","created_at":123}}`) + m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`)
+	for _, code := range []int{401, 403, 429, 503} {
+		payload := fmt.Sprintf(`{"error":{"code":%d}}`, code)
+		terminal, _, raw := extractOpenAISSETerminalEvent(m6Frame(payload) + completed)
+		require.True(t, terminal.Failure)
+		require.True(t, terminal.Valid)
+		require.Zero(t, terminal.WrappedStatus)
+		require.Equal(t, int64(code), gjson.GetBytes(raw, "error.code").Int())
+		require.Equal(t, 502, openAIStreamFailureStatus([]byte(payload), ""))
+		for _, pass := range []bool{false, true} {
+			t.Run(fmt.Sprintf("code=%d/pass=%t", code, pass), func(t *testing.T) {
+				w, usage, _, _, err := m6Stream(t, pass, prefix+m6Frame(payload)+completed)
+				require.Error(t, err)
+				require.Equal(t, 13, usage.InputTokens)
+				require.Equal(t, 5, usage.OutputTokens)
+				require.NotContains(t, w.Body.String(), `"status":"completed"`)
+				require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"), w.Body.String())
+				_, _, err = m6Nonstream(t, pass, prefix+m6Frame(payload)+completed, "text/event-stream")
+				require.Error(t, err)
+			})
+		}
+	}
+	for _, payload := range []string{`{"error":null}`, `{"error":{}}`, `{"type":"response.output_text.delta","delta":"error: provider quoted text"}`} {
+		for _, pass := range []bool{false, true} {
+			_, _, _, _, err := m6Stream(t, pass, m6Frame(payload)+completed)
+			require.NoError(t, err)
+			_, _, err = m6Nonstream(t, pass, m6Frame(payload)+completed, "text/event-stream")
+			require.NoError(t, err)
+		}
+	}
+}

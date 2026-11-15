@@ -2600,6 +2600,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if currentTerminal.Valid {
 				sourceEventType = currentTerminal.EventType
 			}
+			if sawFailedEvent && !currentTerminal.Failure {
+				s.parseSSEUsageBytesWithType(dataBytes, sourceEventType, usage)
+				suppressCurrentEvent = true
+				return passthroughLineContinue
+			}
 			if currentTerminal.Failure && !currentTerminal.Valid {
 				s.parseSSEUsageBytesWithType(dataBytes, sourceEventType, usage)
 				sawFailedEvent = true
@@ -3243,7 +3248,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalSSEEvent, terminalPayload, msg, failureModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, openAIStreamErrorField(terminalPayload, "code").String())
 	}
 	finalResponse, ok := openAIResponsesTerminalResponse(terminal, terminalPayload)
 
