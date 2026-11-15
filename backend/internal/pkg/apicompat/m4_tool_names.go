@@ -204,6 +204,11 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 			Mode string `json:"mode"`
 		}
 		_ = json.Unmarshal(prepared.ToolChoice, &choice)
+		if choice.Mode == "required" {
+			prepared.ToolChoice = json.RawMessage(`"required"`)
+		} else {
+			prepared.ToolChoice = json.RawMessage(`"auto"`)
+		}
 		if len(selected) == 0 && (choice.Mode == "" || choice.Mode == "auto") {
 			prepared.ToolChoice = json.RawMessage(`"none"`)
 		}
