@@ -181,3 +181,26 @@ func TestM1ReviewUnknownReasoningIntent(t *testing.T) {
 		require.Equal(t, converted, got)
 	}
 }
+
+func TestM1ReviewDerivedIntent(t *testing.T) {
+	for _, model := range []string{"gpt-5.1-codex-max", "qwen3-max", "gpt-5.4-high"} {
+		body := []byte(`{"model":"` + model + `","input":"hi"}`)
+		ctx := WithOpenAIReasoningEffortPolicy(m1EffortContext(body), "", []ReasoningEffortMapping{{From: "high", To: "deny"}, {From: "max", To: "deny"}}, "")
+		upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+		result, err := newOpenAIRejectedFieldTestService(upstream).Forward(ctx, newOpenAIRejectedFieldTestContext(body), newOpenAIRejectedFieldTestAccount(), body)
+		require.NoError(t, err)
+		require.Len(t, upstream.bodies, 1)
+		require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning").Exists())
+		require.Nil(t, result.ReasoningEffort)
+	}
+	body := []byte(`{"model":"glm-4.6","max_tokens":1024,"thinking":{"type":"disabled"},"messages":[{"role":"user","content":"hi"}]}`)
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["base_url"] = "https://open.bigmodel.example/api/anthropic"
+	account.Extra["anthropic_passthrough"] = false
+	upstream := &anthropicHTTPUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)}
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+	_, err = newForwardPartialUsageServiceForTest(upstream).Forward(m1EffortContext(body), newOpenAIRejectedFieldTestContext(body), account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, body, upstream.lastBody)
+}
