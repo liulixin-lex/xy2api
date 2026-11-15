@@ -273,6 +273,14 @@ func FinalizeAnthropicResponsesStream(state *AnthropicEventToResponsesState) []R
 	events = append(events, closeCurrentResponsesItem(state)...)
 
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
+	}
 	events = append(events, makeResponsesCompletedEvent(state, status, incompleteDetails))
 	state.CompletedSent = true
 	return events
@@ -601,6 +609,14 @@ func anthToResHandleMessageStop(state *AnthropicEventToResponsesState) []Respons
 	events = append(events, closeCurrentResponsesItem(state)...)
 
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
+	}
 	events = append(events, makeResponsesCompletedEvent(state, status, incompleteDetails))
 	state.CompletedSent = true
 	return events
@@ -732,6 +748,9 @@ func makeResponsesCompletedEvent(
 	eventType := "response.completed"
 	if status == "incomplete" {
 		eventType = "response.incomplete"
+	}
+	if bridgeEnabled(state.Bridge) {
+		eventType, _ = ResponsesTerminalEventType(status)
 	}
 
 	// Carry the output items accumulated over the stream. The SDK's

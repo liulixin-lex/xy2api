@@ -100,6 +100,14 @@ func ChatCompletionsResponseToAnthropicWithBridgeOptions(resp *ChatCompletionsRe
 		}
 	}
 	out.Content = blocks
+	if message.Refusal != "" {
+		out.Content = append(out.Content, AnthropicContentBlock{Type: "text", Text: message.Refusal})
+	}
+	_, reason, err := ProjectTerminal("chat", "anthropic", "", resp.Choices[0].FinishReason, len(message.ToolCalls) > 0 && resp.Choices[0].FinishReason != "length", message.Refusal != "")
+	if err != nil {
+		return nil, err
+	}
+	out.StopReason = AnthropicStopReasonPtr(reason)
 	return out, nil
 }
 
@@ -154,7 +162,7 @@ func ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw []byte, state *C
 			}
 		}
 		tail := *chunk
-		tail.Choices = []ChatChunkChoice{{Index: choice.Index, Delta: ChatDelta{ToolCalls: choice.Delta.ToolCalls}, FinishReason: choice.FinishReason}}
+		tail.Choices = []ChatChunkChoice{{Index: choice.Index, Delta: ChatDelta{ToolCalls: choice.Delta.ToolCalls, Refusal: choice.Delta.Refusal}, FinishReason: choice.FinishReason}}
 		if len(choice.Delta.ToolCalls) > 0 {
 			events = append(events, closeBridgeChatPart(state)...)
 		}
@@ -209,6 +217,9 @@ func appendBridgeChatPart(state *ChatCompletionsToResponsesStreamState, part Cha
 		state.bridgePartOpen = true
 		events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{OutputIndex: entry.index, Item: &item}))
 		typ, partType := "response.content_part.added", "output_text"
+		if part.Kind == "refusal" {
+			partType = "refusal"
+		}
 		if part.Kind == "thinking" {
 			typ, partType = "response.reasoning_summary_part.added", "summary_text"
 		}
@@ -217,6 +228,9 @@ func appendBridgeChatPart(state *ChatCompletionsToResponsesStreamState, part Cha
 	entry := &state.bridgeParts[len(state.bridgeParts)-1]
 	entry.text += part.Text
 	typ := "response.output_text.delta"
+	if part.Kind == "refusal" {
+		typ = "response.refusal.delta"
+	}
 	if part.Kind == "thinking" {
 		typ = "response.reasoning_summary_text.delta"
 	}
@@ -237,10 +251,22 @@ func closeBridgeChatPart(state *ChatCompletionsToResponsesStreamState) []Respons
 	} else {
 		entry.output.Content = []ResponsesContentPart{{Type: "output_text", Text: entry.text}}
 	}
+	if entry.kind == "refusal" {
+		textType, contentType = "response.refusal.done", "refusal"
+		entry.output.Content = []ResponsesContentPart{{Type: "refusal", Refusal: entry.text}}
+	}
 	item := entry.output
+	done := &ResponsesStreamEvent{OutputIndex: entry.index, ItemID: item.ID, Text: entry.text}
+	part := &ResponsesContentPart{Type: contentType, Text: entry.text}
+	if entry.kind == "refusal" {
+		done.Text = ""
+		done.Refusal = entry.text
+		part.Text = ""
+		part.Refusal = entry.text
+	}
 	return []ResponsesStreamEvent{
-		chatToResponsesEvent(state, textType, &ResponsesStreamEvent{OutputIndex: entry.index, ItemID: item.ID, Text: entry.text}),
-		chatToResponsesEvent(state, partType, &ResponsesStreamEvent{OutputIndex: entry.index, ItemID: item.ID, Part: &ResponsesContentPart{Type: contentType, Text: entry.text}}),
+		chatToResponsesEvent(state, textType, done),
+		chatToResponsesEvent(state, partType, &ResponsesStreamEvent{OutputIndex: entry.index, ItemID: item.ID, Part: part}),
 		chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{OutputIndex: entry.index, Item: &item}),
 	}
 }

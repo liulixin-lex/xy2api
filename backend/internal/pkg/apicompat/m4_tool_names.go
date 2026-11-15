@@ -226,6 +226,15 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 			return nil, err
 		}
 		bridgeLengthToolGate(out, resp, opts.Bridge, customTools, toolSearch)
+		if resp != nil && len(resp.Choices) > 0 {
+			choice := resp.Choices[0]
+			var err error
+			out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("chat", choice.FinishReason, len(choice.Message.ToolCalls) > 0 && choice.FinishReason != "length", choice.Message.Refusal != "")
+			if err != nil {
+				return nil, err
+			}
+			appendBridgeBufferedRefusal(out, choice.Message.Refusal)
+		}
 		for i := range out.Output {
 			if out.Output[i].Type == "reasoning" {
 				out.Output[i].ID = generateReasoningItemID()

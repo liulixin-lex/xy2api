@@ -570,6 +570,7 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 // ChatCompletionsToResponsesStreamState + ResponsesEventToAnthropicState pair
 // into one state machine.
 type ChatCompletionsToAnthropicStreamState struct {
+	bridgeHasRefusal      bool
 	bridgePendingThinking string
 	bridgeSlots           chatToolSlots
 	bridgeFlow            *bridgeAnthropicFlow
@@ -720,6 +721,15 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 		return nil
 	}
 
+	stopReason := ccFinishReasonToAnthropicStopReason(state.FinishReason, state.HasToolCall)
+	if bridgeEnabled(state.Bridge) {
+		_, projected, err := ProjectTerminal("chat", "anthropic", "", state.FinishReason, state.HasToolCall && state.FinishReason != "length", state.bridgeHasRefusal)
+		if err != nil {
+			state.bridgeErr = err
+			return nil
+		}
+		stopReason = projected
+	}
 	var events []AnthropicStreamEvent
 	if bridgeEnabled(state.Bridge) {
 		events = append(events, finalizeBridgeAnthropicBlocks(state)...)
@@ -756,8 +766,6 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 	}
 
 	events = append(events, closeCCAnthropicBlock(state)...)
-
-	stopReason := ccFinishReasonToAnthropicStopReason(state.FinishReason, state.HasToolCall)
 
 	events = append(events,
 		AnthropicStreamEvent{

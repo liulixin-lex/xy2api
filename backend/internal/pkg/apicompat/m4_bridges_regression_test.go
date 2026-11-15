@@ -1010,3 +1010,128 @@ func TestM4ChatTerminalEventType(t *testing.T) {
 		}
 	}
 }
+
+func TestM4TerminalReasonProjection(t *testing.T) {
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+	for _, tc := range []struct {
+		source, reason, status, detail string
+		bad                            bool
+	}{
+		{"chat", "stop", "completed", "", false}, {"chat", "length", "incomplete", "max_output_tokens", false},
+		{"chat", "content_filter", "incomplete", "content_filter", false}, {"chat", "unknown", "", "", true}, {"chat", "", "completed", "", false},
+		{"anthropic", "max_tokens", "incomplete", "max_output_tokens", false}, {"anthropic", "model_context_window_exceeded", "incomplete", "max_output_tokens", false},
+		{"anthropic", "refusal", "completed", "", false}, {"anthropic", "end_turn", "completed", "", false}, {"anthropic", "pause_turn", "", "", true}, {"anthropic", "unknown", "", "", true}, {"anthropic", "", "completed", "", false},
+	} {
+		t.Run(tc.source+"/"+tc.reason, func(t *testing.T) {
+			var buffered *ResponsesResponse
+			var err error
+			var events []ResponsesStreamEvent
+			if tc.source == "chat" {
+				resp := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Role: "assistant", Content: json.RawMessage(`"kept"`)}, FinishReason: tc.reason}}}
+				buffered, err = ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts)
+				st := NewChatCompletionsToResponsesStreamState("m")
+				st.Bridge = opts.Bridge
+				st.FinishReason = tc.reason
+				text := "kept"
+				ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: &text}}}}, st)
+				events = FinalizeChatCompletionsResponsesStream(st)
+				if (st.Err() != nil) != tc.bad {
+					t.Fatalf("stream error: %v", st.Err())
+				}
+				anth, e := ChatCompletionsResponseToAnthropicWithBridgeOptions(resp, "m", opts)
+				as := NewChatCompletionsToAnthropicStreamState("m")
+				as.Bridge = opts.Bridge
+				as.FinishReason = tc.reason
+				ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: &text}}}}, as)
+				ae := FinalizeChatCompletionsAnthropicStream(as)
+				if (e != nil) != tc.bad || (as.Err() != nil) != tc.bad {
+					t.Fatalf("Anthropic errors: %v / %v", e, as.Err())
+				}
+				if !tc.bad && (len(ae) < 2 || AnthropicStopReasonString(anth.StopReason) != ae[len(ae)-2].Delta.StopReason) {
+					t.Fatalf("Anthropic mismatch: %#v / %#v", anth, ae)
+				}
+			} else {
+				buffered, err = AnthropicToResponsesResponseWithBridgeOptions(&AnthropicResponse{StopReason: AnthropicStopReasonPtr(tc.reason), Content: []AnthropicContentBlock{{Type: "text", Text: "kept"}}}, opts)
+				st := NewAnthropicEventToResponsesState()
+				st.Bridge = opts.Bridge
+				st.CreatedSent = true
+				st.StopReason = tc.reason
+				st.Outputs = []ResponsesOutput{{Type: "message", Content: []ResponsesContentPart{{Type: "output_text", Text: "kept"}}}}
+				events = AnthropicEventToResponsesEventsWithBridgeOptions(&AnthropicStreamEvent{Type: "message_stop"}, st, opts)
+				if (st.Err() != nil) != tc.bad {
+					t.Fatalf("stream error: %v", st.Err())
+				}
+			}
+			if (err != nil) != tc.bad {
+				t.Fatalf("buffer error: %v", err)
+			}
+			if tc.bad {
+				for _, e := range events {
+					if strings.HasPrefix(e.Type, "response.completed") {
+						t.Fatal("error completed")
+					}
+				}
+				return
+			}
+			if buffered.Status != tc.status || len(events) == 0 {
+				t.Fatalf("status: %#v / %#v", buffered, events)
+			}
+			terminal := events[len(events)-1]
+			if terminal.Type != "response."+tc.status || terminal.Response.Status != tc.status {
+				t.Fatalf("terminal %#v", terminal)
+			}
+			for _, out := range []*ResponsesResponse{buffered, terminal.Response} {
+				detail := ""
+				if out.IncompleteDetails != nil {
+					detail = out.IncompleteDetails.Reason
+				}
+				if detail != tc.detail {
+					t.Fatalf("detail=%q", detail)
+				}
+				raw, _ := json.Marshal(out.Output)
+				if !strings.Contains(string(raw), "kept") {
+					t.Fatalf("lost text: %s", raw)
+				}
+			}
+		})
+	}
+	t.Run("refusal", func(t *testing.T) {
+		resp := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Refusal: "declined"}, FinishReason: "stop"}}}
+		out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(out)
+		if !strings.Contains(string(raw), `"type":"refusal","refusal":"declined"`) {
+			t.Fatalf("lost refusal: %s", raw)
+		}
+		st := NewChatCompletionsToResponsesStreamState("m")
+		st.Bridge = opts.Bridge
+		events := ChatCompletionsChunkToResponsesEventsWithBridgeOptions([]byte(`{"choices":[{"index":0,"delta":{"refusal":"declined"},"finish_reason":"stop"}]}`), st)
+		events = append(events, FinalizeChatCompletionsResponsesStream(st)...)
+		delta, done := 0, 0
+		for _, event := range events {
+			if event.Type == "response.refusal.delta" && event.Delta == "declined" {
+				delta++
+			}
+			if event.Type == "response.refusal.done" && event.Refusal == "declined" {
+				done++
+			}
+		}
+		if st.Err() != nil || delta != 1 || done != 1 {
+			t.Fatalf("refusal lifecycle: %v %#v", st.Err(), events)
+		}
+		raw, _ = json.Marshal(events[len(events)-1].Response)
+		if !strings.Contains(string(raw), `"type":"refusal","refusal":"declined"`) {
+			t.Fatalf("lost terminal refusal: %s", raw)
+		}
+		a, e := ChatCompletionsResponseToAnthropicWithBridgeOptions(resp, "m", opts)
+		ast := NewChatCompletionsToAnthropicStreamState("m")
+		ast.Bridge = opts.Bridge
+		ae := ChatCompletionsChunkToAnthropicEventsWithBridgeOptions([]byte(`{"choices":[{"index":0,"delta":{"refusal":"declined"},"finish_reason":"stop"}]}`), ast)
+		ae = append(ae, FinalizeChatCompletionsAnthropicStream(ast)...)
+		if e != nil || ast.Err() != nil || AnthropicStopReasonString(a.StopReason) != "refusal" || ae[len(ae)-2].Delta.StopReason != "refusal" {
+			t.Fatalf("Anthropic refusal: %#v %v %#v", a, e, ae)
+		}
+	})
+}

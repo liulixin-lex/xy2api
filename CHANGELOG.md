@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat、Anthropic 转换桥保留截断、过滤与拒绝的区别及拒绝正文，非流和流式终态一致。
+
 - Chat 转换桥的终态事件类型与响应 status 一致，length 返回 response.incomplete，且只结束一次。
 
 - length 截断的 function、custom、tool_search 调用不再交付为可执行完成，合法 JSON 和空参数也遵守此规则。

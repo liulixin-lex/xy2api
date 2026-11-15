@@ -5,6 +5,11 @@ package apicompat
 func AnthropicToResponsesResponseWithBridgeOptions(resp *AnthropicResponse, opts ConversionOptions) (*ResponsesResponse, error) {
 	out := AnthropicToResponsesResponse(resp)
 	if bridgeEnabled(opts.Bridge) {
+		var err error
+		out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("anthropic", AnthropicStopReasonString(resp.StopReason), bridgeAnthropicHasTools(resp.Content), false)
+		if err != nil {
+			return nil, err
+		}
 		for i := range out.Output {
 			if out.Output[i].Type == "reasoning" {
 				out.Output[i].ID = generateReasoningItemID()
