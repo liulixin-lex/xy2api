@@ -396,6 +396,107 @@ func TestM5ToolChoice(t *testing.T) {
 	}
 }
 
+func TestM5CacheOnlyUsage(t *testing.T) {
+	for _, tt := range []struct {
+		name, metadata                      string
+		input, cached, output               int
+		promptPresent, incomplete, conflict bool
+	}{
+		{"cache_only", `{"cachedContentTokenCount":7}`, 0, 7, 0, false, true, false},
+		{"cache_exceeds_prompt", `{"promptTokenCount":3,"cachedContentTokenCount":7,"candidatesTokenCount":2}`, 0, 7, 2, true, false, true},
+		{"complete", `{"promptTokenCount":10,"cachedContentTokenCount":7,"candidatesTokenCount":2,"thoughtsTokenCount":3}`, 3, 7, 5, true, false, false},
+		{"zeros", `{"promptTokenCount":0,"cachedContentTokenCount":0,"candidatesTokenCount":0,"thoughtsTokenCount":0}`, 0, 0, 0, true, false, false},
+		{"null", `null`, 0, 0, 0, false, true, false},
+		{"empty", `{}`, 0, 0, 0, false, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":` + tt.metadata + `}`)
+			u := extractGeminiUsage(raw)
+			require.NotNil(t, u)
+			require.Equal(t, tt.input, u.InputTokens)
+			require.Equal(t, tt.cached, u.CacheReadInputTokens)
+			require.Equal(t, tt.output, u.OutputTokens)
+			require.Equal(t, tt.promptPresent, u.InputTokensPresent)
+			require.Equal(t, tt.incomplete, u.UsageIncomplete)
+			require.Equal(t, tt.conflict, u.UsageInconsistent)
+			if tt.promptPresent {
+				require.NotNil(t, u.RawPromptTokens)
+				require.Equal(t, int(gjson.Get(tt.metadata, "promptTokenCount").Int()), *u.RawPromptTokens)
+			} else {
+				require.Nil(t, u.RawPromptTokens)
+			}
+			var response map[string]any
+			require.NoError(t, json.Unmarshal(raw, &response))
+			messages, got := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+
+			require.Equal(t, u, got)
+			usage := messages["usage"].(map[string]any)
+			require.Equal(t, tt.input, usage["input_tokens"])
+			require.Equal(t, tt.output, usage["output_tokens"])
+			if tt.cached > 0 {
+				require.Equal(t, tt.cached, usage["cache_read_input_tokens"])
+			}
+			chat, got, err := geminiResponseToChatCompletions(response, "gemini-2.5-flash", raw, nil)
+			require.NoError(t, err)
+			require.Equal(t, u, got)
+			require.Equal(t, tt.input+tt.cached, chat.Usage.PromptTokens)
+			require.Equal(t, tt.output, chat.Usage.CompletionTokens)
+		})
+	}
+	t.Run("missing_and_blocked", func(t *testing.T) {
+		for _, raw := range []string{`{"candidates":[]}`, `{"promptFeedback":{"blockReason":"SAFETY"}}`} {
+			require.Nil(t, extractGeminiUsage([]byte(raw)))
+			var response map[string]any
+			require.NoError(t, json.Unmarshal([]byte(raw), &response))
+			message, usage := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", []byte(raw), false)
+
+			require.False(t, usage.InputTokensPresent)
+			encoded, err := json.Marshal(message["usage"])
+			require.NoError(t, err)
+			require.Equal(t, `{"input_tokens":0,"output_tokens":0}`, string(encoded), "E8 preserves both counts")
+		}
+	})
+	for _, correction := range []bool{false, true} {
+		t.Run(fmt.Sprintf("progressive/correction=%t", correction), func(t *testing.T) {
+			frames := []string{
+				`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":7,"candidatesTokenCount":2,"thoughtsTokenCount":3}}`,
+				`{"usageMetadata":{"candidatesTokenCount":4}}`,
+			}
+			wantInput, wantCache, wantOutput := 3, 7, 7
+			if correction {
+				frames = append(frames, `{"usageMetadata":{"promptTokenCount":3,"cachedContentTokenCount":1,"candidatesTokenCount":1,"thoughtsTokenCount":0}}`)
+				wantInput, wantCache, wantOutput = 2, 1, 1
+			}
+			frames = append(frames, `{"candidates":[{"finishReason":"STOP"}],"usageMetadata":{}}`)
+			sse := "data: " + strings.Join(frames, "\n\ndata: ") + "\n\n"
+			_, collected, _, err := collectGeminiSSEObserved(strings.NewReader(sse), false, nil)
+			require.NoError(t, err)
+			require.Equal(t, wantInput, collected.InputTokens)
+			require.Equal(t, wantCache, collected.CacheReadInputTokens)
+			require.Equal(t, wantOutput, collected.OutputTokens)
+			for _, protocol := range []string{"messages", "chat"} {
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, nil)
+				svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))}
+				var result *geminiStreamResult
+				if protocol == "messages" {
+					result, err = svc.handleStreamingResponse(c, resp, time.Now(), "gemini-2.5-flash")
+				} else {
+					result, err = svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
+				}
+				require.NoError(t, err)
+				require.Equal(t, collected, result.usage)
+				if protocol == "messages" {
+					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"cache_read_input_tokens":%d`, wantCache))
+				} else {
+					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"prompt_tokens":%d`, wantInput+wantCache))
+					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"completion_tokens":%d`, wantOutput))
+				}
+			}
+		})
+	}
+}
+
 func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
 	t.Helper()
 	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
