@@ -360,11 +360,9 @@ func TestGatewayConvertNonRetryableErrorBeforeContentIsNotReplayed(t *testing.T)
 			var failover *UpstreamFailoverError
 			require.False(t, errors.As(err, &failover), "an invalid request is not replayed: %v", err)
 			body := w.Body()
-			errObj := requireProtocolTerminal(t, path.name, body)
-			require.Contains(t, errObj.Get("message").String(), "prompt is too long")
-			if path.name == "responses" {
-				require.True(t, strings.HasPrefix(body, "event: response.created\n"), "strict SDKs need created first: %q", body)
-			}
+			require.True(t, gjson.Valid(body))
+			require.Contains(t, gjson.Get(body, "error.message").String(), "prompt is too long")
+			require.Equal(t, http.StatusBadGateway, c.Writer.Status())
 		})
 	}
 }
@@ -859,7 +857,7 @@ func TestGatewayConvertSynthesizedFailedFrameRetryAdvice(t *testing.T) {
 
 // Switched off, both conversions keep the 0.4.4 behavior: the opening goes
 // out at once and an upstream end without message_stop still completes.
-func TestGatewayConvertSwitchesOffKeepBaseline(t *testing.T) {
+func TestGatewayConvertSwitchesOffStillRejectsFailure(t *testing.T) {
 	withResilienceSettings(t, func(s *resilience.Settings) {
 		s.Stream.PreludeStaging = false
 		s.Stream.StrictTerminal = false
@@ -869,7 +867,7 @@ func TestGatewayConvertSwitchesOffKeepBaseline(t *testing.T) {
 			w := newGWWriter()
 			c := gwContext(gwPathURL(path.name), w)
 			result, err := path.run(gwConvertService(0, 0), c, gwTestAccount(), gwStatic(gwMsgStart+gwOverloaded))
-			require.NoError(t, err)
+			require.Error(t, err)
 			require.Equal(t, 100, result.Usage.InputTokens)
 			body := w.Body()
 			if path.name == "chat" {
@@ -878,7 +876,8 @@ func TestGatewayConvertSwitchesOffKeepBaseline(t *testing.T) {
 				return
 			}
 			require.True(t, strings.HasPrefix(body, "event: response.created\n"))
-			require.Contains(t, body, "event: response.completed\n")
+			require.NotContains(t, body, "event: response.completed\n")
+			requireProtocolTerminal(t, path.name, body)
 		})
 	}
 }
@@ -901,25 +900,20 @@ func TestGatewayConvertStagingWithoutStrictTerminal(t *testing.T) {
 			w := newGWWriter()
 			c := gwContext(gwPathURL(path.name), w)
 			result, err := path.run(gwConvertService(0, 0), c, gwTestAccount(), gwStatic(gwMsgStart+gwInvalid))
-			require.NoError(t, err)
+			require.Error(t, err)
 			require.Equal(t, 100, result.Usage.InputTokens)
-			if path.name == "responses" {
-				require.True(t, strings.HasPrefix(w.Body(), "event: response.created\n"))
-				require.Contains(t, w.Body(), "event: response.completed\n")
-			} else {
-				require.True(t, strings.HasSuffix(w.Body(), "data: [DONE]\n\n"))
-			}
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover))
+			require.True(t, gjson.Valid(w.Body()))
+			require.Equal(t, http.StatusBadGateway, c.Writer.Status())
 		})
 		t.Run(path.name+"/after_content", func(t *testing.T) {
 			w := newGWWriter()
 			c := gwContext(gwPathURL(path.name), w)
 			_, err := path.run(gwConvertService(0, 0), c, gwTestAccount(), gwStatic(gwMsgStart+gwTextStart+gwTextDelta))
-			require.NoError(t, err)
-			if path.name == "responses" {
-				require.Contains(t, w.Body(), "event: response.completed\n")
-			} else {
-				require.True(t, strings.HasSuffix(w.Body(), "data: [DONE]\n\n"))
-			}
+			require.Error(t, err)
+			requireProtocolTerminal(t, path.name, w.Body())
+			require.NotContains(t, w.Body(), "event: response.completed\n")
 		})
 	}
 }
@@ -1030,7 +1024,8 @@ func TestGatewayConvertCancelDuringFirstWriteIsClientCancel(t *testing.T) {
 			require.ErrorIs(t, got.err, io.ErrUnexpectedEOF)
 			require.False(t, got.result.ClientDisconnect)
 			require.False(t, up.closed.Load(), "the cancel came after output; the upstream was not cut")
-			requireProtocolTerminal(t, path.name, w.Body())
+			require.NotContains(t, w.Body(), "event: response.failed\n")
+			require.NotContains(t, w.Body(), "data: [DONE]")
 		})
 	}
 }

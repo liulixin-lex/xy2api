@@ -446,7 +446,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 
 		evidence.observe(eventType, payload)
-		recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		if c != nil && c.Request != nil {
+			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		}
 		if evidence.err != nil {
 			break
 		}
@@ -675,7 +677,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		},
 	})
 	outcome := stream.run()
-	copyAnthropicUpstreamTarget(c.Request.Context(), outcome.err)
+	copyAnthropicUpstreamTarget(stream.ctx(), outcome.err)
 	if outcome.noResult {
 		return nil, outcome.err
 	}
