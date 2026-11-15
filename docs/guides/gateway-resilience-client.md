@@ -39,7 +39,6 @@
 
 ## 流式请求的失败结束方式
 
-Gemini 兼容入口遇到无法转换的结束原因或坏工具参数时，以对应协议的错误结束，保留已取得的用量，不再补发成功结束帧。
 
 ### 已提交后的失败
 
@@ -52,6 +51,8 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 | Anthropic Messages | `event: error` |
 
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
+
+Gemini 分组的 `/v1/chat/completions`、`/v1/messages` 流式请求（见 [Gemini](../platforms/gemini.md#兼容入口参数)），遇到无法转换的结束原因（如 `MALFORMED_FUNCTION_CALL`），或工具参数不是 JSON 对象时，按上表写一次终止帧，保留已读到的用量，不再补发成功结束。
 
 `/v1/chat/completions` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#chat-completions-转-responses)）另有以下结束方式。错误按上表只写一次，之前不会发出成功的 `finish_reason`：
 
