@@ -1989,3 +1989,72 @@ func TestBufferedHostedAndCustomIdentity(t *testing.T) {
 		require.Equal(t, normal, resp.Output[2])
 	}
 }
+
+func TestStreamingToolSnapshots(t *testing.T) {
+	t.Run("parallel and empty custom", func(t *testing.T) {
+		state := NewResponsesEventToChatState()
+		for i, id := range []string{"a", "b"} {
+			ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, OutputIndexPresent: true, Item: &ResponsesOutput{Type: "custom_tool_call", ID: id, CallID: id, Name: id}}, state)
+		}
+		first := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", ItemID: "b", Input: "patch", InputPresent: true}, state)
+		require.Len(t, first, 1)
+		require.Equal(t, 1, *first[0].Choices[0].Delta.ToolCalls[0].Index)
+		require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", ItemID: "a", InputPresent: true}, state))
+		require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.delta", ItemID: "a", Delta: "late"}, state))
+		require.NoError(t, state.Err())
+	})
+
+	for _, source := range []string{"arguments", "item", "terminal", "added"} {
+		t.Run(source, func(t *testing.T) {
+			state := NewResponsesEventToChatState()
+			item := ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f"}
+			var chunks []ChatCompletionsChunk
+			if source == "added" {
+				item.Arguments = `{"x":1}`
+			}
+			chunks = append(chunks, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndexPresent: true, Item: &item}, state)...)
+			item.Arguments = `{"x":1}`
+			if source == "arguments" {
+				chunks = append(chunks, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: `{"x":`}, state)...)
+				event := &ResponsesStreamEvent{Type: "response.function_call_arguments.done", ItemID: "i", Arguments: item.Arguments, ArgumentsPresent: true}
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+			}
+			if source != "terminal" {
+				event := &ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &item}
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+			}
+			terminal := &ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}}
+			chunks = append(chunks, ResponsesEventToChatChunks(terminal, state)...)
+			chunks = append(chunks, ResponsesEventToChatChunks(terminal, state)...)
+			require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: "late"}, state))
+			require.NoError(t, state.Err())
+			args := ""
+			finishes := 0
+			for _, chunk := range chunks {
+				for _, choice := range chunk.Choices {
+					if choice.FinishReason != nil {
+						finishes++
+					}
+					for _, tool := range choice.Delta.ToolCalls {
+						args += tool.Function.Arguments
+					}
+				}
+			}
+			require.Equal(t, `{"x":1}`, args)
+			require.Equal(t, 1, finishes)
+		})
+	}
+	state := NewResponsesEventToChatState()
+	for _, id := range []string{"a", "b"} {
+		ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: id, CallID: id, Name: id}}, state)
+	}
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", Delta: "ambiguous"}, state)
+	require.Error(t, state.Err())
+	state = NewResponsesEventToChatState()
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f"}}, state)
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: `{"x":1}`}, state)
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.done", ItemID: "i", Arguments: `{"x":2}`}, state)
+	require.Error(t, state.Err())
+}

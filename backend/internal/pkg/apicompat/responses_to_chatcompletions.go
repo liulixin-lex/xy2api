@@ -123,6 +123,8 @@ func responsesStatusToChatFinishReason(status string, details *ResponsesIncomple
 // ResponsesEventToChatState tracks state for converting a sequence of Responses
 // SSE events into Chat Completions SSE chunks.
 type ResponsesEventToChatState struct {
+	tools                  ResponsesToolCallTracker
+	err                    error
 	ID                     string
 	Model                  string
 	Created                int64
@@ -150,7 +152,12 @@ func NewResponsesEventToChatState() *ResponsesEventToChatState {
 
 // ResponsesEventToChatChunks converts a single Responses SSE event into zero
 // or more Chat Completions chunks, updating state as it goes.
+func (state *ResponsesEventToChatState) Err() error { return state.err }
+
 func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if evt == nil || state.Finalized || state.err != nil {
+		return nil
+	}
 	switch evt.Type {
 	case "response.created":
 		return resToChatHandleCreated(evt, state)
@@ -160,6 +167,8 @@ func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEvent
 		return resToChatHandleRefusalDelta(evt, state)
 	case "response.output_item.added":
 		return resToChatHandleOutputItemAdded(evt, state)
+	case "response.output_item.done":
+		return resToChatHandleOutputItemDone(evt, state)
 	case "response.function_call_arguments.delta",
 		// custom/freeform 工具（如新版 apply_patch）的输入增量与 function_call 参数增量同形，
 		// 均按 OutputIndex 累加到对应工具调用。
@@ -265,76 +274,118 @@ func resToChatHandleRefusalDelta(evt *ResponsesStreamEvent, state *ResponsesEven
 	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{Refusal: &refusal})}
 }
 
-func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	// function_call 与 custom_tool_call（custom/freeform 工具）均按工具调用注册，
-	// 以便后续 *_input.delta / *_arguments.delta 能映射到正确的工具索引。
-	if evt.Item == nil || (evt.Item.Type != "function_call" && evt.Item.Type != "custom_tool_call") {
+func resToChatToolSnapshot(item ResponsesOutput, index int, known, complete, terminal bool, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if item.Type != "function_call" && item.Type != "custom_tool_call" {
 		return nil
 	}
-
+	call, added, err := state.tools.Register(item, index, known, terminal)
+	if err != nil {
+		state.err = err
+		return nil
+	}
 	state.SawToolCall = true
-	idx := state.NextToolCallIndex
-	state.OutputIndexToToolIndex[evt.OutputIndex] = idx
-	state.NextToolCallIndex++
+	state.NextToolCallIndex = len(state.tools.calls)
+	if known {
+		state.OutputIndexToToolIndex[index] = call.Index
+	}
+	var chunks []ChatCompletionsChunk
+	if added {
+		i := call.Index
+		chunks = append(chunks, makeChatDeltaChunk(state, ChatDelta{ToolCalls: []ChatToolCall{{Index: &i, ID: call.Item.CallID, Type: "function", Function: ChatFunctionCall{Name: call.Item.Name}}}}))
+	}
+	value := item.Arguments
+	if complete && item.Type == "function_call" && value == "" {
+		value = call.Sent
+	}
+	if item.Type == "custom_tool_call" {
+		value = item.Input
+	}
+	suffix, err := state.tools.Snapshot(call, value, complete)
+	if err != nil {
+		state.err = err
+		return nil
+	}
+	if suffix != "" {
+		chunks = append(chunks, resToChatToolArgumentsChunk(call, suffix, state))
+	}
+	return chunks
+}
 
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{
-		ToolCalls: []ChatToolCall{{
-			Index: &idx,
-			ID:    evt.Item.CallID,
-			Type:  "function",
-			Function: ChatFunctionCall{
-				Name: evt.Item.Name,
-			},
-		}},
-	})}
+func resToChatToolArgumentsChunk(call *responsesTrackedTool, value string, state *ResponsesEventToChatState) ChatCompletionsChunk {
+	index := call.Index
+	return makeChatDeltaChunk(state, ChatDelta{ToolCalls: []ChatToolCall{{Index: &index, Function: ChatFunctionCall{Arguments: value}}}})
+}
+
+func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if evt.Item == nil {
+		return nil
+	}
+	return resToChatToolSnapshot(*evt.Item, evt.OutputIndex, evt.OutputIndexPresent || evt.OutputIndex != 0, false, false, state)
+}
+
+func resToChatHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if evt.Item == nil {
+		return nil
+	}
+	return resToChatToolSnapshot(*evt.Item, evt.OutputIndex, evt.OutputIndexPresent || evt.OutputIndex != 0, true, false, state)
 }
 
 func resToChatHandleFuncArgsDelta(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
 	if evt.Delta == "" {
 		return nil
 	}
-
-	idx, ok := state.OutputIndexToToolIndex[evt.OutputIndex]
-	if !ok {
+	call, err := state.tools.Resolve(evt)
+	if err != nil {
+		state.err = err
 		return nil
 	}
-	state.OutputIndexToArguments[evt.OutputIndex] += evt.Delta
-
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{
-		ToolCalls: []ChatToolCall{{
-			Index: &idx,
-			Function: ChatFunctionCall{
-				Arguments: evt.Delta,
-			},
-		}},
-	})}
+	if call.Closed {
+		return nil
+	}
+	call.Sent += evt.Delta
+	if call.IndexKnown {
+		state.OutputIndexToArguments[call.OutputIndex] = call.Sent
+	}
+	return []ChatCompletionsChunk{resToChatToolArgumentsChunk(call, evt.Delta, state)}
 }
 
 func resToChatHandleFuncArgsDone(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	idx, ok := state.OutputIndexToToolIndex[evt.OutputIndex]
-	if !ok {
+	call, err := state.tools.Resolve(evt)
+	if err != nil {
+		state.err = err
 		return nil
 	}
-
-	completed := evt.Arguments
+	value := evt.Arguments
+	present := evt.ArgumentsPresent || value != ""
 	if evt.Type == "response.custom_tool_call_input.done" {
-		completed = evt.Input
+		value = evt.Input
+		present = evt.InputPresent || value != ""
 	}
-	current := state.OutputIndexToArguments[evt.OutputIndex]
-	if completed == "" || !strings.HasPrefix(completed, current) || completed == current {
+	if !present {
 		return nil
 	}
+	suffix, err := state.tools.Snapshot(call, value, true)
+	if err != nil {
+		state.err = err
+		return nil
+	}
+	if suffix == "" {
+		return nil
+	}
+	return []ChatCompletionsChunk{resToChatToolArgumentsChunk(call, suffix, state)}
+}
 
-	remainder := completed[len(current):]
-	state.OutputIndexToArguments[evt.OutputIndex] = completed
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{
-		ToolCalls: []ChatToolCall{{
-			Index: &idx,
-			Function: ChatFunctionCall{
-				Arguments: remainder,
-			},
-		}},
-	})}
+func resToChatRecoverTerminalTools(resp *ResponsesResponse, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	var chunks []ChatCompletionsChunk
+	if resp != nil {
+		for i, item := range resp.Output {
+			chunks = append(chunks, resToChatToolSnapshot(item, i, true, true, true, state)...)
+			if state.err != nil {
+				return nil
+			}
+		}
+	}
+	return chunks
 }
 
 func resToChatHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
@@ -346,6 +397,10 @@ func resToChatHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEv
 }
 
 func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	recovered := resToChatRecoverTerminalTools(evt.Response, state)
+	if state.err != nil {
+		return nil
+	}
 	state.Finalized = true
 	finishReason := "stop"
 
@@ -397,7 +452,7 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		})
 	}
 
-	return chunks
+	return append(recovered, chunks...)
 }
 
 func chatUsageFromResponsesUsage(u *ResponsesUsage) *ChatUsage {
