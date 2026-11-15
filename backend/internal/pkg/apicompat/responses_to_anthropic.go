@@ -543,6 +543,9 @@ func FinalizeResponsesAnthropicStream(state *ResponsesEventToAnthropicState) []A
 
 	var events []AnthropicStreamEvent
 	events = append(events, closeCurrentBlock(state)...)
+	if state.err != nil {
+		return events
+	}
 
 	_, stopReason, _, err := ProjectTerminalWithMapping("responses", "anthropic", "completed", "", state.HasToolCall, state.hasRefusal)
 	if err != nil {
@@ -1349,6 +1352,9 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		return events
 	}
 	events = append(events, closeCurrentBlock(state)...)
+	if state.err != nil {
+		return events
+	}
 	events = append(events, resToAnthRecoverTerminalText(evt, state)...)
 	if evt.Response != nil {
 		for i, item := range evt.Response.Output {
