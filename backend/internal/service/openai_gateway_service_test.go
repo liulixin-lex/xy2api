@@ -2959,8 +2959,8 @@ func TestOpenAINonStreamingContentTypePassThrough(t *testing.T) {
 		t.Fatalf("handleNonStreamingResponse error: %v", err)
 	}
 
-	if !strings.Contains(rec.Header().Get("Content-Type"), "application/vnd.test+json") {
-		t.Fatalf("expected Content-Type passthrough, got %q", rec.Header().Get("Content-Type"))
+	if rec.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("expected JSON Content-Type, got %q", rec.Header().Get("Content-Type"))
 	}
 }
 
@@ -3963,7 +3963,7 @@ func TestHandleNonStreamingResponse_OAuthJSONBodyWithDataEventTextKeepsJSONUsage
 	require.Equal(t, 22, result.OutputTokens)
 	// Response must remain the original JSON body (not routed through the SSE
 	// path, which would rewrite/lose the body or usage).
-	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
 	require.Equal(t, "resp_oauth_compact", gjson.Get(rec.Body.String(), "id").String())
 	require.Equal(t, int64(33), gjson.Get(rec.Body.String(), "usage.total_tokens").Int())
 	require.Contains(t, rec.Body.String(), "processing data: 1,2,3 then event: click finished")
