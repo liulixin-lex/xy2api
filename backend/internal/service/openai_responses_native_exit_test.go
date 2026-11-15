@@ -226,7 +226,7 @@ func m6Stream(t *testing.T, pass bool, body string) (*httptest.ResponseRecorder,
 }
 
 func TestM6MalformedTerminal(t *testing.T) {
-	prefix := m6Frame(`{"type":"response.created","response":{"id":"r1","created_at":123}}`) + m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`)
+	prefix := m6Frame(`{"type":"response.created","response":{"id":"r1","created_at":123}}`) + m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5,"input_tokens_details":{"cached_tokens":3}}}`)
 	for _, pass := range []bool{false, true} {
 		for _, bad := range []string{
 			"event: response.completed\ndata: \xff\n\n",
@@ -249,6 +249,7 @@ func TestM6MalformedTerminal(t *testing.T) {
 				require.True(t, terminal.Failure)
 				require.Equal(t, "r1", gjson.GetBytes(payload, "response.id").String())
 				require.Equal(t, int64(13), gjson.GetBytes(payload, "response.usage.input_tokens").Int())
+				require.Equal(t, int64(3), gjson.GetBytes(payload, "response.usage.input_tokens_details.cached_tokens").Int())
 			})
 		}
 		for _, validBody := range []string{

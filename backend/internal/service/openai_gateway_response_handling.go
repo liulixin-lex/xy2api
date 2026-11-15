@@ -2843,7 +2843,24 @@ func openAIResponsesFailureMetadata(usage *OpenAIUsage, createdAt int64) gin.H {
 		metadata["created_at"] = createdAt
 	}
 	if usage != nil && (openAIUsageHasTokens(usage) || usage.InputTokensPresent || usage.OutputTokensPresent) {
-		metadata["usage"] = gin.H{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
+		wireUsage := gin.H{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
+		inputDetails := gin.H{}
+		if usage.CacheReadInputTokens > 0 || usage.CacheReadInputTokensPresent {
+			inputDetails["cached_tokens"] = usage.CacheReadInputTokens
+		}
+		if usage.CacheCreationInputTokens > 0 || usage.CacheCreationInputTokensPresent {
+			inputDetails["cache_write_tokens"] = usage.CacheCreationInputTokens
+		}
+		if usage.ImageInputTokens > 0 {
+			inputDetails["image_tokens"] = usage.ImageInputTokens
+		}
+		if len(inputDetails) > 0 {
+			wireUsage["input_tokens_details"] = inputDetails
+		}
+		if usage.ImageOutputTokens > 0 {
+			wireUsage["output_tokens_details"] = gin.H{"image_tokens": usage.ImageOutputTokens}
+		}
+		metadata["usage"] = wireUsage
 	}
 	return metadata
 }
