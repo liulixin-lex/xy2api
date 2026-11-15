@@ -70,7 +70,7 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 		{name: "Luna 后缀保留 max", raw: "max", model: "gpt-5.6-luna-2026-07-09", want: "max"},
 		{name: "DeepSeek V4 保留 max", raw: "max", model: "deepseek-v4-pro", want: "max"},
 		{name: "DeepSeek Flash 保留 max", raw: "max", model: "deepseek-flash", want: "max"},
-		{name: "旧 GPT 模型沿用 xhigh", raw: "max", model: "gpt-5.5", want: "xhigh"},
+		{name: "实际 max 不因旧 GPT 型号折叠", raw: "max", model: "gpt-5.5", want: "max"},
 	}
 
 	for _, tt := range tests {
