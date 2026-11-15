@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- 图片和文件的 detail 提示在 Anthropic 转换桥中省略并记录，媒体内容继续发送。
+
 - Claude Fable/Mythos 5.2 经转换桥继续对话时保留网关封装的已签名 thinking 历史。
 
 - Chat、Anthropic 转换桥保留截断、过滤与拒绝的区别及拒绝正文，非流和流式终态一致。
