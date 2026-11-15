@@ -13,6 +13,7 @@ func TestM1ActualEffortFromWire(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{`{"reasoning":{"effort":"max"}}`, "max"},
 		{`{"reasoning":{"effort":"xhigh"}}`, "xhigh"},
+		{`{"reasoning":{"effort":"ultra"}}`, "ultra"},
 		{`{"reasoning_effort":"none"}`, "none"},
 		{`{"model":"gpt-5.4-high"}`, ""},
 		{`{"reasoning":{"effort":null}}`, ""},
@@ -29,6 +30,9 @@ func TestM1ActualEffortFromWire(t *testing.T) {
 			} else {
 				require.NotNil(t, got)
 				require.Equal(t, tc.want, *got)
+				if tc.want == "ultra" {
+					require.Equal(t, 1.0, reasoningEffortBillingMultiplier(*got, map[string]float64{"ultra": 9}))
+				}
 				if tc.want == "max" || tc.want == "xhigh" {
 					want := map[string]float64{"max": 3, "xhigh": 2}
 					require.Equal(t, want[tc.want], reasoningEffortBillingMultiplier(*got, want))
