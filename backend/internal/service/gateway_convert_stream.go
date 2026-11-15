@@ -63,7 +63,9 @@ type gatewayConvertHooks struct {
 	// the opening is staged; the driver keeps the frames until it ends.
 	convert func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string
 	// finalize returns the frames that end a stream treated as complete.
-	finalize func() []string
+	finalize               func() []string
+	conversionError        func() error
+	terminalMappingHandled bool
 	// failure returns the inbound protocol's terminal frames; source is an
 	// Anthropic error event body.
 	failure func(source []byte) []string
@@ -291,7 +293,9 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 
 func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOutcome, bool) {
 	st.evidence.observe(name, payload)
-	recordAnthropicTerminalMapping(st.ctx(), payload)
+	if !st.hooks.terminalMappingHandled {
+		recordAnthropicTerminalMapping(st.ctx(), payload)
+	}
 	var event apicompat.AnthropicStreamEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logger.L().Warn("gateway convert stream: failed to parse event", zap.Error(err),
@@ -337,6 +341,11 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 		st.sawStop = true
 	}
 	frames := st.hooks.convert(&event, payload, hold)
+	if st.hooks.conversionError != nil {
+		if err := st.hooks.conversionError(); err != nil {
+			return st.conversionFailed(err), true
+		}
+	}
 	if hold {
 		st.held = append(st.held, frames...)
 		return gatewayConvertOutcome{}, false
@@ -509,8 +518,14 @@ func (st *gatewayConvertStream) recordStreamError(body []byte, outputWritten boo
 // finish ends a stream treated as complete: the held opening, then the
 // protocol's closing frames.
 func (st *gatewayConvertStream) finish() gatewayConvertOutcome {
+	frames := st.hooks.finalize()
+	if st.hooks.conversionError != nil {
+		if err := st.hooks.conversionError(); err != nil {
+			return st.conversionFailed(err)
+		}
+	}
 	st.release()
-	st.write(st.hooks.finalize())
+	st.write(frames)
 	return gatewayConvertOutcome{}
 }
 
@@ -709,4 +724,11 @@ func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Co
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: started})
 	timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, started)
 	return newFirstEventGuard(upstreamCtx, timeout, plan)
+}
+
+func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcome {
+	st.held = nil
+	st.sawFailure = true
+	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+	return gatewayConvertOutcome{err: err}
 }

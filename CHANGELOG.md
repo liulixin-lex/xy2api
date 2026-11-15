@@ -174,6 +174,8 @@
 
 - 非流式 Responses 的 JSON 响应被上游标成 SSE 时，用量不再记为 0；SSE 拼成的 JSON 响应改用 JSON 响应头。
 
+- API Key 转换出口保留有效的 metadata.user_id、工具身份和数组内容增量，截断工具仅保留 incomplete 片段，不再宣告可执行完成。
+
 - 固定 Chat 与 Grok API-key 路由可接收 Responses 形状请求，发送前转换或按既定策略降级，仅非法或无法表达的字段返回明确 400。
 
 ### 重试、调度与续接

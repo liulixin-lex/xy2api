@@ -323,6 +323,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 	requestID string,
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
+	emitRaw ...func([]byte) error,
 ) ccStreamScanState {
 	st := ccStreamScanState{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	var terminal openAIRawStreamTerminalState
@@ -356,6 +357,14 @@ func (s *OpenAIGatewayService) scanCCStream(
 		}
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 			observer.ObserveOpenAI([]byte(payload), "")
+		}
+		if len(emitRaw) > 0 && emitRaw[0] != nil {
+			if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && (gjson.Get(payload, "choices.0.delta.content").String() != "" || gjson.Get(payload, "choices.0.delta.reasoning_content").String() != "" || len(gjson.Get(payload, "choices.0.delta.tool_calls").Array()) > 0) {
+				ms := int(time.Since(startTime).Milliseconds())
+				st.FirstTokenMs = &ms
+			}
+			st.Err = emitRaw[0]([]byte(payload))
+			return st.Err != nil
 		}
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {

@@ -35,6 +35,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
@@ -80,18 +81,19 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	ccReq.Model = mappedModel
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, opts)
 	if err != nil {
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 	}
 
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(responsesReq, opts)
 	if err != nil {
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 
 	// 3. Force upstream streaming
+	m7ForwardChatMetadata(responsesReq, anthropicReq, opts)
 	anthropicReq.Stream = true
 	reqStream := true
 
@@ -212,9 +214,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	}
 
 	return result, handleErr
@@ -251,7 +253,9 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (result *ForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -296,7 +300,9 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 		evidence.observe(eventType, payload)
 		if c != nil && c.Request != nil {
-			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			if opts.Bridge == nil {
+				recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			}
 		}
 		if evidence.err != nil {
 			break
@@ -367,7 +373,18 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	// Chain: Anthropic → Responses → Chat Completions
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
+	if err := m7RestoreBridgeResponse(responsesResp, opts); err != nil {
+		return nil, err
+	}
+	if err := apicompat.ValidateResponsesForChat(responsesResp); opts.Bridge != nil && err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
 
 	if s.responseHeaderFilter != nil {
@@ -410,10 +427,13 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (*ForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	// Use Anthropic→Responses state machine, then convert Responses→CC
+	bridgeRestorer := m7BridgeStreamRestorer(opts)
 	anthState := apicompat.NewAnthropicEventToResponsesState()
 	anthState.Model = originalModel
 	ccState := apicompat.NewResponsesEventToChatState()
@@ -490,7 +510,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 
 		// Chain: Anthropic event → Responses events → CC chunks
 		var frames []string
-		for _, resEvt := range apicompat.AnthropicEventToResponsesEvents(event, anthState) {
+		for _, resEvt := range m7RestoreBridgeEvents(apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, anthState, opts), bridgeRestorer) {
 			frames = append(frames, chunkFrames(&resEvt, hold)...)
 		}
 		return frames
@@ -504,7 +524,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			return nil
 		}
 		var frames []string
-		for _, resEvt := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
+		for _, resEvt := range m7RestoreBridgeEvents(apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(anthState, opts), bridgeRestorer) {
 			frames = append(frames, chunkFrames(&resEvt, false)...)
 		}
 		for _, chunk := range apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, stream.sawStop && !stream.sawFailure) {
@@ -521,7 +541,14 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	// xy2api resilience (W1.1, W1.2): the driver reads the Anthropic stream,
 	// stages the role chunk and ends a broken stream with an error chunk.
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{
-		convert:  processAnthropicEvent,
+		convert:                processAnthropicEvent,
+		terminalMappingHandled: opts.Bridge != nil,
+		conversionError: func() error {
+			if err := anthState.Err(); err != nil {
+				return err
+			}
+			return ccState.Err()
+		},
 		finalize: finalizeStream,
 		failure:  gatewayChatFailureFrames,
 	})

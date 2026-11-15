@@ -223,6 +223,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
+API Key 转换路径保留 Chat 请求中有效的 `metadata.user_id`，在后续账号身份处理前回填；其他 metadata 字段仍遵循原字段策略。
+
 非流式 Chat 与 Responses 由 Anthropic 流拼装时，必须收到完整 `message_stop` 或有效 `message_delta.stop_reason` 才返回成功。结束前断流、读取失败或明确错误返回 502，并保留已观察的用量；有效结束后的连接关闭和缺少尾部用量不改变成功结果。
 
 Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转换为 Anthropic Messages 后发往上游，普通账号与兼容账号的转换相同。字段语义以 Anthropic 官方 [OpenAI SDK 兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) 为准：官方支持的映射，官方忽略的忽略。标「网关扩展」的是官方文档之外网关额外提供的映射。所有字段的 JSON `null` 都视为未提供。Gemini 分组的 `/v1/chat/completions` 同样先转为 Messages，但不套用本表的思考预算与 JSON 格式规则，处理方式见 [Gemini · 兼容入口参数](gemini.md#兼容入口参数)。

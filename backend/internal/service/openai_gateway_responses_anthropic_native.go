@@ -42,12 +42,13 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
-	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body)
+	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body, opts)
 	if err != nil {
 		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", "Failed to adapt request tools")
 		return nil, fmt.Errorf("adapt responses client tools: %w", err)
@@ -84,7 +85,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, err
 	}
 	responsesReq.Model = upstreamModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(&responsesReq, opts)
 	if err != nil {
 		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
@@ -157,9 +158,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	}
 
 	if clientStream {
-		return s.handleResponsesStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
+		return s.handleResponsesStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping, opts)
 	}
-	return s.handleResponsesBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
+	return s.handleResponsesBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping, opts)
 }
 
 // handleResponsesBufferedFromNativeAnthropic reads Anthropic SSE events, assembles
@@ -173,7 +174,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
+	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -259,7 +262,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 		observeSchedPayload(c, []byte(payload))
 		evidence.observe(eventType, payload)
-		recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		if opts.Bridge == nil {
+			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		}
 		if evidence.err != nil {
 			break
 		}
@@ -320,7 +325,11 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		finalResp.Model = upstreamModel
 	}
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
 	responsesResp.Model = originalModel
 
 	if s.responseHeaderFilter != nil {
@@ -364,7 +373,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
+	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	var evidence anthropicBufferedEvidence
 	defer func() {
 		if result != nil {
@@ -475,7 +486,10 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		schedUsage := claudeUsageToOpenAIUsage(&usage)
 		currentSchedAttempt(c.Request.Context()).noteUsage(&schedUsage)
 
-		events := apicompat.AnthropicEventToResponsesEvents(event, state)
+		events := apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, state, opts)
+		if state.Err() != nil {
+			return
+		}
 		if clientDisconnected {
 			return
 		}
@@ -538,13 +552,19 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			return resultWithUsage(), evidence.err
 		}
 		observeSchedPayload(c, []byte(payload))
-		recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		if opts.Bridge == nil {
+			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
 
 		processAnthropicEvent(&event)
+		if err := state.Err(); err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			return resultWithUsage(), err
+		}
 	}
 
 	if !evidence.stopped {
@@ -556,7 +576,12 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	// Finalize state machine（客户端已断开时仍推进，保证 usage 汇总完整；仅在
 	// 客户端仍连接时写出）。终态帧与逐事件路径一致过工具名反转与客户端工具还原，
 	// 避免流截断时终态帧携带改写后的工具名。
-	if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 && !clientDisconnected {
+	finalEvents := apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(state, opts)
+	if err := state.Err(); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return resultWithUsage(), err
+	}
+	if len(finalEvents) > 0 && !clientDisconnected {
 		wrote := false
 		for _, evt := range finalEvents {
 			payload, err := json.Marshal(evt)

@@ -31,6 +31,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	body []byte,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	startTime := time.Now()
 
 	var responsesReq apicompat.ResponsesRequest
@@ -73,10 +74,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	// 自愈回写：历史里带明文 summary 的 reasoning item 刷新进缓存，覆盖 Redis
 	// 被 flush / 跨实例漂移后同 id 的 encrypted-only 副本无法再取明文的情况。
-	s.recacheReasoningItemsFromInput(responsesReq.Input)
+	s.recacheReasoningItemsFromInput(responsesReq.Input, opts)
 
 	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
-		ReasoningContentByID: s.reasoningContentByID,
+		ReasoningContentByID: s.reasoningContentByID, Bridge: opts.Bridge, Record: opts.Record,
 	})
 	if err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -149,9 +150,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, opts)
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(c, resp, account, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, opts)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -168,7 +169,9 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	facts := OpenAIForwardResult{}
 	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	requestID := resp.Header.Get("x-request-id")
@@ -176,7 +179,11 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	if err != nil {
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	responsesResp, err := apicompat.ChatCompletionsResponseToResponsesWithBridgeOptions(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools, opts)
+	if err != nil {
+		writeCCStreamReadError(c, PreOutputProtocolResponses, err)
+		return &OpenAIForwardResult{Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort}, err
+	}
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 
 	if s.responseHeaderFilter != nil {
@@ -213,11 +220,15 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (*OpenAIForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	state.Bridge = opts.Bridge
+	state.SetConversionRecorder(opts.Record)
 	state.CustomTools = customTools
 	state.FunctionTools = functionTools
 	state.ToolSearchDeclared = toolSearch
@@ -251,11 +262,26 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		c.Writer.Flush()
 	}
 
-	scan := s.scanCCStream(c, resp, account, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
-		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
+	scan := s.scanCCStream(c, resp, account, "openai responses chat fallback", requestID, startTime, nil, func(raw []byte) error {
+		m7RecordLegacyChatTerminal(c.Request.Context(), raw, opts)
+		events := apicompat.ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw, state)
+		if err := state.Err(); err != nil {
+			return err
+		}
 		s.cacheReasoningItemsFromEvents(events)
 		writeEvents(events)
+		return nil
 	})
+	var finalEvents []apicompat.ResponsesStreamEvent
+	if scan.Err == nil {
+		if !(opts.Bridge != nil && state.FinishReason == "length") {
+			scan.Err = state.ValidateToolCallArguments()
+		}
+		if scan.Err == nil {
+			finalEvents = apicompat.FinalizeChatCompletionsResponsesStream(state)
+			scan.Err = state.Err()
+		}
+	}
 
 	if scan.Err != nil {
 		writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
@@ -280,31 +306,6 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			FirstTokenMs:                scan.FirstTokenMs,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
-	if err := state.ValidateToolCallArguments(); err != nil {
-		writeCCStreamReadError(c, PreOutputProtocolResponses, err)
-		return &OpenAIForwardResult{
-			ResponseFactsKnown: scan.ResponseFactsKnown,
-			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
-			TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
-			ResponseBodyKind: scan.ResponseBodyKind,
-			PartialFailure:   true,
-
-			RequestID:                   requestID,
-			UpstreamHeaders:             resp.Header,
-			Usage:                       scan.Usage,
-			Model:                       originalModel,
-			BillingModel:                billingModel,
-			UpstreamModel:               upstreamModel,
-			ReasoningEffort:             reasoningEffort,
-			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
-			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
-			Stream:                      true,
-			Duration:                    time.Since(startTime),
-			FirstTokenMs:                scan.FirstTokenMs,
-		}, fmt.Errorf("invalid tool call arguments from upstream: %w", err)
-	}
-
-	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
 	s.cacheReasoningItemsFromEvents(finalEvents)
 	writeEvents(finalEvents)
 	if !clientDisconnected {
@@ -382,7 +383,8 @@ func (s *OpenAIGatewayService) reasoningContentByID(itemID string) string {
 // recacheReasoningItemsFromInput 把请求历史里带明文 summary 的 reasoning item
 // 重新写入缓存（best-effort）。Codex 多数时候会原样回传明文 summary，借机
 // 刷新 TTL 并自愈 Redis 被 flush / 跨实例漂移造成的缓存缺失。
-func (s *OpenAIGatewayService) recacheReasoningItemsFromInput(inputRaw json.RawMessage) {
+func (s *OpenAIGatewayService) recacheReasoningItemsFromInput(inputRaw json.RawMessage, options ...apicompat.ConversionOptions) {
+	opts := m7SelectedConversionOptions(options)
 	if s == nil || s.cache == nil {
 		return
 	}
@@ -395,7 +397,7 @@ func (s *OpenAIGatewayService) recacheReasoningItemsFromInput(inputRaw json.RawM
 		return
 	}
 	for _, raw := range items {
-		id, text, ok := apicompat.ExtractResponsesReasoningItem(raw)
+		id, text, ok := apicompat.ExtractResponsesReasoningItemWithBridgeOptions(raw, opts)
 		if !ok || id == "" || text == "" {
 			continue
 		}

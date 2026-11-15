@@ -37,6 +37,7 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
@@ -58,7 +59,7 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
-	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body)
+	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body, opts)
 	if err != nil {
 		return nil, fmt.Errorf("adapt responses client tools: %w", err)
 	}
@@ -96,7 +97,7 @@ func (s *GatewayService) ForwardAsResponses(
 		return nil, err
 	}
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(&responsesReq, opts)
 	if err != nil {
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
@@ -222,27 +223,34 @@ func (s *GatewayService) ForwardAsResponses(
 	// 13. Handle normal response (convert Anthropic → Responses)
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	}
 
 	return result, handleErr
 }
 
-func adaptResponsesClientToolsForAnthropic(body []byte) ([]byte, apicompat.ResponsesClientToolMapping, error) {
+func adaptResponsesClientToolsForAnthropic(body []byte, options ...apicompat.ConversionOptions) ([]byte, apicompat.ResponsesClientToolMapping, error) {
+	opts := m7SelectedConversionOptions(options)
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	var requestBody map[string]any
 	if err := decoder.Decode(&requestBody); err != nil {
 		return body, apicompat.ResponsesClientToolMapping{}, err
 	}
-	additionalToolsChanged, err := liftResponsesAdditionalTools(requestBody)
-	if err != nil {
-		return body, apicompat.ResponsesClientToolMapping{}, err
+	var mapping apicompat.ResponsesClientToolMapping
+	var changed, additionalToolsChanged bool
+	var err error
+	if opts.Bridge != nil {
+		mapping, changed, err = apicompat.AdaptResponsesClientToolsWithBridgeOptions(requestBody, opts)
+	} else {
+		additionalToolsChanged, err = liftResponsesAdditionalTools(requestBody)
+		if err != nil {
+			return body, mapping, err
+		}
+		mapping, changed, err = apicompat.AdaptResponsesClientTools(requestBody)
 	}
-
-	mapping, changed, err := apicompat.AdaptResponsesClientTools(requestBody)
 	if err != nil {
 		return body, apicompat.ResponsesClientToolMapping{}, err
 	}
@@ -408,7 +416,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
+	options ...apicompat.ConversionOptions,
 ) (result *ForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -454,7 +464,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 		evidence.observe(eventType, payload)
 		if c != nil && c.Request != nil {
-			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			if opts.Bridge == nil {
+				recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			}
 		}
 		if evidence.err != nil {
 			break
@@ -537,7 +549,11 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		finalResp.Model = mappedModel
 	}
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
 	responsesResp.Model = originalModel // Use original model name
 
 	if s.responseHeaderFilter != nil {
@@ -583,7 +599,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
+	options ...apicompat.ConversionOptions,
 ) (*ForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	state := apicompat.NewAnthropicEventToResponsesState()
@@ -634,7 +652,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 		// Convert to Responses events
 		var frames []string
-		events := apicompat.AnthropicEventToResponsesEvents(event, state)
+		events := apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, state, opts)
 		for _, evt := range events {
 			payload, err := json.Marshal(evt)
 			if err != nil {
@@ -663,7 +681,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	finalizeStream := func() []string {
 		var frames []string
-		for _, evt := range apicompat.FinalizeAnthropicResponsesStream(state) {
+		for _, evt := range apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(state, opts) {
 			sse, err := apicompat.ResponsesEventToSSE(evt)
 			if err != nil {
 				continue
@@ -677,8 +695,10 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	// stages the opening and ends a broken stream with response.failed.
 	var stream *gatewayConvertStream
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{
-		convert:  func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
-		finalize: finalizeStream,
+		convert:                func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
+		finalize:               finalizeStream,
+		terminalMappingHandled: opts.Bridge != nil,
+		conversionError:        state.Err,
 		failure: func(source []byte) []string {
 			return gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)
 		},

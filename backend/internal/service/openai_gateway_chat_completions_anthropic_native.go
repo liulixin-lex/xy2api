@@ -42,6 +42,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
@@ -72,7 +73,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 
 	ccReq.Model = upstreamModel
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, opts)
 	if err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to convert request")
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -84,7 +85,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 		return nil, err
 	}
 	responsesReq.Model = upstreamModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(responsesReq, opts)
 	if err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
@@ -92,6 +93,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 
 	// 4. Force upstream streaming（客户端原始终决定响应格式；
 	// 上游恒为流式，非流式由缓冲路径组装）。
+	m7ForwardChatMetadata(responsesReq, anthropicReq, opts)
 	anthropicReq.Stream = true
 	reqStream := true
 
@@ -158,9 +160,9 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 
 	if clientStream {
-		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
+		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, opts)
 	}
-	return s.handleCCBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
+	return s.handleCCBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, opts)
 }
 
 // handleCCBufferedFromNativeAnthropic reads Anthropic SSE events, assembles the
@@ -173,7 +175,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -260,7 +264,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 
 		observeSchedPayload(c, []byte(payload))
 		evidence.observe(eventType, payload)
-		recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		if opts.Bridge == nil {
+			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		}
 		if evidence.err != nil {
 			break
 		}
@@ -315,7 +321,18 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		}
 	}
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
+	if err := m7RestoreBridgeResponse(responsesResp, opts); err != nil {
+		return nil, err
+	}
+	if err := apicompat.ValidateResponsesForChat(responsesResp); opts.Bridge != nil && err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
 
 	if s.responseHeaderFilter != nil {
@@ -354,7 +371,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	var evidence anthropicBufferedEvidence
 	defer func() {
 		if result != nil {
@@ -378,6 +397,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.WriteHeader(http.StatusOK)
 
+	bridgeRestorer := m7BridgeStreamRestorer(opts)
 	anthState := apicompat.NewAnthropicEventToResponsesState()
 	anthState.Model = originalModel
 	ccState := apicompat.NewResponsesEventToChatState()
@@ -490,7 +510,12 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			return false
 		}
 
-		responsesEvents := apicompat.AnthropicEventToResponsesEvents(event, anthState)
+		responsesEvents := m7RestoreBridgeEvents(apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, anthState, opts), bridgeRestorer)
+		if err := anthState.Err(); err != nil {
+			conversionErr = err
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			return true
+		}
 		for _, resEvt := range responsesEvents {
 			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 			if err := ccState.Err(); err != nil {
@@ -544,7 +569,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			return resultWithUsage(), evidence.err
 		}
 		observeSchedPayload(c, []byte(payload))
-		recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		if opts.Bridge == nil {
+			recordAnthropicTerminalMapping(c.Request.Context(), payload)
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
@@ -568,7 +595,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		return resultWithUsage(), err
 	}
 	// Finalize both state machines（客户端已断开时仍执行，保证 usage 汇总完整）。
-	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
+	finalResEvents := m7RestoreBridgeEvents(apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(anthState, opts), bridgeRestorer)
+	if err := anthState.Err(); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return resultWithUsage(), err
+	}
 	for _, resEvt := range finalResEvents {
 		ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 		for _, chunk := range ccChunks {
