@@ -95,9 +95,8 @@ func inboundIsChatCompletions(c *gin.Context) bool {
 	return strings.HasSuffix(p, "/chat/completions")
 }
 
-// resilienceChatTerminalFrame reports whether a committed Chat Completions
-// stream ends with the resilience terminal frame instead of the 0.3.0
-// "event: error" frame.
+// resilienceChatTerminalFrame selects the Chat terminal frame independently
+// of keepalive settings.
 func resilienceChatTerminalFrame(c *gin.Context) bool {
 	return inboundIsChatCompletions(c)
 }

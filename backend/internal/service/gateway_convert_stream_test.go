@@ -882,8 +882,8 @@ func TestGatewayConvertSwitchesOffStillRejectsFailure(t *testing.T) {
 	}
 }
 
-// Staging alone defers the opening and switches failures before it; the
-// end of the stream after output keeps the baseline.
+// Staging alone defers the opening and switches eligible failures before it.
+// The strict-terminal flag does not turn a known failure into completion.
 func TestGatewayConvertStagingWithoutStrictTerminal(t *testing.T) {
 	withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.StrictTerminal = false })
 	for _, path := range gwConvertPaths() {
@@ -894,8 +894,7 @@ func TestGatewayConvertStagingWithoutStrictTerminal(t *testing.T) {
 			requireGWFailover(t, err)
 			requireOnlyHeartbeats(t, c, w.Body())
 		})
-		// Review DELTA-P2-1: a non-retryable error before content is dropped
-		// as in 0.4.4, and the end that follows must not replay it.
+		// A non-retryable error before content returns JSON without replay.
 		t.Run(path.name+"/non_retryable_error_is_not_replayed", func(t *testing.T) {
 			w := newGWWriter()
 			c := gwContext(gwPathURL(path.name), w)

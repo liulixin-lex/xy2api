@@ -34,7 +34,8 @@ import (
 // of the attempt runs until then. With stream.strict_terminal a stream that
 // breaks after output ends with the inbound protocol's terminal frame
 // (response.failed, or data:{error} and [DONE]) and is never reported as a
-// success. With both switches off the conversions keep the 0.4.4 behavior.
+// success. The switches control staging and timeout behavior; explicit failure
+// and missing completion evidence never qualify for synthetic success.
 //
 // A client that leaves before the first output cancels the attempt: no
 // switch, no charge, no account failure. After output the upstream is read
