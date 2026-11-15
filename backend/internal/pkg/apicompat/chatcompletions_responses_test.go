@@ -2137,3 +2137,46 @@ func TestToolArgumentsJSONAndCompleteness(t *testing.T) {
 		require.Equal(t, "length", *chunks[len(chunks)-1].Choices[0].FinishReason)
 	}
 }
+
+func TestTerminalProjectionJSONAndSSE(t *testing.T) {
+	for _, tc := range []struct {
+		status, reason, want string
+		invalid              bool
+	}{
+		{"completed", "", "tool_calls", false}, {"incomplete", "max_output_tokens", "length", false}, {"incomplete", "content_filter", "content_filter", false}, {"incomplete", "other", "", true}, {"failed", "", "", true}, {"future", "", "", true},
+	} {
+		resp := &ResponsesResponse{Status: tc.status, Output: []ResponsesOutput{{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: `{}`}}}
+		if tc.reason != "" {
+			resp.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+		}
+		err := ValidateResponsesForChat(resp)
+		require.Equal(t, tc.invalid, err != nil)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response." + tc.status, Response: resp}, state)
+		if tc.status == "future" {
+			chunks = ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.done", Response: resp}, state)
+		}
+		require.Equal(t, tc.invalid, state.Err() != nil)
+		if tc.invalid {
+			require.Empty(t, chunks)
+			continue
+		}
+		require.Equal(t, tc.want, ResponsesToChatCompletions(resp, "m").Choices[0].FinishReason)
+		require.Equal(t, tc.want, *chunks[len(chunks)-1].Choices[0].FinishReason)
+	}
+	resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "message", ID: "m", Content: []ResponsesContentPart{{Type: "refusal", Refusal: "declined"}}}}}
+	require.NoError(t, ValidateResponsesForChat(resp))
+	require.Equal(t, "declined", ResponsesToChatCompletions(resp, "m").Choices[0].Message.Refusal)
+	state := NewResponsesEventToChatState()
+	chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: resp}, state)
+	require.NoError(t, state.Err())
+	require.Equal(t, "declined", *chunks[0].Choices[0].Delta.Refusal)
+	require.Equal(t, "stop", *chunks[len(chunks)-1].Choices[0].FinishReason)
+	state = NewResponsesEventToChatState()
+	require.Empty(t, FinalizeResponsesChatStreamWithTerminal(state, false))
+	require.Error(t, state.Err())
+	state = NewResponsesEventToChatState()
+	require.NotEmpty(t, FinalizeResponsesChatStreamWithTerminal(state, true))
+	require.Empty(t, FinalizeResponsesChatStreamWithTerminal(state, true))
+	require.NotEmpty(t, FinalizeResponsesChatStream(NewResponsesEventToChatState()))
+}

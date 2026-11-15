@@ -22,6 +22,26 @@ func ValidateResponsesForChat(resp *ResponsesResponse) error {
 	if resp == nil {
 		return toolTrackingError("response", "missing response")
 	}
+	reason := ""
+	if resp.IncompleteDetails != nil {
+		reason = resp.IncompleteDetails.Reason
+	}
+	hasTools, hasRefusal := false, false
+	for _, item := range resp.Output {
+		if item.Type == "function_call" || item.Type == "custom_tool_call" {
+			hasTools = true
+		}
+		for _, part := range item.Content {
+			hasRefusal = hasRefusal || (part.Type == "refusal" && part.Refusal != "")
+		}
+	}
+	if _, _, err := ProjectTerminal("responses", "chat", resp.Status, reason, hasTools, hasRefusal); err != nil {
+		return err
+	}
+	return validateResponsesChatTools(resp)
+}
+
+func validateResponsesChatTools(resp *ResponsesResponse) error {
 	if resp.Status != "completed" {
 		return nil
 	}
