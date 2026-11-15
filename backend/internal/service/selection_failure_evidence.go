@@ -83,6 +83,9 @@ func accountSchedulingFailureReason(account *Account) string {
 // Persistent request expressibility deliberately ignores learned capability,
 // cooldown, quota, profit, privacy and other transient/request-specific vetoes.
 func (s *OpenAIGatewayService) openAIConfiguredRequestFailureReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) string {
+	if reason := s.chatRequestCapabilityFailureReason(ctx, account); reason != "" {
+		return reason
+	}
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return string(SelectionReasonCapabilityMismatch)
 	}

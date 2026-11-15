@@ -157,6 +157,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **何时关闭**：需要所有请求都按上游实际用量计费时关闭。
 - **观测**：计数 `undelivered`、`cdn_cut`、`abuse_guard`；未送达列表与接口见 [观测与排障](gateway-resilience-observability.md#未送达请求)。送达口径见 [客户端可见的行为](gateway-resilience-client.md#送达与计费口径)。
 
+带工具的 Chat 请求按候选最终模型／档位与实际出口检查 Responses 能力，选号预检不改请求或记录未发送候选的降级。工具请求跳过组级无号缓存及快速失败计数。
+
 ### 错误语义与防风暴 `errors`
 
 

@@ -65,6 +65,9 @@ func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Cont
 	if account == nil {
 		return false, "account_nil"
 	}
+	if reason := s.chatRequestCapabilityFailureReason(ctx, account); reason != "" {
+		return false, reason
+	}
 	if accountRetryNotBeforeBlocked(ctx, account.ID) {
 		return false, string(SelectionReasonRateLimited)
 	}

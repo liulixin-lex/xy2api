@@ -9,6 +9,7 @@
 | 入站请求体上传超时 | 408 `invalid_request_error`，消息 `Timed out reading request body`；OpenAI 协议 code 为 `request_upload_timeout`。不调用上游；真正取消或断连只记 499，不补写响应 |
 | 普通上游 408、409、422 | 保留状态码与脱敏消息；Responses 与 Chat 错误体保留安全的 `type/code/param`，Messages 保留既有 `type/message` 形状，缺省 code 分别为 `request_timeout/conflict/unprocessable_entity`；管理员配置的错误规则优先 |
 | 分组内没有可用账号 | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
+| 带工具的 Chat 请求，持久配置中没有可表达其最终模型／档位的 Responses 上游 | 400 `invalid_request_error`，code `responses_required`，消息明确指出 `tools` 或 `functions`；有能力但暂时忙的账号不归此类 |
 | 非流式请求，但组内账号都只接受流式 | 503，消息为 `No available account in this group supports non-streaming requests; retry with "stream": true`，带 `x-should-retry: false`，不带 `Retry-After` |
 | 配置原因导致无号（如渠道定价不含该模型） | 503，`Retry-After: 60`，`x-should-retry: false` |
 | 模型不在分组白名单 | 404，消息为 `Model "<model>" is not available for this group`，并列出本分组白名单的前 10 项 |

@@ -466,6 +466,13 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "account_model_not_owned"
 		}
 	}
+	var service *OpenAIGatewayService
+	if len(gateway) > 0 {
+		service = gateway[0]
+	}
+	if reason := service.chatRequestCapabilityFailureReason(ctx, account); reason != "" {
+		return reason
+	}
 	if accountRetryNotBeforeBlocked(ctx, account.ID) {
 		return string(SelectionReasonRateLimited)
 	}
@@ -1064,7 +1071,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
-	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
 		return nil
 	}
@@ -1251,7 +1258,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_should_clear")
 					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 				}
-				eligible := !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability)
+				eligible := !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s)
 				if !clearSticky && !eligible {
 					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
 				}
