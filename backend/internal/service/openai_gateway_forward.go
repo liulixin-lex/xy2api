@@ -1137,6 +1137,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
+	var rejectedFieldRetryEvent *OpsUpstreamErrorEvent
+	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
@@ -1195,6 +1197,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		if rejectedFieldRetryEvent != nil {
+			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
+				rejectedFieldRetryEvent.Resent = true
+			}
+			rejectedFieldRetryEvent = nil
+		}
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0
 			if resp != nil {
@@ -1273,6 +1281,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
+				rejectedFieldRetryEvent = recordOpenAIResponsesRejectedFieldRetry(c, account, resp, respBody)
+				rejectedFieldRetrySequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+				recordOpenAIRejectedOutputLimitOmission(ctx, body, retryBody)
 				body = retryBody
 				requestView = newOpenAIRequestView(body)
 				reqBody = nil

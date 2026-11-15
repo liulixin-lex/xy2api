@@ -164,7 +164,7 @@ goals = true
 - **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
 - **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
 
-Responses 上游明确拒绝 `max_output_tokens` 时，网关按既有请求预算删除该字段后重发；重发请求不再受调用方指定的输出上限约束。
+Responses 上游明确拒绝 `max_output_tokens` 时，网关按既有请求预算删除该字段后重发；重发请求不再受调用方指定的输出上限约束，并记录 `max_output_tokens/omit` 降级。
 
 Chat 请求的 `reasoning` 接受字符串或对象；同时提供 `reasoning_effort` 时以该字段为准。扩展字段中的错误类型与未知子字段继续忽略，`metadata`、`user`、`text` 与预算别名保留给目标协议转换。
 
