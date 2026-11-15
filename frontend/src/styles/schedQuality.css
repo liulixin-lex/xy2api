@@ -69,11 +69,15 @@
 .sq-table tr.sq-weak td { color: var(--sq-text-3); }
 .sq-table tr.sq-split td { border-top: 1px solid var(--sq-line); }
 
-/* Short hover tip (spec E): 12px on the tooltip tokens (styles/tokens.css); one line unless the text has line breaks. */
+/* Short hover tip (spec E): 12px on the tooltip tokens (styles/tokens.css); one line unless the text has line breaks.
+   Never larger than the viewport less 8px each side (--tip-room-w/-h, set by utils/tip.ts before it is placed): what
+   does not fit is cut inside it (12.12-2). */
 .sq-tip {
   position: fixed;
   z-index: 1000;
-  max-width: 320px;
+  max-width: min(320px, var(--tip-room-w, 320px));
+  max-height: var(--tip-room-h, none);
+  overflow: hidden;
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--color-tooltip-bg);
@@ -99,8 +103,8 @@
 
 /* Tip card (12.7): a title with the state at the top right, then a grid of data; text nodes only, built in utils/tip.ts. */
 .sq-tip--card {
-  min-width: 168px;
-  max-width: 340px;
+  min-width: min(168px, var(--tip-room-w, 168px));
+  max-width: min(340px, var(--tip-room-w, 340px));
   padding: 10px 12px;
   border-radius: 10px;
   white-space: nowrap;

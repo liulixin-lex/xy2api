@@ -66,8 +66,15 @@ function tip() {
   return tipEl
 }
 
-/** Above the target; below when it does not fit above; against the viewport's edge when it fits neither. */
+/**
+ * Above the target; below when it does not fit above; against the viewport's edge when it fits neither. Its size is
+ * capped first, to the viewport less EDGE on each side (styles/schedQuality.css caps it further, 320px or a card's
+ * 340px, and cuts what does not fit inside it), so it is placed at the size it shows at and no edge leaves the
+ * screen (12.12-2).
+ */
 function place(target: HTMLElement, el: HTMLElement) {
+  el.style.setProperty('--tip-room-w', `${window.innerWidth - EDGE * 2}px`)
+  el.style.setProperty('--tip-room-h', `${window.innerHeight - EDGE * 2}px`)
   const rect = target.getBoundingClientRect()
   const width = el.offsetWidth
   const height = el.offsetHeight

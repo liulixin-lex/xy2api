@@ -11,6 +11,7 @@ enableAutoUnmount(afterEach)
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
 
@@ -83,5 +84,22 @@ describe('v-tip cards', () => {
     expect(at(600)).toBe('94px')
     expect(at(100)).toBe('126px')
     expect(at(300)).toBe('260px')
+  })
+
+  it('takes a 320px viewport less 8px each side as its largest size before it is measured, then stays on screen (12.12-2)', () => {
+    vi.stubGlobal('innerWidth', 320)
+    vi.stubGlobal('innerHeight', 568)
+    // The room the card has when it is measured; the browser sizes it to that room at most (304px wide here).
+    const room: string[] = []
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      room.push(this.style.getPropertyValue('--tip-room-w'), this.style.getPropertyValue('--tip-room-h'))
+      return 304
+    })
+    content.value = { title: '晨星组', head: ['模型', '原因', '恢复'], rows: [['Astra', '首字超限', '15m 后恢复']] }
+    const el = mount(Host, { attachTo: document.body }).element as HTMLElement
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300, bottom: 320, left: 290, width: 24, height: 20 } as DOMRect)
+    hover(el)
+    expect(room).toEqual(['304px', '552px'])
+    expect(tip().style.left).toBe('8px')
   })
 })
