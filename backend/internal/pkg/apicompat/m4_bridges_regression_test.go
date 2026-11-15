@@ -1305,3 +1305,60 @@ func TestM4ToolHistoryRounds(t *testing.T) {
 		}
 	})
 }
+
+func TestM4UsagePresenceHandoffs(t *testing.T) {
+	for _, raw := range []string{`{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`, `{"prompt_tokens":5}`, `{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":0}`} {
+		var usage ChatUsage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			t.Fatal(err)
+		}
+		out := ChatUsageToResponsesUsage(&usage)
+		if !out.UsagePresenceKnown || out.InputTokensPresent != usage.PromptTokensPresent || out.OutputTokensPresent != usage.CompletionTokensPresent || out.TotalTokensPresent != usage.TotalTokensPresent {
+			t.Fatalf("presence: %#v / %#v", usage, out)
+		}
+		legacy := usage
+		legacy.UsagePresenceKnown = false
+		legacy.PromptTokensPresent = false
+		legacy.CompletionTokensPresent = false
+		legacy.TotalTokensPresent = false
+		a, _ := json.Marshal(ChatUsageToResponsesUsage(&legacy))
+		b, _ := json.Marshal(out)
+		if string(a) != string(b) {
+			t.Fatalf("wire changed: %s / %s", a, b)
+		}
+	}
+	unknown := ChatUsageToResponsesUsage(&ChatUsage{PromptTokens: 5, CompletionTokens: 2})
+	if unknown.UsagePresenceKnown || unknown.TotalTokens != 7 {
+		t.Fatalf("unknown changed: %#v", unknown)
+	}
+	for _, raw := range []string{`{"input_tokens":5,"output_tokens":2}`, `{"input_tokens":5}`, `{"input_tokens":0,"output_tokens":0}`} {
+		var usage AnthropicUsage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			t.Fatal(err)
+		}
+		resp := &AnthropicResponse{ID: "fixed", StopReason: AnthropicStopReasonPtr("end_turn"), Usage: usage}
+		old := AnthropicToResponsesResponse(resp)
+		out, e := AnthropicToResponsesResponseWithBridgeOptions(resp, ConversionOptions{Bridge: &BridgeOptions{Enabled: true}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if !out.Usage.UsagePresenceKnown || out.Usage.InputTokensPresent != usage.InputTokensPresent || out.Usage.OutputTokensPresent != usage.OutputTokensPresent || out.Usage.TotalTokensPresent {
+			t.Fatalf("presence: %#v", out.Usage)
+		}
+		a, _ := json.Marshal(old.Usage)
+		b, _ := json.Marshal(out.Usage)
+		if string(a) != string(b) {
+			t.Fatalf("Anthropic wire changed: %s / %s", a, b)
+		}
+	}
+	state := NewAnthropicEventToResponsesState()
+	state.Bridge = &BridgeOptions{Enabled: true}
+	state.CreatedSent = true
+	state.StopReason = "end_turn"
+	state.InputTokens = 5
+	events := FinalizeAnthropicResponsesStreamWithBridgeOptions(state, ConversionOptions{Bridge: state.Bridge})
+	usage := events[len(events)-1].Response.Usage
+	if usage.UsagePresenceKnown || usage.InputTokens != 5 || usage.OutputTokens != 0 || usage.TotalTokens != 5 {
+		t.Fatalf("E7/E8 stream usage: %#v", usage)
+	}
+}
