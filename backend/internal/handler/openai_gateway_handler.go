@@ -1768,17 +1768,7 @@ func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 	}
 	_, code, message := resilienceTranslateError(c, status, errType, "", message)
-	if !beginResilienceTerminal(c) {
-		return
-	}
-	errObj := gin.H{"type": errType, "message": message}
-	if code != "" {
-		errObj["code"] = code
-	}
-	c.JSON(status, gin.H{
-		"type":  "error",
-		"error": errObj,
-	})
+	service.WriteTargetProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
 }
 
 // anthropicStreamingAwareError handles errors that may occur during streaming,
@@ -1788,33 +1778,8 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 	if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError && errType == "api_error" {
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 	}
-	// xy2api resilience: a pre-output heartbeat may have committed 200.
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
-		streamStarted = true
-	}
-	if streamStarted {
-		_, code, translatedMessage := resilienceTranslateError(c, status, errType, "", message)
-		message = translatedMessage
-		service.MarkOpsStreamError(c, errType, message, status)
-		flusher, ok := c.Writer.(http.Flusher)
-		if ok {
-			if !beginResilienceTerminal(c) {
-				return
-			}
-			errObj := gin.H{"type": errType, "message": message}
-			if code != "" {
-				errObj["code"] = code
-			}
-			errPayload, _ := json.Marshal(gin.H{
-				"type":  "error",
-				"error": errObj,
-			})
-			fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errPayload) //nolint:errcheck
-			flusher.Flush()
-		}
-		return
-	}
-	h.anthropicErrorResponse(c, status, errType, message)
+	_, code, message := resilienceTranslateError(c, status, errType, "", message)
+	service.WriteTargetProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
 }
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
@@ -1881,7 +1846,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 
 // ensureAnthropicErrorResponse writes a fallback Anthropic error if no response was written.
 func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, streamStarted bool) bool {
-	if c == nil || c.Writer == nil || c.Writer.Written() {
+	if c == nil || c.Writer == nil || service.ProtocolTerminalClaimed(c) {
 		return false
 	}
 	h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
@@ -4137,59 +4102,12 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 ) {
 	applyConcurrencyRetryHint(c, status, code)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	// body-signal compact 心跳可能已把响应头提交为 200：先停心跳（建立
-	// happens-before，接管 ResponseWriter），并升级为流内错误处理。
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
-		streamStarted = true
-	}
-	if streamStarted {
+	if streamStarted || c.Writer.Written() {
 		if countTowardsSLA {
 			service.MarkOpsStreamFailure(c, errType, code, message, status)
-		} else {
-			service.MarkOpsStreamError(c, errType, message, status)
 		}
-		// /v1/responses 的严格 SDK（Codex CLI）要求终止事件必须属于
-		// response.completed/failed/incomplete/cancelled 集合。
-		// 通用 `event: error` 帧不被识别为终止事件，会导致
-		// "stream closed before response.completed"。
-		if inboundIsResponses(c) {
-			if writeResponsesFailedSSEWithStatus(c, status, errType, code, message) {
-				return
-			}
-		}
-		if resilienceChatTerminalFrame(c) && writeChatCompletionsErrorSSE(c, errType, code, message, status) {
-			return
-		}
-		// Stream already started, send error as SSE event then close
-		flusher, ok := c.Writer.(http.Flusher)
-		if ok {
-			errorObject := gin.H{"type": errType, "message": message}
-			if code != "" {
-				errorObject["code"] = code
-			}
-			payload, err := json.Marshal(gin.H{"error": errorObject})
-			if err != nil {
-				payload = []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`)
-			}
-			errorEvent := "event: error\ndata: " + string(payload) + "\n\n"
-			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
-				_ = c.Error(err)
-			}
-			flusher.Flush()
-		}
-		return
 	}
-
-	// Normal case: return JSON response with proper status code
-	if code == "" {
-		h.errorResponse(c, status, errType, message)
-		return
-	}
-	body := gin.H{"error": gin.H{
-		"type": errType, "code": code, "message": message,
-	}}
-	stashResilienceErrorResponse(c, status, errType, message, body)
-	c.JSON(status, body)
+	service.WriteTargetProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
 }
 
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
@@ -4336,34 +4254,12 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
 	var code string
 	errType, code, message = resilienceTranslateError(c, status, errType, "", message)
+	body := gin.H{"error": gin.H{"type": errType, "message": message}}
 	if code != "" {
-		if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
-			service.MarkOpsStreamError(c, errType, message, status)
-			if writeResponsesFailedSSEWithStatus(c, status, errType, code, message) {
-				return
-			}
-		}
-		body := gin.H{"error": gin.H{"type": errType, "code": code, "message": message}}
-		stashResilienceErrorResponse(c, status, errType, message, body)
-		c.JSON(status, body)
-		return
-	}
-	// body-signal compact 心跳可能已把响应头提交为 200：JSON 错误体会与已
-	// 提交的 SSE 流交错，必须降级为 response.failed 终止事件（#3887）。
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
-		service.MarkOpsStreamError(c, errType, message, status)
-		if writeResponsesFailedSSEWithStatus(c, status, errType, "", message) {
-			return
-		}
-	}
-	body := gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
+		body["error"].(gin.H)["code"] = code
 	}
 	stashResilienceErrorResponse(c, status, errType, message, body)
-	c.JSON(status, body)
+	service.WriteTargetProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
 }
 
 // openAICompactKeepaliveInterval 复用流式 keepalive 配置作为 compact 下游

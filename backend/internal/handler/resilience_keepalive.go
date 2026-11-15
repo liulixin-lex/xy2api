@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -109,26 +106,8 @@ func resilienceChatTerminalFrame(c *gin.Context) bool {
 // (design §7.6): one data line with the error and its original HTTP status,
 // then [DONE].
 func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string, status int) bool {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return false
-	}
-	if !beginResilienceTerminal(c) {
+	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
-	errObj := gin.H{"type": errType, "message": message, "status": status}
-	if code != "" {
-		errObj["code"] = code
-	}
-	payload, err := json.Marshal(gin.H{"error": errObj})
-	if err != nil {
-		return false
-	}
-	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", payload); err != nil {
-		_ = c.Error(err)
-		return true
-	}
-	service.MarkOpsGatewayTerminalStatus(c, status)
-	flusher.Flush()
-	return true
+	return service.WriteTargetProtocolError(c, service.PreOutputProtocolChat, status, errType, code, "", message)
 }

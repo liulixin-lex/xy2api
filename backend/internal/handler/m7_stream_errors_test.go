@@ -5,8 +5,10 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -40,5 +42,50 @@ func TestM7MessagesKeepsUnknownActualEffort(t *testing.T) {
 				require.Equal(t, "high", *f.usage.logs[0].RequestedReasoningEffort)
 			}
 		})
+	}
+}
+
+func TestM7PostCommitProtocolErrors(t *testing.T) {
+	for _, protocol := range []string{"chat/completions", "messages", "responses"} {
+		for _, handlerKind := range []string{"gateway", "openai"} {
+			t.Run(handlerKind+"/"+protocol, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+protocol, nil)
+				c.Header("Content-Type", "text/event-stream")
+				c.Writer.WriteString(": heartbeat\n\n")
+				c.Writer.Flush()
+				switch handlerKind {
+				case "gateway":
+					h := &GatewayHandler{}
+					h.handleStreamingAwareErrorWithCode(c, 502, "api_error", "fixture", "failure", false)
+					h.handleStreamingAwareErrorWithCode(c, 502, "api_error", "fixture", "again", true)
+				case "openai":
+					h := &OpenAIGatewayHandler{}
+					if protocol == "messages" {
+						h.anthropicErrorResponse(c, 502, "api_error", "failure")
+						h.ensureAnthropicErrorResponse(c, true)
+					} else {
+						h.handleStreamingAwareErrorWithCode(c, 502, "api_error", "fixture", "failure", false, false)
+						h.handleStreamingAwareErrorWithCode(c, 502, "api_error", "fixture", "again", true, false)
+					}
+				}
+				require.Equal(t, 200, rec.Code)
+				require.True(t, service.ProtocolTerminalClaimed(c))
+				require.NotContains(t, rec.Body.String(), "again")
+				switch protocol {
+				case "chat/completions":
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "[DONE]"))
+					require.NotContains(t, rec.Body.String(), "event: error")
+				case "messages":
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+					require.NotContains(t, rec.Body.String(), "[DONE]")
+				case "responses":
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed"))
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.created"))
+					require.NotContains(t, rec.Body.String(), "[DONE]")
+				}
+			})
+		}
 	}
 }

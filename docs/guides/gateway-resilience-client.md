@@ -55,6 +55,8 @@
 
 ## 流式请求的失败结束方式
 
+响应头或心跳提交后，错误按入站协议只写一次：Chat 为 data 错误与 `[DONE]`，Messages 为 `event: error`，Responses 为 `response.failed`。已写 JSON、已结束或已取消的响应不会再追加错误，也不会改动已提交的 HTTP 状态。
+
 上游 Responses 帧先核验原始错误与用量，再进行协议转换。没有 type 的数字错误码也会结束本次尝试，随后到来的 completed 不会覆盖失败；错误帧中已收到的用量仍用于内部记录。
 
 非流式 Chat 与 Responses 由 Anthropic 流拼装时，必须收到完整 `message_stop` 或有效 `message_delta.stop_reason` 才返回成功。结束前断流、读取失败或明确错误返回 502，并保留已观察的用量；有效结束后的连接关闭和缺少尾部用量不改变成功结果。

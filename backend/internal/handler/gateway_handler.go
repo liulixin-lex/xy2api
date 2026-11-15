@@ -2094,52 +2094,7 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 		}
 	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	// xy2api resilience: a pre-output heartbeat may have committed 200.
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
-		streamStarted = true
-	}
-	if streamStarted {
-		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
-		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
-		// 这类挂在 200 流上的失败（如并发限流回退）不会进错误看板。
-		service.MarkOpsStreamError(c, errType, message, status)
-
-		// /v1/responses 的严格 SDK（Codex CLI）要求终止事件必须属于
-		// response.completed/failed/incomplete/cancelled 集合。
-		// Anthropic-backed Responses 路径同样会因为通用 error 帧被拒。
-		if inboundIsResponses(c) {
-			if writeResponsesFailedSSEWithStatus(c, status, errType, code, message) {
-				return
-			}
-		}
-		if resilienceChatTerminalFrame(c) && writeChatCompletionsErrorSSE(c, errType, code, message, status) {
-			return
-		}
-		// Stream already started, send error as SSE event then close
-		flusher, ok := c.Writer.(http.Flusher)
-		if ok {
-			// SSE 错误事件固定 schema，使用 Quote 直拼可避免额外 Marshal 分配。
-			errorCode := ""
-			if code != "" {
-				errorCode = `,"code":` + strconv.Quote(code)
-			}
-			// xy2api G3: Anthropic SDKs only surface named events, so the
-			// frame carries "event: error" (off with the errors switch: the
-			// 0.3.0 frame).
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
-			if resilience.Current().ErrorsOn() {
-				errorEvent = "event: error\n" + errorEvent
-			}
-			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
-				_ = c.Error(err)
-			}
-			flusher.Flush()
-		}
-		return
-	}
-
-	// Normal case: return JSON response with proper status code
-	h.errorResponseWithCode(c, status, errType, code, message)
+	service.WriteTargetProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
@@ -2242,16 +2197,9 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
 	errType = anthropicLocalErrorType(status, errType)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	errorObject := gin.H{"type": errType, "message": message}
-	if code != "" {
-		errorObject["code"] = code
-	}
-	body := gin.H{
-		"type":  "error",
-		"error": errorObject,
-	}
+	body := gin.H{"type": "error", "error": gin.H{"type": errType, "message": message}}
 	stashResilienceErrorResponse(c, status, errType, message, body)
-	c.JSON(status, body)
+	service.WriteTargetProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // CountTokens handles token counting endpoint

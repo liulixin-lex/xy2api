@@ -1,16 +1,12 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -68,60 +64,18 @@ func writeResponsesFailedSSEWithStatus(c *gin.Context, status int, errType, code
 // forceOpening covers queue pings on compatible ingress, including when
 // resilience is disabled or delivery tracking was not installed.
 func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errType, code, message string, forceOpening bool) bool {
-	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
-	if wrote {
-		service.MarkOpsGatewayTerminalStatus(c, status)
+	if service.ProtocolTerminalClaimed(c) {
+		return true
 	}
-	return handled
+	return service.WriteTargetProtocolError(c, service.PreOutputProtocolResponses, status, errType, code, "", message)
 }
 
 func writeResponsesFailedSSEWithOpeningResult(c *gin.Context, errType, code, message string, forceOpening bool) (bool, bool) {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return false, false
-	}
-	if !beginResilienceTerminal(c) {
+	if service.ProtocolTerminalClaimed(c) {
 		return true, false
 	}
-
-	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
-	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)
-	if forceOpening && opening == "" {
-		opening, sequence = string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
-	}
-	failedError := responsesFailedError{Code: mapResponsesErrorCode(errType, code), Message: message}
-	if resilience.Current().FailedFrameRetryAfterOn() && c.Request != nil {
-		advice := responsesFailedRetryAdvice(c, errType, code)
-		failedError.Headers = advice.Headers()
-		failedError.Message = advice.Message(message)
-		if advice.Suppress && advice.Source == "turn_cap" {
-			failedError.Code = codeServerIsOverloaded
-		}
-	}
-	payload, err := json.Marshal(responsesFailedEvent{
-		Type:           "response.failed",
-		SequenceNumber: sequence,
-		Response: responsesFailedBody{
-			ID:        id,
-			Object:    "response",
-			CreatedAt: createdAt,
-			Model:     model,
-			Status:    "failed",
-			Output:    []any{},
-			Error:     failedError,
-		},
-	})
-	if err != nil {
-		_ = c.Error(err)
-		return true, false
-	}
-
-	if _, err := fmt.Fprintf(c.Writer, "%sevent: response.failed\ndata: %s\n\n", opening, payload); err != nil {
-		_ = c.Error(err)
-		return true, false
-	}
-	flusher.Flush()
-	return true, true
+	wrote := service.WriteTargetProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, errType, code, "", message)
+	return wrote, wrote
 }
 
 // inboundIsResponses 判断当前请求是否落在任意 Responses 路由上

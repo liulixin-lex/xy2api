@@ -692,13 +692,7 @@ func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
 
 // writeResponsesError writes an error response in OpenAI Responses API format.
 func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
-	MarkResponseCommitted(c)
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"code":    code,
-			"message": message,
-		},
-	})
+	WriteTargetProtocolError(c, PreOutputProtocolResponses, statusCode, "", code, "", message)
 }
 
 // mapUpstreamStatusCode maps upstream HTTP status codes to appropriate client-facing codes.
