@@ -365,6 +365,7 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 	if s.opsUpstreamSendBoundaries == nil {
 		s.opsUpstreamSendBoundaries = make(map[int64]uint64)
 	}
+	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
 	s.mu.Unlock()

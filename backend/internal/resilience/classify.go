@@ -409,8 +409,7 @@ func isStructuredModelUnsupportedError(err structuredModelError, statusCode int)
 }
 
 var (
-	reRetryAfterJSON = regexp.MustCompile(`(?i)"?retry[_-]after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)`)
-	reTryAgainIn     = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
+	reTryAgainIn = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
 	// reTryAgainInCompound matches Go-style compound hints such as
 	// "try again in 1m30.5s" or "1h2m" (OpenAI rate limits).
 	reTryAgainInCompound = regexp.MustCompile(`(?i)try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s)){2,})\b`)
@@ -476,7 +475,8 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	}
 	retryAfter := RetryAfterFrom(o.Headers, body)
 	if retryAfter == 0 && o.Message != "" {
-		retryAfter = RetryAfterFrom(nil, []byte(o.Message))
+		messageBody, _ := json.Marshal(map[string]any{"error": map[string]string{"message": o.Message}})
+		retryAfter = RetryAfterFrom(nil, messageBody)
 	}
 	status := o.StatusCode
 	isEvent := o.Source == SourceStreamEvent
@@ -722,37 +722,18 @@ func looksLikeHTMLBlock(lowerBody string) bool {
 		strings.Contains(lowerBody, "just a moment...")
 }
 
-// RetryAfterFrom extracts the delay an upstream asked for from response
-// headers (Retry-After seconds or HTTP date, retry-after-ms) or the body
-// (`"retry_after":60` in JSON or relay error pages, "try again in Ns").
-// It returns zero when nothing was found.
+// RetryAfterFrom preserves the legacy duration API while using the shared
+// parser's latest valid boundary across trusted headers and error fields.
 func RetryAfterFrom(h http.Header, body []byte) time.Duration {
-	if d := retryAfterHeader(h, time.Now()); d > 0 {
-		return d
-	}
+	now := time.Now()
 	if len(body) == 0 {
+		return retryAfterHeader(h, now)
+	}
+	hint, ok := ParseUpstreamRecoveryHint(h, body, now)
+	if !ok {
 		return 0
 	}
-	if len(body) > inspectLimit {
-		body = body[:inspectLimit]
-	}
-	s := string(body)
-	if m := reRetryAfterJSON.FindStringSubmatch(s); m != nil {
-		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 {
-			return secondsDuration(v)
-		}
-	}
-	if m := reTryAgainInCompound.FindStringSubmatch(s); m != nil {
-		if d, err := time.ParseDuration(strings.ToLower(m[1])); err == nil && d > 0 {
-			return d
-		}
-	}
-	if m := reTryAgainIn.FindStringSubmatch(s); m != nil {
-		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 {
-			return unitDuration(v, m[2])
-		}
-	}
-	return 0
+	return hint.Delay
 }
 
 // resetFrom extracts a rate-limit reset distance: Retry-After, the body
@@ -770,44 +751,9 @@ func resetFrom(h http.Header, body []byte) time.Duration {
 }
 
 func retryAfterHeader(h http.Header, now time.Time) time.Duration {
-	if h == nil {
+	hint, ok := ParseUpstreamRecoveryHint(h, nil, now)
+	if !ok {
 		return 0
 	}
-	if v := strings.TrimSpace(h.Get("retry-after-ms")); v != "" {
-		if ms, err := strconv.ParseFloat(v, 64); err == nil && ms > 0 {
-			return time.Duration(ms * float64(time.Millisecond))
-		}
-	}
-	v := strings.TrimSpace(h.Get("Retry-After"))
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.ParseFloat(v, 64); err == nil {
-		if secs > 0 {
-			return secondsDuration(secs)
-		}
-		return 0
-	}
-	if t, err := http.ParseTime(v); err == nil && t.After(now) {
-		return t.Sub(now)
-	}
-	return 0
-}
-
-func secondsDuration(v float64) time.Duration {
-	return time.Duration(v * float64(time.Second))
-}
-
-func unitDuration(v float64, unit string) time.Duration {
-	unit = strings.ToLower(unit)
-	switch {
-	case strings.HasPrefix(unit, "ms") || strings.HasPrefix(unit, "milli"):
-		return time.Duration(v * float64(time.Millisecond))
-	case strings.HasPrefix(unit, "h"):
-		return time.Duration(v * float64(time.Hour))
-	case strings.HasPrefix(unit, "m"):
-		return time.Duration(v * float64(time.Minute))
-	default:
-		return secondsDuration(v)
-	}
+	return hint.Delay
 }

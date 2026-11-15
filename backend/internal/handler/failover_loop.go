@@ -58,22 +58,22 @@ const (
 const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group admission policy"
 
 func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryCount int) time.Duration {
+	delay := sameAccountRetryDelay
 	if failoverErr == nil {
-		return sameAccountRetryDelay
+		return delay
 	}
 	if failoverErr.SameAccountRetryDelay > 0 {
-		return failoverErr.SameAccountRetryDelay
-	}
-	if !failoverErr.RequestScopedTransient || retryCount <= 1 {
-		return sameAccountRetryDelay
-	}
-
-	delay := sameAccountRetryDelay
-	for i := 1; i < retryCount; i++ {
-		if delay >= maxRequestScopedRetryDelay/2 {
-			return maxRequestScopedRetryDelay
+		delay = failoverErr.SameAccountRetryDelay
+	} else if failoverErr.RequestScopedTransient {
+		for i := 1; i < retryCount; i++ {
+			delay = min(delay*2, maxRequestScopedRetryDelay)
+			if delay == maxRequestScopedRetryDelay {
+				break
+			}
 		}
-		delay *= 2
+	}
+	if hint := failoverErr.UpstreamRecoveryHint; hint != nil {
+		delay = max(delay, time.Until(hint.NotBefore))
 	}
 	return delay
 }

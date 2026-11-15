@@ -52,11 +52,11 @@ func TestClassifySpecScenarios(t *testing.T) {
 			want: CategoryRateLimit,
 		},
 		{
-			// Spec: relay timeout page with retry_after.
+			// HTML text is not a trusted retry-hint field.
 			name:       "524 relay page",
 			in:         Outcome{StatusCode: 524, Body: []byte(`<html>error code: 524 ... "retry_after":120 </html>`)},
 			want:       CategoryTransient,
-			retryAfter: 120 * time.Second,
+			retryAfter: 0,
 		},
 		{
 			name:       "502 cloudflare json retry_after 60",
@@ -357,9 +357,9 @@ func TestRetryAfterFrom(t *testing.T) {
 	h.Set("retry-after-ms", "1500")
 	require.Equal(t, 1500*time.Millisecond, RetryAfterFrom(h, nil))
 
-	require.Equal(t, 2*time.Minute, RetryAfterFrom(nil, []byte(`please try again in 2 minutes`)))
+	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`please try again in 2 minutes`)))
 	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`nothing here`)))
-	require.Equal(t, 45*time.Second, RetryAfterFrom(nil, []byte(`retry_after: 45`)))
+	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`retry_after: 45`)))
 }
 
 func TestChainedGatewayErrorShapes(t *testing.T) {
@@ -428,9 +428,9 @@ func TestGeminiQuotaWordingIsARateLimit(t *testing.T) {
 func TestRetryAfterFromCompoundHints(t *testing.T) {
 	for in, want := range map[string]time.Duration{
 		`{"error":{"message":"Rate limit reached. Please try again in 1m30.5s."}}`: 90500 * time.Millisecond,
-		`Please try again in 1h2m`:  62 * time.Minute,
-		`Please try again in 250ms`: 250 * time.Millisecond,
-		`Please try again in 20s.`:  20 * time.Second,
+		`{"error":{"message":"Please try again in 1h2m"}}`:                         62 * time.Minute,
+		`{"error":{"message":"Please try again in 250ms"}}`:                        250 * time.Millisecond,
+		`{"error":{"message":"Please try again in 20s."}}`:                         20 * time.Second,
 	} {
 		require.Equal(t, want, RetryAfterFrom(nil, []byte(in)), in)
 	}
@@ -541,7 +541,11 @@ func TestEdgeErrorPagesAreTransientNotCapacity(t *testing.T) {
 	} {
 		r := Classify(Outcome{Source: SourceHTTP, StatusCode: tc.status, Message: tc.msg, Body: []byte(tc.body)}, nil)
 		require.Equal(t, CategoryTransient, r.Category, "%s: %s", tc.name, r.Reason)
-		require.Equal(t, 60*time.Second, r.RetryAfter, tc.name)
+		if tc.name == "relay 502 JSON" {
+			require.Equal(t, 60*time.Second, r.RetryAfter, tc.name)
+		} else {
+			require.Zero(t, r.RetryAfter, "non-error-envelope bodies do not supply retry hints: %s", tc.name)
+		}
 		require.True(t, r.Category.AccountScoped() && r.Category.CountsForSession() && r.Category.SoftCooldown(), tc.name)
 	}
 
