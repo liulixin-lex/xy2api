@@ -95,3 +95,69 @@ func TestM8PreDispatchPreservesFailure(t *testing.T) {
 	absent.SetLastUpstreamFailure(errors.New("ignored"))
 	require.Nil(t, absent.LastUpstreamFailure())
 }
+
+// Credential resolution can finish after the header timer fires, before any
+// transport call. Returning the resolved account models a late successful read.
+type m8LateCredentialRepo struct {
+	AccountRepository
+	parent  *Account
+	expired bool
+}
+
+func (r *m8LateCredentialRepo) GetByID(ctx context.Context, _ int64) (*Account, error) {
+	if ctx.Done() != nil {
+		select {
+		case <-ctx.Done():
+			r.expired = true
+		case <-time.After(3 * time.Second):
+			return nil, errors.New("header timer did not cancel credential lookup")
+		}
+	}
+	return r.parent, nil
+}
+
+func TestM8PreDispatchHeaderTimeoutPreservesFailure(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		name := "native"
+		if passthrough {
+			name = "passthrough"
+		}
+		t.Run(name, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			st := resilience.StateFrom(req.ctx)
+			st.SetBudget(nil) // Use the configured one-second response-header timer.
+			previous := &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests,
+				ResponseBody: []byte(`{"error":{"message":"original rate limit"}}`)}
+			st.SetLastUpstreamFailure(previous)
+			account := webSearchReplayAccount(passthrough)
+			account.Type = AccountTypeOAuth
+			parentID := int64(379)
+			account.ParentAccountID = &parentID
+			repo := &m8LateCredentialRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI,
+				Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}}}
+			st.NoteAccountRetryNotBefore(account.ID, resilience.UpstreamRecoveryHint{NotBefore: time.Now().Add(time.Minute)})
+			upstream := &httpUpstreamRecorder{}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+			svc.accountRepo = repo
+
+			_, err := svc.Forward(req.ctx, req.c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+
+			require.True(t, repo.expired, "the actual header guard must have fired")
+			require.ErrorIs(t, err, previous)
+			var blocked *UpstreamFailoverError
+			require.ErrorAs(t, err, &blocked)
+			require.True(t, blocked.PreDispatchSelectionInvalidated)
+			require.Equal(t, http.StatusTooManyRequests, blocked.StatusCode)
+			require.Equal(t, previous.ResponseBody, blocked.ResponseBody)
+			require.NotContains(t, string(blocked.ResponseBody), "first_output_timeout")
+			require.Empty(t, upstream.requests)
+			require.Empty(t, currentOpsUpstreamEvents(req.c))
+			require.Empty(t, req.session.failures)
+			require.False(t, st.AccountFailed(account.ID))
+			_, sent := st.OpsUpstreamSendBoundary(account.ID)
+			require.False(t, sent)
+		})
+	}
+}
