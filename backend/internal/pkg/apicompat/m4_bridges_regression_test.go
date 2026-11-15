@@ -402,3 +402,67 @@ func TestM4ChatToolSlots(t *testing.T) {
 		t.Fatal("nonzero choice completed")
 	}
 }
+
+func TestM4AnthropicToolInterleave(t *testing.T) {
+	for _, finish := range []bool{true, false} {
+		t.Run(map[bool]string{true: "finish", false: "EOF"}[finish], func(t *testing.T) {
+			state := NewChatCompletionsToAnthropicStreamState("m")
+			state.Bridge = &BridgeOptions{Enabled: true}
+			var events []AnthropicStreamEvent
+			for _, delta := range []string{
+				`{"tool_calls":[{"index":0,"id":"a","function":{"name":"first","arguments":"{"}}]}`,
+				`{"content":"between"}`,
+				`{"tool_calls":[{"index":1,"id":"b","function":{"arguments":"{}"}}]}`,
+				`{"reasoning_content":"THINK"}`,
+				`{"tool_calls":[{"index":0,"function":{"arguments":"}"}},{"index":1,"function":{"name":"second"}}]}`,
+			} {
+				var chunk ChatCompletionsChunk
+				if err := json.Unmarshal([]byte(`{"choices":[{"index":0,"delta":`+delta+`}]}`), &chunk); err != nil {
+					t.Fatal(err)
+				}
+				events = append(events, ChatCompletionsChunkToAnthropicEvents(&chunk, state)...)
+			}
+			if finish {
+				reason := "tool_calls"
+				events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{FinishReason: &reason}}}, state)...)
+			}
+			events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+			open := map[int]bool{}
+			started := map[int]bool{}
+			stopped := false
+			var order []string
+			for _, e := range events {
+				switch e.Type {
+				case "content_block_start":
+					if started[*e.Index] {
+						t.Fatal("duplicate start")
+					}
+					started[*e.Index] = true
+					open[*e.Index] = true
+					order = append(order, e.ContentBlock.Type+":"+e.ContentBlock.Name)
+				case "content_block_delta":
+					if !open[*e.Index] {
+						t.Fatalf("delta on closed block: %+v", e)
+					}
+				case "content_block_stop":
+					if !open[*e.Index] {
+						t.Fatal("duplicate stop")
+					}
+					delete(open, *e.Index)
+				case "message_stop":
+					stopped = true
+				}
+			}
+			if finish {
+				if state.Err() != nil || len(open) != 0 || !stopped {
+					t.Fatalf("err=%v open=%v stopped=%v", state.Err(), open, stopped)
+				}
+				if !reflect.DeepEqual(order, []string{"tool_use:first", "text:", "tool_use:second", "thinking:"}) {
+					t.Fatalf("order=%v", order)
+				}
+			} else if state.Err() == nil || stopped {
+				t.Fatal("EOF completed tool input")
+			}
+		})
+	}
+}

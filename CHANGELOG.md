@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 工具期交错的正文、thinking 与其他工具按到达顺序排队，迟到参数不再发往已关闭的 Anthropic 块。
+
 - Chat 工具流缺失或稀疏的 index 使用稳定槽位，工具宣布、完成和最终响应保持同一身份与顺序。
 
 - namespace 中的 custom 工具可通过 Chat、Anthropic 转换桥调用，非流与流式响应恢复原始工具身份。
