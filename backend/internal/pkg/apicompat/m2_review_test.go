@@ -71,3 +71,95 @@ func TestReviewM2AnonymousDeltaUsesCurrentItem(t *testing.T) {
 		require.Equal(t, "hi", message.Content[0].Text)
 	}
 }
+
+func TestReviewM2TerminalRegeneratedIDs(t *testing.T) {
+	for _, kind := range []string{"function_call", "custom_tool_call", "reasoning", "message"} {
+		t.Run(kind, func(t *testing.T) {
+			item := ResponsesOutput{ID: "stream-id", Type: kind}
+			switch kind {
+			case "function_call":
+				item.CallID = "call"
+				item.Name = "f"
+				item.Arguments = `{}`
+			case "custom_tool_call":
+				item.CallID = "call"
+				item.Name = "f"
+				item.Input = "patch"
+			case "reasoning":
+				item.Summary = []ResponsesSummary{{Type: "summary_text", Text: "think"}}
+			case "message":
+				item.Role = "assistant"
+				item.Content = []ResponsesContentPart{{Type: "output_text", Text: "Hello"}}
+			}
+			for _, terminalID := range []string{"new-terminal-id", ""} {
+				a := NewBufferedResponseAccumulator()
+				state := NewResponsesEventToChatState()
+				state.IncludeUsage = true
+				var text, reasoning, arguments, finish string
+				finishes := 0
+				consume := func(event *ResponsesStreamEvent) {
+					a.ProcessEvent(event)
+					for _, chunk := range ResponsesEventToChatChunks(event, state) {
+						for _, choice := range chunk.Choices {
+							if choice.Delta.Content != nil {
+								text += *choice.Delta.Content
+							}
+							if choice.Delta.ReasoningContent != nil {
+								reasoning += *choice.Delta.ReasoningContent
+							}
+							for _, tool := range choice.Delta.ToolCalls {
+								arguments += tool.Function.Arguments
+							}
+							if choice.FinishReason != nil {
+								finish = *choice.FinishReason
+								finishes++
+							}
+						}
+					}
+				}
+				consume(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndexPresent: true, Item: &item})
+				consume(&ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &item})
+				terminal := item
+				terminal.ID = terminalID
+				response := &ResponsesResponse{Status: "incomplete", IncompleteDetails: &ResponsesIncompleteDetails{Reason: "max_output_tokens"}, Output: []ResponsesOutput{terminal}, Usage: &ResponsesUsage{InputTokens: 5, OutputTokens: 2, TotalTokens: 7}}
+				consume(&ResponsesStreamEvent{Type: "response.completed", Response: response})
+				require.NoError(t, state.Err())
+				require.NoError(t, a.Err())
+				require.Equal(t, "length", finish)
+				require.Equal(t, 1, finishes)
+				require.Equal(t, 5, state.Usage.PromptTokens)
+				a.SupplementResponseOutput(response)
+				require.NoError(t, a.Err())
+				require.Len(t, response.Output, 1)
+				require.Equal(t, "stream-id", response.Output[0].ID)
+				switch kind {
+				case "message":
+					require.Equal(t, "Hello", text)
+				case "reasoning":
+					require.Equal(t, "think", reasoning)
+				case "function_call":
+					require.Equal(t, `{}`, arguments)
+				case "custom_tool_call":
+					require.Equal(t, "patch", arguments)
+				}
+			}
+		})
+	}
+	t.Run("partial terminal matches content before index", func(t *testing.T) {
+		a := NewBufferedResponseAccumulator()
+		for _, raw := range []string{
+			`{"type":"response.output_item.done","output_index":0,"item":{"id":"first","type":"message","content":[{"type":"output_text","text":"First"}]}}`,
+			`{"type":"response.output_item.done","output_index":2,"item":{"id":"last","type":"message","content":[{"type":"output_text","text":"Last"}]}}`,
+			`{"type":"response.completed","response":{"status":"completed","output":[{"id":"new","type":"message","content":[{"type":"output_text","text":"Last"}]}]}}`,
+		} {
+			a.ProcessEvent(reviewM2Event(t, raw))
+		}
+		require.NoError(t, a.Err())
+		out := a.BuildOutput()
+		require.Len(t, out, 2)
+		require.Equal(t, "first", out[0].ID)
+		require.Equal(t, "First", out[0].Content[0].Text)
+		require.Equal(t, "last", out[1].ID)
+		require.Equal(t, "Last", out[1].Content[0].Text)
+	})
+}
