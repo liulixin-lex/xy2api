@@ -8,9 +8,13 @@ XY2API 的诊断 MCP 仍使用 /mcp、mcp.enabled、独立只读 PostgreSQL 登�
 
 管理 MCP 的授权服务器 issuer 为配置的完整 MCP 资源地址，发现地址为 /.well-known/oauth-authorization-server/api/v1/mcp。站点根路径的授权服务器发现继续供原有只读 MCP 使用。管理授权页面为 /oauth/management-mcp/authorize。普通操作员可继续使用原有按模块权限复核的只读诊断工具；管理范围的 OAuth 授权及机器密钥管理仅限超级管理员。
 
-## 部署
+## 后台配置与部署
 
-MCP 默认关闭。只有显式配置稳定、可信的公开 MCP 地址后，才会开放 MCP 资源端点、OAuth 发现及客户端注册接口，侧栏也才会显示 **MCP 接入**。例如：
+管理 MCP 默认关闭。超级管理员登录后台，进入 **系统设置 → 安全与认证 → 管理 MCP（OAuth）**，填写稳定、可信的公开 MCP 地址，勾选启用并保存。保存遵循平台的敏感操作二次验证设置；机器密钥、操作员和 MCP OAuth 凭证均不能修改这项配置。启用后开放 MCP 资源端点、OAuth 发现及客户端注册接口，侧栏显示 **MCP 接入**。
+
+后台配置持久保存在现有 `settings` 表的 `management_mcp_settings` 键，首次保存后优先于环境变量和 YAML 默认值。每个 MCP/OAuth 请求读取有效配置，保存后各实例的新请求立即生效，无需重启；配置读取失败时拒绝请求。无需新增数据库迁移，也不会覆写现有只读 MCP 配置。
+
+尚未在后台保存时，可用环境变量提供部署默认值：
 
 ```sh
 MANAGEMENT_MCP_PUBLIC_URL=https://api.example.com/api/v1/mcp
@@ -23,7 +27,9 @@ management_mcp:
   public_url: https://api.example.com/api/v1/mcp
 ```
 
-地址必须是站点根路径下的 `/api/v1/mcp`，不带尾斜杠、查询参数或片段；OAuth 发现端点同样位于站点根路径，因此不支持挂在子路径（如 `https://example.com/sub2api/`）下部署。生产环境使用 HTTPS；本机开发允许 localhost 或回环 IP 的 HTTP 地址。服务不会从前端 URL、请求 Host 或转发头推断该地址；未配置时 MCP 及其 OAuth 接口均返回 503。清空该配置即可关闭 MCP，已签发的令牌随之无法使用。
+地址必须是站点根路径下的 `/api/v1/mcp`，不带尾斜杠、查询参数或片段；OAuth 发现端点同样位于站点根路径，因此不支持挂在子路径（如 `https://example.com/sub2api/`）下部署。生产环境使用 HTTPS；本机开发允许 localhost 或回环 IP 的 HTTP 地址。服务不会从前端 URL、请求 Host 或转发头推断该地址。
+
+在后台取消启用并保存后，新的 MCP 请求、OAuth 发现、客户端注册、同意授权、授权码兑换和刷新均返回 503；已进入执行中的工具不被中断。授权记录保留，查看和撤销接口仍可使用，后台卡片保留连接管理入口。重新启用相同地址后，未过期、未撤销的授权可继续使用；如需永久失效，请撤销授权。改为不同地址后，旧资源的令牌不能调用新资源，客户端需重新授权。后台保存过配置后，清空环境变量不会覆盖后台设置。
 
 同域部署只需上述 MCP 地址。前后端分域时，另外配置平台前端 URL（管理设置或 `SERVER_FRONTEND_URL`），用于定位浏览器授权页。反向代理需转发 `/api/v1/mcp`、`/api/v1/mcp/oauth/*` 及下列 `/.well-known/*` 发现端点，保留 Authorization、Accept 和 MCP 协议请求头。浏览器客户端访问 MCP 资源仍需符合平台的 CORS/Origin 白名单。
 
@@ -174,6 +180,8 @@ curl 'https://api.example.com/.well-known/oauth-authorization-server/api/v1/mcp'
 
 工具目录位于 `backend/internal/managementmcp/catalog.go`。新增工具应绑定已有管理路由，使用封闭参数 schema，并覆盖权限、资源归属、参数边界及凭证脱敏测试。
 
-OAuth 使用独立管理表，迁移只追加、不覆盖只读 MCP 表。回退旧二进制时先清空 MANAGEMENT_MCP_PUBLIC_URL 并停止相关自动化，保留新增表与迁移记录；不要把新旧版本混用来管理同一组授权。
+OAuth 使用独立管理表，迁移只追加、不覆盖只读 MCP 表。回退旧二进制时，先在后台关闭管理 MCP，再清空 MANAGEMENT_MCP_PUBLIC_URL 和 YAML 的 management_mcp.public_url 并停止相关自动化；旧版本不读取后台开关。保留新增表与迁移记录，不要把新旧版本混用来管理同一组授权。
+
+官方能力及三方合并取舍见 [MCP 三方对比记录](../development/management-mcp-merge.md)。
 
 OAuth 存储由 `297_management_mcp_oauth.sql` 创建。动态注册不写数据库：`client_id` 是服务端签名的无状态标识，自带客户端名称、回调 URI 摘要和 grant type，签名密钥首次使用时生成并保存在 `security_secrets`，多实例共享。只有用户同意授权后才写入授权记录，因此匿名注册不会占用存储，也没有可被占满的全站名额。每次新授权时有界清理过期 7 天以上的授权。浏览器使用 JWT 保护的 `/api/v1/user/mcp/config` 获取服务端配置的连接地址、`/api/v1/user/mcp/authorize` 预览/决定授权，以及 `/api/v1/user/mcp/grants` 列表、撤销接口。客户端协议端点返回标准 OAuth JSON，浏览器接口沿用平台响应格式。

@@ -537,6 +537,8 @@ var catalog = map[string]Entry{
 	"PUT /settings/overload-cooldown":                                          {Kind: KindSuperOnly},
 	"GET /settings/panel-rate-limit":                                           {Kind: KindSuperOnly},
 	"PUT /settings/panel-rate-limit":                                           {Kind: KindSuperOnly},
+	"GET /settings/management-mcp":                                             {Kind: KindSuperOnly},
+	"PUT /settings/management-mcp":                                             {Kind: KindSuperOnly},
 	"GET /settings/rate-limit-429-cooldown":                                    {Kind: KindSuperOnly},
 	"PUT /settings/rate-limit-429-cooldown":                                    {Kind: KindSuperOnly},
 	"GET /settings/rectifier":                                                  {Kind: KindSuperOnly},

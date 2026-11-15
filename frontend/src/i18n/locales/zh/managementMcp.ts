@@ -1,4 +1,13 @@
 export default {
+  adminTitle: '管理 MCP（OAuth）',
+  adminDescription: '允许 AI 助手通过浏览器 OAuth 授权接入平台。保存后立即生效，无需重启服务。',
+  adminEnabled: '启用管理 MCP',
+  adminURLHint: '填写客户端可访问的 HTTPS 地址，路径必须为 /api/v1/mcp；本机开发允许回环地址 HTTP。首次保存后，此处设置优先于部署配置。',
+  adminDisableHint: '关闭后，已签发令牌无法调用或刷新；授权记录保留，重新开启相同地址后仍在有效期内的授权可继续使用。',
+  adminAnalysis: '授权时选择“平台管理 + 只读”，即可分析全站用量、费用、用户、分组及运维状态。允许修改需另行授权并完成两步验证；已授权应用可在 MCP 接入页查看和撤销。',
+  adminLoadFailed: '加载管理 MCP 配置失败，请重试。',
+  adminSaveFailed: '保存管理 MCP 配置失败。',
+  adminSaved: '管理 MCP 配置已保存',
   title: 'MCP 接入',
   description: '通过 OAuth 连接 AI 助手，并管理它对你账户的访问权限。',
   connectionTitle: '连接你的 AI 助手',

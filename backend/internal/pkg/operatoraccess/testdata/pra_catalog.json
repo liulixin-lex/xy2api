@@ -8115,5 +8115,33 @@
   "fields": null,
   "redact": [],
   "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/settings/management-mcp",
+  "group": "admin",
+  "reg": "registerSettingsRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "PUT",
+  "path": "/settings/management-mcp",
+  "group": "admin",
+  "reg": "registerSettingsRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
  }
 ]
