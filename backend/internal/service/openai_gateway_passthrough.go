@@ -2328,6 +2328,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 
 	usage := &OpenAIUsage{}
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
+	tailMetered := false
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
 	responseID := ""
@@ -2928,6 +2929,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	var responsesParser openAICompatSSEFrameParser
 	processFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		tailMetered = openAIResponsesTailUsageCandidate(tailMetered, frame.EventType, []byte(frame.Data), currentTerminal)
 		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
 			observedTerminal = currentTerminal
 		}
@@ -2967,6 +2969,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 		}
 		cleanEOF = scanErr == nil && ctx.Err() == nil
+		if cleanEOF && tailMetered && !sawFailedEvent {
+			sawDone = true
+			terminalEventType = "usage_eof"
+		}
 		ensureResponseFailedTerminal()
 		if guarded && !clientOutputStarted && reqCtx.Err() != nil {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", reqCtx.Err())

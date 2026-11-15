@@ -180,6 +180,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 流式开场与终止 `stream`
 
+Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled；流式保留 `[DONE]` 和完整尾部计量后干净 EOF 的兼容收尾，后续新内容、读错或坏帧会使尾部计量失效，且兼容收尾不伪造终态事实。
+
 原生与透传 Responses 以完整 SSE 帧校验终态，不接受损坏的多行 JSON 或只有事件名的伪结束；已输出后的协议失败只写一次错误终态。
 
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。

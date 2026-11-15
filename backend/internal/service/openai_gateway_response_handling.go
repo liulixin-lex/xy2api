@@ -223,6 +223,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 	usage := &OpenAIUsage{}
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
+	tailMetered := false
 	var finishResponsesFrame func()
 	responseCreatedAt := int64(0)
 	imageCounter := newOpenAIImageOutputCounter()
@@ -475,6 +476,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if streamEarlyErr != nil {
 			return resultWithUsage(), streamEarlyErr
+		}
+		if cleanEOF && tailMetered && !sawFailedEvent {
+			sawTerminalEvent = true
+			terminalEventType = "usage_eof"
 		}
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
@@ -1039,6 +1044,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var responsesParser openAICompatSSEFrameParser
 	processFrame := func(frame openAICompatSSEFrame) {
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		tailMetered = openAIResponsesTailUsageCandidate(tailMetered, frame.EventType, []byte(frame.Data), currentTerminal)
 		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
 			observedTerminal = currentTerminal
 		}
@@ -2708,4 +2714,19 @@ func openAIResponsesFailureSource(payload []byte, usage *OpenAIUsage, createdAt 
 		}
 	}
 	return payload
+}
+
+func openAIResponsesTailUsageCandidate(previous bool, rawEvent string, data []byte, terminal OpenAIResponsesTerminal) bool {
+	if terminal.Failure {
+		return false
+	}
+	event := effectiveOpenAISSEEventType(data, rawEvent)
+	if resilience.ResponsesEventOutputDisposition(event, data).SemanticOutput {
+		return false
+	}
+	usage, present := openAIResponsesUsageEvidence(data, "upstream_sse_progressive")
+	if present && usage.InputTokensPresent && usage.OutputTokensPresent {
+		return true
+	}
+	return previous
 }

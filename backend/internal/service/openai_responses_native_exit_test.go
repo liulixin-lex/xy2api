@@ -257,3 +257,53 @@ func TestM6MalformedTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestM6DoneStatus(t *testing.T) {
+	for _, pass := range []bool{false, true} {
+		for _, status := range []string{"completed", "incomplete", "failed", "cancelled", "canceled", ""} {
+			t.Run(fmt.Sprintf("pass=%t/%s", pass, status), func(t *testing.T) {
+				response := `{"id":"r1","status":"` + status + `","output":[],"usage":{"input_tokens":13,"output_tokens":5}}`
+				body := m6Frame(`{"type":"response.done","response":` + response + `}`)
+				_, usage, seen, valid, err := m6Stream(t, pass, body)
+				if status == "completed" || status == "incomplete" {
+					require.NoError(t, err)
+					require.True(t, seen)
+					require.True(t, valid)
+					require.Equal(t, 13, usage.InputTokens)
+					require.Equal(t, 5, usage.OutputTokens)
+					_, _, err = m6Nonstream(t, pass, body, "text/event-stream")
+					require.NoError(t, err)
+				} else {
+					require.Error(t, err)
+				}
+			})
+		}
+		for _, names := range [][2]string{{"response.done", "response.completed"}, {"response.completed", "response.done"}} {
+			body := "event: " + names[0] + "\n" + m6Frame(`{"type":"`+names[1]+`","response":{"status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`)
+			_, usage, _, valid, err := m6Stream(t, pass, body)
+			require.NoError(t, err)
+			require.True(t, valid)
+			require.Equal(t, 13, usage.InputTokens)
+		}
+		text := m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`)
+		meter := m6Frame(`{"type":"response.usage","usage":{"input_tokens":0,"output_tokens":0}}`)
+		for _, tc := range []struct {
+			body string
+			good bool
+		}{
+			{m6Frame(`{"type":"response.output_text.done","text":"answer"}`) + m6Frame("[DONE]"), true},
+			{text + meter, true}, {text + meter + text, false},
+			{text + m6Frame(`{"type":"response.usage","usage":{"input_tokens":13}}`), false},
+			{text + meter + m6Frame(`{"type":"response.usage","usage":`), false},
+		} {
+			_, _, seen, valid, err := m6Stream(t, pass, tc.body)
+			if tc.good {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.False(t, seen)
+			require.False(t, valid)
+		}
+	}
+}

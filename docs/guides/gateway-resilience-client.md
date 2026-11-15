@@ -98,6 +98,8 @@ compact 心跳提交后的失败也只写一次 `response.failed`；已确认请
 
 非流式 Responses 聚合时按输出项与内容索引补齐 delta 和 done，部分终态不会丢掉其他文本或工具结果；终态已明确给出的值（包括空值）优先，未知输出项与 compaction 字段保留。
 
+Responses 的 done/completed 同义事件按真实 status 处理，failed/cancelled 仍为失败，incomplete 正常返回。流式可兼容 `[DONE]`，或最后内容之后有完整输入/输出计量且干净 EOF 的收尾；这两种兼容结束不会被记录为上游 response 终态证据。
+
 ### 中转伪保活帧
 
 部分中转会插入 `SSE-Keep-Alive` 空 delta 帧，或在 `response.created` 之前发出空字符串、纯空白的 delta。网关直接丢弃它们，不转发、不算首个输出（openai-python 遇到会报错），但仍算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即转发；这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。
