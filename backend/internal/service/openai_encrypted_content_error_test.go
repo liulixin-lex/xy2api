@@ -132,7 +132,7 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 		svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
 		repair := armOpenAIRequestRepair(req.c, account, nil)
 		repair.setBody([]byte(m3TwoItemRequest))
-		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 		payload := []byte(`{"type":"response.failed","response":{"error":{"code":"400","status_code":400,"message":"Encrypted content could not be verified"}}}`)
 		err := newOpenAIRequestRepairSignal(req.ctx, req.c, account, payload, "Encrypted content could not be verified", 400)
 		var signal *openAIRequestRepairSignal

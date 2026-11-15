@@ -21,6 +21,7 @@ const openAIRequestRepairContextKey = "xy_resilience_request_repair"
 type openAIRequestRepair struct {
 	accountID               int64
 	body                    []byte
+	credentialVersion       string
 	encryptedTried          bool
 	passthrough             bool
 	m3                      *openAIM3Attempt
@@ -235,6 +236,9 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 	if signal.kind == resilience.ReasonEncryptedContent {
 		r.encryptedTried = true
 		r.rejectedFieldRetryState.remember(signal.next)
+		if lineage := s.beginOpenAIM3(c, r.body); lineage != nil {
+			s.markHTTPInvalidEncryptedContent(lineage.groupID, lineage.session, account.ID, r.credentialVersion, signal.encryptedItem)
+		}
 	}
 	logger.FromContext(ctx).Info("resilience.request_repair_replay",
 		zap.Int64("account_id", account.ID),

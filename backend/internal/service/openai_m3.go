@@ -49,10 +49,11 @@ type openAIM3Request struct {
 	accounts map[int64]*openAIM3Account
 }
 type openAIM3Attempt struct {
-	service *OpenAIGatewayService
-	request *openAIM3Request
-	account *Account
-	state   *openAIM3Account
+	credentialVersion string
+	service           *OpenAIGatewayService
+	request           *openAIM3Request
+	account           *Account
+	state             *openAIM3Account
 }
 
 // Capture the ingress session before normalization or any per-account derivation.
@@ -70,7 +71,7 @@ func (s *OpenAIGatewayService) beginOpenAIM3(c *gin.Context, body []byte) *openA
 	c.Set(openAIM3ContextKey, r)
 	return r
 }
-func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, body []byte) *openAIM3Attempt {
+func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, body []byte, credentialVersion string) *openAIM3Attempt {
 	r := s.beginOpenAIM3(c, body)
 	if r == nil || account == nil || account.Platform != PlatformOpenAI {
 		return nil
@@ -85,7 +86,7 @@ func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, bod
 		a = &openAIM3Account{replaced: make(map[openAIM3SlotID]struct{}), pending: make(map[openAIBadEncryptedSlot]struct{})}
 		r.accounts[account.ID] = a
 	}
-	return &openAIM3Attempt{service: s, request: r, account: account, state: a}
+	return &openAIM3Attempt{service: s, request: r, account: account, state: a, credentialVersion: credentialVersion}
 }
 
 // Only inspect protocol containers. In particular arguments and string output remain opaque.
@@ -203,11 +204,11 @@ func (a *openAIM3Attempt) event(ctx context.Context, name string, count int) {
 	logger.FromContext(ctx).Warn(name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
 }
 func (a *openAIM3Attempt) persist(ctx context.Context, slots []openAIBadEncryptedSlot) {
-	if len(slots) == 0 {
+	if len(slots) == 0 || a.credentialVersion == "" {
 		return
 	}
 	if store := a.service.getOpenAIWSStateStore(); store != nil {
-		n := store.MarkSessionBadEncryptedSlots(a.request.groupID, a.request.session, a.account.ID, slots, a.service.openAIWSSessionStickyTTL())
+		n := store.MarkSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), a.account.ID, slots, a.service.openAIWSSessionStickyTTL())
 		if n > 0 {
 			a.event(ctx, "resilience.m3_learned", n)
 		}
@@ -220,8 +221,8 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		return body, nil
 	}
 	var bad map[openAIBadEncryptedSlot]struct{}
-	if store := a.service.getOpenAIWSStateStore(); store != nil {
-		bad = store.GetSessionBadEncryptedSlots(a.request.groupID, a.request.session, a.account.ID)
+	if store := a.service.getOpenAIWSStateStore(); store != nil && a.credentialVersion != "" {
+		bad = store.GetSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), a.account.ID)
 	}
 	slots, _, err := openAIM3Slots(body)
 	if err != nil {

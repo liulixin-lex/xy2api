@@ -622,7 +622,7 @@ func TestM6FailureRecoveryHint(t *testing.T) {
 			req.ctx = resilience.WithRequestState(req.ctx, st)
 			req.c.Request = req.c.Request.WithContext(req.ctx)
 			r := armOpenAIRequestRepair(req.c, a, nil)
-			r.m3 = svc.armOpenAIM3(req.c, a, []byte(m3TwoItemRequest))
+			r.m3 = svc.armOpenAIM3(req.c, a, []byte(m3TwoItemRequest), "fixture-version")
 			r.m3.state.replaced[openAIM3SlotID{}] = struct{}{}
 			payload := []byte(`{"error":{"type":"invalid_request_error","message":"shape rejected","headers":{"retry-after":30}}}`)
 			noteOpenAIResponsesRecoveryHint(req.c, a, nil, payload, time.Now())

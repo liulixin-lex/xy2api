@@ -1149,7 +1149,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
-	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	requestRepair.credentialVersion = credentialVersion
+	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
 	for {
 		if replayAttempt {
@@ -1416,13 +1417,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
 				}
-				if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
-					if kind == resilience.ReasonEncryptedContent {
-						var signal *openAIRequestRepairSignal
-						if errors.As(err, &signal) {
-							markEncryptedLineage(signal.encryptedItem)
-						}
-					}
+				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
 				}

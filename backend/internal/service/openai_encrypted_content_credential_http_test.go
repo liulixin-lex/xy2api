@@ -3,7 +3,10 @@
 package service
 
 import (
+	"context"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,6 +60,50 @@ func TestHTTPEncryptedLineageCredentialScopeNative(t *testing.T) {
 			require.Equal(t, change != "same", gjson.GetBytes(next, "input.0.encrypted_content").Exists())
 			require.Equal(t, "good-B", gjson.GetBytes(next, "input.1.encrypted_content").String())
 			require.Equal(t, "good-C", gjson.GetBytes(next, "input.2.encrypted_content").String())
+		})
+	}
+}
+
+func TestHTTPEncryptedLineageCredentialScopeM3(t *testing.T) {
+	for _, change := range []string{"same", "key", "base_url", "token", "missing_secret", "old_key", "restart"} {
+		t.Run(change, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "fixture-secret"}}, openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+			account := webSearchReplayAccount(false)
+			req := newWebSearchReplayRequest(t)
+			body := []byte(m3TwoItemRequest)
+			token := "actual-token"
+			if change == "missing_secret" {
+				svc.cfg.JWT.Secret = ""
+			}
+			version := svc.UpstreamCredentialVersion(account, token)
+			attempt := svc.armOpenAIM3(req.c, account, body, version)
+			// Rotate the mutable account after arming: persistence still uses the send's version.
+			account.Credentials["api_key"] = "mutated-after-send"
+			attempt.learn(req.ctx, body, nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
+			if version != "" {
+				require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, version), account.ID), 1)
+			}
+			switch change {
+			case "key":
+				token = "rotated-key"
+			case "base_url":
+				account.Credentials["base_url"] = "https://different.fixture.invalid/v1"
+			case "token":
+				token = "rotated-token"
+			case "old_key":
+				svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+				slots, _, err := openAIM3Slots(body)
+				require.NoError(t, err)
+				svc.openaiWSStateStore.MarkSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID, []openAIBadEncryptedSlot{slots[0].id.openAIBadEncryptedSlot}, svc.openAIWSSessionStickyTTL())
+			case "restart":
+				svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+			}
+			second := newWebSearchReplayRequest(t)
+			next := svc.armOpenAIM3(second.c, account, body, svc.UpstreamCredentialVersion(account, token))
+			derived, err := next.derive(context.Background(), body)
+			require.NoError(t, err)
+			require.Equal(t, change != "same", strings.Contains(string(derived), `"id":"amsg_one","content":[{"type":"encrypted_content"`))
+			require.Equal(t, "encrypted_content", gjson.GetBytes(derived, "input.1.content.0.type").String())
 		})
 	}
 }

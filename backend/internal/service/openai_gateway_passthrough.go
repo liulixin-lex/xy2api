@@ -341,6 +341,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if err != nil {
 		return nil, err
 	}
+	credentialVersion := s.UpstreamCredentialVersion(account, token)
+	body = s.stripHTTPEncryptedContentForAttempt(c, account, body, credentialVersion)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -383,7 +385,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.passthrough = true
 	requestRepair.encryptedTried = true // rs/cmp stripping remains exclusive to the native path.
-	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	requestRepair.credentialVersion = credentialVersion
+	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
 	for {
 		if replayAttempt {
