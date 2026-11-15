@@ -489,3 +489,102 @@ func TestM3ReasoningTextFallback(t *testing.T) {
 		require.Error(t, st.Err())
 	})
 }
+
+func TestM3TerminalReasonMapping(t *testing.T) {
+	for _, tc := range []struct {
+		status, reason, want string
+		tools, refusal, bad  bool
+	}{
+		{"completed", "", "end_turn", false, false, false}, {"completed", "", "tool_use", true, false, false},
+		{"completed", "", "refusal", true, true, false}, {"incomplete", "max_output_tokens", "max_tokens", true, false, false},
+		{"incomplete", "content_filter", "refusal", false, false, false}, {"incomplete", "", "max_tokens", false, false, false},
+		{"failed", "", "", false, false, true}, {"cancelled", "", "", false, false, true}, {"unknown", "", "", false, false, true},
+	} {
+		t.Run(tc.status+"/"+tc.reason+"/"+tc.want, func(t *testing.T) {
+			resp := &ResponsesResponse{Status: tc.status, Usage: &ResponsesUsage{InputTokens: 7, OutputTokens: 3}}
+			if tc.reason != "" {
+				resp.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+			}
+			if tc.tools {
+				resp.Output = append(resp.Output, ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f", Arguments: `{}`})
+			}
+			if tc.refusal {
+				resp.Output = append(resp.Output, ResponsesOutput{Type: "message", ID: "m", Content: []ResponsesContentPart{{Type: "refusal", Refusal: "cannot comply"}}})
+			}
+			if tc.bad {
+				require.Error(t, ValidateResponsesForAnthropic(resp))
+				require.Nil(t, ResponsesToAnthropic(resp, "test"))
+			} else {
+				require.NoError(t, ValidateResponsesForAnthropic(resp))
+				require.Equal(t, tc.want, AnthropicStopReasonString(ResponsesToAnthropic(resp, "test").StopReason))
+			}
+			st := NewResponsesEventToAnthropicState()
+			if tc.tools {
+				ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &resp.Output[0]}, st)
+				ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", `{}`), st)
+			}
+			events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.done", Response: resp}, st)
+			require.Equal(t, 7, st.InputTokens)
+			require.Equal(t, 3, st.OutputTokens)
+			if tc.bad {
+				require.Error(t, st.Err())
+				require.Empty(t, events)
+				require.Empty(t, FinalizeResponsesAnthropicStream(st))
+			} else {
+				require.NoError(t, st.Err())
+				require.GreaterOrEqual(t, len(events), 2)
+				require.Equal(t, tc.want, events[len(events)-2].Delta.StopReason)
+			}
+		})
+	}
+}
+
+func TestM3RefusalContent(t *testing.T) {
+	for _, carrier := range []string{"delta", "done", "part", "item", "terminal"} {
+		t.Run(carrier, func(t *testing.T) {
+			item := ResponsesOutput{Type: "message", ID: "m1", Content: []ResponsesContentPart{{Type: "output_text", Text: "answer "}, {Type: "refusal", Refusal: "cannot comply"}}}
+			resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+			out := ResponsesToAnthropic(resp, "test")
+			require.Len(t, out.Content, 2)
+			require.Equal(t, "cannot comply", out.Content[1].Text)
+			require.Equal(t, "refusal", AnthropicStopReasonString(out.StopReason))
+			st := NewResponsesEventToAnthropicState()
+			var events []AnthropicStreamEvent
+			feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+			feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "message", ID: item.ID}})
+			feed(&ResponsesStreamEvent{Type: "response.output_text.delta", ItemID: item.ID, Delta: "answer "})
+			switch carrier {
+			case "delta":
+				feed(&ResponsesStreamEvent{Type: "response.refusal.delta", ItemID: item.ID, ContentIndex: 1, Delta: "cannot "})
+				fallthrough
+			case "done":
+				e := &ResponsesStreamEvent{Type: "response.refusal.done", ItemID: item.ID, ContentIndex: 1, Refusal: "cannot comply"}
+				feed(e)
+				feed(e)
+			case "part":
+				feed(&ResponsesStreamEvent{Type: "response.content_part.done", ItemID: item.ID, ContentIndex: 1, Part: &item.Content[1]})
+			case "item":
+				feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+			}
+			feed(&ResponsesStreamEvent{Type: "response.completed", Response: resp})
+			require.NoError(t, st.Err())
+			require.Equal(t, "answer cannot comply", collectAnthropicText(events))
+			requireAnthropicBlockLifecycle(t, events)
+		})
+	}
+	t.Run("distinct items same refusal", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		var events []AnthropicStreamEvent
+		var items []ResponsesOutput
+		for i, id := range []string{"m1", "m2"} {
+			item := ResponsesOutput{Type: "message", ID: id, Content: []ResponsesContentPart{{Type: "refusal", Refusal: "same"}}}
+			items = append(items, item)
+			events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, Item: &item}, st)...)
+			events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.refusal.done", OutputIndex: i, Refusal: "same"}, st)...)
+		}
+		events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: items}}, st)...)
+		require.NoError(t, st.Err())
+		require.Equal(t, "samesame", collectAnthropicText(events))
+		requireAnthropicBlockLifecycle(t, events)
+	})
+}

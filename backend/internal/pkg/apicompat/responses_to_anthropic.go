@@ -44,10 +44,14 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 			}
 		case "message":
 			for _, part := range item.Content {
-				if part.Type == "output_text" && part.Text != "" {
+				text := part.Text
+				if part.Type == "refusal" {
+					text = part.Refusal
+				}
+				if (part.Type == "output_text" || part.Type == "refusal") && text != "" {
 					blocks = append(blocks, AnthropicContentBlock{
 						Type: "text",
-						Text: part.Text,
+						Text: text,
 					})
 				}
 			}
@@ -94,7 +98,11 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 	}
 	out.Content = blocks
 
-	out.StopReason = AnthropicStopReasonPtr(responsesStatusToAnthropicStopReason(resp.Status, resp.IncompleteDetails, blocks))
+	stopReason := responsesStatusToAnthropicStopReason(resp.Status, resp.IncompleteDetails, blocks)
+	if responsesHasRefusal(resp) {
+		_, stopReason, _ = ProjectTerminal("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), containsAnthropicToolUseBlock(blocks), true)
+	}
+	out.StopReason = AnthropicStopReasonPtr(stopReason)
 
 	if resp.Usage != nil {
 		out.Usage = anthropicUsageFromResponsesUsage(resp.Usage)
@@ -108,6 +116,12 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 func ValidateResponsesForAnthropic(resp *ResponsesResponse) error {
 	if resp == nil {
 		return &UpstreamConversionError{Field: "response", Reason: "missing response", SourceProtocol: "responses"}
+	}
+	if resp.Error != nil {
+		return &UpstreamConversionError{Field: "response.error", Reason: "upstream response failed", SourceProtocol: "responses"}
+	}
+	if _, _, err := ProjectTerminal("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), false, responsesHasRefusal(resp)); err != nil {
+		return err
 	}
 	for _, item := range resp.Output {
 		kind, raw := "function", item.Arguments
@@ -161,21 +175,31 @@ func anthropicUsageFromResponsesUsage(usage *ResponsesUsage) AnthropicUsage {
 	}
 }
 
-func responsesStatusToAnthropicStopReason(status string, details *ResponsesIncompleteDetails, blocks []AnthropicContentBlock) string {
-	switch status {
-	case "incomplete":
-		if details != nil && details.Reason == "max_output_tokens" {
-			return "max_tokens"
-		}
-		return "end_turn"
-	case "completed":
-		if containsAnthropicToolUseBlock(blocks) {
-			return "tool_use"
-		}
-		return "end_turn"
-	default:
-		return "end_turn"
+func responsesIncompleteReason(resp *ResponsesResponse) string {
+	if resp.IncompleteDetails != nil {
+		return resp.IncompleteDetails.Reason
 	}
+	return ""
+}
+
+func responsesHasRefusal(resp *ResponsesResponse) bool {
+	for _, item := range resp.Output {
+		for _, part := range item.Content {
+			if part.Type == "refusal" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func responsesStatusToAnthropicStopReason(status string, details *ResponsesIncompleteDetails, blocks []AnthropicContentBlock) string {
+	reason := ""
+	if details != nil {
+		reason = details.Reason
+	}
+	_, stop, _ := ProjectTerminal("responses", "anthropic", status, reason, containsAnthropicToolUseBlock(blocks), false)
+	return stop
 }
 
 func containsAnthropicToolUseBlock(blocks []AnthropicContentBlock) bool {
@@ -215,6 +239,8 @@ func sanitizeAnthropicToolUseInput(name string, raw string) json.RawMessage {
 
 // responsesTextPart identifies one output_text part of a streamed response.
 type responsesTextPart struct {
+	ItemID       string
+	Kind         string
 	OutputIndex  int
 	ContentIndex int
 }
@@ -273,6 +299,7 @@ type ResponsesEventToAnthropicState struct {
 	textByPart map[responsesTextPart]*strings.Builder
 	// textDelivered records whether any assistant text reached the client.
 	textDelivered bool
+	hasRefusal    bool
 
 	InputTokens              int
 	OutputTokens             int
@@ -413,10 +440,27 @@ func resToAnthDispatchEvent(evt *ResponsesStreamEvent, state *ResponsesEventToAn
 		return resToAnthHandleCreated(evt, state)
 	case "response.output_item.added":
 		return resToAnthHandleOutputItemAdded(evt, state)
-	case "response.output_text.delta":
+	case "response.output_text.delta", "response.refusal.delta":
 		return resToAnthHandleTextDelta(evt, state)
 	case "response.output_text.done":
 		return resToAnthHandleTextDone(evt, state)
+	case "response.refusal.done":
+		return resToAnthHandleRefusalDone(evt, state)
+	case "response.content_part.done":
+		if evt.Part != nil {
+			copy := *evt
+			switch evt.Part.Type {
+			case "refusal":
+				copy.Type = "response.refusal.done"
+				copy.Refusal = evt.Part.Refusal
+				return resToAnthHandleRefusalDone(&copy, state)
+			case "output_text":
+				copy.Type = "response.output_text.done"
+				copy.Text = evt.Part.Text
+				return resToAnthHandleTextDone(&copy, state)
+			}
+		}
+		return nil
 	case "response.function_call_arguments.delta",
 		// custom/freeform 工具的输入增量与 function_call 参数增量同形。
 		"response.custom_tool_call_input.delta":
@@ -573,11 +617,28 @@ func resToAnthHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 }
 
 func resToAnthHandleTextDelta(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	return resToAnthEmitText(evt.Delta, resToAnthTextPartOf(evt), state)
+	return resToAnthEmitText(evt.Delta, resToAnthTextPartOf(evt, state), state)
 }
 
-func resToAnthTextPartOf(evt *ResponsesStreamEvent) responsesTextPart {
-	return responsesTextPart{OutputIndex: evt.OutputIndex, ContentIndex: evt.ContentIndex}
+func resToAnthTextPartOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) responsesTextPart {
+	part := responsesTextPart{OutputIndex: evt.OutputIndex, ContentIndex: evt.ContentIndex, Kind: "output_text"}
+	if strings.Contains(evt.Type, "refusal") {
+		part.Kind = "refusal"
+		state.hasRefusal = true
+	}
+	part.ItemID = evt.ItemID
+	if part.ItemID == "" {
+		part.ItemID = state.itemIDs[evt.OutputIndex]
+	}
+	if part.ItemID != "" {
+		part.OutputIndex = 0
+	}
+	return part
+}
+
+func resToAnthHandleRefusalDone(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	events := resToAnthRecoverText(evt.Refusal, resToAnthTextPartOf(evt, state), state)
+	return append(events, resToAnthHandleBlockDone(state)...)
 }
 
 // resToAnthEmitText opens a text block when needed, emits text, and records it
@@ -632,7 +693,7 @@ func resToAnthEmitText(text string, part responsesTextPart, state *ResponsesEven
 // not extend what was already delivered is left alone.
 func resToAnthRecoverText(text string, part responsesTextPart, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	builder, known := state.textByPart[part]
-	if !known && state.textDelivered {
+	if !known && state.textDelivered && part.ItemID == "" && part.Kind != "refusal" {
 		// The payload is indexed differently from every delta seen so far, so
 		// which part it finishes cannot be established. Recovering it could
 		// repeat an answer the client already has, which is worse than leaving
@@ -660,7 +721,7 @@ func resToAnthHandleTextDone(evt *ResponsesStreamEvent, state *ResponsesEventToA
 		return resToAnthHandleBlockDone(state)
 	}
 
-	events := resToAnthRecoverText(evt.Text, resToAnthTextPartOf(evt), state)
+	events := resToAnthRecoverText(evt.Text, resToAnthTextPartOf(evt, state), state)
 	return append(events, resToAnthHandleBlockDone(state)...)
 }
 
@@ -830,6 +891,10 @@ func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEv
 		parts, index = r.summary, evt.SummaryIndex
 	}
 	if strings.HasSuffix(evt.Type, ".done") {
+		// Text has no presence bit; legacy done events may omit the snapshot.
+		if evt.Text == "" {
+			return nil
+		}
 		if !strings.HasPrefix(evt.Text, parts[index]) {
 			state.fail("reasoning", "reasoning completion disagrees with its deltas")
 			return nil
@@ -928,6 +993,24 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 		return resToAnthEmitTool(tool, state)
 	}
 
+	if evt.Item.Type == "message" {
+		var events []AnthropicStreamEvent
+		for i, part := range evt.Item.Content {
+			event := ResponsesStreamEvent{OutputIndex: evt.OutputIndex, ItemID: evt.Item.ID, ContentIndex: i, Type: "response.output_text.done", Text: part.Text}
+			switch part.Type {
+			case "output_text":
+				events = append(events, resToAnthRecoverText(part.Text, resToAnthTextPartOf(&event, state), state)...)
+			case "refusal":
+				event.Type = "response.refusal.done"
+				events = append(events, resToAnthRecoverText(part.Refusal, resToAnthTextPartOf(&event, state), state)...)
+			}
+		}
+		if state.CurrentBlockType == "text" {
+			events = append(events, closeCurrentBlock(state)...)
+		}
+		return events
+	}
+
 	// Handle web_search_call → synthesize server_tool_use + web_search_tool_result blocks.
 	if evt.Item.Type == "web_search_call" && evt.Item.Status == "completed" {
 		return resToAnthHandleWebSearchDone(evt, state)
@@ -1016,21 +1099,37 @@ func resToAnthHandleWebSearchDone(evt *ResponsesStreamEvent, state *ResponsesEve
 // them part by part risks repeating an answer the client already has, which is
 // worse than leaving a partially streamed response as it is.
 func resToAnthRecoverTerminalText(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	if state.textDelivered || evt.Response == nil {
+	if evt.Response == nil {
 		return nil
 	}
-
 	var events []AnthropicStreamEvent
+	hadText := state.textDelivered
 	for outputIndex, item := range evt.Response.Output {
 		if item.Type != "message" {
 			continue
 		}
 		for contentIndex, content := range item.Content {
-			if content.Type != "output_text" {
+			if content.Type != "output_text" && content.Type != "refusal" {
 				continue
 			}
-			part := responsesTextPart{OutputIndex: outputIndex, ContentIndex: contentIndex}
-			events = append(events, resToAnthEmitText(content.Text, part, state)...)
+			if content.Type == "output_text" && hadText && item.ID == "" {
+				continue
+			}
+			part := responsesTextPart{OutputIndex: outputIndex, ItemID: item.ID, ContentIndex: contentIndex, Kind: content.Type}
+			if part.ItemID != "" {
+				part.OutputIndex = 0
+			}
+			text := content.Text
+			if content.Type == "refusal" {
+				text = content.Refusal
+				state.hasRefusal = true
+			}
+			if !hadText && content.Type == "output_text" {
+				// Preserve recovery of all anonymous terminal parts on empty streams.
+				events = append(events, resToAnthEmitText(text, part, state)...)
+			} else {
+				events = append(events, resToAnthRecoverText(text, part, state)...)
+			}
 		}
 	}
 	if len(events) > 0 {
@@ -1041,6 +1140,46 @@ func resToAnthRecoverTerminalText(evt *ResponsesStreamEvent, state *ResponsesEve
 
 func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	if state.MessageStopSent {
+		return nil
+	}
+
+	if evt.Usage != nil {
+		usage := anthropicUsageFromResponsesUsage(evt.Usage)
+		state.InputTokens = usage.InputTokens
+		state.OutputTokens = usage.OutputTokens
+		state.CacheReadInputTokens = usage.CacheReadInputTokens
+		state.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	}
+	if evt.Response != nil {
+		if evt.Response.Usage != nil {
+			usage := anthropicUsageFromResponsesUsage(evt.Response.Usage)
+			state.InputTokens = usage.InputTokens
+			state.OutputTokens = usage.OutputTokens
+			state.CacheReadInputTokens = usage.CacheReadInputTokens
+			state.CacheCreationInputTokens = usage.CacheCreationInputTokens
+		}
+	}
+
+	status, reason := "completed", ""
+	if evt.Response != nil {
+		status = evt.Response.Status
+		reason = responsesIncompleteReason(evt.Response)
+		state.hasRefusal = state.hasRefusal || responsesHasRefusal(evt.Response)
+	}
+	if evt.Type == "response.failed" || (evt.Response != nil && evt.Response.Error != nil) {
+		status = "failed"
+	}
+	if status == "" {
+		status = strings.TrimPrefix(evt.Type, "response.")
+		if status == "done" {
+			status = "completed"
+		}
+	}
+	_, stopReason, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	if err != nil {
+		if state.err == nil {
+			state.err = err
+		}
 		return nil
 	}
 
@@ -1099,32 +1238,12 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		}
 	}
 
-	stopReason := "end_turn"
-	if evt.Usage != nil {
-		usage := anthropicUsageFromResponsesUsage(evt.Usage)
-		state.InputTokens = usage.InputTokens
-		state.OutputTokens = usage.OutputTokens
-		state.CacheReadInputTokens = usage.CacheReadInputTokens
-		state.CacheCreationInputTokens = usage.CacheCreationInputTokens
-	}
-	if evt.Response != nil {
-		if evt.Response.Usage != nil {
-			usage := anthropicUsageFromResponsesUsage(evt.Response.Usage)
-			state.InputTokens = usage.InputTokens
-			state.OutputTokens = usage.OutputTokens
-			state.CacheReadInputTokens = usage.CacheReadInputTokens
-			state.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	_, stopReason, err = ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	if err != nil {
+		if state.err == nil {
+			state.err = err
 		}
-		switch evt.Response.Status {
-		case "incomplete":
-			if evt.Response.IncompleteDetails != nil && evt.Response.IncompleteDetails.Reason == "max_output_tokens" {
-				stopReason = "max_tokens"
-			}
-		case "completed":
-			if state.HasToolCall {
-				stopReason = "tool_use"
-			}
-		}
+		return events
 	}
 
 	events = append(events,
