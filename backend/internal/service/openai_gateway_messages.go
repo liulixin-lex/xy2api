@@ -422,6 +422,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// Grok may reject encrypted reasoning replayed under a different OAuth
 	// account/cache identity. Match forwardGrokResponses: one strip+retry before
 	// treating the 400 as a hard failure / failover trigger.
+	var actualReasoningEffort *string
+	defer func() {
+		if forwardResult != nil {
+			forwardResult.ReasoningEffort = actualReasoningEffort
+		}
+	}()
 	var resp *http.Response
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
@@ -435,6 +441,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
+		actualReasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
@@ -568,7 +575,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, handleErr
 	}
 
-	// Propagate ServiceTier and ReasoningEffort to result for billing
+	// Propagate the resolved ServiceTier on successful responses.
 	if handleErr == nil && result != nil {
 		if compatContinuationEnabled && promptCacheKey != "" && result.ResponseID != "" {
 			s.bindOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey, result.ResponseID)
@@ -580,10 +587,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// fast policy filter/force 之后）里的 tier。
 		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody)); tier != nil {
 			result.ServiceTier = tier
-		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
-			result.ReasoningEffort = &re
 		}
 	}
 
