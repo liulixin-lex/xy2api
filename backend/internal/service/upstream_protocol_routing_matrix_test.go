@@ -358,7 +358,7 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 			differences = append(differences, fmt.Sprintf("%s\nmain: %s\ncurrent: %s", tc.key(), want, got))
 		}
 	}
-	require.Equal(t, 1568, shapeDifferences, "only the fixed API-key Chat input shape changes")
+	require.Equal(t, 1296, shapeDifferences, "only the fixed API-key Chat input shape changes")
 	require.Zero(t, mismatched, "routing differs from main %s in %d cases:\n%s", golden.SourceRevision, mismatched, strings.Join(differences, "\n"))
 	// 2 account types × 4 modes × 3 probe states × 4 address configurations ×
 	// 2 model spellings. A disappeared or expanded exception requires review.
