@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestM5IntermediateThinkingBudget(t *testing.T) {
@@ -196,6 +197,87 @@ func TestM5ThinkingConfig(t *testing.T) {
 				}
 			})
 		}
+	})
+}
+
+func TestM5StructuredOutput(t *testing.T) {
+	t.Run("chat_final_request", func(t *testing.T) {
+		for _, tc := range []struct{ name, model, format, mime, schemaNotice string }{
+			{"default", "gemini-2.5-flash", "", "", ""},
+			{"text", "gemini-2.5-flash", `{"type":"text"}`, "", ""},
+			{"object", "gemini-2.5-flash", `{"type":"json_object"}`, "application/json", ""},
+			{"schema", "gemini-2.5-flash", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object","properties":{"x":{"type":"integer","minimum":9007199254740993,"maximum":18446744073709551615,"enum":[]}}}}}`, "application/json", ""},
+			{"mime_only", "gemini-2.0-flash", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}`, "application/json", "output_config.format.schema"},
+			{"unknown", "gemini-9-flash", `{"type":"json_object"}`, "", "output_config.format"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				body := []byte(`{"model":"format-alias","messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1hZ2U="}}]}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}},{"type":"web_search"}]}`)
+				if tc.format != "" {
+					var err error
+					body, err = sjson.SetRawBytes(body, "response_format", []byte(tc.format))
+					require.NoError(t, err)
+				}
+				account := geminiSignalTestAccount()
+				account.Credentials["model_mapping"] = map[string]any{"format-alias": tc.model}
+				wire, _, notices := m5ForwardChat(t, body, account)
+				require.Equal(t, tc.mime, gjson.GetBytes(wire, "generationConfig.responseMimeType").String())
+				require.Contains(t, string(wire), `"inlineData":{"data":"aW1hZ2U=","mimeType":"image/png"}`)
+				require.Equal(t, "f", gjson.GetBytes(wire, "tools.0.functionDeclarations.0.name").String())
+				require.True(t, gjson.GetBytes(wire, "tools.1.google_search").Exists())
+				if tc.name == "schema" {
+					require.Equal(t, "9007199254740993", gjson.GetBytes(wire, "generationConfig.responseJsonSchema.properties.x.minimum").Raw)
+					require.Equal(t, "18446744073709551615", gjson.GetBytes(wire, "generationConfig.responseJsonSchema.properties.x.maximum").Raw)
+					require.Equal(t, "[]", gjson.GetBytes(wire, "generationConfig.responseJsonSchema.properties.x.enum").Raw)
+				} else {
+					require.False(t, gjson.GetBytes(wire, "generationConfig.responseJsonSchema").Exists())
+				}
+				if tc.schemaNotice != "" {
+					require.Contains(t, notices, apicompat.ConversionNotice{Field: tc.schemaNotice, Action: "omit"})
+				} else {
+					require.Empty(t, notices)
+				}
+			})
+		}
+	})
+	for _, tt := range []struct{ name, model, format, mime, schema, notice string }{
+		{"default", "gemini-2.5-flash", ``, "", "", ""},
+		{"text", "gemini-2.5-flash", `{"type":"text"}`, "", "", ""},
+		{"object", "gemini-2.5-flash", `{"type":"json_object"}`, "application/json", "", ""},
+		{"schema", "gemini-2.5-flash", `{"type":"json_schema","schema": { "type":"object", "properties":{"x":{"enum":[],"minimum":9007199254740993,"maximum":18446744073709551615}} }}`, "application/json", `{ "type":"object", "properties":{"x":{"enum":[],"minimum":9007199254740993,"maximum":18446744073709551615}} }`, ""},
+		{"mime_only", "gemini-2.0-flash", `{"type":"json_schema","schema":{"type":"object"}}`, "application/json", "", "output_config.format.schema"},
+		{"unknown", "gemini-9-flash", `{"type":"json_object"}`, "", "", "output_config.format"},
+	} {
+		t.Run("messages/"+tt.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":%q,"max_tokens":512,"messages":[{"role":"user","content":[{"type":"text","text":"hi"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]}],"tools":[{"name":"f","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]}`, tt.model))
+			var err error
+			if tt.format != "" {
+				body, err = sjson.SetRawBytes(body, "output_config.format", []byte(tt.format))
+				require.NoError(t, err)
+			}
+			wire, _, notices := m5ForwardMessages(t, body)
+			require.Equal(t, tt.mime, gjson.GetBytes(wire, "generationConfig.responseMimeType").String())
+			require.Equal(t, tt.schema, gjson.GetBytes(wire, "generationConfig.responseJsonSchema").Raw)
+			require.Equal(t, "aW1hZ2U=", gjson.GetBytes(wire, "contents.0.parts.1.inlineData.data").String())
+			require.Equal(t, "f", gjson.GetBytes(wire, "tools.0.functionDeclarations.0.name").String())
+			require.True(t, gjson.GetBytes(wire, "tools.1.google_search").Exists())
+			if tt.notice != "" {
+				require.Equal(t, []apicompat.ConversionNotice{{Field: tt.notice, Action: "omit"}}, notices)
+			} else {
+				require.Empty(t, notices)
+			}
+		})
+	}
+
+	t.Run("google_search_preserves_schema", func(t *testing.T) {
+		body := []byte(`{"generationConfig":{"responseJsonSchema": { "type":"integer", "minimum":9007199254740993, "maximum":18446744073709551615 }},"tools":[{"googleSearch":{"timeRangeFilter": { "startTime":"2026-01-01T00:00:00Z" }}},{"functionDeclarations":[{"name":"lookup","parameters":{"type":"OBJECT"}}]}],"contents":[{"role":"user","parts":[{"text":"lookup"}]}]}`)
+		original := string(body)
+		got := normalizeGeminiRequestForAIStudio(body)
+		require.Equal(t, original, string(body), "normalization must not mutate its input")
+		require.Equal(t, gjson.GetBytes(body, "generationConfig").Raw, gjson.GetBytes(got, "generationConfig").Raw)
+		require.Equal(t, gjson.GetBytes(body, "tools.0.googleSearch").Raw, gjson.GetBytes(got, "tools.0.google_search").Raw)
+		require.False(t, gjson.GetBytes(got, "tools.0.googleSearch").Exists())
+		require.Equal(t, gjson.GetBytes(body, "tools.1").Raw, gjson.GetBytes(got, "tools.1").Raw)
+		require.Equal(t, gjson.GetBytes(body, "contents").Raw, gjson.GetBytes(got, "contents").Raw)
 	})
 }
 

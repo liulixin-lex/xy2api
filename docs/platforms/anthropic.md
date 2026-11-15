@@ -243,8 +243,8 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`。`allowed_tools`：API Key 账号只发送允许的工具，重复项去重，未知项忽略并记录降级，`mode: auto` 且允许列表为空时转为 `none`，只在历史中出现的工具不会补进本轮声明；OAuth 账号仍只按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
 | Chat 历史的 `tool_calls[].function.arguments` | 保留 | 原样保留上一轮参数，空字符串按 `{}` 处理；不因参数不是完整 JSON 而新增本地拒绝 |
 | `parallel_tool_calls` | 映射 | `false` 转为 `disable_parallel_tool_use: true` |
-| `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射 |
-| `response_format` 的 `json_object` | 忽略（网关放宽） | Anthropic 没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema` |
+| `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射。显式 Gemini 中间转换保留 schema 到最终 Gemini 请求 |
+| `response_format` 的 `json_object` | 忽略（网关放宽） | 真实 Anthropic 目标没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema`；显式 Gemini 中间目标保留 `json_object` |
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
 | `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理。显式 Gemini 中间目标仅保留 effort/disabled 意图，不生成 Claude 最小预算或默认 thinking，输出上限不扩大 |
 | `metadata`、`user` | 部分映射 | API Key 账号上，可识别的 `metadata.user_id` 作为 Anthropic 的 `metadata.user_id` 发送（兼容账号随后按 [Claude Code 请求兼容](#claude-code-请求兼容api-key-账号) 改写）；其余 `metadata` 字段与 `user` 不发送，也不把 `user` 当作身份。OAuth 账号不变 |

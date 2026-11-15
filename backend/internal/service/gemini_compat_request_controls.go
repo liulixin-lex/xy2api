@@ -28,7 +28,7 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 	if err != nil {
 		return nil, err
 	}
-	return body, nil
+	return applyGeminiCompatResponseFormat(claudeBody, body, capabilities, opts)
 }
 
 type GeminiCompatCapabilities struct {
@@ -141,4 +141,35 @@ func applyGeminiCompatThinkingConfig(claudeBody, body []byte, caps GeminiCompatC
 		return body, nil
 	}
 	return sjson.SetBytes(body, "generationConfig.thinkingConfig", thinking)
+}
+
+func applyGeminiCompatResponseFormat(claudeBody, body []byte, caps GeminiCompatCapabilities, opts apicompat.ConversionOptions) ([]byte, error) {
+	format := gjson.GetBytes(claudeBody, "output_config.format")
+	if !format.Exists() || format.Type == gjson.Null {
+		return body, nil
+	}
+	kind := format.Get("type").String()
+	if !format.IsObject() || (kind != "json_schema" && kind != "json_object" && kind != "text") {
+		return nil, &apicompat.UnsupportedConversionError{Field: "output_config.format", Reason: "expected text, json_object or json_schema"}
+	}
+	if kind == "text" {
+		return body, nil
+	}
+	schema := format.Get("schema")
+	if kind == "json_schema" && !schema.IsObject() && schema.Type != gjson.True && schema.Type != gjson.False {
+		return nil, &apicompat.UnsupportedConversionError{Field: "output_config.format.schema", Reason: "expected a JSON schema"}
+	}
+	if !caps.JSONMIME {
+		recordGeminiConversion(opts, "output_config.format", "omit")
+		return body, nil
+	}
+	body, err := sjson.SetBytes(body, "generationConfig.responseMimeType", "application/json")
+	if err != nil || kind != "json_schema" {
+		return body, err
+	}
+	if !caps.JSONSchema {
+		recordGeminiConversion(opts, "output_config.format.schema", "omit")
+		return body, nil
+	}
+	return sjson.SetRawBytes(body, "generationConfig.responseJsonSchema", []byte(schema.Raw))
 }
