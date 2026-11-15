@@ -65,9 +65,9 @@ func TestGrokChatResponsesBridgeEligibility(t *testing.T) {
 			reason: "invalid_service_tier",
 		},
 		{
-			name:   "stop falls back",
-			body:   `{"model":"grok","messages":[{"role":"user","content":"hi"}],"stop":"done"}`,
-			reason: "unsupported_stop",
+			name: "stop is prepared for Responses",
+			body: `{"model":"grok","messages":[{"role":"user","content":"hi"}],"stop":"done"}`,
+			want: true,
 		},
 		{
 			name:   "developer role falls back",

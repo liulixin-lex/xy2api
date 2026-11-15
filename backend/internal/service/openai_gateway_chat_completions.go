@@ -270,12 +270,17 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
 		chatReq.Model = upstreamModel
-		responsesReq, err = apicompat.ChatCompletionsToResponses(&chatReq)
+		responsesReq, err = apicompat.ChatCompletionsToResponsesWithOptions(&chatReq, m7ConversionOptions(ctx))
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}
 		responsesReq.Model = upstreamModel
 		normalizeResponsesRequestServiceTier(responsesReq)
+		prepared, prepareErr := apicompat.PrepareNativeResponsesRequest(*responsesReq, m7ConversionOptions(ctx))
+		if prepareErr != nil {
+			return nil, fmt.Errorf("prepare Responses request: %w", prepareErr)
+		}
+		*responsesReq = prepared
 		responsesBody, err = json.Marshal(responsesReq)
 		if err != nil {
 			return nil, fmt.Errorf("marshal responses request: %w", err)
