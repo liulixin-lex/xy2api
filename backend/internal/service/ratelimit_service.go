@@ -1866,8 +1866,18 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if len(updates) == 0 {
 		return
 	}
-	if target, known := cooldownAttemptTarget(ctx, account); known && cooldownTargetOfficial(account, target) {
-		updates[quotaCooldownEvidenceKey] = (QuotaCooldownEvidence{Owner: "key", Source: "official_quota", Protocol: target.Protocol, OriginDigest: cooldownOriginDigest(target.Origin)}).extra()
+	if account.Type == AccountTypeAPIKey {
+		evidence := QuotaCooldownEvidence{Owner: "unknown", Source: "unknown_target"}
+		if target, known := cooldownAttemptTarget(ctx, account); known {
+			evidence.Protocol, evidence.OriginDigest = target.Protocol, cooldownOriginDigest(target.Origin)
+			evidence.Source = "quota_snapshot"
+			if cooldownTargetOfficial(account, target) {
+				evidence.Owner, evidence.Source = "key", "official_quota"
+			}
+		}
+		// Every new raw snapshot replaces its provenance too. Otherwise a missing
+		// target can leave an old official tag attached to a different attempt.
+		updates[quotaCooldownEvidenceKey] = evidence.extra()
 	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)

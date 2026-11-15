@@ -122,6 +122,27 @@ func TestThirdParty429EffectiveCooldown(t *testing.T) {
 			require.False(t, known, "missing adaptive target must not guess the Chat URL")
 		}
 	})
+	t.Run("unknown_snapshot_replaces_old_official_provenance", func(t *testing.T) {
+		withResilienceSettings(t, nil)
+		repo := &rateLimitAccountRepoStub{}
+		svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		account := &Account{ID: 918, Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_protocol": "adaptive"}}
+		state := resilience.NewRequestState()
+		ctx := resilience.WithRequestState(context.Background(), state)
+		official := &resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: APIProtocolResponses, Origin: "https://api.deepseek.com"}
+		state.SetUpstreamAttemptTarget(official)
+		svc.persistOpenAICodexSnapshot(ctx, account, week)
+		account.Extra = repo.lastExtraUpdates
+		require.True(t, rawQuotaAppliesToTarget(ctx, account))
+		state.SetUpstreamAttemptTarget(nil)
+		svc.persistOpenAICodexSnapshot(ctx, account, week)
+		for key, value := range repo.lastExtraUpdates {
+			account.Extra[key] = value
+		}
+		require.Equal(t, "unknown", account.Extra[quotaCooldownEvidenceKey].(map[string]any)["owner"])
+		state.SetUpstreamAttemptTarget(official)
+		require.False(t, rawQuotaAppliesToTarget(ctx, account), "new raw window must not inherit prior official provenance")
+	})
 	t.Run("raw_windows_cannot_repause_relay", func(t *testing.T) {
 		withResilienceSettings(t, nil)
 		accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
