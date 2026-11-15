@@ -165,6 +165,9 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	if !account.IsActive() || !account.Schedulable {
 		return false
 	}
+	if !rawQuotaAppliesToTarget(ctx, account) {
+		return false
+	}
 
 	now := time.Now().UTC()
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
@@ -403,6 +406,9 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 	// otherwise a broad "rate limit" keyword rule can shorten a multi-hour
 	// cooldown to a local temporary pause.
 	if statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic {
+		if s.applyThirdParty429(ctx, account, headers, responseBody) {
+			return false
+		}
 		// Fable may be rejected because the organization has no usage credits for
 		// this model. Anthropic reports that as 429, but it is a model entitlement
 		// failure rather than a shared account window exhaustion.
@@ -1286,6 +1292,9 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		s.handleOllamaCloudUsage429(ctx, account, headers)
 		return
 	}
+	if s.applyThirdParty429(ctx, account, headers, responseBody) {
+		return
+	}
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
 	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
 	if account.IsCNProvider() || account.IsOpenCodeGo() {
@@ -1850,6 +1859,9 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	updates := buildCodexUsageExtraUpdates(snapshot, time.Now())
 	if len(updates) == 0 {
 		return
+	}
+	if target, known := cooldownAttemptTarget(ctx, account); known && cooldownTargetOfficial(account, target) {
+		updates[quotaCooldownEvidenceKey] = (QuotaCooldownEvidence{Owner: "key", Source: "official_quota", Protocol: target.Protocol, OriginDigest: cooldownOriginDigest(target.Origin)}).extra()
 	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)

@@ -76,6 +76,7 @@
 - **主要字段**：`transient_cooldown_seconds` 默认 30；上游带 `Retry-After` 时按它冷却，封顶 `retry_after_cap_seconds`（默认 120）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；`balance_keywords_extra` 追加余额不足的识别文案；`decision_v2` 默认开，只把真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化的 overloaded）算作容量降载，“服务繁忙”“排队过多”“并发超限”一类按瞬时或限流处理，可以换到同一主机的其他账号。
 - **何时关闭**：一般不关闭。关闭 `decision_v2` 回到较粗的旧分类规则，同时“仅流式账号学习”只学习、不在本请求换号。
 - **计费与客户端**：分类本身不改变计费。分类结果写进运维错误记录的 `resilience_category`。[分组质量门槛](group-quality-gate.md)的报错线用同一套分类规则，但不看韧性开关：同一个失败，开关开或关结论都一样。
+- **第三方 API Key 限流**：按本次实际请求的协议与目标地址区分官方上游和中转；中转返回的长配额窗口只留作证据，实际账号冷却优先采用可信重试提示，再取已耗尽窗口或既有短时回避，统一由 `retry_after_cap_seconds` 封顶。原始最早重试时刻不缩短，余额暂停不变。
 - **显式模型规则**：HTTP 与流内过载使用相同的临时停调规则；非 401 且实际出站模型已知时，只冷却该账号的该模型。池模式、自定义错误码与规则启用条件保持原有语义。
 - **403 设施故障**：计数器缺失、计数失败或临时停调写入失败时，仅按 `transient_cooldown_seconds` 作本地短时回避，不将账号标为凭据失效；原有的更长硬暂停保持不变。普通 403 的十分钟冷却只在持久化成功后生效。
 - **观测**：`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.unclassified`（只按状态码归类的 4xx 文案采样，可据此补充 `balance_keywords_extra`）。
