@@ -195,3 +195,21 @@ func TestM4ChatToolSlotResolver(t *testing.T) {
 		t.Fatal("negative index accepted")
 	}
 }
+
+func TestM4ToolDeclarationMerge(t *testing.T) {
+	req := &ResponsesRequest{Model: "probe", Input: json.RawMessage(`[{"role":"user","content":"hi"},{"type":"additional_tools","tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}}}},{"type":"function","name":"other"}]}]`), Tools: []ResponsesTool{{Type: "function", Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}}}
+	var notices []ConversionNotice
+	out, err := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}, Record: func(n ConversionNotice) { notices = append(notices, n) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Tools) != 2 || string(out.Tools[0].Function.Parameters) != `{"type":"object"}` {
+		t.Fatalf("tools=%+v", out.Tools)
+	}
+	if !reflect.DeepEqual(notices, []ConversionNotice{{Field: "input[1].tools[0].parameters", Action: "omit"}}) {
+		t.Fatalf("notices=%v", notices)
+	}
+	if _, err := ResponsesToChatCompletionsRequest(req); err == nil {
+		t.Fatal("legacy duplicate rejection changed")
+	}
+}

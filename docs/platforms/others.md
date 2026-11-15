@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Responses 转换桥合并 `tools` 与输入中的 `additional_tools` 时，同类型、完整 namespace 路径和名称的工具保留先声明者；后续 schema 差异只记录省略，不拒绝请求。
+
 这七个平台都是“多协议 API Key 供应商”，共享以下行为：
 
 - **账号类型**：只有 API Key（账号 `type` 为 `apikey`），在「账号管理 → 添加账号」中选择对应平台后填写 API Key。
