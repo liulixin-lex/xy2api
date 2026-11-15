@@ -571,6 +571,7 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 // into one state machine.
 type ChatCompletionsToAnthropicStreamState struct {
 	bridgeSlots chatToolSlots
+	bridgeFlow  *bridgeAnthropicFlow
 	bridgeErr   error
 
 	Bridge           *BridgeOptions
@@ -654,6 +655,9 @@ func ChatCompletionsChunkToAnthropicEvents(
 		state.CacheCreationInputTokens = u.CacheCreationInputTokens
 	}
 
+	if bridgeEnabled(state.Bridge) {
+		return consumeBridgeAnthropicChunk(chunk, state)
+	}
 	var events []AnthropicStreamEvent
 	events = append(events, ensureCCAnthropicMessageStart(state)...)
 
@@ -712,6 +716,12 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 	}
 
 	var events []AnthropicStreamEvent
+	if bridgeEnabled(state.Bridge) {
+		events = append(events, finalizeBridgeAnthropicBlocks(state)...)
+		if state.Err() != nil {
+			return events
+		}
+	}
 	if !state.MessageStartSent {
 		events = append(events, ensureCCAnthropicMessageStart(state)...)
 	}
