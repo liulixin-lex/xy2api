@@ -34,6 +34,11 @@ func TestClassifyOpenAIResponsesTerminal(t *testing.T) {
 		{"error", `{"type":"proxy.upstream_error","status":429}`, true, true, false, true, "upstream_failed", 429},
 		{"", `{"type":"proxy.upstream_error","status":429}`, true, false, false, true, "malformed_wrapped_error", 0},
 		{"response.failed", `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"503","status_code":503}}}`, true, true, false, true, "upstream_failed", 503},
+		{"error", `{"type":"response.failed","response":{"status":"failed","error":{"type":"upstream_error","code":"503","status_code":503}}}`, true, true, false, true, "upstream_failed", 503},
+		{"error", `{"type":"response.failed","response":{"error":{"code":"bad_request"}}}`, true, true, false, true, "upstream_failed", 0},
+		{"error", `{"type":"response.failed","response":{"status":"completed"}}`, true, false, false, true, "type_status_conflict", 0},
+		{"error", `{"type":"response.completed","response":{"status":"completed"}}`, true, false, false, true, "type_status_conflict", 0},
+		{"error", `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"503","status_code":429}}}`, true, false, false, true, "malformed_wrapped_error", 0},
 		{"response.failed", `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":503,"status_code":503}}}`, true, false, false, true, "malformed_wrapped_error", 0},
 		{"response.completed", string([]byte{255}), true, false, false, true, "invalid_utf8", 0},
 	} {
