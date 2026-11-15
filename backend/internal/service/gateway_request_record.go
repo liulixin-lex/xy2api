@@ -69,6 +69,13 @@ func applyGatewayRequestMetadata(ctx context.Context, row *UsageLog) {
 	row.GatewayRequestID, row.Result, row.Switches = &meta.RequestID, &meta.Result, &meta.Switches
 	row.Fallback, row.Takeover = &meta.Fallback, &meta.Takeover
 	row.EndToEndFirstOutputMs = meta.FirstOutputMs
+	row.RequestScope = meta.RequestScope
+	row.UsageObserved = cloneUsageFactValue(meta.UsageObserved)
+	row.UsageSource = cloneUsageFactValue(meta.UsageSource)
+	row.TerminalEventSeen = cloneUsageFactValue(meta.TerminalEventSeen)
+	row.TerminalEventValid = cloneUsageFactValue(meta.TerminalEventValid)
+	row.ResponseBodyType = cloneUsageFactValue(meta.ResponseBodyType)
+	row.ConversionNotices = copyConversionNotices(meta.ConversionNotices)
 }
 
 func createUnbilledGatewayRequest(ctx context.Context, repo UsageLogRepository, row *GatewayUnbilledRequest) error {

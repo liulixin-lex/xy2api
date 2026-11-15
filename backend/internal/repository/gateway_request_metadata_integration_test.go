@@ -4,6 +4,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"testing"
 	"time"
 
@@ -17,6 +20,16 @@ func TestGatewayRequestMetadataSurvivesBillingIntentAndRead(t *testing.T) {
 	id, result, switches, fallback, takeover := uuid.NewString(), int16(2), int16(1), true, false
 	cmd.Usage.GatewayRequestID, cmd.Usage.Result, cmd.Usage.Switches = &id, &result, &switches
 	cmd.Usage.Fallback, cmd.Usage.Takeover = &fallback, &takeover
+	observed, terminal := true, false
+	source, kind := "upstream_json", "json"
+	cmd.Usage.RequestScope = resilience.GatewayRequestScopeText
+	cmd.Usage.UsageObserved = &observed
+	cmd.Usage.UsageSource = &source
+	cmd.Usage.TerminalEventSeen = &terminal
+	cmd.Usage.TerminalEventValid = &terminal
+	cmd.Usage.ResponseBodyType = &kind
+	cmd.Usage.ConversionNotices = []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}}
+	cmd.Usage.PricingSource = json.RawMessage(`{"source":"litellm","matched_key":"fixture","revision":"fixture"}`)
 	_, err := r.Apply(context.Background(), cmd)
 	require.NoError(t, err)
 	var usageID int64
@@ -30,6 +43,14 @@ func TestGatewayRequestMetadataSurvivesBillingIntentAndRead(t *testing.T) {
 	require.Equal(t, &switches, row.Switches)
 	require.Equal(t, &fallback, row.Fallback)
 	require.Equal(t, &takeover, row.Takeover)
+	require.Equal(t, cmd.Usage.RequestScope, row.RequestScope)
+	require.Equal(t, &observed, row.UsageObserved)
+	require.Equal(t, &source, row.UsageSource)
+	require.Equal(t, &terminal, row.TerminalEventSeen)
+	require.Equal(t, &terminal, row.TerminalEventValid)
+	require.Equal(t, &kind, row.ResponseBodyType)
+	require.Equal(t, cmd.Usage.ConversionNotices, row.ConversionNotices)
+	require.JSONEq(t, string(cmd.Usage.PricingSource), string(row.PricingSource))
 	// Recovery/idempotence keeps the original frozen request facts.
 	result = 3
 	_, err = r.Apply(context.Background(), cmd)

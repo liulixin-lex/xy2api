@@ -1330,6 +1330,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		CreatedAt:                time.Now(),
 	}
 	applyGatewayRequestMetadata(ctx, usageLog)
+	applyUsageResponseFacts(usageLog, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource, result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind)
 	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
 		usageLog.RateMultiplier = imageMultiplier
 	}

@@ -170,6 +170,8 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 Responses 拒参修复（包括流内修复）在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
 
+用量与无账单请求的 `usage_observed/usage_source`、`terminal_event_seen/terminal_event_valid`、`response_body_type` 分别对应运行时的用量存在性、来源、原始终态证据和 JSON/SSE 正文类型；未观测的事实为 `NULL`。`degradations` 保存请求级字段名与 `omit/map/default` 动作，错误记录同步保存同一份列表。具体语义见[用量与完成证据](usage.md#用量与完成证据)。
+
 ## 排障
 
 **单账号分组偶发 503**：在选号解释中查看该账号的档位与原因。软罚期间末位兜底会继续用它；若是硬罚（余额、鉴权、超过 300 秒的限流）则只能等恢复或配置无号兜底分组。

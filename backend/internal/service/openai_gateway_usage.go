@@ -459,6 +459,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	usageLog.RequestTiming = resilience.StateFrom(ctx).Timing()
 	usageLog.CreatedAt = time.Now()
 	applyGatewayRequestMetadata(ctx, usageLog)
+	applyUsageResponseFacts(usageLog, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource, result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind)
 	// 设置渠道信息
 	usageLog.ChannelID = optionalInt64Ptr(input.ChannelID)
 	usageLog.ModelMappingChain = optionalTrimmedStringPtr(input.ModelMappingChain)

@@ -4,11 +4,13 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/ent/apikey"
@@ -199,6 +201,162 @@ func (_u *UsageLogUpdate) SetNillableTakeover(v *bool) *UsageLogUpdate {
 // ClearTakeover clears the value of the "takeover" field.
 func (_u *UsageLogUpdate) ClearTakeover() *UsageLogUpdate {
 	_u.mutation.ClearTakeover()
+	return _u
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (_u *UsageLogUpdate) SetRequestScope(v string) *UsageLogUpdate {
+	_u.mutation.SetRequestScope(v)
+	return _u
+}
+
+// SetNillableRequestScope sets the "request_scope" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestScope(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestScope(*v)
+	}
+	return _u
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (_u *UsageLogUpdate) ClearRequestScope() *UsageLogUpdate {
+	_u.mutation.ClearRequestScope()
+	return _u
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (_u *UsageLogUpdate) SetUsageObserved(v bool) *UsageLogUpdate {
+	_u.mutation.SetUsageObserved(v)
+	return _u
+}
+
+// SetNillableUsageObserved sets the "usage_observed" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUsageObserved(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUsageObserved(*v)
+	}
+	return _u
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (_u *UsageLogUpdate) ClearUsageObserved() *UsageLogUpdate {
+	_u.mutation.ClearUsageObserved()
+	return _u
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (_u *UsageLogUpdate) SetUsageSource(v string) *UsageLogUpdate {
+	_u.mutation.SetUsageSource(v)
+	return _u
+}
+
+// SetNillableUsageSource sets the "usage_source" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUsageSource(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUsageSource(*v)
+	}
+	return _u
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (_u *UsageLogUpdate) ClearUsageSource() *UsageLogUpdate {
+	_u.mutation.ClearUsageSource()
+	return _u
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (_u *UsageLogUpdate) SetTerminalEventSeen(v bool) *UsageLogUpdate {
+	_u.mutation.SetTerminalEventSeen(v)
+	return _u
+}
+
+// SetNillableTerminalEventSeen sets the "terminal_event_seen" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTerminalEventSeen(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTerminalEventSeen(*v)
+	}
+	return _u
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (_u *UsageLogUpdate) ClearTerminalEventSeen() *UsageLogUpdate {
+	_u.mutation.ClearTerminalEventSeen()
+	return _u
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (_u *UsageLogUpdate) SetTerminalEventValid(v bool) *UsageLogUpdate {
+	_u.mutation.SetTerminalEventValid(v)
+	return _u
+}
+
+// SetNillableTerminalEventValid sets the "terminal_event_valid" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTerminalEventValid(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTerminalEventValid(*v)
+	}
+	return _u
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (_u *UsageLogUpdate) ClearTerminalEventValid() *UsageLogUpdate {
+	_u.mutation.ClearTerminalEventValid()
+	return _u
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (_u *UsageLogUpdate) SetResponseBodyType(v string) *UsageLogUpdate {
+	_u.mutation.SetResponseBodyType(v)
+	return _u
+}
+
+// SetNillableResponseBodyType sets the "response_body_type" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableResponseBodyType(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetResponseBodyType(*v)
+	}
+	return _u
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (_u *UsageLogUpdate) ClearResponseBodyType() *UsageLogUpdate {
+	_u.mutation.ClearResponseBodyType()
+	return _u
+}
+
+// SetDegradations sets the "degradations" field.
+func (_u *UsageLogUpdate) SetDegradations(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetDegradations(v)
+	return _u
+}
+
+// AppendDegradations appends value to the "degradations" field.
+func (_u *UsageLogUpdate) AppendDegradations(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendDegradations(v)
+	return _u
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (_u *UsageLogUpdate) ClearDegradations() *UsageLogUpdate {
+	_u.mutation.ClearDegradations()
+	return _u
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (_u *UsageLogUpdate) SetPricingSource(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetPricingSource(v)
+	return _u
+}
+
+// AppendPricingSource appends value to the "pricing_source" field.
+func (_u *UsageLogUpdate) AppendPricingSource(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendPricingSource(v)
+	return _u
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (_u *UsageLogUpdate) ClearPricingSource() *UsageLogUpdate {
+	_u.mutation.ClearPricingSource()
 	return _u
 }
 
@@ -1831,6 +1989,64 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.TakeoverCleared() {
 		_spec.ClearField(usagelog.FieldTakeover, field.TypeBool)
 	}
+	if value, ok := _u.mutation.RequestScope(); ok {
+		_spec.SetField(usagelog.FieldRequestScope, field.TypeString, value)
+	}
+	if _u.mutation.RequestScopeCleared() {
+		_spec.ClearField(usagelog.FieldRequestScope, field.TypeString)
+	}
+	if value, ok := _u.mutation.UsageObserved(); ok {
+		_spec.SetField(usagelog.FieldUsageObserved, field.TypeBool, value)
+	}
+	if _u.mutation.UsageObservedCleared() {
+		_spec.ClearField(usagelog.FieldUsageObserved, field.TypeBool)
+	}
+	if value, ok := _u.mutation.UsageSource(); ok {
+		_spec.SetField(usagelog.FieldUsageSource, field.TypeString, value)
+	}
+	if _u.mutation.UsageSourceCleared() {
+		_spec.ClearField(usagelog.FieldUsageSource, field.TypeString)
+	}
+	if value, ok := _u.mutation.TerminalEventSeen(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventSeen, field.TypeBool, value)
+	}
+	if _u.mutation.TerminalEventSeenCleared() {
+		_spec.ClearField(usagelog.FieldTerminalEventSeen, field.TypeBool)
+	}
+	if value, ok := _u.mutation.TerminalEventValid(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventValid, field.TypeBool, value)
+	}
+	if _u.mutation.TerminalEventValidCleared() {
+		_spec.ClearField(usagelog.FieldTerminalEventValid, field.TypeBool)
+	}
+	if value, ok := _u.mutation.ResponseBodyType(); ok {
+		_spec.SetField(usagelog.FieldResponseBodyType, field.TypeString, value)
+	}
+	if _u.mutation.ResponseBodyTypeCleared() {
+		_spec.ClearField(usagelog.FieldResponseBodyType, field.TypeString)
+	}
+	if value, ok := _u.mutation.Degradations(); ok {
+		_spec.SetField(usagelog.FieldDegradations, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDegradations(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDegradations, value)
+		})
+	}
+	if _u.mutation.DegradationsCleared() {
+		_spec.ClearField(usagelog.FieldDegradations, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.PricingSource(); ok {
+		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPricingSource(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldPricingSource, value)
+		})
+	}
+	if _u.mutation.PricingSourceCleared() {
+		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
@@ -2580,6 +2796,162 @@ func (_u *UsageLogUpdateOne) SetNillableTakeover(v *bool) *UsageLogUpdateOne {
 // ClearTakeover clears the value of the "takeover" field.
 func (_u *UsageLogUpdateOne) ClearTakeover() *UsageLogUpdateOne {
 	_u.mutation.ClearTakeover()
+	return _u
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (_u *UsageLogUpdateOne) SetRequestScope(v string) *UsageLogUpdateOne {
+	_u.mutation.SetRequestScope(v)
+	return _u
+}
+
+// SetNillableRequestScope sets the "request_scope" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestScope(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestScope(*v)
+	}
+	return _u
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (_u *UsageLogUpdateOne) ClearRequestScope() *UsageLogUpdateOne {
+	_u.mutation.ClearRequestScope()
+	return _u
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (_u *UsageLogUpdateOne) SetUsageObserved(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetUsageObserved(v)
+	return _u
+}
+
+// SetNillableUsageObserved sets the "usage_observed" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUsageObserved(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUsageObserved(*v)
+	}
+	return _u
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (_u *UsageLogUpdateOne) ClearUsageObserved() *UsageLogUpdateOne {
+	_u.mutation.ClearUsageObserved()
+	return _u
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (_u *UsageLogUpdateOne) SetUsageSource(v string) *UsageLogUpdateOne {
+	_u.mutation.SetUsageSource(v)
+	return _u
+}
+
+// SetNillableUsageSource sets the "usage_source" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUsageSource(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUsageSource(*v)
+	}
+	return _u
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (_u *UsageLogUpdateOne) ClearUsageSource() *UsageLogUpdateOne {
+	_u.mutation.ClearUsageSource()
+	return _u
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (_u *UsageLogUpdateOne) SetTerminalEventSeen(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetTerminalEventSeen(v)
+	return _u
+}
+
+// SetNillableTerminalEventSeen sets the "terminal_event_seen" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTerminalEventSeen(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTerminalEventSeen(*v)
+	}
+	return _u
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (_u *UsageLogUpdateOne) ClearTerminalEventSeen() *UsageLogUpdateOne {
+	_u.mutation.ClearTerminalEventSeen()
+	return _u
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (_u *UsageLogUpdateOne) SetTerminalEventValid(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetTerminalEventValid(v)
+	return _u
+}
+
+// SetNillableTerminalEventValid sets the "terminal_event_valid" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTerminalEventValid(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTerminalEventValid(*v)
+	}
+	return _u
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (_u *UsageLogUpdateOne) ClearTerminalEventValid() *UsageLogUpdateOne {
+	_u.mutation.ClearTerminalEventValid()
+	return _u
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (_u *UsageLogUpdateOne) SetResponseBodyType(v string) *UsageLogUpdateOne {
+	_u.mutation.SetResponseBodyType(v)
+	return _u
+}
+
+// SetNillableResponseBodyType sets the "response_body_type" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableResponseBodyType(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetResponseBodyType(*v)
+	}
+	return _u
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (_u *UsageLogUpdateOne) ClearResponseBodyType() *UsageLogUpdateOne {
+	_u.mutation.ClearResponseBodyType()
+	return _u
+}
+
+// SetDegradations sets the "degradations" field.
+func (_u *UsageLogUpdateOne) SetDegradations(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetDegradations(v)
+	return _u
+}
+
+// AppendDegradations appends value to the "degradations" field.
+func (_u *UsageLogUpdateOne) AppendDegradations(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendDegradations(v)
+	return _u
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (_u *UsageLogUpdateOne) ClearDegradations() *UsageLogUpdateOne {
+	_u.mutation.ClearDegradations()
+	return _u
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (_u *UsageLogUpdateOne) SetPricingSource(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetPricingSource(v)
+	return _u
+}
+
+// AppendPricingSource appends value to the "pricing_source" field.
+func (_u *UsageLogUpdateOne) AppendPricingSource(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendPricingSource(v)
+	return _u
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (_u *UsageLogUpdateOne) ClearPricingSource() *UsageLogUpdateOne {
+	_u.mutation.ClearPricingSource()
 	return _u
 }
 
@@ -4241,6 +4613,64 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.TakeoverCleared() {
 		_spec.ClearField(usagelog.FieldTakeover, field.TypeBool)
+	}
+	if value, ok := _u.mutation.RequestScope(); ok {
+		_spec.SetField(usagelog.FieldRequestScope, field.TypeString, value)
+	}
+	if _u.mutation.RequestScopeCleared() {
+		_spec.ClearField(usagelog.FieldRequestScope, field.TypeString)
+	}
+	if value, ok := _u.mutation.UsageObserved(); ok {
+		_spec.SetField(usagelog.FieldUsageObserved, field.TypeBool, value)
+	}
+	if _u.mutation.UsageObservedCleared() {
+		_spec.ClearField(usagelog.FieldUsageObserved, field.TypeBool)
+	}
+	if value, ok := _u.mutation.UsageSource(); ok {
+		_spec.SetField(usagelog.FieldUsageSource, field.TypeString, value)
+	}
+	if _u.mutation.UsageSourceCleared() {
+		_spec.ClearField(usagelog.FieldUsageSource, field.TypeString)
+	}
+	if value, ok := _u.mutation.TerminalEventSeen(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventSeen, field.TypeBool, value)
+	}
+	if _u.mutation.TerminalEventSeenCleared() {
+		_spec.ClearField(usagelog.FieldTerminalEventSeen, field.TypeBool)
+	}
+	if value, ok := _u.mutation.TerminalEventValid(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventValid, field.TypeBool, value)
+	}
+	if _u.mutation.TerminalEventValidCleared() {
+		_spec.ClearField(usagelog.FieldTerminalEventValid, field.TypeBool)
+	}
+	if value, ok := _u.mutation.ResponseBodyType(); ok {
+		_spec.SetField(usagelog.FieldResponseBodyType, field.TypeString, value)
+	}
+	if _u.mutation.ResponseBodyTypeCleared() {
+		_spec.ClearField(usagelog.FieldResponseBodyType, field.TypeString)
+	}
+	if value, ok := _u.mutation.Degradations(); ok {
+		_spec.SetField(usagelog.FieldDegradations, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDegradations(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDegradations, value)
+		})
+	}
+	if _u.mutation.DegradationsCleared() {
+		_spec.ClearField(usagelog.FieldDegradations, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.PricingSource(); ok {
+		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedPricingSource(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldPricingSource, value)
+		})
+	}
+	if _u.mutation.PricingSourceCleared() {
+		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)

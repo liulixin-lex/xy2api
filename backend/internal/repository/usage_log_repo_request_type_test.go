@@ -131,6 +131,14 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // switches
 			sqlmock.AnyArg(), // fallback
 			sqlmock.AnyArg(), // takeover
+			sqlmock.AnyArg(), // request_scope
+			sqlmock.AnyArg(), // usage_observed
+			sqlmock.AnyArg(), // usage_source
+			sqlmock.AnyArg(), // terminal_event_seen
+			sqlmock.AnyArg(), // terminal_event_valid
+			sqlmock.AnyArg(), // response_body_type
+			sqlmock.AnyArg(), // degradations
+			sqlmock.AnyArg(), // pricing_source
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -254,6 +262,14 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // switches
 			sqlmock.AnyArg(), // fallback
 			sqlmock.AnyArg(), // takeover
+			sqlmock.AnyArg(), // request_scope
+			sqlmock.AnyArg(), // usage_observed
+			sqlmock.AnyArg(), // usage_source
+			sqlmock.AnyArg(), // terminal_event_seen
+			sqlmock.AnyArg(), // terminal_event_valid
+			sqlmock.AnyArg(), // response_body_type
+			sqlmock.AnyArg(), // degradations
+			sqlmock.AnyArg(), // pricing_source
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -1046,6 +1062,14 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			(*int16)(nil),    // switches
 			(*bool)(nil),     // fallback
 			(*bool)(nil),     // takeover
+			(*string)(nil),   // request_scope
+			(*bool)(nil),     // usage_observed
+			(*string)(nil),   // usage_source
+			(*bool)(nil),     // terminal_event_seen
+			(*bool)(nil),     // terminal_event_valid
+			(*string)(nil),   // response_body_type
+			[]byte(nil),      // degradations
+			[]byte(nil),      // pricing_source
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1154,6 +1178,14 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			(*int16)(nil),    // switches
 			(*bool)(nil),     // fallback
 			(*bool)(nil),     // takeover
+			(*string)(nil),   // request_scope
+			(*bool)(nil),     // usage_observed
+			(*string)(nil),   // usage_source
+			(*bool)(nil),     // terminal_event_seen
+			(*bool)(nil),     // terminal_event_valid
+			(*string)(nil),   // response_body_type
+			[]byte(nil),      // degradations
+			[]byte(nil),      // pricing_source
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1245,6 +1277,14 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			(*int16)(nil),    // switches
 			(*bool)(nil),     // fallback
 			(*bool)(nil),     // takeover
+			(*string)(nil),   // request_scope
+			(*bool)(nil),     // usage_observed
+			(*string)(nil),   // usage_source
+			(*bool)(nil),     // terminal_event_seen
+			(*bool)(nil),     // terminal_event_valid
+			(*string)(nil),   // response_body_type
+			[]byte(nil),      // degradations
+			[]byte(nil),      // pricing_source
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1338,6 +1378,14 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			(*int16)(nil),                            // switches
 			(*bool)(nil),                             // fallback
 			(*bool)(nil),                             // takeover
+			(*string)(nil),                           // request_scope
+			(*bool)(nil),                             // usage_observed
+			(*string)(nil),                           // usage_source
+			(*bool)(nil),                             // terminal_event_seen
+			(*bool)(nil),                             // terminal_event_valid
+			(*string)(nil),                           // response_body_type
+			[]byte(nil),                              // degradations
+			[]byte(nil),                              // pricing_source
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

@@ -98,6 +98,16 @@ Gemini 的 prompt 计数包含缓存读取：未缓存输入按 `max(prompt - ca
 
 使用记录、未计费请求记录与错误记录中的 `degradations` 保存本次请求省略或改写的字段路径与动作：`omit` 为省略，`map` 为映射，不含参数值。具体含义见[降级记录说明](gateway-resilience-observability.md)。
 
+## 用量与完成证据
+
+用量行与无账单请求行保存 `usage_observed`、`usage_source`、`terminal_event_seen`、`terminal_event_valid`、`response_body_type`。这些是上游原始响应的内部证据，不改变发给客户端的用量字段、计数或原有合计。
+
+- `NULL` 表示未知或历史记录；已观察到 usage 缺失、null 或空对象时为 `usage_observed=false`，合法计数明确为零时为 `true`。不从 Token 数、HTTP 200 或费用推导。
+- `usage_source` 为 `missing`、`upstream_json`、`upstream_sse_terminal` 或 `upstream_sse_progressive`，对应实际保留的计数来源。
+- JSON 响应的终态两位为 false；SSE 缺终态为 false/false，非法终态为 true/false，合法终态为 true/true。这些位不代表已送达或应当计费。
+- `degradations` 在用量行、无账单行与错误行保存 `{field,action}`，动作仅为 `omit/map/default`，不保存原字段值或请求正文。
+- 财务任务与持久 billing intent 保留同一份深拷贝快照；恢复使用原始事实和价格快照，不重新判断来源或定价。
+
 ## 容量列的分组并发
 
 账号列表和分组列表的容量列可以显示“当前并发 / 总并发 / 本分组并发”。绿色的第三个数是这些账号当前正在处理、且归属于该分组的请求槽位数；账号同时属于多个分组时各分组显示各自的数量，“当前并发”仍是账号的实际总槽位。第三个数不会超过第一个数；并发上限为 0（不限制）的账号没有槽位记录，第三个数始终为 0。
