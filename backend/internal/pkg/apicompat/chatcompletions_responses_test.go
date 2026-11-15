@@ -2058,3 +2058,41 @@ func TestStreamingToolSnapshots(t *testing.T) {
 	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.done", ItemID: "i", Arguments: `{"x":2}`}, state)
 	require.Error(t, state.Err())
 }
+
+func TestReasoningTextFallback(t *testing.T) {
+	for _, tc := range []struct {
+		item ResponsesOutput
+		want string
+	}{
+		{ResponsesOutput{Type: "reasoning", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}, {Type: "reasoning_text", Text: "more"}}}, "rawmore"},
+		{ResponsesOutput{Type: "reasoning", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}, "summary"},
+		{ResponsesOutput{Type: "reasoning", Summary: []ResponsesSummary{{Type: "summary_text"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}, {Type: "text", Text: "ignored"}}}, "raw"},
+		{ResponsesOutput{Type: "reasoning", EncryptedContent: "opaque"}, ""},
+	} {
+		response := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{tc.item}}
+		require.Equal(t, tc.want, ResponsesToChatCompletions(response, "m").Choices[0].Message.ReasoningContent)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: response}, state)
+		require.NoError(t, state.Err())
+		text := ""
+		for _, chunk := range chunks {
+			for _, choice := range chunk.Choices {
+				if choice.Delta.ReasoningContent != nil {
+					text += *choice.Delta.ReasoningContent
+				}
+			}
+		}
+		require.Equal(t, tc.want, text)
+	}
+	state := NewResponsesEventToChatState()
+	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"}, state))
+	chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: "r", Delta: "summary"}, state)
+	require.Len(t, chunks, 1)
+	require.Equal(t, "summary", *chunks[0].Choices[0].Delta.ReasoningContent)
+	item := ResponsesOutput{Type: "reasoning", ID: "r", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary tail"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}
+	chunks = ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, state)
+	require.Len(t, chunks, 1)
+	require.Equal(t, " tail", *chunks[0].Choices[0].Delta.ReasoningContent)
+	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, state))
+	require.NoError(t, state.Err())
+}

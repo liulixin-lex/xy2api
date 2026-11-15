@@ -15,6 +15,8 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
+- Responses 无思考摘要时可恢复 reasoning_text，双载体时优先摘要且不重复正文。
+
 - Chat 流式工具参数可从 item.done 和结束快照补齐，重复快照不再重复参数或完成帧。
 
 - Responses 工具项重建保留两类密文标记及 null、空值区别，避免在 done 快照中丢失。
