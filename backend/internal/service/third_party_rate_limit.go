@@ -149,7 +149,8 @@ func (s *RateLimitService) applyThirdParty429(ctx context.Context, account *Acco
 }
 
 // A raw window is authoritative only for the same official target. Relay and
-// unresolved adaptive windows remain evidence and cannot re-pause the key.
+// mixed adaptive routes remain evidence; entirely official configurations retain
+// their existing pre-selection quota thresholds.
 func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return true
@@ -158,6 +159,30 @@ func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 		return true
 	}
 	target, known := cooldownAttemptTarget(ctx, account)
+	if !known && account.IsAdaptiveAPIProtocol() {
+		// Before selection there is no actual target. Preserve official quota
+		// thresholds only when every supported route is provably official.
+		if actual := resilience.StateFrom(ctx).UpstreamAttemptTarget(); actual != nil && actual.AccountID == account.ID {
+			return false
+		}
+		found, evidenceMatches := false, false
+		evidence, tagged := account.Extra[quotaCooldownEvidenceKey].(map[string]any)
+		for _, protocol := range []string{APIProtocolChatCompletions, APIProtocolResponses, APIProtocolAnthropic} {
+			if !account.providerSupportsProtocol(protocol) {
+				continue
+			}
+			origin, err := upstreamBalanceOrigin(account.GetCNProtocolBaseURL(protocol))
+			candidate := &resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: protocol, Origin: origin}
+			if err != nil || !cooldownTargetOfficial(account, candidate) {
+				return false
+			}
+			found = true
+			if tagged && evidence["owner"] == "key" && evidence["protocol"] == protocol && evidence["origin_digest"] == cooldownOriginDigest(origin) {
+				evidenceMatches = true
+			}
+		}
+		return found && (!tagged || evidenceMatches)
+	}
 	if !known || !cooldownTargetOfficial(account, target) {
 		return false
 	}
