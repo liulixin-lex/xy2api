@@ -97,9 +97,25 @@ func TestBillingPricingProvenance(t *testing.T) {
 		require.Empty(t, buf.String())
 		cost, err := billing.CalculateCostUnified(CostInput{Purpose: "billing", Model: "gpt-9876", Tokens: UsageTokens{InputTokens: 1}, RateMultiplier: 1, Resolver: resolver})
 		require.NoError(t, err)
-		billing.warnBillingPricingFallback(cost.PricingSource)
-		require.Contains(t, buf.String(), "Using fallback pricing")
-		require.Contains(t, buf.String(), "gpt-5.4")
+		_ = cost
+		for _, gateway := range []string{"openai", "generic"} {
+			buf.Reset()
+			biller := NewBillingService(&config.Config{}, catalog)
+			repo := &openAIRecordUsageLogRepoStub{inserted: true}
+			if gateway == "openai" {
+				svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+				svc.billingService = biller
+				require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: &OpenAIForwardResult{RequestID: "fallback", Model: "gpt-9876", Usage: OpenAIUsage{InputTokens: 1}}, APIKey: &APIKey{ID: 2}, User: &User{ID: 1}, Account: &Account{ID: 3}}))
+			} else {
+				generic := &GatewayService{billingService: biller}
+				priced, err := biller.CalculateCost("gpt-9876", UsageTokens{InputTokens: 1}, 1)
+				require.NoError(t, err)
+				row := generic.buildRecordUsageLog(context.Background(), &recordUsageCoreInput{}, &ForwardResult{RequestID: "fallback", Model: "gpt-9876"}, &APIKey{ID: 2}, &User{ID: 1}, &Account{ID: 3}, nil, "gpt-9876", 1, 1, 1, BillingTypeBalance, false, priced)
+				require.NotEmpty(t, row.PricingSource)
+			}
+			require.Contains(t, buf.String(), "Using fallback pricing", gateway)
+			require.Contains(t, buf.String(), "gpt-5.4")
+		}
 	})
 	t.Run("local_layers", func(t *testing.T) {
 		dir := t.TempDir()
@@ -114,7 +130,7 @@ func TestBillingPricingProvenance(t *testing.T) {
 		require.NoError(t, source.loadPricingData(catalogPath))
 		_, base := source.lookupModelPricingWithSource("fixture")
 		_, fallback := source.lookupModelPricingWithSource("layered")
-		require.Equal(t, "catalog", base.Source)
+		require.Empty(t, base.Source, "legacy cache does not certify its origin")
 		require.Equal(t, "fallback_file", fallback.Source)
 		require.Contains(t, base.Overrides["output_cost_per_token"], "override_file:")
 		billing := NewBillingService(&config.Config{}, source)
@@ -174,3 +190,35 @@ func TestZeroImageCustomTokenPricingWithoutCatalog(t *testing.T) {
 	}
 }
 
+func TestPricingFallbackStartupSourceSurvivesCache(t *testing.T) {
+	dir := t.TempDir()
+	fallback := filepath.Join(dir, "fallback.json")
+	body := []byte(`{"fallback-only":{"input_cost_per_token":0.001,"output_cost_per_token":0.002}}`)
+	require.NoError(t, os.WriteFile(fallback, body, 0600))
+	cfg := &config.Config{Pricing: config.PricingConfig{DataDir: dir, FallbackFile: fallback}}
+	svc := NewPricingService(cfg, nil)
+	require.NoError(t, svc.useFallbackPricing())
+	for _, phase := range []string{"startup", "reload", "restart", "unknown-cache"} {
+		t.Run(phase, func(t *testing.T) {
+			if phase == "reload" {
+				require.NoError(t, svc.reloadCustomPricingLayers())
+			}
+			if phase == "restart" {
+				svc = NewPricingService(cfg, nil)
+				require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
+			}
+			if phase == "unknown-cache" {
+				require.NoError(t, os.Remove(svc.getPricingFilePath()+".source"))
+				require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
+			}
+			cost, err := NewBillingService(&config.Config{}, svc).CalculateCost("fallback-only", UsageTokens{InputTokens: 50}, 1)
+			require.NoError(t, err)
+			require.InDelta(t, 0.05, cost.TotalCost, 1e-12)
+			want := "fallback_file"
+			if phase == "unknown-cache" {
+				want = ""
+			}
+			require.Equal(t, want, decodePricingSource(cost.PricingSource).Source)
+		})
+	}
+}

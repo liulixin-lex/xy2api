@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -560,7 +561,7 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 		if readErr != nil {
 			return fmt.Errorf("read file failed: %w", readErr)
 		}
-		data, fingerprint, origins, err = s.buildPricingDataWithSource(body)
+		data, fingerprint, origins, err = s.buildPricingDataWithSource(body, s.cachedPricingBodySource(body))
 		if err != nil {
 			return fmt.Errorf("parse pricing data: %w", err)
 		}
@@ -621,7 +622,7 @@ func (s *PricingService) downloadPricingData() error {
 			remoteHash[:min(8, len(remoteHash))], dataHashStr[:8])
 	}
 
-	data, customFilesHash, origins, err := s.buildPricingDataWithSource(body)
+	data, customFilesHash, origins, err := s.buildPricingDataWithSource(body, "catalog")
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
@@ -631,7 +632,7 @@ func (s *PricingService) downloadPricingData() error {
 	if strings.EqualFold(remoteHash, dataHashStr) {
 		syncHash = strings.ToLower(remoteHash)
 	}
-	if err := s.savePricingFiles(body, syncHash); err != nil {
+	if err := s.savePricingFiles(body, syncHash, "catalog"); err != nil {
 		return err
 	}
 
@@ -1035,12 +1036,12 @@ func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPr
 
 // buildPricingData retains the existing parsing entry point for validation callers.
 func (s *PricingService) buildPricingData(body []byte) (map[string]*LiteLLMModelPricing, string, error) {
-	data, fingerprint, _, err := s.buildPricingDataWithSource(body)
+	data, fingerprint, _, err := s.buildPricingDataWithSource(body, "catalog")
 	return data, fingerprint, err
 }
 
 // Publish the prices and their origins from one stable content revision.
-func (s *PricingService) buildPricingDataWithSource(body []byte) (map[string]*LiteLLMModelPricing, string, map[string]PricingProvenance, error) {
+func (s *PricingService) buildPricingDataWithSource(body []byte, bodySource string) (map[string]*LiteLLMModelPricing, string, map[string]PricingProvenance, error) {
 	fingerprint := s.customPricingFilesFingerprint()
 	data, err := s.parsePricingData(body)
 	if err != nil {
@@ -1048,7 +1049,7 @@ func (s *PricingService) buildPricingDataWithSource(body []byte) (map[string]*Li
 	}
 	origins := make(map[string]PricingProvenance, len(data))
 	for key := range data {
-		origins[key] = PricingProvenance{Source: "catalog"}
+		origins[key] = PricingProvenance{Source: bodySource}
 	}
 	data, err = s.mergeFallbackPricingData(data)
 	if err != nil {
@@ -1099,7 +1100,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 		return fmt.Errorf("read file failed: %w", err)
 	}
 
-	pricingData, customFilesHash, origins, err := s.buildPricingDataWithSource(data)
+	pricingData, customFilesHash, origins, err := s.buildPricingDataWithSource(data, s.cachedPricingBodySource(data))
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
@@ -1190,13 +1191,13 @@ func (s *PricingService) useFallbackPricing() error {
 	if err != nil {
 		return fmt.Errorf("read fallback failed: %w", err)
 	}
-	data, fingerprint, origins, err := s.buildPricingDataWithSource(body)
+	data, fingerprint, origins, err := s.buildPricingDataWithSource(body, "fallback_file")
 	if err != nil {
 		return fmt.Errorf("parse pricing fallback: %w", err)
 	}
 	hash := sha256.Sum256(body)
 	syncHash := hex.EncodeToString(hash[:])
-	if err := s.savePricingFiles(body, syncHash); err != nil {
+	if err := s.savePricingFiles(body, syncHash, "fallback_file"); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -1269,9 +1270,9 @@ func (s *PricingService) lookupModelPricingWithSource(modelName string) (*LiteLL
 	if pricing == nil {
 		return nil, PricingProvenance{}
 	}
-	provenance := s.pricingOrigins[key]
+	provenance, certified := s.pricingOrigins[key]
 	source := provenance.Source
-	if source == "" {
+	if !certified {
 		source = "catalog"
 	}
 	revision := ""
@@ -1826,9 +1827,10 @@ func validatePricingEntry(raw json.RawMessage, entry LiteLLMRawEntry) error {
 }
 
 // savePricingFiles stages validated bytes before publishing the local cache.
-func (s *PricingService) savePricingFiles(body []byte, hash string) error {
-	paths := []string{s.getPricingFilePath(), s.getHashFilePath()}
-	contents := [][]byte{body, []byte(hash + "\n")}
+func (s *PricingService) savePricingFiles(body []byte, hash, source string) error {
+	paths := []string{s.getPricingFilePath(), s.getHashFilePath(), s.getPricingFilePath() + ".source"}
+	metadata, _ := json.Marshal(pricingCacheSource{Hash: hash, Source: source})
+	contents := [][]byte{body, []byte(hash + "\n"), metadata}
 	temps := make([]string, 0, 2)
 	defer func() {
 		for _, path := range temps {
@@ -1860,17 +1862,23 @@ func (s *PricingService) savePricingFiles(body []byte, hash string) error {
 			return err
 		}
 	}
-	// Keep a restorable data file until the corresponding hash has been published.
-	backup := ""
-	oldBody, err := os.ReadFile(paths[0])
-	if err == nil {
-		f, createErr := os.CreateTemp(filepath.Dir(paths[0]), ".pricing-previous-*")
-		if createErr != nil {
-			return createErr
+	// Stage restorable copies of every cache component before publication.
+	backups := make([]string, len(paths))
+	for i, path := range paths {
+		previous, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
 		}
-		backup = f.Name()
-		temps = append(temps, backup)
-		_, writeErr := f.Write(oldBody)
+		if err != nil {
+			return err
+		}
+		f, err := os.CreateTemp(filepath.Dir(path), ".pricing-previous-*")
+		if err != nil {
+			return err
+		}
+		backups[i] = f.Name()
+		temps = append(temps, f.Name())
+		_, writeErr := f.Write(previous)
 		closeErr := f.Close()
 		if writeErr != nil {
 			return writeErr
@@ -1878,27 +1886,22 @@ func (s *PricingService) savePricingFiles(body []byte, hash string) error {
 		if closeErr != nil {
 			return closeErr
 		}
-		if err := os.Chmod(backup, 0644); err != nil {
+		if err := os.Chmod(f.Name(), 0644); err != nil {
 			return err
 		}
-	} else if !os.IsNotExist(err) {
-		return err
 	}
-	if err := os.Rename(temps[0], paths[0]); err != nil {
-		return fmt.Errorf("publish pricing file: %w", err)
-	}
-	if err := os.Rename(temps[1], paths[1]); err != nil {
-		var restoreErr error
-		if backup != "" {
-			restoreErr = os.Rename(backup, paths[0])
-		} else {
-			restoreErr = os.Remove(paths[0])
+	for i, path := range paths {
+		if err := os.Rename(temps[i], path); err != nil {
+			var restoreErr error
+			for j := i - 1; j >= 0; j-- {
+				if backups[j] != "" {
+					restoreErr = errors.Join(restoreErr, os.Rename(backups[j], paths[j]))
+				} else {
+					restoreErr = errors.Join(restoreErr, os.Remove(paths[j]))
+				}
+			}
+			return errors.Join(fmt.Errorf("publish pricing cache: %w", err), restoreErr)
 		}
-		if restoreErr != nil {
-			return fmt.Errorf("publish pricing hash: %w; restore previous cache: %w", err, restoreErr)
-		}
-		return fmt.Errorf("publish pricing hash: %w", err)
 	}
-
 	return nil
 }
