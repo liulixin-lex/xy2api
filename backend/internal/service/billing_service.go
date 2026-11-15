@@ -187,16 +187,17 @@ func pricingWithPriorityMultiplier(base *ModelPricing, multiplier float64) *Mode
 
 // UsageTokens 使用的token数量
 type UsageTokens struct {
-	InputTokens                int
-	ImageInputTokens           int
-	ImageCacheReadTokens       int
-	OutputTokens               int
-	CacheCreationTokensPresent bool // distinguishes an explicit aggregate zero from omitted usage
-	CacheCreationTokens        int
-	CacheReadTokens            int
-	CacheCreation5mTokens      int
-	CacheCreation1hTokens      int
-	ImageOutputTokens          int
+	CacheCreation5mTokensPresent, CacheCreation1hTokensPresent bool
+	InputTokens                                                int
+	ImageInputTokens                                           int
+	ImageCacheReadTokens                                       int
+	OutputTokens                                               int
+	CacheCreationTokensPresent                                 bool // distinguishes an explicit aggregate zero from omitted usage
+	CacheCreationTokens                                        int
+	CacheReadTokens                                            int
+	CacheCreation5mTokens                                      int
+	CacheCreation1hTokens                                      int
+	ImageOutputTokens                                          int
 }
 
 // CostBreakdown 费用明细
