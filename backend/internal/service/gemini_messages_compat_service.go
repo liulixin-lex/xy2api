@@ -3685,6 +3685,10 @@ func writeGeminiCompatConversionError(c *gin.Context, protocol string, err error
 }
 
 func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {
+	return convertClaudeMessagesToGeminiGenerateContentWithOptions(body, geminiContentOptions{})
+}
+
+func convertClaudeMessagesToGeminiGenerateContentWithOptions(body []byte, opts geminiContentOptions) ([]byte, error) {
 	var req map[string]any
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, err
@@ -3693,7 +3697,7 @@ func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {
 	toolUseIDToName := make(map[string]string)
 
 	systemText := extractClaudeSystemText(req["system"])
-	contents, err := convertClaudeMessagesToGeminiContents(req["messages"], toolUseIDToName)
+	contents, err := convertClaudeMessagesToGeminiContents(req["messages"], toolUseIDToName, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -3773,7 +3777,7 @@ func extractClaudeSystemText(system any) string {
 	}
 }
 
-func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[string]string) ([]any, error) {
+func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[string]string, opts geminiContentOptions) ([]any, error) {
 	arr, ok := messages.([]any)
 	if !ok {
 		return nil, errors.New("messages must be an array")
@@ -3860,6 +3864,10 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 										"data":     data,
 									},
 								})
+							}
+						} else if srcType == "url" && opts.URLImages {
+							if part := geminiURLImagePart(src); part != nil {
+								parts = append(parts, part)
 							}
 						}
 					}

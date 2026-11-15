@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -173,26 +174,46 @@ func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)
 }
 
 func TestImageDetailOmittedWithNotice(t *testing.T) {
-	for _, detail := range []string{"", "auto", "low", "high"} {
-		t.Run("detail="+detail, func(t *testing.T) {
-			image := map[string]any{"url": "data:image/png;base64,aW1hZ2U="}
-			if detail != "" {
-				image["detail"] = detail
-			}
-			body, err := json.Marshal(map[string]any{"model": "gemini-2.5-flash", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "image_url", "image_url": image}}}}})
-			require.NoError(t, err)
-			wire, _, notices := m5ForwardChat(t, body)
-			require.Equal(t, "aW1hZ2U=", gjson.GetBytes(wire, "contents.0.parts.0.inlineData.data").String())
-			require.NotContains(t, string(wire), `"detail"`)
-			if detail == "" {
-				require.Empty(t, notices)
-			} else {
-				require.Len(t, notices, 1)
-				require.Equal(t, "omit", notices[0].Action)
-				require.Contains(t, notices[0].Field, "detail")
-			}
-		})
+	for _, source := range []string{"data:image/png;base64,aW1hZ2U=", "https://example.com/a.png"} {
+		for _, detail := range []string{"", "auto", "low", "high"} {
+			t.Run(fmt.Sprintf("%s/detail=%s", source[:5], detail), func(t *testing.T) {
+				image := map[string]any{"url": source}
+				if detail != "" {
+					image["detail"] = detail
+				}
+				body, err := json.Marshal(map[string]any{"model": "gemini-2.5-flash", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "describe"}, map[string]any{"type": "image_url", "image_url": image}}}}})
+				require.NoError(t, err)
+				wire, _, notices := m5ForwardChat(t, body)
+				require.Equal(t, "describe", gjson.GetBytes(wire, "contents.0.parts.0.text").String())
+				if strings.HasPrefix(source, "data:") {
+					require.Equal(t, "aW1hZ2U=", gjson.GetBytes(wire, "contents.0.parts.1.inlineData.data").String())
+				} else {
+					// URL images go out as fileData instead of being dropped.
+					require.JSONEq(t, `{"fileData":{"fileUri":"https://example.com/a.png","mimeType":"image/png"}}`, gjson.GetBytes(wire, "contents.0.parts.1").Raw)
+				}
+				require.NotContains(t, string(wire), `"detail"`)
+				if detail == "" {
+					require.Empty(t, notices)
+				} else {
+					require.Len(t, notices, 1)
+					require.Equal(t, "omit", notices[0].Action)
+					require.Contains(t, notices[0].Field, "detail")
+				}
+			})
+		}
 	}
+	t.Run("ultra_still_rejected", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/a.png","detail":"ultra"}}]}]}`)
+		upstream := &queuedHTTPUpstreamStub{}
+		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+		c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+		account := &Account{ID: 703, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+		_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, account, body)
+		var conversion *apicompat.UnsupportedConversionError
+		require.ErrorAs(t, err, &conversion)
+		require.Contains(t, conversion.Field, "detail")
+		require.Empty(t, upstream.requestBodies)
+	})
 }
 
 func m5ForwardChat(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
