@@ -170,8 +170,8 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRej
 	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
 
 	require.NoError(t, err)
-	require.False(t, changed)
-	require.Nil(t, retryBody)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
 }
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyHandlesExplicitOptionalParameterRejections(t *testing.T) {
@@ -841,7 +841,7 @@ func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(
 	}
 }
 
-func TestOpenAIGatewayService_PreservesRejectedMaxOutputTokens(t *testing.T) {
+func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":4096,"input":[{"type":"message","role":"user","content":{"max_output_tokens":"keep"}}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
@@ -855,11 +855,12 @@ func TestOpenAIGatewayService_PreservesRejectedMaxOutputTokens(t *testing.T) {
 		body,
 	)
 
-	require.Error(t, err)
-	require.Nil(t, result)
-	require.Len(t, upstream.bodies, 1)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
-	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[0], "input.0.content.max_output_tokens").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input.0.content.max_output_tokens").String())
 }
 
 func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRetry(t *testing.T) {
