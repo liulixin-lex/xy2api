@@ -694,9 +694,9 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   min-width: 260px;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-raised);
+  border: 1px solid var(--color-line-popover);
+  border-radius: var(--radius-popover);
+  background: var(--color-bg-popover);
   box-shadow: var(--shadow-popover);
 }
 .tb-menu__folded {
@@ -733,7 +733,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 }
 @media (hover: hover) {
   .tb-menu__clear:hover {
-    background: var(--color-bg-control-hover);
+    background: var(--color-bg-popover-hover);
     color: var(--color-text-primary);
   }
 }

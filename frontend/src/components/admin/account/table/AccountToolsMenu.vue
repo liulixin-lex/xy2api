@@ -18,7 +18,7 @@
       <div
         v-if="open"
         ref="menuRef"
-        class="fixed overflow-hidden rounded-lg border border-line-strong bg-surface-raised shadow-popover"
+        class="fixed overflow-hidden rounded-popover border border-line-popover bg-surface-popover shadow-popover"
         :style="[panelStyle, { zIndex: layer.zIndex.value }]"
         @click.stop
       >
@@ -176,7 +176,7 @@ defineExpose({ close: () => { open.value = false } })
   display: none;
 }
 .account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-fg-primary transition-colors hover:bg-surface-control-hover;
+  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-fg-primary transition-colors hover:bg-surface-popover-hover;
 }
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;

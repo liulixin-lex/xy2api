@@ -130,6 +130,14 @@
   --sidebar-width: 460px;
   --popover-width: 280px;
   --motion-panel: 240ms;
+
+  /* Popover material (spec 12.6): the shared Select's panel, for every dropdown-like layer; shadow --shadow-popover */
+  --color-bg-popover: #ffffff;
+  --color-line-popover: #e5e7eb;
+  --color-bg-popover-hover: #f9fafb;
+  --color-bg-popover-selected: #f0fdfa;
+  --color-text-popover-selected: #0f766e;
+  --radius-popover: 12px;
 }
 
 .dark {
@@ -196,4 +204,11 @@
 
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(0, 0, 0, 0.2);
   --shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.28);
+
+  /* Popover material (spec 12.6) */
+  --color-bg-popover: #1e293b;
+  --color-line-popover: #334155;
+  --color-bg-popover-hover: #334155;
+  --color-bg-popover-selected: rgb(19 78 74 / 0.2);
+  --color-text-popover-selected: #5eead4;
 }

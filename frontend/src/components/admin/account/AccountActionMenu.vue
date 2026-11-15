@@ -5,7 +5,7 @@
       <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
-        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover shadow-popover"
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >
@@ -158,9 +158,9 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
-const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-200'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
-const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
+const DIVIDER = 'my-1 border-t border-line-popover'
 
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false

@@ -48,7 +48,7 @@
         <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="moreRect = null" />
         <div
           role="menu"
-          class="fixed w-44 rounded-xl bg-white py-1 shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+          class="fixed w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
           :style="{ top: `${moreRect.bottom + 4}px`, right: `${Math.max(8, viewportWidth - moreRect.right)}px`, zIndex: (layer.zIndex.value ?? 9998) + 1 }"
           data-test="bulk-more-menu"
         >
@@ -56,7 +56,7 @@
           <button type="button" role="menuitem" :class="ITEM" @click="pick('refresh-token')">{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
           <button type="button" role="menuitem" :class="ITEM" @click="pick('probe-upstream-billing')">{{ t('admin.accounts.bulkActions.probeUpstreamBilling') }}</button>
           <button type="button" role="menuitem" :class="ITEM" :disabled="iqBusy" :aria-busy="iqBusy" data-testid="bulk-iq-check" @click="pick('run-iq-check')">{{ t('admin.accounts.bulkActions.iqCheck') }}</button>
-          <div class="my-1 border-t border-gray-100 dark:border-dark-700" />
+          <div class="my-1 border-t border-line-popover" />
           <button type="button" role="menuitem" :class="ITEM" class="!text-red-600 dark:!text-red-400" @click="pick('delete')">{{ t('admin.accounts.bulkActions.delete') }}</button>
         </div>
       </div>
@@ -105,7 +105,7 @@ const emit = defineEmits([
 const SCHED_ACTIONS = ['reset', 'exempt'] as const
 const LINK = 'text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200'
 const SEP = 'mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600'
-const ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
 
 const { t } = useI18n()
 const { width: viewportWidth } = useWindowSize()

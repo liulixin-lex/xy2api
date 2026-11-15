@@ -22,18 +22,23 @@ export default {
           pill: 'var(--color-bg-pill)',
           'pill-hover': 'var(--color-bg-pill-hover)',
           target: 'var(--color-bg-target)',
-          selected: 'var(--color-bg-selected)'
+          selected: 'var(--color-bg-selected)',
+          popover: 'var(--color-bg-popover)',
+          'popover-hover': 'var(--color-bg-popover-hover)',
+          'popover-selected': 'var(--color-bg-popover-selected)'
         },
         line: {
           row: 'var(--color-line-row)',
           strong: 'var(--color-line-strong)',
-          control: 'var(--color-line-control)'
+          control: 'var(--color-line-control)',
+          popover: 'var(--color-line-popover)'
         },
         fg: {
           primary: 'var(--color-text-primary)',
           secondary: 'var(--color-text-secondary)',
           muted: 'var(--color-text-muted)',
-          'muted-on-pill': 'var(--color-text-muted-on-pill)'
+          'muted-on-pill': 'var(--color-text-muted-on-pill)',
+          'popover-selected': 'var(--color-text-popover-selected)'
         },
         status: {
           ok: 'var(--color-status-ok)',
@@ -184,7 +189,8 @@ export default {
         xs: '2px'
       },
       borderRadius: {
-        '4xl': '2rem'
+        '4xl': '2rem',
+        popover: 'var(--radius-popover)'
       }
     }
   },

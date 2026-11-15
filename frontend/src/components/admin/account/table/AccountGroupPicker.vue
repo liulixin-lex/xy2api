@@ -372,9 +372,9 @@ defineExpose({ requestClose })
      bottom never slips under the browser's toolbar (7p-3). */
   max-height: calc(100dvh - 73px);
   grid-template-rows: auto minmax(0, 1fr) auto;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-raised);
+  border: 1px solid var(--color-line-popover);
+  border-radius: var(--radius-popover);
+  background: var(--color-bg-popover);
   box-shadow: var(--shadow-popover);
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
@@ -471,8 +471,11 @@ defineExpose({ requestClose })
 }
 @media (hover: hover) {
   .gp-item:hover {
-    background: var(--color-bg-row-hover);
+    background: var(--color-bg-popover-hover);
   }
+}
+.gp-item.is-checked {
+  background: var(--color-bg-popover-selected);
 }
 .gp-check {
   width: 14px;
@@ -497,7 +500,7 @@ defineExpose({ requestClose })
   white-space: nowrap;
 }
 .gp-item.is-checked .gp-name {
-  color: var(--color-text-primary);
+  color: var(--color-text-popover-selected);
 }
 .gp-tag {
   flex: none;
@@ -525,7 +528,7 @@ defineExpose({ requestClose })
   gap: 10px;
   padding: 12px;
   border-top: 1px solid var(--color-line-row);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: 0 0 var(--radius-popover) var(--radius-popover);
   background: var(--color-bg-header);
 }
 .gp-conflict__msg {
