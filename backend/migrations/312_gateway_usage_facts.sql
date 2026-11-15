@@ -1,5 +1,10 @@
 -- Unknown gateway facts stay NULL; existing rows are not backfilled.
 
+-- Acquire every lock without waiting before changing any table. A busy table
+-- aborts the runner-owned transaction so existing billing writes can proceed.
+LOCK TABLE usage_logs, gateway_unbilled_requests, ops_error_logs
+    IN ACCESS EXCLUSIVE MODE NOWAIT;
+
 ALTER TABLE usage_logs
     ADD COLUMN IF NOT EXISTS request_scope TEXT,
     ADD COLUMN IF NOT EXISTS usage_observed BOOLEAN,
