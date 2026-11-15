@@ -27,7 +27,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { formatDate } from '@/utils/format'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { vTip } from '@/utils/tip'
 import { probeFailureText, upstreamRateView } from './upstreamBillingRate'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
@@ -83,9 +83,8 @@ const primaryValue = computed(() => {
 })
 const dimmed = computed(() => view.value.dimmed)
 const failureText = computed(() => probeFailureText(view.value.failure, t))
-/** Month, day and 24-hour time in the interface language (never "05:51 PM" in Chinese). */
-const probeTime = (value?: string) =>
-  (value && formatDate(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })) || '-'
+/** A time as the tip cards give it: HH:MM today, else MM-DD HH:MM, whatever the interface language (12.12-13). */
+const probeTime = (value?: string) => (value ? formatShortTime(value) : '-')
 
 /** The hover tip: the rates in force, or the last probe's; why it failed; when it runs next; the probe switches. */
 function rateTip(): string {
