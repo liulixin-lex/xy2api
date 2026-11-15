@@ -32,7 +32,7 @@ func TestM1FinalEffortPolicy(t *testing.T) {
 		{"gpt-6.1-terra", "minimal", "none"}, {"gpt-6.1-terra", "none", "none"},
 		{"gpt-6-sol", "none", "none"}, {"gpt-6-luna", "none", "none"},
 		{"grok-4.7", "none", "none"}, {"grok-4.7", "minimal", "low"},
-		{"claude-sonnet-5-5", "none", "none"}, {"claude-opus-4-6", "xhigh", "high"},
+		{"claude-sonnet-5-5", "none", "none"}, {"claude-opus-5-5", "none", "low"}, {"claude-opus-4-6", "xhigh", "high"},
 		{"unknown", "none", "none"}, {"gpt-6.1-terra", "ultra", "ultra"},
 	} {
 		t.Run(tc.model+tc.effort, func(t *testing.T) {
@@ -230,6 +230,9 @@ func TestM1ReviewOAuthTerraMinimal(t *testing.T) {
 }
 
 func TestM1ReviewClaudeMinimalModes(t *testing.T) {
+	levels, reliable := supportedInferenceEffortsForAccount(newOpenAIRejectedFieldTestAccount(), "claude-opus-5-5")
+	require.True(t, reliable)
+	require.NotContains(t, levels, "minimal", "compatibility input must not become a provider capability")
 	for _, model := range []string{"claude-haiku-5-5", "claude-sonnet-5-5"} {
 		body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"minimal"}`)
 		got, _, err := applyFinalReasoningEffortForAccount(m1EffortContext(body), nil, newOpenAIRejectedFieldTestAccount(), body, model, "chat")
