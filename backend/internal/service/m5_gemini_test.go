@@ -200,6 +200,58 @@ func TestM5ThinkingConfig(t *testing.T) {
 	})
 }
 
+func TestM5EmptyToolEnum(t *testing.T) {
+	tests := []struct {
+		name, schema, want string
+		omitted            []string
+	}{
+		{"empty", `{"type":"STRING","enum":[]}`, `{"type":"STRING"}`, []string{"schema.enum"}},
+		{"empty_string", `{"enum":[""]}`, `{}`, []string{"schema.enum"}},
+		{"mixed", `{"enum":["","ok"]}`, `{"enum":["ok"]}`, []string{"schema.enum"}},
+		{"whitespace", `{"enum":[" "]}`, `{"enum":[" "]}`, nil},
+		{"numbers", `{"enum":[1,2]}`, `{"enum":[1,2]}`, nil},
+		{"nested", `{"properties":{"x":{"items":{"anyOf":[{"enum":[]},{"allOf":[{"enum":["","ok"]}]}]}}}}`, `{"properties":{"x":{"items":{"anyOf":[{},{"allOf":[{"enum":["ok"]}]}]}}}}`, []string{"schema.properties.x.items.anyOf[0].enum", "schema.properties.x.items.anyOf[1].allOf[0].enum"}},
+		{"dependent", `{"dependentSchemas":{"x":{"properties":{"y":{"enum":[]}}}}}`, `{"dependentSchemas":{"x":{"properties":{"y":{}}}}}`, []string{"schema.dependentSchemas.x.properties.y.enum"}},
+		{"not", `{"type":"STRING","not":{"enum":[]}}`, `{"type":"STRING"}`, []string{"schema.not"}},
+		{"conditional", `{"if":{"enum":[]},"then":{"enum":["a"]},"else":{"enum":["b"]},"type":"STRING"}`, `{"type":"STRING"}`, []string{"schema.if", "schema.then", "schema.else"}},
+		{"then", `{"if":{"type":"STRING"},"then":{"properties":{"x":{"enum":[]}}}}`, `{}`, []string{"schema.if", "schema.then"}},
+		{"one_of", `{"oneOf":[{"enum":[]},{"enum":[""]}],"minLength":2}`, `{"minLength":2}`, []string{"schema.oneOf"}},
+		{"contains", `{"contains":{"enum":[]},"minContains":1,"maxContains":2,"type":"ARRAY"}`, `{"type":"ARRAY"}`, []string{"schema.contains", "schema.minContains", "schema.maxContains"}},
+		{"unaffected", `{"not":{"enum":["x"]},"if":{"enum":["a"]},"then":{"enum":["b"]},"else":{"enum":["c"]},"oneOf":[{"enum":["x"]}],"contains":{"enum":[" "]},"minContains":1}`, `{"not":{"enum":["x"]},"if":{"enum":["a"]},"then":{"enum":["b"]},"else":{"enum":["c"]},"oneOf":[{"enum":["x"]}],"contains":{"enum":[" "]},"minContains":1}`, nil},
+		{"data", `{"default":{"enum":[]},"const":{"enum":[""]},"examples":[{"enum":[]}],"properties":{"enum":{"type":"STRING"}},"not":{"const":{"enum":[]}}}`, `{"default":{"enum":[]},"const":{"enum":[""]},"examples":[{"enum":[]}],"properties":{"enum":{"type":"STRING"}},"not":{"const":{"enum":[]}}}`, nil},
+		{"containers", `{"patternProperties":{"x":{"enum":[]}},"$defs":{"x":{"enum":[]}},"definitions":{"x":{"enum":[]}},"items":[{"enum":[]}],"prefixItems":[{"enum":[]}],"additionalProperties":{"enum":[]},"propertyNames":{"enum":[]}}`, `{"patternProperties":{"x":{}},"$defs":{"x":{}},"definitions":{"x":{}},"items":[{}],"prefixItems":[{}],"additionalProperties":{},"propertyNames":{}}`, []string{"schema.patternProperties.x.enum", "schema.$defs.x.enum", "schema.definitions.x.enum", "schema.items[0].enum", "schema.prefixItems[0].enum", "schema.additionalProperties.enum", "schema.propertyNames.enum"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var schema map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tt.schema), &schema))
+			require.Equal(t, len(tt.omitted) > 0, hasGeminiEmptyEnum(schema))
+			before, err := json.Marshal(schema)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.schema, string(before), "detection must be read-only")
+			require.Equal(t, tt.omitted, pruneGeminiEmptyEnums(schema, "schema"))
+			after, err := json.Marshal(schema)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(after))
+			body := []byte(`{"model":"gemini-2.5-flash","max_tokens":512,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":` + tt.schema + `}]}`)
+			wire, _, notices := m5ForwardMessages(t, body)
+			var expected map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tt.want), &expected))
+			cleanedExpected, err := json.Marshal(cleanToolSchema(expected))
+			require.NoError(t, err)
+			require.JSONEq(t, string(cleanedExpected), gjson.GetBytes(wire, "tools.0.functionDeclarations.0.parameters").Raw)
+			var wantNotices []apicompat.ConversionNotice
+			for _, field := range tt.omitted {
+				if tt.name == "containers" && (strings.Contains(field, "patternProperties") || strings.Contains(field, "$defs") || strings.Contains(field, "definitions") || strings.Contains(field, "additionalProperties")) {
+					continue // The established cleaner already removes these keywords.
+				}
+				wantNotices = append(wantNotices, apicompat.ConversionNotice{Field: strings.Replace(field, "schema", "tools[0].functionDeclarations[0].parameters", 1), Action: "omit"})
+			}
+			require.Equal(t, wantNotices, notices)
+		})
+	}
+}
+
 func TestM5StructuredOutput(t *testing.T) {
 	t.Run("chat_final_request", func(t *testing.T) {
 		for _, tc := range []struct{ name, model, format, mime, schemaNotice string }{
