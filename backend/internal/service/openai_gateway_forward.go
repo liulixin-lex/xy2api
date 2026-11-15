@@ -1269,7 +1269,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) && isHTTPReasoningEncryptedRejection(body, encryptedErrorPayload, upstreamMsg) {
-				if plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, requestRepair, body, encryptedErrorPayload); ok {
+				plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, requestRepair, body, encryptedErrorPayload)
+				if ok {
 					markEncryptedLineage(plan.Digests)
 					body, requestView, reqBody = plan.Next, newOpenAIRequestView(plan.Next), nil
 					requestRepair.noteHTTPEncryptedRepair(plan)
@@ -1278,7 +1279,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))
 					continue
 				}
-				rejection := newOpenAIEncryptedContentRejection(ctx, account, body, encryptedErrorPayload)
+				rejection := newOpenAIEncryptedContentRejection(ctx, account, body, encryptedErrorPayload, plan.Selected)
 				captureOpenAIStateRejection(c, account, encryptedErrorPayload, upstreamMsg, "native_http", false, body)
 				writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
 				return nil, &OpenAIRequestRejectionError{rejection}

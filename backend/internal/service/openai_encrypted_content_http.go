@@ -73,16 +73,22 @@ func newHTTPEncryptedContentRepairSignal(ctx context.Context, c *gin.Context, ac
 	if !isHTTPEncryptedContentFailure(body, payload, message, status) {
 		return nil
 	}
-	if plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, openAIRequestRepairFrom(c), body, payload); ok {
+	plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, openAIRequestRepairFrom(c), body, payload)
+	if ok {
 		return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: plan.Next, encrypted: plan}
 	}
-	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, false, sse)
+	return terminateHTTPEncryptedContentWith(ctx, c, account, body, payload, message, status, false, sse, plan.Selected)
 }
 
 func terminateHTTPEncryptedContent(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, outputStarted, sse bool) error {
 	if !isHTTPEncryptedContentFailure(body, payload, message, status) {
 		return nil
 	}
+	selected, _ := openAIRequestEncryptedContentRepairBody(c, body, payload)
+	return terminateHTTPEncryptedContentWith(ctx, c, account, body, payload, message, status, outputStarted, sse, selected)
+}
+
+func terminateHTTPEncryptedContentWith(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, outputStarted, sse bool, selected httpRejectedEncryptedItem) error {
 	path := "native_http"
 	if c != nil && c.GetBool("openai_passthrough") {
 		path = "passthrough_http"
@@ -94,7 +100,7 @@ func terminateHTTPEncryptedContent(ctx context.Context, c *gin.Context, account 
 		}
 	}
 	captureOpenAIStateRejection(c, account, payload, message, path, outputStarted, body, status)
-	rejection := newOpenAIEncryptedContentRejection(ctx, account, body, payload)
+	rejection := newOpenAIEncryptedContentRejection(ctx, account, body, payload, selected)
 	writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
 	return &OpenAIRequestRejectionError{rejection}
 }

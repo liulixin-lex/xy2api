@@ -28,7 +28,8 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 		{"redaction", `{"error":{"code":"invalid_encrypted_content","message":"Could not verify cipher-bad with fixture-credential-secret"},"debug":"arbitrary response body"}`, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := newOpenAIEncryptedContentRejection(context.Background(), account, body, []byte(tc.payload))
+			selected, _ := selectHTTPRejectedEncryptedItem(body, []byte(tc.payload))
+			err := newOpenAIEncryptedContentRejection(context.Background(), account, body, []byte(tc.payload), selected)
 			require.Equal(t, tc.param, err.Param)
 			require.Contains(t, err.Message, "Upstream detail:")
 			if tc.unique {
@@ -109,7 +110,9 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 			req.c.Header("Retry-After", "9")
 			req.c.Writer.WriteHeader(http.StatusOK)
 			req.c.Writer.WriteHeaderNow()
-			rejection := newOpenAIEncryptedContentRejection(req.ctx, account, body, []byte(`{"error":{"code":"invalid_encrypted_content","param":"input[0].encrypted_content","message":"for item rs_bad"}}`))
+			payload := []byte(`{"error":{"code":"invalid_encrypted_content","param":"input[0].encrypted_content","message":"for item rs_bad"}}`)
+			selected, _ := selectHTTPRejectedEncryptedItem(body, payload)
+			rejection := newOpenAIEncryptedContentRejection(req.ctx, account, body, payload, selected)
 			require.True(t, writeOpenAIEncryptedContentRejection(req.c, protocol, rejection))
 			before := req.rec.Body.String()
 			require.False(t, writeOpenAIEncryptedContentRejection(req.c, protocol, rejection))
@@ -143,4 +146,34 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 		require.False(t, req.c.Writer.Written())
 	})
 
+}
+
+// Blue review input: native normalization drops an over-long item id. The
+// terminal error keeps the location the repair decision mapped through the
+// original request instead of claiming the item could not be identified.
+func TestEncryptedContentTerminalKeepsMappedLocator(t *testing.T) {
+	id := "rs_" + strings.Repeat("a", 65)
+	for _, tc := range []struct{ name, input string }{
+		{"single", fmt.Sprintf(`[{"type":"reasoning","id":%q,"encrypted_content":"cipher-bad","summary":[]}]`, id)},
+		{"with_other_item", fmt.Sprintf(`[{"type":"reasoning","id":%q,"encrypted_content":"cipher-bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"cipher-good","summary":[]}]`, id)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Budget.MaxAttempts = 1 })
+			req := newWebSearchReplayRequest(t)
+			body := []byte(`{"model":"gpt-5.5","stream":true,"input":` + tc.input + `}`)
+			payload := fmt.Sprintf(`{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item %s"}}`, id)
+			up := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIUpstreamErrorResponse(http.StatusBadRequest, payload)}}
+			svc := newOpenAIImageGenerationControlTestService(up)
+			_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(false), body)
+			var rejection *OpenAIRequestRejectionError
+			require.ErrorAs(t, err, &rejection)
+			require.Len(t, up.bodies, 1)
+			require.Empty(t, gjson.GetBytes(up.bodies[0], "input.0.id").String(), "fixture relies on the wire dropping the id")
+			require.Equal(t, http.StatusBadRequest, req.rec.Code)
+			message := gjson.GetBytes(req.rec.Body.Bytes(), "error.message").String()
+			require.Contains(t, message, "The upstream rejected encrypted content at item "+id+".")
+			require.Contains(t, message, "Remove only the identified encrypted item")
+			require.Empty(t, gjson.GetBytes(req.rec.Body.Bytes(), "error.param").String())
+		})
+	}
 }

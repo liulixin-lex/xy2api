@@ -79,8 +79,35 @@ func isHTTPReasoningEncryptedRejection(body, payload []byte, message string) boo
 	}
 }
 
-func newOpenAIEncryptedContentRejection(ctx context.Context, account *Account, body, payload []byte) *openAIEncryptedContentRejectionError {
-	selected, _ := selectHTTPRejectedEncryptedItem(body, payload)
+// httpEncryptedNamedItem returns the single item id the upstream named.
+func httpEncryptedNamedItem(payload []byte) string {
+	named := ""
+	add := func(id string) bool {
+		if id == "" || id == named {
+			return true
+		}
+		if named != "" {
+			return false
+		}
+		named = id
+		return true
+	}
+	if !add(openAIStreamErrorField(payload, "item_id").String()) {
+		return ""
+	}
+	for _, field := range []string{"code", "param", "message"} {
+		for _, match := range httpEncryptedItemPattern.FindAllStringSubmatch(openAIStreamErrorField(payload, field).String(), -1) {
+			if !add(firstNonEmpty(match[1], match[2])) {
+				return ""
+			}
+		}
+	}
+	return named
+}
+
+// selected must be the same selection the repair decision used, so a
+// location found through the original request is not lost here.
+func newOpenAIEncryptedContentRejection(ctx context.Context, account *Account, body, payload []byte, selected httpRejectedEncryptedItem) *openAIEncryptedContentRejectionError {
 	// Project only error fields, using the existing credential scrubber before
 	// exposing details. The original payload is still used for item selection.
 	safe := redactOpenAITerminalOpsSensitiveBody(ctx, nil, account, payload)
@@ -103,11 +130,8 @@ func newOpenAIEncryptedContentRejection(ctx context.Context, account *Account, b
 	if selected.ItemIndex >= 0 {
 		if param != "" {
 			locator = param
-		} else if selected.ItemID != "" {
-			raw := openAIStreamErrorField(payload, "message").String()
-			if strings.Contains(raw, selected.ItemID) || openAIStreamErrorField(payload, "item_id").String() == selected.ItemID {
-				locator = "item " + clean(selected.ItemID)
-			}
+		} else if id := httpEncryptedNamedItem(payload); id != "" {
+			locator = "item " + clean(id)
 		}
 	}
 	message := "The upstream rejected an encrypted item in the request. The gateway could not identify a single item to repair safely. Rebuild the request from complete readable history, or start a new conversation."
