@@ -1231,7 +1231,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		if streamFailoverErr != nil {
 			// xy2api resilience: pre-output heartbeats are not client output.
-			if c == nil || c.Writer == nil || !openAIStreamClientOutputStarted(c, false) {
+			if !facts.UsagePresent && (c == nil || c.Writer == nil || !openAIStreamClientOutputStarted(c, false)) {
 				return nil, streamFailoverErr
 			}
 			return resultWithUsage(), streamFailoverErr
