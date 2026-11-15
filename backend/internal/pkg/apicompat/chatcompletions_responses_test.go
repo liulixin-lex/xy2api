@@ -1965,3 +1965,27 @@ func TestChatHistoryReasoningSeparated(t *testing.T) {
 		})
 	}
 }
+
+func TestBufferedHostedAndCustomIdentity(t *testing.T) {
+	a := NewBufferedResponseAccumulator()
+	hosted := ResponsesOutput{Type: "web_search_call", ID: "w", Status: "completed", Action: &WebSearchAction{Type: "search", Query: "query"}}
+	custom := ResponsesOutput{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch", Namespace: "ns", Input: "raw patch"}
+	normal := ResponsesOutput{Type: "function_call", ID: "f", CallID: "fc", Name: "read", Arguments: `{}`}
+	for i, item := range []ResponsesOutput{hosted, custom, normal} {
+		event := &ResponsesStreamEvent{Type: "response.output_item.done", OutputIndex: i, OutputIndexPresent: true, Item: &item}
+		a.ProcessEvent(event)
+		a.ProcessEvent(event)
+	}
+	for _, partial := range []bool{false, true} {
+		resp := &ResponsesResponse{Status: "completed"}
+		if partial {
+			resp.Output = []ResponsesOutput{{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch", Input: "raw patch"}}
+		}
+		a.SupplementResponseOutput(resp)
+		require.NoError(t, a.Err())
+		require.Len(t, resp.Output, 3)
+		require.Equal(t, hosted, resp.Output[0])
+		require.Equal(t, custom, resp.Output[1])
+		require.Equal(t, normal, resp.Output[2])
+	}
+}
