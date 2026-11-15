@@ -145,6 +145,87 @@ func TestReviewM2TerminalRegeneratedIDs(t *testing.T) {
 			}
 		})
 	}
+	t.Run("v0.6.6 relay terminal", func(t *testing.T) {
+		// The released Chat->Responses bridge regenerates reasoning and tool
+		// item IDs in response.completed; force every terminal ID to differ.
+		relay := NewChatCompletionsToResponsesStreamState("m")
+		var events []ResponsesStreamEvent
+		for _, raw := range []string{
+			`{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"pl"}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"reasoning_content":"an"}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{\"a\":"}}]}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"g","arguments":""}}]}}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			`{"id":"c1","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		} {
+			var chunk ChatCompletionsChunk
+			require.NoError(t, json.Unmarshal([]byte(raw), &chunk))
+			events = append(events, ChatCompletionsChunkToResponsesEvents(&chunk, relay)...)
+		}
+		events = append(events, FinalizeChatCompletionsResponsesStream(relay)...)
+		state := NewResponsesEventToChatState()
+		state.IncludeUsage = true
+		a := NewBufferedResponseAccumulator()
+		var final *ResponsesResponse
+		var text, reasoning, finish string
+		arguments := map[int]string{}
+		finishes := 0
+		streamIDs := map[string]bool{}
+		for _, evt := range events {
+			raw, err := json.Marshal(evt)
+			require.NoError(t, err)
+			event := reviewM2Event(t, string(raw))
+			if event.Item != nil && event.Item.ID != "" {
+				streamIDs[event.Item.ID] = true
+			}
+			if event.Type == "response.completed" {
+				for i := range event.Response.Output {
+					event.Response.Output[i].ID = "regenerated"
+				}
+				final = event.Response
+			}
+			a.ProcessEvent(event)
+			for _, chunk := range ResponsesEventToChatChunks(event, state) {
+				for _, choice := range chunk.Choices {
+					if choice.Delta.Content != nil {
+						text += *choice.Delta.Content
+					}
+					if choice.Delta.ReasoningContent != nil {
+						reasoning += *choice.Delta.ReasoningContent
+					}
+					for _, tool := range choice.Delta.ToolCalls {
+						arguments[*tool.Index] += tool.Function.Arguments
+					}
+					if choice.FinishReason != nil {
+						finish = *choice.FinishReason
+						finishes++
+					}
+				}
+			}
+		}
+		require.NoError(t, state.Err())
+		require.Equal(t, "ok", text)
+		require.Equal(t, "plan", reasoning)
+		require.Equal(t, map[int]string{0: `{"a":1}`, 1: `{}`}, arguments)
+		require.Equal(t, "tool_calls", finish)
+		require.Equal(t, 1, finishes)
+		require.Equal(t, 7, state.Usage.TotalTokens)
+		require.NotNil(t, final)
+		a.SupplementResponseOutput(final)
+		require.NoError(t, a.Err())
+		require.NoError(t, ValidateResponsesForChat(final))
+		require.Len(t, final.Output, 4)
+		for _, item := range final.Output {
+			require.True(t, streamIDs[item.ID], "terminal item %s keeps the streamed ID", item.Type)
+		}
+		chat := ResponsesToChatCompletions(final, "m")
+		require.Equal(t, "tool_calls", chat.Choices[0].FinishReason)
+		require.JSONEq(t, `"ok"`, string(chat.Choices[0].Message.Content))
+		require.Equal(t, "plan", chat.Choices[0].Message.ReasoningContent)
+		require.Len(t, chat.Choices[0].Message.ToolCalls, 2)
+	})
 	t.Run("partial terminal matches content before index", func(t *testing.T) {
 		a := NewBufferedResponseAccumulator()
 		for _, raw := range []string{
