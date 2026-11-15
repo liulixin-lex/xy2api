@@ -4,6 +4,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -125,7 +126,11 @@ func TestM4ReviewDiscoveredToolNames(t *testing.T) {
 				t.Fatal(err)
 			}
 			after, _ := json.Marshal(value)
-			if string(before) != string(after) {
+			// Re-encoding a lowered schema may sort its keys; the content must not change.
+			var beforeValue, afterValue any
+			_ = json.Unmarshal(before, &beforeValue)
+			_ = json.Unmarshal(after, &afterValue)
+			if !reflect.DeepEqual(beforeValue, afterValue) {
 				t.Fatalf("second adaptation changed request: %s / %s", before, after)
 			}
 		})
