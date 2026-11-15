@@ -1,13 +1,13 @@
 <template>
   <div ref="rootRef" class="tb-root" data-test="accounts-toolbar">
-    <TableToolbar class="tb">
+    <TableToolbar class="tb" compact>
       <template #search>
-      <label class="tb-search">
+      <label class="table-toolbar__search-box">
         <span class="sr-only">{{ t('admin.accounts.table.searchPlaceholder') }}</span>
-        <Icon name="search" size="sm" class="tb-search__icon" />
+        <Icon name="search" size="sm" class="table-toolbar__search-icon" />
         <input
           ref="searchRef"
-          class="tb-input"
+          class="table-toolbar__input"
           type="search"
           autocomplete="off"
           :value="search"
@@ -37,7 +37,7 @@
         <button
           ref="moreRef"
           type="button"
-          class="tb-btn tb-btn--secondary"
+          class="table-toolbar__btn table-toolbar__btn--secondary"
           :aria-expanded="menuOpen ? 'true' : 'false'"
           aria-haspopup="true"
           :aria-label="folded.length ? t('admin.accounts.table.folded', { n: folded.length }) : undefined"
@@ -67,7 +67,7 @@
       <template #actions>
       <button
         type="button"
-        class="tb-icon-btn table-toolbar__icon"
+        class="table-toolbar__icon-btn table-toolbar__icon"
         :aria-label="t('admin.accounts.table.refresh')"
         v-tip="t('admin.accounts.table.refreshTip')"
         data-test="accounts-refresh"
@@ -76,7 +76,7 @@
         <Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />
       </button>
       <slot name="more-actions" />
-      <button v-if="canCreate" type="button" class="tb-btn tb-btn--primary" data-test="accounts-create" @click="emit('create')">
+      <button v-if="canCreate" type="button" class="table-toolbar__btn table-toolbar__btn--primary" data-test="accounts-create" @click="emit('create')">
         <Icon name="plus" size="sm" />{{ t('admin.accounts.createAccount') }}
       </button>
       </template>
@@ -114,7 +114,8 @@
 
 <script setup lang="ts">
 /**
- * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar. From 1024px one row, never wrapping (this
+ * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar in its compact form (12.9), whose 32px search
+ * box and buttons it uses. From 1024px one row, never wrapping (this
  * component's own rules below): search, four filters shown directly (platform, status, group, quality), "more filters"
  * (type, privacy, IQ, category) and the active filters as removable tags. Tags that do not fit fold from the right into
  * the "more filters" count, where they can still be seen and removed; if the row still overflows, the direct filters
@@ -413,35 +414,28 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   position: relative;
   min-width: 0;
 }
-/* From 1024px the page's own one-row toolbar, on TableToolbar's parts: no wrapping, 8px apart, the tags taking the
-   room left; below 1024px TableToolbar's narrow layout applies as it is. */
+/* From 1024px the page's own one-row toolbar, on TableToolbar's compact parts (8px apart, the 220px search box): no
+   wrapping, the tags taking the room left; below 1024px TableToolbar's narrow layout applies as it is. */
 @media (min-width: 1024px) {
   .tb {
     flex-wrap: nowrap;
     align-items: center;
-    gap: 8px;
   }
   /* Its basis stays the search box's, not the shared one (its content, 7r-5): one row whatever the tags, the actions
      at their size and the tags folding into the room they leave. */
   .tb :deep(.table-toolbar__main) {
     flex: 1 1 16rem;
     flex-wrap: nowrap;
-    gap: 8px;
-  }
-  .tb :deep(.table-toolbar__search) {
-    width: auto;
   }
   .tb :deep(.table-toolbar__filters) {
     flex: 1 1 auto;
     flex-wrap: nowrap;
-    gap: 8px;
   }
   .tb :deep(.table-toolbar__filters > .tb-tags) {
     flex: 1 1 0;
   }
   .tb :deep(.table-toolbar__actions) {
     flex-wrap: nowrap;
-    gap: 8px;
   }
 }
 .tb-filters {
@@ -504,40 +498,6 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     background: var(--color-line-control);
   }
 }
-.tb-search {
-  position: relative;
-  display: block;
-  flex: none;
-  width: 220px;
-}
-.tb-search__icon {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  color: var(--color-text-muted);
-  pointer-events: none;
-}
-.tb-input {
-  width: 100%;
-  height: var(--control-height);
-  padding: 0 10px 0 30px;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-control);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-body);
-}
-.tb-input::placeholder {
-  color: var(--color-text-muted);
-}
-.tb-input:focus-visible {
-  outline: 2px solid theme('colors.primary.500');
-  outline-offset: -1px;
-  border-color: transparent;
-}
 .tb-sel {
   width: 96px;
   flex: none;
@@ -545,62 +505,10 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 .tb-sel--full {
   width: 100%;
 }
-.tb-btn {
-  display: inline-flex;
-  height: var(--control-height);
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-  transition: background-color var(--motion-fast) var(--ease-out);
-}
-.tb-btn--secondary {
-  border-color: var(--color-line-control);
-  background: var(--color-bg-control);
-  color: var(--color-text-primary);
-}
-.tb-btn--primary {
-  background: theme('colors.primary.500');
-  color: #fff;
-}
-@media (hover: hover) {
-  .tb-btn--secondary:hover {
-    background: var(--color-bg-control-hover);
-  }
-  .tb-btn--primary:hover {
-    background: theme('colors.primary.600');
-  }
-}
-.tb-btn:focus-visible,
-.tb-icon-btn:focus-visible,
 .tb-tag__x:focus-visible,
 .tb-menu__clear:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 2px;
-}
-.tb-icon-btn {
-  display: inline-grid;
-  width: var(--control-height);
-  height: var(--control-height);
-  flex: none;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-control);
-  color: var(--color-text-secondary);
-}
-@media (hover: hover) {
-  .tb-icon-btn:hover {
-    background: var(--color-bg-control-hover);
-    color: var(--color-text-primary);
-  }
 }
 .tb-count {
   min-width: 18px;
@@ -709,19 +617,6 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     color: var(--color-text-primary);
   }
 }
-/* Below 1024px (prototype, touch): the search fills its row, controls are 40px high, the tags live in the menu. */
-@media (max-width: 1023px) {
-  .tb-search {
-    width: 100%;
-  }
-  .tb-input {
-    height: 40px;
-    font-size: 15px;
-  }
-  .tb-btn {
-    height: 40px;
-  }
-}
 /* Touch (7n-3): a tag's remove button reaches 40 x 40 with an invisible area, more of it over its own tag than towards
    the next one (6px, the gap). From 1024px the tag row clips, so it lends the area 8px above and below. */
 @media (pointer: coarse) {
@@ -740,9 +635,9 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     padding-block: 8px;
   }
 }
-/* 1024–1279: still one row; the search box and filters narrow */
+/* 1024–1279: still one row; the search box and filters narrow (two classes: over the shared compact 220px) */
 @media (min-width: 1024px) and (max-width: 1279px) {
-  .tb-search {
+  .tb.table-toolbar--compact :deep(.table-toolbar__search) {
     width: 160px;
   }
   .tb-sel {

@@ -1,5 +1,5 @@
 <template>
-  <div class="table-toolbar">
+  <div class="table-toolbar" :class="{ 'table-toolbar--compact': compact }">
     <div class="table-toolbar__main">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
       <div v-if="filled($slots.filters)" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
@@ -28,7 +28,20 @@ import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
  * is a 40px square with its icon alone, so the button needs an aria-label and a tip (7o-3). A button that is an icon
  * at every width (refresh) carries `table-toolbar__icon` and is the same square there. This is the only place the
  * square's size is set, for every page. The primary action ("create", "add") uses neither class and keeps its text.
+ *
+ * `compact` (spec 12.9), for the dense pages (accounts, groups, users): from 1024px the controls are 32px high in
+ * 13px type and 8px apart, the search box 220px. Their looks are set here once for those pages:
+ * - `table-toolbar__search-box` holding `table-toolbar__search-icon` and `table-toolbar__input` (a field without the
+ *   icon adds `table-toolbar__input--plain`);
+ * - `table-toolbar__btn`, outlined with `--secondary`, the brand gradient with `--primary` (12.1-5, the one filled
+ *   button of the row);
+ * - `table-toolbar__icon-btn`, a 32px outlined square for a tool (refresh, column settings), named by its tip;
+ * - `table-toolbar__divider`, the 1px rule between the view tools and the page's actions.
+ * A secondary action whose text sits in `table-toolbar__label table-toolbar__label--wide` shows it only while the
+ * toolbar is at least 1184px wide, the widest compact row with every text (the groups page with its four filters);
+ * narrower it is its icon in a 32px square. Below 1024px the narrow layout above applies, the controls 40px high.
  */
+defineProps<{ compact?: boolean }>()
 
 /**
  * Whether a slot renders anything: a filters slot whose filters are all switched off (the users page) renders only
@@ -86,6 +99,135 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
   gap: 8px;
   min-width: 0;
 }
+/* ---- compact (12.9): placed before the narrow rules, which win over it below 1024px ---- */
+.table-toolbar--compact {
+  container-type: inline-size;
+}
+@media (min-width: 1024px) {
+  .table-toolbar--compact,
+  .table-toolbar--compact .table-toolbar__main,
+  .table-toolbar--compact .table-toolbar__filters {
+    gap: 8px;
+  }
+  .table-toolbar--compact .table-toolbar__search {
+    width: 220px;
+  }
+}
+.table-toolbar--compact :deep(.table-toolbar__search-box) {
+  position: relative;
+  display: block;
+}
+.table-toolbar--compact :deep(.table-toolbar__search-icon) {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+.table-toolbar--compact :deep(.table-toolbar__input) {
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 10px 0 30px;
+  border: 1px solid var(--color-line-control);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-control);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+.table-toolbar--compact :deep(.table-toolbar__input--plain) {
+  padding-left: 10px;
+}
+.table-toolbar--compact :deep(.table-toolbar__input::placeholder) {
+  color: var(--color-text-muted);
+}
+.table-toolbar--compact :deep(.table-toolbar__input:focus-visible) {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.table-toolbar--compact :deep(.table-toolbar__btn) {
+  display: inline-flex;
+  height: var(--control-height);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
+}
+.table-toolbar--compact :deep(.table-toolbar__btn--secondary) {
+  border-color: var(--color-line-control);
+  background: var(--color-bg-control);
+  color: var(--color-text-primary);
+}
+/* The brand gradient with a soft shadow of its own colour (12.1-5). */
+.table-toolbar--compact :deep(.table-toolbar__btn--primary) {
+  background: linear-gradient(to right, theme('colors.primary.500'), theme('colors.primary.600'));
+  box-shadow: 0 2px 8px -2px theme('colors.primary.500 / 45%');
+  color: #fff;
+}
+.table-toolbar--compact :deep(.table-toolbar__icon-btn) {
+  display: inline-grid;
+  width: var(--control-height);
+  height: var(--control-height);
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--color-line-control);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-control);
+  color: var(--color-text-secondary);
+}
+@media (hover: hover) {
+  .table-toolbar--compact :deep(.table-toolbar__btn--secondary:not(:disabled):hover) {
+    background: var(--color-bg-control-hover);
+  }
+  .table-toolbar--compact :deep(.table-toolbar__btn--primary:not(:disabled):hover) {
+    background: linear-gradient(to right, theme('colors.primary.600'), theme('colors.primary.700'));
+    box-shadow: 0 4px 12px -2px theme('colors.primary.500 / 50%');
+  }
+  .table-toolbar--compact :deep(.table-toolbar__icon-btn:not(:disabled):hover) {
+    background: var(--color-bg-control-hover);
+    color: var(--color-text-primary);
+  }
+}
+.table-toolbar--compact :deep(.table-toolbar__btn:disabled),
+.table-toolbar--compact :deep(.table-toolbar__icon-btn:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.table-toolbar--compact :deep(.table-toolbar__btn:focus-visible),
+.table-toolbar--compact :deep(.table-toolbar__icon-btn:focus-visible) {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: 2px;
+}
+.table-toolbar--compact :deep(.table-toolbar__divider) {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  background: var(--color-line-strong);
+}
+/* From 1024px, under the widest row with every text (1184px, see above) the secondary actions keep their icons;
+   below 1024px the narrow layout makes them 40px squares. */
+@media (min-width: 1024px) {
+  @container (max-width: 1183px) {
+    .table-toolbar--compact :deep(.table-toolbar__label--wide) {
+      display: none;
+    }
+    .table-toolbar--compact :deep(.table-toolbar__btn:has(> .table-toolbar__label--wide)) {
+      width: var(--control-height);
+      padding: 0;
+    }
+  }
+}
 @media (max-width: 1023px) {
   /* One column that never wraps: a wrapping column takes the width of its widest row (the filters), which then widens
      the whole page (7n-1). */
@@ -141,6 +283,23 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
     margin-inline: -24px;
     padding-inline: 24px;
     scroll-padding-inline: 24px;
+  }
+}
+/* Compact below 1024px: the narrow layout's 40px controls; the divider goes (the row has no room for it). */
+@media (max-width: 1023px) {
+  .table-toolbar--compact :deep(.table-toolbar__input) {
+    height: 40px;
+    font-size: 15px;
+  }
+  .table-toolbar--compact :deep(.table-toolbar__btn) {
+    height: 40px;
+  }
+  .table-toolbar--compact :deep(.table-toolbar__icon-btn) {
+    width: 40px;
+    height: 40px;
+  }
+  .table-toolbar--compact :deep(.table-toolbar__divider) {
+    display: none;
   }
 }
 /* A mouse cannot swipe: it gets a thin scrollbar to reach the filters off screen; touch keeps it hidden (7j-6). */
