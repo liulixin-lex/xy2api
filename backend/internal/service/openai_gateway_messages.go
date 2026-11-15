@@ -1434,7 +1434,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return nil, err
 		}
 		if streamFailoverErr != nil {
-			if canReplayPrelude() {
+			if !facts.UsagePresent && canReplayPrelude() {
 				return nil, streamFailoverErr
 			}
 			return resultWithUsage(), streamFailoverErr
