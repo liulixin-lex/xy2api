@@ -7,14 +7,18 @@ import "strings"
 type StateFamily string
 
 const (
-	StateNone                StateFamily = ""
-	StateRelay               StateFamily = "relay_state"
-	StateConversationInvalid StateFamily = "conversation_invalid"
-	StateFunctionOutput      StateFamily = "function_output"
-	StateAgentMessage        StateFamily = "agent_message"
-	StateReasoning           StateFamily = "reasoning"
-	StateOtherEncrypted      StateFamily = "other_encrypted"
-	ReasonConversationState              = "conversation_state"
+	StateContinuationOwnerMismatch   StateFamily = "continuation_owner_mismatch"
+	StateHTTPContinuationUnsupported StateFamily = "http_continuation_unsupported"
+	StateToolOutputMissingCallID     StateFamily = "tool_output_missing_call_id"
+	StateUpstreamContinuationExpired StateFamily = "upstream_continuation_expired"
+	StateNone                        StateFamily = ""
+	StateRelay                       StateFamily = "relay_state"
+	StateConversationInvalid         StateFamily = "conversation_invalid"
+	StateFunctionOutput              StateFamily = "function_output"
+	StateAgentMessage                StateFamily = "agent_message"
+	StateReasoning                   StateFamily = "reasoning"
+	StateOtherEncrypted              StateFamily = "other_encrypted"
+	ReasonConversationState                      = "conversation_state"
 )
 
 type StateRejection struct {
