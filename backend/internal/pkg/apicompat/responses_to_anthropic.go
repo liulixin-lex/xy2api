@@ -990,6 +990,18 @@ func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEv
 func resToAnthRecoverReasoning(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	r := resToAnthReasoningOf(evt, state)
 	if r.closed && r.rawSelected {
+		for _, part := range evt.Item.Content {
+			if part.Type != "reasoning_text" {
+				continue
+			}
+			rawItem := *evt.Item
+			rawItem.Summary = nil // A late summary cannot hide the selected raw carrier.
+			final := ResponsesOutputReasoningText(rawItem)
+			if !strings.HasPrefix(final, resToAnthJoinReasoning(r.raw)) || !strings.HasPrefix(final, r.delivered) {
+				state.fail("reasoning", "reasoning completion disagrees with its deltas")
+			}
+			break
+		}
 		return nil
 	}
 	item := evt.Item

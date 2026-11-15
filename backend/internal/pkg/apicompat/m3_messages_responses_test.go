@@ -789,6 +789,57 @@ func TestM3ReviewR1DeferredReasoningIdentity(t *testing.T) {
 }
 
 func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
+	t.Run("closed raw final", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, raw, summary string
+			bad                bool
+		}{
+			{name: "same raw", raw: "raw"},
+			{name: "contradictory raw", raw: "different", bad: true},
+			{name: "late summary", summary: "different summary"},
+			{name: "raw conflict with late summary", raw: "different", summary: "different summary", bad: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				st := NewResponsesEventToAnthropicState()
+				var events []AnthropicStreamEvent
+				feed := func(e *ResponsesStreamEvent) {
+					events = append(events, ResponsesEventToAnthropicEvents(e, st)...)
+				}
+				feed(responsesCreated())
+				feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "reasoning", ID: "r"}})
+				feed(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"})
+				feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning", ID: "r", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}})
+				final := ResponsesOutput{Type: "reasoning", ID: "r"}
+				if tc.raw != "" {
+					final.Content = []ResponsesContentPart{{Type: "reasoning_text", Text: tc.raw}}
+				}
+				if tc.summary != "" {
+					final.Summary = []ResponsesSummary{{Type: "summary_text", Text: tc.summary}}
+				}
+				feed(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{final}}})
+				var delivered string
+				var stopped bool
+				for _, event := range events {
+					if event.Delta != nil {
+						delivered += event.Delta.Thinking
+					}
+					stopped = stopped || event.Type == "message_stop"
+				}
+				t.Logf("delivered=%q final_raw=%q final_summary=%q err=%v message_stop=%v", delivered, tc.raw, tc.summary, st.Err(), stopped)
+				require.Equal(t, "raw", delivered)
+				if tc.bad {
+					var conversion *UpstreamConversionError
+					require.ErrorAs(t, st.Err(), &conversion)
+					require.Equal(t, "reasoning", conversion.Field)
+					require.False(t, stopped)
+				} else {
+					require.NoError(t, st.Err())
+					require.True(t, stopped)
+				}
+				require.Empty(t, FinalizeResponsesAnthropicStream(st))
+			})
+		}
+	})
 	t.Run("raw conflict at close", func(t *testing.T) {
 		for _, finalize := range []bool{false, true} {
 			st := NewResponsesEventToAnthropicState()
