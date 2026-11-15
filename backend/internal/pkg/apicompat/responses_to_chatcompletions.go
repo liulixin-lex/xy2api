@@ -743,9 +743,10 @@ type bufferedOutputSlot struct {
 // BufferedResponseAccumulator keeps independent output and content slots. It
 // restores content only; the reader still authenticates the upstream terminal.
 type BufferedResponseAccumulator struct {
-	slots   []*bufferedOutputSlot
-	current *bufferedOutputSlot
-	err     error
+	slots         []*bufferedOutputSlot
+	current       *bufferedOutputSlot
+	terminalSlots map[int]*bufferedOutputSlot
+	err           error
 }
 
 func NewBufferedResponseAccumulator() *BufferedResponseAccumulator {
@@ -766,6 +767,14 @@ func bufferedIdentityConflict(left, right ResponsesOutput) bool {
 }
 
 func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, explicit, terminal bool) *bufferedOutputSlot {
+	if terminal {
+		if slot := a.terminalSlot(item, index); slot != nil {
+			return slot
+		}
+		slot := a.newSlot(index, explicit)
+		a.terminalSlots[index] = slot
+		return slot
+	}
 	if !terminal && !explicit && item.ID == "" && item.CallID == "" && a.current != nil && !bufferedIdentityConflict(a.current.item, item) {
 		return a.current
 	}
@@ -824,12 +833,99 @@ func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, expl
 		}
 		return found
 	}
+	return a.newSlot(index, explicit)
+}
+
+func (a *BufferedResponseAccumulator) newSlot(index int, explicit bool) *bufferedOutputSlot {
 	if !explicit {
 		index = len(a.slots)
 	}
-	found = &bufferedOutputSlot{index: index, explicit: explicit, parts: map[int]ResponsesContentPart{}, partRanks: map[int]int{}, summaries: map[int]ResponsesSummary{}, summaryRanks: map[int]int{}}
-	a.slots = append(a.slots, found)
-	return found
+	slot := &bufferedOutputSlot{index: index, explicit: explicit, parts: map[int]ResponsesContentPart{}, partRanks: map[int]int{}, summaries: map[int]ResponsesSummary{}, summaryRanks: map[int]int{}}
+	a.slots = append(a.slots, slot)
+	return slot
+}
+
+// Relays may regenerate item IDs in the terminal output. Match stable call IDs,
+// then content and order, retaining identities already observed in the stream.
+func (a *BufferedResponseAccumulator) terminalSlot(item ResponsesOutput, index int) *bufferedOutputSlot {
+	if a.terminalSlots == nil {
+		a.terminalSlots = make(map[int]*bufferedOutputSlot)
+	}
+	remember := func(slot *bufferedOutputSlot) *bufferedOutputSlot {
+		a.terminalSlots[index] = slot
+		return slot
+	}
+	for _, slot := range a.slots {
+		if item.CallID != "" && slot.item.CallID == item.CallID {
+			return remember(slot)
+		}
+	}
+	for _, slot := range a.slots {
+		if item.ID != "" && slot.item.ID == item.ID {
+			return remember(slot)
+		}
+	}
+	available := func(slot *bufferedOutputSlot) bool {
+		if item.Type != "" && slot.item.Type != "" && item.Type != slot.item.Type {
+			return false
+		}
+		for terminalIndex, used := range a.terminalSlots {
+			if used == slot && terminalIndex != index {
+				return false
+			}
+		}
+		return true
+	}
+	for _, slot := range a.slots {
+		if available(slot) && bufferedTerminalContentMatches(slot, item) {
+			return remember(slot)
+		}
+	}
+	if slot := a.terminalSlots[index]; slot != nil && available(slot) {
+		return slot
+	}
+	for _, slot := range a.slots {
+		if slot.index == index && available(slot) {
+			return remember(slot)
+		}
+	}
+	var first *bufferedOutputSlot
+	for _, slot := range a.slots {
+		if available(slot) && (first == nil || slot.index < first.index) {
+			first = slot
+		}
+	}
+	if first != nil {
+		return remember(first)
+	}
+	return nil
+}
+
+func bufferedTerminalContentMatches(slot *bufferedOutputSlot, item ResponsesOutput) bool {
+	if item.Name != "" && slot.item.Name != "" && item.Name != slot.item.Name {
+		return false
+	}
+	matched := item.Arguments != "" && item.Arguments == slot.item.Arguments || item.Input != "" && item.Input == slot.item.Input
+	for i, part := range item.Content {
+		if part.Text == "" && part.Refusal == "" {
+			continue
+		}
+		old := slot.parts[i]
+		if part.Type != old.Type || part.Text != old.Text || part.Refusal != old.Refusal {
+			return false
+		}
+		matched = true
+	}
+	for i, summary := range item.Summary {
+		if summary.Text == "" {
+			continue
+		}
+		if summary.Text != slot.summaries[i].Text {
+			return false
+		}
+		matched = true
+	}
+	return matched
 }
 
 func mergeBufferedItem(previous, incoming ResponsesOutput) ResponsesOutput {
@@ -951,6 +1047,14 @@ func (a *BufferedResponseAccumulator) snapshot(item ResponsesOutput, index int, 
 	}
 	if rank == 1 {
 		a.current = slot
+	}
+	if rank == 3 {
+		if slot.item.ID != "" {
+			item.ID = slot.item.ID
+		}
+		if slot.item.CallID != "" {
+			item.CallID = slot.item.CallID
+		}
 	}
 	if rank >= slot.rank {
 		slot.item = mergeBufferedItem(slot.item, item)
