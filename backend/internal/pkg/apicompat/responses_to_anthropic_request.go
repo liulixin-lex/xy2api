@@ -16,11 +16,26 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		return nil, unsupportedConversion("request", "request is nil")
 	}
 	_, is55 := claude.Claude55(req.Model)
+	return responsesToAnthropicRequest(req, is55)
+}
+
+// ResponsesToAnthropicRequestWithOptions is the explicit API-key/Gemini
+// intermediate entry. Bridge-only policies remain gated by opts.Bridge.
+func ResponsesToAnthropicRequestWithOptions(req *ResponsesRequest, opts ConversionOptions) (*AnthropicRequest, error) {
+	if req == nil {
+		return nil, unsupportedConversion("request", "request is nil")
+	}
+	_, is55 := claude.Claude55(req.Model)
+	spec, ok := claude.Claude52(req.Model)
+	return responsesToAnthropicRequest(req, is55 || (ok && spec.PreserveSignedThinking))
+}
+
+func responsesToAnthropicRequest(req *ResponsesRequest, preserveThinking bool) (*AnthropicRequest, error) {
 	out := &AnthropicRequest{CacheControl: req.CacheControl, Model: req.Model, Stream: req.Stream}
 	if err := applyAnthropicFieldPolicies(req, out); err != nil {
 		return nil, err
 	}
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, preserveThinking, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}

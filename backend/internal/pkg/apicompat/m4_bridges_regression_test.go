@@ -1135,3 +1135,35 @@ func TestM4TerminalReasonProjection(t *testing.T) {
 		}
 	})
 }
+
+func TestM4AnthropicRequestHandoffs(t *testing.T) {
+	t.Run("claude52", func(t *testing.T) {
+		for _, model := range []string{"claude-fable-5-2", "claude-mythos-5-2", "claude-sonnet-5-5", "unknown"} {
+			for _, signed := range []bool{true, false} {
+				envelope := "opaque-openai-ciphertext"
+				if signed {
+					envelope = encodeAnthropicThinking(AnthropicContentBlock{Type: "thinking", Thinking: "signed text", Signature: "sig"})
+				}
+				input, _ := json.Marshal([]ResponsesInputItem{{Type: "reasoning", EncryptedContent: envelope}, {Role: "user", Content: json.RawMessage(`"hi"`)}})
+				req := &ResponsesRequest{Model: model, Input: input}
+				out, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, _ := json.Marshal(out.Messages)
+				want := signed && model != "unknown"
+				if strings.Contains(string(raw), "signed text") != want {
+					t.Fatalf("%s signed=%v: %s", model, signed, raw)
+				}
+				old, err := ResponsesToAnthropicRequest(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, _ = json.Marshal(old.Messages)
+				if strings.Contains(string(raw), "signed text") != (signed && model == "claude-sonnet-5-5") {
+					t.Fatalf("legacy changed: %s", raw)
+				}
+			}
+		}
+	})
+}
