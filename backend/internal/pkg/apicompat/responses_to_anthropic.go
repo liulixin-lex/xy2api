@@ -513,9 +513,10 @@ func FinalizeResponsesAnthropicStream(state *ResponsesEventToAnthropicState) []A
 	var events []AnthropicStreamEvent
 	events = append(events, closeCurrentBlock(state)...)
 
-	stopReason := "end_turn"
-	if state.HasToolCall {
-		stopReason = "tool_use"
+	_, stopReason, err := ProjectTerminal("responses", "anthropic", "completed", "", state.HasToolCall, state.hasRefusal)
+	if err != nil {
+		state.err = err
+		return events
 	}
 
 	events = append(events,

@@ -590,6 +590,14 @@ func TestM3RefusalContent(t *testing.T) {
 }
 
 func TestM3CompletionBoundaries(t *testing.T) {
+	t.Run("eligible refusal finalizer", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		ResponsesEventToAnthropicEvents(responsesCreated(), st)
+		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.refusal.delta", Delta: "no"}, st)
+		events := FinalizeResponsesAnthropicStream(st)
+		require.NoError(t, st.Err())
+		require.Equal(t, "refusal", events[len(events)-2].Delta.StopReason)
+	})
 	t.Run("explicit unmatched index", func(t *testing.T) {
 		st := NewResponsesEventToAnthropicState()
 		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "a", CallID: "c", Name: "f"}}, st)
