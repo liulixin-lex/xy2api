@@ -77,7 +77,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 		msg.ReasoningContent = reasoningText
 	}
 
-	finishReason := responsesStatusToChatFinishReason(resp.Status, resp.IncompleteDetails, toolCalls, refusalText != "")
+	finishReason := responsesStatusToChatFinishReason(resp.Status, resp.IncompleteDetails, resp.Output, refusalText != "")
 
 	out.Choices = []ChatChoice{{
 		Index:        0,
@@ -90,15 +90,13 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 	return out
 }
 
-func responsesStatusToChatFinishReason(status string, details *ResponsesIncompleteDetails, toolCalls []ChatToolCall, hasRefusal bool) string {
+func responsesStatusToChatFinishReason(status string, details *ResponsesIncompleteDetails, output []ResponsesOutput, hasRefusal bool) string {
+	completeTools := responsesChatToolsComplete(status, details, output)
 	status, reason := responsesChatTerminal(status, details)
-	_, finish, _, err := ProjectTerminalWithMapping("responses", "chat", status, reason, len(toolCalls) > 0, hasRefusal)
+	_, finish, _, err := ProjectTerminalWithMapping("responses", "chat", status, reason, completeTools, hasRefusal)
 	if err != nil {
 		// This legacy projector cannot return an error. Validated callers reject
-		// explicit failures first; legacy callers retain their original enum.
-		if len(toolCalls) > 0 {
-			return "tool_calls"
-		}
+		// explicit failures first; legacy callers retain the original stop.
 		return "stop"
 	}
 	return finish
@@ -635,8 +633,12 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	if state.err != nil {
 		return nil
 	}
+	completeTools := state.SawToolCall
+	if resp.Status != "completed" {
+		completeTools = completeTools && responsesChatToolsComplete(resp.Status, resp.IncompleteDetails, resToChatTrackedTools(state))
+	}
 	status, reason := responsesChatTerminal(resp.Status, resp.IncompleteDetails)
-	_, finishReason, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, state.SawToolCall, state.SawRefusal)
+	_, finishReason, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, completeTools, state.SawRefusal)
 	if err != nil {
 		state.err = err
 		return nil

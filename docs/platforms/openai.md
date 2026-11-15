@@ -71,7 +71,7 @@ API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effo
 
 | 响应 | 处理 |
 |---|---|
-| `finish_reason` | 非流式与流式相同：明确的 `max_output_tokens` 截断为 `length`，内容过滤为 `content_filter`，两者优先于 `tool_calls`；有完整工具调用时为 `tool_calls`；拒答为 `stop`，正文放在 `message.refusal`（流式为 `delta.refusal`）。上游 `failed`、`cancelled` 返回错误；其他未列出的原因按正常结束处理。合法结束事件缺状态、`response.done` 没带 response、incomplete 未给原因时保持既有正常结束行为 |
+| `finish_reason` | 非流式与流式相同：明确的 `max_output_tokens` 截断为 `length`，内容过滤为 `content_filter`，两者优先于 `tool_calls`；有完整工具调用时为 `tool_calls`；拒答为 `stop`，正文放在 `message.refusal`（流式为 `delta.refusal`）。上游 `failed`、`cancelled` 返回错误；其他未列出的原因按正常结束处理，只有工具调用都已结束且参数完整时才为 `tool_calls`。合法结束事件缺状态、`response.done` 没带 response 时保持既有正常结束行为；incomplete 未给原因时照旧为 `stop`，不以 `tool_calls` 结束 |
 | `reasoning_content` | 逐项取非空的 summary，没有时取 `reasoning_text`，两者不拼接；流式中的原始推理文本在该项结束后才发出。`encrypted_content` 不会作为思考文本输出 |
 | 工具参数 | 上游生成的普通函数参数不是合法 JSON 时返回错误，不修补；成功结束而参数为空时按 `{}` 交付。custom 工具调用以 `function` 形式返回，`arguments` 为原始输入文本 |
 | 流式工具参数 | 只在 `function_call_arguments.done`、`output_item.done` 或结束事件里给出的参数也会发出，只补还没发出的部分；重复完成事件和结束后迟到的增量不会重复输出。流内事件之间的同一调用身份或参数前后矛盾时返回错误；结束事件重新生成 item ID 不会因此报错 |
