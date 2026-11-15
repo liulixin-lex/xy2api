@@ -78,9 +78,8 @@ func TestExtractOpenAIReasoningEffortModelCandidates(t *testing.T) {
 }
 
 // 回归：OAuth 账号请求后缀式模型（无显式 reasoning 字段）时，上游模型被
-// normalizeCodexModel 剥掉 effort 后缀，用量元数据的 effort 必须仍能从
-// 原始模型名后缀推导出来。
-func TestOpenAIGatewayServiceForwardOAuthDerivesEffortFromSuffixModel(t *testing.T) {
+// normalizeCodexModel 剥掉 effort 后缀；最终 wire 没有显式档位时，实际档位为空。
+func TestOpenAIGatewayServiceForwardOAuthReadsFinalWireEffort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
 		resp: &http.Response{
@@ -116,6 +115,6 @@ func TestOpenAIGatewayServiceForwardOAuthDerivesEffortFromSuffixModel(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "gpt-5.3-codex", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.NotNil(t, result.ReasoningEffort)
-	require.Equal(t, "xhigh", *result.ReasoningEffort)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning.effort").Exists())
+	require.Nil(t, result.ReasoningEffort)
 }

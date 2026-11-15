@@ -161,7 +161,7 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, m
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, m.sessionRequestModel))
+	m.reasoningEffort.Store(extractOpenAIWSLegacyReasoningEffort(policyOutput, mappedModel, m.sessionRequestModel))
 	m.storeTurnModels(m.sessionRequestModel, policyOutput)
 }
 
@@ -197,7 +197,7 @@ func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []b
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, requestModelForFrame))
+	m.reasoningEffort.Store(extractOpenAIWSLegacyReasoningEffort(policyOutput, mappedModel, requestModelForFrame))
 	m.storeTurnModels(requestModelForFrame, policyOutput)
 }
 
@@ -1734,4 +1734,60 @@ func gatewayWSClientCanceled(ctx context.Context, err error) bool {
 		return true
 	}
 	return err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && isOpenAIWSClientDisconnectError(err)
+}
+
+// WS observations retain the pre-HTTP-change normalization and suffix rules.
+func extractOpenAIWSLegacyReasoningEffort(body []byte, modelCandidates ...string) *string {
+	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
+	if reasoningEffort == "" {
+		reasoningEffort = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	}
+	if reasoningEffort != "" {
+		normalized := normalizeOpenAICompatOutboundEffort(reasoningEffort, firstNonEmpty(modelCandidates...))
+		if normalized == "" {
+			return nil
+		}
+		return &normalized
+	}
+
+	value := deriveOpenAIWSLegacyEffortCandidates(modelCandidates)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func deriveOpenAIWSLegacyEffort(model string) string {
+	if strings.TrimSpace(model) == "" {
+		return ""
+	}
+
+	modelID := strings.TrimSpace(model)
+	if strings.Contains(modelID, "/") {
+		parts := strings.Split(modelID, "/")
+		modelID = parts[len(parts)-1]
+	}
+
+	parts := strings.FieldsFunc(strings.ToLower(modelID), func(r rune) bool {
+		switch r {
+		case '-', '_', ' ':
+			return true
+		default:
+			return false
+		}
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return normalizeOpenAICompatOutboundEffort(parts[len(parts)-1], modelID)
+}
+
+func deriveOpenAIWSLegacyEffortCandidates(models []string) string {
+	for _, model := range models {
+		if value := deriveOpenAIWSLegacyEffort(model); value != "" {
+			return value
+		}
+	}
+	return ""
 }

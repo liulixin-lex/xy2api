@@ -252,7 +252,7 @@ func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, er
 	delete(body, "type")
 	delete(body, "generate")
 	delete(body, "previous_response_id")
-	deleteOpenAIResponsesNoneReasoningEffortFromObject(account, body)
+	deleteOpenAIWSLegacyNoneReasoningEffort(account, body)
 	body["stream"] = true
 	return json.Marshal(body)
 }
@@ -1041,4 +1041,41 @@ func resolveGrokWSUpstreamModel(account *Account, body []byte, originalModel str
 		upstreamModel = grokDefaultResponsesModel
 	}
 	return upstreamModel
+}
+
+// The WS-to-HTTP bridge retains its original host-specific omission contract.
+func shouldPreserveOpenAIWSLegacyNoneEffort(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsOpenAIPassthroughEnabled() {
+		return true
+	}
+	if account.IsOpenAIOAuthLike() {
+		return true
+	}
+	if !account.IsOpenAIApiKey() {
+		return false
+	}
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	return baseURL == "" || isOfficialOpenAIModelsBaseURL(baseURL)
+}
+
+func deleteOpenAIWSLegacyNoneReasoningEffort(account *Account, body map[string]any) {
+	if body == nil || shouldPreserveOpenAIWSLegacyNoneEffort(account) {
+		return
+	}
+	if effort, ok := body["reasoning_effort"].(string); ok && strings.EqualFold(strings.TrimSpace(effort), "none") {
+		delete(body, "reasoning_effort")
+	}
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok {
+		return
+	}
+	if effort, ok := reasoning["effort"].(string); ok && strings.EqualFold(strings.TrimSpace(effort), "none") {
+		delete(reasoning, "effort")
+	}
+	if len(reasoning) == 0 {
+		delete(body, "reasoning")
+	}
 }
