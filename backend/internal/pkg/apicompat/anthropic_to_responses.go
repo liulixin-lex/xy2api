@@ -516,15 +516,101 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool, opts ConversionOpti
 			out = append(out, ResponsesTool{Type: "web_search"})
 			continue
 		}
+		parameters := normalizeToolParameters(t.InputSchema)
+		strict := defaultStrictFalse(t.Strict)
+		if *strict && !anthropicSchemaSupportsResponsesStrict(parameters) {
+			strict = boolPtr(false)
+			if opts.Record != nil {
+				opts.Record(ConversionNotice{Field: fmt.Sprintf("tools[%d].strict", i), Action: "omit"})
+			}
+		}
 		out = append(out, ResponsesTool{
 			Type:        "function",
 			Name:        t.Name,
 			Description: t.Description,
-			Parameters:  normalizeToolParameters(t.InputSchema),
-			Strict:      defaultStrictFalse(t.Strict),
+			Parameters:  parameters,
+			Strict:      strict,
 		})
 	}
 	return out, nil
+}
+
+// Check schema positions only: values inside const/default/enum are user data.
+// The schema itself is never rewritten to manufacture strict compatibility.
+func anthropicSchemaSupportsResponsesStrict(raw json.RawMessage) bool {
+	var schema map[string]any
+	if json.Unmarshal(raw, &schema) != nil || schema == nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(value any) bool {
+		if _, ok := value.(bool); ok {
+			return true
+		}
+		node, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		object := node["type"] == "object"
+		if types, ok := node["type"].([]any); ok {
+			for _, kind := range types {
+				object = object || kind == "object"
+			}
+		}
+		properties, hasProperties := node["properties"]
+		if object || hasProperties {
+			if additional, ok := node["additionalProperties"].(bool); !ok || additional {
+				return false
+			}
+			props, ok := properties.(map[string]any)
+			if hasProperties && !ok {
+				return false
+			}
+			required := make(map[string]bool)
+			if names, present := node["required"]; present {
+				list, ok := names.([]any)
+				if !ok {
+					return false
+				}
+				for _, name := range list {
+					key, ok := name.(string)
+					if !ok {
+						return false
+					}
+					required[key] = true
+				}
+			}
+			for name := range props {
+				if !required[name] {
+					return false
+				}
+			}
+		}
+		for _, key := range []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"} {
+			if children, ok := node[key].(map[string]any); ok {
+				for _, child := range children {
+					if !visit(child) {
+						return false
+					}
+				}
+			}
+		}
+		for _, key := range []string{"items", "prefixItems", "additionalProperties", "unevaluatedProperties", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "contains", "propertyNames"} {
+			if child, present := node[key]; present {
+				if children, ok := child.([]any); ok {
+					for _, item := range children {
+						if !visit(item) {
+							return false
+						}
+					}
+				} else if !visit(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return visit(schema)
 }
 
 func boolPtr(v bool) *bool {

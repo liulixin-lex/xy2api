@@ -132,7 +132,7 @@ func TestM3ToolConstraints(t *testing.T) {
 		name, fields            string
 		strict, notice, invalid bool
 	}{
-		{name: "default"}, {name: "true", fields: `,"strict":true`, strict: true}, {name: "false", fields: `,"strict":false`},
+		{name: "default"}, {name: "true", fields: `,"strict":true`}, {name: "false", fields: `,"strict":false`},
 		{name: "null", fields: `,"allowed_callers":null`}, {name: "direct", fields: `,"allowed_callers":["direct"]`},
 		{name: "executor", fields: `,"allowed_callers":["code_execution_20250825"]`, notice: true},
 		{name: "mixed", fields: `,"allowed_callers":["direct","executor"]`, notice: true},
@@ -157,7 +157,9 @@ func TestM3ToolConstraints(t *testing.T) {
 			require.Equal(t, tc.strict, *out.Tools[0].Strict)
 			require.JSONEq(t, string(req.Tools[0].InputSchema), string(out.Tools[0].Parameters))
 			require.False(t, *out.ParallelToolCalls)
-			if tc.notice {
+			if tc.name == "true" {
+				require.Equal(t, []ConversionNotice{{Field: "tools[0].strict", Action: "omit"}}, notices)
+			} else if tc.notice {
 				require.Equal(t, []ConversionNotice{{Field: "tools[0].allowed_callers", Action: "omit"}}, notices)
 			} else {
 				require.Empty(t, notices)
@@ -862,6 +864,46 @@ func TestM3ReviewR3AnonymousMessageDone(t *testing.T) {
 			require.NoError(t, st.Err())
 			require.Equal(t, final+" refusal", collectAnthropicText(events))
 			requireAnthropicBlockLifecycle(t, events)
+		})
+	}
+}
+
+func TestM3ReviewR4StrictSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema string
+		strict       bool
+	}{
+		{"optional unit", `{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},"required":["city"],"additionalProperties":false}`, false},
+		{"all required", `{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},"required":["city","unit"],"additionalProperties":false}`, true},
+		{"missing additionalProperties", `{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`, false},
+		{"nested optional", `{"type":"object","properties":{"location":{"type":"object","properties":{"city":{"type":"string"}},"additionalProperties":false}},"required":["location"],"additionalProperties":false}`, false},
+		{"array nested", `{"type":"object","properties":{"locations":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":true}}},"required":["locations"],"additionalProperties":false}`, false},
+		{"nested valid and const data", `{"type":"object","properties":{"location":{"type":["object","null"],"properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"data":{"const":{"type":"object","properties":{"unrelated":1}}}},"required":["location","data"],"additionalProperties":false}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &AnthropicRequest{Model: "test", Tools: []AnthropicTool{{Name: "get_weather", Strict: boolPtr(true), InputSchema: json.RawMessage(tc.schema)}}}
+			var notices []ConversionNotice
+			out, err := AnthropicToResponsesWithOptions(req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+			require.NoError(t, err)
+			require.Equal(t, tc.strict, *out.Tools[0].Strict)
+			require.JSONEq(t, tc.schema, string(out.Tools[0].Parameters))
+			require.True(t, *req.Tools[0].Strict)
+			if tc.strict {
+				require.Empty(t, notices)
+			} else {
+				require.Equal(t, []ConversionNotice{{Field: "tools[0].strict", Action: "omit"}}, notices)
+			}
+			legacy, err := AnthropicToResponses(req)
+			require.NoError(t, err)
+			require.Equal(t, out, legacy)
+			for _, explicit := range []*bool{nil, boolPtr(false)} {
+				req.Tools[0].Strict = explicit
+				notices = nil
+				out, err = AnthropicToResponsesWithOptions(req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+				require.NoError(t, err)
+				require.False(t, *out.Tools[0].Strict)
+				require.Empty(t, notices)
+			}
 		})
 	}
 }
