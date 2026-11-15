@@ -242,6 +242,12 @@ func TestM1ReviewClaudeMinimalModes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "adaptive", out.Thinking.Type)
 		require.Equal(t, "low", out.OutputConfig.Effort)
+		wire, err := json.Marshal(out)
+		require.NoError(t, err)
+		projected, _, err := applyFinalReasoningEffortForAccount(m1EffortContext(body), nil, newOpenAIRejectedFieldTestAccount(), wire, model, "anthropic")
+		require.NoError(t, err)
+		require.Equal(t, wire, projected, "post-conversion policy must preserve adaptive/low")
+
 		native := []byte(`{"model":"` + model + `","max_tokens":8192,"output_config":{"effort":"minimal"},"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}`)
 		upstream := &anthropicHTTPUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)}
 		parsed, err := ParseGatewayRequest(NewRequestBodyRef(native), PlatformAnthropic)
