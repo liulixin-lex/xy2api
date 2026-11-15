@@ -564,6 +564,10 @@ func geminiResponseToChatCompletions(
 	}
 	if usageOverride != nil {
 		usage = usageOverride
+	}
+	// E8: the client sees the same counts as before; an all-zero aggregate
+	// keeps the converted response usage, as it always did.
+	if usageOverride != nil && (usageOverride.InputTokens > 0 || usageOverride.OutputTokens > 0 || usageOverride.CacheReadInputTokens > 0) {
 		if usageMap, ok := claudeRespMap["usage"].(map[string]any); ok {
 			usageMap["input_tokens"] = usage.InputTokens
 			usageMap["output_tokens"] = usage.OutputTokens
@@ -579,9 +583,6 @@ func geminiResponseToChatCompletions(
 	if err := json.Unmarshal(claudeBytes, &anthropicResp); err != nil {
 		return nil, nil, err
 	}
-	anthropicResp.Usage.InputTokensPresent = usage.InputTokensPresent
-	anthropicResp.Usage.OutputTokensPresent = usage.OutputTokensPresent
-	anthropicResp.Usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent
 	responsesResp := apicompat.AnthropicToResponsesResponse(&anthropicResp)
 	chat := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
 	reason, err := projectGeminiCompatTerminal(geminiResp, "chat", len(chat.Choices[0].Message.ToolCalls) > 0, opts...)
@@ -925,12 +926,9 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			StopReason: stopReason,
 		},
 		Usage: &apicompat.AnthropicUsage{
-			InputTokens:                 usage.InputTokens,
-			OutputTokens:                usage.OutputTokens,
-			CacheReadInputTokens:        usage.CacheReadInputTokens,
-			InputTokensPresent:          usage.InputTokensPresent,
-			OutputTokensPresent:         usage.OutputTokensPresent,
-			CacheReadInputTokensPresent: usage.CacheReadInputTokensPresent,
+			InputTokens:          usage.InputTokens,
+			OutputTokens:         usage.OutputTokens,
+			CacheReadInputTokens: usage.CacheReadInputTokens,
 		},
 	}) {
 		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, ccState.Err()

@@ -134,7 +134,7 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 - **工具选择**：auto/none/any 映射为 AUTO/NONE/ANY，指定函数映射为 ANY 与 allowedFunctionNames。none 移除当前 builtin 声明，保留历史；强制 builtin 保留声明并记录 map，不能保证本轮必调用。禁并行控制省略并记录 omit，不能保证只返回一个调用。畸形选择、非布尔并行控制或未声明的工具名返回指出字段的错误。
 - **工具历史**：按轮次与调用出现顺序配对结果，旧式同名调用继续按 FIFO 消费；不新增历史闭合校验，缺结果、孤儿结果与同轮重复 ID 沿原有转换方式处理。
 - **结束原因**：正常停止保留为自然结束或工具调用；MAX_TOKENS 优先保留长度截断，工具存在也不改成正常工具结束。安全过滤映射为 Messages refusal 或 Chat content_filter；OTHER 与未列出的非空停因沿用自然结束/完整工具的兼容映射，并记录 map；明确的坏工具停因返回上游转换错误，流式错误后不再追加成功结束帧。已读用量保留，完整工具参数必须是 JSON 对象。
-- **缓存用量**：未缓存输入为 `max(promptTokenCount - cachedContentTokenCount, 0)`，缓存读取保留原值；输出只加一次 candidates 与 thoughts。流中按字段保留最近一次有效计数，缺字段不覆盖已知值，显式零或修正值正常覆盖。缺失 prompt 与缓存大于 prompt 分别记录内部不完整、矛盾证据；存在位只用于内部记录，不据此省略客户端原有计数。
+- **缓存用量**：未缓存输入为 `max(promptTokenCount - cachedContentTokenCount, 0)`，缓存读取保留原值；输出只加一次 candidates 与 thoughts。流中按字段保留最近一次有效计数，缺字段不覆盖已知值，显式零或修正值正常覆盖。返回给客户端的用量字段与原来相同，不新增缓存字段；缺 prompt 与缓存大于 prompt 只在用量记录里区分。
 - **思考文本**：上游 `thought: true` 的文本放进 Messages 的 `thinking` 块或 Chat 的 `reasoning_content`，普通正文单独输出；非流式与流式相同。之后的请求在 assistant 历史里带回的 `thinking`、`redacted_thinking` 块不发给 Gemini（只有思考块的那一轮照原方式转换），工具调用的签名不受影响。
 - **AI Studio 搜索工具**：只调整搜索工具的字段拼写，输出 schema 原样保留，大整数不丢精度。
 
