@@ -253,7 +253,7 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 	}
 	out := ChatCompletionsResponseToResponses(resp, model, customTools, functionTools, toolSearch, namespaceTools)
 	if bridgeEnabled(opts.Bridge) {
-		if err := applyBridgeBufferedParts(out, resp); err != nil {
+		if err := applyBridgeBufferedParts(out, resp, opts); err != nil {
 			return nil, err
 		}
 		bridgeLengthToolGate(out, resp, opts.Bridge, customTools, toolSearch)

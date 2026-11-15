@@ -21,18 +21,18 @@ func hasThinkingPart(parts []ChatOutputPart) bool {
 	return false
 }
 
-func bridgeBufferedParts(message ChatMessage) ([]ChatOutputPart, bool, error) {
-	parts, err := DecodeChatOutputContent(message.Content)
+func bridgeBufferedParts(message ChatMessage, record func(ConversionNotice)) ([]ChatOutputPart, bool, error) {
+	parts, err := decodeChatOutputContent(message.Content, record, "choices[0].message.content")
 	raw := bytesTrimSpace(message.Content)
 	return parts, len(raw) > 0 && raw[0] == '[', err
 }
 
-func applyBridgeBufferedParts(out *ResponsesResponse, resp *ChatCompletionsResponse) error {
+func applyBridgeBufferedParts(out *ResponsesResponse, resp *ChatCompletionsResponse, opts ConversionOptions) error {
 	if resp == nil || len(resp.Choices) == 0 {
 		return nil
 	}
 	message := resp.Choices[0].Message
-	parts, array, err := bridgeBufferedParts(message)
+	parts, array, err := bridgeBufferedParts(message, opts.Record)
 	if err != nil {
 		return bridgeConversionError("choices.message.content", err)
 	}
@@ -70,7 +70,7 @@ func ChatCompletionsResponseToAnthropicWithBridgeOptions(resp *ChatCompletionsRe
 		return out, nil
 	}
 	message := resp.Choices[0].Message
-	parts, array, err := bridgeBufferedParts(message)
+	parts, array, err := bridgeBufferedParts(message, opts.Record)
 	if err != nil {
 		return nil, bridgeConversionError("choices.message.content", err)
 	}
@@ -141,7 +141,7 @@ func ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw []byte, state *C
 		}
 		var parts []ChatOutputPart
 		if content, exists := arrays[position]; exists {
-			parts, err = DecodeChatOutputContent(content)
+			parts, err = decodeChatOutputContent(content, state.bridgeRecord, fmt.Sprintf("choices[%d].delta.content", position))
 			if err != nil {
 				state.bridgeErr = bridgeConversionError("choices.delta.content", err)
 				return events
@@ -190,7 +190,7 @@ func ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(raw []byte, state *C
 	}
 	parts := make(map[int][]ChatOutputPart)
 	for index, content := range arrays {
-		parts[index], err = DecodeChatOutputContent(content)
+		parts[index], err = decodeChatOutputContent(content, state.bridgeRecord, fmt.Sprintf("choices[%d].delta.content", index))
 		if err != nil {
 			state.bridgeErr = bridgeConversionError("choices.delta.content", err)
 			return nil

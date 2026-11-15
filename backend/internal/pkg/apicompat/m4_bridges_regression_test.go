@@ -96,7 +96,7 @@ func TestM4TypedChatOutputDecoder(t *testing.T) {
 		{`"answer"`, []ChatOutputPart{{"text", "answer"}}, false},
 		{`null`, nil, false},
 		{`[{"type":"thinking","thinking":"THINK"},{"type":"text","text":"ANSWER"},{"type":"thinking","thinking":{"text":"NEXT"}}]`, []ChatOutputPart{{"thinking", "THINK"}, {"text", "ANSWER"}, {"thinking", "NEXT"}}, false},
-		{`[{"type":"unknown","text":"x"}]`, nil, true},
+		{`[{"type":"text","text":1}]`, nil, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
@@ -791,12 +791,12 @@ func TestM4TypedChatOutput(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"THINK", "ANSWER", "NEXT"}) {
 		t.Fatalf("deltas=%v", got)
 	}
-	bad := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: json.RawMessage(`[{"type":"unknown","text":"x"}]`)}}}}
+	bad := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: json.RawMessage(`[{"type":"text","text":1}]`)}}}}
 	if _, err := ChatCompletionsResponseToResponsesWithBridgeOptions(bad, "m", nil, nil, false, nil, opts); err == nil {
-		t.Fatal("unknown output part accepted")
+		t.Fatal("invalid text output accepted")
 	}
 	if _, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(bad, "m", opts); err == nil {
-		t.Fatal("unknown output part accepted")
+		t.Fatal("invalid text output accepted")
 	}
 }
 
