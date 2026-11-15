@@ -363,7 +363,7 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 func TestM8CompatStatusFieldsReachClient(t *testing.T) {
 	for _, status := range []int{408, 409, 422} {
 		for _, fields := range []bool{false, true} {
-			for _, path := range []string{"native", "chat", "anthropic", "chat_committed"} {
+			for _, path := range []string{"native", "chat", "chat_after_account", "anthropic", "chat_committed"} {
 				t.Run(fmt.Sprintf("%d/fields=%t/%s", status, fields, path), func(t *testing.T) {
 					c, rec := newOpenAIUpstreamErrorTestContext(t)
 					body := `{"error":{"message":"The request could not be processed"}}`
@@ -391,13 +391,14 @@ func TestM8CompatStatusFieldsReachClient(t *testing.T) {
 					if path == "native" {
 						_, err = svc.handleErrorResponse(context.Background(), resp, c, account, nil)
 					} else {
-						protocol := PreOutputProtocolChat
-						if path == "anthropic" {
-							protocol = PreOutputProtocolAnthropic
+						switch path {
+						case "anthropic":
+							_, err = svc.handleAnthropicErrorResponse(resp, c, account)
+						case "chat_after_account":
+							_, err = svc.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account)
+						default:
+							_, err = svc.handleChatCompletionsErrorResponse(resp, c, account)
 						}
-						_, err = svc.handleCompatErrorResponseWithFields(resp, c, account, func(c *gin.Context, status int, typ, code, param, msg string) {
-							WriteTargetProtocolError(c, protocol, status, typ, code, param, msg)
-						}, false)
 					}
 					require.Error(t, err)
 					output := rec.Body.String()
@@ -437,9 +438,7 @@ func TestM8CompatStatusFieldsReachClient(t *testing.T) {
 		rules.setLocalCache([]*model.ErrorPassthroughRule{newNonFailoverPassthroughRule(422, "specific", 418, "rule message")})
 		BindErrorPassthroughService(c, rules)
 		svc := &OpenAIGatewayService{cfg: &config.Config{}}
-		_, err := svc.handleCompatErrorResponseWithFields(newOpenAIUpstreamErrorResponse(422, `{"error":{"message":"specific","code":"original"}}`), c, newOpenAIUpstreamErrorTestAccount(), func(c *gin.Context, status int, typ, code, param, msg string) {
-			WriteTargetProtocolError(c, PreOutputProtocolChat, status, typ, code, param, msg)
-		}, false)
+		_, err := svc.handleChatCompletionsErrorResponse(newOpenAIUpstreamErrorResponse(422, `{"error":{"message":"specific","code":"original"}}`), c, newOpenAIUpstreamErrorTestAccount())
 		require.Error(t, err)
 		require.Equal(t, 418, rec.Code)
 		require.Equal(t, "rule message", gjson.Get(rec.Body.String(), "error.message").String())

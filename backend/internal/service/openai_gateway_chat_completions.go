@@ -649,7 +649,9 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
 	account *Account,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, false, requestedModel...)
+	return s.handleCompatErrorResponseWithFields(resp, c, account, func(c *gin.Context, status int, errType, code, param, message string) {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, status, errType, code, param, message)
+	}, false, requestedModel...)
 }
 
 func (s *OpenAIGatewayService) handleChatCompletionsErrorResponseAfterAccountHandling(
@@ -658,7 +660,9 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponseAfterAccountHan
 	account *Account,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, true, requestedModel...)
+	return s.handleCompatErrorResponseWithFields(resp, c, account, func(c *gin.Context, status int, errType, code, param, message string) {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, status, errType, code, param, message)
+	}, true, requestedModel...)
 }
 
 // handleChatBufferedStreamingResponse reads all Responses SSE events from the

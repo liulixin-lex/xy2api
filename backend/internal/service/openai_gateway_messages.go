@@ -673,7 +673,9 @@ func (s *OpenAIGatewayService) handleAnthropicErrorResponse(
 	account *Account,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, writeAnthropicError, false, requestedModel...)
+	return s.handleCompatErrorResponseWithFields(resp, c, account, func(c *gin.Context, status int, errType, code, param, message string) {
+		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, status, errType, code, param, message)
+	}, false, requestedModel...)
 }
 
 // handleAnthropicBufferedStreamingResponse reads all Responses SSE events from
