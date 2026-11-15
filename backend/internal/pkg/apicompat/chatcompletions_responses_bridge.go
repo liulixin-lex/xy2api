@@ -21,6 +21,9 @@ type toolOutputMediaByCallID map[string][]ChatContentPart
 // ResponsesToChatCompletionsRequestWithOptions. All fields are optional; a nil
 // *ResponsesToChatOptions behaves exactly like ResponsesToChatCompletionsRequest.
 type ResponsesToChatOptions struct {
+	Record                          func(ConversionNotice)
+	SupportsPlaintextReasoningInput bool
+	Bridge                          *BridgeOptions
 	// ReasoningContentByID looks up the cached reasoning text for a reasoning
 	// item id. Codex histories may carry reasoning items with no plaintext
 	// summary (empty summary + opaque encrypted_content, e.g. after remote
@@ -216,6 +219,7 @@ func FunctionToolNames(tools []ResponsesTool) map[string]bool {
 
 // NamespacedToolName 记录 namespace 子工具的原始归属（命名空间 + 裸子工具名）。
 type NamespacedToolName struct {
+	Kind      string
 	Namespace string
 	Name      string
 }
@@ -1593,6 +1597,7 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
+	Bridge         *BridgeOptions
 	ResponseID     string
 	Model          string
 	Created        int64

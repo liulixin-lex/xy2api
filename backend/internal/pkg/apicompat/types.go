@@ -124,13 +124,15 @@ type AnthropicImageSource struct {
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
-	DeferLoading *bool                  `json:"defer_loading,omitempty"`
-	Custom       json.RawMessage        `json:"custom,omitempty"`
-	Type         string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	InputSchema  json.RawMessage        `json:"input_schema,omitempty"` // JSON Schema object
-	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Strict         *bool                  `json:"strict,omitempty"`
+	AllowedCallers json.RawMessage        `json:"allowed_callers,omitempty"`
+	DeferLoading   *bool                  `json:"defer_loading,omitempty"`
+	Custom         json.RawMessage        `json:"custom,omitempty"`
+	Type           string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description,omitempty"`
+	InputSchema    json.RawMessage        `json:"input_schema,omitempty"` // JSON Schema object
+	CacheControl   *AnthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 // AnthropicCacheControl 对应 Anthropic API 的 cache_control 字段。
@@ -248,6 +250,9 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
+	Metadata         json.RawMessage `json:"metadata,omitempty"`
+	User             json.RawMessage `json:"user,omitempty"`
+	conversionTarget string
 	// Conversion-only intent never enters native OpenAI wire requests.
 	anthropicN          json.RawMessage
 	anthropicChatSource *ChatCompletionsRequest
@@ -296,7 +301,10 @@ type ResponsesText struct {
 // ResponsesInputItem is one item in the Responses API input array.
 // The Type field determines which other fields are populated.
 type ResponsesInputItem struct {
-	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Summary               []ResponsesSummary `json:"summary,omitempty"`
+	EncryptedFunctionArgs json.RawMessage    `json:"encrypted_function_args,omitempty"`
+	encryptedContentRaw   json.RawMessage
+	CacheControl          *AnthropicCacheControl `json:"cache_control,omitempty"`
 	// Common
 	Type string `json:"type,omitempty"` // "message" for role-based messages
 
@@ -324,13 +332,21 @@ func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 	type alias ResponsesInputItem
 	var wire struct {
 		*alias
-		Output json.RawMessage `json:"output"`
+		Output           json.RawMessage `json:"output"`
+		EncryptedContent json.RawMessage `json:"encrypted_content"`
 	}
 
 	*i = ResponsesInputItem{}
 	wire.alias = (*alias)(i)
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
+	}
+
+	i.encryptedContentRaw = append(json.RawMessage(nil), wire.EncryptedContent...)
+	if len(wire.EncryptedContent) > 0 && !bytes.Equal(bytes.TrimSpace(wire.EncryptedContent), []byte("null")) {
+		if err := json.Unmarshal(wire.EncryptedContent, &i.EncryptedContent); err != nil {
+			return err
+		}
 	}
 
 	output := bytes.TrimSpace(wire.Output)
@@ -365,6 +381,7 @@ type ResponsesContentPart struct {
 
 // ResponsesTool describes a tool in the Responses API.
 type ResponsesTool struct {
+	Format       json.RawMessage        `json:"format,omitempty"`
 	DeferLoading *bool                  `json:"defer_loading,omitempty"`
 	Custom       json.RawMessage        `json:"custom,omitempty"`
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
@@ -439,7 +456,9 @@ type ResponsesIncompleteDetails struct {
 
 // ResponsesOutput is one output item in a Responses API response.
 type ResponsesOutput struct {
-	Type string `json:"type"` // "message" | "reasoning" | "function_call" | "web_search_call"
+	EncryptedFunctionArgs json.RawMessage `json:"encrypted_function_args,omitempty"`
+	encryptedContentRaw   json.RawMessage
+	Type                  string `json:"type"` // "message" | "reasoning" | "function_call" | "web_search_call"
 
 	// type=message
 	ID      string                 `json:"id,omitempty"`
@@ -472,7 +491,13 @@ type ResponsesOutput struct {
 func (o ResponsesOutput) MarshalJSON() ([]byte, error) {
 	type responsesOutputAlias ResponsesOutput
 	if o.Type != "tool_search_call" {
-		return json.Marshal(responsesOutputAlias(o))
+		if len(o.encryptedContentRaw) == 0 {
+			return json.Marshal(responsesOutputAlias(o))
+		}
+		return json.Marshal(struct {
+			responsesOutputAlias
+			EncryptedContent json.RawMessage `json:"encrypted_content"`
+		}{responsesOutputAlias(o), o.encryptedContentRaw})
 	}
 	m := map[string]any{
 		"type":      o.Type,
@@ -494,7 +519,8 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 	type responsesOutputAlias ResponsesOutput
 
 	var kind struct {
-		Type string `json:"type"`
+		Type             string          `json:"type"`
+		EncryptedContent json.RawMessage `json:"encrypted_content"`
 	}
 	if err := json.Unmarshal(data, &kind); err != nil {
 		return err
@@ -505,6 +531,7 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		*o = ResponsesOutput(decoded)
+		o.encryptedContentRaw = append(json.RawMessage(nil), kind.EncryptedContent...)
 		return nil
 	}
 
@@ -524,6 +551,7 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*o = ResponsesOutput(decoded)
+	o.encryptedContentRaw = append(json.RawMessage(nil), kind.EncryptedContent...)
 	if !hasArguments || string(arguments) == "null" {
 		return nil
 	}
@@ -539,8 +567,10 @@ func (o *ResponsesOutput) UnmarshalJSON(data []byte) error {
 
 // WebSearchAction describes the search action in a web_search_call output item.
 type WebSearchAction struct {
-	Type  string `json:"type,omitempty"`  // "search"
-	Query string `json:"query,omitempty"` // primary search query
+	URL     string                     `json:"url,omitempty"`
+	Sources []ResponsesWebSearchSource `json:"sources,omitempty"`
+	Type    string                     `json:"type,omitempty"`  // "search"
+	Query   string                     `json:"query,omitempty"` // primary search query
 }
 
 // ResponsesSummary is a summary text block inside a reasoning output.
@@ -627,7 +657,11 @@ type ResponsesOutputTokensDetails struct {
 // ResponsesStreamEvent is a single SSE event in the Responses streaming protocol.
 // The Type field corresponds to the "type" in the JSON payload.
 type ResponsesStreamEvent struct {
-	Type string `json:"type"`
+	Refusal            string `json:"refusal,omitempty"`
+	OutputIndexPresent bool   `json:"-"`
+	ArgumentsPresent   bool   `json:"-"`
+	InputPresent       bool   `json:"-"`
+	Type               string `json:"type"`
 
 	// response.created / response.completed / response.done / response.failed / response.incomplete
 	Response *ResponsesResponse `json:"response,omitempty"`
@@ -677,6 +711,13 @@ type ResponsesStreamEvent struct {
 
 // ChatCompletionsRequest is the request body for POST /v1/chat/completions.
 type ChatCompletionsRequest struct {
+	Metadata                  json.RawMessage `json:"metadata,omitempty"`
+	User                      json.RawMessage `json:"user,omitempty"`
+	Reasoning                 json.RawMessage `json:"reasoning,omitempty"`
+	MaxOutputTokens           *int            `json:"max_output_tokens,omitempty"`
+	Text                      *ResponsesText  `json:"text,omitempty"`
+	Verbosity                 string          `json:"verbosity,omitempty"`
+	Include                   json.RawMessage `json:"include,omitempty"`
 	anthropicN                json.RawMessage
 	anthropicDroppedToolNames map[string]bool
 
@@ -925,4 +966,33 @@ func (d ChatDelta) reasoningText() *string {
 		return d.ReasoningContent
 	}
 	return d.Reasoning
+}
+
+// ResponsesWebSearchSource preserves upstream search evidence for protocol adapters.
+type ResponsesWebSearchSource struct {
+	Type    string `json:"type,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+func (e *ResponsesStreamEvent) UnmarshalJSON(data []byte) error {
+	type alias ResponsesStreamEvent
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*e = ResponsesStreamEvent(decoded)
+	present := func(name string) bool {
+		raw := bytes.TrimSpace(fields[name])
+		return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
+	}
+	e.OutputIndexPresent = present("output_index")
+	e.ArgumentsPresent = present("arguments")
+	e.InputPresent = present("input")
+	return nil
 }

@@ -169,6 +169,7 @@ func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicC
 // AnthropicEventToResponsesState tracks state for converting a sequence of
 // Anthropic SSE events into Responses SSE events.
 type AnthropicEventToResponsesState struct {
+	Bridge         *BridgeOptions
 	CacheUsage     AnthropicUsage
 	ResponseID     string
 	Model          string

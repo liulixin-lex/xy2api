@@ -11,6 +11,7 @@ import (
 // native Responses request is sent to an upstream that only understands
 // function tools.
 type ResponsesClientToolMapping struct {
+	Bridge         *BridgeOptions
 	CustomTools    map[string]bool
 	ToolSearch     bool
 	NamespaceTools map[string]ResponsesNamespaceName

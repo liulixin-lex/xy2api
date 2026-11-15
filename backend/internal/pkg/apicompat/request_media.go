@@ -90,6 +90,19 @@ func responsesMediaToAnthropic(p ResponsesContentPart) (AnthropicContentBlock, e
 // Preserve typed media in function outputs across marshal/unmarshal boundaries.
 func (i ResponsesInputItem) MarshalJSON() ([]byte, error) {
 	type wire ResponsesInputItem
+	if len(i.encryptedContentRaw) > 0 {
+		if len(i.outputRaw) > 0 {
+			return json.Marshal(struct {
+				wire
+				Output           json.RawMessage `json:"output"`
+				EncryptedContent json.RawMessage `json:"encrypted_content"`
+			}{wire(i), i.outputRaw, i.encryptedContentRaw})
+		}
+		return json.Marshal(struct {
+			wire
+			EncryptedContent json.RawMessage `json:"encrypted_content"`
+		}{wire(i), i.encryptedContentRaw})
+	}
 	if len(i.outputRaw) == 0 {
 		return json.Marshal(wire(i))
 	}
