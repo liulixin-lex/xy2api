@@ -826,13 +826,20 @@ func resToAnthHandleFuncArgsDone(evt *ResponsesStreamEvent, state *ResponsesEven
 	return resToAnthEmitTool(tool, state)
 }
 
-func resToAnthCompleteTool(tool *responsesAnthropicTool, raw string, present bool, state *ResponsesEventToAnthropicState) {
+func resToAnthReconcileTool(tool *responsesAnthropicTool, raw string, present bool, state *ResponsesEventToAnthropicState) bool {
 	if present {
 		if (tool.complete && raw != tool.raw) || !strings.HasPrefix(raw, tool.raw) {
 			state.fail("arguments", "final tool arguments disagree with delivered input")
-			return
+			return false
 		}
 		tool.raw = raw
+	}
+	return true
+}
+
+func resToAnthCompleteTool(tool *responsesAnthropicTool, raw string, present bool, state *ResponsesEventToAnthropicState) {
+	if !resToAnthReconcileTool(tool, raw, present, state) {
+		return
 	}
 	kind := "function"
 	if tool.kind == "custom_tool_call" {
@@ -1275,14 +1282,14 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	}
 
 	var events []AnthropicStreamEvent
-	if evt.Response != nil && (evt.Response.Status == "completed" || unknownMapped) {
-		state.successTerminal = true
+	state.successTerminal = evt.Response != nil && (evt.Response.Status == "completed" || unknownMapped)
+	if evt.Response != nil {
 		for i, item := range evt.Response.Output {
 			tool := state.toolItems[item.ID]
 			if tool == nil && item.ID == "" {
 				tool = state.tools[i]
 			}
-			if tool == nil && state.tools[i] == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
+			if state.successTerminal && tool == nil && state.tools[i] == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
 				events = append(events, resToAnthHandleOutputItemDone(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
 				continue
 			}
@@ -1291,13 +1298,19 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 				if tool.kind == "custom_tool_call" {
 					raw, present = item.Input, item.Input != "" || tool.raw == ""
 				}
-				resToAnthCompleteTool(tool, raw, present, state)
-				events = append(events, resToAnthEmitTool(tool, state)...)
+				if state.successTerminal {
+					resToAnthCompleteTool(tool, raw, present, state)
+					events = append(events, resToAnthEmitTool(tool, state)...)
+				} else {
+					resToAnthReconcileTool(tool, raw, present, state)
+				}
 			}
 		}
 		if state.err != nil {
 			return nil
 		}
+	}
+	if state.successTerminal {
 		for _, tool := range state.toolOrder {
 			resToAnthCompleteTool(tool, "", false, state)
 		}
