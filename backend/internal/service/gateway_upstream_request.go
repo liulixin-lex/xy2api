@@ -18,7 +18,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
+func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (request *http.Request, wireBody []byte, retErr error) {
+	recordTarget := beginAnthropicUpstreamTarget(ctx, account)
+	defer func() { recordTarget(request) }()
 	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr

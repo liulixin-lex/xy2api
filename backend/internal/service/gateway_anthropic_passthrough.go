@@ -331,7 +331,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	account *Account,
 	body []byte,
 	token string,
-) (*http.Request, []byte, error) {
+) (request *http.Request, wireBody []byte, retErr error) {
+	recordTarget := beginAnthropicUpstreamTarget(ctx, account)
+	defer func() { recordTarget(request) }()
 	body = stripDeferredToolCacheControl(body)
 	targetURL := claudeAPIURL
 	baseURL := account.GetBaseURL()
