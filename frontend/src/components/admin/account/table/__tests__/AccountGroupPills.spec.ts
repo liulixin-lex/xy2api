@@ -2,20 +2,40 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountGroupPills from '../AccountGroupPills.vue'
+import { formatShortTime } from '../accountTime'
+import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { AdminGroup } from '@/types'
 import { closeOverlay, openOverlay } from '@/utils/overlayStack'
+import type { TipContent } from '@/utils/tip'
 
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
-  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key), te: () => true })
 }))
 
+type Quality = Pick<BackendAccountSummary, 'status' | 'stop' | 'substandard' | 'exemptions' | 'ttfo'>
 const group = (id: number) => ({ id, name: `Group ${id}`, platform: 'openai', status: 'active' }) as AdminGroup
-const quality = { account_id: 7, status: 'normal', reset_at: null, stop: null, substandard: [], exemptions: [] } as never
-const mountPills = (count: number, withQuality = true) => mount(AccountGroupPills, {
-  attachTo: document.body,
-  props: { account: { id: 7, name: 'acc-7' } as never, groups: Array.from({ length: count }, (_, i) => group(i + 1)), quality: withQuality ? quality : null }
+const baseQuality = (patch: Partial<Quality> = {}): Quality => ({
+  status: 'normal', stop: null, substandard: [], exemptions: [], ttfo: { n: 30, short: false, red: false, p50_ms: 2800 }, ...patch
 })
+const quality = baseQuality()
+const mountPills = (count: number, withQuality: Quality | boolean = true) => mount(AccountGroupPills, {
+  attachTo: document.body,
+  props: {
+    account: { id: 7, name: 'acc-7' } as never,
+    groups: Array.from({ length: count }, (_, i) => group(i + 1)),
+    quality: withQuality === true ? quality : withQuality || null
+  }
+})
+const back = (groupId: number, model: string, dims: Quality['substandard'][number]['dims'], until: string) =>
+  ({ group_id: groupId, model, dims, until, other_group: false, exempt: false, effective: true })
+const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
+/** The card the zone's tip shows (its v-tip value, called as the tip does when it shows). */
+const cardOf = (el: { element: Element }) => {
+  const value = (el.element as HTMLElement & { __tipText?: TipContent | (() => TipContent) }).__tipText
+  return typeof value === 'function' ? value() : value
+}
+const backIn = expect.stringMatching(/^admin\.accounts\.table\.pillBackUntil:/)
 
 // The pointer type is one shared media query: it is read again once no pill uses it.
 enableAutoUnmount(afterEach)
@@ -105,9 +125,69 @@ describe('AccountGroupPills', () => {
     expect(wrapper.emitted('edit-groups')).toBeUndefined()
     const tip = document.getElementById('sq-tip')!
     expect(tip.hidden).toBe(false)
-    expect(tip.textContent!.split('\n').slice(1).map((line) => line.split(' · ')[0])).toEqual(
-      [9, 10, 11, 12].map((id) => expect.stringContaining(`Group ${id}`))
-    )
+    expect(Array.from(tip.querySelectorAll('.sq-tip__c.sq-tip__first'), (el) => el.textContent)).toEqual(['Group 9', 'Group 10', 'Group 11', 'Group 12'])
+  })
+
+  // Tip cards (12.7): data and state words only, the same card on both zones.
+  it('shows the group\'s name and state on both zones; at the back a row per model with why and when it is back', () => {
+    const wrapper = mountPills(2, baseQuality({
+      substandard: [back(2, 'gpt-6-astra', ['ttfo', 'error'], inMinutes(15)), back(2, 'gpt-5', ['cache'], inMinutes(-1))]
+    }))
+    const [ok, atBack] = wrapper.findAll('[data-test="group-pill"]')
+    expect(cardOf(ok.get('[data-test="group-pill-dot"]'))).toEqual({
+      title: 'Group 1', chip: { text: 'admin.accounts.table.dotStates.ok', tone: 'ok', dot: true }, rows: []
+    })
+    const card = cardOf(atBack.get('[data-test="group-pill-dot"]'))
+    expect(cardOf(atBack.get('[data-test="group-pill-text"]'))).toEqual(card)
+    expect(card).toEqual({
+      title: 'Group 2',
+      chip: { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true },
+      rows: [
+        ['Astra', { text: 'admin.accounts.table.dimReasons.ttfo、admin.accounts.table.dimReasons.error', tone: 'back' }, backIn],
+        ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, '']
+      ]
+    })
+  })
+
+  it('shows an exemption\'s end and reason, the TTFT samples while observed, and a stop\'s reason, source and end', () => {
+    const exempt = mountPills(1, baseQuality({ exemptions: [{ group_id: 0, expires_at: null, reason: '试用' }] }))
+    expect(cardOf(exempt.get('[data-test="group-pill-dot"]'))).toMatchObject({
+      chip: { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true },
+      rows: [['admin.accounts.table.tip.exemptUntil', 'admin.accounts.table.tip.forever'], ['admin.accounts.table.tip.reason', '试用']]
+    })
+    const observed = mountPills(1, baseQuality({ status: 'observing', ttfo: { n: 12, short: true, red: false, p50_ms: null } }))
+    expect(cardOf(observed.get('[data-test="group-pill-dot"]'))).toMatchObject({
+      chip: { tone: 'observe' }, rows: [['admin.accounts.table.tip.samples', 'admin.accounts.table.tip.count:{"n":12}']]
+    })
+    const until = inMinutes(90)
+    const stopped = mountPills(1, baseQuality({ stop: { source: 'manual', reason: 'manual_off', until } }))
+    expect(cardOf(stopped.get('[data-test="group-pill-dot"]'))).toMatchObject({
+      chip: { text: 'admin.accounts.table.dotStates.stopped', tone: 'stopped', dot: true },
+      rows: [
+        ['admin.accounts.table.tip.reason', 'admin.schedQuality.kind.manual_off'],
+        ['admin.accounts.table.tip.source', 'admin.accounts.table.tip.sources.manual'],
+        ['admin.accounts.table.tip.resume', formatShortTime(until)]
+      ]
+    })
+  })
+
+  it('lists each folded group under "+N" with its dot, state and end; without quality data names only; "+" has no tip', () => {
+    const expires = inMinutes(120)
+    const wrapper = mountPills(11, baseQuality({ substandard: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
+    expect(cardOf(wrapper.get('[data-test="group-pill-more-text"]'))).toEqual({
+      title: 'admin.accounts.table.pillMore:{"n":3}',
+      rows: [
+        ['Group 9', { text: 'admin.accounts.table.dotStates.ok', tone: 'ok', dot: true }, ''],
+        ['Group 10', { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true }, backIn],
+        ['Group 11', { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true }, formatShortTime(expires)]
+      ]
+    })
+    const plain = mountPills(10, false)
+    expect(cardOf(plain.get('[data-test="group-pill-text"]'))).toEqual({ title: 'Group 1', chip: { text: 'admin.accounts.table.pillNoQuality', tone: 'muted' } })
+    expect(cardOf(plain.get('[data-test="group-pill-more-text"]'))).toEqual({
+      title: 'admin.accounts.table.pillMore:{"n":2}', chip: { text: 'admin.accounts.table.pillNoQuality', tone: 'muted' }, rows: [['Group 9'], ['Group 10']]
+    })
+    expect(cardOf(mountPills(0).get('[data-test="group-pill-empty"]'))).toBeUndefined()
   })
 
   it('on a touch screen opens the quality panel from the whole pill, at any width; a pill with no dot shows its full name (spec 4.3, 7l-5)', async () => {
@@ -125,7 +205,8 @@ describe('AccountGroupPills', () => {
     const plain = mountPills(1, false)
     await plain.get('[data-test="group-pill"]').trigger('click')
     expect(plain.emitted('open-quality')).toBeUndefined()
-    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.table.pillNoQuality:{"name":"Group 1"}')
+    expect(document.querySelector('#sq-tip .sq-tip__title')!.textContent).toBe('Group 1')
+    expect(document.querySelector('#sq-tip .sq-tip__chip')!.textContent).toBe('admin.accounts.table.pillNoQuality')
     plain.unmount()
     window.matchMedia = matchMedia
   })
