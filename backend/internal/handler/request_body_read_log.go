@@ -13,8 +13,8 @@ import (
 )
 
 // logRequestBodyReadFailure records a bounded, payload-free reason for a body
-// read failure. Clients continue to receive the stable generic error message;
-// operators get enough information to distinguish compression failures from a
+// read failure. Operators get enough information to distinguish upload timeouts,
+// compression failures and a
 // disconnected/truncated upload without logging request content.
 func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error) {
 	if reqLog == nil || err == nil {
@@ -73,7 +73,40 @@ func requestBodyReadErrorKind(err error) string {
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return "upload_timeout"
+		}
 		return "transport"
 	}
 	return "io_read"
+}
+
+// requestBodyReadFailureResponse classifies errors before any upstream send.
+// A 499 is for local recording only: the caller must not write a new response
+// to a disconnected client.
+func requestBodyReadFailureResponse(req *http.Request, err error) (status int, errType, code, message string) {
+	errType = "invalid_request_error"
+	kind := requestBodyReadErrorKind(err)
+	switch kind {
+	case "max_bytes":
+		var maxErr *http.MaxBytesError
+		errors.As(err, &maxErr)
+		return http.StatusRequestEntityTooLarge, errType, "", buildBodyTooLargeMessage(maxErr.Limit)
+	case "decode_content_encoding", "unsupported_content_encoding":
+		return http.StatusBadRequest, errType, "", "Failed to read request body"
+	case "client_disconnect":
+		return statusClientClosedRequest, "", "", ""
+	}
+	if req != nil {
+		switch req.Context().Err() {
+		case context.Canceled:
+			return statusClientClosedRequest, "", "", ""
+		case context.DeadlineExceeded:
+			kind = "upload_timeout"
+		}
+	}
+	if kind == "upload_timeout" {
+		return http.StatusRequestTimeout, errType, "request_upload_timeout", "Timed out reading request body"
+	}
+	return http.StatusBadRequest, errType, "", "Failed to read request body"
 }
