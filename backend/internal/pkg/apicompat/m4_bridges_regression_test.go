@@ -1434,6 +1434,7 @@ func TestM4ToolChoiceSubset(t *testing.T) {
 	}
 	// The private original Chat source remains a copied policy input after aliasing.
 	chatReq := &ChatCompletionsRequest{Model: "claude-sonnet-4-6", Tools: []ChatTool{{Type: "function", Function: &ChatFunction{Name: "工具", Parameters: json.RawMessage(`{"type":"object"}`)}}}, Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}}}
+	chatReq.Tools[0].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 	intermediate, err := ChatCompletionsToResponses(chatReq)
 	if err != nil {
 		t.Fatal(err)
@@ -1445,6 +1446,9 @@ func TestM4ToolChoiceSubset(t *testing.T) {
 	}
 	if out.Tools[0].Name == "工具" || chatReq.Tools[0].Function.Name != "工具" {
 		t.Fatal("Chat source alias/copy failed")
+	}
+	if out.Tools[0].Strict != nil || out.Tools[0].CacheControl == nil || out.Tools[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("source tool fields changed: %#v", out.Tools[0])
 	}
 }
 
