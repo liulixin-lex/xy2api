@@ -78,3 +78,32 @@ func TestFoundationUpstreamRecoveryHintState(t *testing.T) {
 	absent.SetUpstreamAttemptTarget(nil)
 	absent.NoteAccountRetryNotBefore(1, hint)
 }
+
+func TestFoundationRecoveryTrustedBody(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, body string
+		header     http.Header
+		want       time.Duration
+		source     string
+	}{
+		{"trusted_top_level", `{"type":"error","error":{"type":"rate_limit_error","message":"busy"},"retry_after":300}`, nil, 300 * time.Second, "retry_after"},
+		{"latest_top_level", `{"type":"error","error":{"type":"rate_limit_error","retry_after":20},"retry_after_ms":300000}`, http.Header{"Retry-After": {"10"}}, 300 * time.Second, "retry_after_ms"},
+		{"body_http_date", `{"error":{"message":"busy","retry_after":"Thu, 01 Jan 2026 00:01:00 GMT"}}`, nil, time.Minute, "error.retry_after"},
+		{"top_http_date", `{"type":"error","error":{"message":"busy","retry_after":20},"retry_after":"Thu, 01 Jan 2026 00:01:00 GMT"}`, nil, time.Minute, "retry_after"},
+		{"expired_date_keeps_valid_hint", `{"error":{"message":"busy","retry_after":"Wed, 31 Dec 2025 23:59:00 GMT","retry_after_ms":12000}}`, nil, 12 * time.Second, "error.retry_after_ms"},
+		{"expired_date_only", `{"error":{"message":"busy","retry_after":"Wed, 31 Dec 2025 23:59:00 GMT"}}`, nil, 0, ""},
+		{"ordinary_body", `{"type":"response.output_text.delta","delta":"Try again in 300s","retry_after":300,"retry_after_ms":300000}`, nil, 0, ""},
+		{"ordinary_message", `{"message":"Try again in 300s","retry_after":300}`, nil, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseUpstreamRecoveryHint(tc.header, []byte(tc.body), now)
+			if ok != (tc.want > 0) || got.Delay != tc.want || got.Source != tc.source {
+				t.Fatalf("got %+v %v; want %v %q", got, ok, tc.want, tc.source)
+			}
+			if tc.source != "" && len(got.Headers) != 0 {
+				t.Fatal("body source invented headers")
+			}
+		})
+	}
+}

@@ -199,8 +199,31 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 		})
 		headers(values, path)
 	}
-	for _, path := range []string{"response.error", "error"} {
-		object := root.Get(path)
+	bodyPaths := []string{"response.error", "error"}
+	// Only an error envelope authorizes top-level compatibility retry fields.
+	// Ordinary response bodies are not retry-hint sources.
+	errorEnvelope := false
+	switch root.Get("type").String() {
+	case "error", "proxy.upstream_error", "response.failed":
+		errorEnvelope = true
+	case "":
+		if object := root.Get("error"); object.IsObject() {
+			for _, field := range []string{"message", "type", "code"} {
+				v := object.Get(field)
+				if v.Type == gjson.String && strings.TrimSpace(v.Str) != "" || field == "code" && v.Type == gjson.Number {
+					errorEnvelope = true
+				}
+			}
+		}
+	}
+	if errorEnvelope {
+		bodyPaths = append(bodyPaths, "")
+	}
+	for _, path := range bodyPaths {
+		object := root
+		if path != "" {
+			object = root.Get(path)
+		}
 		if !object.IsObject() {
 			continue
 		}
@@ -209,14 +232,14 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 			if value.Type != gjson.String && value.Type != gjson.Number {
 				continue
 			}
-			unit := time.Second
-			if field == "retry_after_ms" {
-				unit = time.Millisecond
-			}
-			if d, ok := recoveryDelay(value.String(), unit); ok {
-				choose(observedAt.Add(d), path+"."+field, nil)
+			// retry_after has the same seconds/HTTP-date grammar as Retry-After.
+			if at, ok := parseHeader(value.String(), strings.ReplaceAll(field, "_", "-")); ok {
+				choose(at, strings.TrimPrefix(path+"."+field, "."), nil)
 			}
 		}
+		if path == "" {
+			continue
+		} // Duration prose is trusted only inside the error objects.
 		message := object.Get("message")
 		if message.Type != gjson.String || strings.ContainsAny(message.Str, "\r\n") {
 			continue
