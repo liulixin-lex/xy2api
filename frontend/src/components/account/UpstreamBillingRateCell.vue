@@ -125,6 +125,7 @@ function rateTip(): string {
 .ratio__v {
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
+  font-variant-numeric: tabular-nums;
   line-height: var(--line-height-body);
   white-space: nowrap;
   cursor: help;

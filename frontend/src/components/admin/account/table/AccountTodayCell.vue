@@ -51,11 +51,12 @@ const lines = computed(() => {
   line-height: 15px;
 }
 .today__k {
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 .today__v {
   color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
 }

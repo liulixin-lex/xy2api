@@ -370,7 +370,7 @@
  * dialogs that edit them (each dialog gets its own snapshot or loads the account).
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
+import { useDebounceFn, useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { IQ_RUN_BATCH_LIMIT } from '@/api/admin/accounts'
@@ -544,7 +544,12 @@ const live = useAccountsLiveTable({
 const table = live.table
 schedLayers.bind(table, (id) => table.record(id))
 const { rows, loading, total, pending, status: liveStatus } = table
-const accountRowClass = (row: LiveAccount) => (table.transitioning.value || table.isDimmed(row.id) ? 'opacity-60' : undefined)
+// A ticked account reads in the shared table's selected background (12.1-3); the cards below 1024px mark it
+// themselves (AccountCard), so the row class leaves them alone.
+const wideTable = useMediaQuery('(min-width: 1024px)')
+const accountRowClass = (row: LiveAccount) => [
+  { 'opacity-60': table.transitioning.value || table.isDimmed(row.id), 'is-selected': wideTable.value && isSelected(row.id) }
+]
 const changesText = (n: string) => t('common.pendingChanges.changes', { n })
 
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
@@ -1668,10 +1673,11 @@ onUnmounted(() => cancelModalPrefetch?.())
   background: transparent;
   color: var(--color-text-secondary);
 }
+/* The icon takes the brand teal under the pointer (12.1-6). */
 @media (hover: hover) {
   .acc-op:hover {
     background: var(--color-bg-control-hover);
-    color: var(--color-text-primary);
+    color: theme('colors.primary.500');
   }
 }
 /* The pencil at the prototype's 14px (7i-8). */

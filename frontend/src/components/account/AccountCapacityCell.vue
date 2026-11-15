@@ -223,7 +223,7 @@ const lines = computed<CapLine[]>(() => {
 .cap__l,
 .cap__group,
 .cap__suffix {
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
 }
 .cap__chip--zero,
 .cap__chip--zero .cap__l,

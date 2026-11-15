@@ -11,26 +11,26 @@
   /* Surfaces */
   --color-bg-page: #f3f5f8;
   --color-bg-surface: #ffffff;
-  --color-bg-header: #f7f9fb;
-  --color-bg-row-hover: #f4f6f9;
+  --color-bg-header: #f1f4f8;
+  --color-bg-row-hover: #eef2f7;
   --color-bg-raised: #ffffff;
   --color-bg-control: #ffffff;
   --color-bg-control-hover: #f3f5f8;
-  --color-bg-pill: #edf0f4;
+  --color-bg-pill: #e9edf3;
   --color-bg-pill-hover: #dde3eb;
   --color-bg-target: #e9f6f4;
-  --color-bg-selected: #e8f4f2;
+  --color-bg-selected: #e6f6f3;
   --color-bg-seg: #edf0f4;
   --color-bg-seg-active: #ffffff;
 
   /* Lines */
-  --color-line-row: #edf0f4;
-  --color-line-strong: #d9dee6;
+  --color-line-row: #e6eaf0;
+  --color-line-strong: #d3d9e2;
   --color-line-control: #cdd4de;
 
   /* Text, three levels */
-  --color-text-primary: #111827;
-  --color-text-secondary: #4d596b;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
   --color-text-muted: #5f6b7d;
   --color-text-muted-on-pill: #5f6b7d;
 
@@ -41,20 +41,23 @@
   --color-switch-thumb-off: #ffffff;
 
   /* Status fills (dots) */
-  --color-status-ok: #1f8a5b;
-  --color-status-back: #a66a07;
-  --color-status-exempt: #6b59d3;
+  --color-status-ok: #059669;
+  --color-status-back: #d97706;
+  --color-status-exempt: #7c3aed;
   --color-status-observe: #7d8798;
   --color-status-stopped: #4a5363;
-  --color-status-error: #c43b3b;
-  --color-status-info: #2765c0;
+  --color-status-error: #dc2626;
+  --color-status-info: #2563eb;
 
   /* Status text */
-  --color-status-ok-text: #1b7c51;
-  --color-status-back-text: #94600a;
-  --color-status-exempt-text: #5d4bc4;
-  --color-status-error-text: #bb3535;
-  --color-status-info-text: #2765c0;
+  --color-status-ok-text: #047857;
+  --color-status-back-text: #ab4f09;
+  --color-status-exempt-text: #6d28d9;
+  --color-status-error-text: #b91c1c;
+  --color-status-info-text: #1d4ed8;
+
+  /* Second round (spec 12): a ticked row under the pointer, still told apart from a hovered or a ticked one */
+  --color-bg-selected-hover: #d9f0eb;
 
   /* Tooltips */
   --color-tooltip-bg: #111827;
@@ -116,25 +119,25 @@
 .dark {
   --color-bg-page: #0b111d;
   --color-bg-surface: #0f1626;
-  --color-bg-header: #131b2d;
-  --color-bg-row-hover: #151e31;
+  --color-bg-header: #18223a;
+  --color-bg-row-hover: #19243a;
   --color-bg-raised: #131b2c;
   --color-bg-control: #0f1626;
   --color-bg-control-hover: #172034;
-  --color-bg-pill: #1c2639;
+  --color-bg-pill: #212c42;
   --color-bg-pill-hover: #283350;
   --color-bg-target: #12262d;
-  --color-bg-selected: #13222b;
+  --color-bg-selected: #11272f;
   --color-bg-seg: #0f1626;
   --color-bg-seg-active: #253048;
 
-  --color-line-row: #1a2335;
-  --color-line-strong: #263046;
+  --color-line-row: #1e293d;
+  --color-line-strong: #2c3850;
   --color-line-control: #2e3a52;
 
-  --color-text-primary: #e3e8ef;
-  --color-text-secondary: #98a4b6;
-  --color-text-muted: #7d899c;
+  --color-text-primary: #eef2f7;
+  --color-text-secondary: #aab5c5;
+  --color-text-muted: #8b96a7;
   --color-text-muted-on-pill: oklch(0.665 0.032 260);
 
   --color-switch-on: oklch(0.54 0.05 182);
@@ -142,19 +145,21 @@
   --color-switch-thumb: #ffffff;
   --color-switch-thumb-off: #c7d0dc;
 
-  --color-status-ok: #52bf8d;
-  --color-status-back: #d8a647;
-  --color-status-exempt: #ab9ff2;
+  --color-status-ok: #34d399;
+  --color-status-back: #fbbf24;
+  --color-status-exempt: #a78bfa;
   --color-status-observe: oklch(0.6 0.025 260);
   --color-status-stopped: oklch(0.72 0.03 260);
-  --color-status-error: #f0726e;
-  --color-status-info: #6ea8ee;
+  --color-status-error: #f87171;
+  --color-status-info: #60a5fa;
 
-  --color-status-ok-text: #5cc897;
-  --color-status-back-text: #dcae55;
-  --color-status-exempt-text: #b4a9f4;
-  --color-status-error-text: #f27c78;
-  --color-status-info-text: #7cb2f0;
+  --color-status-ok-text: #34d399;
+  --color-status-back-text: #fbbf24;
+  --color-status-exempt-text: #c4b5fd;
+  --color-status-error-text: #f87171;
+  --color-status-info-text: #60a5fa;
+
+  --color-bg-selected-hover: #163039;
 
   --color-tooltip-bg: #222c40;
   --color-tooltip-text: #e3e8ef;

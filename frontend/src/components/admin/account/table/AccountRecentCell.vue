@@ -53,13 +53,14 @@ const lines = computed(() => {
   width: 72px;
 }
 .recent__k {
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-small);
   line-height: var(--line-height-body);
 }
 .recent__v {
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
+  font-variant-numeric: tabular-nums;
   line-height: var(--line-height-body);
   text-align: right;
   white-space: nowrap;

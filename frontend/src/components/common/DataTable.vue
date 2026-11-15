@@ -1274,6 +1274,17 @@ defineExpose({
   background-color: var(--color-bg-row-hover);
 }
 
+/* A ticked row (the table's own check boxes, or a page's row class "is-selected"): the selected background over the
+   whole row, frozen cells included; under the pointer a step deeper, still apart from a hovered row (12.1-3). */
+.table-wrapper :deep(tbody tr.is-selected),
+.table-wrapper :deep(tbody tr.is-selected .sticky-col) {
+  background-color: var(--color-bg-selected);
+}
+.table-wrapper :deep(tbody tr.is-selected:hover),
+.table-wrapper :deep(tbody tr.is-selected:hover .sticky-col) {
+  background-color: var(--color-bg-selected-hover);
+}
+
 /* 固定列的分隔线只在确实可以横向滚动时显示（规格 7b）：靠滚动区一侧 1px，表头与表体连成一条 */
 .is-scrollable :deep(.sticky-col-left),
 .is-scrollable :deep(.sticky-col-left-second) {
