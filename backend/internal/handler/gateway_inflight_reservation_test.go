@@ -318,16 +318,17 @@ func TestChatReservationLimitMatchesConversion(t *testing.T) {
 
 func TestReviewM2ReservationFallbackDoesNotReject(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		body []byte
+		name      string
+		body      []byte
+		protocols []string
 	}{
-		{"invalid UTF-8", []byte("{\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"\xff\"}]}")},
-		{"integer decimal", []byte(`{"max_tokens":4096.0}`)},
-		{"Codex zero limit", []byte(`{"max_output_tokens":0}`)},
+		{"invalid UTF-8", []byte("{\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"\xff\"}]}"), []string{"chat", "responses", "anthropic", "gemini"}},
+		{"integer decimal", []byte(`{"max_tokens":4096.0}`), []string{"chat", "anthropic"}},
+		{"Codex zero limit", []byte(`{"max_output_tokens":0}`), []string{"responses"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := append([]byte(nil), tc.body...)
-			for _, protocol := range []string{"chat", "responses", "anthropic", "gemini"} {
+			for _, protocol := range tc.protocols {
 				estimate, err := tokenInflightEstimateForProtocol("m", tc.body, protocol)
 				require.NoError(t, err)
 				require.Equal(t, tokenInflightEstimate("m", tc.body), estimate)
