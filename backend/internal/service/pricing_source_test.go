@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -99,6 +101,34 @@ func TestBillingPricingProvenance(t *testing.T) {
 		require.Contains(t, buf.String(), "Using fallback pricing")
 		require.Contains(t, buf.String(), "gpt-5.4")
 	})
+	t.Run("local_layers", func(t *testing.T) {
+		dir := t.TempDir()
+		catalogPath := filepath.Join(dir, "catalog.json")
+		fallbackPath := filepath.Join(dir, "fallback.json")
+		overridePath := filepath.Join(dir, "override.json")
+		body := []byte(`{"fixture":{"input_cost_per_token":0.001,"output_cost_per_token":0.002}}`)
+		require.NoError(t, os.WriteFile(catalogPath, body, 0600))
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"layered":{"input_cost_per_token":0.003,"output_cost_per_token":0.004}}`), 0600))
+		require.NoError(t, os.WriteFile(overridePath, []byte(`{"fixture":{"output_cost_per_token":0.006}}`), 0600))
+		source := NewPricingService(&config.Config{Pricing: config.PricingConfig{FallbackFile: fallbackPath, OverrideFile: overridePath}}, nil)
+		require.NoError(t, source.loadPricingData(catalogPath))
+		_, base := source.lookupModelPricingWithSource("fixture")
+		_, fallback := source.lookupModelPricingWithSource("layered")
+		require.Equal(t, "catalog", base.Source)
+		require.Equal(t, "fallback_file", fallback.Source)
+		require.Contains(t, base.Overrides["output_cost_per_token"], "override_file:")
+		billing := NewBillingService(&config.Config{}, source)
+		cost, err := billing.CalculateCost("fixture", UsageTokens{InputTokens: 1, OutputTokens: 1}, 1)
+		require.NoError(t, err)
+		require.InDelta(t, 0.007, cost.TotalCost, 1e-12)
+		frozen := append([]byte(nil), cost.PricingSource...)
+		require.NoError(t, os.WriteFile(overridePath, []byte(`{"fixture":{"output_cost_per_token":0.008}}`), 0600))
+		require.NoError(t, source.loadPricingData(catalogPath))
+		_, next := source.lookupModelPricingWithSource("fixture")
+		require.NotEqual(t, base.Revision, next.Revision)
+		require.Equal(t, frozen, []byte(cost.PricingSource))
+	})
+
 	t.Run("image_and_request", func(t *testing.T) {
 		billing := NewBillingService(&config.Config{}, catalog)
 		image := billing.CalculateImageCost("fixture", "1K", 2, &ImagePriceConfig{Price1K: new(float64(0.25))}, 1)
