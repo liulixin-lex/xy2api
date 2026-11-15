@@ -394,6 +394,10 @@ func (s *OpenAIGatewayService) scanCCStream(
 		st.Err = ErrOpenAIUpstreamStreamTruncated
 	}
 
+	if st.Err == nil && terminal.sawCompleteTrailingUsage {
+		currentSchedAttempt(c.Request.Context()).markTerminal()
+	}
+
 	return st
 }
 

@@ -617,6 +617,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
+	if terminal.sawCompleteTrailingUsage {
+		currentSchedAttempt(c.Request.Context()).markTerminal()
+	}
 	if !clientDisconnected {
 		ClaimProtocolTerminal(c)
 	}
