@@ -26,12 +26,15 @@ type openAIRequestRepair struct {
 	passthrough             bool
 	m3                      *openAIM3Attempt
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
+	rejectedFieldEvent      *OpsUpstreamErrorEvent
+	rejectedFieldSequence   uint64
 }
 
 func armOpenAIRequestRepair(c *gin.Context, account *Account, rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState) *openAIRequestRepair {
 	if c == nil || c.Request == nil {
 		return nil
 	}
+	previous := openAIRequestRepairFrom(c)
 	c.Set(openAIRequestRepairContextKey, (*openAIRequestRepair)(nil))
 	if account == nil {
 		return nil
@@ -39,6 +42,9 @@ func armOpenAIRequestRepair(c *gin.Context, account *Account, rejectedFieldRetry
 	repair := &openAIRequestRepair{
 		accountID:               account.ID,
 		rejectedFieldRetryState: rejectedFieldRetryState,
+	}
+	if previous != nil && previous.accountID == account.ID {
+		repair.rejectedFieldEvent, repair.rejectedFieldSequence = previous.rejectedFieldEvent, previous.rejectedFieldSequence
 	}
 	c.Set(openAIRequestRepairContextKey, repair)
 	return repair
@@ -60,9 +66,10 @@ func openAIRequestRepairFrom(c *gin.Context) *openAIRequestRepair {
 }
 
 type openAIRequestRepairSignal struct {
-	kind          string
-	next          []byte
-	encryptedItem httpRejectedEncryptedItem
+	kind                 string
+	next                 []byte
+	encryptedItem        httpRejectedEncryptedItem
+	rejectedFieldPayload []byte
 }
 
 func (e *openAIRequestRepairSignal) Error() string {
@@ -208,7 +215,8 @@ func newOpenAIRejectedFieldRepairSignal(ctx context.Context, r *openAIRequestRep
 	if len(errorObject) > 0 {
 		next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
 		if err == nil && changed && r.rejectedFieldRetryState.Allow(next) && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(r.accountID, false, time.Now()) {
-			return &openAIRequestRepairSignal{kind: reason, next: next}
+			recordOpenAIRejectedOutputLimitOmission(ctx, r.body, next)
+			return &openAIRequestRepairSignal{kind: reason, next: next, rejectedFieldPayload: errorObject}
 		}
 	}
 	return nil
@@ -226,6 +234,14 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
+	if len(signal.rejectedFieldPayload) > 0 {
+		refusal := &http.Response{StatusCode: http.StatusBadRequest}
+		if resp != nil {
+			refusal.Header = resp.Header
+		}
+		r.rejectedFieldEvent = recordOpenAIResponsesRejectedFieldRetry(c, account, refusal, signal.rejectedFieldPayload)
+		r.rejectedFieldSequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+	}
 	if signal.kind == resilience.ReasonEncryptedContent {
 		r.encryptedTried = true
 		r.rejectedFieldRetryState.remember(signal.next)
@@ -239,4 +255,16 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 		zap.String("form", "inband"),
 	)
 	return signal.next, signal.kind, true
+}
+
+// A prepared repair is not a resend until this account crossed transport.
+func noteOpenAIRequestRepairResent(ctx context.Context, c *gin.Context, account *Account) {
+	r := openAIRequestRepairFrom(c)
+	if r == nil || account == nil || r.accountID != account.ID || r.rejectedFieldEvent == nil {
+		return
+	}
+	if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && r.rejectedFieldSequence > 0 && boundary >= r.rejectedFieldSequence {
+		r.rejectedFieldEvent.Resent = true
+	}
+	r.rejectedFieldEvent = nil
 }
