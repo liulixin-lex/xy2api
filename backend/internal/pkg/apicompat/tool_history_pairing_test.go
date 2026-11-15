@@ -4,6 +4,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -29,5 +30,41 @@ func TestFoundationToolHistoryPairing(t *testing.T) {
 	p, err = PairToolHistory(legacy, false)
 	if err != nil || len(p) != 1 {
 		t.Fatal(p, err)
+	}
+}
+
+func TestFoundationToolHistoryInterleavedAndLegacyFIFO(t *testing.T) {
+	interleaved := []json.RawMessage{
+		[]byte(`{"type":"function_call","call_id":"A"}`), []byte(`{"type":"function_call","call_id":"B"}`),
+		[]byte(`{"type":"function_call_output","call_id":"A","output":"a"}`), []byte(`{"type":"function_call","call_id":"C"}`),
+		[]byte(`{"type":"function_call_output","call_id":"B","output":"b"}`), []byte(`{"type":"function_call_output","call_id":"C","output":"c"}`),
+	}
+	pairs, err := PairToolHistory(interleaved, false)
+	want := []ToolHistoryPair{{Round: 0, CallIndex: 0, ResultIndex: 2, Slot: 0, Kind: "function", CallID: "A"}, {Round: 0, CallIndex: 1, ResultIndex: 4, Slot: 1, Kind: "function", CallID: "B"}, {Round: 0, CallIndex: 3, ResultIndex: 5, Slot: 2, Kind: "function", CallID: "C"}}
+	if err != nil || !reflect.DeepEqual(pairs, want) {
+		t.Fatal(pairs, err)
+	}
+	legacy := ChatMessage{Role: "assistant", FunctionCall: &ChatFunctionCall{Name: "lookup", Arguments: `{}`}}
+	converted, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: "probe", Messages: []ChatMessage{legacy, legacy, {Role: "function", Name: "lookup", Content: json.RawMessage(`"one"`)}, {Role: "function", Name: "lookup", Content: json.RawMessage(`"two"`)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var items []json.RawMessage
+	if err = json.Unmarshal(converted.Input, &items); err != nil {
+		t.Fatal(err)
+	}
+	pairs, err = PairToolHistory(items, false)
+	want = []ToolHistoryPair{{Round: 0, CallIndex: 0, ResultIndex: 2, Slot: 0, Kind: "function", CallID: "call_legacy_1"}, {Round: 0, CallIndex: 1, ResultIndex: 3, Slot: 1, Kind: "function", CallID: "call_legacy_2"}}
+	if err != nil || !reflect.DeepEqual(pairs, want) {
+		t.Fatal(pairs, err)
+	}
+	for i, pair := range pairs {
+		var item ResponsesInputItem
+		if err = json.Unmarshal(items[pair.ResultIndex], &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.CallID != want[i].CallID || item.Output != []string{"one", "two"}[i] {
+			t.Fatal(item)
+		}
 	}
 }
