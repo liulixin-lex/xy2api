@@ -11,7 +11,7 @@
 - API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。
 - Fable 5.2、Mythos 5.2 未指定档位时按 adaptive/high 思考，多轮对话保留已签名的 thinking 历史；`tool_choice` 为 required 或具名工具时返回 400。
 - GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
-- API Key 账号的请求显式写 `none` 时，不再因 Base URL 不是 OpenAI 官方地址而被删除；第三方上游明确拒绝时在既有预算内省略并重发一次。`/v1/chat/completions` 收到的 Responses 格式正文保留 `metadata`。
+- API Key 账号的请求显式写 `none` 时原样发送，不再因 Base URL 不是 OpenAI 官方地址或账号属于 DeepSeek、Kimi、智谱等兼容平台而被删除；第三方上游明确拒绝时在既有预算内省略并重发一次。`/v1/chat/completions` 收到的 Responses 格式正文保留 `metadata`。
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
