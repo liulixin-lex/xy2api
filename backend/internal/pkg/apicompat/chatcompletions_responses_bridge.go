@@ -1604,8 +1604,9 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
-	bridgeSlots chatToolSlots
-	bridgeErr   error
+	bridgeSlots         chatToolSlots
+	bridgeErr           error
+	bridgeLateReasoning strings.Builder
 
 	Bridge         *BridgeOptions
 	ResponseID     string
@@ -1766,7 +1767,9 @@ func ChatCompletionsChunkToResponsesEvents(
 		// delta, otherwise a strict client discards the delta. The leading
 		// empty-string reasoning delta upstreams send is filtered out.
 		reasoning := choice.Delta.reasoningText()
-		if reasoning != nil && *reasoning != "" {
+		if reasoning != nil && *reasoning != "" && bridgeEnabled(state.Bridge) && state.ReasoningDone {
+			_, _ = state.bridgeLateReasoning.WriteString(*reasoning)
+		} else if reasoning != nil && *reasoning != "" {
 			events = append(events, ensureChatReasoningItem(state)...)
 			_, _ = state.Reasoning.WriteString(*reasoning)
 			events = append(events, chatToResponsesEvent(state, "response.reasoning_summary_text.delta", &ResponsesStreamEvent{
@@ -1979,6 +1982,9 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 // closeChatReasoningItem emits the reasoning item's terminal events
 // (reasoning_summary_text.done + reasoning_summary_part.done + output_item.done).
 func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if bridgeEnabled(state.Bridge) {
+		state.ReasoningDone = true
+	}
 	if !state.ReasoningOpen {
 		return nil
 	}

@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 正文或工具开始后的迟到 reasoning 不再写入已关闭项或仅出现在最终响应中。
+
 - Anthropic thinking 转为 Responses 流时补齐摘要分段的宣布与关闭事件，完成事件携带完整文本。
 
 - Chat、Anthropic 转换桥合成 reasoning 项使用 rs_ ID，流式事件与最终响应保持一致，便于后续历史回放。

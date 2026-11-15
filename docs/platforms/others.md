@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Chat 响应的独立 `reasoning_content`/`reasoning` 在正文或工具开始后封闭；迟到字段不再开启新 reasoning 项，也不改写已完成摘要。
+
 转换桥合成的 Responses reasoning 项使用 `rs_` ID，流式宣布、增量、完成与最终响应复用同一身份。
 
 Chat 上游工具流转换为 Responses 时，function、custom 和 tool_search 项在 added、done 与最终响应中复用同一 item ID。
