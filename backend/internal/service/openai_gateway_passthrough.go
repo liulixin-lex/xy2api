@@ -3225,10 +3225,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	mappedModel string,
 ) (schedResult *openaiNonStreamingResultPassthrough, schedErr error) {
 	bodyKind, usageSource := "", "missing"
+	var observedUsage *OpenAIUsage
 	observedBody := false
 	defer func() {
 		if !observedBody {
 			return
+		}
+		if schedResult == nil && observedUsage != nil {
+			schedResult = &openaiNonStreamingResultPassthrough{OpenAIUsage: observedUsage, usage: observedUsage}
 		}
 		if schedResult != nil {
 			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
@@ -3273,6 +3277,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	bodyKind = "json"
 	usageValue, present := openAIResponsesUsageEvidence(body, "upstream_json")
 	usage := &usageValue
+	observedUsage = usage
 	if present {
 		usageSource = "upstream_json"
 	}

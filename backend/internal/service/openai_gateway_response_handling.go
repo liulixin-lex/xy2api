@@ -1933,10 +1933,14 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (schedResult *openaiNonStreamingResult, schedErr error) {
 	bodyKind, usageSource := "", "missing"
+	var observedUsage *OpenAIUsage
 	observedBody := false
 	defer func() {
 		if !observedBody {
 			return
+		}
+		if schedResult == nil && observedUsage != nil {
+			schedResult = &openaiNonStreamingResult{OpenAIUsage: observedUsage, usage: observedUsage}
 		}
 		if schedResult != nil {
 			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
@@ -1989,6 +1993,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	bodyKind = "json"
 	usageValue, present := openAIResponsesUsageEvidence(body, "upstream_json")
 	usage := &usageValue
+	observedUsage = usage
 	if present {
 		usageSource = "upstream_json"
 	}
