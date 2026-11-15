@@ -63,13 +63,20 @@ func TestM1ReviewExplicitNoneRepair(t *testing.T) {
 			require.False(t, gjson.GetBytes(up.bodies[1], "reasoning").Exists())
 			require.Contains(t, resilience.SnapshotConversionNotices(ctx), apicompat.ConversionNotice{Field: "reasoning.effort", Action: "omit"})
 			require.Equal(t, "none", *RequestedReasoningEffortFromContext(ctx))
+			value, exists := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, exists)
+			events, ok := value.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			require.Equal(t, param, events[0].RejectedField)
+			require.True(t, events[0].Resent)
 			again, changed, err := applyFinalReasoningEffortForAccount(ctx, c, account, up.bodies[1], "company-coding-model", "responses")
 			require.NoError(t, err)
 			require.False(t, changed)
 			require.Equal(t, up.bodies[1], again)
 			other := *account
 			other.ID++
-			next, _, err := applyFinalReasoningEffortForAccount(ctx, c, &other, body, "company-coding-model", "responses")
+			next, _, err := applyFinalReasoningEffortForAccount(ctx, c, &other, up.bodies[1], "company-coding-model", "responses")
 			require.NoError(t, err)
 			require.Equal(t, "none", gjson.GetBytes(next, "reasoning.effort").String())
 		}
