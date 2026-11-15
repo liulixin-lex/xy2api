@@ -441,6 +441,30 @@ func TestM6UsageEvidence(t *testing.T) {
 	require.False(t, trace.FieldByName("UsageObserved").IsNil())
 	require.False(t, trace.FieldByName("UsageObserved").Elem().Bool())
 	require.Equal(t, "", trace.FieldByName("ResponseBodyType").Elem().String())
+	for _, pass := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unobserved/pass=%t", pass), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: passthroughErrReadCloser{err: io.ErrUnexpectedEOF}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			a := newOpenAIRejectedFieldTestAccount()
+			if pass {
+				r, e := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, a, time.Now(), "m", "m")
+				require.Error(t, e)
+				require.NotNil(t, r)
+				require.False(t, r.ResponseFactsKnown)
+				require.Empty(t, r.ResponseBodyKind)
+			} else {
+				r, e := svc.handleStreamingResponse(c.Request.Context(), resp, c, a, time.Now(), "m", "m")
+				require.Error(t, e)
+				require.NotNil(t, r)
+				require.False(t, r.ResponseFactsKnown)
+				require.Empty(t, r.ResponseBodyKind)
+			}
+		})
+	}
+
 }
 
 func TestM6NonstreamMissingTerminal(t *testing.T) {

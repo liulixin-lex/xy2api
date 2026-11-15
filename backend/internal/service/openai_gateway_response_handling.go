@@ -90,8 +90,12 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (schedResult *openaiStreamingResult, schedErr error) {
 	usageSource := "missing"
+	responsesObserved := false
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
 	defer func() {
+		if !responsesObserved {
+			return
+		}
 		if schedResult != nil {
 			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
 			schedResult.TerminalSeen, schedResult.TerminalValid, schedResult.ResponseBodyKind = observedTerminal.Seen, observedTerminal.Valid, "sse"
@@ -484,6 +488,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		responsesObserved = responsesObserved || cleanEOF
 		if finishResponsesFrame != nil {
 			finishResponsesFrame()
 		}
@@ -1108,6 +1113,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		processResponseLine("", queueDrained)
 	}
 	processSSELine := func(line string, queueDrained bool) {
+		responsesObserved = true
 		line = strings.TrimSuffix(line, "\r")
 		if strings.HasPrefix(line, "data:") {
 			frameDataCount++

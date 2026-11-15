@@ -2359,8 +2359,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	reasoningEffort string,
 ) (schedResult *openaiStreamingResultPassthrough, schedErr error) {
 	usageSource := "missing"
+	responsesObserved := false
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
 	defer func() {
+		if !responsesObserved {
+			return
+		}
 		if schedResult != nil {
 			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
 			schedResult.TerminalSeen, schedResult.TerminalValid, schedResult.ResponseBodyKind = observedTerminal.Seen, observedTerminal.Valid, "sse"
@@ -3056,6 +3060,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		return processResponseLine("")
 	}
 	processLine := func(line string) passthroughLineStep {
+		responsesObserved = true
 		line = strings.TrimSuffix(line, "\r")
 		if strings.HasPrefix(line, "data:") {
 			frameDataCount++
@@ -3085,6 +3090,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	}
 
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
+		responsesObserved = responsesObserved || scanErr == nil
 		if frame, ok := responsesParser.Finish(); ok {
 			responsesEOF = true
 			step := processFrame(frame)
