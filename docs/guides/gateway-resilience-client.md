@@ -119,6 +119,8 @@ raw Chat 接受有效 finish_reason、`[DONE]`，也兼容最后正文之后完�
 
 Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancelled` 按失败结束，`incomplete` 照常返回；`response.completed` 的状态必须与事件类型一致。流式请求在没有 `response` 结束事件时，以下两种结束仍算正常：收到 `[DONE]`；或最后一段内容之后给出了完整的输入、输出用量，然后连接正常关闭。之后若又来新内容、读错或坏帧，后一种不再算正常。运维记录中，这两种结束不算作收到了上游结束事件。
 
+raw Chat 的 role 与无内容开场也先暂存，和请求是否达到 64 KiB 无关；完整错误帧先分类，正文前失败不会泄露该次尝试的开场。正文后只写一次 Chat 错误终态并停止，不再续发成功内容。暂存仍受原 8 MiB 上限约束。
+
 ### 中转伪保活帧
 
 部分中转会插入 `SSE-Keep-Alive` 空 delta 帧，或在 `response.created` 之前发出空字符串、纯空白的 delta。网关直接丢弃它们，不转发、不算首个输出（openai-python 遇到会报错），但仍算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即转发；这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。

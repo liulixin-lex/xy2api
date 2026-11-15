@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -306,6 +307,70 @@ func TestM7RawUsageIsNotTerminal(t *testing.T) {
 				require.Equal(t, 11, result.Usage.InputTokens)
 				require.Equal(t, 6, result.Usage.OutputTokens)
 				require.Equal(t, "upstream_sse_progressive", result.UsageSource)
+			}
+		})
+	}
+}
+
+func TestM7RawPreludeClassifiesWholeError(t *testing.T) {
+	withResilienceSettings(t, nil)
+	role := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+	content := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
+	failure := "event: error\ndata: {\"error\":\ndata: {\"type\":\"server_error\",\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}\n\n"
+	late := "data: {\"choices\":[{\"delta\":{\"content\":\"should_not_reach\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+	for _, requestBytes := range []int{1, 128 << 10} {
+		for _, afterContent := range []bool{false, true} {
+			t.Run(fmt.Sprintf("request_%d_content_%t", requestBytes, afterContent), func(t *testing.T) {
+				wire := role
+				if afterContent {
+					wire += content
+				}
+				wire += failure + late
+				c, rec := compatStreamContext("/v1/chat/completions", "")
+				resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+				result, err := svc.streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), requestBytes)
+				require.Error(t, err)
+				var failover *UpstreamFailoverError
+				if !afterContent {
+					require.ErrorAs(t, err, &failover)
+					require.Nil(t, result)
+					require.Empty(t, rec.Body.String())
+				} else {
+					require.False(t, errors.As(err, &failover))
+					require.NotNil(t, result)
+					require.True(t, result.PartialFailure)
+					require.Contains(t, rec.Body.String(), "hello")
+					require.Equal(t, 1, strings.Count(rec.Body.String(), `"error"`))
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "[DONE]"))
+					require.NotContains(t, rec.Body.String(), "should_not_reach")
+					require.True(t, ProtocolTerminalClaimed(c))
+					before := rec.Body.String()
+					require.False(t, WriteTargetProtocolError(c, PreOutputProtocolChat, 502, "server_error", "", "", "again"))
+					require.Equal(t, before, rec.Body.String())
+				}
+			})
+		}
+	}
+	for _, tc := range []struct {
+		name, wire string
+		wantError  bool
+	}{
+		{"normal_order", role + content + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", false},
+		{"event_only", role + "event: error\n\n", true},
+		{"prelude_limit", strings.Repeat(role, openAIFirstOutputStageMaxBytes/len(role)+1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := compatStreamContext("/v1/chat/completions", "")
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.wire))}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+			_, err := svc.streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+			if tc.wantError {
+				require.Error(t, err)
+				require.Empty(t, rec.Body.String())
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.wire, rec.Body.String())
 			}
 		})
 	}

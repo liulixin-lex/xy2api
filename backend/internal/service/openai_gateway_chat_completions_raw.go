@@ -327,6 +327,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	terminal := openAIRawStreamTerminalState{strict: resilience.Current().StrictTerminalOn()}
 	prefixBytes := 0
+	releaseFrame := false
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -334,7 +335,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		// Comments keep the connection alive while the first data event is
 		// pending. They are not semantic output and must not prevent failover.
-		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted &&
+		if !clientOutputStarted &&
 			(strings.HasPrefix(line, ":") || (line == "" && len(pendingLines) == 0)) {
 			writeStableStreamHeaders(c)
 			n, werr := writeOpenAIStreamKeepalive(c, c.Writer, []byte(line+"\n"), false)
@@ -351,18 +352,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			c.Writer.Flush()
 			return
 		}
-		// Wait for the first data payload before committing its SSE framing.
-		// This bounded prefix lets event:error + data:error fail over too.
-		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted && prefixBytes+len(line)+1 <= ssePendingLimit &&
-			(line == "" || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:")) {
-			pendingLines = append(pendingLines, line)
+		if !clientOutputStarted && (!releaseFrame || !refusalDetector.ShouldReleaseClientOutput()) {
 			prefixBytes += len(line) + 1
-			return
-		}
-		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+			if prefixBytes > openAIFirstOutputStageMaxBytes {
+				terminal.sawMalformed = true
+				return
+			}
 			pendingLines = append(pendingLines, line)
 			return
 		}
+
 		if !clientOutputStarted {
 			writeStreamHeaders()
 			for _, pending := range pendingLines {
@@ -377,6 +376,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				}
 			}
 			pendingLines = pendingLines[:0]
+			prefixBytes = 0
 			clientOutputStarted = true
 		}
 		if _, werr := c.Writer.WriteString(line + "\n"); werr != nil {
@@ -405,6 +405,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}()
 	processFrame := func(frame openAICompatSSEFrame, lines []string) error {
 		payload := strings.TrimSpace(frame.Data)
+		releaseFrame = false
+		if frame.EventType == "error" && payload == "" {
+			terminal.sawMalformed = true
+			pendingLines = nil
+			return nil
+		}
 		if payload != "" {
 			terminal.ObserveDataLine(payload)
 			if frame.EventType == "error" && gjson.Valid(payload) {
@@ -429,6 +435,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				}
 			}
 		}
+		if terminal.failurePayload != "" || terminal.sawMalformed {
+			pendingLines = nil
+			prefixBytes = 0
+			return nil
+		}
+		releaseFrame = terminal.Terminated() || terminal.sawUnfinishedGeneration || semanticSSEBlock([]byte("data: "+payload))
 		for _, line := range lines {
 			refusalDetector.ObserveSSELine(line)
 			line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
@@ -445,11 +457,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	frameBytes := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, ":") && !terminal.sawDataLine && !clientOutputStarted {
+		if strings.HasPrefix(line, ":") && !clientOutputStarted {
 			writeLine(line)
 			continue
 		}
 		if len(frameLines) == 0 && line != "" && !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, ":") && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:") {
+			releaseFrame = true
 			writeLine(line)
 			continue
 		}
@@ -468,7 +481,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		frameLines = nil
 		frameBytes = 0
-		if terminal.sawDone {
+		if terminal.sawDone || terminal.failurePayload != "" || terminal.sawMalformed {
 			break
 		}
 	}
@@ -533,8 +546,14 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		s.handleOpenAIStreamTerminalAccountSideEffects(c, account, failure, message, resp.Header, upstreamModel)
 		s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, failure, message, clientOutputStarted)
 		MarkOpsStreamFailure(c, "upstream_error", openAIStreamFailedEventErrorCode(failure), message, openAIStreamFailureStatus(failure, message))
-		// The upstream error and DONE have already been forwarded. A plain
-		// error plus the committed marker prevents duplicate handler frames.
+		errType, code, param, _ := UpstreamClientErrorFields(failure, message)
+		if errType == "" {
+			errType = "upstream_error"
+		}
+		if code == "" {
+			code = openAIStreamFailedEventErrorCode(failure)
+		}
+		WriteTargetProtocolError(c, PreOutputProtocolChat, openAIStreamFailureStatus(failure, message), errType, code, param, message)
 		MarkResponseCommitted(c)
 		return resultWithUsage(), fmt.Errorf("upstream Chat Completions stream failed: %s", message)
 	}
@@ -593,6 +612,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
+	if !clientDisconnected {
+		ClaimProtocolTerminal(c)
+	}
 	return resultWithUsage(), nil
 }
 
