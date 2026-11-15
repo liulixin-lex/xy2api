@@ -237,16 +237,17 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 				choose(at, strings.TrimPrefix(path+"."+field, "."), nil)
 			}
 		}
-		if path == "" {
+		// A flat type:error payload is itself the trusted error object.
+		if path == "" && (root.Get("type").String() != "error" || root.Get("error").IsObject() || root.Get("response.error").IsObject()) {
 			continue
-		} // Duration prose is trusted only inside the error objects.
+		}
 		message := object.Get("message")
 		if message.Type != gjson.String || strings.ContainsAny(message.Str, "\r\n") {
 			continue
 		}
 		for _, match := range reTryAgainIn.FindAllStringSubmatch(message.Str, -1) {
 			if d, ok := recoveryDelay(match[1], recoveryUnit(match[2])); ok {
-				choose(observedAt.Add(d), path+".message", nil)
+				choose(observedAt.Add(d), strings.TrimPrefix(path+".message", "."), nil)
 			}
 		}
 		for _, match := range reTryAgainInCompound.FindAllStringSubmatch(message.Str, -1) {
@@ -267,7 +268,7 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 				total += d
 			}
 			if valid && total > 0 {
-				choose(observedAt.Add(total), path+".message", nil)
+				choose(observedAt.Add(total), strings.TrimPrefix(path+".message", "."), nil)
 			}
 		}
 	}

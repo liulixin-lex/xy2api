@@ -126,3 +126,22 @@ func TestFoundationRecoveryCompoundZero(t *testing.T) {
 		})
 	}
 }
+
+func TestFoundationRecoveryFlatErrorMessage(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		body string
+		want time.Duration
+	}{
+		{`{"type":"error","code":"rate_limit_exceeded","message":"... Please try again in 20s.","param":null}`, 20 * time.Second},
+		{`{"type":"response.output_text.delta","message":"Please try again in 20s."}`, 0},
+		{`{"message":"Please try again in 20s."}`, 0},
+		{`{"type":"error","message":"Please try again in 60s.","error":{"message":"busy"}}`, 0},
+		{`{"type":"error","message":"Please try again in 20s.","retry_after":30}`, 30 * time.Second},
+	} {
+		got, ok := ParseUpstreamRecoveryHint(nil, []byte(tc.body), now)
+		if ok != (tc.want > 0) || got.Delay != tc.want {
+			t.Fatalf("%s: %+v %v, want %s", tc.body, got, ok, tc.want)
+		}
+	}
+}
