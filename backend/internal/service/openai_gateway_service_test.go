@@ -3870,7 +3870,7 @@ func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {
 		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4o","usage":{"input_tokens":11,"output_tokens":22,"input_tokens_details":{"cached_tokens":3}}}}`,
 		`data: [DONE]`,
-	}, "\n\n")
+	}, "\n")
 
 	finalResp, ok := extractCodexFinalResponse(body)
 	require.True(t, ok)
@@ -3893,7 +3893,7 @@ func TestHandleSSEToJSON_CompletedEventReturnsJSON(t *testing.T) {
 		`data: {"type":"response.in_progress","response":{"id":"resp_2"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-4o","usage":{"input_tokens":7,"output_tokens":9,"input_tokens_details":{"cached_tokens":1}}}}`,
 		`data: [DONE]`,
-	}, "\n\n"))
+	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
 	require.NoError(t, err)
@@ -3922,7 +3922,7 @@ func TestHandleNonStreamingResponse_APIKeyFallsBackToSSEBodyWhenContentTypeIsWro
 			`data: {"type":"response.output_text.delta","delta":"lo"}`,
 			`data: {"type":"response.completed","response":{"id":"resp_api_key_sse","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
 			`data: [DONE]`,
-		}, "\n\n"))),
+		}, "\n"))),
 	}
 	account := &Account{ID: 1, Type: AccountTypeAPIKey}
 
@@ -4012,7 +4012,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
 		`data: [DONE]`,
-	}, "\n\n"))
+	}, "\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-5.4", "gpt-5.4")
 	require.NoError(t, err)

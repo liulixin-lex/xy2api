@@ -3023,7 +3023,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	var frameExtras []string
 	var frameDataLine, frameEventLine string
 	frameDataCount := 0
-	processFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
+	processSingleFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
 		defer func() { frameDataLine, frameEventLine, frameDataCount = "", "", 0; frameExtras = nil }()
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
 		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
@@ -3058,6 +3058,22 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return step
 		}
 		return processResponseLine("")
+	}
+	processFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
+		frames := splitOpenAIResponsesFrame(frame)
+		if len(frames) == 1 {
+			return processSingleFrame(frame)
+		}
+		eventLine, eof := frameEventLine, responsesEOF
+		defer func() { responsesEOF = eof }()
+		for i, event := range frames {
+			frameEventLine, frameDataLine, frameDataCount = eventLine, "data: "+event.Data, 1
+			responsesEOF = eof && i == len(frames)-1
+			if step := processSingleFrame(event); step != passthroughLineContinue {
+				return step
+			}
+		}
+		return passthroughLineContinue
 	}
 	processLine := func(line string) passthroughLineStep {
 		responsesObserved = true

@@ -1071,7 +1071,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var frameExtras []string
 	var frameDataLine, frameEventLine string
 	frameDataCount := 0
-	processFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
+	processSingleFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
 		defer func() {
 			frameDataLine, frameEventLine, frameDataCount = "", "", 0
 			frameExtras = nil
@@ -1119,6 +1119,23 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		processResponseLine(wireData, queueDrained)
 		processResponseLine("", queueDrained)
+	}
+	processFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
+		frames := splitOpenAIResponsesFrame(frame)
+		if len(frames) == 1 {
+			processSingleFrame(frame, queueDrained)
+			return
+		}
+		eventLine, eof := frameEventLine, responsesEOF
+		for i, event := range frames {
+			frameEventLine, frameDataLine, frameDataCount = eventLine, "data: "+event.Data, 1
+			responsesEOF = eof && i == len(frames)-1
+			processSingleFrame(event, queueDrained && i == len(frames)-1)
+			if streamEarlyErr != nil {
+				break
+			}
+		}
+		responsesEOF = eof
 	}
 	processSSELine := func(line string, queueDrained bool) {
 		responsesObserved = true
@@ -2273,12 +2290,33 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 }
 
 // forEachOpenAIResponsesFrame dispatches the complete SSE event, including EOF.
-// Unlike the legacy iterator, malformed multiline data is never split and retried.
+// Complete adjacent JSON records retain the legacy missing-separator handling.
+// Legacy relays may omit the blank separator between complete JSON objects.
+// A valid multiline JSON document remains one event; any partial line fails.
+func splitOpenAIResponsesFrame(frame openAICompatSSEFrame) []openAICompatSSEFrame {
+	if !strings.Contains(frame.Data, "\n") || json.Valid([]byte(frame.Data)) {
+		return []openAICompatSSEFrame{frame}
+	}
+	lines := strings.Split(frame.Data, "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "[DONE]" && !isOpenAIResponseJSONObject([]byte(line)) {
+			return []openAICompatSSEFrame{frame}
+		}
+	}
+	frames := make([]openAICompatSSEFrame, 0, len(lines))
+	for _, line := range lines {
+		frames = append(frames, openAICompatSSEFrame{EventType: frame.EventType, Data: line})
+	}
+	return frames
+}
+
 func forEachOpenAIResponsesFrame(body string, visit func(string, []byte)) {
 	var parser openAICompatSSEFrameParser
 	emit := func(frame openAICompatSSEFrame, ok bool) {
 		if ok {
-			visit(frame.EventType, []byte(frame.Data))
+			for _, event := range splitOpenAIResponsesFrame(frame) {
+				visit(event.EventType, []byte(event.Data))
+			}
 		}
 	}
 	for _, line := range strings.Split(body, "\n") {

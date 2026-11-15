@@ -234,7 +234,7 @@ func TestM6MalformedTerminal(t *testing.T) {
 			m6Frame(`{"type":"response.completed"}`),
 			m6Frame(`{"type":"response.completed","response":{"status":"failed"}}`),
 			m6Frame(`{"type":"response.output_text.delta","delta":`),
-			"event: response.completed\ndata: {\"type\":\"response.created\"}\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+			"event: response.completed\ndata: {\"type\":\"response.created\"}\ndata: {\"type\":\n\n",
 		} {
 			t.Run(fmt.Sprintf("pass=%t/%q", pass, bad), func(t *testing.T) {
 				w, usage, _, valid, err := m6Stream(t, pass, prefix+bad)
@@ -856,6 +856,32 @@ func TestM6ReviewOAuthTypedErrorRecovery(t *testing.T) {
 					require.Contains(t, w.Body.String(), `"status":"completed"`)
 					require.NotContains(t, w.Body.String(), `"type":"response.failed"`)
 					require.Nil(t, st.UpstreamRecoveryHint())
+				}
+			})
+		}
+	}
+}
+
+func TestM6ReviewAdjacentDataLines(t *testing.T) {
+	for _, pass := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("pass=%t/stream=%t", pass, stream), func(t *testing.T) {
+				body := "data: " + `{"type":"response.output_text.delta","delta":"answer"}` + "\ndata: " + `{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}` + "\n\n"
+				if stream {
+					w, u, seen, valid, err := m6Stream(t, pass, body)
+					require.NoError(t, err)
+					require.True(t, seen)
+					require.True(t, valid)
+					require.Contains(t, w.Body.String(), "answer")
+					require.Contains(t, w.Body.String(), "response.completed")
+					require.Equal(t, 13, u.InputTokens)
+					require.Equal(t, 5, u.OutputTokens)
+				} else {
+					w, u, err := m6Nonstream(t, pass, body, "text/event-stream")
+					require.NoError(t, err)
+					require.Equal(t, 200, w.Code)
+					require.Equal(t, 13, u.InputTokens)
+					require.Equal(t, 5, u.OutputTokens)
 				}
 			})
 		}
