@@ -88,6 +88,13 @@ func ChatCompletionsResponseToAnthropicWithBridgeOptions(resp *ChatCompletionsRe
 		}
 		out.Content = blocks
 	}
+	blocks := out.Content[:0]
+	for _, block := range out.Content {
+		if block.Type != "thinking" || bridgeNonblankThinking(block.Thinking) {
+			blocks = append(blocks, block)
+		}
+	}
+	out.Content = blocks
 	return out, nil
 }
 

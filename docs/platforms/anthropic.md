@@ -260,6 +260,8 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 }
 ```
 
+Chat 上游纯空白 reasoning 不生成 thinking 块；流式前导空白暂存，出现非空白内容后连同原前缀发送，块内空白保持原样。
+
 Chat 上游响应的 text/thinking 数组按原顺序转换为内容块，非流与流式处理一致，数组 thinking 不与独立 reasoning 重复输出。
 
 Responses 流式响应中的 thinking 摘要先宣布 part，再发送文本增量，关闭时发送完整 text.done 与 part.done，最后关闭 item；仅签名或 redacted 内容不生成空摘要。

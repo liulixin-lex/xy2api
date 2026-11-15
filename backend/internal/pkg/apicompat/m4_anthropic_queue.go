@@ -59,6 +59,7 @@ func consumeBridgeAnthropicChunk(chunk *ChatCompletionsChunk, state *ChatComplet
 				state.HasToolCall = true
 				if !flow.toolStage {
 					events = append(events, closeCCAnthropicBlock(state)...)
+					state.bridgePendingThinking = ""
 					flow.toolStage = true
 					flow.active = slot
 				} else {
@@ -101,9 +102,18 @@ func emitBridgeAnthropicText(state *ChatCompletionsToAnthropicStreamState, kind,
 		return nil
 	}
 	if kind == "thinking" {
+		if !state.ContentBlockOpen || state.CurrentBlockType != "thinking" {
+			state.bridgePendingThinking += text
+			if !bridgeNonblankThinking(state.bridgePendingThinking) {
+				return nil
+			}
+			text = state.bridgePendingThinking
+			state.bridgePendingThinking = ""
+		}
 		events := ensureCCAnthropicThinkingBlock(state)
 		return append(events, ccAnthropicDelta(state, &AnthropicDelta{Type: "thinking_delta", Thinking: text})...)
 	}
+	state.bridgePendingThinking = ""
 	events := ensureCCAnthropicTextBlock(state)
 	return append(events, ccAnthropicDelta(state, &AnthropicDelta{Type: "text_delta", Text: text})...)
 }
@@ -142,6 +152,7 @@ func finalizeBridgeAnthropicBlocks(state *ChatCompletionsToAnthropicStreamState)
 	events = append(events, closeCCAnthropicBlock(state)...)
 	for _, entry := range flow.queue {
 		if entry.kind == "tool" {
+			state.bridgePendingThinking = ""
 			events = append(events, closeCCAnthropicBlock(state)...)
 			publish(entry.slot)
 			events = append(events, closeCCAnthropicBlock(state)...)

@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- 纯空白 reasoning 不再生成 Anthropic thinking 块，真实思考的前导空白和块内空白仍完整保留。
+
 - Chat 响应数组中的 thinking 与 text 按原顺序保留，流式数组不再解码失败或丢失思考内容。
 
 - Chat 正文或工具开始后的迟到 reasoning 不再写入已关闭项或仅出现在最终响应中。

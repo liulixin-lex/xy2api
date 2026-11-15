@@ -570,9 +570,10 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 // ChatCompletionsToResponsesStreamState + ResponsesEventToAnthropicState pair
 // into one state machine.
 type ChatCompletionsToAnthropicStreamState struct {
-	bridgeSlots chatToolSlots
-	bridgeFlow  *bridgeAnthropicFlow
-	bridgeErr   error
+	bridgePendingThinking string
+	bridgeSlots           chatToolSlots
+	bridgeFlow            *bridgeAnthropicFlow
+	bridgeErr             error
 
 	Bridge           *BridgeOptions
 	MessageStartSent bool
