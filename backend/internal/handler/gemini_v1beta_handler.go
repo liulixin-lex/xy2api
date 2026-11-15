@@ -396,8 +396,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
 	inflightEstimate, err := tokenInflightEstimateForProtocol(modelName, body, "gemini")
 	if err != nil {
-		googleError(c, http.StatusBadRequest, err.Error())
-		return
+		// E22: the native body is forwarded as is; an unreadable limit falls back to the old estimate.
+		inflightEstimate = tokenInflightEstimate(modelName, body)
 	}
 	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
 	if err != nil {

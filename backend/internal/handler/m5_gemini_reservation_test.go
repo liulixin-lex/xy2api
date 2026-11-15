@@ -69,9 +69,11 @@ func TestM5GeminiOutputLimitReservation(t *testing.T) {
 			f.handler.geminiCompatService = service.NewGeminiMessagesCompatService(nil, nil, nil, nil, nil, nil, upstream, nil, &config.Config{})
 			rec, _ := f.serve(t, "/v1beta/models/*modelAction", "/v1beta/models/gemini-2.5-flash:generateContent", body, f.handler.GeminiV1BetaModels)
 			if tt.invalid {
+				// E22: an unreadable limit uses the old estimate and the native body still goes out.
 				require.Error(t, err)
-				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-				require.Zero(t, upstream.calls)
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Equal(t, 1, upstream.calls)
+				require.JSONEq(t, body, string(upstream.body))
 				return
 			}
 			require.NoError(t, err)
