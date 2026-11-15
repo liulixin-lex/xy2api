@@ -19,13 +19,16 @@ func responsesToolArguments(item ResponsesOutput, complete bool) string {
 // ValidateResponsesForChat checks generated data before a non-streaming Chat
 // projection. A truncated tool remains partial even when its bytes form JSON.
 func ValidateResponsesForChat(resp *ResponsesResponse) error {
+	return ValidateResponsesForChatWithOptions(resp, ConversionOptions{})
+}
+
+// ValidateResponsesForChatWithOptions records unknown terminal mappings once.
+// The caller must first authenticate the response terminal, as for the old entry.
+func ValidateResponsesForChatWithOptions(resp *ResponsesResponse, opts ConversionOptions) error {
 	if resp == nil {
 		return toolTrackingError("response", "missing response")
 	}
-	reason := ""
-	if resp.IncompleteDetails != nil {
-		reason = resp.IncompleteDetails.Reason
-	}
+	status, reason := responsesChatTerminal(resp.Status, resp.IncompleteDetails)
 	hasTools, hasRefusal := false, false
 	for _, item := range resp.Output {
 		if item.Type == "function_call" || item.Type == "custom_tool_call" {
@@ -35,10 +38,34 @@ func ValidateResponsesForChat(resp *ResponsesResponse) error {
 			hasRefusal = hasRefusal || (part.Type == "refusal" && part.Refusal != "")
 		}
 	}
-	if _, _, err := ProjectTerminal("responses", "chat", resp.Status, reason, hasTools, hasRefusal); err != nil {
+	_, finish, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, hasTools, hasRefusal)
+	if err != nil {
 		return err
 	}
-	return validateResponsesChatTools(resp)
+	complete := *resp
+	if finish == "stop" || finish == "tool_calls" {
+		complete.Status = "completed"
+	}
+	if err := validateResponsesChatTools(&complete); err != nil {
+		return err
+	}
+	if mapped && opts.Record != nil {
+		opts.Record(ConversionNotice{Field: "finish_reason", Action: "map"})
+	}
+	return nil
+}
+
+// Preserve the existing Chat projection for a qualified terminal lacking status
+// or an incomplete terminal without a reason. The reader still proves completion.
+func responsesChatTerminal(status string, details *ResponsesIncompleteDetails) (string, string) {
+	reason := ""
+	if details != nil {
+		reason = details.Reason
+	}
+	if status == "" || status == "incomplete" && reason == "" {
+		status = "completed"
+	}
+	return status, reason
 }
 
 func validateResponsesChatTools(resp *ResponsesResponse) error {
