@@ -23,7 +23,7 @@ func responsesWebSearchSources(item ResponsesOutput) json.RawMessage {
 		seen := make(map[string]bool)
 		for _, source := range sources {
 			u, err := url.Parse(source.URL)
-			if err != nil || u.Host == "" || !(strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) || seen[source.URL] {
+			if err != nil || u.Host == "" || (!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) || seen[source.URL] {
 				continue
 			}
 			seen[source.URL] = true
