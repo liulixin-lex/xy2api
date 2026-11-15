@@ -227,13 +227,13 @@ func IsGPT61SolModelSpelling(model string) bool {
 	}
 }
 
-// ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
-// increasing the client's requested effort on compatibility paths.
+// ValidateGPT61SolReasoningEffort validates the final applied effort. An explicit
+// effort takes precedence over a request-model suffix after policy mapping.
 func ValidateGPT61SolReasoningEffort(model, effort string) error {
 	if IsGPT61SolModelSpelling(model) {
 		canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 		for _, disabled := range []string{"none", "minimal"} {
-			if strings.HasSuffix(canonical, "-"+disabled) {
+			if strings.TrimSpace(effort) == "" && strings.HasSuffix(canonical, "-"+disabled) {
 				return fmt.Errorf("gpt-6.1-sol does not support reasoning effort %q; use low, medium, high, xhigh or max", disabled)
 			}
 		}
