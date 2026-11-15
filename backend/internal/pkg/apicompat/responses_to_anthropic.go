@@ -120,7 +120,7 @@ func ValidateResponsesForAnthropic(resp *ResponsesResponse) error {
 	if resp == nil {
 		return &UpstreamConversionError{Field: "response", Reason: "missing response", SourceProtocol: "responses"}
 	}
-	if resp.Error != nil {
+	if responsesHasError(resp) {
 		return &UpstreamConversionError{Field: "response.error", Reason: "upstream response failed", SourceProtocol: "responses"}
 	}
 	if _, _, _, err := ProjectTerminalWithMapping("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), false, responsesHasRefusal(resp)); err != nil {
@@ -183,6 +183,10 @@ func responsesIncompleteReason(resp *ResponsesResponse) string {
 		return resp.IncompleteDetails.Reason
 	}
 	return ""
+}
+
+func responsesHasError(resp *ResponsesResponse) bool {
+	return resp.Error != nil && (strings.TrimSpace(resp.Error.Code) != "" || strings.TrimSpace(resp.Error.Message) != "")
 }
 
 func responsesHasRefusal(resp *ResponsesResponse) bool {
@@ -1264,7 +1268,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		reason = responsesIncompleteReason(evt.Response)
 		state.hasRefusal = state.hasRefusal || responsesHasRefusal(evt.Response)
 	}
-	if evt.Type == "response.failed" || (evt.Response != nil && evt.Response.Error != nil) {
+	if evt.Type == "response.failed" || (evt.Response != nil && responsesHasError(evt.Response)) {
 		status = "failed"
 	}
 	if status == "" {
