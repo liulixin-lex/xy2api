@@ -15,6 +15,8 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
+- 带合法 `stop` 的请求可转换为 Responses，省略停止序列并记录，停止边界不再生效。
+
 - Chat 的 JSON Schema 响应格式未指定 `strict` 时，转 Responses 默认发送 `false`。
 
 - Chat 转 Responses 的输出上限下限降为 16，1 至 15 提高到 16，16 及以上原值保留。

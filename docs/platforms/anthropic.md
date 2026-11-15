@@ -225,7 +225,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `max_tokens`、`max_completion_tokens`、`max_output_tokens` | 映射 | 转为 `max_tokens`，`max_completion_tokens` 优先于 `max_tokens`；都没有时为 8192 |
 | `stream`、`stream_options` | 映射 | 按入口协议返回流式事件 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
-| `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400 |
+| `stop` | 映射 | Anthropic 目标转为 `stop_sequences`（最终 Responses 目标省略并记录）；只含空白的项丢弃，空字符串返回 400 |
 | function 工具、Responses `custom` 工具 | 映射 | 转为 Anthropic 工具；`parameters` 缺失、为 `null` 或为空数组 `[]`（PHP 客户端常见）时用空的 object schema |
 | Anthropic 原生工具类型（`bash_20250124` 这类 `名称_YYYYMMDD`） | Responses 透传，Chat 丢弃 | Responses 按原定义转发；Chat Completions 中去掉 |
 | `web_search`、`web_search_preview`、`code_execution` | 映射（网关扩展） | 两个入口都支持；前两种转为 Anthropic `web_search_20250305` |
