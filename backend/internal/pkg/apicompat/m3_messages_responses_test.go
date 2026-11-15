@@ -907,3 +907,45 @@ func TestM3ReviewR4StrictSchema(t *testing.T) {
 		})
 	}
 }
+
+func TestM3ReviewB01MixedTerminalTools(t *testing.T) {
+	for _, kind := range []string{"function_call", "custom_tool_call"} {
+		for _, completeA := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/completeA=%v", kind, completeA), func(t *testing.T) {
+				st := NewResponsesEventToAnthropicState()
+				var events []AnthropicStreamEvent
+				feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+				a := ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f"}
+				feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &a})
+				if completeA {
+					feed(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", `{"x":1}`))
+				} else {
+					feed(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "fc_a", Delta: `{"x":`})
+				}
+				a.Arguments = `{"x":1}`
+				b := ResponsesOutput{Type: kind, ID: "fc_b", CallID: "call_b", Name: "g", Arguments: `{"y":2}`, Input: "patch"}
+				feed(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{a, b}}})
+				require.NoError(t, st.Err())
+				var ids []string
+				inputs := map[int]string{}
+				for _, e := range events {
+					if e.ContentBlock != nil && e.ContentBlock.Type == "tool_use" {
+						ids = append(ids, e.ContentBlock.ID)
+					}
+					if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+						inputs[*e.Index] += e.Delta.PartialJSON
+					}
+				}
+				require.Equal(t, []string{"call_a", "call_b"}, ids)
+				require.JSONEq(t, `{"x":1}`, inputs[0])
+				if kind == "function_call" {
+					require.JSONEq(t, `{"y":2}`, inputs[1])
+				} else {
+					require.JSONEq(t, `{"input":"patch"}`, inputs[1])
+				}
+				requireAnthropicBlockLifecycle(t, events)
+				require.Equal(t, "message_stop", events[len(events)-1].Type)
+			})
+		}
+	}
+}
