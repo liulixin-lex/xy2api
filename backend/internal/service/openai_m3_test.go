@@ -141,6 +141,9 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			for _, terminal := range []string{"", "response.cancelled", "response.completed"} {
 				for _, output := range []bool{false, true} {
+					if terminal == "response.completed" && !output {
+						continue // The success control includes delivered semantic output.
+					}
 					t.Run(fmt.Sprintf("passthrough=%t/stream=%t/terminal=%s/output=%t", passthrough, stream, terminal, output), func(t *testing.T) {
 						withResilienceSettings(t, nil)
 						req := newWebSearchReplayRequest(t)
