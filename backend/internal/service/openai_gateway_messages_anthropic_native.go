@@ -237,7 +237,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
-) (_ *OpenAIForwardResult, retErr error) {
+) (result *OpenAIForwardResult, retErr error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "json"}
+	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	if s.rateLimitService != nil {
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
@@ -254,6 +256,12 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	observeSchedPayload(c, body)
 	observer.ObserveAnthropic(body)
 
+	var evidence anthropicBufferedEvidence
+	evidence.observe("", string(body))
+	if evidence.usagePresent {
+		facts.UsagePresent = true
+		facts.UsageSource = "upstream_json"
+	}
 	var raw json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, invalidNonStreamingJSONFailoverError(ctx, s.rateLimitService, resp, account, body, err, billingModel)
@@ -302,7 +310,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, retErr error) {
+	var evidence anthropicBufferedEvidence
+	defer func() { facts := evidence.facts(); finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -461,6 +471,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				return onProgressTimeout()
 			}
 			if !ok {
+				if frame, complete := deliveredParser.Finish(); complete {
+					evidence.observe(frame.EventType, frame.Data)
+				}
 				if !clientDisconnected {
 					flusher.Flush()
 				}
@@ -491,7 +504,8 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 
 			line := ev.line
-			if frame, complete := deliveredParser.AddLine(line); complete && !clientDisconnected {
+			if frame, complete := deliveredParser.AddLine(line); complete {
+				evidence.observe(frame.EventType, frame.Data)
 				outputStarted = outputStarted || semanticSSEBlock([]byte("event: "+frame.EventType+"\ndata: "+frame.Data))
 			}
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
@@ -608,6 +622,11 @@ func claudeUsageToOpenAIUsage(u *ClaudeUsage) OpenAIUsage {
 		return OpenAIUsage{}
 	}
 	return OpenAIUsage{
+		InputTokensPresent: u.InputTokensPresent, OutputTokensPresent: u.OutputTokensPresent,
+		CacheReadInputTokensPresent: u.CacheReadInputTokensPresent, CacheCreationInputTokensPresent: u.CacheCreationInputTokensPresent,
+		CacheCreation5mTokens: u.CacheCreation5mTokens, CacheCreation1hTokens: u.CacheCreation1hTokens,
+		CacheCreation5mTokensPresent: u.CacheCreation5mTokensPresent, CacheCreation1hTokensPresent: u.CacheCreation1hTokensPresent,
+		UsageIncomplete: u.UsageIncomplete, UsageInconsistent: u.UsageInconsistent,
 		InputTokens:              u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
 		OutputTokens:             u.OutputTokens,
 		CacheCreationInputTokens: u.CacheCreationInputTokens,

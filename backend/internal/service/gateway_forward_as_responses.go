@@ -302,6 +302,10 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 		return
 	}
 
+	dst.InputTokensPresent = dst.InputTokensPresent || src.InputTokensPresent
+	dst.OutputTokensPresent = dst.OutputTokensPresent || src.OutputTokensPresent
+	dst.CacheReadInputTokensPresent = dst.CacheReadInputTokensPresent || src.CacheReadInputTokensPresent
+	dst.CacheCreationInputTokensPresent = dst.CacheCreationInputTokensPresent || src.CacheCreationInputTokensPresent
 	cacheReadTokens := src.CacheReadInputTokens
 	if cacheReadTokens == 0 && src.CachedTokens > 0 {
 		cacheReadTokens = src.CachedTokens

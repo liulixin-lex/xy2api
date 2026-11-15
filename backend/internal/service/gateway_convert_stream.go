@@ -69,6 +69,7 @@ type gatewayConvertHooks struct {
 }
 
 type gatewayConvertStream struct {
+	evidence          anthropicBufferedEvidence
 	s                 *GatewayService
 	c                 *gin.Context
 	resp              *http.Response
@@ -137,7 +138,18 @@ func (st *gatewayConvertStream) ctx() context.Context {
 }
 
 // run reads the attempt to its end.
-func (st *gatewayConvertStream) run() gatewayConvertOutcome {
+func (st *gatewayConvertStream) run() (out gatewayConvertOutcome) {
+	defer func() {
+		facts := st.evidence.facts()
+		out.ResponseFactsKnown, out.UsagePresent, out.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+		out.TerminalSeen, out.TerminalValid, out.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+		if st.account != nil {
+			resilience.StateFrom(st.ctx()).SetGatewayResponseFacts(st.account.ID, true, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		if out.err == nil && !st.gone {
+			ClaimProtocolTerminal(st.c)
+		}
+	}()
 	if !st.guarded {
 		st.headers(true)
 	} else {
@@ -277,6 +289,7 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 }
 
 func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOutcome, bool) {
+	st.evidence.observe(name, payload)
 	var event apicompat.AnthropicStreamEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logger.L().Warn("gateway convert stream: failed to parse event", zap.Error(err),

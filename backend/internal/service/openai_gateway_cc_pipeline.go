@@ -418,7 +418,14 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	c *gin.Context,
 	resp *http.Response,
 	writeError compatErrorWriter,
+	factsOut ...*OpenAIForwardResult,
 ) (_ *apicompat.ChatCompletionsResponse, _ OpenAIUsage, retErr error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "json"}
+	defer func() {
+		if len(factsOut) > 0 && factsOut[0] != nil {
+			*factsOut[0] = facts
+		}
+	}()
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		classified := nonstreamReadError(c.Request.Context(), resp, err)
@@ -432,6 +439,10 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		return nil, OpenAIUsage{}, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	if _, present := openAIResponsesUsageEvidence(respBody, "upstream_json"); present {
+		facts.UsagePresent = true
+		facts.UsageSource = "upstream_json"
+	}
 	var ccResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &ccResp); err != nil {
 		writeError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
