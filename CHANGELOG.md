@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- OAuth Terra 的 minimal 请求恢复为 none 后发送，不再被本地提前拒绝。
+
 - API Key Responses 请求继续将既有 minimal 兼容值归一为 none，避免上游拒绝。
 
 - 模型后缀与第三方 thinking 模式不再被误写成显式推理档位或触发分组拒绝。
