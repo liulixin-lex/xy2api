@@ -36,10 +36,22 @@ const cardOf = (el: { element: Element }) => {
   return typeof value === 'function' ? value() : value
 }
 const backIn = expect.stringMatching(/^admin\.accounts\.table\.pillBackUntil:/)
+const layer = { modal: false, root: () => null, panel: () => null }
+const tipShown = () => document.getElementById('sq-tip')?.hidden === false
+/** Leaves whatever was hovered, hovers the zone for the tip's delay (fake timers) and says whether a tip shows. */
+let hovered: Element | null = null
+function hoverShows(el: Element) {
+  hovered?.dispatchEvent(new Event('mouseleave'))
+  el.dispatchEvent(new Event('mouseenter'))
+  hovered = el
+  vi.advanceTimersByTime(400)
+  return tipShown()
+}
 
 // The pointer type is one shared media query: it is read again once no pill uses it.
 enableAutoUnmount(afterEach)
 afterEach(() => {
+  hovered = null
   document.body.innerHTML = ''
 })
 
@@ -56,50 +68,73 @@ describe('AccountGroupPills', () => {
     expect(wrapper.emitted('open-quality')).toHaveLength(1)
   })
 
-  it('puts a zone\'s tip away on the click that opens a layer, and keeps it away while that layer is open (7i-3)', async () => {
+  it('puts a pill\'s card away on the click that opens a layer, and keeps it away while that layer is open (7i-3)', async () => {
     vi.useFakeTimers()
     const wrapper = mountPills(1)
     const dot = wrapper.get('[data-test="group-pill-dot"]').element
-    const tipShown = () => document.getElementById('sq-tip')?.hidden === false
-    const hover = () => {
-      dot.dispatchEvent(new Event('mouseleave'))
-      dot.dispatchEvent(new Event('mouseenter'))
-      vi.advanceTimersByTime(400)
-    }
-    hover()
+    hoverShows(dot)
     expect(tipShown()).toBe(true)
     await wrapper.get('[data-test="group-pill-dot"]').trigger('click')
     expect(tipShown()).toBe(false)
-    // The panel it opened is open: no tip, so Escape reaches the panel.
+    // The panel it opened is open: no card, so Escape reaches the panel.
     const panel = Symbol('panel')
-    openOverlay(panel, { modal: false, root: () => null, panel: () => null })
-    hover()
+    openOverlay(panel, layer)
+    hoverShows(dot)
     expect(tipShown()).toBe(false)
     closeOverlay(panel)
-    hover()
+    hoverShows(dot)
     expect(tipShown()).toBe(true)
     vi.useRealTimers()
+  })
+
+  // Both zones show the same card, so the quiet is the pill's, not the zone's (12.12-8).
+  it('opened from the dot: hovering the same pill\'s text shows no card, other pills and "+N" show theirs', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => vi.useRealTimers())
+    const wrapper = mountPills(10)
+    const [first, second] = wrapper.findAll('[data-test="group-pill"]')
+    await first.get('[data-test="group-pill-dot"]').trigger('click')
+    const panel = Symbol('panel')
+    openOverlay(panel, layer)
+    expect(hoverShows(first.get('[data-test="group-pill-text"]').element)).toBe(false)
+    expect(hoverShows(first.get('[data-test="group-pill-dot"]').element)).toBe(false)
+    expect(hoverShows(second.get('[data-test="group-pill-text"]').element)).toBe(true)
+    expect(hoverShows(wrapper.get('[data-test="group-pill-more-text"]').element)).toBe(true)
+    closeOverlay(panel)
+    expect(hoverShows(first.get('[data-test="group-pill-text"]').element)).toBe(true)
+
+    // "+N" alike: opened from its dot, its text shows no card.
+    await wrapper.get('[data-test="group-pill-more"] .pill__dot').trigger('click')
+    openOverlay(panel, layer)
+    expect(hoverShows(wrapper.get('[data-test="group-pill-more-text"]').element)).toBe(false)
+    expect(hoverShows(first.get('[data-test="group-pill-text"]').element)).toBe(true)
+    closeOverlay(panel)
+  })
+
+  it('opened from the text: hovering the same pill\'s dot shows no card until the picker closes', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => vi.useRealTimers())
+    const wrapper = mountPills(2)
+    const [first, second] = wrapper.findAll('[data-test="group-pill"]')
+    await first.get('[data-test="group-pill-text"]').trigger('click')
+    const picker = Symbol('picker')
+    openOverlay(picker, layer)
+    expect(hoverShows(first.get('[data-test="group-pill-dot"]').element)).toBe(false)
+    expect(hoverShows(second.get('[data-test="group-pill-dot"]').element)).toBe(true)
+    closeOverlay(picker)
+    expect(hoverShows(first.get('[data-test="group-pill-dot"]').element)).toBe(true)
   })
 
   it('is quiet only until its own layer closes; over any layer Escape closes the tip and goes on to the layer (7m-2)', async () => {
     vi.useFakeTimers()
     const wrapper = mountPills(1)
-    const dot = wrapper.get('[data-test="group-pill-dot"]').element
-    const tipShown = () => document.getElementById('sq-tip')?.hidden === false
-    const hover = () => {
-      dot.dispatchEvent(new Event('mouseleave'))
-      dot.dispatchEvent(new Event('mouseenter'))
-      vi.advanceTimersByTime(400)
-    }
-    const layer = { modal: false, root: () => null, panel: () => null }
     await wrapper.get('[data-test="group-pill-dot"]').trigger('click')
     const panel = Symbol('panel')
     openOverlay(panel, layer)
     closeOverlay(panel)
     const other = Symbol('other')
     openOverlay(other, layer)
-    hover()
-    expect(tipShown()).toBe(true)
+    expect(hoverShows(wrapper.get('[data-test="group-pill-text"]').element)).toBe(true)
 
     const reached = vi.fn()
     document.body.addEventListener('keydown', reached)

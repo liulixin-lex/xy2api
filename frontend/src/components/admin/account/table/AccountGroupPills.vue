@@ -53,10 +53,10 @@
           type="button"
           class="pill__dot"
           :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
-          v-tip="quietTip(`dot:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
+          v-tip="quietTip(`pill:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
           :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
           data-test="group-pill-dot"
-          @click="hush(`dot:${pill.group.id}`); emit('open-quality', pill.group.id)"
+          @click="hush(`pill:${pill.group.id}`); emit('open-quality', pill.group.id)"
         >
           <StatusDot :tone="DOT_TONES[pill.state]" />
         </button>
@@ -66,10 +66,10 @@
           :class="{ 'pill__text--latin': pill.latin }"
           :disabled="readonly"
           :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
-          v-tip="quietTip(`text:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
+          v-tip="quietTip(`pill:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
           data-test="group-pill-text"
           :data-groups-opener="account.id"
-          @click="hush(`text:${pill.group.id}`); emit('edit-groups', $event)"
+          @click="hush(`pill:${pill.group.id}`); emit('edit-groups', $event)"
         >{{ pill.text }}</button>
       </span>
     </template>
@@ -105,7 +105,7 @@
         type="button"
         class="pill__text"
         :aria-label="t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
-        v-tip="moreTip"
+        v-tip="quietTip('more', moreTip)"
         data-test="group-pill-more-text"
         @click="showTipNow($event.currentTarget)"
       >+{{ rest.length }}</button>
@@ -220,18 +220,18 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
 }
 
 /**
- * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and the tip stays
- * away while that layer is open (7i-3); once the layer closes the zone's tip is back, even with some other layer open
- * (7m-2). Other zones' tips show as usual.
+ * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and while that
+ * layer is open neither zone of the same pill shows the card, the two zones showing the same one (7i-3, 12.12-8); once
+ * the layer closes the pill's card is back, even with some other layer open (7m-2). Other pills' cards show as usual.
  */
-let quiet: { zone: string; closed: number } | null = null
-const hush = (zone: string) => {
-  quiet = { zone, closed: overlaysClosed() }
+let quiet: { pill: string; closed: number } | null = null
+const hush = (pill: string) => {
+  quiet = { pill, closed: overlaysClosed() }
   hideTip()
 }
-const quietTip = (zone: string, content: () => TipContent) => () => {
+const quietTip = (pill: string, content: () => TipContent) => () => {
   if (quiet && overlaysClosed() !== quiet.closed) quiet = null
-  return quiet?.zone === zone && anyOverlayOpen() ? '' : content()
+  return quiet?.pill === pill && anyOverlayOpen() ? '' : content()
 }
 
 /** The group's card: its full name, its state at the top right and the state's rows; no state without quality data. */
