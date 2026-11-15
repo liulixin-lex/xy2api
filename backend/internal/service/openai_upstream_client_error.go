@@ -3,6 +3,7 @@ package service
 import (
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -37,21 +38,14 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 // redactAgentIdentitySensitiveBody；这里不重复清洗，也不回落读取原始 body 的
 // message，避免绕开那两道脱敏。
 func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
-	errorPayload := gin.H{"type": openAIUpstreamClientErrorFallbackType}
-	if errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String()); errType != "" {
-		errorPayload["type"] = errType
-	}
-	if code := strings.TrimSpace(extractUpstreamErrorCode(body)); code != "" {
+	errType, code, param, message := UpstreamClientErrorFields(body, upstreamMsg)
+	errorPayload := gin.H{"type": errType, "message": message}
+	if code != "" {
 		errorPayload["code"] = code
 	}
-	if param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String()); param != "" {
+	if param != "" {
 		errorPayload["param"] = param
 	}
-	message := strings.TrimSpace(upstreamMsg)
-	if message == "" {
-		message = openAIUpstreamClientErrorFallbackMessage
-	}
-	errorPayload["message"] = message
 
 	writeOpenAICollaborationErrorJSON(c, statusCode, gin.H{"error": errorPayload})
 }
@@ -60,4 +54,86 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 // client error when the handler has exhausted all eligible accounts.
 func WriteOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
 	writeOpenAIUpstreamClientError(c, statusCode, body, upstreamMsg)
+}
+
+// UpstreamClientErrorFields projects safe scalar fields and the already-redacted
+// message. It never falls back to an unsanitized message in the upstream body.
+func UpstreamClientErrorFields(body []byte, upstreamMsg string) (errType, code, param, message string) {
+	errType = openAIUpstreamClientErrorFallbackType
+	if utf8.Valid(body) && gjson.ValidBytes(body) {
+		if v := gjson.GetBytes(body, "error.type"); v.Type == gjson.String && strings.TrimSpace(v.Str) != "" {
+			errType = strings.TrimSpace(v.Str)
+		}
+		candidates := []gjson.Result{gjson.GetBytes(body, "error.code"), openAITopLevelStreamError(body).Get("code")}
+		inner := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
+		if strings.HasPrefix(inner, "{") {
+			if last := strings.LastIndex(inner, "}"); last >= 0 && gjson.Valid(inner[:last+1]) {
+				candidates = append(candidates, gjson.Get(inner[:last+1], "error.code"))
+			}
+		}
+		for _, v := range candidates {
+			if v.Type == gjson.String || v.Type == gjson.Number {
+				if value := strings.TrimSpace(v.String()); value != "" {
+					code = value
+					break
+				}
+			}
+		}
+		if v := gjson.GetBytes(body, "error.param"); v.Type == gjson.String {
+			param = strings.TrimSpace(v.Str)
+		}
+	}
+	message = strings.TrimSpace(upstreamMsg)
+	if message == "" {
+		message = openAIUpstreamClientErrorFallbackMessage
+	}
+	return
+}
+
+// isToolHistoryUpstreamClientError recognizes only the established structured
+// HTTP 400 tool-history rejection, without validating local history.
+//
+//nolint:unused // M6/M8 own the passthrough call sites after this prerequisite.
+func isToolHistoryUpstreamClientError(status int, body []byte) bool {
+	if status != http.StatusBadRequest || !utf8.Valid(body) || !gjson.ValidBytes(body) {
+		return false
+	}
+	object := gjson.GetBytes(body, "error")
+	if !object.IsObject() {
+		return false
+	}
+	message := object.Get("message")
+	if message.Type != gjson.String {
+		return false
+	}
+	matched := false
+	for _, prefix := range []string{"No tool call found for function call output", "No tool output found for function call"} {
+		if message.Str == prefix || strings.HasPrefix(message.Str, prefix+" ") || strings.HasPrefix(message.Str, prefix+".") || strings.HasPrefix(message.Str, prefix+":") {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	code := object.Get("code")
+	if code.Exists() && code.Type != gjson.Null && (code.Type != gjson.String || code.Str != "" && code.Str != "invalid_request_error") {
+		return false
+	}
+	param := object.Get("param")
+	if !param.Exists() || param.Type == gjson.Null {
+		return true
+	}
+	if param.Type != gjson.String {
+		return false
+	}
+	if param.Str == "" {
+		return true
+	}
+	for _, root := range []string{"input", "messages"} {
+		if param.Str == root || strings.HasPrefix(param.Str, root+"[") || strings.HasPrefix(param.Str, root+".") {
+			return true
+		}
+	}
+	return false
 }
