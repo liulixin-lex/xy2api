@@ -1171,9 +1171,12 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			observeGeminiImageOutputs(c, collectedBytes)
 			claudeResp, usageObj2, conversionErr := convertGeminiToClaudeMessage(collected, originalModel, collectedBytes, false, geminiCompatConversionOptions(ctx))
 			if conversionErr != nil {
-				return nil, conversionErr
+				// Same as the direct JSON reader: write the specific error and keep the usage read.
+				writeGeminiCompatConversionError(c, PreOutputProtocolAnthropic, conversionErr)
+				responseErr = conversionErr
+			} else {
+				c.JSON(http.StatusOK, claudeResp)
 			}
-			c.JSON(http.StatusOK, claudeResp)
 			usage = usageObj2
 			if usageObj != nil && (usageObj.InputTokens > 0 || usageObj.OutputTokens > 0) {
 				usage = usageObj

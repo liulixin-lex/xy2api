@@ -842,6 +842,12 @@ func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte,
 	return upstream.requestBodies[0], result, resilience.SnapshotConversionNotices(ctx)
 }
 
+type m5TokenCache struct{ geminiTokenCacheStub }
+
+func (*m5TokenCache) GetAccessToken(context.Context, string) (string, error) {
+	return "test-token", nil
+}
+
 func TestM5FinishReasonMapping(t *testing.T) {
 	for _, tt := range []struct {
 		name, reason, args, messages, chat string
@@ -960,6 +966,31 @@ func TestM5FinishReasonMapping(t *testing.T) {
 				require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
 				require.Len(t, upstream.requestBodies, 1)
 			}
+		}
+	})
+	t.Run("oauth_aggregated", func(t *testing.T) {
+		// OAuth Code Assist turns a client non-stream request into an upstream stream and aggregates it.
+		for _, protocol := range []string{"messages", "chat"} {
+			sse := "data: {\"response\":{\"candidates\":[{\"finishReason\":\"MALFORMED_FUNCTION_CALL\"}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2}}}\n\n"
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))}}}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, tokenProvider: &GeminiTokenProvider{tokenCache: &m5TokenCache{}}, cfg: &config.Config{}}
+			account := &Account{ID: 101, Platform: PlatformGemini, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-token", "project_id": "test-project"}}
+			body := []byte(`{"model":"gemini-2.5-flash","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}`)
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, body)
+			var result *ForwardResult
+			var err error
+			if protocol == "messages" {
+				result, err = svc.Forward(c.Request.Context(), c, account, body)
+			} else {
+				result, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, body)
+			}
+			var conversion *apicompat.UpstreamConversionError
+			require.ErrorAs(t, err, &conversion, protocol)
+			require.Equal(t, http.StatusBadGateway, recorder.Code, protocol)
+			require.Contains(t, gjson.Get(recorder.Body.String(), "error.message").String(), "upstream conversion failed at finish_reason", recorder.Body.String())
+			require.NotNil(t, result, protocol)
+			require.Equal(t, 5, result.Usage.InputTokens)
+			require.Len(t, upstream.requestBodies, 1)
 		}
 	})
 	t.Run("missing_terminal", func(t *testing.T) {
