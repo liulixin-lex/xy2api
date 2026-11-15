@@ -144,7 +144,7 @@
 
 - Gemini 分组的兼容请求按最终模型写入思考控制，按最后实际发出的 `thinkingLevel` 计费，只给预算时不推断档位。
 
-- Gemini 分组的 `json_object` 与 `json_schema` 输出格式会传到 Gemini（Chat 与 Messages 都适用），模型不支持的格式约束省略并记录。
+- Gemini 分组的 `json_object` 与 `json_schema` 输出格式会传到 Gemini（Chat 与 Messages 都适用），模型不支持的格式约束省略并记录；带工具的请求不设置格式并记录，避免上游 400。
 
 - Gemini 工具 schema 中空的 `enum` 不再导致上游 400；位于条件、否定等位置、无法单独删除时，省略整段约束并记录。
 

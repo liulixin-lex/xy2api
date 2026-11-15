@@ -211,7 +211,9 @@ func applyGeminiCompatResponseFormat(claudeBody, body []byte, caps GeminiCompatC
 	if kind == "json_schema" && !schema.IsObject() && schema.Type != gjson.True && schema.Type != gjson.False {
 		return nil, &apicompat.UnsupportedConversionError{Field: "output_config.format.schema", Reason: "expected a JSON schema"}
 	}
-	if !caps.JSONMIME {
+	// Gemini 2.x rejects function calling combined with a JSON response MIME
+	// type, so a request that sends tools keeps the baseline (no format).
+	if !caps.JSONMIME || len(gjson.GetBytes(body, "tools").Array()) > 0 {
 		recordGeminiConversion(opts, "output_config.format", "omit")
 		return body, nil
 	}
