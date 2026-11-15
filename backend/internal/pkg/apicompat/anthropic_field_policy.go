@@ -87,6 +87,10 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	if json.Unmarshal(aux.MaxOutputTokens, &maxOutputTokens) == nil {
 		r.MaxOutputTokens = maxOutputTokens
 	}
+	reasoning, _ := decodeChatReasoning(r.Reasoning, r.ReasoningEffort)
+	if reasoning != nil {
+		r.ReasoningEffort = reasoning.Effort
+	}
 	type rawTool struct {
 		Type     string        `json:"type"`
 		Name     string        `json:"name"`
@@ -115,6 +119,26 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// decodeChatReasoning accepts the Chat extension without tightening decoding.
+// The legacy effort wins; malformed or unknown extension members stay ignored.
+func decodeChatReasoning(raw json.RawMessage, legacy string) (*ResponsesReasoning, error) {
+	var result ResponsesReasoning
+	if json.Unmarshal(raw, &result.Effort) != nil {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			_ = json.Unmarshal(fields["effort"], &result.Effort)
+			_ = json.Unmarshal(fields["summary"], &result.Summary)
+		}
+	}
+	if legacy != "" {
+		result.Effort = legacy
+	}
+	if result.Effort == "" && result.Summary == "" {
+		return nil, nil
+	}
+	return &result, nil
 }
 
 func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {

@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 请求的字符串 `reasoning` 生效，`reasoning_effort` 继续优先，扩展字段解码不新增拒绝。
+
 - 推理实际档位保留出站 `max`、`xhigh`、`ultra` 的区别，缺少显式字段时不再从模型后缀推导。
 
 - Responses 上游拒绝 `max_output_tokens` 时按既有预算删除该字段后重发。
