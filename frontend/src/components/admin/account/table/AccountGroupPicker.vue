@@ -41,7 +41,7 @@
       <div class="gp-list" data-test="group-picker-list">
         <div v-if="!fresh" class="gp-empty">{{ t('common.loading') }}</div>
         <div v-else-if="!visible.length" class="gp-empty">{{ query.trim() ? t('admin.accounts.groupPicker.noMatch', { q: query.trim() }) : t('admin.accounts.groupPicker.none') }}</div>
-        <label v-for="group in visible" :key="group.id" class="gp-item" :class="{ 'is-checked': selectedSet.has(group.id) }">
+        <label v-for="group in visible" :key="group.id" class="gp-item">
           <input
             type="checkbox"
             class="gp-check"
@@ -372,10 +372,10 @@ defineExpose({ requestClose })
      bottom never slips under the browser's toolbar (7p-3). */
   max-height: calc(100dvh - 73px);
   grid-template-rows: auto minmax(0, 1fr) auto;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-raised);
-  box-shadow: var(--shadow-popover);
+  border: 1px solid var(--color-line-popover);
+  border-radius: var(--radius-popover);
+  background: var(--color-bg-popover);
+  box-shadow: var(--shadow-dropdown);
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
@@ -471,9 +471,11 @@ defineExpose({ requestClose })
 }
 @media (hover: hover) {
   .gp-item:hover {
-    background: var(--color-bg-row-hover);
+    background: var(--color-bg-popover-hover);
   }
 }
+/* A multi-select list: a ticked group is told by its checkbox alone, in the brand colour, without the selected
+   background or text colour, which would cover a list that is mostly ticked (12.6-5). */
 .gp-check {
   width: 14px;
   height: 14px;
@@ -481,7 +483,7 @@ defineExpose({ requestClose })
   border: 1px solid var(--color-line-control);
   border-radius: var(--radius-xs);
   background: var(--color-bg-control);
-  color: theme('colors.primary.600');
+  accent-color: theme('colors.primary.600');
 }
 .gp-check:focus-visible {
   outline: 2px solid theme('colors.primary.500');
@@ -495,9 +497,6 @@ defineExpose({ requestClose })
   font-size: var(--font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.gp-item.is-checked .gp-name {
-  color: var(--color-text-primary);
 }
 .gp-tag {
   flex: none;
@@ -525,7 +524,7 @@ defineExpose({ requestClose })
   gap: 10px;
   padding: 12px;
   border-top: 1px solid var(--color-line-row);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: 0 0 var(--radius-popover) var(--radius-popover);
   background: var(--color-bg-header);
 }
 .gp-conflict__msg {

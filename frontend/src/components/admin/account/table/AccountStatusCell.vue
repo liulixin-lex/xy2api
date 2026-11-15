@@ -8,6 +8,7 @@
       :class="{
         'status-text-normal': view.state === 'ok' || view.state === 'paused',
         'account-status__label--error': view.state === 'error',
+        'account-status__label--back': BACK_STATES.has(view.state),
         'account-status__label--button': view.state === 'temp'
       }"
       :aria-label="view.state === 'temp' ? t('admin.accounts.status.viewTempUnschedDetails') : undefined"
@@ -22,8 +23,9 @@
 <script setup lang="ts">
 /**
  * Status column (prototype): a dot and a word. Normal and paused (scheduling off, the shared hollow ring) read in the
- * shared secondary status text; rate limited, overloaded and temporarily unschedulable carry a small code and a
- * countdown on the page's shared clock; an error is red with its reason. Model-level limits are counted and listed in
+ * shared secondary status text; rate limited, overloaded, temporarily unschedulable and over quota read in the amber
+ * status text at 500 (12.1-4), the first three with a small code and a countdown on the page's shared clock; an error
+ * is red with its reason. Model-level limits are counted and listed in
  * the tip. Only a row with an end time still ahead reads the clock, so the others do not redraw every second (7d-5,
  * 7g-1: the backend keeps an end time after it passes).
  */
@@ -42,6 +44,8 @@ const { t } = useI18n()
 const now = useLiveClock()
 
 type State = 'error' | 'inactive' | 'limited' | 'overloaded' | 'temp' | 'quota' | 'paused' | 'ok'
+/** Abnormal but not an error: the words in the amber status text (12.1-4). */
+const BACK_STATES = new Set<State>(['limited', 'overloaded', 'temp', 'quota'])
 interface View { state: State; tone: StatusDotTone; label: string; code?: string; until?: string | null }
 
 const exceeded = (used?: number | null, limit?: number | null) => typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
@@ -121,6 +125,10 @@ const tip = () => {
 }
 .account-status__label--error {
   color: var(--color-status-error-text);
+  font-weight: var(--font-weight-medium);
+}
+.account-status__label--back {
+  color: var(--color-status-back-text);
   font-weight: var(--font-weight-medium);
 }
 .account-status__label--button {

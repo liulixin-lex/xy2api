@@ -14,7 +14,9 @@
         'select-trigger',
         isOpen && 'select-trigger-open',
         error && 'select-trigger-error',
-        disabled && 'select-trigger-disabled'
+        disabled && 'select-trigger-disabled',
+        size === 'sm' && 'select-trigger--sm',
+        size === 'sm' && hasValue && 'select-trigger--filled'
       ]"
       @keydown.down.prevent="onTriggerKeyDown"
       @keydown.up.prevent="onTriggerKeyDown"
@@ -39,7 +41,7 @@
       <span class="select-icon">
         <Icon
           name="chevronDown"
-          size="md"
+          :size="size === 'sm' ? 'sm' : 'md'"
           :class="['transition-transform duration-200', isOpen && 'rotate-180']"
         />
       </span>
@@ -52,7 +54,7 @@
           v-if="isOpen"
           ref="dropdownRef"
           class="select-dropdown-portal"
-          :class="[instanceId]"
+          :class="[instanceId, size === 'sm' && 'select-dropdown-portal--sm']"
           :style="dropdownStyle"
           role="listbox"
           tabindex="-1"
@@ -99,7 +101,11 @@
                   size="sm"
                   class="flex-shrink-0 text-gray-400"
                 />
-                <span class="select-option-label" :class="option._creatable && 'italic text-gray-500 dark:text-dark-300'">{{ getOptionLabel(option) }}</span>
+                <span
+                  class="select-option-label"
+                  :class="option._creatable && 'italic text-gray-500 dark:text-dark-300'"
+                  @mouseenter="size === 'sm' && titleIfCut($event)"
+                >{{ getOptionLabel(option) }}</span>
                 <Icon
                   v-if="isSelected(option)"
                   name="check"
@@ -162,6 +168,12 @@ interface Props {
   loading?: boolean
   /** 下拉面板与触发框同宽，选项里的长文字换行，不再按内容撑宽 */
   matchTriggerWidth?: boolean
+  /**
+   * md (default): the form control. sm: the dense toolbars' control (spec 12.6), 32px high (40px below 1024px) on the
+   * control colours, the placeholder in the secondary text colour until a value is chosen; its panel is at least as
+   * wide as the trigger and 168px, at most 320px wide and high, with 34px options cut by an ellipsis.
+   */
+  size?: 'md' | 'sm'
 }
 
 interface Emits {
@@ -181,7 +193,8 @@ const props = withDefaults(defineProps<Props>(), {
   labelKey: 'label',
   remote: false,
   loading: false,
-  matchTriggerWidth: false
+  matchTriggerWidth: false,
+  size: 'md'
 })
 
 const emit = defineEmits<Emits>()
@@ -198,6 +211,8 @@ const dropdownPosition = ref<'bottom' | 'top'>('bottom')
 const triggerRect = ref<DOMRect | null>(null)
 const dropdownViewportPadding = 8
 const dropdownMinimumWidth = 200
+const SM_MIN_WIDTH = 168
+const SM_MAX_WIDTH = 320
 const DROPDOWN_Z = 100000020
 
 // The open menu is a sub-layer of whatever it was opened from (page, dialog, drawer, board): while open it owns
@@ -239,14 +254,16 @@ const dropdownStyle = computed(() => {
     Math.max(dropdownViewportPadding, rect.left),
     viewportRight
   )
+  const sm = props.size === 'sm'
   const availableWidth = Math.max(0, viewportRight - left)
-  const preferredMinWidth = Math.max(dropdownMinimumWidth, rect.width)
-  const minWidth = Math.min(preferredMinWidth, availableWidth)
+  const maxWidth = sm ? Math.min(SM_MAX_WIDTH, availableWidth) : availableWidth
+  const preferredMinWidth = Math.max(sm ? SM_MIN_WIDTH : dropdownMinimumWidth, rect.width)
+  const minWidth = Math.min(preferredMinWidth, maxWidth)
   const style: Record<string, string> = {
     position: 'fixed',
     left: `${left}px`,
     minWidth: `${minWidth}px`,
-    maxWidth: `${availableWidth}px`,
+    maxWidth: `${maxWidth}px`,
     zIndex: String(menuLayer.zIndex.value ?? DROPDOWN_Z)
   }
   if (props.matchTriggerWidth) style.width = `${minWidth}px`
@@ -365,6 +382,15 @@ watch(filteredOptions, (next, previous) => {
   focusedIndex.value = kept >= 0 && !isOptionDisabled(next[kept]) ? kept : findNextEnabledIndex(0)
   if (focusedIndex.value >= 0) scrollToFocused()
 })
+
+/**
+ * sm: an option cut by its ellipsis carries its whole text as a native title. The shared tip is drawn under this
+ * panel (its layer is far above the tip's), so it could not show here.
+ */
+const titleIfCut = (event: MouseEvent) => {
+  const label = event.currentTarget as HTMLElement
+  label.title = label.scrollWidth > label.clientWidth ? (label.textContent ?? '').trim() : ''
+}
 
 const handleOptionMouseEnter = (option: any, index: number) => {
   if (isOptionDisabled(option) || isGroupHeaderOption(option)) return
@@ -581,6 +607,39 @@ onUnmounted(() => {
   @apply rounded text-gray-400 transition-colors;
   @apply hover:text-gray-600 dark:hover:text-gray-200;
 }
+
+/* sm (spec 12.6): the accounts toolbar's search box look. Two classes, so it wins over the base rule and its dark and
+   state variants; the focus and open borders are restated for the same reason. */
+.select-trigger.select-trigger--sm {
+  height: var(--control-height);
+  gap: 6px;
+  padding: 0 10px;
+  border-color: var(--color-line-control);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-control);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+.select-trigger.select-trigger--sm.select-trigger--filled {
+  color: var(--color-text-primary);
+}
+.select-trigger.select-trigger--sm:hover {
+  border-color: var(--color-line-control);
+  background-color: var(--color-bg-control-hover);
+}
+.select-trigger.select-trigger--sm:focus,
+.select-trigger.select-trigger--sm.select-trigger-open {
+  border-color: theme('colors.primary.500');
+}
+.select-trigger--sm .select-icon {
+  color: var(--color-text-secondary);
+}
+@media (max-width: 1023px) {
+  .select-trigger.select-trigger--sm {
+    height: 40px;
+  }
+}
 </style>
 
 <style>
@@ -650,6 +709,35 @@ onUnmounted(() => {
 .select-dropdown-portal .select-empty {
   @apply px-4 py-8 text-center text-sm;
   @apply text-gray-500 dark:text-dark-400;
+}
+
+/* sm: at most 320px high, the options scrolling under the search box; 34px options in 13px type */
+.select-dropdown-portal.select-dropdown-portal--sm {
+  display: flex;
+  max-height: 320px;
+  flex-direction: column;
+}
+
+.select-dropdown-portal--sm .select-options {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+}
+
+.select-dropdown-portal--sm .select-option {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.select-dropdown-portal--sm .select-search-input {
+  font-size: 13px;
+}
+
+/* sm: the search box's placeholder in the muted text colour of both themes (12.12-7); two classes, over the shared
+   dark placeholder rule. md keeps its own. */
+.select-dropdown-portal.select-dropdown-portal--sm .select-search-input::placeholder {
+  color: var(--color-text-muted);
 }
 
 .select-dropdown-enter-active,

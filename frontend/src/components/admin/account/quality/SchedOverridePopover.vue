@@ -6,7 +6,7 @@
         ref="rootRef"
         role="dialog"
         :aria-labelledby="titleId"
-        class="fixed w-[320px] max-w-[calc(100vw-32px)] rounded-lg border border-line-strong bg-surface-raised p-4 shadow-popover"
+        class="fixed w-[320px] max-w-[calc(100vw-32px)] rounded-popover border border-line-popover bg-surface-popover p-4 shadow-dropdown"
         :style="{ zIndex: stackZ, top: `${pos.top}px`, left: `${pos.left}px` }"
         data-sq-popover
         @keydown.tab="trapTab($event, rootRef)"

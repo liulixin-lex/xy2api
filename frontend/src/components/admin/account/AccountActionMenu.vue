@@ -5,7 +5,7 @@
       <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
-        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover shadow-dropdown"
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >
@@ -83,7 +83,7 @@
             </button>
             <template v-if="canManage">
               <div :class="DIVIDER"></div>
-              <button :class="[ITEM, '!text-red-600 dark:!text-red-400']" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
+              <button :class="[ITEM, DANGER]" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
                 <Icon name="trash" size="sm" class="shrink-0 text-red-500 dark:text-red-400" />
                 {{ t('common.delete') }}
               </button>
@@ -158,9 +158,11 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
-const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-200'
+// A danger item: the error text, on a light red under the pointer and keyboard focus instead of the grey (12.12-6).
+const DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
-const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
+const DIVIDER = 'my-1 border-t border-line-popover'
 
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false

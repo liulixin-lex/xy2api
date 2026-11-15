@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import UpstreamBillingRateCell from '../UpstreamBillingRateCell.vue'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import type { Account } from '@/types'
 
 vi.mock('vue-i18n', async () => {
@@ -200,7 +201,7 @@ describe('UpstreamBillingRateCell', () => {
     expect(note).toContain('admin.accounts.table.ratioFailure:')
   })
 
-  // 7i-6: information only, so the app's plain tip; times in the interface language, failures in words.
+  // 7i-6: information only, so the app's plain tip; failures in words; times as the tip cards give them (12.12-13).
   it('tells a stale snapshot, the next probe and both probe switches in the plain tip', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
       attachTo: document.body,
@@ -224,12 +225,12 @@ describe('UpstreamBillingRateCell', () => {
     const lines = tipLines(wrapper.get('[data-testid="upstream-billing-rate"]').element)
     expect(lines.slice(0, 3)).toEqual([
       'admin.accounts.upstreamBilling.lastDetectedRate:0.6',
-      expect.stringMatching(/^admin\.accounts\.upstreamBilling\.lastDetectedAt:07\D+1[23]\D+\d{2}:\d{2}$/),
+      `admin.accounts.upstreamBilling.lastDetectedAt:${formatShortTime('2026-07-12T22:00:00Z')}`,
       'admin.accounts.upstreamBilling.elapsedSince:admin.accounts.upstreamBilling.hoursAgo:2'
     ])
     expect(lines.join('\n')).not.toMatch(/AM|PM/)
     expect(lines.slice(3)).toEqual([
-      expect.stringMatching(/^admin\.accounts\.upstreamBilling\.nextProbeAt:/),
+      `admin.accounts.upstreamBilling.nextProbeAt:${formatShortTime('2026-07-13T01:00:00Z')}`,
       'admin.accounts.upstreamBilling.accountProbeStateadmin.accounts.upstreamBilling.enabled'
     ])
 

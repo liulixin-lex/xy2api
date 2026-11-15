@@ -59,7 +59,7 @@ describe('AccountCapacityCell group concurrency', () => {
   })
 })
 
-// The prototype's neutral chips, same lines as before (7e-14).
+// The same lines as before (7e-14), filled by how much of each limit is in use (12.4).
 describe('AccountCapacityCell look', () => {
   it('keeps the same lines, without icons; labels name them when there are several', () => {
     const wrapper = mountCell({
@@ -77,15 +77,29 @@ describe('AccountCapacityCell look', () => {
     expect(text(wrapper.get('[data-cap="rpm"]'))).toContain('[T]')
   })
 
-  it('greys a line with nothing in use and marks only a full one', () => {
-    const idle = mountCell({ current_concurrency: 0 }).get('[data-cap="concurrency"]')
-    expect(idle.classes()).toContain('cap__chip--zero')
-    expect(idle.classes()).not.toContain('cap__chip--full')
-    // 80% used is not full: still neutral.
-    const busy = mountCell({ current_concurrency: 80 }).get('[data-cap="concurrency"]')
-    expect(busy.classes()).not.toContain('cap__chip--zero')
-    expect(busy.classes()).not.toContain('cap__chip--full')
-    expect(mountCell({ current_concurrency: 100 }).get('[data-cap="concurrency"]').classes()).toContain('cap__chip--full')
+  it('fills each line by use, on the thresholds of the badges before the redesign; nothing in use stays neutral (12.4)', () => {
+    const tone = (account: Record<string, unknown>, key: string) =>
+      mountCell(account).get(`[data-cap="${key}"]`).classes().find((cls) => cls.startsWith('cap__chip--'))
+    // Concurrency: yellow as soon as anything runs, red when full.
+    expect([0, 1, 99, 100].map((n) => tone({ current_concurrency: n }, 'concurrency'))).toEqual(
+      ['cap__chip--neutral', 'cap__chip--yellow', 'cap__chip--yellow', 'cap__chip--red']
+    )
+    // Window cost (limit $30, reserve $10 by default): green, yellow from 80%, orange at the limit, red past the reserve.
+    const anthropic = { platform: 'anthropic', type: 'oauth', window_cost_limit: 30 }
+    expect([0, 1, 24, 30, 40].map((cost) => tone({ ...anthropic, current_window_cost: cost }, 'window_cost'))).toEqual(
+      ['cap__chip--neutral', 'cap__chip--green', 'cap__chip--yellow', 'cap__chip--orange', 'cap__chip--red']
+    )
+    // RPM (base 50, buffer 10 by default): tiered turns red past the buffer; sticky-exempt stops at orange.
+    const rpm = { ...anthropic, window_cost_limit: 0, base_rpm: 50 }
+    expect([40, 50, 60].map((n) => tone({ ...rpm, current_rpm: n }, 'rpm'))).toEqual(['cap__chip--yellow', 'cap__chip--orange', 'cap__chip--red'])
+    expect(tone({ ...rpm, rpm_strategy: 'sticky_exempt', current_rpm: 60 }, 'rpm')).toBe('cap__chip--orange')
+    // Sessions and quotas: red at the limit, yellow from 80%.
+    expect([0, 3, 4, 5].map((n) => tone({ ...anthropic, window_cost_limit: 0, max_sessions: 5, active_sessions: n }, 'sessions'))).toEqual(
+      ['cap__chip--neutral', 'cap__chip--green', 'cap__chip--yellow', 'cap__chip--red']
+    )
+    expect([0, 10, 80, 100].map((used) => tone({ quota_daily_limit: 100, quota_daily_used: used }, 'quota_daily'))).toEqual(
+      ['cap__chip--neutral', 'cap__chip--green', 'cap__chip--yellow', 'cap__chip--red']
+    )
     // A single line carries no label.
     expect(mountCell({}).find('.cap__l').exists()).toBe(false)
   })

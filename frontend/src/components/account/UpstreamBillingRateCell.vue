@@ -27,7 +27,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { formatDate } from '@/utils/format'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { vTip } from '@/utils/tip'
 import { probeFailureText, upstreamRateView } from './upstreamBillingRate'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
@@ -83,9 +83,8 @@ const primaryValue = computed(() => {
 })
 const dimmed = computed(() => view.value.dimmed)
 const failureText = computed(() => probeFailureText(view.value.failure, t))
-/** Month, day and 24-hour time in the interface language (never "05:51 PM" in Chinese). */
-const probeTime = (value?: string) =>
-  (value && formatDate(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })) || '-'
+/** A time as the tip cards give it: HH:MM today, else MM-DD HH:MM, whatever the interface language (12.12-13). */
+const probeTime = (value?: string) => (value ? formatShortTime(value) : '-')
 
 /** The hover tip: the rates in force, or the last probe's; why it failed; when it runs next; the probe switches. */
 function rateTip(): string {
@@ -116,16 +115,22 @@ function rateTip(): string {
 </script>
 
 <style scoped>
+/* "9.9999x", the 3px gap and the 18px button fit the column's 74px; a longer value ends in "…", the tip has the rate
+   in force whole (12.5). */
 .ratio {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 .ratio__v {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
+  font-variant-numeric: tabular-nums;
   line-height: var(--line-height-body);
+  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: help;
 }
@@ -135,8 +140,8 @@ function rateTip(): string {
 }
 .ratio__btn {
   display: inline-grid;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   flex: none;
   place-items: center;
   padding: 0;

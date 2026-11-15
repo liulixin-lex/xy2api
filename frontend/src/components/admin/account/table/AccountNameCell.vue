@@ -55,7 +55,7 @@ const title = computed(() =>
   overflow: hidden;
   color: var(--color-text-primary);
   font-size: var(--font-size-name);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-name);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -72,7 +72,7 @@ const title = computed(() =>
 }
 .account-name__sub {
   overflow: hidden;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-small);
   line-height: var(--line-height-small);
   text-overflow: ellipsis;

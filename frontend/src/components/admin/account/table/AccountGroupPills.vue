@@ -6,10 +6,9 @@
       class="pill pill--empty"
       :disabled="readonly"
       :aria-label="t('admin.accounts.table.pillEmptyLabel', { name: account.name })"
-      v-tip="quietTip('empty', () => t('admin.accounts.table.pillEmpty'))"
       data-test="group-pill-empty"
       :data-groups-opener="account.id"
-      @click="hush('empty'); emit('edit-groups', $event)"
+      @click="emit('edit-groups', $event)"
     >
       <Icon name="plus" size="xs" />
     </button>
@@ -29,14 +28,14 @@
         <span class="pill__dot"><StatusDot :tone="DOT_TONES[pill.state]" /></span>
         <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
       </button>
-      <!-- No dot, nothing to open: a tap shows the group's full name, as "+N" lists what it folds (7l-5). -->
+      <!-- No dot, nothing to open: a tap shows the group's card, as "+N" lists what it folds (7l-5). -->
       <button
         v-else-if="coarse"
         type="button"
         class="pill pill--nodot pill--whole"
         :data-group-id="pill.group.id"
-        :aria-label="t('admin.accounts.table.pillNoQuality', { name: pill.group.name })"
-        v-tip="t('admin.accounts.table.pillNoQuality', { name: pill.group.name })"
+        :aria-label="t('admin.accounts.table.pillTip', { name: pill.group.name, state: t('admin.accounts.table.pillNoQuality') })"
+        v-tip="() => pillCard(pill.group, null)"
         data-test="group-pill"
         @click="showTipNow($event.currentTarget)"
       >
@@ -54,10 +53,10 @@
           type="button"
           class="pill__dot"
           :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
-          v-tip="quietTip(`dot:${pill.group.id}`, () => pillTip(pill.group, pill.state, 'dot'))"
+          v-tip="quietTip(`pill:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
           :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
           data-test="group-pill-dot"
-          @click="hush(`dot:${pill.group.id}`); emit('open-quality', pill.group.id)"
+          @click="hush(`pill:${pill.group.id}`); emit('open-quality', pill.group.id)"
         >
           <StatusDot :tone="DOT_TONES[pill.state]" />
         </button>
@@ -67,10 +66,10 @@
           :class="{ 'pill__text--latin': pill.latin }"
           :disabled="readonly"
           :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
-          v-tip="quietTip(`text:${pill.group.id}`, () => pillTip(pill.group, pill.state, 'text'))"
+          v-tip="quietTip(`pill:${pill.group.id}`, () => pillCard(pill.group, pill.state))"
           data-test="group-pill-text"
           :data-groups-opener="account.id"
-          @click="hush(`text:${pill.group.id}`); emit('edit-groups', $event)"
+          @click="hush(`pill:${pill.group.id}`); emit('edit-groups', $event)"
         >{{ pill.text }}</button>
       </span>
     </template>
@@ -106,7 +105,7 @@
         type="button"
         class="pill__text"
         :aria-label="t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
-        v-tip="moreTip"
+        v-tip="quietTip('more', moreTip)"
         data-test="group-pill-more-text"
         @click="showTipNow($event.currentTarget)"
       >+{{ rest.length }}</button>
@@ -119,8 +118,8 @@
  * Groups column (spec 4.3, prototype): a fixed 3×3 grid of pills in the groups page's order. One to three pills sit in
  * one row, centred; more fill from the top. With more than nine the ninth is "+N" with the worst folded state; hovering
  * or clicking its text lists every folded group (spec 4.3, 7d-7), its dot opens the worst one. Each pill has two hit
- * zones: the dot opens the quality panel on that group, the text edits the account's groups. Non-OpenAI accounts have
- * no quality data and no dot.
+ * zones: the dot opens the quality panel on that group, the text edits the account's groups; both show the group's
+ * tip card (12.7): its full name and state, and the state's data. Non-OpenAI accounts have no quality data and no dot.
  *
  * On a touch screen (coarse pointer, whatever the width) the whole pill opens the quality panel on its group, "+N" on
  * the worst folded one; editing goes through the card's and the row menu's "edit groups". In the card's grid each
@@ -134,9 +133,11 @@ import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
+import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { Account, AdminGroup } from '@/types'
 import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
-import { hideTip, showTipNow, vTip } from '@/utils/tip'
+import { kindName } from '@/utils/schedQualityFormat'
+import { hideTip, showTipNow, vTip, type TipCard, type TipCell, type TipContent, type TipTone } from '@/utils/tip'
 import { groupPillText, isLatinPillText } from '@/utils/groupAlias'
 import { groupDotState, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
@@ -146,19 +147,21 @@ const props = defineProps<{
   /** The account's groups, already in the groups page's order. */
   groups: AdminGroup[]
   /** The account's quality summary; null for accounts without quality data. */
-  quality: AccountQualityView | null
+  quality: (AccountQualityView & Pick<BackendAccountSummary, 'ttfo'>) | null
   readonly?: boolean
   /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
   card?: boolean
 }>()
 const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const now = useLiveClock()
 const coarse = usePointerCoarse()
 
 const DOT_TONES: Record<GroupDotState, StatusDotTone> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'off' }
 const STATE_KEYS: Record<GroupDotState, string> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
 const stateLabel = (state: GroupDotState) => t(`admin.accounts.table.dotStates.${STATE_KEYS[state]}`)
+const TIP_TONES: Record<GroupDotState, TipTone> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
+const stateCell = (state: GroupDotState): TipCell => ({ text: stateLabel(state), tone: TIP_TONES[state], dot: true })
 
 const stateOf = (group: AdminGroup): GroupDotState | null => (props.quality ? groupDotState(props.quality, group.id) : null)
 
@@ -177,61 +180,84 @@ const restWorst = computed(() => {
   return worst ? states.find((item) => item.state === worst)! : null
 })
 
-/** The state's own detail: substandard models with their reasons and time left, the exemption's end, … */
-function stateDetail(group: AdminGroup, state: GroupDotState): string {
+/** "15m 后恢复" until a time still ahead, else nothing. */
+function backIn(until: string | null | undefined): string {
+  const left = msLeft(until, now.value)
+  return left === null ? '' : t('admin.accounts.table.pillBackUntil', { time: formatRemaining(t, left) })
+}
+
+const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
+  quality.exemptions.find((item) => item.group_id === group.id) ?? quality.exemptions.find((item) => item.group_id === 0)
+const exemptEnd = (expiresAt: string | null | undefined) => (expiresAt ? formatShortTime(expiresAt) : t('admin.accounts.table.tip.forever'))
+
+/** The rows of the group's state (12.7): models at the back with why and when they are back, the exemption, … */
+function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
-  if (!quality) return ''
+  if (!quality) return []
   if (state === 'back') {
-    const items = quality.substandard.filter((item) => item.group_id === group.id)
-    const models = items
-      .map((item) => `${iqModelLabel(item.model)} ${item.dims.map((dim) => t(`admin.accounts.table.dimReasons.${dim}`)).join('、')}`)
-      .join('；')
-    const until = items.map((item) => item.until).filter(Boolean).sort().pop()
-    const left = msLeft(until, now.value)
-    return [models, left === null ? '' : t('admin.accounts.table.pillBackUntil', { time: formatRemaining(t, left) })].filter(Boolean).join(' · ')
+    return quality.substandard
+      .filter((item) => item.group_id === group.id)
+      .map((item) => [
+        iqModelLabel(item.model),
+        { text: item.dims.map((dim) => t(`admin.accounts.table.dimReasons.${dim}`)).join('、'), tone: 'back' },
+        backIn(item.until)
+      ])
   }
   if (state === 'exempt') {
-    const exemption = quality.exemptions.find((item) => item.group_id === group.id) ?? quality.exemptions.find((item) => item.group_id === 0)
-    return exemption?.expires_at ? t('admin.accounts.table.pillExemptUntil', { time: formatShortTime(exemption.expires_at) }) : t('admin.accounts.table.pillExemptForever')
+    const exemption = exemptionOf(quality, group)
+    const rows = [[t('admin.accounts.table.tip.exemptUntil'), exemptEnd(exemption?.expires_at)]]
+    return exemption?.reason ? [...rows, [t('admin.accounts.table.tip.reason'), exemption.reason]] : rows
   }
-  if (state === 'observe') return t('admin.accounts.table.pillObserve')
-  if (state === 'stopped') return t('admin.accounts.table.pillStopped')
-  return ''
+  if (state === 'observe') return [[t('admin.accounts.table.tip.samples'), t('admin.accounts.table.tip.count', { n: quality.ttfo.n }, quality.ttfo.n)]]
+  if (state === 'stopped' && quality.stop) {
+    const rows = [
+      [t('admin.accounts.table.tip.reason'), kindName(quality.stop.reason, t, te)],
+      [t('admin.accounts.table.tip.source'), t(`admin.accounts.table.tip.sources.${quality.stop.source === 'manual' ? 'manual' : 'auto'}`)]
+    ]
+    return quality.stop.until ? [...rows, [t('admin.accounts.table.tip.resume'), formatShortTime(quality.stop.until)]] : rows
+  }
+  return []
 }
 
 /**
- * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and the tip stays
- * away while that layer is open (7i-3); once the layer closes the zone's tip is back, even with some other layer open
- * (7m-2). Other zones' tips show as usual.
+ * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and while that
+ * layer is open neither zone of the same pill shows the card, the two zones showing the same one (7i-3, 12.12-8); once
+ * the layer closes the pill's card is back, even with some other layer open (7m-2). Other pills' cards show as usual.
  */
-let quiet: { zone: string; closed: number } | null = null
-const hush = (zone: string) => {
-  quiet = { zone, closed: overlaysClosed() }
+let quiet: { pill: string; closed: number } | null = null
+const hush = (pill: string) => {
+  quiet = { pill, closed: overlaysClosed() }
   hideTip()
 }
-const quietTip = (zone: string, text: () => string) => () => {
+const quietTip = (pill: string, content: () => TipContent) => () => {
   if (quiet && overlaysClosed() !== quiet.closed) quiet = null
-  return quiet?.zone === zone && anyOverlayOpen() ? '' : text()
+  return quiet?.pill === pill && anyOverlayOpen() ? '' : content()
 }
 
-function pillTip(group: AdminGroup, state: GroupDotState | null, zone: 'dot' | 'text'): string {
-  const head = state
-    ? [t('admin.accounts.table.pillTip', { name: group.name, state: stateLabel(state) }), stateDetail(group, state)].filter(Boolean).join(' · ')
-    : t('admin.accounts.table.pillNoQuality', { name: group.name })
-  if (zone === 'text' && props.readonly) return head
-  return `${head}\n${t(zone === 'dot' ? 'admin.accounts.table.pillDotAction' : 'admin.accounts.table.pillTextAction')}`
+/** The group's card: its full name, its state at the top right and the state's rows; no state without quality data. */
+function pillCard(group: AdminGroup, state: GroupDotState | null): TipCard {
+  if (!state) return { title: group.name, chip: { text: t('admin.accounts.table.pillNoQuality'), tone: 'muted' } }
+  return { title: group.name, chip: stateCell(state), rows: stateRows(group, state) }
 }
 
-function moreTip(): string {
-  const worst = restWorst.value
-  const head = worst
-    ? t('admin.accounts.table.pillMoreWorst', { n: rest.value.length, state: stateLabel(worst.state) })
-    : t('admin.accounts.table.pillMore', { n: rest.value.length })
-  const lines = rest.value.map((group) => {
-    const state = stateOf(group)
-    return [`${groupPillText(group)}  ${group.name}`, state ? stateLabel(state) : '', state ? stateDetail(group, state) : ''].filter(Boolean).join(' · ')
-  })
-  return [head, ...lines].join('\n')
+/** "+N": a row per folded group, with its dot and state and, at the back or exempt, when that ends. */
+function moreTip(): TipCard {
+  const title = t('admin.accounts.table.pillMore', { n: rest.value.length })
+  if (!props.quality) return { title, chip: { text: t('admin.accounts.table.pillNoQuality'), tone: 'muted' }, rows: rest.value.map((group) => [group.name]) }
+  const quality = props.quality
+  return {
+    title,
+    rows: rest.value.map((group) => {
+      const state = stateOf(group)!
+      const end =
+        state === 'back'
+          ? backIn(quality.substandard.filter((item) => item.group_id === group.id).map((item) => item.until).filter(Boolean).sort().pop())
+          : state === 'exempt'
+            ? exemptEnd(exemptionOf(quality, group)?.expires_at)
+            : ''
+      return [group.name, stateCell(state), end]
+    })
+  }
 }
 </script>
 

@@ -1,13 +1,13 @@
 <template>
   <div ref="rootRef" class="tb-root" data-test="accounts-toolbar">
-    <TableToolbar class="tb">
+    <TableToolbar class="tb" compact>
       <template #search>
-      <label class="tb-search">
+      <label class="table-toolbar__search-box">
         <span class="sr-only">{{ t('admin.accounts.table.searchPlaceholder') }}</span>
-        <Icon name="search" size="sm" class="tb-search__icon" />
+        <Icon name="search" size="sm" class="table-toolbar__search-icon" />
         <input
           ref="searchRef"
-          class="tb-input"
+          class="table-toolbar__input"
           type="search"
           autocomplete="off"
           :value="search"
@@ -19,25 +19,25 @@
       </template>
       <template #filters>
       <div ref="filtersRef" class="tb-filters">
+        <!-- The shared Select's sm (12.6): the filter's name until a value is chosen, "all" first in its panel. -->
         <template v-for="key in DIRECT" :key="key">
-          <span v-if="!foldedSelects.includes(key)" class="tb-sel">
-            <select
-              :class="{ 'has-value': !!filters[FIELD[key]] }"
-              :value="filters[FIELD[key]] ?? ''"
-              :aria-label="label(key)"
-              :data-filter="key"
-              @change="setFilter(key, ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">{{ label(key) }}</option>
-              <option v-for="option in options(key)" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-            <Icon name="chevronDown" size="xs" class="tb-sel__icon" />
-          </span>
+          <Select
+            v-if="!foldedSelects.includes(key)"
+            size="sm"
+            class="tb-sel"
+            :model-value="filters[FIELD[key]] ?? ''"
+            :options="selectOptions(key)"
+            :aria-label="label(key)"
+            :data-filter="key"
+            @update:model-value="setFilter(key, String($event ?? ''))"
+          >
+            <template #selected="{ option }">{{ option && option.value !== '' ? option.label : label(key) }}</template>
+          </Select>
         </template>
         <button
           ref="moreRef"
           type="button"
-          class="tb-btn tb-btn--secondary"
+          class="table-toolbar__btn table-toolbar__btn--secondary"
           :aria-expanded="menuOpen ? 'true' : 'false'"
           aria-haspopup="true"
           :aria-label="folded.length ? t('admin.accounts.table.folded', { n: folded.length }) : undefined"
@@ -67,7 +67,7 @@
       <template #actions>
       <button
         type="button"
-        class="tb-icon-btn table-toolbar__icon"
+        class="table-toolbar__icon-btn table-toolbar__icon"
         :aria-label="t('admin.accounts.table.refresh')"
         v-tip="t('admin.accounts.table.refreshTip')"
         data-test="accounts-refresh"
@@ -76,7 +76,7 @@
         <Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />
       </button>
       <slot name="more-actions" />
-      <button v-if="canCreate" type="button" class="tb-btn tb-btn--primary" data-test="accounts-create" @click="emit('create')">
+      <button v-if="canCreate" type="button" class="table-toolbar__btn table-toolbar__btn--primary" data-test="accounts-create" @click="emit('create')">
         <Icon name="plus" size="sm" />{{ t('admin.accounts.createAccount') }}
       </button>
       </template>
@@ -95,16 +95,18 @@
           </span>
         </div>
       </div>
-      <label v-for="key in menuKeys" :key="key" class="tb-menu__field">
-        <span>{{ label(key) }}</span>
-        <span class="tb-sel tb-sel--full">
-          <select :value="filters[FIELD[key]] ?? ''" :class="{ 'has-value': !!filters[FIELD[key]] }" :data-filter="key" @change="setFilter(key, ($event.target as HTMLSelectElement).value)">
-            <option value="">{{ t('admin.accounts.table.any') }}</option>
-            <option v-for="option in options(key)" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-          <Icon name="chevronDown" size="xs" class="tb-sel__icon" />
-        </span>
-      </label>
+      <div v-for="key in menuKeys" :key="key" class="tb-menu__field">
+        <span aria-hidden="true">{{ label(key) }}</span>
+        <Select
+          size="sm"
+          class="tb-sel tb-sel--full"
+          :model-value="filters[FIELD[key]] ?? ''"
+          :options="selectOptions(key)"
+          :aria-label="label(key)"
+          :data-filter="key"
+          @update:model-value="setFilter(key, String($event ?? ''))"
+        />
+      </div>
       <button v-if="tags.length" type="button" class="tb-menu__clear" @click="clearAll">{{ t('admin.accounts.table.clearFilters') }}</button>
     </div>
   </div>
@@ -112,7 +114,8 @@
 
 <script setup lang="ts">
 /**
- * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar. From 1024px one row, never wrapping (this
+ * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar in its compact form (12.9), whose 32px search
+ * box and buttons it uses. From 1024px one row, never wrapping (this
  * component's own rules below): search, four filters shown directly (platform, status, group, quality), "more filters"
  * (type, privacy, IQ, category) and the active filters as removable tags. Tags that do not fit fold from the right into
  * the "more filters" count, where they can still be seen and removed; if the row still overflows, the direct filters
@@ -128,10 +131,12 @@ import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import Select from '@/components/common/Select.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { LiveStatus } from '@/composables/useLiveTable'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupCategoriesStore } from '@/stores/groupCategories'
 import type { AdminGroup } from '@/types'
@@ -217,6 +222,8 @@ const optionsByKey = computed<Record<ToolbarFilterKey, Option[]>>(() => ({
   category: categories.categories.map((category) => ({ value: String(category.id), label: category.name }))
 }))
 const options = (key: ToolbarFilterKey) => optionsByKey.value[key]
+/** A filter's Select: "all" (no value) first, then its options. */
+const selectOptions = (key: ToolbarFilterKey): Option[] => [{ value: '', label: t('admin.accounts.table.any') }, ...options(key)]
 
 const showCategory = computed(() => !authStore.isSimpleMode && (categories.categories.length > 0 || !!props.filters.group_category))
 const moreKeys = computed(() => MORE.filter((key) => key !== 'category' || showCategory.value))
@@ -380,17 +387,23 @@ watch(menuOpen, async (open) => {
   await nextTick()
   placeMenu()
 })
+// A sub-layer of the overlay stack: a Select opened in the menu is a layer above it, its panel in the body. A press
+// in that panel is not a press outside the menu, so the option's click lands and the menu stays open; Escape closes
+// the open Select first, then the menu (12.12-3).
+const menuLayer = useOverlayLayer(menuOpen, {
+  root: menuRef,
+  modal: false,
+  onEscape: () => {
+    menuOpen.value = false
+    moreRef.value?.focus({ preventScroll: true })
+  },
+  onCovered: () => { menuOpen.value = false }
+})
 useEventListener(document, 'mousedown', (event: MouseEvent) => {
   if (!menuOpen.value) return
-  const target = event.target as Node
-  if (menuRef.value?.contains(target) || moreRef.value?.contains(target)) return
+  const target = event.target as Element
+  if (menuRef.value?.contains(target) || moreRef.value?.contains(target) || menuLayer.insideAbove(target)) return
   menuOpen.value = false
-})
-useEventListener(document, 'keydown', (event: KeyboardEvent) => {
-  if (event.key !== 'Escape' || !menuOpen.value) return
-  event.preventDefault()
-  menuOpen.value = false
-  moreRef.value?.focus({ preventScroll: true })
 })
 
 onMounted(() => {
@@ -407,35 +420,42 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   position: relative;
   min-width: 0;
 }
-/* From 1024px the page's own one-row toolbar, on TableToolbar's parts: no wrapping, 8px apart, the tags taking the
-   room left; below 1024px TableToolbar's narrow layout applies as it is. */
+/* From 1024px the page's own one-row toolbar, on TableToolbar's compact parts (8px apart, the 220px search box): no
+   wrapping, the tags taking the room left; below 1024px TableToolbar's narrow layout applies as it is. */
 @media (min-width: 1024px) {
   .tb {
     flex-wrap: nowrap;
     align-items: center;
-    gap: 8px;
   }
   /* Its basis stays the search box's, not the shared one (its content, 7r-5): one row whatever the tags, the actions
      at their size and the tags folding into the room they leave. */
   .tb :deep(.table-toolbar__main) {
     flex: 1 1 16rem;
     flex-wrap: nowrap;
-    gap: 8px;
-  }
-  .tb :deep(.table-toolbar__search) {
-    width: auto;
   }
   .tb :deep(.table-toolbar__filters) {
     flex: 1 1 auto;
     flex-wrap: nowrap;
-    gap: 8px;
   }
   .tb :deep(.table-toolbar__filters > .tb-tags) {
     flex: 1 1 0;
   }
   .tb :deep(.table-toolbar__actions) {
     flex-wrap: nowrap;
-    gap: 8px;
+  }
+  /* Its own fixed search box, 220px (160px at 1024–1279, below), not the shared flexible one (12.12-10): this row
+     folds its filters into "more filters" instead. */
+  .tb.table-toolbar--compact :deep(.table-toolbar__search) {
+    flex: none;
+    width: 220px;
+  }
+  /* The direct filters' triggers spaced tighter than the shared sm (10px sides, 6px gap), so a filter's name fits whole
+     at 96 and 88px (12.12-14): 8px before the text, 2px to the chevron, 4px after it (the chevron is drawn 3px inside
+     its 16px box). Text room: width − 2 border − 8 − 2 − 16 − 4, so 64px and 56px, against about 52px for the longest
+     names ("质量状态", "Platform"). */
+  .tb-filters .tb-sel :deep(.select-trigger--sm) {
+    gap: 2px;
+    padding: 0 4px 0 8px;
   }
 }
 .tb-filters {
@@ -476,6 +496,13 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-tags:empty {
     display: none;
   }
+  /* The row scrolls on its own, so the direct filters take their content's width (96–160px): a name such as "质量状态"
+     shows whole, a long chosen value ends in an ellipsis at 160px. */
+  .tb-filters .tb-sel {
+    width: auto;
+    min-width: 96px;
+    max-width: 160px;
+  }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
   .tb-filters {
@@ -498,137 +525,17 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     background: var(--color-line-control);
   }
 }
-.tb-search {
-  position: relative;
-  display: block;
-  flex: none;
-  width: 220px;
-}
-.tb-search__icon {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  color: var(--color-text-muted);
-  pointer-events: none;
-}
-.tb-input {
-  width: 100%;
-  height: var(--control-height);
-  padding: 0 10px 0 30px;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-control);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-body);
-}
-.tb-input::placeholder {
-  color: var(--color-text-muted);
-}
-.tb-input:focus-visible,
-.tb-sel select:focus-visible {
-  outline: 2px solid theme('colors.primary.500');
-  outline-offset: -1px;
-  border-color: transparent;
-}
 .tb-sel {
-  position: relative;
-  display: inline-block;
+  width: 96px;
   flex: none;
 }
-.tb-sel select {
-  width: 96px;
-  height: var(--control-height);
-  padding: 0 28px 0 10px;
-  overflow: hidden;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  appearance: none;
-  background: var(--color-bg-control);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-body);
-  text-overflow: ellipsis;
-}
-.tb-sel select.has-value {
-  color: var(--color-text-primary);
-}
-.tb-sel--full,
-.tb-sel--full select {
+.tb-sel--full {
   width: 100%;
 }
-.tb-sel__icon {
-  position: absolute;
-  top: 50%;
-  right: 9px;
-  width: 12px;
-  height: 12px;
-  margin-top: -6px;
-  color: var(--color-text-secondary);
-  pointer-events: none;
-}
-@media (hover: hover) {
-  .tb-sel select:hover {
-    background: var(--color-bg-control-hover);
-  }
-}
-.tb-btn {
-  display: inline-flex;
-  height: var(--control-height);
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-  transition: background-color var(--motion-fast) var(--ease-out);
-}
-.tb-btn--secondary {
-  border-color: var(--color-line-control);
-  background: var(--color-bg-control);
-  color: var(--color-text-primary);
-}
-.tb-btn--primary {
-  background: theme('colors.primary.500');
-  color: #fff;
-}
-@media (hover: hover) {
-  .tb-btn--secondary:hover {
-    background: var(--color-bg-control-hover);
-  }
-  .tb-btn--primary:hover {
-    background: theme('colors.primary.600');
-  }
-}
-.tb-btn:focus-visible,
-.tb-icon-btn:focus-visible,
 .tb-tag__x:focus-visible,
 .tb-menu__clear:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 2px;
-}
-.tb-icon-btn {
-  display: inline-grid;
-  width: var(--control-height);
-  height: var(--control-height);
-  flex: none;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-control);
-  color: var(--color-text-secondary);
-}
-@media (hover: hover) {
-  .tb-icon-btn:hover {
-    background: var(--color-bg-control-hover);
-    color: var(--color-text-primary);
-  }
 }
 .tb-count {
   min-width: 18px;
@@ -694,10 +601,10 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   min-width: 260px;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-raised);
-  box-shadow: var(--shadow-popover);
+  border: 1px solid var(--color-line-popover);
+  border-radius: var(--radius-popover);
+  background: var(--color-bg-popover);
+  box-shadow: var(--shadow-dropdown);
 }
 .tb-menu__folded {
   display: grid;
@@ -733,22 +640,8 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 }
 @media (hover: hover) {
   .tb-menu__clear:hover {
-    background: var(--color-bg-control-hover);
+    background: var(--color-bg-popover-hover);
     color: var(--color-text-primary);
-  }
-}
-/* Below 1024px (prototype, touch): the search fills its row, controls are 40px high, the tags live in the menu. */
-@media (max-width: 1023px) {
-  .tb-search {
-    width: 100%;
-  }
-  .tb-input {
-    height: 40px;
-    font-size: 15px;
-  }
-  .tb-sel select,
-  .tb-btn {
-    height: 40px;
   }
 }
 /* Touch (7n-3): a tag's remove button reaches 40 x 40 with an invisible area, more of it over its own tag than towards
@@ -769,12 +662,13 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     padding-block: 8px;
   }
 }
-/* 1024–1279: still one row; the search box and filters narrow */
+/* 1024–1279: still one row; the search box and filters narrow (two classes: over the shared compact 220px) */
 @media (min-width: 1024px) and (max-width: 1279px) {
-  .tb-search {
+  .tb.table-toolbar--compact :deep(.table-toolbar__search) {
     width: 160px;
   }
-  .tb-sel select {
+  /* The direct filters on the toolbar only: the fields in "more filters" keep filling their column (12.12-4). */
+  .tb-filters .tb-sel {
     width: 88px;
   }
 }

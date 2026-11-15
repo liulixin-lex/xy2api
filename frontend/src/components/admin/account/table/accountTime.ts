@@ -23,14 +23,13 @@ export function formatRemaining(t: Translate, ms: number): string {
   return t('common.time.countdown.minutes', { m: mins })
 }
 
-/** hh:mm for a time today, else MM-DD hh:mm (for tips). */
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** HH:MM for a time today, else MM-DD HH:MM (for tips): digits only, local time, whatever the interface language (12.12-9). */
 export function formatShortTime(value: string | number | null | undefined): string {
   if (value == null || value === '') return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  const sameDay = date.toDateString() === new Date().toDateString()
-  const options: Intl.DateTimeFormatOptions = sameDay
-    ? { hour: '2-digit', minute: '2-digit', hour12: false }
-    : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
-  return new Intl.DateTimeFormat(undefined, options).format(date)
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  return date.toDateString() === new Date().toDateString() ? clock : `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${clock}`
 }

@@ -4,6 +4,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { AdminUser } from '@/types'
 import UsersView from '../UsersView.vue'
 
+/** A bulk action, from the toolbar's bulk menu (12.9-5), opened first when it is closed. */
+const bulkItem = async (wrapper: ReturnType<typeof mount>, test: string) => {
+  if (!wrapper.find('[data-test="bulk-menu"]').exists()) await wrapper.get('[data-test="bulk-actions"]').trigger('click')
+  return wrapper.get(`[data-test="${test}"]`)
+}
+
 const {
   listUsers,
   toggleStatus,
@@ -224,11 +230,11 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    // Always there, disabled until a row is ticked: the toolbar keeps its rows (7s-4).
-    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeDefined()
+    // The bulk menu's button is disabled until a row is ticked (12.9-5).
+    expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
-    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeUndefined()
-    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    expect((await bulkItem(wrapper, 'bulk-delete-users')).attributes('disabled')).toBeUndefined()
+    await (await bulkItem(wrapper, 'bulk-delete-users')).trigger('click')
     expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkDelete.confirm:1')
     expect(deleteUser).not.toHaveBeenCalled()
 
@@ -257,7 +263,7 @@ describe('admin UsersView', () => {
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="select-43"]').trigger('click')
-    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-delete-users')).trigger('click')
     expect(deleteUser).not.toHaveBeenCalled()
 
     await wrapper.get('[data-test="confirm-delete"]').trigger('click')
@@ -286,7 +292,7 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
     await wrapper.get('[data-test="select-42"]').trigger('click')
-    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-delete-users')).trigger('click')
     listUsers.mockReturnValue(new Promise(() => {})) // the reload after the delete never answers here
     await wrapper.get('[data-test="confirm-delete"]').trigger('click')
     await flushPromises()
@@ -306,9 +312,9 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
     await wrapper.get('[data-test="select-42"]').trigger('click')
-    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-delete-users')).trigger('click')
     await wrapper.get('[data-test="confirm-delete"]').trigger('click')
-    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeDefined()
+    expect((await bulkItem(wrapper, 'bulk-delete-users')).attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-43"]').trigger('click')
     finishDelete()
     await flushPromises()
@@ -349,12 +355,12 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    expect(wrapper.get('[data-test="bulk-disable-users"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="select-43"]').trigger('click')
-    await wrapper.get('[data-test="bulk-disable-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-disable-users')).trigger('click')
     expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkStatus.disableConfirm:2')
     expect(batchUpdateStatus).not.toHaveBeenCalled()
 
@@ -378,13 +384,36 @@ describe('admin UsersView', () => {
     await flushPromises()
     await wrapper.get('[data-test="select-42"]').trigger('click')
 
+    // Attributes and the bulk menu; refresh, filter and column settings are icons at every width (12.9-2).
     const labels = wrapper.findAll('.table-toolbar__label')
-    expect(labels).toHaveLength(7)
+    expect(labels).toHaveLength(2)
     for (const label of labels) {
       expect(label.element.closest('button')!.getAttribute('aria-label')).toBe(label.text())
     }
     const create = wrapper.findAll('button').find((button) => button.text() === 'admin.users.createUser')!
     expect(create.find('.table-toolbar__label').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('folds the four bulk actions into one menu, disabled until a row is ticked, the count on its button (12.9-5)', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    const button = wrapper.get('[data-test="bulk-actions"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="bulk-count"]').classes()).toContain('is-empty')
+
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-test="bulk-count"]').text()).toBe('1')
+    await button.trigger('click')
+    expect(wrapper.findAll('[data-test="bulk-menu"] [role="menuitem"]').map((item) => item.text()))
+      .toEqual(['admin.users.bulkLimits.label', 'admin.users.enable', 'admin.users.disable', 'common.delete'])
+
+    // A sub-layer of the overlay stack: Escape closes it.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.find('[data-test="bulk-menu"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -407,13 +436,13 @@ describe('admin UsersView', () => {
     await flushPromises()
     await wrapper.get('[data-test="select-42"]').trigger('click')
 
-    await wrapper.get('[data-test="bulk-enable-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-enable-users')).trigger('click')
     expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkStatus.enableConfirm:1')
     await wrapper.get('[data-test="cancel-delete"]').trigger('click')
     expect(wrapper.find('[data-test="delete-dialog"]').exists()).toBe(false)
     expect(batchUpdateStatus).not.toHaveBeenCalled()
 
-    await wrapper.get('[data-test="bulk-enable-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-enable-users')).trigger('click')
     await wrapper.get('[data-test="confirm-delete"]').trigger('click')
     await flushPromises()
 
@@ -421,7 +450,7 @@ describe('admin UsersView', () => {
     expect(showError).toHaveBeenCalledWith('database unavailable')
     expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
-    expect(wrapper.get('[data-test="bulk-enable-users"]').attributes('disabled')).toBeUndefined()
+    expect((await bulkItem(wrapper, 'bulk-enable-users')).attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -684,10 +713,10 @@ describe('admin UsersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
-    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeUndefined()
+    expect((await bulkItem(wrapper, 'bulk-edit-limits')).attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -696,7 +725,7 @@ describe('admin UsersView', () => {
     await wrapper.get('[data-test="select-43"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42,43')
 
-    await wrapper.get('[data-test="bulk-edit-limits"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-edit-limits')).trigger('click')
     expect(wrapper.get('[data-test="bulk-modal-ids"]').text()).toBe('42,43')
 
     const callsBeforeSuccess = listUsers.mock.calls.length
@@ -706,7 +735,7 @@ describe('admin UsersView', () => {
 
     expect(listUsers.mock.calls.length).toBeGreaterThan(callsBeforeSuccess)
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
-    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
 })

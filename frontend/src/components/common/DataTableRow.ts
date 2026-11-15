@@ -92,7 +92,7 @@ export default defineComponent({
             'table-row-border hover:bg-surface-hover',
             {
               'cursor-pointer': props.clickable,
-              'bg-primary-50/40 dark:bg-primary-900/10': props.selectable && props.selected
+              'is-selected': props.selectable && props.selected
             },
             props.rowClass?.(props.row, props.index)
           ],

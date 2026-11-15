@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-/** The accounts table's 28×16 switch (scheduling, IQ checks): one soft teal for "on" (spec 7a). */
+/** The accounts table's 28×16 switch (scheduling, IQ checks): the brand teal for "on", a step deeper under the pointer (12.2). */
 defineProps<{ checked: boolean; label: string; disabled?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ toggle: [next: boolean] }>()
 </script>
@@ -50,6 +50,12 @@ const emit = defineEmits<{ toggle: [next: boolean] }>()
 }
 .account-switch[aria-checked='true'] {
   background: var(--color-switch-on);
+}
+/* On, under the pointer: a step deeper (12.2). Off, busy and disabled look as they did. */
+@media (hover: hover) {
+  .account-switch[aria-checked='true']:not(:disabled):not([aria-busy='true']):hover {
+    background: var(--color-switch-on-hover);
+  }
 }
 .account-switch[aria-checked='true'] .account-switch__thumb {
   transform: translateX(12px);

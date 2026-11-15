@@ -2,88 +2,95 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <TableToolbar>
+        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create. -->
+        <TableToolbar compact>
           <template #status>
             <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
           </template>
           <template #search>
-            <div class="relative">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
+            <label class="table-toolbar__search-box">
+              <span class="sr-only">{{ t("admin.groups.searchGroups") }}</span>
+              <Icon name="search" size="sm" class="table-toolbar__search-icon" />
               <input
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
+                class="table-toolbar__input"
                 @input="handleSearch"
               />
-            </div>
+            </label>
           </template>
           <template #filters>
             <Select
               v-model="filters.platform"
+              size="sm"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
             <Select
               v-model="filters.status"
+              size="sm"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
             <Select
               v-if="!authStore.isSimpleMode"
               v-model="filters.is_exclusive"
+              size="sm"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="applyGroupFilters" />
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="table-toolbar__filter" @change="applyGroupFilters" />
           </template>
 
           <template #actions>
             <button
+              type="button"
               @click="reloadGroups"
               :disabled="loading"
-              class="btn btn-secondary table-toolbar__icon"
+              class="table-toolbar__icon-btn table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >
               <Icon
                 name="refresh"
-                size="md"
+                size="sm"
                 :class="loading ? 'animate-spin' : ''"
               />
             </button>
             <div class="relative" ref="columnDropdownRef">
               <button
+                type="button"
                 @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary"
+                class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.groups.columnSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
                 v-tip="t('admin.groups.columnSettings')"
               >
                 <!-- The columns icon of the other pages' column settings: "grid" is the category manager's (7r-7). -->
-                <svg class="mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
-                <span class="table-toolbar__label">{{ t("admin.groups.columnSettings") }}</span>
               </button>
               <div
                 v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
+                <!-- A multi-select list: a shown column is told by its brand check alone, without the selected background
+                     or text colour (12.6-5). -->
                 <button
                   v-for="col in toggleableColumns"
                   :key="col.key"
+                  type="button"
                   @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300"
                 >
                   <span>{{ col.label }}</span>
                   <Icon
@@ -96,24 +103,27 @@
                 </button>
               </div>
             </div>
-            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
+            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
               v-if="!authStore.isSimpleMode && canManage"
+              type="button"
               @click="openSortModal"
-              class="btn btn-secondary"
+              class="table-toolbar__btn table-toolbar__btn--secondary"
               :aria-label="t('admin.groups.sortOrder')"
               v-tip="t('admin.groups.sortOrder')"
             >
-              <Icon name="arrowsUpDown" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t("admin.groups.sortOrder") }}</span>
+              <Icon name="arrowsUpDown" size="sm" />
+              <span class="table-toolbar__label table-toolbar__label--wide">{{ t("admin.groups.sortOrder") }}</span>
             </button>
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
             <button
               v-if="canManage"
+              type="button"
               @click="openCreateModal"
-              class="btn btn-primary max-lg:gap-1.5 max-lg:px-3"
+              class="table-toolbar__btn table-toolbar__btn--primary"
               data-tour="groups-create-btn"
             >
-              <Icon name="plus" size="md" class="mr-2 max-lg:mr-0 max-lg:h-4 max-lg:w-4" />
+              <Icon name="plus" size="sm" />
               {{ t("admin.groups.createGroup") }}
             </button>
           </template>

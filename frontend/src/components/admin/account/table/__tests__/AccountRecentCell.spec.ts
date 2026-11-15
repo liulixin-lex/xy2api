@@ -5,15 +5,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountRecentCell from '../AccountRecentCell.vue'
+import { formatShortTime } from '../accountTime'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
+import type { TipContent } from '@/utils/tip'
 
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
 }))
 
-type Quality = Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'>
+type Quality = Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'>
 const quality = (patch: Partial<Quality> = {}): Quality => ({
+  reset_at: null,
   ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
   error: { n: 100, short: false, red: false, rate: 0.042 },
   cache: { n: 40, short: false, red: false, ratio: 0.8 },
@@ -32,13 +35,36 @@ describe('AccountRecentCell', () => {
       { dim: 'error', text: '12%', cls: [] },
       { dim: 'cache', text: '80%', cls: [] }
     ])
-    const value = mountCell(quality()).get('[data-dim="ttfo"]').element
+  })
+
+  // One tip card for the whole cell (12.7): the window, then a row per dimension with its value and sample count.
+  it('has one card: the last hour, each dimension\'s value and samples, muted with too few samples, "—" without a value', () => {
+    const cell = mountCell(quality({ cache: { n: 3, short: true, red: false, ratio: 0.2 }, error: { n: 0, short: true, red: false, rate: null } }))
+    expect(cell.findAll('.recent__v').some((value) => '__tipHandlers' in value.element)).toBe(false)
     vi.useFakeTimers()
-    value.dispatchEvent(new Event('mouseenter'))
+    cell.element.dispatchEvent(new Event('mouseenter'))
     vi.advanceTimersByTime(400)
     vi.useRealTimers()
-    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.table.recentValue:{"label":"admin.accounts.table.dims.ttfo","value":"2.8s"}\nadmin.accounts.table.recentScope')
-    value.dispatchEvent(new Event('mouseleave'))
+    const tip = document.getElementById('sq-tip')!
+    expect(tip.querySelector('.sq-tip__title')!.textContent).toBe('admin.accounts.table.tip.recentTitle')
+    expect(Array.from(tip.querySelectorAll('.sq-tip__c'), (el) => el.textContent)).toEqual([
+      'admin.accounts.table.dims.ttfo', '2.8s', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.dims.error', '—', 'admin.accounts.table.tip.countShort:{"n":0}',
+      'admin.accounts.table.dims.cache', '20%', 'admin.accounts.table.tip.countShort:{"n":3}'
+    ])
+    expect(Array.from(tip.querySelectorAll('.sq-tip__tone--muted'), (el) => el.textContent)).toEqual(['—', '20%'])
+    cell.element.dispatchEvent(new Event('mouseleave'))
+  })
+
+  it('names the reset time when the stats were reset within the hour; no card without quality data', () => {
+    const card = (q: Quality | null) => {
+      const value = (mountCell(q).element as HTMLElement & { __tipText?: () => TipContent }).__tipText!()
+      return typeof value === 'string' ? value : value.title
+    }
+    const reset = new Date(Date.now() - 20 * 60_000).toISOString()
+    expect(card(quality({ reset_at: reset }))).toBe(`admin.accounts.table.tip.recentSince:${JSON.stringify({ time: formatShortTime(reset) })}`)
+    expect(card(quality({ reset_at: new Date(Date.now() - 2 * 3_600_000).toISOString() }))).toBe('admin.accounts.table.tip.recentTitle')
+    expect(card(null)).toBe('')
   })
 
   it('takes its column\'s size, never the viewport\'s: 72px, 84px only when the table has the roomy widths (7q-5)', () => {
