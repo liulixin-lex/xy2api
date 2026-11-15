@@ -140,8 +140,12 @@ func TestFoundationTerminalUnknownMapping(t *testing.T) {
 				want["anthropic"] = [2]string{"", "tool_use"}
 			}
 			for target, expected := range want {
+				wantMapped := source[0] != target
+				if !wantMapped {
+					expected = [2]string{source[1], source[2]}
+				}
 				status, reason, mapped, err := ProjectTerminalWithMapping(source[0], target, source[1], source[2], tools, false)
-				if err != nil || !mapped || [2]string{status, reason} != expected {
+				if err != nil || mapped != wantMapped || [2]string{status, reason} != expected {
 					t.Fatalf("%v -> %s tools=%t: %s/%s mapped=%t err=%v; want %v", source, target, tools, status, reason, mapped, err, expected)
 				}
 				oldStatus, oldReason, oldErr := ProjectTerminal(source[0], target, source[1], source[2], tools, false)
@@ -169,6 +173,28 @@ func TestFoundationTerminalGeminiOther(t *testing.T) {
 			status, reason, mapped, err := ProjectTerminalWithMapping("gemini", target, "", "OTHER", tools, false)
 			if err != nil || !mapped || [2]string{status, reason} != expected {
 				t.Fatalf("OTHER -> %s tools=%t: %s/%s mapped=%t err=%v; want %v", target, tools, status, reason, mapped, err, expected)
+			}
+		}
+	}
+}
+
+func TestFoundationTerminalSameProtocolUnknown(t *testing.T) {
+	for _, source := range [][3]string{
+		{"chat", "", "eos_token"}, {"chat", "", "model_length"},
+		{"anthropic", "", "some_future_reason"},
+		{"gemini", "", "FUTURE_REASON"}, {"gemini", "", "OTHER"},
+		{"responses", "completed", "future_reason"},
+		{"responses", "incomplete", "future_reason"},
+		{"responses", "future_status", ""},
+	} {
+		for _, tools := range []bool{false, true} {
+			status, reason, mapped, err := ProjectTerminalWithMapping(source[0], source[0], source[1], source[2], tools, false)
+			if err != nil || mapped || status != source[1] || reason != source[2] {
+				t.Fatalf("same protocol %v tools=%t: %s/%s mapped=%t err=%v", source, tools, status, reason, mapped, err)
+			}
+			oldStatus, oldReason, oldErr := ProjectTerminal(source[0], source[0], source[1], source[2], tools, false)
+			if oldErr != nil || oldStatus != status || oldReason != reason {
+				t.Fatalf("compatibility wrapper differs: %s/%s %v", oldStatus, oldReason, oldErr)
 			}
 		}
 	}

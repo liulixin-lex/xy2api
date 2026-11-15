@@ -11,7 +11,8 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 // ProjectTerminalWithMapping also reports whether an unlisted nonempty source
 // status/reason used the existing mapper's normal-completion default. Callers
 // record one map notice when unknownReasonMapped is true. Explicit table errors
-// remain errors. As with ProjectTerminal, callers must authenticate termination.
+// remain errors. Unlisted same-protocol values pass through with mapped=false.
+// As with ProjectTerminal, callers must authenticate termination.
 func ProjectTerminalWithMapping(source, target, status, reason string, hasCompleteTools, hasRefusal bool) (targetStatus, targetReason string, unknownReasonMapped bool, err error) {
 	fail := func() (string, string, bool, error) {
 		return "", "", false, &UpstreamConversionError{Field: "finish_reason", Reason: "terminal reason has no equivalent", SourceProtocol: source, SourceReason: reason}
@@ -100,6 +101,9 @@ func ProjectTerminalWithMapping(source, target, status, reason string, hasComple
 		default:
 			unknownReasonMapped = true
 		}
+	}
+	if source == target && unknownReasonMapped {
+		return status, reason, false, nil
 	}
 	if toolReason && !hasCompleteTools {
 		return fail()
