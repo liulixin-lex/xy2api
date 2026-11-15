@@ -1167,3 +1167,43 @@ func TestM4AnthropicRequestHandoffs(t *testing.T) {
 		}
 	})
 }
+
+func TestM4AnthropicMediaHandoffs(t *testing.T) {
+	input := json.RawMessage(`[{"role":"user","content":[{"type":"input_image","image_url":"https://example.test/a.png","detail":"high"}]},{"type":"function_call","call_id":"call_a","name":"read","arguments":"{}"},{"type":"function_call_output","call_id":"call_a","output":[{"type":"input_file","file_url":"https://example.test/a.pdf","detail":"low"}]}]`)
+	req := &ResponsesRequest{Model: "m", Input: input}
+	original := string(input)
+	var notices []ConversionNotice
+	out, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(out.Messages)
+	if !strings.Contains(string(raw), "a.png") || !strings.Contains(string(raw), "a.pdf") || strings.Contains(string(raw), "detail") || string(req.Input) != original {
+		t.Fatalf("media: %s", raw)
+	}
+	want := []ConversionNotice{{Field: "input[0].content[0].detail", Action: "omit"}, {Field: "input[2].output[0].detail", Action: "omit"}}
+	if !reflect.DeepEqual(notices, want) {
+		t.Fatalf("notices=%#v", notices)
+	}
+	if _, err := ResponsesToAnthropicRequest(req); err == nil {
+		t.Fatal("legacy detail rejection changed")
+	}
+	req.Input = json.RawMessage(`[{"role":"user","content":[{"type":"input_file","file_id":"provider"}]}]`)
+	if _, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{}); err == nil || !strings.Contains(err.Error(), "input[0].content[0].file_id") {
+		t.Fatalf("field path: %v", err)
+	}
+	req.Input = json.RawMessage(`[{"type":"reasoning","content":[{"type":"reasoning_text","text":"private"}],"encrypted_content":"opaque"},{"role":"assistant","content":[{"type":"output_text","text":"answer"}]}]`)
+	old, e := ResponsesToAnthropicRequest(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	current, e := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	a, _ := json.Marshal(old)
+	b, _ := json.Marshal(current)
+	if string(a) != string(b) {
+		t.Fatalf("zero options reasoning changed: %s / %s", a, b)
+	}
+}

@@ -279,3 +279,5 @@ Responses 流式响应中的 thinking 摘要先宣布 part，再发送文本增�
 Chat、Anthropic API Key 转换桥按同一停因表投影非流与流式终态：长度或上下文上限为 incomplete，过滤保留过滤原因，拒绝保留正文；无法表达的停因返回转换错误。Chat refusal 转为 Responses 的正式 refusal 分片，转为 Messages 时保留为正文。
 
 Claude Fable/Mythos 5.2 的 API Key 桥请求与 5.5 一样回放网关封装的已签名 thinking；任意 OpenAI 密文不按 Anthropic 签名解包。
+
+API Key 转换桥对最终协议无法表示的图片或文件 detail 提示省略并记录字段路径，媒体本身保留；其他媒体编码错误仍指出原输入字段。未确认最终目标支持明文 reasoning 时，沿原历史表示，不解密普通密文。
