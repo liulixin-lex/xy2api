@@ -60,6 +60,8 @@ Chat 的合法 `stop` 字符串或数组在最终 Responses 请求中省略并�
 
 Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_tokens` 取首个非 null 值，预留与转换使用相同顺序；选中值必须为正整数，落选的合法别名记录省略。
 
+用量中未提供的计数仅在内部记录为缺失；对外 JSON 和流式用量保留原计数、字段及合计补和，未知来源也维持原输出。
+
 ## 客户端配置
 
 ### Codex CLI

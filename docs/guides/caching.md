@@ -248,3 +248,5 @@ gateway:
 - 旧版的全局 1 小时注入、消息断点清理重建与 OAuth 计费补贴已退出运行路径。依赖这些旧行为的部署需要改为配置分组自动补缓存；需要保留补贴时，改用账号的「缓存写入计费分类覆盖」。旧版精确规则升级后只保留分组选择，开关为关闭，需要管理员重新开启。
 - 迁移 `280_drop_cache_northstar.sql` 删除 `cache_trace_hourly`、`cache_observability_events`、`cache_northstar_hours`、`cache_northstar_rollup_state`、`cache_northstar_hourly` 五张缓存观测表及其索引和序列，数据不可恢复，升级前请按常规流程备份。
 - 回退到旧版本前，先停用自动补缓存与新的 TTL 偏好入口；旧程序可以忽略新增列，但不执行新的 TTL 语义，不能视为行为等价。不需要删除新列，也不回算历史账单。
+
+主用量存在位仅记录来源，不改变缓存用量解析的既有来源优先级，也不改变对外计数与补和。
