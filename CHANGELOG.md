@@ -54,21 +54,25 @@
 
 - Messages 对已认证的非标准结束原因保持原默认停因兼容，并记录映射降级；明确失败与取消仍按错误结束。
 
-- Messages 保留正式拒答正文并使用对应停因，截断、过滤和上游失败不再被转换为自然完成。
+- Messages 转 Responses 时，工具的显式 `strict: true` 仅在各层对象禁止额外属性且所有属性必填时保留，否则按 `false` 发送并记录降级；显式 `false` 与未指定照旧，`allowed_callers` 中无法表达的限制省略并记录，不是字符串数组时返回 400。
 
-- Messages 思考内容优先使用 summary，仅在没有 summary 时恢复原始 reasoning 文本，避免同一项重复输出两种内容。
+- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
 
-- Messages 搜索结果保留上游已返回的有效来源与页面 URL，非流式和流式使用相同投影。
+- Messages 转 Responses 时，流式并行工具调用不再丢失第一个工具迟到的参数，各工具按顺序完整交付。
 
-- Messages 的非流式与流式响应均保留 custom 工具调用，自由文本和空输入按同一对象格式交付。
+- Messages 转 Responses 时，上游生成的工具参数不是合法 JSON 对象时改为返回错误，不再作为可执行的工具调用交给客户端；成功结束的空参数仍按 `{}` 交付。
 
-- Messages 不再把上游生成的坏 JSON 或非对象工具参数当作可执行调用，成功结束的空参数仍兼容为空对象。
+- Messages 转 Responses 时，流式工具参数的最终值与已发出的增量矛盾时改为返回错误，最终值只多出尾部时补发一次尾部。
 
-- Messages 工具参数的完成值与已交付增量矛盾时不再被当作正常完成，缺失的兼容尾部只补发一次。
+- Messages 转 Responses 时，非流式响应中的 custom 工具调用不再丢失，流式不再把自由文本当作 JSON 参数输出，输入统一包装为 `{"input":"原文"}`。
 
-- Messages 并行工具调用不再因后续工具提前开块而丢掉首工具迟到的完整参数。
+- Messages 转 Responses 时，网页搜索结果带回上游实际返回的来源链接与标题，不再总是空结果。
 
-- Messages 转 Responses 保留工具显式 strict，缺省仍为 false；无法表达的 allowed_callers 字符串列表省略限制并记录，工具声明与 schema 保留。
+- Messages 转 Responses 时，上游只返回原始推理文本的思考内容不再丢失，同时返回摘要时只输出摘要；流式的原始推理文本改为在该项结束时一次给出。
+
+- Messages 转 Responses 时保留上游的拒答正文并以 `refusal` 结束，内容过滤与无原因的截断不再报成 `end_turn`，流式遇到上游失败或取消时以错误结束。
+
+- Messages 转 Responses 时，上游返回未列出的非标准结束原因仍按正常结束（有完整工具调用时为 `tool_use`）返回，并记录一条映射降级。
 
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 
