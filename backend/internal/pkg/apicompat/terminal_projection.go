@@ -2,9 +2,19 @@ package apicompat
 
 // ProjectTerminal projects authenticated terminal evidence between protocols.
 // Readers remain responsible for proving that an otherwise empty reason ended.
+// Call ProjectTerminalWithMapping when the caller records conversion notices.
 func ProjectTerminal(source, target, status, reason string, hasCompleteTools, hasRefusal bool) (targetStatus, targetReason string, err error) {
-	fail := func() (string, string, error) {
-		return "", "", &UpstreamConversionError{Field: "finish_reason", Reason: "terminal reason has no equivalent", SourceProtocol: source, SourceReason: reason}
+	targetStatus, targetReason, _, err = ProjectTerminalWithMapping(source, target, status, reason, hasCompleteTools, hasRefusal)
+	return targetStatus, targetReason, err
+}
+
+// ProjectTerminalWithMapping also reports whether an unlisted nonempty source
+// status/reason used the existing mapper's normal-completion default. Callers
+// record one map notice when unknownReasonMapped is true. Explicit table errors
+// remain errors. As with ProjectTerminal, callers must authenticate termination.
+func ProjectTerminalWithMapping(source, target, status, reason string, hasCompleteTools, hasRefusal bool) (targetStatus, targetReason string, unknownReasonMapped bool, err error) {
+	fail := func() (string, string, bool, error) {
+		return "", "", false, &UpstreamConversionError{Field: "finish_reason", Reason: "terminal reason has no equivalent", SourceProtocol: source, SourceReason: reason}
 	}
 	validProtocol := func(p string) bool {
 		switch p {
@@ -22,9 +32,7 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 	case "responses":
 		switch status {
 		case "completed":
-			if reason != "" {
-				return fail()
-			}
+			unknownReasonMapped = reason != ""
 		case "incomplete":
 			switch reason {
 			case "", "max_output_tokens":
@@ -32,10 +40,12 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 			case "content_filter":
 				semantic = "filter"
 			default:
-				return fail()
+				unknownReasonMapped = true
 			}
-		default:
+		case "", "failed", "cancelled", "canceled":
 			return fail()
+		default:
+			unknownReasonMapped = true
 		}
 	case "chat":
 		if status != "" {
@@ -50,7 +60,7 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 		case "content_filter":
 			semantic = "filter"
 		default:
-			return fail()
+			unknownReasonMapped = true
 		}
 	case "anthropic":
 		if status != "" {
@@ -66,11 +76,11 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 			semantic = "refusal"
 		case "pause_turn":
 			if target == source {
-				return "", reason, nil
+				return "", reason, unknownReasonMapped, nil
 			}
 			return fail()
 		default:
-			return fail()
+			unknownReasonMapped = true
 		}
 	case "gemini":
 		if status != "" {
@@ -84,11 +94,13 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 			semantic = "filter"
 		case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "TOO_MANY_TOOL_CALLS":
 			if target == source {
-				return "", reason, nil
+				return "", reason, unknownReasonMapped, nil
 			}
 			return fail()
-		default:
+		case "OTHER":
 			return fail()
+		default:
+			unknownReasonMapped = true
 		}
 	}
 	if toolReason && !hasCompleteTools {
@@ -102,60 +114,60 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 		switch semantic {
 		case "length":
 			if source == "responses" && reason == "" {
-				return "incomplete", "", nil
+				return "incomplete", "", unknownReasonMapped, nil
 			}
-			return "incomplete", "max_output_tokens", nil
+			return "incomplete", "max_output_tokens", unknownReasonMapped, nil
 		case "filter":
-			return "incomplete", "content_filter", nil
+			return "incomplete", "content_filter", unknownReasonMapped, nil
 		default:
-			return "completed", "", nil
+			return "completed", "", unknownReasonMapped, nil
 		}
 	case "chat":
 		switch semantic {
 		case "length":
-			return "", "length", nil
+			return "", "length", unknownReasonMapped, nil
 		case "filter":
-			return "", "content_filter", nil
+			return "", "content_filter", unknownReasonMapped, nil
 		case "refusal":
-			return "", "stop", nil
+			return "", "stop", unknownReasonMapped, nil
 		}
 		if source == target && reason == "function_call" {
-			return "", reason, nil
+			return "", reason, unknownReasonMapped, nil
 		}
 		if hasCompleteTools {
-			return "", "tool_calls", nil
+			return "", "tool_calls", unknownReasonMapped, nil
 		}
-		return "", "stop", nil
+		return "", "stop", unknownReasonMapped, nil
 	case "anthropic":
 		switch semantic {
 		case "length":
 			if source == target && reason == "model_context_window_exceeded" {
-				return "", reason, nil
+				return "", reason, unknownReasonMapped, nil
 			}
-			return "", "max_tokens", nil
+			return "", "max_tokens", unknownReasonMapped, nil
 		case "filter", "refusal":
-			return "", "refusal", nil
+			return "", "refusal", unknownReasonMapped, nil
 		}
 		if source == target && reason == "stop_sequence" {
-			return "", reason, nil
+			return "", reason, unknownReasonMapped, nil
 		}
 		if hasCompleteTools {
-			return "", "tool_use", nil
+			return "", "tool_use", unknownReasonMapped, nil
 		}
-		return "", "end_turn", nil
+		return "", "end_turn", unknownReasonMapped, nil
 	case "gemini":
 		switch semantic {
 		case "length":
-			return "", "MAX_TOKENS", nil
+			return "", "MAX_TOKENS", unknownReasonMapped, nil
 		case "filter":
 			if source == target {
-				return "", reason, nil
+				return "", reason, unknownReasonMapped, nil
 			}
-			return "", "SAFETY", nil
+			return "", "SAFETY", unknownReasonMapped, nil
 		case "refusal":
-			return "", "SAFETY", nil
+			return "", "SAFETY", unknownReasonMapped, nil
 		}
-		return "", "STOP", nil
+		return "", "STOP", unknownReasonMapped, nil
 	}
 	return fail()
 }

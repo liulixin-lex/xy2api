@@ -50,8 +50,8 @@ func TestFoundationTerminalProjection(t *testing.T) {
 		cases = append(cases, terminalCase{"gemini", "", reason, false, false, [4]string{"ERR", "ERR", "ERR", "/" + reason}})
 	}
 	for _, source := range [][3]string{
-		{"responses", "failed", ""}, {"responses", "cancelled", ""}, {"responses", "canceled", ""}, {"responses", "unknown", ""}, {"responses", "completed", "unknown"}, {"responses", "incomplete", "unknown"}, {"responses", "", ""},
-		{"chat", "", "unknown"}, {"anthropic", "", "unknown"}, {"gemini", "", "OTHER"}, {"gemini", "", "unknown"},
+		{"responses", "failed", ""}, {"responses", "cancelled", ""}, {"responses", "canceled", ""}, {"responses", "", ""},
+		{"gemini", "", "OTHER"},
 		{"chat", "", "tool_calls"}, {"chat", "", "function_call"}, {"anthropic", "", "tool_use"}, {"bad", "", "stop"},
 	} {
 		cases = append(cases, terminalCase{source[0], source[1], source[2], false, false, [4]string{"ERR", "ERR", "ERR", "ERR"}})
@@ -59,7 +59,10 @@ func TestFoundationTerminalProjection(t *testing.T) {
 	for _, tc := range cases {
 		for i, target := range targets {
 			t.Run(tc.source+"/"+tc.status+"/"+tc.reason+"/"+target, func(t *testing.T) {
-				status, reason, err := ProjectTerminal(tc.source, target, tc.status, tc.reason, tc.tools, tc.refusal)
+				status, reason, mapped, err := ProjectTerminalWithMapping(tc.source, target, tc.status, tc.reason, tc.tools, tc.refusal)
+				if mapped {
+					t.Fatal("known terminal must not be marked unknown")
+				}
 				if tc.want[i] == "ERR" {
 					var conversion *UpstreamConversionError
 					if !errors.As(err, &conversion) || status != "" || reason != "" {
@@ -99,6 +102,54 @@ func TestFoundationToolArguments(t *testing.T) {
 	} {
 		if err := ValidateToolArguments(tc.kind, tc.raw, tc.object, tc.opaque); (err == nil) != tc.ok {
 			t.Fatal(tc, err)
+		}
+	}
+}
+
+func TestFoundationTerminalUnknownMapping(t *testing.T) {
+	// These are the pre-foundation direction mappers, retained by their owners.
+	for _, reason := range []string{"eos_token", "model_length"} {
+		for _, tools := range []bool{false, true} {
+			var blocks []AnthropicContentBlock
+			if tools {
+				blocks = []AnthropicContentBlock{{Type: "tool_use"}}
+			}
+			want := chatFinishReasonToAnthropicStopReason(reason, blocks)
+			if other := ccFinishReasonToAnthropicStopReason(reason, tools); other != want {
+				t.Fatalf("baseline mappers disagree: %s/%s", want, other)
+			}
+			status, got, mapped, err := ProjectTerminalWithMapping("chat", "anthropic", "", reason, tools, false)
+			if err != nil || status != "" || got != want || !mapped {
+				t.Fatalf("%s tools=%t: %s/%s mapped=%t err=%v; want %s", reason, tools, status, got, mapped, err, want)
+			}
+		}
+	}
+	status, reason, mapped, err := ProjectTerminalWithMapping("anthropic", "responses", "", "some_future_reason", false, false)
+	if want := anthropicStopReasonToResponsesStatus("some_future_reason", nil); err != nil || status != want || reason != "" || !mapped {
+		t.Fatalf("Anthropic future: %s/%s mapped=%t err=%v; want %s", status, reason, mapped, err, want)
+	}
+	// Each target keeps its own normal finish vocabulary; tools remain complete.
+	for _, source := range [][3]string{
+		{"chat", "", "eos_token"}, {"chat", "", "model_length"},
+		{"anthropic", "", "some_future_reason"}, {"gemini", "", "FUTURE_REASON"},
+		{"responses", "future_status", ""}, {"responses", "completed", "future_reason"}, {"responses", "incomplete", "future_reason"},
+	} {
+		for _, tools := range []bool{false, true} {
+			want := map[string][2]string{"responses": {"completed", ""}, "chat": {"", "stop"}, "anthropic": {"", "end_turn"}, "gemini": {"", "STOP"}}
+			if tools {
+				want["chat"] = [2]string{"", "tool_calls"}
+				want["anthropic"] = [2]string{"", "tool_use"}
+			}
+			for target, expected := range want {
+				status, reason, mapped, err := ProjectTerminalWithMapping(source[0], target, source[1], source[2], tools, false)
+				if err != nil || !mapped || [2]string{status, reason} != expected {
+					t.Fatalf("%v -> %s tools=%t: %s/%s mapped=%t err=%v; want %v", source, target, tools, status, reason, mapped, err, expected)
+				}
+				oldStatus, oldReason, oldErr := ProjectTerminal(source[0], target, source[1], source[2], tools, false)
+				if oldErr != nil || oldStatus != status || oldReason != reason {
+					t.Fatalf("compatibility wrapper differs: %s/%s %v", oldStatus, oldReason, oldErr)
+				}
+			}
 		}
 	}
 }
