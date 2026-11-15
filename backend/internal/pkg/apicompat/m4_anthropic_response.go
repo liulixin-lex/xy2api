@@ -15,7 +15,7 @@ func AnthropicToResponsesResponseWithBridgeOptions(resp *AnthropicResponse, opts
 			out.Usage.CacheWriteSource = "cache_creation_input_tokens"
 		}
 		var err error
-		out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("anthropic", AnthropicStopReasonString(resp.StopReason), bridgeAnthropicHasTools(resp.Content), false)
+		out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("anthropic", AnthropicStopReasonString(resp.StopReason), bridgeAnthropicHasTools(resp.Content), false, opts.Record)
 		if err != nil {
 			return nil, err
 		}
@@ -34,6 +34,7 @@ func AnthropicEventToResponsesEventsWithBridgeOptions(event *AnthropicStreamEven
 	}
 	if !state.CreatedSent {
 		state.Bridge = opts.Bridge
+		state.bridgeRecord = opts.Record
 	}
 	return AnthropicEventToResponsesEvents(event, state)
 }
@@ -44,6 +45,7 @@ func FinalizeAnthropicResponsesStreamWithBridgeOptions(state *AnthropicEventToRe
 	}
 	if !state.CreatedSent {
 		state.Bridge = opts.Bridge
+		state.bridgeRecord = opts.Record
 	}
 	if bridgeEnabled(state.Bridge) && !state.CompletedSent && state.StopReason == "" {
 		return closeCurrentResponsesItem(state)

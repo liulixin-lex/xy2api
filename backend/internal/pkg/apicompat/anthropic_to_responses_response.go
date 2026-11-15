@@ -169,6 +169,7 @@ func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicC
 // AnthropicEventToResponsesState tracks state for converting a sequence of
 // Anthropic SSE events into Responses SSE events.
 type AnthropicEventToResponsesState struct {
+	bridgeRecord      func(ConversionNotice)
 	bridgeErr         error
 	bridgeSummaryOpen bool
 
@@ -275,7 +276,7 @@ func FinalizeAnthropicResponsesStream(state *AnthropicEventToResponsesState) []R
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
 	if bridgeEnabled(state.Bridge) {
 		var err error
-		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false)
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false, state.bridgeRecord)
 		if err != nil {
 			state.bridgeErr = err
 			return events
@@ -611,7 +612,7 @@ func anthToResHandleMessageStop(state *AnthropicEventToResponsesState) []Respons
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
 	if bridgeEnabled(state.Bridge) {
 		var err error
-		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false)
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false, state.bridgeRecord)
 		if err != nil {
 			state.bridgeErr = err
 			return events

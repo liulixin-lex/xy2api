@@ -1018,9 +1018,9 @@ func TestM4TerminalReasonProjection(t *testing.T) {
 		bad                            bool
 	}{
 		{"chat", "stop", "completed", "", false}, {"chat", "length", "incomplete", "max_output_tokens", false},
-		{"chat", "content_filter", "incomplete", "content_filter", false}, {"chat", "unknown", "", "", true}, {"chat", "", "completed", "", false},
+		{"chat", "content_filter", "incomplete", "content_filter", false}, {"chat", "unknown", "completed", "", false}, {"chat", "", "completed", "", false},
 		{"anthropic", "max_tokens", "incomplete", "max_output_tokens", false}, {"anthropic", "model_context_window_exceeded", "incomplete", "max_output_tokens", false},
-		{"anthropic", "refusal", "completed", "", false}, {"anthropic", "end_turn", "completed", "", false}, {"anthropic", "pause_turn", "", "", true}, {"anthropic", "unknown", "", "", true}, {"anthropic", "", "completed", "", false},
+		{"anthropic", "refusal", "completed", "", false}, {"anthropic", "end_turn", "completed", "", false}, {"anthropic", "pause_turn", "", "", true}, {"anthropic", "unknown", "completed", "", false}, {"anthropic", "", "completed", "", false},
 	} {
 		t.Run(tc.source+"/"+tc.reason, func(t *testing.T) {
 			var buffered *ResponsesResponse
@@ -1426,4 +1426,76 @@ func TestM4ToolChoiceSubset(t *testing.T) {
 	if out.Tools[0].Name == "工具" || chatReq.Tools[0].Function.Name != "工具" {
 		t.Fatal("Chat source alias/copy failed")
 	}
+}
+
+func TestM4UnknownTerminalMapping(t *testing.T) {
+	var notices []ConversionNotice
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}, Record: func(n ConversionNotice) { notices = append(notices, n) }}
+	check := func(field string) {
+		t.Helper()
+		if !reflect.DeepEqual(notices, []ConversionNotice{{Field: field, Action: "map"}}) {
+			t.Fatalf("notices=%#v", notices)
+		}
+		notices = nil
+	}
+	resp := &ChatCompletionsResponse{Choices: []ChatChoice{{FinishReason: "vendor_done", Message: ChatMessage{Content: json.RawMessage(`"kept"`)}}}}
+	out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts)
+	if err != nil || out.Status != "completed" {
+		t.Fatalf("unknown: %#v %v", out, err)
+	}
+	check("finish_reason")
+	anth, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(resp, "m", opts)
+	if err != nil || AnthropicStopReasonString(anth.StopReason) != "end_turn" {
+		t.Fatalf("unknown: %#v %v", anth, err)
+	}
+	check("finish_reason")
+	for _, tools := range []bool{false, true} {
+		st := NewChatCompletionsToResponsesStreamState("m")
+		st.Bridge = opts.Bridge
+		st.SetConversionRecorder(opts.Record)
+		st.FinishReason = "vendor_done"
+		ast := NewChatCompletionsToAnthropicStreamState("m")
+		ast.Bridge = opts.Bridge
+		ast.SetConversionRecorder(opts.Record)
+		ast.FinishReason = "vendor_done"
+		if tools {
+			var chunk ChatCompletionsChunk
+			_ = json.Unmarshal([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"name":"f","arguments":"{}"}}]}}]}`), &chunk)
+			ChatCompletionsChunkToResponsesEvents(&chunk, st)
+			ChatCompletionsChunkToAnthropicEvents(&chunk, ast)
+		}
+		events := FinalizeChatCompletionsResponsesStream(st)
+		if st.Err() != nil || len(events) == 0 || events[len(events)-1].Type != "response.completed" {
+			t.Fatalf("unknown stream: %v %#v", st.Err(), events)
+		}
+		if len(FinalizeChatCompletionsResponsesStream(st)) != 0 {
+			t.Fatal("duplicate terminal")
+		}
+		check("finish_reason")
+		ae := FinalizeChatCompletionsAnthropicStream(ast)
+		if ast.Err() != nil || len(ae) < 2 {
+			t.Fatalf("unknown stream: %v %#v", ast.Err(), ae)
+		}
+		want := "end_turn"
+		if tools {
+			want = "tool_use"
+		}
+		if ae[len(ae)-2].Delta.StopReason != want {
+			t.Fatal("wrong tool projection")
+		}
+		check("finish_reason")
+	}
+	_, err = AnthropicToResponsesResponseWithBridgeOptions(&AnthropicResponse{StopReason: AnthropicStopReasonPtr("vendor_done")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("stop_reason")
+	state := NewAnthropicEventToResponsesState()
+	AnthropicEventToResponsesEventsWithBridgeOptions(&AnthropicStreamEvent{Type: "message_start", Message: &AnthropicResponse{ID: "fixed"}}, state, opts)
+	state.StopReason = "vendor_done"
+	events := AnthropicEventToResponsesEventsWithBridgeOptions(&AnthropicStreamEvent{Type: "message_stop"}, state, opts)
+	if state.Err() != nil || len(events) != 1 || events[0].Type != "response.completed" {
+		t.Fatalf("unknown Anthropic: %v %#v", state.Err(), events)
+	}
+	check("stop_reason")
 }

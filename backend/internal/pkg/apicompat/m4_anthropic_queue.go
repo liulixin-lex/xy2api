@@ -127,7 +127,8 @@ func finalizeBridgeAnthropicBlocks(state *ChatCompletionsToAnthropicStreamState)
 	if flow == nil || !flow.toolStage {
 		return nil
 	}
-	if state.FinishReason != "stop" && state.FinishReason != "tool_calls" && state.FinishReason != "function_call" {
+	_, reason, err := ProjectTerminal("chat", "anthropic", "", state.FinishReason, true, false)
+	if state.FinishReason == "" || err != nil || reason != "tool_use" {
 		state.bridgeErr = bridgeConversionError("finish_reason", fmt.Errorf("tool input has no complete finish"))
 		return nil
 	}

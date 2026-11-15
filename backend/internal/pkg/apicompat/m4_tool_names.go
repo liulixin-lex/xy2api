@@ -252,7 +252,7 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 		if resp != nil && len(resp.Choices) > 0 {
 			choice := resp.Choices[0]
 			var err error
-			out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("chat", choice.FinishReason, len(choice.Message.ToolCalls) > 0 && choice.FinishReason != "length", choice.Message.Refusal != "")
+			out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("chat", choice.FinishReason, len(choice.Message.ToolCalls) > 0 && choice.FinishReason != "length", choice.Message.Refusal != "", opts.Record)
 			if err != nil {
 				return nil, err
 			}

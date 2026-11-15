@@ -1602,15 +1602,13 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
 		}
 	}
-	if usage.UsagePresenceKnown && usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokensPresent {
-		out.CacheReadSource = "prompt_tokens_details.cached_tokens"
-	}
 	return out
 }
 
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
+	bridgeRecord        func(ConversionNotice)
 	bridgeParts         []bridgeChatPart
 	bridgePartOpen      bool
 	bridgeMessageClosed bool
@@ -1897,7 +1895,7 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	var incompleteDetails *ResponsesIncompleteDetails
 	if bridgeEnabled(state.Bridge) {
 		var err error
-		status, incompleteDetails, err = bridgeResponsesTerminal("chat", state.FinishReason, len(state.ToolCalls) > 0 && state.FinishReason != "length", false)
+		status, incompleteDetails, err = bridgeResponsesTerminal("chat", state.FinishReason, len(state.ToolCalls) > 0 && state.FinishReason != "length", false, state.bridgeRecord)
 		if err != nil {
 			state.bridgeErr = err
 			return nil
