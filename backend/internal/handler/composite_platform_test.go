@@ -141,10 +141,10 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	omittedCtx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 	omittedCtx.Request = omittedCtx.Request.WithContext(service.WithResolvedTargetPlatform(omittedCtx.Request.Context(), service.PlatformOpenAI))
 	bindOpenAIReasoningEffortPolicyForMessagesRequest(omittedCtx, apiKey, []byte(`{"model":"gpt-5"}`))
-	omitted, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(omittedCtx.Request.Context(), []byte(`{"model":"gpt-5"}`))
+	omitted, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(omittedCtx.Request.Context(), []byte(`{"reasoning":{"effort":"high"}}`))
 	require.NoError(t, err)
 	require.False(t, changed)
-	require.JSONEq(t, `{"model":"gpt-5"}`, string(omitted))
+	require.JSONEq(t, `{"reasoning":{"effort":"high"}}`, string(omitted))
 	require.Nil(t, service.RequestedReasoningEffortFromContext(omittedCtx.Request.Context()))
 
 	denyGroup := *group

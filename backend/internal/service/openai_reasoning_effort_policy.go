@@ -455,6 +455,9 @@ func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt
 	if !ok {
 		return body, false, nil
 	}
+	if original, ok := ctx.Value(finalReasoningRequestKey{}).(*finalReasoningRequest); ok && original.field == "" {
+		return body, false, nil // Converter defaults and model suffixes are not explicit policy input.
+	}
 	return ApplyOpenAIReasoningEffortPolicy(body, policy.maxEffort, policy.mappings, policy.overLimit)
 }
 

@@ -169,6 +169,10 @@ func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *s
 		return
 	}
 	bindRequestedReasoningEffort(c, body, strings.TrimSpace(gjson.GetBytes(body, "model").String()))
+	effort := gjson.GetBytes(body, "output_config.effort")
+	if effort.Type != gjson.String || strings.TrimSpace(effort.String()) == "" {
+		return
+	}
 	maxEffort, mappings, overLimit, ok := openAIReasoningEffortPolicyForRequest(c, apiKey)
 	if !ok {
 		return
