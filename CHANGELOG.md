@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 转换桥的终态事件类型与响应 status 一致，length 返回 response.incomplete，且只结束一次。
+
 - length 截断的 function、custom、tool_search 调用不再交付为可执行完成，合法 JSON 和空参数也遵守此规则。
 
 - 上游生成的非法工具参数在非流与流式转换中明确报错，不再删成空成功响应。

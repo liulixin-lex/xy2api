@@ -38,6 +38,8 @@
 
 ## 流式请求的失败结束方式
 
+转换桥以 `response.incomplete` 表达合法的截断或过滤结果，事件类型与响应体 status 一致；转换错误由错误出口以 `response.failed` 结束。两者不混作正常完成。
+
 ### 已提交后的失败
 
 Chat 上游以 `length` 截断的工具调用不可执行，即使参数是合法 JSON 或空串，也不发送 arguments/input done 或 completed 工具项；保留已收到的文本、参数片段和用量。
