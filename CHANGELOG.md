@@ -130,6 +130,8 @@
 
 - Gemini API Key 兼容请求的工具 schema 自动清理空 enum，并记录敏感条件整段省略造成的约束损失。
 
+- Gemini API Key 兼容请求保留工具选择和历史，无法表达的 builtin 强制调用、禁并行控制会记录降级。
+
 - Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
 
 - Gemini Messages 兼容请求保留 JSON 输出格式与 schema 精度，不支持的格式约束会记录降级。

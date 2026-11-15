@@ -333,6 +333,69 @@ func TestM5StructuredOutput(t *testing.T) {
 	})
 }
 
+func TestM5ToolChoice(t *testing.T) {
+	t.Run("intermediate_conversion_error", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{broken"}}]}]}`)
+		upstream := &queuedHTTPUpstreamStub{}
+		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+		c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+		_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, geminiSignalTestAccount(), body)
+		var conversion *apicompat.UnsupportedConversionError
+		require.ErrorAs(t, err, &conversion)
+		require.Equal(t, "messages[0].tool_calls[0].function.arguments", conversion.Field)
+		require.Zero(t, upstream.callCount)
+		require.Empty(t, recorder.Body.String(), "preserve the field for the handler before writing a generic response")
+	})
+	for _, tt := range []struct {
+		name, choice, mode, field string
+		builtin                   bool
+		notices                   []apicompat.ConversionNotice
+	}{
+		{name: "default", builtin: true},
+		{name: "auto", choice: `{"type":"auto"}`, mode: "AUTO", builtin: true},
+		{name: "none", choice: `{"type":"none"}`, mode: "NONE"},
+		{name: "any", choice: `{"type":"any"}`, mode: "ANY", builtin: true},
+		{name: "named", choice: `{"type":"tool","name":"f"}`, mode: "ANY", builtin: true},
+		{name: "builtin", choice: `{"type":"tool","name":"web_search"}`, builtin: true, notices: []apicompat.ConversionNotice{{Field: "tool_choice", Action: "map"}}},
+		{name: "serial", choice: `{"type":"auto","disable_parallel_tool_use":true}`, mode: "AUTO", builtin: true, notices: []apicompat.ConversionNotice{{Field: "tool_choice.disable_parallel_tool_use", Action: "omit"}}},
+		{name: "parallel", choice: `{"type":"auto","disable_parallel_tool_use":false}`, mode: "AUTO", builtin: true},
+		{name: "undeclared", choice: `{"type":"tool","name":"unknown"}`, field: "tool_choice.name"},
+		{name: "bad_name", choice: `{"type":"tool","name":4}`, field: "tool_choice.name"},
+		{name: "bad_choice", choice: `"none"`, field: "tool_choice"},
+		{name: "bad_type", choice: `{"type":"unknown"}`, field: "tool_choice.type"},
+		{name: "bad_parallel", choice: `{"type":"auto","disable_parallel_tool_use":"true"}`, field: "tool_choice.disable_parallel_tool_use"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"old","name":"f","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"old","content":"history"}]}],"tools":[{"name":"f","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]}`)
+			if tt.choice != "" {
+				var err error
+				body, err = sjson.SetRawBytes(body, "tool_choice", []byte(tt.choice))
+				require.NoError(t, err)
+			}
+			if tt.field != "" {
+				upstream := &queuedHTTPUpstreamStub{}
+				svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/messages", body)
+				_, err := svc.Forward(c.Request.Context(), c, geminiSignalTestAccount(), body)
+				var conversion *apicompat.UnsupportedConversionError
+				require.ErrorAs(t, err, &conversion)
+				require.Equal(t, tt.field, conversion.Field)
+				require.Zero(t, upstream.callCount)
+				require.Empty(t, recorder.Body.String(), "handler must receive the precise conversion error")
+				return
+			}
+			wire, _, notices := m5ForwardMessages(t, body)
+			require.Equal(t, tt.mode, gjson.GetBytes(wire, "toolConfig.functionCallingConfig.mode").String())
+			require.Equal(t, tt.builtin, gjson.GetBytes(wire, "tools.1.google_search").Exists())
+			if tt.name == "named" {
+				require.Equal(t, `["f"]`, gjson.GetBytes(wire, "toolConfig.functionCallingConfig.allowedFunctionNames").Raw)
+			}
+			require.Equal(t, "history", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.response.content").String())
+			require.Equal(t, tt.notices, notices)
+		})
+	}
+}
+
 func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
 	t.Helper()
 	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`

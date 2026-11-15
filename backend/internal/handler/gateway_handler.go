@@ -536,6 +536,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				accountReleaseFunc()
 			}
 			if err != nil {
+				if account.Platform == service.PlatformGemini && handleUnsupportedProtocolConversion(c, err, "messages", streamStarted) {
+					return
+				}
 				if errors.Is(err, service.ErrNoAvailableAccounts) {
 					fs.FailedAccountIDs[account.ID] = struct{}{}
 					continue
