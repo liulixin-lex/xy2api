@@ -126,6 +126,7 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 ### 兼容入口参数
 
+AI Studio 请求规范化仅调整搜索工具的字段拼写，保留输出 schema 的原始 JSON 与整数精度。
 
 API Key 账号的兼容请求按最终映射后的模型转换。Chat 的 Anthropic 中间对象仅保留意图，不套用 Claude 的最小思考预算、不生成默认 thinking；输出上限保持原值，最终 Gemini 请求才按实际目标校验和映射：
 

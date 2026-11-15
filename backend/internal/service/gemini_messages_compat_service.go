@@ -3858,41 +3858,32 @@ func convertClaudeToolsToGeminiTools(tools any) []any {
 }
 
 func normalizeGeminiRequestForAIStudio(body []byte) []byte {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if !json.Valid(body) {
+		return body
+	}
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.IsArray() {
 		return body
 	}
 
-	tools, ok := payload["tools"].([]any)
-	if !ok || len(tools) == 0 {
-		return body
-	}
-
-	modified := false
-	for _, rawTool := range tools {
-		tool, ok := rawTool.(map[string]any)
-		if !ok {
+	// Only rename the search declaration. Re-encoding the whole request through
+	// float64 would change integers and raw schemas in generationConfig.
+	normalized := body
+	for index, tool := range tools.Array() {
+		googleSearch := tool.Get("googleSearch")
+		if !tool.IsObject() || !googleSearch.Exists() || tool.Get("google_search").Exists() {
 			continue
 		}
-		googleSearch, ok := tool["googleSearch"]
-		if !ok {
-			continue
+		prefix := fmt.Sprintf("tools.%d.", index)
+		var err error
+		normalized, err = sjson.SetRawBytes(normalized, prefix+"google_search", []byte(googleSearch.Raw))
+		if err != nil {
+			return body
 		}
-		if _, exists := tool["google_search"]; exists {
-			continue
+		normalized, err = sjson.DeleteBytes(normalized, prefix+"googleSearch")
+		if err != nil {
+			return body
 		}
-		tool["google_search"] = googleSearch
-		delete(tool, "googleSearch")
-		modified = true
-	}
-
-	if !modified {
-		return body
-	}
-
-	normalized, err := json.Marshal(payload)
-	if err != nil {
-		return body
 	}
 	return normalized
 }
