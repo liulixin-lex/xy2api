@@ -796,3 +796,52 @@ func TestM4TypedChatOutput(t *testing.T) {
 		t.Fatal("unknown output part accepted")
 	}
 }
+
+func TestM4WhitespaceThinking(t *testing.T) {
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+	out, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(&ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{ReasoningContent: " \n\t", Content: json.RawMessage(`"answer"`)}, FinishReason: "stop"}}}, "m", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range out.Content {
+		if b.Type == "thinking" {
+			t.Fatal("blank buffered thinking")
+		}
+	}
+	for _, texts := range [][]string{{" ", "\n"}, {" ", "word", " \t"}} {
+		state := NewChatCompletionsToAnthropicStreamState("m")
+		state.Bridge = opts.Bridge
+		var events []AnthropicStreamEvent
+		for _, text := range texts {
+			value := text
+			events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ReasoningContent: &value}}}}, state)...)
+		}
+		answer := "answer"
+		reason := "stop"
+		events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: &answer}, FinishReason: &reason}}}, state)...)
+		events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+		thinking := ""
+		starts := 0
+		firstIndex := -1
+		for _, e := range events {
+			if e.Type == "content_block_start" && firstIndex < 0 {
+				firstIndex = *e.Index
+			}
+			if e.ContentBlock != nil && e.ContentBlock.Type == "thinking" {
+				starts++
+			}
+			if e.Delta != nil && e.Delta.Type == "thinking_delta" {
+				thinking += e.Delta.Thinking
+			}
+		}
+		want := ""
+		wantStarts := 0
+		if len(texts) == 3 {
+			want = " word \t"
+			wantStarts = 1
+		}
+		if thinking != want || starts != wantStarts || firstIndex != 0 {
+			t.Fatalf("thinking=%q starts=%d first=%d", thinking, starts, firstIndex)
+		}
+	}
+}
