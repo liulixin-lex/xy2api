@@ -204,3 +204,16 @@ func TestM1ReviewDerivedIntent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, body, upstream.lastBody)
 }
+
+func TestM1ReviewAPIKeyMinimal(t *testing.T) {
+	for _, host := range []string{"https://api.openai.com", "https://compat.example"} {
+		body := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"minimal"},"input":"hi"}`)
+		upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+		account := newOpenAIRejectedFieldTestAccount()
+		account.Credentials["base_url"] = host
+		result, err := newOpenAIRejectedFieldTestService(upstream).Forward(m1EffortContext(body), newOpenAIRejectedFieldTestContext(body), account, body)
+		require.NoError(t, err)
+		require.Equal(t, "none", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+		require.Equal(t, "none", *result.ReasoningEffort)
+	}
+}
