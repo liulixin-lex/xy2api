@@ -54,6 +54,9 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 		out.OutputConfig.Effort = effort
 		return nil
 	}
+	if spec, ok := claude.Claude52(req.Model); ok && effort == "" {
+		effort = spec.DefaultEffort
+	}
 	if effort == "" {
 		return nil
 	}

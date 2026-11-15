@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Fable 5.2 与 Mythos 5.2 补齐模型目录及默认 adaptive/high 转换，强制工具选择按目标能力拒绝。
+
 - Chat 请求的字符串 `reasoning` 生效，`reasoning_effort` 继续优先，扩展字段解码不新增拒绝。
 
 - 推理实际档位保留出站 `max`、`xhigh`、`ultra` 的区别，缺少显式字段时不再从模型后缀推导。

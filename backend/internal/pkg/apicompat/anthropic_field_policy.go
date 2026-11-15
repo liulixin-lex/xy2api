@@ -369,6 +369,9 @@ func mapAnthropicToolChoice(req *ResponsesRequest, out *AnthropicRequest) error 
 	if spec, ok := claude.Claude55(req.Model); ok && !spec.ForcedToolChoice && (value.Type == "any" || value.Type == "tool") {
 		return unsupportedConversion("tool_choice", "this model does not support forced tool_choice; use auto or none")
 	}
+	if spec, ok := claude.Claude52(req.Model); ok && !spec.ForcedToolChoice && (value.Type == "any" || value.Type == "tool") {
+		return unsupportedConversion("tool_choice", "this model does not support forced tool_choice; use auto or none")
+	}
 	out.ToolChoice = choice
 	return nil
 }
