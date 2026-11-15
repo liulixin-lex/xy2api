@@ -14,8 +14,12 @@ func TestFoundationUsagePresence(t *testing.T) {
 		want string
 	}{
 		{ResponsesUsage{}, `{"input_tokens":0,"output_tokens":0,"total_tokens":0}`},
+		{ResponsesUsage{UsagePresenceKnown: true}, `{"input_tokens":0,"output_tokens":0,"total_tokens":0}`},
+		{ResponsesUsage{UsagePresenceKnown: true, InputTokens: 5, OutputTokens: 2, TotalTokens: 7, InputTokensPresent: true}, `{"input_tokens":5,"output_tokens":2,"total_tokens":7}`},
 		{ResponsesUsage{InputTokens: 5, OutputTokens: 2, TotalTokens: 7}, `{"input_tokens":5,"output_tokens":2,"total_tokens":7}`},
 		{ChatUsage{}, `{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`},
+		{ChatUsage{UsagePresenceKnown: true}, `{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`},
+		{ChatUsage{UsagePresenceKnown: true, PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7, PromptTokensPresent: true}, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`},
 		{ChatUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`},
 	} {
 		b, err := json.Marshal(tc.v)
@@ -54,10 +58,41 @@ func TestFoundationUsagePresence(t *testing.T) {
 				var fields map[string]json.RawMessage
 				_ = json.Unmarshal(b, &fields)
 				_, total := fields["total_tokens"]
-				if total != tc.total {
-					t.Fatalf("invented total: %s", b)
+				if !total {
+					t.Fatalf("missing legacy wire counter: %s", b)
 				}
 			}
 		})
 	}
+	// Decode-time sums remain byte-for-byte baseline behavior, even when total
+	// was explicitly zero; its presence bit still records only the source field.
+	for _, tc := range []struct {
+		raw             string
+		present         bool
+		total           int
+		responses, chat string
+	}{
+		{`{"input_tokens":5,"output_tokens":2}`, false, 7, `{"input_tokens":5,"output_tokens":2,"total_tokens":7}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`},
+		{`{"input_tokens":5,"output_tokens":2,"total_tokens":0}`, true, 7, `{"input_tokens":5,"output_tokens":2,"total_tokens":7}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`},
+		{`{"input_tokens":5,"output_tokens":2,"total_tokens":9}`, true, 9, `{"input_tokens":5,"output_tokens":2,"total_tokens":9}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":9}`},
+		{`{"input_tokens":5,"output_tokens":2,"total_tokens":-1}`, false, -1, `{"input_tokens":5,"output_tokens":2,"total_tokens":-1}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":-1}`},
+	} {
+		var r ResponsesUsage
+		var c ChatUsage
+		if err := json.Unmarshal([]byte(tc.raw), &r); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(tc.raw), &c); err != nil {
+			t.Fatal(err)
+		}
+		if r.TotalTokensPresent != tc.present || c.TotalTokensPresent != tc.present || r.TotalTokens != tc.total || c.TotalTokens != tc.total {
+			t.Fatal(tc, r, c)
+		}
+		rb, _ := json.Marshal(r)
+		cb, _ := json.Marshal(c)
+		if string(rb) != tc.responses || string(cb) != tc.chat {
+			t.Fatal(tc, string(rb), string(cb))
+		}
+	}
+
 }

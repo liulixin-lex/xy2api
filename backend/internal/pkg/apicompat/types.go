@@ -647,6 +647,9 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	u.UsagePresenceKnown = true
 	u.InputTokensPresent, u.OutputTokensPresent = counts.InputTokensPresent, counts.OutputTokensPresent
 	u.TotalTokens, u.TotalTokensPresent = usageTotalPresence(data)
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.InputTokens + u.OutputTokens
+	}
 	return nil
 }
 
@@ -917,6 +920,9 @@ func (u *ChatUsage) UnmarshalJSON(data []byte) error {
 	u.UsagePresenceKnown = true
 	u.PromptTokensPresent, u.CompletionTokensPresent = counts.InputTokensPresent, counts.OutputTokensPresent
 	u.TotalTokens, u.TotalTokensPresent = usageTotalPresence(data)
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
 	return nil
 }
 
@@ -1023,41 +1029,23 @@ func (e *ResponsesStreamEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// usageTotalPresence records source presence independently of the legacy sum.
 func usageTotalPresence(data []byte) (int, bool) {
-	value := gjson.ParseBytes(data)
-	count, source := firstUsageCount(value, "total_tokens")
-	return count, source != "" && value.Get(source).Num >= 0
-}
-
-func usageCountPointer(value int, present bool) *int {
-	if !present {
-		return nil
+	value := gjson.GetBytes(data, "total_tokens")
+	var count int
+	if json.Unmarshal([]byte(value.Raw), &count) != nil {
+		return 0, false
 	}
-	return &value
+	return count, value.Type == gjson.Number && count >= 0
 }
 
+// MarshalJSON keeps the established wire shape; presence is internal evidence.
 func (u ResponsesUsage) MarshalJSON() ([]byte, error) {
 	type alias ResponsesUsage
-	if !u.UsagePresenceKnown {
-		return json.Marshal(alias(u))
-	}
-	return json.Marshal(struct {
-		alias
-		Input  *int `json:"input_tokens,omitempty"`
-		Output *int `json:"output_tokens,omitempty"`
-		Total  *int `json:"total_tokens,omitempty"`
-	}{alias(u), usageCountPointer(u.InputTokens, u.InputTokensPresent), usageCountPointer(u.OutputTokens, u.OutputTokensPresent), usageCountPointer(u.TotalTokens, u.TotalTokensPresent)})
+	return json.Marshal(alias(u))
 }
 
 func (u ChatUsage) MarshalJSON() ([]byte, error) {
 	type alias ChatUsage
-	if !u.UsagePresenceKnown {
-		return json.Marshal(alias(u))
-	}
-	return json.Marshal(struct {
-		alias
-		Input  *int `json:"prompt_tokens,omitempty"`
-		Output *int `json:"completion_tokens,omitempty"`
-		Total  *int `json:"total_tokens,omitempty"`
-	}{alias(u), usageCountPointer(u.PromptTokens, u.PromptTokensPresent), usageCountPointer(u.CompletionTokens, u.CompletionTokensPresent), usageCountPointer(u.TotalTokens, u.TotalTokensPresent)})
+	return json.Marshal(alias(u))
 }
