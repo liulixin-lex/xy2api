@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,14 +27,16 @@ func TestM7NilResultResponseFacts(t *testing.T) {
 	result, err := svc.handleAnthropicBufferedStreamingResponse(resp, c, &Account{ID: 11}, "fixture", "fixture", "fixture", time.Now())
 	require.Error(t, err)
 	require.Nil(t, result)
-	meta, ok := state.ClaimGatewayRequest(false)
-	require.True(t, ok)
-	require.NotNil(t, meta.UsageObserved)
-	require.False(t, *meta.UsageObserved)
-	require.Equal(t, "missing", *meta.UsageSource)
-	require.True(t, *meta.TerminalEventSeen)
-	require.False(t, *meta.TerminalEventValid)
-	require.Equal(t, "sse", *meta.ResponseBodyType)
+	// M8 owns freezing these fields into metadata; inspect the actual live
+	// trace here to test M7's publication without a replacement production API.
+	trace := reflect.ValueOf(state).Elem().FieldByName("gatewayRecord").Elem()
+	present := trace.FieldByName("UsageObserved")
+	require.False(t, present.IsNil())
+	require.False(t, present.Elem().Bool())
+	require.Equal(t, "missing", trace.FieldByName("UsageSource").Elem().String())
+	require.True(t, trace.FieldByName("TerminalEventSeen").Elem().Bool())
+	require.False(t, trace.FieldByName("TerminalEventValid").Elem().Bool())
+	require.Equal(t, "sse", trace.FieldByName("ResponseBodyType").Elem().String())
 }
 
 func TestM7UnknownTerminalMapping(t *testing.T) {

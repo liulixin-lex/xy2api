@@ -66,10 +66,9 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 		if finish.Type == gjson.Null || !finish.Exists() || finish.String() == "" {
 			continue
 		}
-		switch finish.String() {
-		case "stop", "length", "tool_calls", "function_call", "content_filter":
+		if finish.Type == gjson.String {
 			t.sawFinishReason = true
-		default:
+		} else {
 			t.sawMalformed = true
 		}
 	}
