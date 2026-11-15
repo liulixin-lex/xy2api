@@ -41,7 +41,7 @@ func validateBridgeBufferedTools(resp *ChatCompletionsResponse, bridge *BridgeOp
 		if choice.Index != 0 {
 			return &UpstreamConversionError{Field: "choices.index", Reason: "only choice zero is supported", SourceProtocol: "chat"}
 		}
-		if choice.FinishReason == "length" {
+		if choice.FinishReason == "length" || (requireObject && choice.FinishReason == "content_filter") {
 			continue
 		}
 		for _, call := range choice.Message.ToolCalls {

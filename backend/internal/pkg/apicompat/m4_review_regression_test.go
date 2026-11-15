@@ -164,3 +164,67 @@ func TestM4ReviewAuthenticatedChatFinish(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewAnthropicTruncatedTools(t *testing.T) {
+	for _, reason := range []string{"length", "content_filter"} {
+		for _, args := range []string{`{"q":`, `{}`, ``} {
+			st := NewChatCompletionsToAnthropicStreamState("m")
+			st.Bridge = &BridgeOptions{Enabled: true}
+			index := 0
+			second := 1
+			before, after := "before", "after"
+			var events []AnthropicStreamEvent
+			for _, delta := range []ChatDelta{{Content: &before}, {ToolCalls: []ChatToolCall{{Index: &index, ID: "call_1", Function: ChatFunctionCall{Name: "f", Arguments: args}}}}, {Content: &after}, {ToolCalls: []ChatToolCall{{Index: &second, ID: "call_2", Function: ChatFunctionCall{Name: "g", Arguments: args}}}}} {
+				events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: delta}}}, st)...)
+			}
+			ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{FinishReason: &reason}}, Usage: &ChatUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}}, st)
+			events = append(events, FinalizeChatCompletionsAnthropicStream(st)...)
+			if st.Err() != nil {
+				t.Fatalf("%s %q: %v", reason, args, st.Err())
+			}
+			want := "max_tokens"
+			if reason == "content_filter" {
+				want = "refusal"
+			}
+			if len(events) < 2 || events[len(events)-1].Type != "message_stop" || events[len(events)-2].Delta.StopReason != want || events[len(events)-2].Usage.OutputTokens != 2 {
+				t.Fatalf("terminal: %#v", events)
+			}
+			text := ""
+			toolArgs := map[int]string{}
+			open := map[int]bool{}
+			for _, e := range events {
+				switch e.Type {
+				case "content_block_start":
+					open[*e.Index] = true
+					if e.ContentBlock.Type == "tool_use" {
+						toolArgs[*e.Index] = ""
+					}
+				case "content_block_delta":
+					if !open[*e.Index] {
+						t.Fatal("delta after block close")
+					}
+					if e.Delta.Type == "text_delta" {
+						text += e.Delta.Text
+					}
+					if e.Delta.Type == "input_json_delta" {
+						toolArgs[*e.Index] += e.Delta.PartialJSON
+					}
+				case "content_block_stop":
+					delete(open, *e.Index)
+				}
+			}
+			if text != "beforeafter" || len(toolArgs) != 2 || len(open) != 0 {
+				t.Fatalf("queue: text=%q args=%#v open=%v", text, toolArgs, open)
+			}
+			for _, got := range toolArgs {
+				if got != args {
+					t.Fatalf("partial arguments changed: %q != %q", got, args)
+				}
+			}
+			buffered, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(&ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: json.RawMessage(`"beforeafter"`), ToolCalls: []ChatToolCall{{ID: "call_1", Function: ChatFunctionCall{Name: "f", Arguments: args}}}}, FinishReason: reason}}}, "m", ConversionOptions{Bridge: st.Bridge})
+			if err != nil || AnthropicStopReasonString(buffered.StopReason) != want {
+				t.Fatalf("buffered differs: %#v %v", buffered, err)
+			}
+		}
+	}
+}
