@@ -651,7 +651,8 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
     width: 160px;
   }
-  .tb-sel {
+  /* The direct filters on the toolbar only: the fields in "more filters" keep filling their column (12.12-4). */
+  .tb-filters .tb-sel {
     width: 88px;
   }
 }
