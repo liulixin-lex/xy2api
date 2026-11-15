@@ -90,11 +90,11 @@ func TestM1ResolvedTargetPolicy(t *testing.T) {
 			}
 		}
 	}
-	minimalBody := []byte(`{"max_tokens":8192,"output_config":{"effort":"minimal"}}`)
+	minimalBody := []byte(`{"max_tokens":8192,"output_config":{"effort":"minimal"},"thinking":{"type":"adaptive"}}`)
 	minimalOut, _, minimalErr := applyFinalReasoningEffortForAccount(m1EffortContext(minimalBody), nil, account, minimalBody, "claude-haiku-5-5", "anthropic")
 	require.NoError(t, minimalErr)
-	require.Equal(t, "disabled", gjson.GetBytes(minimalOut, "thinking.type").String())
-	require.Equal(t, "low", gjson.GetBytes(minimalOut, "output_config.effort").String())
+	require.Equal(t, "adaptive", gjson.GetBytes(minimalOut, "thinking.type").String())
+	require.Equal(t, "minimal", gjson.GetBytes(minimalOut, "output_config.effort").String())
 	modeBody := []byte(`{"output_config":{"effort":"high","format":{"type":"json_schema","schema":{"type":"object"}}},"thinking":{"type":"disabled"}}`)
 	modeOut, _, modeErr := applyFinalReasoningEffortForAccount(m1EffortContext(modeBody), nil, account, modeBody, "claude-haiku-5-5", "anthropic")
 	require.NoError(t, modeErr)
@@ -227,4 +227,27 @@ func TestM1ReviewOAuthTerraMinimal(t *testing.T) {
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, "none", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+}
+
+func TestM1ReviewClaudeMinimalModes(t *testing.T) {
+	for _, model := range []string{"claude-haiku-5-5", "claude-sonnet-5-5"} {
+		body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"minimal"}`)
+		got, _, err := applyFinalReasoningEffortForAccount(m1EffortContext(body), nil, newOpenAIRejectedFieldTestAccount(), body, model, "chat")
+		require.NoError(t, err)
+		var chat apicompat.ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal(got, &chat))
+		responses, err := apicompat.ChatCompletionsToResponses(&chat)
+		require.NoError(t, err)
+		out, err := apicompat.ResponsesToAnthropicRequest(responses)
+		require.NoError(t, err)
+		require.Equal(t, "adaptive", out.Thinking.Type)
+		require.Equal(t, "low", out.OutputConfig.Effort)
+		native := []byte(`{"model":"` + model + `","max_tokens":8192,"output_config":{"effort":"minimal"},"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"hi"}]}`)
+		upstream := &anthropicHTTPUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)}
+		parsed, err := ParseGatewayRequest(NewRequestBodyRef(native), PlatformAnthropic)
+		require.NoError(t, err)
+		_, err = newForwardPartialUsageServiceForTest(upstream).Forward(m1EffortContext(native), newOpenAIRejectedFieldTestContext(native), newAnthropicAPIKeyAccountForTest(), parsed)
+		require.NoError(t, err)
+		require.Equal(t, native, upstream.lastBody)
+	}
 }

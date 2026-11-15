@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Claude minimal 请求保留既有 adaptive 模式，不再被就近映射成关闭思考。
+
 - OAuth Terra 的 minimal 请求恢复为 none 后发送，不再被本地提前拒绝。
 
 - API Key Responses 请求继续将既有 minimal 兼容值归一为 none，避免上游拒绝。

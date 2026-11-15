@@ -79,6 +79,9 @@ func supportedInferenceEffortsForAccount(account *Account, model string) ([]stri
 	case claude.IsClaudeModel(model):
 		supported = claude.EffortLevelsForModel(model)
 		reliable = len(supported) > 0
+		if reliable {
+			supported = append([]string{"minimal"}, supported...) // Existing converters express minimal as adaptive/low, not disabled.
+		}
 		spec, _ := claude.Claude55(model)
 		if claude.SupportsDisabledThinking(model) || spec.BetweenTools {
 			supported = append([]string{"none"}, supported...)
