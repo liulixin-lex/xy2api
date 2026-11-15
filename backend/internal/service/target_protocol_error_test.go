@@ -113,3 +113,63 @@ func TestM7ServiceErrorAfterHeartbeat(t *testing.T) {
 	}
 
 }
+
+func TestTargetProtocolFailureUsageE8(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		frames                       []string
+		wantUsage                    bool
+		input, output, total, cached int64
+	}{
+		{"partial", []string{`{"input_tokens":7,"output_tokens":0}`}, true, 7, 0, 7, 0},
+		{"empty", []string{`{}`}, false, 0, 0, 0, 0},
+		{"unverified", []string{`{"input_tokens":"7","output_tokens":null}`}, false, 0, 0, 0, 0},
+		{"zero", []string{`{"input_tokens":0}`}, true, 0, 0, 0, 0},
+		{"details_then_empty", []string{`{"input_tokens":7,"input_tokens_details":{"cached_tokens":2},"output_tokens":0}`, `{}`}, true, 7, 0, 7, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest("POST", "/", nil)
+			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+			InstallDeliveryTracking(c, time.Now())
+			c.Header("Content-Type", "text/event-stream")
+			_, _ = c.Writer.Write([]byte("data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_usage\"}}\n\n"))
+			for _, raw := range tc.frames {
+				_, _ = c.Writer.Write([]byte("data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":" + raw + "}}\n\n"))
+			}
+			source := append([]byte(nil), deliveryWriterFrom(c).terminal.usage...)
+			before := string(source)
+			_ = targetProtocolFailureUsage(source)
+			if string(source) != before {
+				t.Fatal("normalization mutated observed source")
+			}
+			if !WriteTargetProtocolError(c, PreOutputProtocolResponses, 502, "server_error", "upstream_stream_truncated", "", "failed") {
+				t.Fatal("not claimed")
+			}
+			for _, line := range strings.Split(rec.Body.String(), "\n") {
+				if !strings.HasPrefix(line, "data: ") || gjson.Get(line[6:], "type").String() != "response.failed" {
+					continue
+				}
+				u := gjson.Get(line[6:], "response.usage")
+				if u.Exists() != tc.wantUsage {
+					t.Fatalf("usage=%s", u.Raw)
+				}
+				if !tc.wantUsage {
+					return
+				}
+				for key, want := range map[string]int64{"input_tokens": tc.input, "output_tokens": tc.output, "total_tokens": tc.total} {
+					v := u.Get(key)
+					if v.Type != gjson.Number || v.Int() != want {
+						t.Fatalf("usage=%s, want %s=%d", u.Raw, key, want)
+					}
+				}
+				if u.Get("input_tokens_details.cached_tokens").Int() != tc.cached {
+					t.Fatal(u.Raw)
+				}
+				return
+			}
+			t.Fatal("no failure frame")
+		})
+	}
+}

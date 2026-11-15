@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/tidwall/gjson"
 )
 
@@ -61,7 +62,10 @@ func (s *targetProtocolErrorState) observe(contentType string, data []byte) {
 		}
 		for _, path := range []string{"usage", "response.usage"} {
 			if u := root.Get(path); u.IsObject() {
-				s.usage = append(s.usage[:0], u.Raw...)
+				// Empty or unobserved counters cannot replace retained usage evidence.
+				if _, present := openAIResponsesUsageEvidence(payload, "upstream_sse_progressive"); present {
+					s.usage = append(s.usage[:0], u.Raw...)
+				}
 				break
 			}
 		}
@@ -69,4 +73,41 @@ func (s *targetProtocolErrorState) observe(contentType string, data []byte) {
 	if len(s.pending) > ssePendingLimit {
 		s.pending = nil
 	}
+}
+
+// targetProtocolFailureUsage normalizes only the three required wire counters.
+// Keep observed details unchanged; normalization does not set request usage or billing facts.
+func targetProtocolFailureUsage(raw json.RawMessage) json.RawMessage {
+	envelope, err := json.Marshal(struct {
+		Usage json.RawMessage `json:"usage"`
+	}{raw})
+	if err != nil {
+		return nil
+	}
+	if _, present := openAIResponsesUsageEvidence(envelope, "upstream_sse_progressive"); !present {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil
+	}
+	counters := make(map[string]json.RawMessage)
+	for _, field := range []string{"input_tokens", "output_tokens", "total_tokens", "prompt_tokens", "completion_tokens"} {
+		if v, ok := fields[field]; ok {
+			counters[field] = v
+		}
+	}
+	encoded, _ := json.Marshal(counters)
+	var usage apicompat.ResponsesUsage
+	if json.Unmarshal(encoded, &usage) != nil {
+		return nil
+	}
+	for name, value := range map[string]int{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.TotalTokens} {
+		fields[name], _ = json.Marshal(value)
+	}
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	return normalized
 }

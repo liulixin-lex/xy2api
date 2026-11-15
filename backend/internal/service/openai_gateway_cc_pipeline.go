@@ -541,8 +541,8 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 		if model != "" {
 			response["model"] = model
 		}
-		if len(usage) > 0 {
-			response["usage"] = usage
+		if normalized := targetProtocolFailureUsage(usage); len(normalized) > 0 {
+			response["usage"] = normalized
 		}
 		body, _ := json.Marshal(gin.H{"type": "response.failed", "sequence_number": sequence, "response": response})
 		frame = append(frame, []byte("event: response.failed\ndata: "+string(restoreOpenAICollaborationError(c, body))+"\n\n")...)
