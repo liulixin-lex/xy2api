@@ -63,3 +63,71 @@ func TestM4ReviewRawToolRestoration(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewDiscoveredToolNames(t *testing.T) {
+	for _, tc := range []struct{ name, namespace, tool string }{
+		{"namespace", "collaboration", "spawn_agent"},
+		{"long_namespace", "mcp__codex_apps__microsoft_sharepoint", "list_site_drive_items_recursively"},
+		{"long_function", "", strings.Repeat("x", 70)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			discovered := map[string]any{"type": "function", "name": tc.tool, "parameters": map[string]any{"type": "object"}}
+			if tc.namespace != "" {
+				discovered = map[string]any{"type": "namespace", "name": tc.namespace, "tools": []any{discovered}}
+			}
+			obj := m4ReviewObject(t, `{"model":"m","tools":[{"type":"tool_search"},{"type":"function","name":"inspect","parameters":{"type":"object"}}],"input":[{"type":"tool_search_call","call_id":"search_1","arguments":{"query":"workspace"}},{"type":"tool_search_output","call_id":"search_1","status":"completed","execution":"client","tools":[{"type":"function","name":"inspect","parameters":{"type":"object"}},{"type":"custom","name":"exec"}]}]}`)
+			output := obj["input"].([]any)[1].(map[string]any)
+			output["tools"] = append(output["tools"].([]any), discovered)
+			raw, _ := json.Marshal(obj)
+			var req ResponsesRequest
+			if err := json.Unmarshal(raw, &req); err != nil {
+				t.Fatal(err)
+			}
+			old, err := ResponsesToChatCompletionsRequest(&req)
+			if err != nil || len(old.Tools) != 4 {
+				t.Fatalf("baseline: %#v %v", old, err)
+			}
+			bridge := &BridgeOptions{Enabled: true}
+			chat, err := ResponsesToChatCompletionsRequestWithOptions(&req, &ResponsesToChatOptions{Bridge: bridge})
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := ToolNameIdentity{Kind: "function", Namespace: tc.namespace, Name: tc.tool}
+			alias := bridge.ToolNames.Forward[id]
+			if len(chat.Tools) != 4 || chat.Tools[3].Function.Name != alias || !validBridgeToolName(alias, 64) {
+				t.Fatalf("Chat declarations=%#v alias=%q", chat.Tools, alias)
+			}
+			rawBridge := &BridgeOptions{Enabled: true}
+			value := m4ReviewObject(t, string(raw))
+			mapping, _, err := AdaptResponsesClientToolsWithBridgeOptions(value, ConversionOptions{Bridge: rawBridge})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools := value["tools"].([]any)
+			alias = rawBridge.ToolNames.Forward[id]
+			if len(tools) != 4 || tools[3].(map[string]any)["name"] != alias || !validBridgeToolName(alias, 64) {
+				t.Fatalf("Anthropic declarations=%#v alias=%q", tools, alias)
+			}
+			payload, _ := json.Marshal(map[string]any{"output": []any{map[string]any{"type": "function_call", "id": "fc_1", "call_id": "c1", "name": alias, "arguments": "{}"}}})
+			restored, _, err := RestoreResponsesClientToolPayload(payload, mapping)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed struct{ Output []ResponsesOutput }
+			if err = json.Unmarshal(restored, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			if len(parsed.Output) != 1 || parsed.Output[0].Name != tc.tool || parsed.Output[0].Namespace != tc.namespace {
+				t.Fatalf("restored=%s", restored)
+			}
+			before, _ := json.Marshal(value)
+			if _, _, err = AdaptResponsesClientToolsWithBridgeOptions(value, ConversionOptions{Bridge: rawBridge}); err != nil {
+				t.Fatal(err)
+			}
+			after, _ := json.Marshal(value)
+			if string(before) != string(after) {
+				t.Fatalf("second adaptation changed request: %s / %s", before, after)
+			}
+		})
+	}
+}

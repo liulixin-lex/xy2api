@@ -21,6 +21,10 @@ type ResponsesClientToolMapping struct {
 // ordinary function tools. It mutates req and returns the mapping required to
 // restore the upstream response.
 func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, bool, error) {
+	return adaptResponsesClientTools(req, true)
+}
+
+func adaptResponsesClientTools(req map[string]any, promote bool) (ResponsesClientToolMapping, bool, error) {
 	if req == nil {
 		return ResponsesClientToolMapping{}, false, nil
 	}
@@ -28,9 +32,13 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if !ok || len(tools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	discovered, err := promoteResponsesToolSearchDiscoveries(req)
-	if err != nil {
-		return ResponsesClientToolMapping{}, false, err
+	discovered := false
+	if promote {
+		var err error
+		discovered, err = promoteResponsesToolSearchDiscoveries(req)
+		if err != nil {
+			return ResponsesClientToolMapping{}, false, err
+		}
 	}
 	if discovered {
 		tools, _ = req["tools"].([]any)
