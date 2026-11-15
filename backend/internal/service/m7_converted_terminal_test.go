@@ -24,6 +24,7 @@ func TestM7ConvertedTerminalOutcomes(t *testing.T) {
 				failed, usage bool
 			}{
 				{"completed_no_usage", completed, false, false},
+				{"completed_missing_status", strings.Replace(completed, `"status":"completed",`, "", 1), false, false},
 				{"done_completed", strings.Replace(completed, "response.completed", "response.done", 1), false, false},
 				{"done_incomplete", `{"type":"response.done","response":{"id":"resp_fixture","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`, false, true},
 				{"done_failed", `{"type":"response.done","response":{"id":"resp_fixture","status":"failed","error":{"code":"fixture_failed","message":"fixture failed"},"usage":{"input_tokens":13,"output_tokens":5}}}`, true, true},
