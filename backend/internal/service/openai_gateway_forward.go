@@ -65,7 +65,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "", err.Error())
 			return nil, err
 		}
 	} else {
@@ -107,12 +107,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	logCodexCLIOnlyDetection(ctx, c, account, apiKeyID, restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"type":    "forbidden_error",
-				"message": CodexClientRestrictionMessage(restrictionResult),
-			},
-		})
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusForbidden, "forbidden_error", "", "", CodexClientRestrictionMessage(restrictionResult))
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
@@ -158,9 +153,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				param = validationErr.param
 			}
 			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": liteErr.Error(), "param": param,
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", param, liteErr.Error())
 			return nil, liteErr
 		}
 		if changed {
@@ -176,9 +169,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
 		if err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": err.Error(), "param": "tools",
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "tools", err.Error())
 			return nil, err
 		}
 	}
@@ -189,9 +180,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, err = stripOpenAIResponsesInputNamespaces(body, keepToolCallNamespaces)
 		if err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": err.Error(), "param": "input",
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "input", err.Error())
 			return nil, err
 		}
 	}
@@ -353,7 +342,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		body = policyBody
 		if err := validateGPT61FinalCompatRequest(body, validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "reasoning.effort", err.Error())
 			return nil, err
 		}
 		requestView = newOpenAIRequestView(body)
@@ -516,7 +505,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateOpenAIResponsesImageModel(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "model"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "model", err.Error())
 			return nil, err
 		}
 		if hasOpenAIImageGenerationTool(decoded) {
@@ -539,7 +528,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateCodexSparkInput(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "input"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "input", err.Error())
 			return nil, err
 		}
 	}
@@ -589,7 +578,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			})
 		}
 		if codexResult.Error != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": codexResult.Error.Error()}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "", codexResult.Error.Error())
 			return nil, codexResult.Error
 		}
 		setCodexToolNameReverse(c, codexResult.ToolNameReverse)

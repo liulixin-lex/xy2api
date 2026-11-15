@@ -89,3 +89,33 @@ func TestM7PostCommitProtocolErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestM7ContinuationExhaustionKeepsStructuredError(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		c, rec := newGinContextForEndpoint(t, EndpointResponses)
+		if stream {
+			c.Writer.Header().Set("Content-Type", "text/event-stream")
+			_, err := c.Writer.WriteString(": heartbeat\n\n")
+			require.NoError(t, err)
+		}
+		expected := service.NewHTTPContinuationUnsupportedError()
+		h := &OpenAIGatewayHandler{}
+		h.handleFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: 502, Reason: service.OpenAIHTTPContinuationUnsupportedReason}, stream)
+		before := rec.Body.String()
+		h.handleFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: 502, Reason: service.OpenAIHTTPContinuationUnsupportedReason}, stream)
+		require.Equal(t, before, rec.Body.String())
+		if stream {
+			events := parseSSEEvents(before)
+			require.Len(t, events, 2)
+			require.Equal(t, "response.failed", events[1].name)
+			require.Contains(t, events[1].data, expected.Code)
+			require.Contains(t, events[1].data, expected.Param)
+			require.Contains(t, events[1].data, expected.Message)
+		} else {
+			require.Equal(t, 400, rec.Code)
+			require.Contains(t, before, expected.Code)
+			require.Contains(t, before, expected.Param)
+			require.Contains(t, before, expected.Message)
+		}
+	}
+}

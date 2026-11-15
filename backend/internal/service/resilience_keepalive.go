@@ -270,6 +270,10 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 		}
 		// The client has seen heartbeats only: open the response first.
 		id, createdAt := "resp_"+randomKeepaliveHex(12), time.Now().Unix()
+		errorBody := openAIResponseFailureError(ctx, status, errType, code, message)
+		if param != "" {
+			errorBody["param"] = param
+		}
 		payload, _ := json.Marshal(map[string]any{
 			"type":            "response.failed",
 			"sequence_number": 1,
@@ -279,7 +283,7 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 				"created_at": createdAt,
 				"status":     "failed",
 				"output":     []any{},
-				"error":      openAIResponseFailureError(ctx, status, errType, code, message),
+				"error":      errorBody,
 			},
 		})
 		return append(ResponsesCreatedFrame(id, "", createdAt), "event: response.failed\ndata: "+string(payload)+"\n\n"...)

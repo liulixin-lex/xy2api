@@ -3896,11 +3896,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	if failoverErr.Reason == service.OpenAIHTTPContinuationUnsupportedReason {
 		suppressResilienceRetryAdvice(c, "non_retryable")
-		message := strings.TrimSpace(failoverErr.ClientMessage)
-		if message == "" {
-			message = "previous_response_id requires an OpenAI API-key account for HTTP requests"
+		if streamStarted {
+			prepareHandlerErrorSSE(c)
 		}
-		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
+		service.WriteHTTPContinuationError(c, nil, service.NewHTTPContinuationUnsupportedError())
 		return
 	}
 	copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
