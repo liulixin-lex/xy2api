@@ -34,7 +34,10 @@ func beginGatewayRequestWithScope(c *gin.Context, key func() *service.APIKey, mo
 
 func gatewayBillingContext(ctx context.Context) context.Context {
 	st := resilience.StateFrom(ctx)
-	if _, exists := st.GatewayRequestScope(); !exists {
+	scope, exists := st.GatewayRequestScope()
+	// Keep excluded legacy turns out of the billing metadata while preserving
+	// non-text scopes that still require financial correlation.
+	if !exists || scope == "" && !st.GatewayRequestEnabled() {
 		return ctx
 	}
 	meta, _ := st.ClaimGatewayRequest(true)
