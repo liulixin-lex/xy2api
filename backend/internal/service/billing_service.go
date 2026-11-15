@@ -245,6 +245,9 @@ func isClaudeFable51Model(model string) bool {
 
 func reasoningEffortBillingMultiplier(effort string, multipliers map[string]float64) float64 {
 	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort != "none" {
+		effort = NormalizeMaxReasoningEffort(effort)
+	}
 	if effort == "" {
 		return 1
 	}
