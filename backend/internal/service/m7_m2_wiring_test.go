@@ -37,7 +37,7 @@ func TestM7ResponsesWirePreparesStop(t *testing.T) {
 		repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}}
 		upstream := &httpUpstreamRecorder{resp: grokChatBridgeCompletedResponse("resp_grok_stop", 10)}
 		svc := &OpenAIGatewayService{httpUpstream: upstream, grokTokenProvider: NewGrokTokenProvider(repo, nil), accountRepo: repo}
-		result, err := svc.ForwardAsChatCompletions(ctx, c, account, body, "", "")
+		result, err := svc.forwardGrokChatCompletionsViaResponses(ctx, c, account, body, "stable-session", "")
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.Equal(t, 200, rec.Code)

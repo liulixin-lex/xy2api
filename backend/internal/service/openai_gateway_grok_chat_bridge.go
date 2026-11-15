@@ -56,7 +56,7 @@ func grokChatResponsesBridgeEligibility(body []byte) (bool, string) {
 	// that common SDK representation keeps the request on the bridge path,
 	// while non-null values remain unsupported because the Responses converter
 	// cannot preserve their Chat Completions semantics.
-	for _, field := range []string{"reasoning_effort"} {
+	for _, field := range []string{"stop", "reasoning_effort"} {
 		if raw, exists := root[field]; exists && !grokChatJSONNull(raw) {
 			return false, "unsupported_" + field
 		}
