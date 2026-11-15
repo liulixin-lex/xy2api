@@ -233,6 +233,7 @@ func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
 	repo.byGroup[group] = accounts
 	r.lastResortGroups.drop(group)
 	require.False(t, resilienceNoAccountIsGroupLevel(ctx, group, model, nil))
+	require.Positive(t, svc.NoAccountRetryAfter(ctx, &group, model), "the group-level proof no longer performs snapshot I/O")
 	require.Equal(t, 10, svc.RetryAdvice(ctx, &group, model).Seconds)
 }
 
@@ -389,7 +390,7 @@ func TestM8SelectionNegativeCache(t *testing.T) {
 	e.LastCause = cause
 	resilienceNegativeCachePut(newCtx(), &group, "cause", "", nil, e)
 	require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, "cause", "", nil))
-	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"version":1}`), []byte(`not-json`)} {
+	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"version":1}`), []byte(`{"version":2,"known":true,"group_level":true}`), []byte(`not-json`)} {
 		key := selectionNegativeKey(ctx, &group, "bad", "")
 		resilience.ProcessNegativeCache().Put(key, group, resilience.CachedResponse{Body: raw}, time.Minute, time.Now())
 		require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, "bad", "", nil))

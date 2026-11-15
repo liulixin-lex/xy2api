@@ -110,6 +110,15 @@ func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, vari
 	if json.Unmarshal(cached.Body, &record) != nil || record.Version != 2 {
 		return nil
 	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(cached.Body, &fields) != nil {
+		return nil
+	}
+	for _, field := range []string{"members", "eligible", "model_supported", "request_supported", "immediate"} {
+		if value := strings.TrimSpace(string(fields[field])); value == "" || value == "null" {
+			return nil
+		}
+	}
 	e := &SelectionExhaustion{Known: record.Known, GroupLevel: record.GroupLevel, Members: record.Members, Eligible: record.Eligible,
 		ModelSupported: record.ModelSupported, RequestSupported: record.RequestSupported, Immediate: record.Immediate, Reasons: record.Reasons}
 	if !resilienceNoAccountIsGroupLevel(ctx, *groupID, model, e) {
