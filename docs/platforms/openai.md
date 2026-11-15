@@ -72,6 +72,8 @@ Responses 工具项结构化重建保留 `encrypted_content` 与 `encrypted_func
 
 Chat 流式工具参数可从 arguments.done、item.done 或结束快照补齐，只发送尚未交付的后缀；重复终值和关闭后的迟到增量不重复输出，身份或前缀冲突转为上游转换错误。
 
+Responses reasoning 输出逐项优先使用非空 `summary_text`，否则使用 `content.reasoning_text`；流式先缓存原文，到该项结束仍无摘要才发送原文，不读取密文或其他 part。
+
 ## 客户端配置
 
 ### Codex CLI

@@ -41,8 +41,7 @@ func TestResponsesEventToChatChunks_CustomToolCallInputDelta(t *testing.T) {
 	assert.Equal(t, "*** Begin Patch", tc.Function.Arguments)
 }
 
-// 原始推理文本增量 reasoning_text.delta 应像 reasoning_summary_text.delta 一样
-// 映射为 reasoning_content。
+// 原始推理文本先缓存；该项结束仍无摘要时映射为 reasoning_content。
 func TestResponsesEventToChatChunks_ReasoningTextDelta(t *testing.T) {
 	state := NewResponsesEventToChatState()
 	state.Model = "gpt-5-codex"
@@ -52,6 +51,8 @@ func TestResponsesEventToChatChunks_ReasoningTextDelta(t *testing.T) {
 		Type:  "response.reasoning_text.delta",
 		Delta: "thinking step",
 	}, state)
+	require.Empty(t, chunks)
+	chunks = ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning"}}, state)
 	require.Len(t, chunks, 1)
 	require.NotNil(t, chunks[0].Choices[0].Delta.ReasoningContent)
 	assert.Equal(t, "thinking step", *chunks[0].Choices[0].Delta.ReasoningContent)

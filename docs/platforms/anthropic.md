@@ -217,6 +217,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
+响应思考摘要与签名分离：非空 summary_text 优先，缺摘要时仅回退 reasoning_text，不把密文作为可见思考正文。
+
 Responses 响应补齐保留托管工具项及 custom 工具的身份、命名空间与原始输入，再按目标协议投影。
 
 助手历史的明文 reasoning 与签名分别处理；只有目标能力已确认时才改为独立思考项，未确认的路径沿用已有历史表示。

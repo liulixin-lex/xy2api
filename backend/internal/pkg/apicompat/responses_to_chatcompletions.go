@@ -59,11 +59,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 				},
 			})
 		case "reasoning":
-			for _, s := range item.Summary {
-				if s.Type == "summary_text" && s.Text != "" {
-					reasoningText += s.Text
-				}
-			}
+			reasoningText += ResponsesOutputReasoningText(item)
 		case "web_search_call":
 			// silently consumed — results already incorporated into text output
 		}
@@ -123,6 +119,9 @@ func responsesStatusToChatFinishReason(status string, details *ResponsesIncomple
 // ResponsesEventToChatState tracks state for converting a sequence of Responses
 // SSE events into Chat Completions SSE chunks.
 type ResponsesEventToChatState struct {
+	reasoning              *BufferedResponseAccumulator
+	reasoningSent          map[*bufferedOutputSlot]string
+	reasoningCarrier       map[*bufferedOutputSlot]string
 	tools                  ResponsesToolCallTracker
 	err                    error
 	ID                     string
@@ -181,8 +180,8 @@ func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEvent
 		// 与 reasoning summary 一样映射为 reasoning_content。
 		"response.reasoning_text.delta":
 		return resToChatHandleReasoningDelta(evt, state)
-	case "response.reasoning_summary_text.done":
-		return nil
+	case "response.reasoning_summary_text.done", "response.reasoning_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		return resToChatHandleReasoningDelta(evt, state)
 	// response.done 是 Realtime/WS 与项目透传路径使用的终止别名；
 	// 普通 Responses HTTP SSE 的公开终止事件仍以 response.completed 为主。
 	case "response.completed", "response.done", "response.incomplete", "response.failed":
@@ -317,6 +316,9 @@ func resToChatToolArgumentsChunk(call *responsesTrackedTool, value string, state
 }
 
 func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if evt.Item != nil && evt.Item.Type == "reasoning" {
+		return resToChatHandleReasoningDelta(evt, state)
+	}
 	if evt.Item == nil {
 		return nil
 	}
@@ -324,6 +326,9 @@ func resToChatHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 }
 
 func resToChatHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if evt.Item != nil && evt.Item.Type == "reasoning" {
+		return resToChatHandleReasoningDelta(evt, state)
+	}
 	if evt.Item == nil {
 		return nil
 	}
@@ -389,15 +394,107 @@ func resToChatRecoverTerminalTools(resp *ResponsesResponse, state *ResponsesEven
 }
 
 func resToChatHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	if evt.Delta == "" {
+	if state.reasoning == nil {
+		state.reasoning = NewBufferedResponseAccumulator()
+		state.reasoningSent = map[*bufferedOutputSlot]string{}
+		state.reasoningCarrier = map[*bufferedOutputSlot]string{}
+	}
+	state.reasoning.ProcessEvent(evt)
+	if state.reasoning.Err() != nil {
+		state.err = state.reasoning.Err()
 		return nil
 	}
-	reasoning := evt.Delta
-	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{ReasoningContent: &reasoning})}
+	var chunks []ChatCompletionsChunk
+	for _, slot := range state.reasoning.slots {
+		closed := evt.Type == "response.output_item.done" && evt.Item != nil && (slot.item.ID == evt.Item.ID || (evt.Item.ID == "" && slot.index == evt.OutputIndex))
+		chunks = append(chunks, resToChatRecoverReasoningItem(slot, closed, state)...)
+		if state.err != nil {
+			return nil
+		}
+	}
+	return chunks
+}
+
+func resToChatRecoverReasoningItem(slot *bufferedOutputSlot, closed bool, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	item := slot.item
+	indices := make([]int, 0, len(slot.summaries))
+	for i := range slot.summaries {
+		indices = append(indices, i)
+	}
+	sort.Ints(indices)
+	for _, i := range indices {
+		item.Summary = append(item.Summary, slot.summaries[i])
+	}
+	indices = indices[:0]
+	for i := range slot.parts {
+		indices = append(indices, i)
+	}
+	sort.Ints(indices)
+	for _, i := range indices {
+		item.Content = append(item.Content, slot.parts[i])
+	}
+	summary := item
+	summary.Content = nil
+	carrier := "summary"
+	text := ResponsesOutputReasoningText(summary)
+	if text == "" {
+		if !closed {
+			return nil
+		}
+		carrier = "content"
+		text = ResponsesOutputReasoningText(item)
+	}
+	if text == "" {
+		return nil
+	}
+	if previous := state.reasoningCarrier[slot]; previous != "" && previous != carrier {
+		state.err = toolTrackingError("reasoning", "reasoning carrier conflicts with delivered text")
+		return nil
+	}
+	sent := state.reasoningSent[slot]
+	if !strings.HasPrefix(text, sent) {
+		state.err = toolTrackingError("reasoning", "reasoning snapshot conflicts with delivered prefix")
+		return nil
+	}
+	state.reasoningCarrier[slot] = carrier
+	state.reasoningSent[slot] = text
+	suffix := text[len(sent):]
+	if suffix == "" {
+		return nil
+	}
+	return []ChatCompletionsChunk{makeChatDeltaChunk(state, ChatDelta{ReasoningContent: &suffix})}
+}
+
+func resToChatRecoverTerminalReasoning(resp *ResponsesResponse, state *ResponsesEventToChatState) []ChatCompletionsChunk {
+	if state.reasoning == nil {
+		state.reasoning = NewBufferedResponseAccumulator()
+		state.reasoningSent = map[*bufferedOutputSlot]string{}
+		state.reasoningCarrier = map[*bufferedOutputSlot]string{}
+	}
+	if resp != nil {
+		for i, item := range resp.Output {
+			if item.Type == "reasoning" {
+				state.reasoning.snapshot(item, i, true, 3)
+			}
+		}
+	}
+	if state.reasoning.Err() != nil {
+		state.err = state.reasoning.Err()
+		return nil
+	}
+	var chunks []ChatCompletionsChunk
+	for _, slot := range state.reasoning.slots {
+		chunks = append(chunks, resToChatRecoverReasoningItem(slot, true, state)...)
+		if state.err != nil {
+			return nil
+		}
+	}
+	return chunks
 }
 
 func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
-	recovered := resToChatRecoverTerminalTools(evt.Response, state)
+	recovered := resToChatRecoverTerminalReasoning(evt.Response, state)
+	recovered = append(recovered, resToChatRecoverTerminalTools(evt.Response, state)...)
 	if state.err != nil {
 		return nil
 	}
