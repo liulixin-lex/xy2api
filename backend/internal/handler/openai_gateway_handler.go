@@ -20,6 +20,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/requestmodel"
@@ -461,9 +462,23 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Read request body
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
 		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolResponses)
+		return
+	}
+
+	if err := pkghttputil.ValidateJSONUTF8(body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "invalid_utf8", "param": "body", "message": err.Error()}})
+		return
+	}
+	body, err = pkghttputil.NormalizeLenientJSONRequestBody(body, gatewayMaxBodySize(h.cfg))
+	if err != nil {
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 
