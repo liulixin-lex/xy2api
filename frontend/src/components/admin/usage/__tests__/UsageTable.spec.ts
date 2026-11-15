@@ -166,6 +166,18 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).toContain('usage.anthropicCacheTTL.unknownDetail')
   })
 
+  it('puts the above-table slot right above the table, under the IP lookup bar (7j-4)', () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [], loading: false, columns: [{ key: 'ip_address', label: 'IP' }] },
+      slots: { 'above-table': '<div data-test="anchor" />' },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const root = wrapper.element as HTMLElement
+    const anchor = root.querySelector('[data-test="anchor"]')!
+    expect(anchor.previousElementSibling?.textContent).toContain('usage.ipGeo.batchFetch')
+    expect(anchor.nextElementSibling?.firstElementChild).toBe(wrapper.findComponent(DataTableStub).element)
+  })
+
   it('shows enabled average TPS using total duration and excludes media rows', () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {

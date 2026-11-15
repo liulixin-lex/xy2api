@@ -1411,17 +1411,18 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(getProviders).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the quality switch and the OAuth rate under short names, without the retired scheduler switches", async () => {
+  // Backend 0.6.5 dropped the quality test switch (sched_quality_test_enabled): one quality switch is left.
+  it("shows the quality switch and the OAuth rate under short names, without the retired test and scheduler switches", async () => {
     const wrapper = mountView(); await flushPromises(); await openGatewayTab(wrapper);
     expect(wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').attributes("placeholder")).toBe("账号倍率");
     expect(wrapper.text()).toContain("OAuth 倍率");
     expect(wrapper.text()).toContain("质量调度");
+    expect(wrapper.text()).not.toContain("主动测试");
     expect(wrapper.find('[data-testid="sched-quality-test-enabled"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="sched-quality-enabled"]').setValue(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      sched_quality_enabled: true,
-    }));
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ sched_quality_enabled: false }));
     expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("sched_quality_test_enabled");
     expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);

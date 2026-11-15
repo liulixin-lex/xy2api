@@ -1,43 +1,25 @@
 <template>
-  <div class="group/usage relative text-sm">
+  <div class="text-sm">
     <div class="flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.today') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ today.toFixed(4) }}</span>
-      <Icon
+      <span class="font-medium text-gray-900 dark:text-white" v-tip="exactMoneyTip(today)">{{ formatCompactMoney(today) }}</span>
+      <!-- The split by platform is the app's shared tip, in the body and kept on screen: it takes no room while hidden,
+           shows on hover or keyboard focus, and a tap shows it at once (7r-3). A 24px target over the 12px icon. -->
+      <button
         v-if="hasBreakdown"
-        name="infoCircle"
-        size="xs"
-        class="text-gray-400 dark:text-gray-500"
-      />
+        type="button"
+        class="-m-1.5 inline-flex rounded p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+        :aria-label="t('admin.users.platformBreakdown')"
+        v-tip="breakdownTip"
+        data-test="platform-breakdown"
+        @click="showTipNow($event.currentTarget)"
+      >
+        <Icon name="infoCircle" size="xs" />
+      </button>
     </div>
     <div class="mt-0.5 flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.total') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ total.toFixed(4) }}</span>
-    </div>
-
-    <div
-      v-if="hasBreakdown"
-      class="pointer-events-none absolute left-full top-0 z-50 ml-2 min-w-[220px] whitespace-nowrap rounded-md bg-gray-900 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-opacity duration-100 group-hover/usage:opacity-100 dark:bg-dark-600"
-    >
-      <div class="mb-1.5 flex items-center justify-between gap-3 border-b border-white/10 pb-1 text-[11px] opacity-80">
-        <span>{{ t('admin.users.platformBreakdown') }}</span>
-        <span class="font-mono">{{ t('admin.users.today') }} / {{ t('admin.users.total') }}</span>
-      </div>
-      <div
-        v-for="item in sortedBreakdown"
-        :key="item.platform"
-        class="flex items-center justify-between gap-3 py-0.5"
-        :class="{ 'opacity-70 italic': item.isOther }"
-      >
-        <span class="capitalize">
-          {{ item.isOther ? t('admin.users.platformOther') : platformLabel(item.platform) }}
-        </span>
-        <span class="font-mono">
-          ${{ item.today_actual_cost.toFixed(4) }}
-          <span class="opacity-50">/</span>
-          ${{ item.total_actual_cost.toFixed(4) }}
-        </span>
-      </div>
+      <span class="font-medium text-gray-900 dark:text-white" v-tip="exactMoneyTip(total)">{{ formatCompactMoney(total) }}</span>
     </div>
   </div>
 </template>
@@ -46,6 +28,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { exactMoneyTip, formatCompactMoney } from '@/utils/compactNumber'
+import { showTipNow, vTip } from '@/utils/tip'
 import type { PlatformUsage } from '@/api/admin/dashboard'
 
 const props = defineProps<{
@@ -89,6 +73,17 @@ const sortedBreakdown = computed<BreakdownRow[]>(() => {
 })
 
 const hasBreakdown = computed(() => sortedBreakdown.value.length > 0)
+
+/** One line per platform, today / total in full (the tip keeps line breaks and spaces). */
+const breakdownTip = computed(() =>
+  [
+    `${t('admin.users.platformBreakdown')}  ${t('admin.users.today')} / ${t('admin.users.total')}`,
+    ...sortedBreakdown.value.map((item) => {
+      const name = item.isOther ? t('admin.users.platformOther') : platformLabel(item.platform)
+      return `${name}  $${item.today_actual_cost.toFixed(4)} / $${item.total_actual_cost.toFixed(4)}`
+    })
+  ].join('\n')
+)
 
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',

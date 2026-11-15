@@ -5,7 +5,6 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
-  listWithEtag,
   batchRefresh,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
@@ -14,7 +13,6 @@ const {
   showError
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   batchRefresh: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -24,13 +22,13 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats,
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchDelete: vi.fn(),
@@ -98,9 +96,9 @@ const AccountBulkActionsBarStub = {
   `
 }
 
-const AccountTableFiltersStub = {
+const AccountsToolbarStub = {
   emits: ['change'],
-  template: '<button data-test="change-filter" @click="$emit(\'change\')">change filter</button>'
+  template: '<button data-test="change-filter" @click="$emit(\'change\', { platform: \'openai\' })">change filter</button>'
 }
 
 // The bulk bar shows only while something is selected (R2 ui-proposal 6.1 #7): tick the first row to bring it up.
@@ -122,7 +120,7 @@ const mountView = () => mount(AccountsView, {
       Pagination: true,
       ConfirmDialog: true,
       AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-      AccountTableFilters: AccountTableFiltersStub,
+      AccountsToolbar: AccountsToolbarStub,
       AccountBulkActionsBar: AccountBulkActionsBarStub,
       AccountActionMenu: true,
       ImportDataModal: true,
@@ -131,6 +129,7 @@ const mountView = () => mount(AccountsView, {
       AccountStatsModal: true,
       ScheduledTestsPanel: true,
       SyncFromCrsModal: true,
+      TempUnschedStatusModal: true,
       ErrorPassthroughRulesModal: true,
       TLSFingerprintProfilesModal: true,
       CreateAccountModal: true,
@@ -138,6 +137,7 @@ const mountView = () => mount(AccountsView, {
       BulkEditAccountModal: true,
       PlatformTypeBadge: true,
       AccountCapacityCell: true,
+      AccountStatusIndicator: true,
       AccountTodayStatsCell: true,
       AccountGroupsCell: true,
       AccountUsageCell: true,
@@ -150,7 +150,6 @@ describe('admin AccountsView select all filtered results', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset()
-    listWithEtag.mockReset()
     batchRefresh.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
@@ -158,11 +157,6 @@ describe('admin AccountsView select all filtered results', () => {
     getAllGroups.mockReset()
     showError.mockReset()
 
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
-    })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
@@ -270,6 +264,7 @@ describe('admin AccountsView select all filtered results', () => {
 
     expect(wrapper.get('[data-test="selected-count"]').text()).toBe('20')
     expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('false')
-    expect(showError).toHaveBeenCalledWith('admin.accounts.bulkActions.selectAllFailed')
+    // The action's words with the backend's reason (spec 7e-13).
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
   })
 })

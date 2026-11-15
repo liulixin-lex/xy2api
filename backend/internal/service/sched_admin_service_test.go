@@ -66,10 +66,11 @@ func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedqu
 
 type schedAdminAccounts struct {
 	SchedAdminAccountRepository
-	rows       map[int64]*Account
-	reads      int
-	fail       map[string]error
-	changeTemp bool
+	rows         map[int64]*Account
+	reads        int
+	fail         map[string]error
+	changeTemp   bool
+	allPlatforms bool
 }
 
 func (r *schedAdminAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -687,8 +688,8 @@ func TestSchedAdminResetFailureRemovesEarlierClearedKind(t *testing.T) {
 
 func (r *schedAdminAccounts) SchedAdminAccountIDs(context.Context) ([]int64, error) {
 	ids := []int64{}
-	for id, a := range r.rows {
-		if a.Platform == PlatformOpenAI {
+	for id, account := range r.rows {
+		if account.Platform == PlatformOpenAI || r.allPlatforms {
 			ids = append(ids, id)
 		}
 	}

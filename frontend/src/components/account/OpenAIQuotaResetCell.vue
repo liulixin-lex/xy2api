@@ -182,6 +182,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useHeldResult } from '@/composables/useHeldResult'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import {
@@ -209,8 +210,12 @@ const visible = computed(() => props.account.platform === 'openai' && props.acco
 const loading = ref(false)
 const resetting = ref(false)
 const error = ref<string | null>(null)
-const data = ref<OpenAIQuotaUsage | null>(null)
-const cachedData = ref<OpenAIQuotaUsage | null>(null)
+// The row's snapshots are what the cell shows. A query or a reset may show its fresher answer, which stands until the
+// row brings new snapshots (both write them). `null` held on purpose means "unknown".
+const snapshotBasis = () => [props.account.extra?.codex_reset_credit_snapshot, props.account.extra?.codex_credits_snapshot]
+const liveReset = useHeldResult<OpenAIQuotaUsage | null>(snapshotBasis)
+const persistedReset = useHeldResult<OpenAIQuotaUsage | null>(snapshotBasis)
+const liveCredits = useHeldResult<ReturnType<typeof readCachedCredits>>(snapshotBasis)
 const resetMessage = ref<string | null>(null)
 const resetWarning = ref<string | null>(null)
 const showResetConfirm = ref(false)
@@ -224,7 +229,8 @@ const readCachedCredits = (account: Account) => {
   if (credits.balance != null && typeof credits.balance !== 'string') return null
   return { credits, fetched_at: snapshot.fetched_at }
 }
-const creditsData = ref(readCachedCredits(props.account))
+const snapshotCredits = computed(() => readCachedCredits(props.account))
+const creditsData = computed(() => (liveCredits.current.value ? liveCredits.current.value.value : snapshotCredits.value))
 const creditsDisplay = computed(() => {
   const credits = creditsData.value?.credits
   if (!credits) return '—'
@@ -245,7 +251,7 @@ const creditsButtonTitle = computed(() => {
 })
 
 const updateCredits = (usage: OpenAIQuotaUsage | null) => {
-  creditsData.value = usage?.credits ? { credits: usage.credits, fetched_at: usage.fetched_at } : null
+  liveCredits.hold(usage?.credits ? { credits: usage.credits, fetched_at: usage.fetched_at } : null)
 }
 
 type AutoResetCreditState = NonNullable<NonNullable<Account['extra']>['codex_auto_reset_credit_state']>
@@ -326,8 +332,9 @@ const readCachedResetCredits = (account: Account): OpenAIQuotaUsage | null => {
   }
 }
 
-cachedData.value = readCachedResetCredits(props.account)
-data.value = cachedData.value
+const snapshotReset = computed(() => readCachedResetCredits(props.account))
+const data = computed(() => (liveReset.current.value ? liveReset.current.value.value : snapshotReset.value))
+const cachedData = computed(() => (persistedReset.current.value ? persistedReset.current.value.value : snapshotReset.value))
 
 // 影子账号的额度查询会 resolve 到母账号,但影子本身不支持重置(后端返回 409);
 // 重置必须在母账号上进行。前端据此禁用影子的重置入口(外审 F6)。
@@ -449,9 +456,9 @@ const handleQuery = async () => {
     // The upstream read succeeded even when the snapshot write was rejected, so
     // the live count is always adopted. Only the persisted view is left alone,
     // which keeps the displayed expirations consistent with what is stored.
-    data.value = result
+    liveReset.hold(result)
     if (result.cache_persisted) {
-      cachedData.value = result
+      persistedReset.hold(result)
     } else {
       resetWarning.value = t('admin.accounts.openaiQuotaReset.refreshCachePersistFailed')
     }
@@ -491,13 +498,13 @@ const confirmReset = async () => {
     updateCredits(result.quota ?? null)
     showResetCreditDetails.value = false
     if (result.cache_refreshed && result.quota) {
-      data.value = result.quota
-      cachedData.value = result.quota
+      liveReset.hold(result.quota)
+      persistedReset.hold(result.quota)
     } else {
       // A credit was consumed but the post-reset count could not be read back.
       // Whatever we still hold is one generation stale, so report the count as
       // unknown instead of letting a second consumption start from stale data.
-      data.value = null
+      liveReset.hold(null)
     }
     if (result.account) emit('account-updated', result.account)
 
@@ -524,9 +531,9 @@ watch(
   () => props.account.id,
   () => {
     // Account row may be reused across paginated lists; reset local state.
-    cachedData.value = readCachedResetCredits(props.account)
-    data.value = cachedData.value
-    creditsData.value = readCachedCredits(props.account)
+    liveReset.clear()
+    persistedReset.clear()
+    liveCredits.clear()
     creditsCacheWarning.value = false
     error.value = null
     resetMessage.value = null

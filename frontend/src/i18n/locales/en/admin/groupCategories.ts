@@ -26,7 +26,6 @@ export default {
     groupSavedCategoriesFailed: 'The group was saved, but its categories were not: {message}',
     groupCopiedCategoriesFailed: 'The group was copied, but its categories were not: {message}',
     tabsLabel: 'Filter by category',
-    editAccountGroups: 'Edit groups · {name}',
-    editAccountGroupsAria: 'Edit the groups of account {name}'
+    editAccountGroups: 'Edit groups · {name}'
   }
 }

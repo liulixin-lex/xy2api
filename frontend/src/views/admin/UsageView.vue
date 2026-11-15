@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageSummaryBar :stats="usageStats" />
+      <UsageStatsCards :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -61,7 +61,7 @@
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" :hint="false" />
+          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
@@ -84,6 +84,9 @@
         </div>
 
         <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" :can-cleanup="!adminAccess.isOperator" :can-export="has('data.export')" @cleanup="openCleanupDialog" @export="exportToExcel">
+          <template #status>
+            <LiveStatusIndicator v-if="activeTab === 'usage'" :status="liveStatus" :pause="liveUsage.pause" :resume="liveUsage.resume" :detail="t('admin.usage.liveDetail')" />
+          </template>
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -123,15 +126,17 @@
         </UsageFilters>
         <UsageExportTasks v-if="has('data.export')" ref="exportPanel" scope="admin" @busy="exporting = $event" />
 
-        <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
+        <!-- overflow-clip, not hidden: the sticky anchor below must follow the page scroll -->
+        <div v-show="activeTab === 'usage'" class="overflow-clip rounded-b-2xl">
           <UsageTable
+            ref="usageTableRef"
             flat
-            admin
+            :row-class="usageRowClass"
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
             show-fallback-origin
-            :data="usageLogs"
-            :loading="loading"
+            :data="usageRows"
+            :loading="usageLoading"
             :columns="visibleColumns"
             :server-side-sort="true"
             :default-sort-key="'created_at'"
@@ -139,8 +144,19 @@
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
-          />
-          <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          >
+            <!-- "N new records" shows only while the list is away from its top (new records come in by themselves
+                 there), so from 1024px it rides this zero-height anchor right above the table, under the IP lookup bar
+                 (7j-4): in the header band while the list's top is in view, under the page header once it has
+                 scrolled away. Below 1024px the anchor is no layer of its own and the pill, fixed under the top bar,
+                 stacks as on the users and groups pages. -->
+            <template #above-table>
+              <div class="h-0 lg:sticky lg:top-16 lg:z-10">
+                <PendingChangesPill :count="pending" :more="pendingMore" :label="newRecordsText" @merge="applyPending" />
+              </div>
+            </template>
+          </UsageTable>
+          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
@@ -194,9 +210,10 @@ import { useRoute } from 'vue-router'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
-import UsageSummaryBar from '@/components/admin/usage/UsageSummaryBar.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
@@ -208,6 +225,8 @@ import type { OpsErrorLog } from '@/api/admin/ops'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
+import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
@@ -222,7 +241,7 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const adminSettingsStore = useAdminSettingsStore()
 const route = useRoute()
-const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
+const usageStats = ref<AdminUsageStatsResponse | null>(null); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
@@ -238,9 +257,7 @@ const inboundEndpointStats = ref<EndpointStat[]>([])
 const upstreamEndpointStats = ref<EndpointStat[]>([])
 const endpointPathStats = ref<EndpointStat[]>([])
 const endpointStatsLoading = ref(false)
-let abortController: AbortController | null = null
 let chartReqSeq = 0
-let statsReqSeq = 0
 let modelStatsReqSeq = 0
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
@@ -306,8 +323,8 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 }
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, native_compaction_v2: null, billing_type: null, result: null, start_date: startDate.value, end_date: endDate.value })
-const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, native_compaction_v2: null, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+const pagination = reactive({ page: 1, page_size: getPersistedPageSize() })
 const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
@@ -412,40 +429,69 @@ const buildUsageListParams = (
   }
 }
 
-const loadLogs = async () => {
-  abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
-  try {
-    const res = await adminAPI.usage.list(
-      buildUsageListParams(pagination.page, pagination.page_size, false),
-      { signal: c.signal }
-    )
-    if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
-  } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
-}
-const loadStats = async (force = false) => {
-  const seq = ++statsReqSeq
+// The list is a live table in log mode: every 5 s the current page is fetched again; on page 1, newest first, with the
+// list's top in view, new records come in at the top (trimmed to the page size); otherwise they are only counted
+// (liveUsage.pending / pendingMore, taken in by liveUsage.applyPending). Usage rows never change once written, so there
+// is no per-row source. The stats cards are a 30 s page task that also runs after every successful load. On the errors
+// and ranking tabs the list's 5 s check is held (the cards go on) and runs at once on the way back (spec 8.5a).
+type DetailTab = 'usage' | 'errors' | 'ranking'
+const activeTab = ref<DetailTab>('usage')
+const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
+const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
+const liveUsage = useLiveTable<AdminUsageLog>({
+  getId: usageRowId,
+  fetchPage: (signal) => adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal }),
+  membershipIntervalMs: 5000,
+  membershipActive: () => activeTab.value === 'usage',
+  tail: {
+    enabled: () => pagination.page === 1 && sortState.sort_by === 'created_at' && sortState.sort_order === 'desc'
+      && (usageTableRef.value?.isAtTop?.() ?? true),
+    pageSize: () => pagination.page_size
+  },
+  tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
+})
+const { rows: usageRows, loading: usageLoading, total: usageTotal, pending, pendingMore, status: liveStatus } = liveUsage
+const newRecordsText = (n: string) => t('admin.usage.newRecords', { n })
+const usageRowClass = (row: AdminUsageLog) =>
+  liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined
+const logLoadError = (error: unknown) => console.error('Failed to load usage logs:', error)
+const reloadUsage = () => liveUsage.reload().catch(logLoadError)
+const applyPending = () => liveUsage.applyPending().catch(logLoadError)
+
+// The endpoint distribution charts come from the stats answer but follow only page opens, filter changes and manual
+// refreshes, not the 30 s beat (spec 8.5); values stay until new ones arrive.
+let endpointStatsDue = true
+let statsNoCache = false
+const askEndpointStats = (noCache = false) => {
+  endpointStatsDue = true
   endpointStatsLoading.value = true
+  if (noCache) statsNoCache = true
+}
+const runStatsTask = async (signal: AbortSignal) => {
+  const withEndpoints = endpointStatsDue
+  const noCache = statsNoCache
+  const requestType = filters.value.request_type
+  const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
   try {
-    const requestType = filters.value.request_type
-    const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const s = await adminAPI.usage.getStats({
       ...filters.value,
       stream: legacyStream === null ? undefined : legacyStream,
-      ...(force ? { nocache: 1 } : {}),
+      ...(noCache ? { nocache: 1 } : {}),
     })
-    if (seq !== statsReqSeq) return
+    if (signal.aborted) return // a load started: the filter may have changed
+    if (noCache) statsNoCache = false
     usageStats.value = s
+    if (!withEndpoints) return
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
     endpointPathStats.value = s.endpoint_paths || []
+    endpointStatsDue = false
+    endpointStatsLoading.value = false
   } catch (error) {
-    if (seq !== statsReqSeq) return
+    if (signal.aborted) return
     console.error('Failed to load usage stats:', error)
-    inboundEndpointStats.value = []
-    upstreamEndpointStats.value = []
-    endpointPathStats.value = []
-  } finally {
-    if (seq === statsReqSeq) endpointStatsLoading.value = false
+    if (withEndpoints) endpointStatsLoading.value = false
+    throw error // the engine retries it on the back-off beat
   }
 }
 
@@ -544,8 +590,9 @@ const loadChartData = async () => {
 const applyFilters = () => {
   pagination.page = 1
   invalidateModelStatsCache()
-  loadLogs()
-  loadStats()
+  usageTableRef.value?.scrollToTop?.()
+  askEndpointStats()
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   errPage.value = 1
@@ -558,8 +605,8 @@ const applyFilters = () => {
 const refreshData = () => {
   void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
-  loadLogs()
-  loadStats(true)
+  askEndpointStats(true)
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
@@ -573,13 +620,13 @@ const resetFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
-const handlePageChange = (p: number) => { pagination.page = p; loadLogs() }
-const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; loadLogs() }
+const handlePageChange = (p: number) => { pagination.page = p; void reloadUsage() }
+const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; void reloadUsage() }
 const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
-  loadLogs()
+  void reloadUsage()
 }
 
 const handleIpGeoBatchFailed = () => {
@@ -588,7 +635,10 @@ const handleIpGeoBatchFailed = () => {
 const openCleanupDialog = () => { cleanupDialogVisible.value = true }
 const exportPanel = ref<InstanceType<typeof UsageExportTasks> | null>(null)
 const exportToExcel = async () => {
-  await exportPanel.value?.create({ ...buildUsageListParams(1, 100, false) })
+  // 导出的是账单记录（usage 日志），不含无账单请求，也不按请求结果筛选；不把 result 带过去，免得看似已筛。
+  const params = buildUsageListParams(1, 100, false)
+  delete params.result
+  await exportPanel.value?.create({ ...params })
 }
 
 // Column visibility
@@ -600,24 +650,20 @@ const HIDDEN_COLUMNS_VERSION_KEY = 'usage-hidden-columns-version'
 const HIDDEN_COLUMNS_PREV_VERSION = 'request-id-hidden-by-default'
 const HIDDEN_COLUMNS_CURRENT_VERSION = 'upstream-request-id-hidden-by-default'
 
-// FINAL §7 order: 时间｜用户｜分组｜账号｜模型｜结果｜首字｜耗时｜Token｜缓存｜费用, then the existing extra columns.
 const allColumns = computed(() => [
-  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user', label: t('admin.usage.user'), sortable: false },
-  { key: 'group', label: t('admin.usage.group'), sortable: false },
+  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'account', label: t('admin.usage.account'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
-  { key: 'result', label: t('admin.schedQuality.usage.col.result'), sortable: false },
-  { key: 'first_token', label: t('admin.schedQuality.usage.col.firstToken'), sortable: false, class: 'text-right' },
-  { key: 'duration', label: t('admin.schedQuality.usage.col.duration'), sortable: false, class: 'text-right' },
-  { key: 'tokens', label: t('usage.tokens'), sortable: false },
-  { key: 'cache', label: t('admin.schedQuality.usage.col.cache'), sortable: false, class: 'text-right' },
-  { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
+  { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
+  { key: 'tokens', label: t('usage.tokens'), sortable: false },
+  { key: 'cost', label: t('usage.cost'), sortable: false },
+  { key: 'latency', label: t('usage.latency'), sortable: false },
+  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
   { key: 'upstream_request_id', label: t('admin.usage.upstreamRequestId'), sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
@@ -750,8 +796,6 @@ const loadSavedColumns = () => {
 }
 
 // Detail tabs
-type DetailTab = 'usage' | 'errors' | 'ranking'
-const activeTab = ref<DetailTab>('usage')
 const detailTabs = computed(() => [
   { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
   { key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const },
@@ -837,8 +881,8 @@ onMounted(() => {
   void loadRouteUserFilterLabel()
   void loadRouteAccountFilterLabel()
   if (getSingleQueryValue(route.query.tab) === 'errors') switchTab('errors')
-  loadLogs()
-  loadStats()
+  askEndpointStats()
+  void reloadUsage()
   loadModelStats(modelDistributionSource.value, true)
   window.setTimeout(() => {
     void loadChartData()
@@ -847,7 +891,7 @@ onMounted(() => {
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

@@ -2,47 +2,48 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="relative w-full sm:w-64">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.proxies.searchProxies')"
-              class="input pl-10"
-              @input="handleSearch"
-            />
-          </div>
-
-          <div class="w-full sm:w-40">
+        <TableToolbar>
+          <template #search>
+            <div class="relative">
+              <Icon
+                name="search"
+                size="md"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.proxies.searchProxies')"
+                class="input pl-10"
+                @input="handleSearch"
+              />
+            </div>
+          </template>
+          <template #filters>
             <Select
               v-model="filters.protocol"
               :options="protocolOptions"
               :placeholder="t('admin.proxies.allProtocols')"
+              class="w-40"
               @change="handleFilterChange"
             />
-          </div>
-          <div class="w-full sm:w-36">
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.proxies.allStatus')"
+              class="w-36"
               @change="handleFilterChange"
             />
-          </div>
-
-          <!-- Right: All action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          </template>
+          <!-- Below 1024 the row holds refresh, the two checks, a menu with delete, import and export, and create
+               (seven buttons do not fit 390px); from 1024 every action is its own button. -->
+          <template #actions>
             <button
               @click="loadProxies"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="btn btn-secondary table-toolbar__icon"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -51,45 +52,96 @@
               @click="handleBatchTest"
               :disabled="batchTesting || loading"
               class="btn btn-secondary"
-              :title="t('admin.proxies.testConnection')"
+              :aria-label="t('admin.proxies.testConnection')"
+              v-tip="t('admin.proxies.testConnection')"
             >
-              <Icon name="play" size="md" class="mr-2" />
-              {{ t('admin.proxies.testConnection') }}
+              <Icon name="play" size="md" class="lg:mr-2" />
+              <span class="table-toolbar__label">{{ t('admin.proxies.testConnection') }}</span>
             </button>
             <button
               v-if="canManage"
               @click="handleBatchQualityCheck"
               :disabled="batchQualityChecking || loading"
               class="btn btn-secondary"
-              :title="t('admin.proxies.batchQualityCheck')"
+              :aria-label="t('admin.proxies.batchQualityCheck')"
+              v-tip="t('admin.proxies.batchQualityCheck')"
             >
-              <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
-              {{ t('admin.proxies.batchQualityCheck') }}
+              <Icon name="shield" size="md" class="lg:mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
+              <span class="table-toolbar__label">{{ t('admin.proxies.batchQualityCheck') }}</span>
             </button>
             <button
               v-if="canManage"
               @click="openBatchDelete"
               :disabled="selectedCount === 0"
-              class="btn btn-danger"
-              :title="t('admin.proxies.batchDeleteAction')"
+              class="btn btn-danger max-lg:hidden"
             >
               <Icon name="trash" size="md" class="mr-2" />
               {{ t('admin.proxies.batchDeleteAction') }}
             </button>
             <template v-if="isSuperAdmin">
-              <button @click="showImportData = true" class="btn btn-secondary">
+              <button @click="showImportData = true" class="btn btn-secondary max-lg:hidden">
                 {{ t('admin.proxies.dataImport') }}
               </button>
-              <button @click="showExportDataDialog = true" class="btn btn-secondary">
-                {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
+              <button @click="showExportDataDialog = true" class="btn btn-secondary max-lg:hidden">
+                {{ dataExportLabel }}
               </button>
             </template>
+            <div v-if="canManage || isSuperAdmin" class="relative lg:hidden">
+              <button
+                ref="moreButtonRef"
+                type="button"
+                class="btn btn-secondary table-toolbar__icon"
+                :aria-label="t('common.more')"
+                aria-haspopup="menu"
+                :aria-expanded="moreMenuOpen"
+                v-tip="t('common.more')"
+                data-test="proxy-more-actions"
+                @click.stop="moreMenuOpen = !moreMenuOpen"
+              >
+                <Icon name="more" size="md" />
+              </button>
+              <div
+                v-if="moreMenuOpen"
+                ref="moreMenuRef"
+                role="menu"
+                class="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  v-if="canManage"
+                  type="button"
+                  role="menuitem"
+                  :disabled="selectedCount === 0"
+                  class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-dark-700"
+                  @click="openBatchDelete"
+                >
+                  <Icon name="trash" size="sm" />{{ t('admin.proxies.batchDeleteAction') }}
+                </button>
+                <template v-if="isSuperAdmin">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                    @click="showImportData = true"
+                  >
+                    <Icon name="upload" size="sm" />{{ t('admin.proxies.dataImport') }}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                    @click="showExportDataDialog = true"
+                  >
+                    <Icon name="download" size="sm" />{{ dataExportLabel }}
+                  </button>
+                </template>
+              </div>
+            </div>
             <button v-if="canCreateProxies" @click="showCreateModal = true" class="btn btn-primary" data-testid="proxy-create">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
@@ -98,31 +150,16 @@
           :columns="columns"
           :data="proxies"
           :loading="loading"
+          row-key="id"
+          selectable
+          :selected-keys="selectedIds"
+          :selection-label="proxySelectionLabel"
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
           @sort="handleSort"
+          @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <template #header-select>
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              @click.stop
-              @change="toggleSelectAllVisible($event)"
-            />
-          </template>
-
-          <template #cell-select="{ row }">
-            <input
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="selectedProxyIds.has(row.id)"
-              @click.stop
-              @change="toggleSelectRow(row.id, $event)"
-            />
-          </template>
-
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
           </template>
@@ -140,31 +177,16 @@
           <template #cell-address="{ row }">
             <div class="flex items-center gap-1.5">
               <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <div class="relative">
-                <button
-                  type="button"
-                  class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
-                  :title="t('admin.proxies.copyProxyUrl')"
-                  @click.stop="copyProxyUrl(row)"
-                  @contextmenu.prevent="toggleCopyMenu(row.id)"
-                >
-                  <Icon name="copy" size="sm" />
-                </button>
-                <!-- 右键展开格式选择菜单 -->
-                <div
-                  v-if="copyMenuProxyId === row.id"
-                  class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
-                >
-                  <button
-                    v-for="fmt in getCopyFormats(row)"
-                    :key="fmt.label"
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
-                    @click.stop="copyFormat(fmt.value)"
-                  >
-                    <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
-                  </button>
-                </div>
-              </div>
+              <!-- 右键（触屏长按）展开格式选择菜单 -->
+              <button
+                type="button"
+                class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                :title="t('admin.proxies.copyProxyUrl')"
+                @click.stop="copyProxyUrl(row)"
+                @contextmenu.prevent="toggleCopyMenu(row, $event)"
+              >
+                <Icon name="copy" size="sm" />
+              </button>
             </div>
           </template>
 
@@ -374,6 +396,31 @@
         />
       </template>
     </TablePageLayout>
+
+    <!-- The copy-format menu, placed like the row menu (AccountActionMenu): in the body, under its button or above it,
+         always whole on screen; a sub-layer, so Escape closes it (7r-4). -->
+    <Teleport to="body">
+      <div
+        v-if="copyMenu"
+        ref="copyMenuRef"
+        role="menu"
+        class="fixed min-w-[180px] overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
+        :style="copyMenuStyle"
+        data-test="proxy-copy-menu"
+        @click.stop
+      >
+        <button
+          v-for="fmt in getCopyFormats(copyMenu.row)"
+          :key="fmt.label"
+          type="button"
+          role="menuitem"
+          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
+          @click="copyFormat(fmt.value)"
+        >
+          <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Create Proxy Modal -->
     <BaseDialog
@@ -979,7 +1026,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useWindowSize } from '@vueuse/core'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -987,6 +1036,7 @@ import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -995,6 +1045,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
@@ -1022,7 +1073,6 @@ const editLoaded = reactive({ status: '', expires_at: '' })
 const PROXY_NETWORK_FIELDS = ['protocol', 'host', 'port', 'username', 'password', 'fallback_mode', 'backup_proxy_id'] as const
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
   { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
   { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
@@ -1067,7 +1117,57 @@ const editStatusOptions = computed(() => [
 
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
-const copyMenuProxyId = ref<number | null>(null)
+const copyMenu = ref<{ row: Proxy; button: HTMLElement; anchor: DOMRect } | null>(null)
+const copyMenuRef = ref<HTMLElement | null>(null)
+const copyMenuPosition = ref({ top: 0, left: 0 })
+const { width: viewportWidth, height: viewportHeight } = useWindowSize()
+const COPY_MENU_PADDING = 8
+const copyMenuLayer = useOverlayLayer(() => copyMenu.value !== null, {
+  root: copyMenuRef,
+  modal: false,
+  onEscape: () => {
+    const button = copyMenu.value?.button
+    copyMenu.value = null
+    button?.focus({ preventScroll: true })
+  },
+  onCovered: () => { copyMenu.value = null }
+})
+const copyMenuStyle = computed(() => ({
+  top: `${copyMenuPosition.value.top}px`,
+  left: `${copyMenuPosition.value.left}px`,
+  maxWidth: `${Math.max(0, viewportWidth.value - COPY_MENU_PADDING * 2)}px`,
+  maxHeight: `${Math.max(0, viewportHeight.value - COPY_MENU_PADDING * 2)}px`,
+  zIndex: copyMenuLayer.zIndex.value
+}))
+// Under the button, left edges aligned, or above it when it does not fit below; then kept 8px inside the screen.
+const placeCopyMenu = () => {
+  const menu = copyMenuRef.value
+  const anchor = copyMenu.value?.anchor
+  if (!menu || !anchor) return
+  const { width, height } = menu.getBoundingClientRect()
+  const gap = 4
+  const maxTop = viewportHeight.value - height - COPY_MENU_PADDING
+  const top = anchor.bottom + gap <= maxTop ? anchor.bottom + gap : anchor.top - height - gap
+  copyMenuPosition.value = {
+    top: Math.max(COPY_MENU_PADDING, Math.min(top, maxTop)),
+    left: Math.max(COPY_MENU_PADDING, Math.min(anchor.left, viewportWidth.value - width - COPY_MENU_PADDING))
+  }
+}
+watch([copyMenuRef, copyMenu, viewportWidth, viewportHeight], placeCopyMenu, { flush: 'post' })
+const moreMenuOpen = ref(false)
+const moreButtonRef = ref<HTMLElement | null>(null)
+const moreMenuRef = ref<HTMLElement | null>(null)
+// The narrow "more" menu is a sub-layer like the app's other menus: Escape closes it and focus goes back to its
+// button; a dialog it opens closes it (7p-4).
+useOverlayLayer(moreMenuOpen, {
+  root: moreMenuRef,
+  modal: false,
+  onEscape: () => {
+    moreMenuOpen.value = false
+    moreButtonRef.value?.focus({ preventScroll: true })
+  },
+  onCovered: () => { moreMenuOpen.value = false }
+})
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
@@ -1104,14 +1204,14 @@ const batchQualityChecking = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
 const {
   selectedSet: selectedProxyIds,
+  selectedIds,
   selectedCount,
-  allVisibleSelected,
   isSelected,
+  setSelectedIds,
   select,
   deselect,
   clear: clearSelectedProxies,
   removeMany: removeSelectedProxies,
-  toggleVisible,
   batchUpdate
 } = useTableSelection<Proxy>({
   rows: proxies,
@@ -1193,19 +1293,15 @@ const isAbortError = (error: unknown) => {
   return maybeError.name === 'AbortError' || maybeError.code === 'ERR_CANCELED'
 }
 
-const toggleSelectRow = (id: number, event: Event) => {
-  const target = event.target as HTMLInputElement
-  if (target.checked) {
-    select(id)
-    return
-  }
-  deselect(id)
+const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
+  setSelectedIds(keys.filter((key): key is number => typeof key === 'number'))
 }
 
-const toggleSelectAllVisible = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
-}
+const proxySelectionLabel = (proxy: Proxy) => proxy.name
+
+const dataExportLabel = computed(() =>
+  selectedCount.value > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport')
+)
 
 const buildProxyQueryFilters = () => ({
   protocol: filters.protocol || undefined,
@@ -2098,31 +2194,33 @@ function getCopyFormats(row: any) {
 
 function copyProxyUrl(row: any) {
   copyToClipboard(buildProxyUrl(row), t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
+  copyMenu.value = null
 }
 
-function toggleCopyMenu(id: number) {
-  copyMenuProxyId.value = copyMenuProxyId.value === id ? null : id
+function toggleCopyMenu(row: Proxy, event: MouseEvent) {
+  const button = event.currentTarget as HTMLElement
+  copyMenu.value = copyMenu.value?.row.id === row.id ? null : { row, button, anchor: button.getBoundingClientRect() }
 }
 
 function copyFormat(value: string) {
   copyToClipboard(value, t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
+  copyMenu.value = null
 }
 
-function closeCopyMenu() {
-  copyMenuProxyId.value = null
+function closeMenus() {
+  copyMenu.value = null
+  moreMenuOpen.value = false
 }
 
 onMounted(() => {
   loadProxies()
   loadBackupProxyOptions()
-  document.addEventListener('click', closeCopyMenu)
+  document.addEventListener('click', closeMenus)
 })
 
 onUnmounted(() => {
   clearTimeout(searchTimeout)
   abortController?.abort()
-  document.removeEventListener('click', closeCopyMenu)
+  document.removeEventListener('click', closeMenus)
 })
 </script>

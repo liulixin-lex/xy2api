@@ -18,6 +18,21 @@ export function sortIQTargets<T extends { model: string }>(targets: T[]): T[] {
   return [...targets].sort((a, b) => rank(a.model) - rank(b.model))
 }
 
+/**
+ * The targets the list switch leaves on the row at once (7e-1): both built-in targets on or off, a built-in target the
+ * account has no row for yet added as a fresh one, custom targets as they are. The server's answer replaces it.
+ */
+export function iqTargetsSwitched(targets: IQTargetSummary[] | undefined, enabled: boolean): IQTargetSummary[] {
+  const current = targets ?? []
+  const missing = IQ_BUILTIN_MODELS.filter((model) => !current.some((target) => target.model === model))
+  return [
+    ...current.map((target) => (isIQBuiltinModel(target.model) ? { ...target, enabled } : target)),
+    ...missing.map((model): IQTargetSummary => ({
+      model, enabled, verdict: 'unknown', state: 'idle', gate_active: false, verdict_at: null, last_run_at: null, next_run_at: null
+    }))
+  ]
+}
+
 /** Account-level summary used by the list filter: degraded if any enabled target is degraded, smart if every enabled target is smart. */
 export function iqAccountVerdict(targets: IQTargetSummary[] | undefined): IQVerdict {
   const enabled = (targets ?? []).filter(target => target.enabled)

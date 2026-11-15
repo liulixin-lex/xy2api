@@ -85,7 +85,11 @@ const MAX_PRIORITY = 9999
 // 连续点击时合并为一次保存，避免每次 +/- 都打一次接口
 const SAVE_DEBOUNCE_MS = 450
 
-const props = defineProps<{ account: Account }>()
+const props = defineProps<{
+  account: Account
+  /** Saves the new priority (the accounts page edits it through the live table); by default the account is updated. */
+  save?: (priority: number) => Promise<Account | void>
+}>()
 const emit = defineEmits<{
   (e: 'updated', account: Account): void
   (e: 'error', message: string): void
@@ -124,8 +128,8 @@ const save = async () => {
   if (target === props.account.priority) return
   saving.value = true
   try {
-    const updated = await updateAccount(props.account.id, { priority: target })
-    emit('updated', updated)
+    const updated = props.save ? await props.save(target) : await updateAccount(props.account.id, { priority: target })
+    if (updated) emit('updated', updated)
   } catch (error) {
     draft.value = props.account.priority
     emit('error', extractApiErrorMessage(error, t('admin.accounts.priorityQuick.failed')))

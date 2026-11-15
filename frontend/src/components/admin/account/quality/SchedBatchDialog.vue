@@ -6,7 +6,7 @@
     </p>
     <template #footer>
       <button type="button" class="btn btn-secondary btn-sm" @click="close">{{ t('admin.schedQuality.action.cancel') }}</button>
-      <button type="button" class="btn btn-primary btn-sm" data-sq-batch-confirm @click="confirm">{{ action === 'reset' ? t('admin.schedQuality.action.confirm') : actionName }}</button>
+      <button type="button" class="btn btn-primary btn-sm" data-sq-batch-confirm @click="confirm">{{ t('admin.schedQuality.action.confirm') }}</button>
     </template>
   </BaseDialog>
 
@@ -54,16 +54,17 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedOverrideRequest } from '@/types/schedQuality'
+import type { SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { markSchedChanged } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 // Batch quality actions of the account list (design spec A.5, B.11). Reset confirms first, exempt uses the override
-// popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
-// with one toast (contract delta F3). Exempt calls each account one by one, four at a time, and list it with its
-// result. A run works on what it was started with (action, request, accounts), never on the props of a later opening.
-// Closing the results stops it: accounts not yet called are "not run" and answers still on their way are dropped.
-// Until those answers are in, the run is busy and no other batch can start.
+// popover; the small tests and the "demote" override went with backend 0.6.5. A confirmed reset (恢复) hands the
+// accounts back (`recover`) and runs in the background with one toast (contract delta F3). Exempt calls each account
+// one by one, four at a time, and lists it with its result. A run works on what it was started with (action, request,
+// accounts), never on the props of a later opening. Closing the results stops it: accounts not yet called are
+// "not run" and answers still on their way are dropped. Until those answers are in, the run is busy and no other
+// batch can start.
 export type SchedBatchAction = 'reset' | 'exempt'
 type Result = 'ok' | 'failed' | 'skipped'
 interface Row { id: number; name: string; result: Result | null }

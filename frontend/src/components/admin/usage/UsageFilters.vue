@@ -139,16 +139,16 @@
           <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
         </div>
 
-        <!-- Result Filter (usage only; FINAL §7) -->
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[160px]">
-          <label class="input-label">{{ t('admin.schedQuality.usage.col.result') }}</label>
-          <Select v-model="filters.result" :options="resultOptions" data-testid="usage-result-filter" @change="emitChange" />
-        </div>
-
         <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
         <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
           <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
+        </div>
+
+        <!-- Request result filter (usage only; backend 0.6.5 request ledger: list and stats) -->
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('admin.usage.result') }}</label>
+          <Select v-model="filters.result" :options="resultOptions" @change="emitChange" />
         </div>
 
         <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
@@ -184,6 +184,8 @@
 
       <!-- Right: actions -->
       <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+        <!-- The page's live indicator, next to the refresh button -->
+        <slot name="status" />
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
           {{ t('common.refresh') }}
         </button>
@@ -303,6 +305,15 @@ const billingTypeOptions = ref<SelectOption[]>([
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
 ])
 
+// 请求结果（后端 0.6.5 请求层）：1 成功，2 已救回，3 失败，4 已取消
+const resultOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allResults') },
+  { value: 1, label: t('admin.usage.resultSuccess') },
+  { value: 2, label: t('admin.usage.resultRescued') },
+  { value: 3, label: t('admin.usage.resultFailed') },
+  { value: 4, label: t('admin.usage.resultCanceled') }
+])
+
 // 错误类型对应后端 phase 参数(与错误表"类型"徽章同语义)
 const errorPhaseOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allTypes') },
@@ -327,10 +338,6 @@ const statusCodeOptions = computed<SelectOption[]>(() => [
   ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
 ])
 
-const resultOptions = computed<SelectOption[]>(() => [
-  { value: null, label: t('admin.schedQuality.usage.allResults') },
-  ...(['success', 'rescued', 'failed', 'canceled'] as const).map((name, index) => ({ value: index + 1, label: t(`admin.schedQuality.usage.result.${name}`) }))
-])
 const billingModeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingModes') },
   { value: 'token', label: t('admin.usage.billingModeToken') },

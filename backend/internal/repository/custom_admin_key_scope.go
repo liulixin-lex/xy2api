@@ -51,6 +51,9 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		}
 		q.Where(dbaccount.Or(matches...))
 	}
+	if ids, enabled := service.AccountIDsFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, 0, err

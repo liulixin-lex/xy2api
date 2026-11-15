@@ -372,7 +372,7 @@ func normalizeCreateGroupInputForSimpleMode(input *CreateGroupInput) {
 		return
 	}
 	*input = CreateGroupInput{
-		Name: input.Name, Description: input.Description, Platform: input.Platform,
+		Name: input.Name, Alias: input.Alias, Description: input.Description, Platform: input.Platform,
 		SystemPromptConfig: input.SystemPromptConfig,
 		RateMultiplier:     1, SubscriptionType: SubscriptionTypeStandard,
 	}
@@ -382,10 +382,14 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 	if input == nil {
 		return
 	}
-	*input = UpdateGroupInput{Name: input.Name, Description: input.Description, SystemPromptConfig: input.SystemPromptConfig}
+	*input = UpdateGroupInput{Name: input.Name, Alias: input.Alias, Description: input.Description, SystemPromptConfig: input.SystemPromptConfig}
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	alias, err := normalizeGroupAlias(input.Alias)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.operatorGroupCreateRules(ctx, input); err != nil {
 		return nil, err
 	}
@@ -590,6 +594,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 
 	group := &Group{
 		Name:                            input.Name,
+		Alias:                           alias,
 		Description:                     input.Description,
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
@@ -804,6 +809,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// 渠道缓存里存了 groupID → platform 的映射，改了平台要让它失效（见函数末尾）
 	previousPlatform := group.Platform
 
+	if input.Alias != nil {
+		alias, err := normalizeGroupAlias(*input.Alias)
+		if err != nil {
+			return nil, err
+		}
+		group.Alias = alias
+	}
 	if input.Name != "" {
 		group.Name = input.Name
 	}

@@ -305,3 +305,38 @@ describe('UsageFilters — native compaction filter', () => {
     expect(wrapper.emitted('change')).toBeTruthy()
   })
 })
+
+describe('UsageFilters — request result filter (backend 0.6.5 request ledger)', () => {
+  const SelectStub = {
+    name: 'Select',
+    props: ['modelValue', 'options'],
+    emits: ['update:modelValue', 'change'],
+    template: '<div />',
+  }
+  const mountWith = (mode: 'usage' | 'errors' | 'ranking', filters: Record<string, unknown> = defaultFilters()) =>
+    mount(UsageFilters, {
+      props: { modelValue: filters, exporting: false, startDate: '2026-05-01', endDate: '2026-05-28', showActions: false, modelOptions: [], mode },
+      global: { stubs: { Select: SelectStub, Teleport: true } },
+    })
+  const resultSelect = (wrapper: ReturnType<typeof mountWith>) =>
+    wrapper.findAllComponents(SelectStub).find((select: any) =>
+      (select.props('options') as Array<{ label: string }>).some((option) => option.label === 'admin.usage.allResults'))
+
+  it('offers 全部 / 成功 / 已救回 / 失败 / 已取消 on the usage tab and emits the numeric result', async () => {
+    const filters: Record<string, unknown> = defaultFilters()
+    const wrapper = mountWith('usage', filters)
+    const select = resultSelect(wrapper)
+    expect(select).toBeDefined()
+    expect((select!.props('options') as Array<{ value: unknown }>).map((option) => option.value)).toEqual([null, 1, 2, 3, 4])
+    select!.vm.$emit('update:modelValue', 3)
+    select!.vm.$emit('change')
+    await wrapper.vm.$nextTick()
+    expect(filters.result).toBe(3)
+    expect(wrapper.emitted('change')).toBeTruthy()
+  })
+
+  it('is not offered on the error and ranking tabs, whose endpoints do not take it', () => {
+    expect(resultSelect(mountWith('errors'))).toBeUndefined()
+    expect(resultSelect(mountWith('ranking'))).toBeUndefined()
+  })
+})

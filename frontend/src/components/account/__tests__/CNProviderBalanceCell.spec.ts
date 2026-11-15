@@ -73,4 +73,19 @@ describe('CNProviderBalanceCell', () => {
     expect(wrapper.text()).toContain('CNY 12.50')
     expect(wrapper.text()).toContain('HTTP 401')
   })
+
+  it('shows a query answer until the row brings a new snapshot (spec 8.4)', async () => {
+    queryBalance.mockResolvedValue({ success: true, balance: 30, currency: 'CNY' })
+    const wrapper = mount(CNProviderBalanceCell, { props: { account } })
+
+    await wrapper.get('[data-test="cn-provider-balance-probe"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="cn-provider-balance-value"]').text()).toContain('CNY 30.00')
+
+    // A refresh that brings the same snapshot keeps the answer; a new snapshot replaces it.
+    await wrapper.setProps({ account: { ...account, extra: { ...account.extra } } as Account })
+    expect(wrapper.get('[data-test="cn-provider-balance-value"]').text()).toContain('CNY 30.00')
+    await wrapper.setProps({ account: { ...account, extra: { kimi_balance: 28, kimi_balance_currency: 'CNY' } } as Account })
+    expect(wrapper.get('[data-test="cn-provider-balance-value"]').text()).toContain('CNY 28.00')
+  })
 })

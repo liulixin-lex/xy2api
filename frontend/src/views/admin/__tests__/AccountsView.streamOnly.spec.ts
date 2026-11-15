@@ -9,7 +9,7 @@ const { listAccounts, clearCapabilityLearning } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin/accountCapability', async () => {
   const actual = await vi.importActual<typeof import('@/api/admin/accountCapability')>('@/api/admin/accountCapability')
   return { ...actual, clearCapabilityLearning }
@@ -19,8 +19,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -70,8 +70,8 @@ function mountView() {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: DataTableStub,
-        AccountTableActions: true,
-        AccountTableFilters: true,
+        AccountStatusCell: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -82,6 +82,7 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -117,6 +118,7 @@ describe('admin AccountsView stream-only state in the status column', () => {
     await flushPromises()
 
     const row = wrapper.get('[data-test="status-1"]')
+    expect(row.get('[data-test="status-badge"]').text()).toBe('active')
     expect(row.find('[data-test="stream-only-badge"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="status-2"]').find('[data-test="stream-only-badge"]').exists()).toBe(false)
 

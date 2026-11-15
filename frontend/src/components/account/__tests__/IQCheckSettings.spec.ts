@@ -2,7 +2,6 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import Select from '@/components/common/Select.vue'
 import IQCheckSettings from '../IQCheckSettings.vue'
-import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 const { fetchModels, fetchTargets } = vi.hoisted(() => ({ fetchModels: vi.fn(), fetchTargets: vi.fn() }))
 vi.mock('@/api/admin/accounts', () => ({ getIQCheckModels: fetchModels, getIQCheck: fetchTargets }))
 vi.mock('@/api/admin/groupCategories', () => ({ default: { list: vi.fn(async () => []), save: vi.fn(), setGroupCategories: vi.fn() } }))
@@ -70,13 +69,7 @@ describe('IQ target settings', () => {
     expect(wrapper.text()).toContain('iqModelDuplicate')
     expect(lastPatch(wrapper)).toBeNull()
   })
-  it('emits the IQ filter without discarding other active filters', async () => {
-    const wrapper = mount(AccountTableFilters, { props: { searchQuery: '', filters: { platform: 'openai', status: 'active', iq_status: '' } }, global: { stubs: { Select: { props: ['options', 'modelValue'], template: '<button @click="$emit(\'update:model-value\', \'degraded\')">{{ JSON.stringify(options) }}</button>' }, SearchInput: true } } })
-    const iqFilter = wrapper.findAll('button').find(button => button.text().includes('allIQStatuses'))!
-    expect(iqFilter.text()).toContain('smart'); expect(iqFilter.text()).toContain('unknown')
-    await iqFilter.trigger('click')
-    expect(wrapper.emitted('update:filters')?.[0]).toEqual([{ platform: 'openai', status: 'active', iq_status: 'degraded' }])
-  })})
+})
 
 describe('IQ catalog and effort capabilities', () => {
   const value = view('custom')

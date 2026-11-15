@@ -13,12 +13,13 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 	exempt := mustCreateAccount(s.T(), s.client, &service.Account{Name: "b-exempt", Platform: service.PlatformOpenAI})
 	observing := mustCreateAccount(s.T(), s.client, &service.Account{Name: "c-observing", Platform: service.PlatformOpenAI})
 	normal := mustCreateAccount(s.T(), s.client, &service.Account{Name: "d-normal", Platform: service.PlatformOpenAI})
-	other := mustCreateAccount(s.T(), s.client, &service.Account{Name: "e-other", Platform: service.PlatformAnthropic})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "e-other", Platform: service.PlatformAnthropic})
 	for _, id := range []int64{substandard.ID, observing.ID, normal.ID} {
 		_, err := s.client.AccountGroup.Create().SetAccountID(id).SetGroupID(group.ID).Save(s.ctx)
 		s.Require().NoError(err)
 	}
 	attention := service.SchedAdminAttention{Substandard: []int64{substandard.ID}, Exempt: []int64{exempt.ID}, Observing: []int64{observing.ID}}
+	normalIDs := []int64{normal.ID}
 	for _, tc := range []struct {
 		name, quality string
 		group         int64
@@ -29,7 +30,7 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 		{name: "substandard", quality: "substandard", want: []int64{substandard.ID}},
 		{name: "exempt_ungrouped", quality: "exempt", want: []int64{exempt.ID}},
 		{name: "observing", quality: "observing", want: []int64{observing.ID}},
-		{name: "normal_includes_other_platforms", quality: "normal", want: []int64{normal.ID, other.ID}},
+		{name: "normal_excludes_other_platforms", quality: "normal", want: []int64{normal.ID}},
 		{name: "normal_group", quality: "normal", group: group.ID, want: []int64{normal.ID}},
 		{name: "normal_platform", quality: "normal", platform: service.PlatformOpenAI, want: []int64{normal.ID}},
 		{name: "exempt_group_no_match", quality: "exempt", group: group.ID, want: []int64{}},
@@ -37,14 +38,16 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 		{name: "empty_substandard", quality: "substandard", empty: true, want: []int64{}},
 		{name: "empty_exempt", quality: "exempt", empty: true, want: []int64{}},
 		{name: "empty_observing", quality: "observing", empty: true, want: []int64{}},
-		{name: "normal_empty_union", quality: "normal", empty: true, want: []int64{substandard.ID, exempt.ID, observing.ID, normal.ID, other.ID}},
+		{name: "normal_empty", quality: "normal", empty: true, want: []int64{}},
 	} {
 		s.Run(tc.name, func() {
 			value := attention
+			eligible := normalIDs
 			if tc.empty {
 				value = service.SchedAdminAttention{}
+				eligible = nil
 			}
-			filter := value.Filter(tc.quality)
+			filter := value.Filter(tc.quality, eligible)
 			ctx := service.WithSchedQualityAccountFilter(s.ctx, filter.IDs, filter.Exclude)
 			rows, page, err := s.repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, tc.platform, "", "", "", tc.group, "")
 			s.Require().NoError(err)

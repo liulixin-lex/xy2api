@@ -9,13 +9,13 @@ const { listAccounts, getBatchTodayStats } = vi.hoisted(() => ({
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
       getBatchTodayStats,
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -58,8 +58,8 @@ function mountView() {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: DataTableStub,
-        AccountTableActions: true,
-        AccountTableFilters: true,
+        AccountStatusIndicator: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         Pagination: true,
         ConfirmDialog: true,
@@ -70,6 +70,7 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -82,7 +83,7 @@ function mountView() {
   })
 }
 
-// Per-page batches (today stats) follow every table loader path, not only load().
+// Today's stats (a partial source of the live table) run after every active load: first load, page, page size, filter.
 describe('admin AccountsView per-page batches', () => {
   const row = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'apikey', status: 'active', schedulable: true })
 
@@ -125,13 +126,11 @@ describe('admin AccountsView per-page batches', () => {
     expect(getBatchTodayStats).toHaveBeenLastCalledWith([3])
   })
 
-  it('asks again after the debounced filter reload', async () => {
-    vi.useFakeTimers()
+  it('asks again after a filter change', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('change')
-    await vi.advanceTimersByTimeAsync(300)
+    wrapper.getComponent({ name: 'AccountsToolbar' }).vm.$emit('change', { platform: 'openai' })
     await flushPromises()
 
     expect(listAccounts).toHaveBeenCalledTimes(2)
@@ -140,10 +139,46 @@ describe('admin AccountsView per-page batches', () => {
   })
 
   it('skips the request while every column that shows it is hidden, and ignores unknown saved columns', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'usage', 'retired_column']))
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['today_stats', 'usage', 'retired_column']))
     mountView()
     await flushPromises()
     expect(listAccounts).toHaveBeenCalledTimes(1)
     expect(getBatchTodayStats).not.toHaveBeenCalled()
+  })
+})
+
+// The pagination bar shows the range of the rows on screen, not of the page asked for (7e-12).
+describe('admin AccountsView pagination range', () => {
+  const row = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'apikey', status: 'active', schedulable: true })
+
+  it('moves to the new page once its rows are in, and stays put when that load fails', async () => {
+    localStorage.clear()
+    getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
+    let answer!: (value: unknown) => void
+    let fail!: (error: unknown) => void
+    listAccounts
+      .mockReset()
+      .mockResolvedValueOnce({ items: [row(1, 'busy'), row(2, 'quiet')], total: 6, page: 1, page_size: 2, pages: 3 })
+      .mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+      .mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    const wrapper = mountView()
+    await flushPromises()
+    const bar = () => wrapper.getComponent({ name: 'Pagination' })
+    expect(bar().props('page')).toBe(1)
+
+    bar().vm.$emit('update:page', 2)
+    await flushPromises()
+    // The old rows are still on screen (dimmed): so is their range.
+    expect(bar().props('page')).toBe(1)
+    answer({ items: [row(3, 'next'), row(4, 'later')], total: 6, page: 2, page_size: 2, pages: 3 })
+    await flushPromises()
+    expect(bar().props('page')).toBe(2)
+
+    bar().vm.$emit('update:page', 3)
+    await flushPromises()
+    fail(new Error('down'))
+    await flushPromises()
+    expect(bar().props('page')).toBe(2)
+    wrapper.unmount()
   })
 })

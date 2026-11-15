@@ -60,12 +60,16 @@ func (s *schedQualityListAdmin) ListAccounts(ctx context.Context, _, _ int, _, _
 
 type schedQualityAttention struct {
 	SchedQualityAdmin
-	value service.SchedAdminAttention
-	err   error
+	value  service.SchedAdminAttention
+	normal []int64
+	err    error
 }
 
 func (s schedQualityAttention) Attention(context.Context) (service.SchedAdminAttention, error) {
 	return s.value, s.err
+}
+func (s schedQualityAttention) AccountFilter(_ context.Context, quality string) (service.SchedQualityFilter, error) {
+	return s.value.Filter(quality, s.normal), s.err
 }
 
 func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
@@ -100,7 +104,7 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 			{name: "empty_substandard", quality: "substandard", empty: true, code: 200, want: []int64{}},
 			{name: "empty_exempt", quality: "exempt", empty: true, code: 200, want: []int64{}},
 			{name: "empty_observing", quality: "observing", empty: true, code: 200, want: []int64{}},
-			{name: "normal_empty_union", quality: "normal", empty: true, code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
+			{name: "normal_empty", quality: "normal", empty: true, code: 200, want: []int64{}},
 			{name: "unfiltered", code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
 			{name: "invalid", quality: "unknown", code: 400},
 			{name: "unavailable", quality: "normal", unavailable: true, code: 503},
@@ -114,7 +118,11 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 					value = service.SchedAdminAttention{}
 				}
 				if !tc.unavailable {
-					h.schedQuality = schedQualityAttention{value: value, err: tc.err}
+					normal := []int64{5, 6}
+					if tc.empty {
+						normal = nil
+					}
+					h.schedQuality = schedQualityAttention{value: value, normal: normal, err: tc.err}
 				}
 				r := gin.New()
 				route.register(r, h)
@@ -134,10 +142,10 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 				}
 				require.Equal(t, 1, admin.calls)
 				require.Equal(t, tc.quality != "", admin.filtered)
-				require.Equal(t, tc.quality == "normal", admin.filter.Exclude)
+				require.Equal(t, false, admin.filter.Exclude)
 				require.Equal(t, tc.want, admin.matched)
 				if tc.quality == "normal" && !tc.empty {
-					require.Equal(t, []int64{1, 2, 3, 4}, admin.filter.IDs)
+					require.Equal(t, []int64{5, 6}, admin.filter.IDs)
 				}
 				if route.name == "bulk" {
 					require.Equal(t, tc.quality, admin.filters.SchedQuality)

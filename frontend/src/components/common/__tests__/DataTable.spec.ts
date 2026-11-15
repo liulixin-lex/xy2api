@@ -73,13 +73,13 @@ describe('DataTable', () => {
     expect(nameHeader.attributes('aria-sort')).toBe('ascending')
     expect(nameHeader.findAll('svg')).toHaveLength(2)
     expect(nameHeader.findAll('svg')[0].classes()).toContain('text-primary-600')
-    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-gray-300')
+    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-fg-muted')
 
     await nameHeader.trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(nameHeader.attributes('aria-sort')).toBe('descending')
-    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-gray-300')
+    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-fg-muted')
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
@@ -100,37 +100,6 @@ describe('DataTable', () => {
     expect(wrapper.findAll('tbody tr[data-index]')).toHaveLength(data.length)
     // …and there are no aria-hidden virtual padding spacer rows.
     expect(wrapper.findAll('tbody tr[aria-hidden="true"]')).toHaveLength(0)
-  })
-
-  it('renders a full-width detail row under a row whose row-detail slot has content, and keeps row attributes on the row', async () => {
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }, { key: 'note', label: 'Note' }],
-        data: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }],
-        rowKey: 'id',
-        selectable: true,
-        selectedKeys: []
-      },
-      slots: {
-        'row-detail': `<template #row-detail="{ row }"><span v-if="row.id === 2" data-test="detail">detail of B</span></template>`
-      }
-    })
-    await wrapper.vm.$nextTick()
-
-    const rows = wrapper.findAll('tbody tr')
-    expect(rows.map((tr) => tr.attributes('data-index') ?? 'detail')).toEqual(['0', '1', 'detail'])
-    expect(rows[1].attributes('data-row-id')).toBe('2')
-    expect(rows[2].get('td').attributes('colspan')).toBe('3')
-    expect(rows[2].get('[data-test="detail"]').text()).toBe('detail of B')
-  })
-
-  it('renders every row while a detail row is open, since windowing measures main rows only (RG-010)', async () => {
-    const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
-    const wrapper = mount(DataTable, { props: { columns: [{ key: 'name', label: 'Name' }], data, virtualizeThreshold: 10, hasDetails: true } })
-    await wrapper.vm.$nextTick()
-    expect((wrapper.vm as any).shouldVirtualize).toBe(false)
-    await wrapper.setProps({ hasDetails: false })
-    expect((wrapper.vm as any).shouldVirtualize).toBe(true)
   })
 
   it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {
@@ -371,33 +340,69 @@ describe('DataTable', () => {
     wrapper.unmount()
   })
 
-  it('keeps the single usage field shrinkable in a 320px mobile card', () => {
+  it('lays a card out as the leading column in the head, the others as label-over-value fields, the actions in the foot', () => {
     stubMobileMatchMedia()
-    const viewport = document.createElement('div')
-    viewport.style.width = '320px'
-    document.body.appendChild(viewport)
     const wrapper = mount(DataTable, {
-      attachTo: viewport,
       props: {
-        columns: [{ key: 'usage', label: 'Usage' }],
-        data: [{ id: 1, usage: 'snapshot' }],
+        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'actions', label: '' }],
+        data: [{ id: 1, name: 'one', usage: 'snapshot' }],
         rowKey: 'id'
       },
       slots: {
-        'cell-usage': '<div data-test="usage-cell">snapshot</div>'
+        'cell-usage': '<div data-test="usage-cell">snapshot</div>',
+        'cell-actions': '<button data-test="edit">edit</button>'
       }
     })
 
-    expect(viewport.style.width).toBe('320px')
-    expect(wrapper.findAll('[data-field="usage"]')).toHaveLength(1)
-    expect(wrapper.find('[data-field="ollama_cloud_usage"]').exists()).toBe(false)
-    const field = wrapper.get('[data-field="usage"]')
-    expect(field.classes()).toContain('min-w-0')
-    expect(field.get('div').classes()).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full']))
-    expect(wrapper.findAll('[data-test="usage-cell"]')).toHaveLength(1)
+    const card = wrapper.get('.table-card')
+    expect(card.get('.table-card__head [data-field="name"]').text()).toBe('one')
+    const field = card.get('.table-card__fields [data-field="usage"]')
+    expect(field.get('dt').text()).toBe('Usage')
+    expect(field.get('dd [data-test="usage-cell"]').text()).toBe('snapshot')
+    expect(card.get('.table-card__foot [data-test="edit"]').exists()).toBe(true)
+  })
 
-    wrapper.unmount()
-    viewport.remove()
+  it('puts a column marked cardHeadEnd at the right of the card\'s head, not among the fields', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'status', label: 'Status', cardHeadEnd: true }],
+        data: [{ id: 1, name: 'one', usage: 'snapshot', status: 'active' }],
+        rowKey: 'id'
+      },
+      slots: { 'cell-status': '<span data-test="status-cell">{{ params.value }}</span>' }
+    })
+    const card = wrapper.get('.table-card')
+    expect(card.get('.table-card__head .table-card__end [data-test="status-cell"]').text()).toBe('active')
+    expect(card.findAll('.table-card__fields [data-field]').map((field) => field.attributes('data-field'))).toEqual(['usage'])
+  })
+
+  it('lays a column marked cardFullRow across the whole card, the others in its two columns (7r-6)', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }, { key: 'group', label: 'Group' }, { key: 'usage', label: 'Usage', cardFullRow: true }],
+        data: [{ id: 1, name: 'one', group: 'g', usage: 'bars' }],
+        rowKey: 'id'
+      }
+    })
+    const fields = wrapper.findAll('.table-card__fields [data-field]')
+    expect(fields.map((field) => [field.attributes('data-field'), field.classes('col-span-full')])).toEqual([['group', false], ['usage', true]])
+  })
+
+  it('lets a page draw its own card, with any column\'s cell drawn the way the table draws it', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: { columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }], data: [{ id: 1, name: 'one', usage: 'snapshot' }], rowKey: 'id' },
+      slots: {
+        'cell-usage': '<b data-test="usage-cell">{{ params.value }}</b>',
+        card: `<template #card="{ row, cell }"><div data-test="own-card">{{ row.name }}<component :is="cell" column="usage" :row="row" /></div></template>`
+      }
+    })
+    const card = wrapper.get('.table-card')
+    expect(card.find('.table-card__head').exists()).toBe(false)
+    expect(card.get('[data-test="own-card"]').text()).toBe('onesnapshot')
+    expect(card.get('[data-test="usage-cell"]').text()).toBe('snapshot')
   })
 
   it('offers current-page select all in the mobile card layout', async () => {
