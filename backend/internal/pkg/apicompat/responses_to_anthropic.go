@@ -860,7 +860,7 @@ func resToAnthJoinReasoning(parts map[int]string) string {
 	sort.Ints(keys)
 	var b strings.Builder
 	for _, k := range keys {
-		b.WriteString(parts[k])
+		_, _ = b.WriteString(parts[k])
 	}
 	return b.String()
 }
@@ -1209,7 +1209,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 			status = "completed"
 		}
 	}
-	_, stopReason, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	_, _, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		if state.err == nil {
 			state.err = err
@@ -1272,7 +1272,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		}
 	}
 
-	_, stopReason, err = ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	_, stopReason, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		if state.err == nil {
 			state.err = err
