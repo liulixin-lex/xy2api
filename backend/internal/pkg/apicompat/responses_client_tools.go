@@ -503,6 +503,9 @@ func RestoreResponsesClientToolPayload(payload []byte, mapping ResponsesClientTo
 }
 
 func restoreClientToolValue(value any, adapter *ResponsesClientToolMapping) bool {
+	if bridgeEnabled(adapter.Bridge) {
+		return restoreBridgeRawValue(value, adapter.Bridge.ToolNames)
+	}
 	changed := false
 	switch typed := value.(type) {
 	case []any:
@@ -617,7 +620,7 @@ func (r *ResponsesClientToolStreamRestorer) Restore(event ResponsesStreamEvent) 
 				if input != "" {
 					emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.delta", OutputIndex: call.outputIdx, ItemID: call.clientItemID, Delta: input})
 				}
-				emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", OutputIndex: call.outputIdx, ItemID: call.clientItemID, CallID: call.callID, Name: call.name, Input: input})
+				emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", OutputIndex: call.outputIdx, ItemID: call.clientItemID, CallID: call.callID, Name: bridgeRestoredToolName(call.name, r.adapter.Bridge), Input: input})
 			}
 			return out
 		}
@@ -843,6 +846,15 @@ func (r *ResponsesClientToolStreamRestorer) callFor(event ResponsesStreamEvent) 
 }
 
 func (r *ResponsesClientToolStreamRestorer) restoreNamespaceEvent(event ResponsesStreamEvent) ResponsesStreamEvent {
+	if bridgeEnabled(r.adapter.Bridge) {
+		restoreBridgeOutputIdentity(event.Item, r.adapter.Bridge.ToolNames)
+		if r.adapter.Bridge.ToolNames != nil {
+			if id, ok := r.adapter.Bridge.ToolNames.Reverse[event.Name]; ok {
+				event.Name = id.Name
+			}
+		}
+		return event
+	}
 	if len(r.adapter.NamespaceTools) == 0 {
 		return event
 	}
@@ -860,6 +872,12 @@ func (r *ResponsesClientToolStreamRestorer) restoreNamespaceEvent(event Response
 }
 
 func restoreResponsesOutputClientTools(outputs []ResponsesOutput, adapter *ResponsesClientToolMapping) {
+	if bridgeEnabled(adapter.Bridge) {
+		for i := range outputs {
+			restoreBridgeOutputIdentity(&outputs[i], adapter.Bridge.ToolNames)
+		}
+		return
+	}
 	for index := range outputs {
 		output := &outputs[index]
 		if output.Type != "function_call" {

@@ -213,3 +213,52 @@ func TestM4ToolDeclarationMerge(t *testing.T) {
 		t.Fatal("legacy duplicate rejection changed")
 	}
 }
+
+func TestM4ToolNameRoundTrip(t *testing.T) {
+	names := []string{"lookup", strings.Repeat("a", 64), strings.Repeat("a", 65), "工具"}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			input, _ := json.Marshal([]map[string]any{{"type": "function_call", "call_id": "c", "name": name, "arguments": "{}"}, {"type": "function_call_output", "call_id": "c", "output": "ok"}, {"type": "function_call", "call_id": "old", "name": "historical工具", "arguments": "{}"}, {"type": "function_call_output", "call_id": "old", "output": "old"}})
+			choice, _ := json.Marshal(map[string]string{"type": "function", "name": name})
+			bridge := &BridgeOptions{Enabled: true}
+			req := &ResponsesRequest{Model: "probe", Input: input, Tools: []ResponsesTool{{Type: "function", Name: name}}, ToolChoice: choice}
+			got, err := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: bridge})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Tools) != 1 || !validBridgeToolName(got.Tools[0].Function.Name, 64) {
+				t.Fatalf("tools=%+v", got.Tools)
+			}
+			alias := got.Tools[0].Function.Name
+			if !strings.Contains(string(got.ToolChoice), alias) || got.Messages[0].ToolCalls[0].Function.Name != alias {
+				t.Fatalf("choice/history not mapped: %+v", got)
+			}
+			if validBridgeToolName(name, 64) && alias != name {
+				t.Fatalf("valid original renamed: %s", alias)
+			}
+			response := &ChatCompletionsResponse{ID: "fixed", Choices: []ChatChoice{{Message: ChatMessage{ToolCalls: []ChatToolCall{{ID: "c", Function: ChatFunctionCall{Name: alias, Arguments: "{}"}}}}, FinishReason: "tool_calls"}}}
+			out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(response, "probe", nil, nil, false, nil, ConversionOptions{Bridge: bridge})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Output[0].Name != name {
+				t.Fatalf("lost original identity: %+v", out.Output)
+			}
+			if len(req.Tools) != 1 || string(req.Input) != string(input) {
+				t.Fatal("mutated input")
+			}
+		})
+	}
+	tools := []ResponsesTool{{Type: "function", Name: "n__f"}, {Type: "namespace", Name: "n", Tools: []ResponsesTool{{Type: "function", Name: "f"}}}, {Type: "namespace", Name: "other", Tools: []ResponsesTool{{Type: "function", Name: "f"}}}}
+	mapping, err := BuildBridgeToolNames(tools, nil, "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mapping.Reverse) != 3 || mapping.Forward[ToolNameIdentity{Kind: "function", Name: "n__f"}] != "n__f" {
+		t.Fatalf("collision table=%+v", mapping)
+	}
+	again, err := BuildBridgeToolNames(tools, nil, "chat")
+	if err != nil || !reflect.DeepEqual(mapping, again) {
+		t.Fatal("nondeterministic table")
+	}
+}
