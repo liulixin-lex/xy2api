@@ -191,6 +191,10 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 	if err != nil {
 		return nil, err
 	}
+	prepared.Input, err = bridgeReasoningHistory(prepared.Input)
+	if err != nil {
+		return nil, err
+	}
 	legacyOpts := *opts
 	legacyOpts.Bridge = nil
 	out, err := ResponsesToChatCompletionsRequestWithOptions(prepared, &legacyOpts)
