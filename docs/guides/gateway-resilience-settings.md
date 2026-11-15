@@ -167,7 +167,9 @@
 | 字段 | 默认 | 范围 | 说明 |
 |---|---|---|---|
 | `enabled` | true | 布尔 | 停滞检测 |
-| `text_stall_seconds` | 120 | 30–280 | 已输出后无数据多久判定断流 |
+| `text_stall_seconds` | 120 | 30–280 | 已输出后无有效上游活动多久判定断流 |
+
+Anthropic 原生 Messages 与协议转换中，注释和 ping 不续期；完整用量（含零）、内容、控制与结束帧推进业务期限。首输出已有 guard 时沿用其截止；无 guard 的读取与排水继续使用 `gateway.stream_data_interval_timeout`，不增加新的阈值。下游 keepalive 不影响这些上游期限。
 
 ### 断开计费 `disconnect`
 

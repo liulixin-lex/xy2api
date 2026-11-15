@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -364,13 +363,13 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			return false
 		}
 	}
-	var lastReadAt int64
-	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+	var progress anthropicNativeProgress
+	progress.start()
 	go func(scanBuf *sseScannerBuf64K) {
 		defer putSSEScannerBuf64K(scanBuf)
 		defer close(events)
 		for scanner.Scan() {
-			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
+			progress.observeLine(scanner.Text())
 			if !sendEvent(scanEvent{line: scanner.Text()}) {
 				return
 			}
@@ -387,8 +386,8 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
 	var intervalTicker *time.Ticker
-	if streamInterval > 0 {
-		intervalTicker = time.NewTicker(streamInterval)
+	if base := resilienceStallCheckBase(streamInterval); base > 0 {
+		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(base))
 		defer intervalTicker.Stop()
 	}
 	var intervalCh <-chan time.Time
@@ -423,10 +422,44 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
 	inPartialEvent := false
+	outputStarted := false
+	var deliveredParser openAICompatSSEFrameParser
+	firstEvent := openAICompatFirstEventOf(resp)
+	progressExpired := func() bool {
+		if !outputStarted && firstEvent != nil && !firstEvent.disarmed.Load() {
+			return false
+		}
+		threshold := resilienceStallThreshold(streamInterval, outputStarted)
+		return threshold > 0 && time.Since(time.Unix(0, progress.lastProgressAt.Load())) >= threshold
+	}
+	onProgressTimeout := func() (*OpenAIForwardResult, error) {
+		_ = resp.Body.Close()
+		if ctx.Err() != nil {
+			return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), ctx.Err()
+		}
+		if clientDisconnected {
+			return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
+				fmt.Errorf("stream usage incomplete after timeout")
+		}
+		logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, upstreamModel, streamInterval)
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandleStreamTimeout(ctx, account, upstreamModel)
+		}
+		noteSchedStall(c)
+		noteResilienceStall(ctx, s.rateLimitService, account)
+		return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
+			fmt.Errorf("stream data interval timeout")
+	}
 
 	for {
+		if progressExpired() {
+			return onProgressTimeout()
+		}
 		select {
 		case ev, ok := <-events:
+			if progressExpired() {
+				return onProgressTimeout()
+			}
 			if !ok {
 				if !clientDisconnected {
 					flusher.Flush()
@@ -458,6 +491,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 
 			line := ev.line
+			if frame, complete := deliveredParser.AddLine(line); complete && !clientDisconnected {
+				outputStarted = outputStarted || semanticSSEBlock([]byte("event: "+frame.EventType+"\ndata: "+frame.Data))
+			}
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
 				observeSchedPayload(c, []byte(trimmed))
@@ -501,22 +537,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 
 		case <-intervalCh:
-			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
-			if time.Since(lastRead) < streamInterval {
-				continue
+			if progressExpired() {
+				return onProgressTimeout()
 			}
-			if clientDisconnected {
-				return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
-					fmt.Errorf("stream usage incomplete after timeout")
-			}
-			logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, upstreamModel, streamInterval)
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleStreamTimeout(ctx, account, upstreamModel)
-			}
-			noteSchedStall(c)
-			noteResilienceStall(ctx, s.rateLimitService, account)
-			return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
-				fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:
 			if clientDisconnected {

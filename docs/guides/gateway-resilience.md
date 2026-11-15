@@ -135,13 +135,14 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 - **做什么**：只对经 CDN 的流式请求生效（见“CDN 识别”）。请求开始 `delay_seconds`（默认 15 秒）后仍无输出时，提交 SSE 响应头并每 `interval_seconds`（默认 10 秒）发一次心跳，避免 CDN 空闲超时切断。换号后心跳在下一次尝试中继续，写出内容、终态或心跳写失败后停止。心跳格式按入站协议选择，见 [客户端可见的行为](gateway-resilience-client.md#心跳)。
 - **例外**：`skip_official_oauth`（默认 true）时，官方 OAuth / Setup Token 账号不主动发起首包前保活。
-- **影响**：心跳提交 HTTP 200 后，之后的失败只能以流内终止帧告知客户端，不能再改状态码。心跳不算输出、不计费，也不妨碍换号。
+- **影响**：心跳提交 HTTP 200 后，之后的失败只能以流内终止帧告知客户端，不能再改状态码。心跳不算输出、不计费，也不妨碍换号；下游心跳不延长上游业务进展期限。
 - **何时关闭**：CDN 空闲超时足够长，或客户端不接受注释心跳时关闭。
 - **观测**：计数 `keepalive_committed`；日志 `resilience.keepalive_committed`。
 
 ### 停滞检测 `stall`
 
-- **做什么**：已向客户端输出后，上游超过 `text_stall_seconds`（默认 120 秒）没有任何数据，判定断流并结束请求，按入站协议写终止帧；图片生成豁免。停滞计入账号失败与会话失败。输出前的静默由首输出截止接管并换号。
+- **做什么**：已向客户端输出后，上游超过 `text_stall_seconds`（默认 120 秒）没有有效上游活动，判定断流并结束请求，按入站协议写终止帧；图片生成豁免。停滞计入账号失败与会话失败。输出前的静默由首输出截止接管并换号。
+- Anthropic 原生 Messages 与协议转换的读取以完整业务帧到达时间续期；注释和 ping 仅表示传输存活，不能延长等待。用量（包括显式零）、内容、控制和结束帧照常处理。首输出已有 guard 时沿用其截止，无 guard 的读取与排水沿用 `gateway.stream_data_interval_timeout`，输出后复用停滞阈值。
 - **计费**：按已读到的用量计费一次。
 - **何时关闭**：上游长时间无输出属于正常（例如极长推理且不发任何事件）时调大阈值，必要时关闭。
 - **观测**：计数 `stall`；日志 `resilience.stall`。
@@ -185,6 +186,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
   - `native_prelude_whitelist`：原生 Responses 把 `response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不含内容的 added 事件也算作开场。
   - `strict_terminal`：明确识别失败终态，例如 raw Chat 透传中 `error` 后跟 `[DONE]` 判为失败；输出后断流、读错或停滞时按协议写失败终态，不再合成成功结束；启用 Responses 透传的首输出截止与停滞检测。
+- Anthropic 的完整业务帧推进读取期限，ping 或注释不代替业务进展；流结束和用量读取不受本地下游心跳影响。
 - **何时关闭**：只在某个客户端依赖开场事件的写出时机时，关闭对应的子开关。
 - **计费与客户端**：只写出开场时断开按未送达处理，不计费。不完整（incomplete）、内容拒绝与合法空回答照常返回，不重放。
 - **观测**：计数 `relay_keepalive`、`pre_created_delta`；日志字段 `prelude_release_event` 等，见 [观测与排障](gateway-resilience-observability.md#请求关联字段)。

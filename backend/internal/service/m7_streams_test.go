@@ -3,11 +3,15 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -104,4 +108,133 @@ func TestM7AnthropicEndpointURLs(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestM7AnthropicPingDoesNotExtendProgress(t *testing.T) {
+	ping := ": transport alive\n\nevent: ping\ndata: {\"type\":\"ping\"}\n\n"
+	zeroUsage := "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":0}}\n\n"
+	t.Run("pump_ping", func(t *testing.T) {
+		pr, pw := io.Pipe()
+		defer pr.Close()
+		pump := newAnthropicNativeLinePump(bufio.NewScanner(pr), 80*time.Millisecond)
+		defer pump.stop()
+		go func() {
+			defer pw.Close()
+			for i := 0; i < 30; i++ {
+				if _, err := io.WriteString(pw, ping); err != nil {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		for {
+			_, err := pump.next()
+			if err != nil {
+				require.ErrorIs(t, err, errAnthropicNativeStreamIdle)
+				break
+			}
+		}
+	})
+	t.Run("pump_usage_progress", func(t *testing.T) {
+		pr, pw := io.Pipe()
+		defer pr.Close()
+		pump := newAnthropicNativeLinePump(bufio.NewScanner(pr), 180*time.Millisecond)
+		defer pump.stop()
+		go func() {
+			defer pw.Close()
+			for i := 0; i < 5; i++ {
+				if _, err := io.WriteString(pw, ping+zeroUsage); err != nil {
+					return
+				}
+				time.Sleep(60 * time.Millisecond)
+			}
+		}()
+		var received strings.Builder
+		for {
+			line, err := pump.next()
+			if err != nil {
+				require.ErrorIs(t, err, io.EOF)
+				break
+			}
+			received.WriteString(line + "\n")
+		}
+		require.Equal(t, strings.Repeat(ping+zeroUsage, 5), received.String())
+	})
+	t.Run("queued_lines_do_not_refresh_deadline", func(t *testing.T) {
+		pump := &anthropicNativeLinePump{events: make(chan anthropicNativeLineEvent, 1), done: make(chan struct{}), interval: time.Millisecond}
+		pump.progress.start()
+		pump.progress.lastProgressAt.Store(time.Now().Add(-time.Second).UnixNano())
+		pump.events <- anthropicNativeLineEvent{line: "event: ping"}
+		defer pump.stop()
+		_, err := pump.next()
+		require.ErrorIs(t, err, errAnthropicNativeStreamIdle)
+		require.Len(t, pump.events, 1)
+	})
+	t.Run("first_output_guard_owns_deadline", func(t *testing.T) {
+		pump := &anthropicNativeLinePump{events: make(chan anthropicNativeLineEvent, 1), done: make(chan struct{}), interval: time.Millisecond, firstEvent: &openAICompatFirstEvent{}}
+		pump.progress.start()
+		pump.progress.lastProgressAt.Store(time.Now().Add(-time.Second).UnixNano())
+		pump.events <- anthropicNativeLineEvent{line: "event: ping"}
+		defer pump.stop()
+		line, err := pump.next()
+		require.NoError(t, err)
+		require.Equal(t, "event: ping", line)
+	})
+	for _, upstreamPing := range []bool{false, true} {
+		name := "native_downstream_heartbeat"
+		if upstreamPing {
+			name = "native_upstream_ping"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc := newNativeAnthropicHangTestService(1)
+			svc.cfg.Gateway.StreamKeepaliveInterval = 1
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			pr, pw := io.Pipe()
+			defer pr.Close()
+			defer pw.Close()
+			go func() {
+				_, _ = io.WriteString(pw, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":0}}}\n\n")
+				for i := 0; i < 16; i++ {
+					if upstreamPing {
+						if _, err := io.WriteString(pw, ping); err != nil {
+							return
+						}
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				_ = pw.Close()
+			}()
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+			res, err := svc.handleNativeAnthropicStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, "fixture", "fixture", "fixture", nil, time.Now())
+			require.ErrorContains(t, err, "stream data interval timeout")
+			require.NotNil(t, res)
+			require.Equal(t, 4, res.Usage.InputTokens)
+			require.Zero(t, res.Usage.OutputTokens)
+		})
+	}
+	t.Run("native_usage_and_content_progress", func(t *testing.T) {
+		svc := newNativeAnthropicHangTestService(1)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		pr, pw := io.Pipe()
+		defer pr.Close()
+		go func() {
+			defer pw.Close()
+			for i := 0; i < 4; i++ {
+				if _, err := io.WriteString(pw, ping+zeroUsage+"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n"); err != nil {
+					return
+				}
+				time.Sleep(400 * time.Millisecond)
+			}
+			_, _ = io.WriteString(pw, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		}()
+		resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+		res, err := svc.handleNativeAnthropicStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, "fixture", "fixture", "fixture", nil, time.Now())
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.Equal(t, 4, strings.Count(rec.Body.String(), "hello"))
+		require.Contains(t, rec.Body.String(), `"output_tokens":0`)
+	})
 }

@@ -121,9 +121,11 @@ Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancell
 
 部分中转会插入 `SSE-Keep-Alive` 空 delta 帧，或在 `response.created` 之前发出空字符串、纯空白的 delta。网关直接丢弃它们，不转发、不算首个输出（openai-python 遇到会报错），但仍算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即转发；这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。
 
+Anthropic 原生 Messages 与协议转换的上游 ping、注释只表示传输存活，不推进业务等待期限；完整用量帧（包括显式零）、内容、控制和结束帧照常处理。上述中转伪保活帧的 wire activity 规则保持不变。
+
 ## 心跳
 
-心跳不算输出、不计费，也不妨碍换号。
+心跳不算输出、不计费，也不妨碍换号；网关发给客户端的心跳不会延长等待上游业务进展的期限。
 
 | 入站协议 | 首个输出前的心跳 |
 |---|---|
