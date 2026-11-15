@@ -155,6 +155,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		nil,
 		group.ModelAllowlist.Models,
 		group.ModelAllowlistEnabled(),
+		nil, nil,
 	)
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
@@ -188,11 +189,19 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	}
 
 	var configuredModels []string
+	var metadataModels map[string]string
+	modelMetadata := make(map[string]codexModelMetadataOverride)
 	if !group.CodexModelsManifestConfig.Enabled {
-		var err error
-		configuredModels, err = s.groupConfiguredCodexModelIDs(ctx, group)
+		visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 		if err != nil {
 			return fmt.Errorf("load group configured Codex models: %w", err)
+		}
+		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		metadataModels = codexCatalogMetadataModels(PlatformOpenAI, configuredModels, catalog, nil, true)
+		for _, modelID := range configuredModels {
+			if metadata, ok := groupCodexModelMetadata(PlatformOpenAI, modelID, catalog, group, nil, true); ok {
+				modelMetadata[modelID] = metadata
+			}
 		}
 	}
 	body, changed, err := mergeConfiguredCodexModelsManifest(
@@ -200,6 +209,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		configuredModels,
 		group.ModelAllowlist.Models,
 		group.ModelAllowlistEnabled(),
+		metadataModels, modelMetadata,
 	)
 	if err != nil {
 		return fmt.Errorf("merge group configured Codex models: %w", err)
@@ -1357,6 +1367,8 @@ func mergeConfiguredCodexModelsManifest(
 	configuredModels []string,
 	selectedModels []string,
 	filterBySelection bool,
+	metadataModels map[string]string,
+	modelMetadata map[string]codexModelMetadataOverride,
 ) ([]byte, bool, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(body, &envelope); err != nil {
@@ -1433,9 +1445,36 @@ func mergeConfiguredCodexModelsManifest(
 		if _, exists := seen[modelID]; exists {
 			continue
 		}
-		rawModel, err := json.Marshal(newConfiguredCodexModelDescriptor(modelID))
+		metadataModelID := strings.TrimSpace(metadataModels[modelID])
+		if metadataModelID == "" {
+			metadataModelID = modelID
+		}
+		if isCodexDedicatedMediaModel(metadataModelID) {
+			continue
+		}
+		descriptor := newConfiguredCodexModelDescriptor(metadataModelID)
+		descriptor.Slug = modelID
+		if metadata, ok := modelMetadata[modelID]; ok {
+			applyUpstreamModelMetadataToCodexDescriptor(&descriptor, metadata)
+		}
+		if metadataModelID != modelID {
+			descriptor.DisplayName = modelID
+			descriptor.Description = configuredCodexCustomDescription
+		}
+		rawModel, err := json.Marshal(descriptor)
 		if err != nil {
 			return nil, false, err
+		}
+		if capabilities := modelMetadata[modelID].CodexToolCapabilities; len(capabilities) > 0 {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(rawModel, &fields); err != nil {
+				return nil, false, err
+			}
+			applyCodexToolCapabilities(fields, capabilities, true)
+			rawModel, err = json.Marshal(fields)
+			if err != nil {
+				return nil, false, err
+			}
 		}
 		merged = append(merged, rawModel)
 		seen[modelID] = struct{}{}
