@@ -276,7 +276,7 @@ func TestForwardGrokChatViaResponsesNonStreamingCachesAndReturnsChat(t *testing.
 	require.NotNil(t, repo.updates[account.ID][grokQuotaSnapshotExtraKey])
 }
 
-func TestForwardGrokChatViaResponsesNonStreamingRejectsCompletedResponseWithoutUsage(t *testing.T) {
+func TestForwardGrokChatViaResponsesNonStreamingAcceptsCompletedResponseWithoutUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":false,"prompt_cache_key":"stable-session"}`)
@@ -308,13 +308,13 @@ func TestForwardGrokChatViaResponsesNonStreamingRejectsCompletedResponseWithoutU
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Equal(t, grokMissingUsageErrorCode, gjson.GetBytes(failoverErr.ResponseBody, "error.code").String())
-	require.False(t, c.Writer.Written(), "an unbillable response must not be committed to the client")
-	require.Empty(t, recorder.Body.String())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.UsagePresent)
+	require.True(t, result.TerminalSeen)
+	require.True(t, result.TerminalValid)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "ok")
 }
 
 func TestForwardGrokChatViaResponsesCodeBuddyUsesStableConversationHeader(t *testing.T) {

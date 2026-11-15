@@ -59,7 +59,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	clientStream := ccReq.Stream
 
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
 	if err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to convert request")
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -359,6 +359,8 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	ccState := apicompat.NewResponsesEventToChatState()
 	ccState.Model = originalModel
 
+	var conversionErr error
+	sawStop := false
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
@@ -467,6 +469,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		responsesEvents := apicompat.AnthropicEventToResponsesEvents(event, anthState)
 		for _, resEvt := range responsesEvents {
 			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
+			if err := ccState.Err(); err != nil {
+				conversionErr = err
+				WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+				return true
+			}
 			for _, chunk := range ccChunks {
 				writeChunk(chunk)
 			}
@@ -514,13 +521,21 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
+		if event.Type == "message_stop" || event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "" {
+			sawStop = true
+		}
 		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(&event, payload)
 
 		if processAnthropicEvent(&event) {
-			return resultWithUsage(), nil
+			return resultWithUsage(), conversionErr
 		}
 	}
 
+	if !sawStop {
+		err := &apicompat.UpstreamConversionError{Field: "stream", Reason: "missing Anthropic terminal event", SourceProtocol: "anthropic"}
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return resultWithUsage(), err
+	}
 	// Finalize both state machines（客户端已断开时仍执行，保证 usage 汇总完整）。
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
 	for _, resEvt := range finalResEvents {
@@ -529,7 +544,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			writeChunk(chunk) //nolint:errcheck
 		}
 	}
-	finalCCChunks := apicompat.FinalizeResponsesChatStream(ccState)
+	finalCCChunks := apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, sawStop)
+	if err := ccState.Err(); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return resultWithUsage(), err
+	}
 	for _, chunk := range finalCCChunks {
 		writeChunk(chunk) //nolint:errcheck
 	}

@@ -36,6 +36,7 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
@@ -47,7 +48,7 @@ func (s *GatewayService) ForwardAsResponses(
 		finishClaudeCacheAttempt(cacheDecision, result)
 	}()
 
-	normalizedBody, normalized, err := normalizeConvertedResponsesLegacyIngress(body)
+	normalizedBody, normalized, err := normalizeResponsesLegacyIngressForTarget(body, false, m7ConversionOptions(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -673,10 +674,13 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		},
 	})
 	outcome := stream.run()
+	copyAnthropicUpstreamTarget(c.Request.Context(), outcome.err)
 	if outcome.noResult {
 		return nil, outcome.err
 	}
 	result := resultWithUsage()
+	result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = outcome.ResponseFactsKnown, outcome.UsagePresent, outcome.UsageSource
+	result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = outcome.TerminalSeen, outcome.TerminalValid, outcome.ResponseBodyKind
 	result.ClientDisconnect = stream.guarded && stream.gone
 	return result, outcome.err
 }

@@ -34,6 +34,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
@@ -54,7 +55,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	clientStream := ccReq.Stream
 
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 	}
@@ -435,6 +436,10 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		} else {
 			ccChunks = apicompat.ResponsesEventToChatChunks(resEvt, ccState)
 		}
+		if err := ccState.Err(); err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			return nil
+		}
 		var frames []string
 		for _, chunk := range ccChunks {
 			sse, err := apicompat.ChatChunkToSSE(chunk)
@@ -482,14 +487,22 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 
 	// Finalize both state machines, then the [DONE] marker.
 	finalizeStream := func() []string {
+		if !stream.sawStop || stream.sawFailure {
+			apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, false)
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a terminal event")
+			return nil
+		}
 		var frames []string
 		for _, resEvt := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
 			frames = append(frames, chunkFrames(&resEvt, false)...)
 		}
-		for _, chunk := range apicompat.FinalizeResponsesChatStream(ccState) {
+		for _, chunk := range apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, stream.sawStop && !stream.sawFailure) {
 			if sse, err := apicompat.ChatChunkToSSE(chunk); err == nil {
 				frames = append(frames, string(reverseToolNamesIfPresent(c, []byte(sse))))
 			}
+		}
+		if ccState.Err() != nil {
+			return nil
 		}
 		return append(frames, "data: [DONE]\n\n")
 	}
@@ -502,10 +515,17 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		failure:  gatewayChatFailureFrames,
 	})
 	outcome := stream.run()
+	copyAnthropicUpstreamTarget(c.Request.Context(), outcome.err)
 	if outcome.noResult {
 		return nil, outcome.err
 	}
 	result := resultWithUsage()
+	result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = outcome.ResponseFactsKnown, outcome.UsagePresent, outcome.UsageSource
+	result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = outcome.TerminalSeen, outcome.TerminalValid, outcome.ResponseBodyKind
+	if err := ccState.Err(); err != nil && outcome.err == nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		outcome.err = err
+	}
 	result.ClientDisconnect = stream.guarded && stream.gone
 	return result, outcome.err
 }
