@@ -477,11 +477,14 @@ func restoreBridgeRawValue(value any, names *BridgeToolNameMap) bool {
 				if id.Kind == "tool_search" {
 					v["type"] = "tool_search_call"
 					v["execution"] = "client"
+					v["arguments"] = json.RawMessage(toolSearchCallArgumentsJSON(rawObjectString(v["arguments"])))
+					retypeResponsesToolCallItemID(v, "tool_search_call")
 					delete(v, "name")
 					delete(v, "namespace")
 				}
 				if id.Kind == "custom" && typ == "function_call" {
 					v["type"] = "custom_tool_call"
+					retypeResponsesToolCallItemID(v, "custom_tool_call")
 					v["input"] = extractCustomToolCallInput(rawObjectString(v["arguments"]))
 					delete(v, "arguments")
 				}
