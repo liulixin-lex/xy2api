@@ -255,3 +255,66 @@ func TestM3FunctionArgumentsFinalValue(t *testing.T) {
 		require.Empty(t, events)
 	})
 }
+
+func TestM3FunctionArgumentValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		valid     bool
+	}{
+		{"object", `{"x":1}`, true}, {"Read", `{"file_path":"x","pages":""}`, true}, {"bad", `{"x":`, false},
+		{"array", `[]`, false}, {"null", `null`, false}, {"scalar", `1`, false}, {"empty", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "f"
+			if tc.name == "Read" {
+				name = "Read"
+			}
+			item := ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: name, Arguments: tc.raw}
+			resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+			err := ValidateResponsesForAnthropic(resp)
+			if tc.valid {
+				require.NoError(t, err)
+				require.NotNil(t, ResponsesToAnthropic(resp, "test"))
+			} else {
+				require.Error(t, err)
+				require.Nil(t, ResponsesToAnthropic(resp, "test"))
+			}
+			st := NewResponsesEventToAnthropicState()
+			item.Arguments = ""
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &item}, st)
+			done := ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", tc.raw), st)
+			if tc.valid {
+				require.NoError(t, st.Err())
+				if tc.raw == "" {
+					require.Empty(t, done)
+				}
+				ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: resp}, st)
+				require.NoError(t, st.Err())
+			} else {
+				require.Error(t, st.Err())
+				require.Empty(t, done)
+				require.Equal(t, tc.raw, st.tools[0].raw)
+				require.Empty(t, FinalizeResponsesAnthropicStream(st))
+			}
+		})
+	}
+	t.Run("truncated empty", func(t *testing.T) {
+		resp := &ResponsesResponse{Status: "incomplete", Output: []ResponsesOutput{{Type: "function_call", CallID: "call_a", Name: "f"}}}
+		require.Error(t, ValidateResponsesForAnthropic(resp))
+		st := NewResponsesEventToAnthropicState()
+		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &resp.Output[0]}, st)
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.incomplete", Response: resp}, st)
+		require.Error(t, st.Err())
+		require.Empty(t, events)
+	})
+	t.Run("custom empty", func(t *testing.T) {
+		require.NoError(t, ValidateResponsesForAnthropic(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "custom_tool_call", Input: ""}}}))
+	})
+	t.Run("opaque stays opaque", func(t *testing.T) {
+		resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "function_call", Arguments: "cipher", EncryptedFunctionArgs: json.RawMessage(`"opaque"`)}}}
+		var err *UpstreamConversionError
+		require.ErrorAs(t, ValidateResponsesForAnthropic(resp), &err)
+		require.Equal(t, "encrypted_function_args", err.Field)
+		require.Equal(t, "cipher", resp.Output[0].Arguments)
+	})
+}
