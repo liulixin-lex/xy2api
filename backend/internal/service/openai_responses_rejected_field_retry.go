@@ -10,7 +10,10 @@ import (
 	"strings"
 	"sync"
 
+	"context"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -236,6 +239,48 @@ func isExplicitOpenAIResponsesFieldRejection(code, message string) bool {
 	}
 	return strings.Contains(message, "unknown parameter") ||
 		strings.Contains(message, "unsupported parameter")
+}
+
+// openAIResponsesRejectedFieldForRecord returns only known wire field names and
+// structural paths. Error messages and caller-controlled field values never
+// become observation fields, and recognition does not authorize a repair.
+func openAIResponsesRejectedFieldForRecord(statusCode int, responseBody []byte) string {
+	if statusCode != http.StatusBadRequest {
+		return ""
+	}
+	param := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String()))
+	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
+	messageParam := openAIResponsesRejectedParamFromMessage(message)
+	if messageParam == "" {
+		messageParam = openAIResponsesCacheModelRejectionParamFromMessage(message)
+	}
+	if messageParam == "" {
+		messageParam = openAIResponsesInvalidTypeParamFromMessage(message)
+	}
+	if messageParam == "" {
+		messageParam = openAIResponsesMaxZeroContentParamFromMessage(message)
+	}
+	if param != "" && messageParam != "" && param != messageParam {
+		return ""
+	}
+	if param == "" {
+		param = messageParam
+	}
+	switch param {
+	case "max_output_tokens", "truncation", "top_p", "metadata", "temperature", "frequency_penalty", "presence_penalty", "prompt_cache_breakpoint", "input", "tools", "model", "reasoning.effort", "reasoning_effort":
+		return param
+	}
+	for _, pattern := range []*regexp.Regexp{
+		openAIResponsesRejectedNamespaceParamPattern, openAIResponsesRejectedStatusParamPattern,
+		openAIResponsesRejectedContentParamPattern, openAIResponsesRejectedCacheParamPattern,
+		openAIResponsesRejectedContentCacheParamPattern, openAIResponsesRejectedArgumentsParamPattern,
+		openAIResponsesToolParametersParamPattern,
+	} {
+		if pattern.MatchString(param) {
+			return param
+		}
+	}
+	return ""
 }
 
 func openAIResponsesRejectedParamFromMessage(message string) string {
@@ -578,4 +623,31 @@ func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]by
 		return nil, "", false, fmt.Errorf("delete rejected namespace at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed namespace parameter rejection", true, nil
+}
+
+// recordOpenAIResponsesRejectedFieldRetry stores the refusal that an approved
+// repair will retry. Terminal refusals retain their existing error-event path.
+func recordOpenAIResponsesRejectedFieldRetry(c *gin.Context, account *Account, resp *http.Response, responseBody []byte) *OpsUpstreamErrorEvent {
+	if c == nil || account == nil || resp == nil {
+		return nil
+	}
+	field := openAIResponsesRejectedFieldForRecord(resp.StatusCode, responseBody)
+	if field == "" {
+		return nil
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account), UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"), Kind: "http_error", RejectedField: field, Resent: false, Message: extractUpstreamErrorMessage(responseBody)})
+	value, _ := c.Get(OpsUpstreamErrorsKey)
+	events, _ := value.([]*OpsUpstreamErrorEvent)
+	if len(events) == 0 {
+		return nil
+	}
+	return events[len(events)-1]
+}
+
+// Record the actual wire omission after the existing repair budget approved it.
+// M6/M7/M10 reuse this on their max_output_tokens repair paths.
+func recordOpenAIRejectedOutputLimitOmission(ctx context.Context, before, after []byte) {
+	if gjson.GetBytes(before, "max_output_tokens").Exists() && !gjson.GetBytes(after, "max_output_tokens").Exists() {
+		resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "max_output_tokens", Action: "omit"})
+	}
 }
