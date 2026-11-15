@@ -17,6 +17,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // 重试相关常量
@@ -116,6 +117,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 		} else if account.Type == AccountTypeAPIKey {
 			validationModel = account.GetMappedModel(validationModel)
+		}
+	}
+	if account != nil && account.Platform == PlatformAnthropic {
+		policyBody, changed, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, parsed.Body.Bytes(), validationModel, "anthropic")
+		if policyErr != nil {
+			return nil, writeFinalReasoningPolicyError(c, "anthropic", policyErr)
+		}
+		if changed {
+			if err := parsed.ReplaceBody(policyBody); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if account != nil && account.Platform == PlatformAnthropic {
@@ -380,6 +392,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var cachedErrorBody []byte
 	hardClassifiedFailure := false
 	lastWireBody := body
+	defer func() {
+		if result != nil {
+			result.ReasoningEffort = NormalizeClaudeOutputEffort(gjson.GetBytes(lastWireBody, "output_config.effort").String())
+		}
+	}()
 	retryStart := time.Now()
 	attemptModel := originalModel
 	if account.Platform == PlatformAnthropic {

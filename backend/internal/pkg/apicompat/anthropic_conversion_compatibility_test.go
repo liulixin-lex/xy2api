@@ -131,7 +131,7 @@ func TestAnthropicReasoningNoneAndSupportedEfforts(t *testing.T) {
 			{"claude-opus-4-8", "xhigh", "adaptive", "xhigh"},
 			{"claude-sonnet-5", "xhigh", "adaptive", "xhigh"},
 			{"claude-fable-5-2", "xhigh", "adaptive", "xhigh"},
-			{"claude-opus-4-6", "xhigh", "adaptive", "max"},
+			{"claude-opus-4-6", "xhigh", "adaptive", "high"},
 			{"claude-sonnet-5", "none", "adaptive", "low"},
 			{"claude-fable-5", "none", "adaptive", "low"},
 			{"claude-mythos-preview", "none", "adaptive", "low"},

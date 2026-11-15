@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"io"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -1686,14 +1687,16 @@ func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string
 }
 
 func explicitRequestedReasoningEffortFromBody(body []byte) string {
-	raw := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	for _, path := range []string{"reasoning_effort", "reasoning.effort", "reasoning", "output_config.effort"} {
+		value := gjson.GetBytes(body, path)
+		if value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+			return strings.TrimSpace(value.String())
+		}
 	}
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "output_config.effort").String())
+	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+		return "none"
 	}
-	return raw
+	return ""
 }
 
 // CanonicalRequestedReasoningEffort extracts the client-requested effort before
@@ -1702,7 +1705,7 @@ func explicitRequestedReasoningEffortFromBody(body []byte) string {
 // later persist "xhigh".
 func CanonicalRequestedReasoningEffort(body []byte, modelCandidates ...string) *string {
 	if raw := explicitRequestedReasoningEffortFromBody(body); raw != "" {
-		canonical := NormalizeMaxReasoningEffort(raw)
+		canonical := normalizeReasoningEffortMappingSource(raw)
 		if canonical == "" {
 			return nil
 		}
@@ -1741,7 +1744,7 @@ func canonicalReasoningEffortFromModelSuffix(model string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return NormalizeMaxReasoningEffort(parts[len(parts)-1])
+	return normalizeReasoningEffortMappingSource(parts[len(parts)-1])
 }
 
 func extractOpenAIServiceTier(reqBody map[string]any) *string {
@@ -2470,28 +2473,11 @@ func extractOpenAIReasoningEffort(reqBody map[string]any, modelCandidates ...str
 }
 
 func CanonicalRequestedReasoningEffortFromReqBody(reqBody map[string]any, modelCandidates ...string) *string {
-	if reqBody == nil {
-		return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil
 	}
-	raw := ""
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw == "" {
-		if effort, ok := reqBody["reasoning_effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw != "" {
-		canonical := NormalizeMaxReasoningEffort(raw)
-		if canonical == "" {
-			return nil
-		}
-		return &canonical
-	}
-	return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
+	return CanonicalRequestedReasoningEffort(body, modelCandidates...)
 }
 
 func normalizeOpenAIReasoningEffort(raw string) string {
@@ -2529,6 +2515,9 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		if strings.TrimSpace(gjson.GetBytes(body, path).String()) == "" {
+			continue
+		}
 		if err := openai.ValidateGPT61TerraReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
 			return err
 		}
@@ -2539,6 +2528,9 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
 		return openai.ValidateGPT61SolReasoningEffort(model, "none")
 	}
+	if explicitRequestedReasoningEffortFromBody(body) != "" {
+		return nil
+	}
 	requestedModel := openai.CanonicalizeOpenAIModelAliasSpelling(gjson.GetBytes(body, "model").String())
 	for _, effort := range []string{"none", "minimal"} {
 		if strings.HasSuffix(requestedModel, "-"+effort) {
@@ -2546,4 +2538,21 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 		}
 	}
 	return nil
+}
+
+// Inspect replayable final builder bytes without consuming or rewriting the wire.
+func extractOpenAIReasoningEffortFromRequest(request *http.Request) *string {
+	if request == nil || request.GetBody == nil {
+		return nil
+	}
+	reader, err := request.GetBody()
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = reader.Close() }()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil
+	}
+	return extractOpenAIReasoningEffortFromBody(body)
 }

@@ -46,6 +46,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
 	}
+	if account.Type != AccountTypeAPIKey {
+		policyBody, _, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
+		if policyErr != nil {
+			return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+		}
+		body = policyBody
+	}
 	// Validate the original request before compatibility filters can discard an
 	// explicit effort. Use the same final account/compact model as forwarding.
 	requestedValidationModel := gjson.GetBytes(body, "model").String()
@@ -56,9 +63,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			validationModel = mapped
 		}
 	}
-	if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-		return nil, err
+	if account.Type != AccountTypeAPIKey || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+	} else {
+		ctx = WithFinalReasoningEffortRequest(ctx, body)
 	}
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
@@ -335,6 +346,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		)
 	}
 
+	if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, validationModel, "responses")
+		if policyErr != nil {
+			return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+		}
+		body = policyBody
+		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
+			return nil, err
+		}
+		originalBody = body
+		requestView = newOpenAIRequestView(body)
+	}
+
 	bodyModified := false
 	clientPromptCacheKey := promptCacheKey
 	var reqBody map[string]any
@@ -442,7 +467,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Upstream model resolved: %s -> %s (account: %s, type: %s, isCodexCLI: %v)", billingModel, upstreamModel, account.Name, account.Type, isCodexCLI)
 		}
 	}
-	if strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String()) == "minimal" {
+	if account.Type != AccountTypeAPIKey && strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String()) == "minimal" {
 		markPatchSet("reasoning.effort", "none")
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
 	}
@@ -1095,8 +1120,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
-	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
+	defer func() {
+		if result != nil {
+			result.ReasoningEffort = reasoningEffort
+		}
+	}()
 	reasoningEffortValue := ""
 	if reasoningEffort != nil {
 		reasoningEffortValue = *reasoningEffort
@@ -1116,6 +1144,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	for {
 		if replayAttempt {
 			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		}
+		if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, upstreamModel, "responses")
+			if policyErr != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			body = policyBody
 		}
 		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
 		if deriveErr != nil {
@@ -1148,6 +1183,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+
+		reasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
 		// Get proxy URL
 		proxyURL := ""

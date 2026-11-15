@@ -35,10 +35,11 @@ func TestGPT61SolAnthropicEffortAndLegacyIsolation(t *testing.T) {
 	}
 }
 
-func TestGPT61SolConvertersRejectDisabledModelAliases(t *testing.T) {
+func TestGPT61SolConvertersValidateAppliedEffortBeforeModelAliases(t *testing.T) {
 	for _, model := range []string{"gpt-6.1-sol-none", "openai/GPT_6.1_SOL_MINIMAL"} {
-		_, err := AnthropicToResponses(&AnthropicRequest{Model: model})
-		require.Error(t, err)
+		out, err := AnthropicToResponses(&AnthropicRequest{Model: model})
+		require.NoError(t, err) // The converter has already selected its default effort.
+		require.Equal(t, "medium", out.Reasoning.Effort)
 		_, err = ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model})
 		require.Error(t, err)
 	}
