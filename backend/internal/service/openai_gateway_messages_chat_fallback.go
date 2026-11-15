@@ -181,7 +181,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	anthropicResp, err := apicompat.ChatCompletionsResponseToAnthropicWithBridgeOptions(ccResp, originalModel, opts)
 	if err != nil {
 		writeCCStreamReadError(c, PreOutputProtocolAnthropic, err)
-		return &OpenAIForwardResult{Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort}, err
+		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier), Duration: time.Since(startTime)}, err
 	}
 
 	if s.responseHeaderFilter != nil {

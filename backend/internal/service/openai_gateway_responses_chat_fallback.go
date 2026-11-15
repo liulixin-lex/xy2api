@@ -182,7 +182,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	responsesResp, err := apicompat.ChatCompletionsResponseToResponsesWithBridgeOptions(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools, opts)
 	if err != nil {
 		writeCCStreamReadError(c, PreOutputProtocolResponses, err)
-		return &OpenAIForwardResult{Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort}, err
+		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier), Duration: time.Since(startTime)}, err
 	}
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 
@@ -280,7 +280,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 	var finalEvents []apicompat.ResponsesStreamEvent
 	if scan.Err == nil {
-		if !(opts.Bridge != nil && state.FinishReason == "length") {
+		if opts.Bridge == nil || state.FinishReason != "length" {
 			scan.Err = state.ValidateToolCallArguments()
 		}
 		if scan.Err == nil {
