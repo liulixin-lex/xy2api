@@ -137,5 +137,17 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	type wire ResponsesRequest
+	if r.anthropicChatSource != nil && r.Reasoning != nil && r.Reasoning.Effort == "" && r.Reasoning.Summary != "" {
+		// A Chat summary-only extension must not synthesize an empty effort.
+		// Keep the shared DTO and other request paths' encoding unchanged.
+		return json.Marshal(struct {
+			wire
+			Reasoning struct {
+				Summary string `json:"summary"`
+			} `json:"reasoning"`
+		}{wire: wire(r), Reasoning: struct {
+			Summary string `json:"summary"`
+		}{Summary: r.Reasoning.Summary}})
+	}
 	return json.Marshal(wire(r))
 }
