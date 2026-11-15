@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Responses reasoning 历史转为 Chat 时优先使用 `summary_text`，为空时只回退到 `reasoning_text` 并按顺序拼接；普通 text、密文与签名不作为可见推理文本。无明文时仍使用既有 ID 缓存。
+
 Responses→Chat 桥保留 `user`、`metadata`，将 `text.verbosity` 映射为 `verbosity`，沿用入口已选定的输出预算。
 
 Chat 响应支持字符串、null，以及按顺序包含 text/thinking 的内容数组；数组已带 thinking 时不重复输出独立 reasoning 字段，未知 part 返回转换错误。此规则不改变 Chat 请求媒体数组。

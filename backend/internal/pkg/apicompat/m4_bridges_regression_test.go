@@ -868,3 +868,37 @@ func TestM4RequestFieldContract(t *testing.T) {
 		t.Fatal("metadata aliases input")
 	}
 }
+
+func TestM4ReasoningHistoryFallback(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{`{"type":"reasoning","id":"rs_fixed","summary":[],"content":[{"type":"reasoning_text","text":"A"},{"type":"reasoning_text","text":"B"}]}`, "AB"},
+		{`{"type":"reasoning","id":"rs_fixed","summary":[{"type":"summary_text","text":"SUMMARY"}],"content":[{"type":"reasoning_text","text":"RAW"}]}`, "SUMMARY"},
+		{`{"type":"reasoning","id":"rs_fixed","content":[{"type":"text","text":"NOT REASONING"}]}`, ""},
+		{`{"type":"reasoning","id":"rs_fixed","encrypted_content":"opaque"}`, ""},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+			id, text, ok := ExtractResponsesReasoningItemWithBridgeOptions(json.RawMessage(tc.raw), opts)
+			if !ok || id != "rs_fixed" || text != tc.want {
+				t.Fatalf("id=%s text=%q ok=%v", id, text, ok)
+			}
+			input := json.RawMessage("[" + tc.raw + `,{"role":"assistant","content":"answer"}]`)
+			out, err := ResponsesToChatCompletionsRequestWithOptions(&ResponsesRequest{Model: "m", Input: input}, &ResponsesToChatOptions{Bridge: opts.Bridge, ReasoningContentByID: func(string) string { return "CACHE" }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tc.want
+			if want == "" {
+				want = "CACHE"
+			}
+			if out.Messages[0].ReasoningContent != want {
+				t.Fatalf("history=%+v", out.Messages)
+			}
+		})
+	}
+	raw := json.RawMessage(`{"type":"reasoning","content":[{"type":"text","text":"legacy"}]}`)
+	_, text, ok := ExtractResponsesReasoningItemWithBridgeOptions(raw, ConversionOptions{})
+	if !ok || text != "legacy" {
+		t.Fatal("zero options changed")
+	}
+}

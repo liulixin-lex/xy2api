@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Responses reasoning 历史仅从 summary_text 或 reasoning_text 提取明文，避免普通 content.text 被误当作推理内容。
+
 - Responses 转为 Chat 请求时保留 user、metadata、verbosity 和已选定的输出预算。
 
 - 纯空白 reasoning 不再生成 Anthropic thinking 块，真实思考的前导空白和块内空白仍完整保留。
