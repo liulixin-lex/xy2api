@@ -276,6 +276,16 @@
 
 - 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
 
+- 上游的普通 408、409、422 在 Responses、Chat、Messages 出口保留状态码和安全错误信息，Chat 同时保留 code/param。
+
+- 工具历史 400 在透传出口保留上游说明和已有定位字段，调用方可据此修正历史，不新增本地闭合校验。
+
+- 加密推理项被上游拒绝后的同号修复只清理唯一被指认项，保留其他推理和压缩历史；无法安全修复时明确返回 `encrypted_content_rejected`。
+
+- 原生与透传 HTTP 的密文拒绝证据按账号和实际凭据版本隔离，旧会话级证据不迁移，换账号或换凭据后保留首发历史。
+
+- 原生 HTTP 续接错误区分响应归属、目标不支持、工具输出缺 call_id 与上游状态过期，保留对应错误码和字段位置；明确终止错误不再被通用报错覆盖。
+
 ### 用量记录与计费
 
 ## [0.6.7] - 2026-11-15

@@ -240,15 +240,16 @@ var authCodes = map[string]struct{}{
 }
 
 var clientErrorCodes = map[string]struct{}{
-	"context_length_exceeded":  {},
-	"string_above_max_length":  {},
-	"invalid_prompt":           {},
-	"cyber_policy":             {},
-	"bio_policy":               {},
-	"content_policy_violation": {},
-	"content_filter":           {},
-	"invalid_request_error":    {},
-	"request_too_large":        {},
+	"encrypted_content_rejected": {},
+	"context_length_exceeded":    {},
+	"string_above_max_length":    {},
+	"invalid_prompt":             {},
+	"cyber_policy":               {},
+	"bio_policy":                 {},
+	"content_policy_violation":   {},
+	"content_filter":             {},
+	"invalid_request_error":      {},
+	"request_too_large":          {},
 }
 
 // IsKnownClientErrorCode identifies explicit client-fault codes, not the
@@ -521,6 +522,9 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	// streams).
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
+	}
+	if code == "encrypted_content_rejected" {
+		return Result{Category: CategoryClientError, Reason: ReasonEncryptedContent, StateFamily: StateOtherEncrypted}
 	}
 	if rej := ClassifyStateRejection(code, text); rej.RequestScoped() {
 		reason := ReasonConversationState

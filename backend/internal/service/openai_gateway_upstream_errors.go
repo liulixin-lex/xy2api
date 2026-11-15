@@ -529,6 +529,14 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	requestedModel ...string,
 ) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	if rejection := classifyHTTPContinuationError(body); rejection != nil {
+		WriteHTTPContinuationError(c, account, rejection)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
+	if rejection := upstreamEncryptedTerminalRejection(s.redactAgentIdentitySensitiveBody(ctx, account, body)); rejection != nil {
+		writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
 	defer func() {
 		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)
 	}()
@@ -818,6 +826,17 @@ func (s *OpenAIGatewayService) handleCompatErrorResponseWithFields(
 	requestedModel ...string,
 ) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	if rejection := classifyHTTPContinuationError(body); rejection != nil {
+		noteLocalHTTPContinuationRejection(c, account, rejection)
+		suppressHTTPStateRejectionRetry(c)
+		writeError(c, rejection.Status, "invalid_request_error", rejection.Code, rejection.Param, rejection.Message)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
+	if rejection := upstreamEncryptedTerminalRejection(s.redactAgentIdentitySensitiveBody(c.Request.Context(), account, body)); rejection != nil {
+		suppressHTTPStateRejectionRetry(c)
+		writeError(c, http.StatusBadRequest, "invalid_request_error", "encrypted_content_rejected", rejection.Param, rejection.Message)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
 	defer func() {
 		s.noteOpenAITerminalRejection(c.Request.Context(), account, resp.StatusCode, resp.Header, body, forwardErr)
 	}()
