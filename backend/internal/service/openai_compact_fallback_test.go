@@ -327,7 +327,8 @@ func TestOpenAIGatewayForwardCompactFailoverEventCarriesManagedProxy(t *testing.
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.PartialFailure)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Len(t, upstream.bodies, 2)

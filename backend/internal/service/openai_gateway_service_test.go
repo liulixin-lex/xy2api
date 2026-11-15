@@ -1859,7 +1859,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputReturnsFailover(t *testing.T) 
 			`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"An error occurred while processing your request."}}`,
+			`data: {"type":"response.failed","error":{"message":"An error occurred while processing your request."},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-failed"}},
@@ -1901,7 +1901,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 			`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`,
+			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-capacity-failed"}},
@@ -2221,7 +2221,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null}}`,
+			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-context-window-failed"}},
@@ -2475,7 +2475,7 @@ func TestOpenAIStreamingPolicyResponseFailedBeforeOutputPassesThrough(t *testing
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`,
+			`data: {"type":"response.failed","error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-policy-failed"}},
@@ -2673,7 +2673,7 @@ func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"upstream processing failed"}}`,
+			`data: {"type":"response.failed","error":{"message":"upstream processing failed"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-passthrough-failed"}},
@@ -3870,7 +3870,7 @@ func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {
 		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4o","usage":{"input_tokens":11,"output_tokens":22,"input_tokens_details":{"cached_tokens":3}}}}`,
 		`data: [DONE]`,
-	}, "\n")
+	}, "\n\n")
 
 	finalResp, ok := extractCodexFinalResponse(body)
 	require.True(t, ok)
@@ -3922,7 +3922,7 @@ func TestHandleNonStreamingResponse_APIKeyFallsBackToSSEBodyWhenContentTypeIsWro
 			`data: {"type":"response.output_text.delta","delta":"lo"}`,
 			`data: {"type":"response.completed","response":{"id":"resp_api_key_sse","object":"response","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`,
 			`data: [DONE]`,
-		}, "\n"))),
+		}, "\n\n"))),
 	}
 	account := &Account{ID: 1, Type: AccountTypeAPIKey}
 
@@ -4149,7 +4149,7 @@ func TestHandleStreamingResponseCyberPolicyMarks(t *testing.T) {
 			`data: {"type":"response.created","response":{"id":"r1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"code":"cyber_policy","message":"flagged"}}`,
+			`data: {"type":"response.failed","error":{"code":"cyber_policy","message":"flagged"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid"}},

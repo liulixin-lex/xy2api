@@ -38,7 +38,8 @@ func TestOpenAINativeForwardFailureKeepsOnlyPostOutputResult(t *testing.T) {
 			require.Error(t, err)
 			var failover *UpstreamFailoverError
 			if !output {
-				require.Nil(t, result)
+				require.NotNil(t, result)
+				require.True(t, result.PartialFailure)
 				require.ErrorAs(t, err, &failover)
 				return
 			}

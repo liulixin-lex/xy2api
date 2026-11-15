@@ -219,7 +219,7 @@ func TestOpenAIStreamingPassthroughWrappedE2UsesFrameStatus(t *testing.T) {
 
 func TestOpenAIStreamingPassthroughNonRetryableFailedBeforeOutputFlushesAtBoundary(t *testing.T) {
 	upstream := "event: response.failed\n" +
-		`data: {"type":"response.failed","error":{"code":"content_policy","message":"request blocked by policy"},"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6}}` + "\n\n"
+		`data: {"type":"response.failed","error":{"code":"content_policy","message":"request blocked by policy"},"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6},"response":{"status":"failed"}}` + "\n\n"
 
 	result, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
 
@@ -278,7 +278,7 @@ func TestOpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage(t *te
 func TestOpenAIStreamingPassthroughFailedAfterOutputFlushesAtBoundaryAndKeepsUsage(t *testing.T) {
 	firstOutput := `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"
 	failedEvent := "event: response.failed\n" +
-		`data: {"type":"response.failed","error":{"code":"server_error","message":"upstream processing failed"},"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}` + "\n\n"
+		`data: {"type":"response.failed","error":{"code":"server_error","message":"upstream processing failed"},"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9},"response":{"status":"failed"}}` + "\n\n"
 	upstream := firstOutput + failedEvent
 
 	result, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
@@ -328,7 +328,7 @@ func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing
 }
 
 func TestOpenAIStreamingPassthroughNamespaceRestoreErrorFlushesWrittenResidualOnce(t *testing.T) {
-	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n"
+	writtenPrefix := `data: {"type":"response.output_text.delta","delta":"prefix"}` + "\n\n"
 	overflowData := `data: {"type":"response.output_text.delta","delta":"not-written","overflow":1e1000}`
 
 	_, recorder, writer, err := runPassthroughFlushTest(

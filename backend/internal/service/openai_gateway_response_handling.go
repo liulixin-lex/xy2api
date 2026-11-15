@@ -236,6 +236,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var finishResponsesFrame func()
 	var releaseFrameScan func()
 	responsesEOF := false
+	responsesEOFUnterminated := false
 	responsesFrameBytes := 0
 	responseCreatedAt := int64(0)
 	imageCounter := newOpenAIImageOutputCounter()
@@ -427,7 +428,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			"response":        openAIResponsesFailureMetadata(usage, responseCreatedAt),
 		})
 		frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, source, message)
-		if eventInProgress {
+		if eventInProgress || responsesEOFUnterminated {
 			frame = "\n" + frame
 		}
 		if _, err := writePendingString(frame); err != nil {
@@ -639,6 +640,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 				sawFailedEvent = true
 				failedMessage = "Upstream returned an invalid Responses terminal event"
+				if currentTerminal.Reason == "malformed_wrapped_error" {
+					logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
+					failedMessage = openAIMalformedWrappedErrorMessage
+				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 					streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, nil, failedMessage, mappedModel, resp.Header)
 				} else {
@@ -1141,6 +1146,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if frame, ok := responsesParser.Finish(); ok {
 			responsesEOF = true
 			processFrame(frame, true)
+			responsesEOFUnterminated = clientOutputStarted && !failureDelivered && !sawTerminalEvent
 			responsesEOF = false
 		}
 	}
@@ -1599,7 +1605,13 @@ func (s *OpenAIGatewayService) parseSSEUsage(data string, usage *OpenAIUsage) {
 }
 
 func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsage) {
+	if usage == nil {
+		return
+	}
+	// Legacy consumers do not authenticate count presence through this adapter.
+	input, output, read, write := usage.InputTokensPresent, usage.OutputTokensPresent, usage.CacheReadInputTokensPresent, usage.CacheCreationInputTokensPresent
 	s.parseSSEUsageBytesWithType(data, "", usage)
+	usage.InputTokensPresent, usage.OutputTokensPresent, usage.CacheReadInputTokensPresent, usage.CacheCreationInputTokensPresent = input, output, read, write
 }
 
 func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType string, usage *OpenAIUsage) string {
@@ -2166,6 +2178,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 	if terminal.Failure {
 		if !terminal.Valid {
+			if terminal.Reason == "malformed_wrapped_error" {
+				logOpenAIWrappedErrorMalformed(c.Request.Context(), account, "native_sse_aggregate")
+			}
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid Responses terminal event", OpenAIUpstreamProtocolErrorCode)
 		}
 		msg := extractOpenAISSEErrorMessage(terminalPayload)

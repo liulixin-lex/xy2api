@@ -164,11 +164,8 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 						require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
 						attempt := openAIRequestRepairFrom(req.c).m3
 						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID)
-						if output {
-							require.Len(t, bad, 2)
-						} else {
-							require.Empty(t, bad)
-						}
+						// Neither truncated nor cancelled responses run the success hook.
+						require.Empty(t, bad)
 					})
 				}
 			}

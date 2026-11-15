@@ -2685,6 +2685,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				s.parseSSEUsageBytesWithType(dataBytes, sourceEventType, usage)
 				sawFailedEvent = true
 				failedMessage = "Upstream returned an invalid Responses terminal event"
+				if currentTerminal.Reason == "malformed_wrapped_error" {
+					logOpenAIWrappedErrorMalformed(ctx, account, "passthrough_sse")
+					failedMessage = openAIMalformedWrappedErrorMessage
+				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, nil, failedMessage, failureModel, resp.Header))
 				}
@@ -3377,6 +3381,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 	if terminal.Failure {
 		if !terminal.Valid {
+			if terminal.Reason == "malformed_wrapped_error" {
+				logOpenAIWrappedErrorMalformed(c.Request.Context(), account, "passthrough_sse_aggregate")
+			}
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid Responses terminal event", OpenAIUpstreamProtocolErrorCode)
 		}
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
