@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Claude Fable/Mythos 5.2 经转换桥继续对话时保留网关封装的已签名 thinking 历史。
+
 - Chat、Anthropic 转换桥保留截断、过滤与拒绝的区别及拒绝正文，非流和流式终态一致。
 
 - Chat 转换桥的终态事件类型与响应 status 一致，length 返回 response.incomplete，且只结束一次。
