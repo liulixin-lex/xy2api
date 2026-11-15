@@ -8,14 +8,14 @@
 |---|---|
 | 入站请求体上传超时 | 408 `invalid_request_error`，消息 `Timed out reading request body`；OpenAI 协议 code 为 `request_upload_timeout`。不调用上游；真正取消或断连只记 499，不补写响应 |
 | 普通上游 408、409、422 | 保留状态码与脱敏消息；Responses 与 Chat 错误体保留安全的 `type/code/param`，Messages 保留既有 `type/message` 形状，缺省 code 分别为 `request_timeout/conflict/unprocessable_entity`；管理员配置的错误规则优先 |
-| 分组内没有可用账号 | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
-| 带工具的 Chat 请求，持久配置中没有可表达其最终模型／档位的 Responses 上游 | 400 `invalid_request_error`，code `responses_required`，消息明确指出 `tools` 或 `functions`；有能力但暂时忙的账号不归此类 |
+| 分组内没有可用账号 | 按原因区分：确认无成员或没有账号支持该模型时为 404；只有请求能力不满足时为 400；所有能服务的账号仅因普通限流或槽位、队列容量耗尽时为 429；余额暂停、混合限制或数据库查询失败时为 503。已有上游失败时保留最后一次失败的处理结果 |
+| 带 `tools` 或 `functions` 的 Chat 请求，分组里没有任何账号能用 Responses 协议服务它的最终模型与档位 | 400 `invalid_request_error`，code `responses_required`，消息指出 `tools` 或 `functions`。有这类账号只是暂时繁忙时，按“分组内没有可用账号”处理 |
 | 非流式请求，但组内账号都只接受流式 | 503，消息为 `No available account in this group supports non-streaming requests; retry with "stream": true`，带 `x-should-retry: false`，不带 `Retry-After` |
 | 配置原因导致无号（如渠道定价不含该模型） | 503，`Retry-After: 60`，`x-should-retry: false` |
 | 模型不在分组白名单 | 404，消息为 `Model "<model>" is not available for this group`，并列出本分组白名单的前 10 项 |
 | 分组仅限 Claude Code，请求不是 Claude Code 且没有兜底分组 | 403 `permission_error`，不带重试头 |
 | 用户余额被在途请求占用 | 429 `rate_limit_error`，code `concurrent_balance_reserved`，`Retry-After` 约 5 秒 |
-| 排队已满或并发槽位已满 | 429，`Retry-After: 5` |
+| 排队已满或并发槽位已满 | 先在本请求剩余的时间与尝试次数内，再找一次有即时空位的其他合格账号（续链等必须回到原账号的请求除外）；仍没有空位时返回 429，`Retry-After: 5`，不再进入第二次排队 |
 | 上游余额不足 | 本请求换号；全部耗尽时 503。单账号分组在账号暂停期间返回 503，`Retry-After` 为暂停剩余时间（2–30 秒） |
 | 上游明确报告模型不可用，候选耗尽 | 404，OpenAI 与 Anthropic 为 `model_not_found`，Gemini 为 `NOT_FOUND`，消息为 `Model "<model>" is not supported by any configured account in this group`，不附重试建议 |
 | 上游内容安全拒绝 | 400 `invalid_request_error`，code `content_policy_violation`，附脱敏后的上游原文（最多 500 字符）；不重试、不换号 |
@@ -26,7 +26,7 @@
 | 非流式 Responses 请求，上游返回的 SSE 没有合法的 `response` 结束事件 | 502 JSON，`code` 为 `upstream_stream_truncated`，不再以 200 原样返回 SSE；已读到的用量照常计费。经 CDN 时按下方 CDN 规则改为 503 |
 | 非流式 Responses 请求，上游返回的 SSE 结束事件损坏（坏 UTF-8、坏 JSON、缺 `response`、状态矛盾） | 502 JSON，`code` 为 `upstream_protocol_error`；其余同上 |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，带 `X-XY-Upstream-Status: 502` 或 `504`。直连请求保持原状态码 |
-| Gemini 入口组内账号全部暂时不可用 | 503 并带重试提示 |
+| Gemini 入口组内账号全部暂时不可用 | 同样按无号原因区分普通容量耗尽与混合限制；需要重试时带重试提示 |
 | Gemini 兼容入口选择未声明的工具或并行控制类型错误 | 400 `invalid_request_error`，错误指出 `tool_choice.name` 或 `tool_choice.disable_parallel_tool_use`；不发送上游、不换号或罚号 |
 
 补充说明：
@@ -35,10 +35,10 @@
 
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
 
-- 模型供给不足与暂时无空位分别判断；供给查询失败保持服务错误，原始上游末次失败通过错误链保留。上游给出的原始账号等待截止始终约束选号，短冷却上限只决定何时复查。
 
+- 上游给出的重试时间（如 `Retry-After`）之前，网关不会再选用同一账号，末位兜底也一样；冷却上限只决定网关何时重新检查这个账号。
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。
-- Anthropic 协议（`/v1/messages`）下，网关自身的无号与瞬时失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
+- Anthropic 协议（`/v1/messages`）下，网关自身的 503 失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
 - 关闭 `errors` 段后不加重试头、不做负缓存与回合封顶，上述错误形态回到原样（内容安全拒绝回到 502）。
 
 原生 Responses HTTP 的续接错误使用以下稳定字段，`error.type` 均为 `invalid_request_error`：
@@ -54,14 +54,13 @@
 
 实际错误字段中的会话政策拒绝（`session_blocked_by_cyber_policy`、`cyber_policy`）会结束本次请求，不跨账号重发；防护墙 1010 拦截不视为账号凭据失效。
 
-排队已满或账号并发等待超时后，网关可在原预算内再选一次即时空闲的合格账号；没有空位时仍保留原 429 原因与重试提示，不会进入第二次队列。固定属主的续接请求不参与重选。请求总时间或上游尝试次数已用尽时也不会再选其他账号。
 
 ## Retry-After 的取值
 
 - 估算方法：对本请求有资格的每个账号，取它仍有效的限制中最晚的结束时间（含按模型的冷却），再取各账号中最早的那个。
 - 上游的等待提示：HTTP 响应头、失败事件里的 `error.headers` 与错误体中给出的有效等待时间，取其中最晚的时刻（对已确认的 HTTP 错误，也会按原有方式从错误体解析一次，一起比较）。网关在同一账号上的重试不会早于这个时刻；返回给客户端的重试建议仍按下面的范围限幅。
 - 各出口的范围：HTTP 无号 2–30 秒（`errors.no_account_retry_after`）；Codex 客户端（按 `User-Agent` 或 `originator` 识别）不超过 `errors.codex_retry_after_cap_seconds`（默认 10 秒），因为 Codex 会按它静默等待；流内失败帧 2–10 秒。
-- 负缓存：同一分组、平台、模型的“无号”结论缓存 2 秒，这期间的请求直接返回同样的 503。只对整个分组成立的结论缓存；只对某个会话成立的无号（例如新会话撞上会话数上限）不缓存。
+- 负缓存：只缓存对整个分组成立的无号结论，默认 2 秒；命中后返回相同的状态码与原因。只对某个请求或会话成立的失败不缓存；带工具的 Chat 请求也不读写这份缓存、不计入快速失败。
 - 快速失败：同一 API Key 在 30 秒内收到 10 次相同的 503 后，后续请求在选号之前直接返回该 503，直到成功一次。
 
 ## 流式请求的失败结束方式

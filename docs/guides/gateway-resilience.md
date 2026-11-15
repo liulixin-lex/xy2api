@@ -76,7 +76,7 @@
 - **主要字段**：`transient_cooldown_seconds` 默认 30；上游带 `Retry-After` 时按它冷却，封顶 `retry_after_cap_seconds`（默认 120）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；`balance_keywords_extra` 追加余额不足的识别文案；`decision_v2` 默认开，只把真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化的 overloaded）算作容量降载，“服务繁忙”“排队过多”“并发超限”一类按瞬时或限流处理，可以换到同一主机的其他账号。
 - **何时关闭**：一般不关闭。关闭 `decision_v2` 回到较粗的旧分类规则，同时“仅流式账号学习”只学习、不在本请求换号。
 - **计费与客户端**：分类本身不改变计费。分类结果写进运维错误记录的 `resilience_category`。[分组质量门槛](group-quality-gate.md)的报错线用同一套分类规则，但不看韧性开关：同一个失败，开关开或关结论都一样。
-- **第三方 API Key 限流**：按本次实际请求的协议与目标地址区分官方上游和中转；中转返回的长配额窗口只留作证据，实际账号冷却优先采用可信重试提示，再取已耗尽窗口或既有短时回避，统一由 `retry_after_cap_seconds` 封顶。原始最早重试时刻不缩短，余额暂停不变。上游明确指出模型配额或权限不足时仍只写原模型冷却键，保留模型归属证据。每次原始配额采样同步更新来源，目标未知时不沿用上一次的官方标记。自适应账号的所有可用协议地址都为官方地址时，原有平台阈值仍生效；存在中转地址时不据原始窗口停用整个账号。
+- **第三方 API Key 限流**：按本次实际请求的协议与目标地址区分官方上游与中转。上游给出的配额重置时间（可能长达数天）不再当作冷却时长：冷却优先按上游的重试提示，没有时按配额已用尽的窗口或默认短冷却，都以 `retry_after_cap_seconds` 封顶；上游重试提示给出的最早重试时刻仍然遵守，余额暂停不变。上游明确指出是某个模型的配额或权限不足时，只冷却该模型。目标地址或协议变了，旧的配额记录不再算作新目标的官方配额。运营配置的临时停调规则仍优先执行；所有可用协议地址都是官方地址的自适应账号，继续执行原有用量阈值。
 - **显式模型规则**：HTTP 与流内过载使用相同的临时停调规则；非 401 且实际出站模型已知时，只冷却该账号的该模型。池模式、自定义错误码与规则启用条件保持原有语义。
 - **403 设施故障**：计数器缺失、计数失败或临时停调写入失败时，仅按 `transient_cooldown_seconds` 作本地短时回避，不将账号标为凭据失效；原有的更长硬暂停保持不变。普通 403 的十分钟冷却只在持久化成功后生效。认证类 code/type 的 403 仍按原计数阈值处理：前两次临时回避，第三次才停用。
 - **观测**：`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.unclassified`（只按状态码归类的 4xx 文案采样，可据此补充 `balance_keywords_extra`）。
@@ -157,19 +157,17 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **何时关闭**：需要所有请求都按上游实际用量计费时关闭。
 - **观测**：计数 `undelivered`、`cdn_cut`、`abuse_guard`；未送达列表与接口见 [观测与排障](gateway-resilience-observability.md#未送达请求)。送达口径见 [客户端可见的行为](gateway-resilience-client.md#送达与计费口径)。
 
-带工具的 Chat 请求按候选最终模型／档位与实际出口检查 Responses 能力，选号预检不改请求或记录未发送候选的降级。工具请求跳过组级无号缓存及快速失败计数。
-
 ### 错误语义与防风暴 `errors`
 
 
 - **做什么**：
   - Responses 失败帧保留上游给出的等待提示（0 不算提示），没有其他已知建议时给客户端的等待夹到 2–10 秒，同一账号仍按上游原始时刻恢复；无 `type` 的失败不会被之后的 `response.completed` 清除。
-  - 选号耗尽分别记录持久可用成员、模型支持、请求支持与即时容量，各账号按实际首个否决门计一次；查询失败为未知并保留原因，不据此认定模型不存在；这些诊断不追加到原有对外错误消息中。
-  - 无可用账号时 503 带 `Retry-After`（`no_account_retry_after`，默认 2–30 秒，按组内最早恢复时间估算）；配置原因导致无号时 `Retry-After: 60` 并带 `x-should-retry: false`。
-  - 同一分组、平台、模型的“无号”结论负缓存 `negative_cache_seconds`（默认 2 秒）；同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。
+  - 没有可用账号时，运维记录分别统计：分组中可用的账号数、支持该模型的账号数、能满足本次请求能力的账号数、此刻有空位的账号数；每个账号只按它第一个不满足的条件计一次。数据库查询失败时记为未知，不据此判定模型不存在。
+  - 没有可用账号时按原因返回 404、400、429 或 503，具体见[错误响应](gateway-resilience-client.md#错误响应)。需要重试的 503 带 `Retry-After`（`no_account_retry_after`，默认 2–30 秒）；配置原因导致无号时 `Retry-After: 60` 并带 `x-should-retry: false`。
+  - 同一分组、平台、模型的“无号”结论负缓存 `negative_cache_seconds`（默认 2 秒）；同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。带工具的 Chat 请求不使用这份负缓存，也不计入快速失败。
   - 同一会话连续 5 次耗尽失败（间隔 120 秒内）后改为终止应答，不再建议重试（`turn_cap`）。
   - 合成的 `response.failed` 按情况附带重试时间（`failed_frame_retry_after`）；Codex 客户端收到的 `Retry-After` 不超过 `codex_retry_after_cap_seconds`（默认 10 秒，0 表示不另设）。
-  - Anthropic 协议下网关自身的失败与换号耗尽的容量降载统一为 503 `api_error`，避免 Claude Code 把 `overloaded_error` 计为 529 后停止或切换模型。
+  - Anthropic 协议下网关自身的 503 失败与换号耗尽的容量降载使用 `api_error`，避免 Claude Code 把 `overloaded_error` 计为 529 后停止或切换模型。
 - **何时关闭**：只在下游系统依赖旧的错误形态时关闭；关闭后不加重试头、不做负缓存与回合封顶，错误形态回到原样。
 - **观测**：计数 `fast_fail`、`turn_cap`；日志 `resilience.fast_fail`、`resilience.turn_cap`。各场景的响应见 [客户端可见的行为](gateway-resilience-client.md)。
 
@@ -204,6 +202,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 - **做什么**：非流式请求遇到上游明确的“只接受流式请求”400（如 “only accepts streaming requests”“stream must be true”）时，记住该账号在当前协议下不收非流式请求，有效期 `learn_ttl_seconds`（默认 6 小时）；本请求立即换号，不计账号失败、不冷却。之后会因此失败的非流式请求暂不选它；流式请求，以及网关本来就改发流式的请求不受影响。
 - **范围**：OpenAI 入站的 Responses 与 Chat 普通文本请求，OpenAI 与 Grok 平台的账号；只在上游协议与入站相同、上游流模式跟随客户端的路径上过滤。学习粒度是“账号 + 协议”，不分模型。
+- **Chat 工具请求**：带 `tools` 或 `functions` 的 Chat 请求，如果其最终模型与档位要求 Responses，只选择能用该协议服务它的账号（规则见[调度](scheduling.md#openai-分组的选号顺序)）；选号时的检查不改请求，也不记降级。
 - **管理**：账号列表的状态列显示“仅流式（自动学习，剩余 X 小时）”，可点“清除”；接口 `DELETE /api/v1/admin/accounts/:id/capability-learning`。学习结果存在账号 `extra`，复制、导入与导出账号不带它；改了上游配置的账号不受旧记录影响。
 - **何时关闭**：关闭后不再学习，已学到的记录不参与选号、按到期时间自然失效。本请求换号还要求 `failure.decision_v2` 开启，否则只学习、本请求照旧返回 400。
 - **客户端**：组内账号全部被学为仅流式时，非流式请求返回 503，消息提示改用 `"stream": true`，带 `x-should-retry: false`、不带 `Retry-After`。
