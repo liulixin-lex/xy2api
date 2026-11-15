@@ -447,11 +447,6 @@ retryChatResponsesWire:
 		return nil, err
 	}
 	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
-	defer func() {
-		if schedResult != nil {
-			schedResult.ReasoningEffort = actualReasoningEffort
-		}
-	}()
 
 	if promptCacheKey != "" {
 		upstreamReq.Header.Set("session_id", compatSessionUUID)
@@ -547,6 +542,7 @@ retryChatResponsesWire:
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
 	if result != nil {
+		result.ReasoningEffort = actualReasoningEffort
 		schedCapture.noteUsage(&result.Usage)
 	}
 	if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, handleErr); ok {

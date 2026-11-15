@@ -1002,6 +1002,9 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 		}
 		acc.ProcessEvent(&event)
+		if err := acc.Err(); err != nil {
+			return nil, err
+		}
 		if terminal.Seen && terminal.Valid && event.Response != nil {
 			if event.Response.Usage == nil {
 				event.Response.Usage = event.Usage

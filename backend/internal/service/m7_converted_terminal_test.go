@@ -24,6 +24,8 @@ func TestM7ConvertedTerminalOutcomes(t *testing.T) {
 				failed, usage bool
 			}{
 				{"completed_no_usage", completed, false, false},
+				{"null_error_extension", `{"error":null}` + "\n\ndata: " + completed, false, false},
+				{"empty_error_extension", `{"error":{}}` + "\n\ndata: " + completed, false, false},
 				{"completed_missing_status", strings.Replace(completed, `"status":"completed",`, "", 1), false, false},
 				{"done_completed", strings.Replace(completed, "response.completed", "response.done", 1), false, false},
 				{"done_incomplete", `{"type":"response.done","response":{"id":"resp_fixture","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`, false, true},
@@ -89,5 +91,53 @@ func TestM7ConvertedTerminalOutcomes(t *testing.T) {
 }
 
 func TestM7NumericErrorKeepsUsage(t *testing.T) {
-	TestM7ConvertedTerminalOutcomes(t)
+	withResilienceSettings(t, nil)
+	for _, target := range []string{"chat", "messages"} {
+		for _, buffered := range []bool{false, true} {
+			for _, code := range []string{`503`, `"503"`} {
+				for _, bare := range []bool{false, true} {
+					name := target + "/" + code
+					if buffered {
+						name += "/buffer"
+					}
+					if bare {
+						name += "/bare"
+					}
+					t.Run(name, func(t *testing.T) {
+						failure := `{"type":"response.failed","response":{"status":"failed","error":{"code":` + code + `,"message":"fixture failure"},"usage":{"input_tokens":4,"output_tokens":2}}}`
+						if bare {
+							failure = `{"error":{"code":` + code + `},"usage":{"input_tokens":4,"output_tokens":2}}`
+						}
+						wire := "data: " + failure + "\n\ndata: " + `{"type":"response.completed","response":{"status":"completed","output":[]}}` + "\n\n"
+						c, rec := compatStreamContext("/v1/"+target, "")
+						resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
+						svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+						account := rawChatCompletionsTestAccount()
+						var result *OpenAIForwardResult
+						var err error
+						if target == "chat" {
+							if buffered {
+								result, err = svc.handleChatBufferedStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now())
+							} else {
+								result, err = svc.handleChatStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now(), 1)
+							}
+						} else {
+							if buffered {
+								result, err = svc.handleAnthropicBufferedStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now())
+							} else {
+								result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now())
+							}
+						}
+						require.Error(t, err)
+						require.NotNil(t, result)
+						require.Equal(t, 4, result.Usage.InputTokens)
+						require.Equal(t, 2, result.Usage.OutputTokens)
+						require.True(t, result.PartialFailure)
+						require.NotContains(t, rec.Body.String(), `"finish_reason":"stop"`)
+						require.NotContains(t, rec.Body.String(), `"stop_reason":"end_turn"`)
+					})
+				}
+			}
+		}
+	}
 }
