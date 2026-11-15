@@ -222,6 +222,19 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 
 // OpenAIUsage represents OpenAI API response usage
 type OpenAIUsage struct {
+	CacheCreation5mTokens           int  `json:"-"`
+	CacheCreation1hTokens           int  `json:"-"`
+	InputTokensPresent              bool `json:"-"`
+	OutputTokensPresent             bool `json:"-"`
+	CacheReadInputTokensPresent     bool `json:"-"`
+	UsageIncomplete                 bool `json:"-"`
+	UsageInconsistent               bool `json:"-"`
+	CacheCreationInputTokensPresent bool `json:"-"`
+	CacheCreation5mTokensPresent    bool `json:"-"`
+	CacheCreation1hTokensPresent    bool `json:"-"`
+	RawPromptTokens                 *int `json:"-"`
+	RawCacheReadTokens              *int `json:"-"`
+
 	CacheReadSource          string `json:"-"`
 	CacheWriteSource         string `json:"-"`
 	InputTokens              int    `json:"input_tokens"`

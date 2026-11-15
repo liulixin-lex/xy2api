@@ -581,6 +581,11 @@ type ResponsesSummary struct {
 
 // ResponsesUsage holds token counts in Responses API format.
 type ResponsesUsage struct {
+	UsagePresenceKnown  bool `json:"-"`
+	InputTokensPresent  bool `json:"-"`
+	OutputTokensPresent bool `json:"-"`
+	TotalTokensPresent  bool `json:"-"`
+
 	CacheReadSource          string `json:"-"`
 	CacheWriteSource         string `json:"-"`
 	InputTokens              int    `json:"input_tokens"`
@@ -597,6 +602,9 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	type responsesUsageAlias ResponsesUsage
 	var aux struct {
 		responsesUsageAlias
+		InputTokens             json.RawMessage               `json:"input_tokens"`
+		OutputTokens            json.RawMessage               `json:"output_tokens"`
+		TotalTokens             json.RawMessage               `json:"total_tokens"`
 		PromptTokensDetails     *ResponsesInputTokensDetails  `json:"prompt_tokens_details,omitempty"`
 		CompletionTokensDetails *ResponsesOutputTokensDetails `json:"completion_tokens_details,omitempty"`
 	}
@@ -628,9 +636,9 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if counts.CacheReadSource != "" {
 		u.InputTokensDetails.CachedTokens = counts.CacheReadTokens
 	}
-	if u.TotalTokens == 0 {
-		u.TotalTokens = u.InputTokens + u.OutputTokens
-	}
+	u.UsagePresenceKnown = true
+	u.InputTokensPresent, u.OutputTokensPresent = counts.InputTokensPresent, counts.OutputTokensPresent
+	u.TotalTokens, u.TotalTokensPresent = usageTotalPresence(data)
 	return nil
 }
 
@@ -859,6 +867,11 @@ type ChatChoice struct {
 
 // ChatUsage holds token counts in Chat Completions format.
 type ChatUsage struct {
+	UsagePresenceKnown      bool `json:"-"`
+	PromptTokensPresent     bool `json:"-"`
+	CompletionTokensPresent bool `json:"-"`
+	TotalTokensPresent      bool `json:"-"`
+
 	PromptTokens            int               `json:"prompt_tokens"`
 	CompletionTokens        int               `json:"completion_tokens"`
 	TotalTokens             int               `json:"total_tokens"`
@@ -868,11 +881,16 @@ type ChatUsage struct {
 
 func (u *ChatUsage) UnmarshalJSON(data []byte) error {
 	type alias ChatUsage
-	var decoded alias
+	var decoded struct {
+		alias
+		PromptTokens     json.RawMessage `json:"prompt_tokens"`
+		CompletionTokens json.RawMessage `json:"completion_tokens"`
+		TotalTokens      json.RawMessage `json:"total_tokens"`
+	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*u = ChatUsage(decoded)
+	*u = ChatUsage(decoded.alias)
 	counts := ParseOpenAIUsageCounts(gjson.ParseBytes(data))
 	u.PromptTokens, u.CompletionTokens = counts.InputTokens, counts.OutputTokens
 	if counts.CacheReadSource != "" || counts.CacheWriteSource != "" {
@@ -888,9 +906,9 @@ func (u *ChatUsage) UnmarshalJSON(data []byte) error {
 		}
 		u.PromptTokensDetails.CachedTokensPresent = counts.CacheReadSource != ""
 	}
-	if u.TotalTokens == 0 {
-		u.TotalTokens = u.PromptTokens + u.CompletionTokens
-	}
+	u.UsagePresenceKnown = true
+	u.PromptTokensPresent, u.CompletionTokensPresent = counts.InputTokensPresent, counts.OutputTokensPresent
+	u.TotalTokens, u.TotalTokensPresent = usageTotalPresence(data)
 	return nil
 }
 
@@ -995,4 +1013,43 @@ func (e *ResponsesStreamEvent) UnmarshalJSON(data []byte) error {
 	e.ArgumentsPresent = present("arguments")
 	e.InputPresent = present("input")
 	return nil
+}
+
+func usageTotalPresence(data []byte) (int, bool) {
+	value := gjson.ParseBytes(data)
+	count, source := firstUsageCount(value, "total_tokens")
+	return count, source != "" && value.Get(source).Num >= 0
+}
+
+func usageCountPointer(value int, present bool) *int {
+	if !present {
+		return nil
+	}
+	return &value
+}
+
+func (u ResponsesUsage) MarshalJSON() ([]byte, error) {
+	type alias ResponsesUsage
+	if !u.UsagePresenceKnown {
+		return json.Marshal(alias(u))
+	}
+	return json.Marshal(struct {
+		alias
+		Input  *int `json:"input_tokens,omitempty"`
+		Output *int `json:"output_tokens,omitempty"`
+		Total  *int `json:"total_tokens,omitempty"`
+	}{alias(u), usageCountPointer(u.InputTokens, u.InputTokensPresent), usageCountPointer(u.OutputTokens, u.OutputTokensPresent), usageCountPointer(u.TotalTokens, u.TotalTokensPresent)})
+}
+
+func (u ChatUsage) MarshalJSON() ([]byte, error) {
+	type alias ChatUsage
+	if !u.UsagePresenceKnown {
+		return json.Marshal(alias(u))
+	}
+	return json.Marshal(struct {
+		alias
+		Input  *int `json:"prompt_tokens,omitempty"`
+		Output *int `json:"completion_tokens,omitempty"`
+		Total  *int `json:"total_tokens,omitempty"`
+	}{alias(u), usageCountPointer(u.PromptTokens, u.PromptTokensPresent), usageCountPointer(u.CompletionTokens, u.CompletionTokensPresent), usageCountPointer(u.TotalTokens, u.TotalTokensPresent)})
 }

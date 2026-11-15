@@ -594,6 +594,14 @@ func (r *AccountSelectionResult) ProfitGateActive() bool {
 
 // ClaudeUsage 表示Claude API返回的usage信息
 type ClaudeUsage struct {
+	InputTokensPresent          bool `json:"-"`
+	OutputTokensPresent         bool `json:"-"`
+	CacheReadInputTokensPresent bool `json:"-"`
+	UsageIncomplete             bool `json:"-"`
+	UsageInconsistent           bool `json:"-"`
+	RawPromptTokens             *int `json:"-"`
+	RawCacheReadTokens          *int `json:"-"`
+
 	CacheCreationInputTokensPresent bool `json:"-"`
 	CacheCreation5mTokensPresent    bool `json:"-"`
 	CacheCreation1hTokensPresent    bool `json:"-"`
