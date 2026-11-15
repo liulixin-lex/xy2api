@@ -53,6 +53,7 @@ func TestHTTPEncryptedRepairUniqueItemStreams(t *testing.T) {
 						require.NotErrorAs(t, err, &failover)
 						require.Len(t, up.bodies, 1)
 						require.Contains(t, req.rec.Body.String(), "encrypted_content_rejected")
+						require.NotEmpty(t, currentOpsUpstreamEvents(req.c), "terminal refusals retain sanitized upstream evidence")
 						if mode == "after_output" {
 							require.NotNil(t, result)
 							require.True(t, result.PartialFailure)

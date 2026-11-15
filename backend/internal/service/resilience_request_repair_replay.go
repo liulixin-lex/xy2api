@@ -185,7 +185,7 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 		}
 	}
 
-	if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, r.body, payload, message, wrappedStatus); repairErr != nil {
+	if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, r.body, payload, message, wrappedStatus, true); repairErr != nil {
 		return repairErr
 	}
 

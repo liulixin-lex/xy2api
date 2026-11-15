@@ -21,7 +21,7 @@ func isHTTPEncryptedContentFailure(body, payload []byte, message string, status 
 }
 
 // Both HTTP and buffered/pre-output SSE use this same single-item budget.
-func newHTTPEncryptedContentRepairSignal(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int) error {
+func newHTTPEncryptedContentRepairSignal(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, sse bool) error {
 	if !isHTTPEncryptedContentFailure(body, payload, message, status) {
 		return nil
 	}
@@ -30,10 +30,10 @@ func newHTTPEncryptedContentRepairSignal(ctx context.Context, c *gin.Context, ac
 	if r != nil && account != nil && r.accountID == account.ID && !r.encryptedTried && err == nil && selected.Changed && ctx.Err() == nil && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
 		return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: selected.Body, encryptedItem: selected}
 	}
-	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, false)
+	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, false, sse)
 }
 
-func terminateHTTPEncryptedContent(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, outputStarted bool) error {
+func terminateHTTPEncryptedContent(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, outputStarted, sse bool) error {
 	if !isHTTPEncryptedContentFailure(body, payload, message, status) {
 		return nil
 	}
@@ -41,7 +41,7 @@ func terminateHTTPEncryptedContent(ctx context.Context, c *gin.Context, account 
 	if c != nil && c.GetBool("openai_passthrough") {
 		path = "passthrough_http"
 	}
-	if outputStarted {
+	if sse || outputStarted {
 		path = "native_sse"
 		if c != nil && c.GetBool("openai_passthrough") {
 			path = "passthrough_sse"
@@ -85,13 +85,17 @@ func finishHTTPEncryptedContentAfterOutput(ctx context.Context, c *gin.Context, 
 			return err
 		}
 	}
-	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, true)
+	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, true, true)
 }
 
-func handleHTTPEncryptedContentFrame(ctx context.Context, c *gin.Context, account *Account, payload []byte, status int, outputStarted bool, flush func() error) error {
+func (s *OpenAIGatewayService) handleHTTPEncryptedContentFrame(ctx context.Context, c *gin.Context, account *Account, payload []byte, status int, outputStarted bool, flush func() error, upstreamRequestID string) error {
 	message := extractOpenAISSEErrorMessage(payload)
 	if outputStarted {
-		return finishHTTPEncryptedContentAfterOutput(ctx, c, account, payload, message, status, flush)
+		rejection := finishHTTPEncryptedContentAfterOutput(ctx, c, account, payload, message, status, flush)
+		if rejection != nil && isHTTPEncryptedContentFailure(openAIHTTPRepairBody(c), payload, message, status) {
+			s.recordOpenAIStreamUpstreamError(c, account, c != nil && c.GetBool("openai_passthrough"), upstreamRequestID, "stream_failed", payload, message, status)
+		}
+		return rejection
 	}
-	return newHTTPEncryptedContentRepairSignal(ctx, c, account, openAIHTTPRepairBody(c), payload, message, status)
+	return newHTTPEncryptedContentRepairSignal(ctx, c, account, openAIHTTPRepairBody(c), payload, message, status, true)
 }
