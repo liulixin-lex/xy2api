@@ -32,7 +32,7 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
 		return nil, err
 	}
-	input, err := convertChatMessagesToResponsesInput(req.Messages)
+	input, err := convertChatMessagesToResponsesInput(req.Messages, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 
 // convertChatMessagesToResponsesInput converts the Chat Completions messages
 // array into a Responses API input items array.
-func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputItem, error) {
+func convertChatMessagesToResponsesInput(msgs []ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
 	var out []ResponsesInputItem
 	legacyIDs := legacyFunctionCallIDs{msgs: msgs}
 	for _, m := range msgs {
@@ -149,7 +149,7 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputIt
 		case m.Role == "function" && m.ToolCallID == "":
 			m.ToolCallID = legacyIDs.claim(m.Name)
 		}
-		items, err := chatMessageToResponsesItems(m)
+		items, err := chatMessageToResponsesItems(m, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -213,14 +213,14 @@ func (ids *legacyFunctionCallIDs) claim(name string) string {
 
 // chatMessageToResponsesItems converts a single ChatMessage into one or more
 // ResponsesInputItem values.
-func chatMessageToResponsesItems(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatMessageToResponsesItems(m ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
 	switch m.Role {
 	case "system", "developer":
 		return chatSystemToResponses(m)
 	case "user":
 		return chatUserToResponses(m)
 	case "assistant":
-		return chatAssistantToResponses(m)
+		return chatAssistantToResponses(m, opts)
 	case "tool":
 		return chatToolToResponses(m)
 	case "function":
@@ -263,7 +263,22 @@ func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // text content and tool_calls, the text is emitted as an assistant message
 // first, then each tool_call becomes a function_call item. If the content is
 // empty/nil and there are tool_calls, only function_call items are emitted.
-func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatAssistantToResponses(m ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
+	var prefix []ResponsesInputItem
+	if opts.SupportsPlaintextReasoningInput {
+		reasoning, visible, err := splitChatAssistantContent(m)
+		if err != nil {
+			return nil, err
+		}
+		m.ReasoningContent, m.Content = "", visible
+		if reasoning != "" {
+			raw, err := json.Marshal([]ResponsesContentPart{{Type: "reasoning_text", Text: reasoning}})
+			if err != nil {
+				return nil, err
+			}
+			prefix = []ResponsesInputItem{{Type: "reasoning", Content: raw}}
+		}
+	}
 	var items []ResponsesInputItem
 	content := ""
 
@@ -350,7 +365,7 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 		})
 	}
 
-	return items, nil
+	return append(prefix, items...), nil
 }
 
 // parseAssistantContent returns assistant content as plain text.

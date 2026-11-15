@@ -62,6 +62,8 @@ Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_to
 
 用量中未提供的计数仅在内部记录为缺失；对外 JSON 和流式用量保留原计数、字段及合计补和，未知来源也维持原输出。
 
+仅在已确认最终目标支持明文 reasoning 输入的转换路径中，助手历史思考单独承载为 `reasoning_text`，可见答案与工具调用保持分离；未确认能力的路径保留原有历史处理。
+
 ## 客户端配置
 
 ### Codex CLI
