@@ -150,3 +150,12 @@ func TestM7BridgeToolIdentityRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestM7AnthropicBridgeKeepsIntermediateStop(t *testing.T) {
+	req, err := apicompat.ChatCompletionsToResponsesWithOptions(&apicompat.ChatCompletionsRequest{Model: "k3", Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}}, Stop: json.RawMessage(`["END"]`)}, apicompat.ConversionOptions{})
+	require.NoError(t, err)
+	opts := m7BridgeConversionOptions(context.Background(), nativeAnthropicTestAccount())
+	out, err := m7ResponsesToAnthropicRequest(req, opts)
+	require.NoError(t, err)
+	require.Equal(t, []string{"END"}, out.StopSeqs)
+}
