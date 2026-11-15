@@ -1678,7 +1678,7 @@ func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *
 		return
 	}
 	terminalEvent = strings.TrimSpace(terminalEvent)
-	if terminalEvent != "response.completed" && terminalEvent != "response.done" && terminalEvent != "[DONE]" && terminalEvent != "json" {
+	if terminalEvent != "response.completed" && terminalEvent != "response.incomplete" && terminalEvent != "response.done" && terminalEvent != "[DONE]" && terminalEvent != "json" {
 		return
 	}
 	logNow, total, suppressed := openAIMissingUsageSampler.sample(time.Now())
