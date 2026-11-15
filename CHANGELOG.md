@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Anthropic 桥保留工具 strict，并在启用桥选项时将 allowed_tools 限制应用到实际声明。
+
 - Fable 5.2 与 Mythos 5.2 补齐模型目录及默认 adaptive/high 转换，强制工具选择按目标能力拒绝。
 
 - Chat 请求的字符串 `reasoning` 生效，`reasoning_effort` 继续优先，扩展字段解码不新增拒绝。
