@@ -164,10 +164,13 @@
 
 ### 重试、调度与续接
 
-- 工具历史 400 在透传出口保留上游说明和已有定位字段，调用方可据此修正历史，不新增本地闭合校验。
-- 加密推理项被上游拒绝后的同号修复只清理唯一被指认项，保留其他推理和压缩历史；无法安全修复时明确返回 `encrypted_content_rejected`。
-- 原生与透传 HTTP 的密文拒绝证据按账号和实际凭据版本隔离，旧会话级证据不迁移，换账号或换凭据后保留首发历史。
-- 原生 HTTP 续接错误区分响应归属、目标不支持、工具输出缺 call_id 与上游状态过期，保留对应错误码和字段位置。
+- 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。
+
+- 加密推理项被上游拒绝后，同号重试只去掉被上游指出的那一项，其他推理与压缩历史保留；重试后又有别的项被拒才去掉其余密文；有多项密文又无法确定是哪一项时返回 400 `encrypted_content_rejected` 并附恢复说明，不再删掉全部密文后重放。
+
+- 同一会话里一个账号的密文被拒，不再让换账号或换 API Key 之后的请求被提前删去密文；旧版本的拒绝记录不再沿用。
+
+- 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
 
 ### 用量记录与计费
 
