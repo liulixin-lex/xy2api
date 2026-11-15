@@ -644,19 +644,24 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
-	facts := OpenAIForwardResult{}
+	outcome := openAICompatBufferedOutcome{}
+	facts := &outcome.facts
 	var usage OpenAIUsage
 	defer func() {
 		if result == nil && retErr != nil && facts.UsagePresent && GetOpsCyberPolicy(c) == nil {
 			result = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
 				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}
 		}
-		finishOpenAICompatResponse(c, account, result, retErr, &facts)
+		finishOpenAICompatResponse(c, account, result, retErr, facts)
 	}()
 
-	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai messages buffered", requestID, &facts)
+	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai messages buffered", requestID, &outcome)
 	usage = observedUsage
 	if err != nil {
+		var conversion *apicompat.UpstreamConversionError
+		if errors.As(err, &conversion) {
+			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, conversion.Field, "Invalid upstream response event")
+		}
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
 			return nil, readErr.cause
@@ -677,7 +682,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
-		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		payload := outcome.payload
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
 			MarkOpsCyberPolicy(c, CyberPolicyMark{
 				Code:           code,
@@ -831,12 +836,12 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	model string,
 	logPrefix string,
 	requestID string,
-	factsOut ...*OpenAIForwardResult,
+	outcomes ...*openAICompatBufferedOutcome,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
 	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	defer func() {
-		if len(factsOut) > 0 && factsOut[0] != nil {
-			*factsOut[0] = facts
+		if len(outcomes) > 0 && outcomes[0] != nil {
+			outcomes[0].facts = facts
 		}
 		finishOpenAICompatResponse(c, account, nil, nil, &facts)
 	}()
@@ -914,6 +919,10 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 
 	processFrame := func(frame openAICompatSSEFrame) (*apicompat.ResponsesResponse, error) {
 		terminal := observeOpenAICompatFrame(c, resp, frame, &usage, &facts)
+		if terminal.Seen && len(outcomes) > 0 && outcomes[0] != nil {
+			outcomes[0].terminal = terminal
+			outcomes[0].payload = []byte(frame.Data)
+		}
 		if terminal.Failure {
 			if !terminal.Valid {
 				return nil, &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}

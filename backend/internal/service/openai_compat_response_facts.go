@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,12 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
+
+type openAICompatBufferedOutcome struct {
+	facts    OpenAIForwardResult
+	terminal OpenAIResponsesTerminal
+	payload  []byte
+}
 
 func observeOpenAICompatFrame(c *gin.Context, resp *http.Response, frame openAICompatSSEFrame, usage *OpenAIUsage, facts *OpenAIForwardResult) OpenAIResponsesTerminal {
 	data := []byte(frame.Data)
@@ -19,7 +26,17 @@ func observeOpenAICompatFrame(c *gin.Context, resp *http.Response, frame openAIC
 		source = "upstream_sse_terminal"
 	}
 	if observed, present := openAIResponsesUsageEvidence(data, source); present {
-		*usage = observed
+		if terminal.Seen && terminal.Valid {
+			if openAIUsageHasTokens(&observed) || !openAIUsageHasTokens(usage) {
+				*usage = observed
+			}
+		} else {
+			mergeOpenAIUsageNonZero(usage, observed)
+		}
+		usage.InputTokensPresent = usage.InputTokensPresent || observed.InputTokensPresent
+		usage.OutputTokensPresent = usage.OutputTokensPresent || observed.OutputTokensPresent
+		usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent || observed.CacheReadInputTokensPresent
+		usage.CacheCreationInputTokensPresent = usage.CacheCreationInputTokensPresent || observed.CacheCreationInputTokensPresent
 		facts.UsagePresent, facts.UsageSource = true, source
 	}
 	if terminal.Seen {
@@ -54,6 +71,13 @@ func finishOpenAICompatResponse(c *gin.Context, account *Account, out *OpenAIFor
 	if c != nil && c.Request != nil && account != nil {
 		resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
 	}
+	if err != nil && failover == nil && c != nil && c.Writer != nil && c.Writer.Written() && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") && (out == nil || !out.ClientDisconnect) {
+		protocol := PreOutputProtocolChat
+		if c.Request != nil && c.Request.URL != nil && strings.Contains(c.Request.URL.Path, "/messages") {
+			protocol = PreOutputProtocolAnthropic
+		}
+		writeCCStreamReadError(c, protocol, err)
+	}
 	if out != nil && !facts.PartialFailure && !out.ClientDisconnect {
 		ClaimProtocolTerminal(c)
 	}
@@ -67,8 +91,8 @@ func openAICompatFailedTerminalResponse(terminal OpenAIResponsesTerminal, payloa
 	}
 	code := ""
 	for _, path := range []string{"response.error.code", "error.code"} {
-		if value := gjson.GetBytes(payload, path); value.Type == gjson.String {
-			code = value.Str
+		if value := gjson.GetBytes(payload, path); value.Type == gjson.String || value.Type == gjson.Number {
+			code = value.String()
 			break
 		}
 	}

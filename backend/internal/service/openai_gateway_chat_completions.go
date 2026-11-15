@@ -604,19 +604,24 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
-	facts := OpenAIForwardResult{}
+	outcome := openAICompatBufferedOutcome{}
+	facts := &outcome.facts
 	var usage OpenAIUsage
 	defer func() {
 		if result == nil && retErr != nil && facts.UsagePresent && GetOpsCyberPolicy(c) == nil {
 			result = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
 				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}
 		}
-		finishOpenAICompatResponse(c, account, result, retErr, &facts)
+		finishOpenAICompatResponse(c, account, result, retErr, facts)
 	}()
 
-	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai chat_completions buffered", requestID, &facts)
+	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai chat_completions buffered", requestID, &outcome)
 	usage = observedUsage
 	if err != nil {
+		var conversion *apicompat.UpstreamConversionError
+		if errors.As(err, &conversion) {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, conversion.Field, "Invalid upstream response event")
+		}
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
 
@@ -632,7 +637,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	observer.Observe(finalResponse.Model, true)
 	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
-		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		payload := outcome.payload
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
 		// 标记供 handler 事后写风控/邮件/tokens=0 用量行。
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
@@ -685,6 +690,14 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
+	if err := acc.Err(); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
+	if err := apicompat.ValidateResponsesForChat(finalResponse); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, originalModel)
 
 	if s.responseHeaderFilter != nil {
