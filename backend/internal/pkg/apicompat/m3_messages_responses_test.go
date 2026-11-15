@@ -366,3 +366,41 @@ func TestM3CustomToolResponse(t *testing.T) {
 	}
 	require.NoError(t, ValidateResponsesForAnthropic(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "function_call", Arguments: `{"input":"normal"}`}}}))
 }
+
+func TestM3WebSearchSources(t *testing.T) {
+	for _, tc := range []struct{ name, status, action, want string }{
+		{"missing", "completed", `null`, `[]`}, {"empty", "completed", `{"type":"search","sources":[]}`, `[]`},
+		{"sources", "completed", `{"type":"search","sources":[{"url":"https://example.invalid/a","title":"A","content":"body"},{"url":"https://example.invalid/a","title":"duplicate"},{"url":"javascript:bad"},{"url":"http://example.invalid/b"},{"url":"https://"}]}`, `[{"type":"web_search_result","url":"https://example.invalid/a","title":"A","content":"body"},{"type":"web_search_result","url":"http://example.invalid/b"}]`},
+		{"open page", "completed", `{"type":"open_page","url":"https://example.invalid/page"}`, `[{"type":"web_search_result","url":"https://example.invalid/page"}]`},
+		{"unfinished", "in_progress", `{"type":"search","sources":[{"url":"https://example.invalid/a"}]}`, `[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := ResponsesOutput{Type: "web_search_call", ID: "ws_a", Status: tc.status}
+			require.NoError(t, json.Unmarshal([]byte(tc.action), &item.Action))
+			require.JSONEq(t, tc.want, string(responsesWebSearchSources(item)))
+			resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+			out := ResponsesToAnthropic(resp, "test")
+			st := NewResponsesEventToAnthropicState()
+			events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, st)
+			events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: resp}, st)...)
+			var jsonResults, streamResults []json.RawMessage
+			for _, b := range out.Content {
+				if b.Type == "web_search_tool_result" {
+					jsonResults = append(jsonResults, b.Content)
+				}
+			}
+			for _, e := range events {
+				if e.ContentBlock != nil && e.ContentBlock.Type == "web_search_tool_result" {
+					streamResults = append(streamResults, e.ContentBlock.Content)
+				}
+			}
+			require.Equal(t, jsonResults, streamResults)
+			if tc.status == "completed" {
+				require.Len(t, jsonResults, 1)
+				require.JSONEq(t, tc.want, string(jsonResults[0]))
+			} else {
+				require.Empty(t, jsonResults)
+			}
+		})
+	}
+}
