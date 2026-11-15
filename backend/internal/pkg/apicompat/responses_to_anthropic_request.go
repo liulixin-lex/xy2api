@@ -36,10 +36,20 @@ func responsesToAnthropicRequest(req *ResponsesRequest, preserveThinking bool, o
 	if err := applyAnthropicFieldPolicies(req, out); err != nil {
 		return nil, err
 	}
-	system, messages, err := convertResponsesInputToAnthropicWithOptions(req.Instructions, req.Input, preserveThinking, opts, req.chatCacheControls...)
+	input := req.Input
+	var restore map[string]string
+	if opts != nil {
+		var err error
+		input, restore, err = bridgeHistoryOccurrences(input)
+		if err != nil {
+			return nil, err
+		}
+	}
+	system, messages, err := convertResponsesInputToAnthropicWithOptions(req.Instructions, input, preserveThinking, opts, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}
+	restoreBridgeAnthropicHistory(messages, restore)
 	out.Messages = messages
 	if len(system) > 0 {
 		out.System = system
