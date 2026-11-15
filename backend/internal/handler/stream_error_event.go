@@ -36,6 +36,9 @@ func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errTyp
 	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
+	if !prepareHandlerErrorSSE(c) {
+		return false
+	}
 	return writeHandlerProtocolError(c, service.PreOutputProtocolResponses, status, errType, code, "", message)
 }
 
@@ -43,6 +46,9 @@ func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errTyp
 func writeResponsesFailedSSEWithOpeningResult(c *gin.Context, errType, code, message string, forceOpening bool) (bool, bool) {
 	if service.ProtocolTerminalClaimed(c) {
 		return true, false
+	}
+	if !prepareHandlerErrorSSE(c) {
+		return false, false
 	}
 	wrote := writeHandlerProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, errType, code, "", message)
 	return wrote, wrote

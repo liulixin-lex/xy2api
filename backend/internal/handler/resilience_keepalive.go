@@ -109,5 +109,8 @@ func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string,
 	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
+	if !prepareHandlerErrorSSE(c) {
+		return false
+	}
 	return writeHandlerProtocolError(c, service.PreOutputProtocolChat, status, errType, code, "", message)
 }

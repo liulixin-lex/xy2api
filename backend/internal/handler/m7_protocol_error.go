@@ -44,3 +44,19 @@ func writeHandlerProtocolError(c *gin.Context, protocol string, status int, errT
 	}
 	return service.WriteTargetProtocolError(c, protocol, status, errType, code, param, message)
 }
+
+// Explicit SSE wrappers retain their original contract when called before the
+// first event. General errors still choose the actual committed response type.
+func prepareHandlerErrorSSE(c *gin.Context) bool {
+	if c == nil || c.Writer == nil || service.ProtocolTerminalClaimed(c) {
+		return false
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
+	if !c.Writer.Written() {
+		c.Header("Content-Type", "text/event-stream")
+		c.Writer.WriteHeaderNow()
+	}
+	return true
+}
