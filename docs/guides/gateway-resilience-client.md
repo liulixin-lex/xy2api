@@ -76,6 +76,8 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 
 - 并行工具：按上游输出顺序逐个交付。前一个工具的参数完成之前，后面的工具以及随后的正文、思考与搜索块先暂存，完成后依次发出。重复的完成事件不会重复结束块。结束事件里的输出列表按 item ID、call ID 对应已流式的工具，排列与流式顺序不同、缺少或换了 item ID 时不重复交付、不报错；流式事件里同一工具的 item ID、call ID 或输出位置互相矛盾，或参数未完成就断流时，以 `event: error` 结束。
 
+compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
+
 ### `response.failed` 的重试时间
 
 `errors.failed_frame_retry_after` 开启时（默认），合成的 `response.failed` 在 `error.headers.retry-after` 中给出重试时间（Codex 从这里读取），正文 “try again in Ns” 的 N 与之相同：

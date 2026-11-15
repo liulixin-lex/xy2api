@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -141,6 +142,30 @@ func TestM6GrokActualAndPartialFailure(t *testing.T) {
 				require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning.effort").Exists())
 				require.Nil(t, result.ReasoningEffort, "missing wire effort must not be inferred from the client alias")
 			}
+		})
+	}
+}
+
+func TestM6CompactFailureModel(t *testing.T) {
+	for _, model := range []string{"client-model", ""} {
+		t.Run(model, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			state := resilience.NewRequestState()
+			state.NoteTurn(1, model, "fixture")
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil).WithContext(resilience.WithRequestState(context.Background(), state))
+			SetOpsUpstreamModel(c, "mapped-model")
+			c.Header("Content-Type", "text/event-stream")
+			_, _ = c.Writer.Write([]byte(": heartbeat\n\n"))
+			writeOpenAICompactSSEFailureMessage(c, 502, "upstream_error", "fixture failure")
+			writeOpenAICompactSSEFailureMessage(c, 502, "upstream_error", "duplicate")
+			require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
+			var payload []byte
+			forEachOpenAISSEFrame(w.Body.String(), func(_ string, data []byte) { payload = data })
+			require.Equal(t, model, gjson.GetBytes(payload, "response.model").String())
+			require.Greater(t, gjson.GetBytes(payload, "response.created_at").Int(), int64(0))
+			require.True(t, gjson.GetBytes(payload, "sequence_number").Exists())
+			require.True(t, ProtocolTerminalClaimed(c))
 		})
 	}
 }
