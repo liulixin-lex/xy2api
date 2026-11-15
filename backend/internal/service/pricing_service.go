@@ -403,7 +403,7 @@ func (s *PricingService) checkAndUpdatePricing() error {
 		localHash := s.localHash
 		s.mu.RUnlock()
 
-		if localHash == "" || remoteHash != localHash {
+		if localHash == "" || !strings.EqualFold(remoteHash, localHash) {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Remote hash differs on startup (local=%s remote=%s), downloading...",
 				localHash[:min(8, len(localHash))], remoteHash[:min(8, len(remoteHash))])
 			if err := s.downloadPricingData(); err != nil {
@@ -446,7 +446,7 @@ func (s *PricingService) syncWithRemote() error {
 		localHash := s.localHash
 		s.mu.RUnlock()
 
-		if localHash == "" || remoteHash != localHash {
+		if localHash == "" || !strings.EqualFold(remoteHash, localHash) {
 			logger.LegacyPrintf("service.pricing", "[Pricing] Remote hash differs (local=%s remote=%s), downloading new version...",
 				localHash[:min(8, len(localHash))], remoteHash[:min(8, len(remoteHash))])
 			return s.downloadPricingData()
@@ -630,11 +630,10 @@ func (s *PricingService) downloadPricingData() error {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save file: %v", err)
 	}
 
-	// 使用远程哈希作为同步锚点，防止重复下载
-	// 当远程哈希不可用时，回退到数据本身的哈希
+	// 同步锚点只确认实际下载正文；远端 hash 提前发布时下一轮仍须下载。
 	syncHash := dataHashStr
-	if remoteHash != "" {
-		syncHash = remoteHash
+	if strings.EqualFold(remoteHash, dataHashStr) {
+		syncHash = strings.ToLower(remoteHash)
 	}
 	hashFile := s.getHashFilePath()
 	if err := os.WriteFile(hashFile, []byte(syncHash+"\n"), 0644); err != nil {

@@ -51,6 +51,10 @@ Gemini 的 prompt 计数包含缓存读取：未缓存输入按 `max(prompt - ca
 
 **Anthropic 缓存 TTL**：用量接口返回 `anthropic_cache_ttl_policy`（`off`/`5m`/`1h`）与 `anthropic_cache_ttl_applied`（布尔），历史记录和非目标出口为 `NULL`，使用记录页面不显示。`applied=true` 只表示最终请求的缓存声明都符合指定 TTL，不表示供应商采用了该 TTL 或命中了缓存。价格与计费规则见[提示词缓存](caching.md)。
 
+## 价格来源与版本
+
+远程价格同步以实际下载正文的 SHA-256 作为内容版本和同步锚点。远端 hash 与正文暂时不一致时，仍可加载校验通过的正文，但不会提前确认尚未下载的版本；下一轮继续检查并下载更新。本地 fallback、override 文件变化按各自内容指纹重新加载。
+
 ## Token 吞吐量
 
 渠道监控和运维流量卡的 **Token 吞吐量（tokens/s）** 是统计窗口内全部计费 Token（输入、输出、缓存创建、缓存读取）除以窗口秒数。它随并发量变化，不能与单次请求平均 TPS 直接比较。渠道监控的 `TPM ÷ 60` 与之等价。

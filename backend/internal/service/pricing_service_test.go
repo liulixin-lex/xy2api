@@ -1,9 +1,13 @@
 package service
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1190,4 +1194,79 @@ func TestCalculateCost_ClaudeSonnetCatalogLadderIsDataDriven(t *testing.T) {
 	cost, err = svc.CalculateCost("claude-sonnet-4-5", under, 1.0)
 	require.NoError(t, err)
 	require.False(t, cost.LongContextBillingApplied, "恰好 200000 不进高档（严格大于）")
+}
+
+// pricingHashRemote models independently published catalog and hash responses.
+type pricingHashRemote struct {
+	body, hash string
+	err        error
+	downloads  int
+}
+
+func (c *pricingHashRemote) FetchPricingJSON(context.Context, string) ([]byte, error) {
+	c.downloads++
+	return []byte(c.body), c.err
+}
+
+func (c *pricingHashRemote) FetchHashText(context.Context, string) (string, error) {
+	return c.hash, nil
+}
+
+func TestPricingRemoteHashAheadOfBody(t *testing.T) {
+	oldBody := `{"fixture":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`
+	newBody := `{"fixture":{"input_cost_per_token":0.000003,"output_cost_per_token":0.000004}}`
+	oldHash := fmt.Sprintf("%x", sha256.Sum256([]byte(oldBody)))
+	newHash := fmt.Sprintf("%x", sha256.Sum256([]byte(newBody)))
+	for _, mode := range []string{"ahead", "equal", "no_hash", "download_failure", "override_change"} {
+		t.Run(mode, func(t *testing.T) {
+			remote := &pricingHashRemote{body: oldBody, hash: oldHash}
+			cfg := &config.Config{Pricing: config.PricingConfig{DataDir: t.TempDir(), RemoteURL: "https://example.com/pricing.json", HashURL: "https://example.com/pricing.sha256"}}
+			svc := NewPricingService(cfg, remote)
+			require.NoError(t, svc.downloadPricingData())
+			switch mode {
+			case "ahead", "override_change":
+				remote.hash = newHash
+			case "equal":
+				remote.hash = strings.ToUpper(oldHash)
+			case "no_hash":
+				cfg.Pricing.HashURL = ""
+				remote.hash = ""
+			case "download_failure":
+				remote.hash = newHash
+				remote.err = fmt.Errorf("fixture download failure")
+			}
+			if mode == "override_change" {
+				cfg.Pricing.OverrideFile = filepath.Join(cfg.Pricing.DataDir, "override.json")
+				require.NoError(t, os.WriteFile(cfg.Pricing.OverrideFile, []byte(`{"fixture":{"input_cost_per_token":0.000005}}`), 0600))
+			}
+			err := svc.downloadPricingData()
+			if mode == "download_failure" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			hashFile, err := os.ReadFile(svc.getHashFilePath())
+			require.NoError(t, err)
+			t.Logf("first download: actual=%s anchor=%s file=%s", oldHash, svc.localHash, strings.TrimSpace(string(hashFile)))
+			require.Equal(t, oldHash, svc.localHash)
+			require.Equal(t, oldHash, strings.TrimSpace(string(hashFile)))
+			if mode == "ahead" || mode == "override_change" {
+				remote.body = newBody
+				before := remote.downloads
+				require.NoError(t, svc.syncWithRemote())
+				require.Equal(t, before+1, remote.downloads)
+				require.Equal(t, newHash, svc.localHash)
+				hashFile, err = os.ReadFile(svc.getHashFilePath())
+				require.NoError(t, err)
+				require.Equal(t, newHash, strings.TrimSpace(string(hashFile)))
+				wantInput := 3e-6
+				if mode == "override_change" {
+					wantInput = 5e-6
+					require.Equal(t, svc.customPricingFilesFingerprint(), svc.customFilesHash)
+				}
+				require.InDelta(t, wantInput, svc.pricingData["fixture"].InputCostPerToken, 1e-12)
+				t.Logf("second download: anchor=%s downloads=%d", svc.localHash, remote.downloads)
+			}
+		})
+	}
 }
