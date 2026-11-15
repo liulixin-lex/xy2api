@@ -11,7 +11,9 @@ func convertedResponsesErrorState(c *gin.Context) *targetProtocolErrorState {
 		return &w.terminal
 	}
 	if value, ok := c.Get(convertedResponsesErrorStateKey); ok {
-		return value.(*targetProtocolErrorState)
+		if state, ok := value.(*targetProtocolErrorState); ok {
+			return state
+		}
 	}
 	state := &targetProtocolErrorState{}
 	c.Set(convertedResponsesErrorStateKey, state)

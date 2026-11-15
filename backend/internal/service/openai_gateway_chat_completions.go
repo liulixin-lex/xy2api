@@ -1085,6 +1085,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				resilience.StateFrom(c.Request.Context()).NotePreludeStaged(startTime)
 			}
 			deferredOpenAIChatChunks(&event, state, true)
+			if err := state.Err(); err != nil {
+				WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+				streamNonFailoverErr = err
+				return true
+			}
 			return false
 		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
