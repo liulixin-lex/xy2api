@@ -43,6 +43,15 @@ func TestChatReasoningUnionConversion(t *testing.T) {
 				} else {
 					require.Equal(t, &ResponsesReasoning{Effort: tc.effort, Summary: tc.summary}, out.Reasoning)
 				}
+				if tc.effort == "" && tc.summary != "" {
+					wire, err := json.Marshal(out)
+					require.NoError(t, err)
+					var body struct {
+						Reasoning map[string]string `json:"reasoning"`
+					}
+					require.NoError(t, json.Unmarshal(wire, &body))
+					require.Equal(t, map[string]string{"summary": tc.summary}, body.Reasoning)
+				}
 				after, err := json.Marshal(req)
 				require.NoError(t, err)
 				require.Equal(t, before, after)

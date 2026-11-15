@@ -2197,7 +2197,7 @@ func TestChatFieldsPreservedForResponses(t *testing.T) {
 		{"text null verbosity", `"verbosity":"low","text":{"verbosity":null}`, `"text":{"verbosity":"low"}`, "", nil},
 		{"format and verbosity", `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, "", nil},
 		{"existing format priority", `"response_format":{"type":"json_object"},"text":{"format":{"type":"text"}}`, `"text":{"format":{"type":"json_object"}}`, "", []ConversionNotice{{Field: "text.format", Action: "omit"}}},
-		{"explicit include appended", `"include":["file_search_call.results","file_search_call.results"],"reasoning":{"summary":"detailed"}`, `"include":["file_search_call.results","reasoning.encrypted_content"],"reasoning":{"effort":"","summary":"detailed"}`, "", nil},
+		{"explicit include appended", `"include":["file_search_call.results","file_search_call.results"],"reasoning":{"summary":"detailed"}`, `"include":["file_search_call.results","reasoning.encrypted_content"],"reasoning":{"summary":"detailed"}`, "", nil},
 		{"metadata array", `"metadata":[]`, ``, "metadata", nil},
 		{"metadata nonstring", `"metadata":{"k":1}`, ``, "metadata", nil},
 		{"metadata null member", `"metadata":{"k":null}`, ``, "metadata", nil},
