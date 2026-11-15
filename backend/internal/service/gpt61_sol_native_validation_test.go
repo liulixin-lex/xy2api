@@ -19,7 +19,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestGPT61SolNativeHTTPValidationBeforeNormalization(t *testing.T) {
+func TestGPT61SolNativeHTTPValidationAfterFinalEffort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 		for _, stream := range []bool{false, true} {
@@ -41,7 +41,7 @@ func TestGPT61SolNativeHTTPValidationBeforeNormalization(t *testing.T) {
 					}
 					body, err := json.Marshal(request)
 					require.NoError(t, err)
-					upstream := &httpUpstreamRecorder{err: errors.New("upstream must not be reached")}
+					upstream := &httpUpstreamRecorder{err: errors.New("fixture upstream reached")}
 					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 					account := &Account{ID: 1, Platform: PlatformOpenAI, Type: accountType, Credentials: map[string]any{
 						"api_key": "fixture", "access_token": "fixture", "base_url": "https://compatible.invalid",
@@ -52,6 +52,17 @@ func TestGPT61SolNativeHTTPValidationBeforeNormalization(t *testing.T) {
 					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 					_, err = svc.Forward(context.Background(), c, account, body)
 					require.Error(t, err)
+					if accountType == AccountTypeAPIKey {
+						require.Len(t, upstream.requests, 1)
+						wantModel := "gpt-6.1-sol"
+						if tc.name == "space_alias" {
+							// Preserve the existing spelling when the exact mapping misses.
+							wantModel = tc.model
+						}
+						require.Equal(t, wantModel, gjson.GetBytes(upstream.lastBody, "model").String())
+						require.Equal(t, "low", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+						return
+					}
 					require.Equal(t, http.StatusBadRequest, recorder.Code)
 					require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
 					require.Empty(t, upstream.requests)
@@ -96,13 +107,18 @@ func TestGPT61SolHTTPValidationUsesActualCompactAndPassthroughModel(t *testing.T
 			c.Request = httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(body))
 			_, err = svc.Forward(context.Background(), c, account, body)
 			require.Error(t, err)
-			if tc.reject {
+			if tc.reject && tc.passthrough {
 				require.Equal(t, http.StatusBadRequest, recorder.Code)
 				require.Contains(t, recorder.Body.String(), "gpt-6.1-sol")
 				require.Empty(t, upstream.requests)
 			} else {
 				require.Len(t, upstream.requests, 1, "valid mapped target must reach its upstream")
-				require.Equal(t, "gpt-6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+				wantModel, wantEffort := "gpt-6-sol", "none"
+				if tc.reject {
+					wantModel, wantEffort = "gpt-6.1-sol", "low"
+				}
+				require.Equal(t, wantModel, gjson.GetBytes(upstream.lastBody, "model").String())
+				require.Equal(t, wantEffort, gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
 			}
 		})
 	}
