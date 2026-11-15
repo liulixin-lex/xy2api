@@ -3727,3 +3727,32 @@ func (wsPinnedQualityView) ResetAt(int64) time.Time { return time.Time{} }
 
 func (*wsTurnQualityView) GroupEnabled(int64) bool { return true }
 func (*wsTurnQualityView) ResetAt(int64) time.Time { return time.Time{} }
+
+func (r *openAIWSFailoverHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+
+	var out []service.Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform && a.Status == service.StatusActive && a.Schedulable {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *openAIWSFailoverHandlerAccountRepoStub) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			if r.accounts[i].Extra == nil {
+				r.accounts[i].Extra = map[string]any{}
+			}
+			for key, value := range updates {
+				r.accounts[i].Extra[key] = value
+			}
+			break
+		}
+	}
+	return nil
+}

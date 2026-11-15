@@ -143,3 +143,7 @@ func TestQueueRejectionGetsOneFreeSlotReselection(t *testing.T) {
 		})
 	}
 }
+
+func (r *queueReselectionRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]service.Account, error) {
+	return r.accounts, nil
+}

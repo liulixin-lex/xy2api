@@ -214,6 +214,13 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx = withSelectionFailureEvidence(ctx)
+	request := OpenAIAccountScheduleRequest{
+		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), RequestedModel: requestedModel,
+		RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
+		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+	}
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
@@ -312,8 +319,16 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			selection, err = lr, nil
 			decision.SelectedAccountID = lr.Account.ID
 			decision.SelectedAccountType = lr.Account.Type
-		} else if negativeCacheable {
-			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
+		} else {
+			err = s.withOpenAISelectionExhaustion(ctx, request, err)
+			if negativeCacheable {
+				resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
+			}
+		}
+	}
+	if err != nil {
+		if _, found := SelectionExhaustionFromError(err); !found && (isNoAccountSelectionError(err) || selectionDependencyFailed(ctx)) {
+			err = s.withOpenAISelectionExhaustion(ctx, request, err)
 		}
 	}
 	// xy2api resilience: selections that are never cached still count for the

@@ -56,9 +56,17 @@ func (s *OpenAIGatewayService) isAccountRequestCompatible(ctx context.Context, a
 // request, and when it cannot, names the veto point. The reason feeds
 // openAISelectionFilterStats so that "no available accounts" errors state why
 // each candidate was dropped instead of failing silently (#4599).
-func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
+func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (compatible bool, reason string) {
+	defer func() {
+		if account != nil && !compatible {
+			observeSelectionFailure(ctx, account.ID, reason, nil)
+		}
+	}()
 	if account == nil {
 		return false, "account_nil"
+	}
+	if accountRetryNotBeforeBlocked(ctx, account.ID) {
+		return false, string(SelectionReasonRateLimited)
 	}
 	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
 		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {

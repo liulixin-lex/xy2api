@@ -1,6 +1,10 @@
 package service
 
-import "context"
+import (
+	"context"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"time"
+)
 
 // ChatRequestRequirement preserves the original request intent for selection.
 type ChatRequestRequirement struct {
@@ -47,4 +51,10 @@ func openAISelectionNoWait(ctx context.Context) bool {
 // guards when the HTTP admission path considers one local free-slot retry.
 func OpenAIQueueReselectionAllowed(ctx context.Context) bool {
 	return ctx != nil && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx)
+}
+
+// The scheduling recheck may be capped; the provider's original deadline is not.
+func accountRetryNotBeforeBlocked(ctx context.Context, accountID int64) bool {
+	hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(accountID)
+	return ok && time.Now().Before(hint.NotBefore)
 }

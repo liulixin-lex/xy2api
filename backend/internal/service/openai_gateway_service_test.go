@@ -4209,3 +4209,7 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
 }
+
+func (r stubOpenAIAccountRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	return (schedulerTestOpenAIAccountRepo{accounts: r.accounts}).ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
+}

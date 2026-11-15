@@ -210,7 +210,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 			if len(fs.FailedAccountIDs) == 0 {
 				recordSelectionExhausted(c.Request.Context())
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform, err)
 				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)

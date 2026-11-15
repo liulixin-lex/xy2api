@@ -366,7 +366,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				if len(fs.FailedAccountIDs) == 0 {
 					recordSelectionExhausted(c.Request.Context())
-					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini)
+					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini, err)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
@@ -720,7 +720,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				if len(fs.FailedAccountIDs) == 0 {
 					recordSelectionExhausted(c.Request.Context())
-					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
+					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform, err)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
@@ -2318,7 +2318,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model, excluded)
 		if err != nil {
 			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform, err)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 			}

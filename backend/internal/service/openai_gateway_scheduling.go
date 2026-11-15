@@ -442,7 +442,16 @@ func isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx context.Context
 	return openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability, gateway...) == ""
 }
 
-func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) string {
+func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) (reason string) {
+	defer func() {
+		if account != nil && reason != "" {
+			observed := reason
+			if observed == "not_schedulable" {
+				observed = accountSchedulingFailureReason(account)
+			}
+			observeSelectionFailure(ctx, account.ID, observed, nil)
+		}
+	}()
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if account == nil {
 		return "account_nil"
@@ -456,6 +465,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {
 			return "account_model_not_owned"
 		}
+	}
+	if accountRetryNotBeforeBlocked(ctx, account.ID) {
+		return string(SelectionReasonRateLimited)
 	}
 	if account.Platform != platform || !account.IsOpenAICompatible() {
 		return "platform_mismatch"
@@ -1096,6 +1108,9 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 // true); the third contains deterministic
 // exclusion diagnostics for the evaluated snapshot.
 func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, platform string, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, bool, openAISelectionFilterStats) {
+	if _, ok := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence); !ok {
+		ctx = withSelectionFailureEvidence(ctx)
+	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	compactBlocked := false
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
@@ -1114,20 +1129,27 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 		fresh := s.resolveFreshSchedulableOpenAIAccountBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
-			reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
-			if reason != resilience.ReasonCapabilityStreamOnly {
-				reason = "ineligible"
+			reason := ""
+			if evidence, _ := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence); evidence != nil && evidence.reasons[acc.ID] != "" {
+				reason = string(evidence.reasons[acc.ID])
+			}
+			if reason == "" {
+				reason = string(SelectionReasonDependencyError)
 			}
 			filterStats.exclude(reason)
 			continue
 		}
 		fresh = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, fresh, groupID, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
-			filterStats.exclude("ineligible")
+			reason := string(SelectionReasonDependencyError)
+			if evidence, _ := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence); evidence != nil && evidence.reasons[acc.ID] != "" {
+				reason = string(evidence.reasons[acc.ID])
+			}
+			filterStats.exclude(reason)
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
-			filterStats.exclude("channel_restricted")
+			filterStats.exclude("channel_upstream_restricted")
 			continue
 		}
 		if vetoed, reason := openAIProfitControlVetoReason(ctx, fresh); vetoed {
@@ -1296,7 +1318,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	loadRequests := selectionLoadRequests(candidates)
 	tryAcquire := func(loads map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
-		available := s.selectionAvailable(candidates, loads)
+		available := s.selectionAvailable(ctx, candidates, loads)
 		s.sortSelectionAccounts(ctx, available, req, loads)
 		for _, a := range available {
 			if ctx.Err() != nil {
@@ -1408,6 +1430,13 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	if err != nil {
+		observeSelectionFailure(ctx, accountID, string(SelectionReasonDependencyError), err)
+	} else if result == nil || !result.Acquired {
+		observeSelectionFailure(ctx, accountID, string(SelectionReasonConcurrencyFull), nil)
+	} else {
+		observeSelectionReady(ctx, accountID)
+	}
 	if err == nil && result != nil && !result.Acquired {
 		s.selectionFullMarks.Mark(accountID, s.selectionNow())
 	}
@@ -1419,7 +1448,8 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	if fresh == nil {
 		return nil
 	}
-	if vetoed, _ := openAIProfitControlVetoReason(ctx, fresh); vetoed {
+	if vetoed, reason := openAIProfitControlVetoReason(ctx, fresh); vetoed {
+		observeSelectionFailure(ctx, fresh.ID, reason, nil)
 		return nil
 	}
 	return fresh
@@ -1435,6 +1465,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if s.schedulerSnapshot != nil {
 		current, err := s.getSchedulableAccount(ctx, account.ID)
 		if err != nil || current == nil {
+			observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
 			return nil
 		}
 		fresh = current
@@ -1444,15 +1475,19 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		return nil
 	}
 	if !parentHealthyForShadow(fresh, s.parentAccountLookup(ctx)) {
+		observeSelectionFailure(ctx, fresh.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel, requireCompact) {
+		observeSelectionFailure(ctx, fresh.ID, "runtime_blocked", nil)
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, fresh) {
+		observeSelectionFailure(ctx, fresh.ID, "account_scheduling_threshold", nil)
 		return nil
 	}
 	if s.isOpenAIProxyStreamQuarantined(ctx, fresh) {
+		observeSelectionFailure(ctx, fresh.ID, "proxy_stream_quarantined", nil)
 		return nil
 	}
 	return fresh
@@ -1477,7 +1512,8 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 	if latest == nil {
 		return nil
 	}
-	if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
+	if vetoed, reason := openAIProfitControlVetoReason(ctx, latest); vetoed {
+		observeSelectionFailure(ctx, latest.ID, reason, nil)
 		return nil
 	}
 	return latest
@@ -1490,18 +1526,22 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !account.IsPrivacySet() {
+			observeSelectionFailure(ctx, account.ID, "privacy_not_set", nil)
 			return nil
 		}
 		if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability, s) {
 			return nil
 		}
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
+			observeSelectionFailure(ctx, account.ID, "account_scheduling_threshold", nil)
 			return nil
 		}
 		if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+			observeSelectionFailure(ctx, account.ID, "shadow_parent_unhealthy", nil)
 			return nil
 		}
 		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
+			observeSelectionFailure(ctx, account.ID, "proxy_stream_quarantined", nil)
 			return nil
 		}
 		return account
@@ -1509,6 +1549,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || latest == nil {
+		observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
 		return nil
 	}
 	return s.recheckLatestOpenAIAccount(ctx, latest, groupID, platform, requestedModel, requireCompact, requiredCapability)
@@ -1517,24 +1558,30 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 // recheckLatestOpenAIAccount applies the DB recheck to an account just read.
 func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, latest *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
 	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+		observeSelectionFailure(ctx, latest.ID, "excluded", nil)
 		return nil
 	}
 	if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
+		observeSelectionFailure(ctx, latest.ID, "privacy_not_set", nil)
 		return nil
 	}
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s) {
 		return nil
 	}
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
+		observeSelectionFailure(ctx, latest.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+		observeSelectionFailure(ctx, latest.ID, "runtime_blocked", nil)
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {
+		observeSelectionFailure(ctx, latest.ID, "account_scheduling_threshold", nil)
 		return nil
 	}
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
+		observeSelectionFailure(ctx, latest.ID, "proxy_stream_quarantined", nil)
 		return nil
 	}
 	return latest
@@ -1567,6 +1614,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 		}
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
+		observeSelectionFailure(ctx, account.ID, "account_scheduling_threshold", nil)
 		return nil, nil
 	}
 	// Legacy sticky (advanced scheduler off) must still free-gate Grok OAuth.
@@ -1628,6 +1676,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if account != nil {
+			observeSelectionFailure(ctx, account.ID, "dependency_error", err)
+		}
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
@@ -1674,6 +1725,9 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context, account *Account) (*Account, bool, string) {
 	latest, vetoed, reason := s.ProfitControlVetoLatest(ctx, account)
 	if vetoed {
+		if account != nil {
+			observeSelectionFailure(ctx, account.ID, reason, nil)
+		}
 		return latest, vetoed, reason
 	}
 	return latest, false, ""

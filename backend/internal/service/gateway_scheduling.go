@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -99,6 +100,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // xy2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (result *AccountSelectionResult, err error) {
+	ctx = withSelectionFailureEvidence(ctx)
 	latencyModel := anthropicLatencyModel(ctx, requestedModel)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	// 调试日志：记录调度入口参数
@@ -128,6 +130,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	defer func() {
+		if isNoAccountSelectionError(err) && !errors.Is(err, errNegativeCached) {
+			platform, _, platformErr := s.resolvePlatform(ctx, groupID, group, requestedModel)
+			if platformErr != nil {
+				observeSelectionFailure(ctx, 0, "dependency_error", platformErr)
+			}
+			diagnosis := s.DiagnoseModelAvailabilityForPlatform(ctx, groupID, requestedModel, platform)
+			err = selectionErrorWithExhaustion(err, selectionExhaustionEvidence(ctx, diagnosis, err))
+		}
 		result, err = s.resilienceGatewaySelectionEpilogue(ctx, group, groupID, sessionHash, requestedModel, origExcluded, avoided, result, err)
 	}()
 	if cachedErr := resilienceNegativeCacheHit(ctx, groupID, requestedModel, "", origExcluded); cachedErr != nil {
@@ -196,6 +206,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+					observeSelectionFailure(ctx, account.ID, "excluded", nil)
 					result.ReleaseFunc()                   // 释放槽位
 					localExcluded[account.ID] = struct{}{} // 排除此账号
 					continue                               // 重新选择
@@ -205,6 +216,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 			// 对于等待计划的情况，也需要先检查会话限制
 			if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+				observeSelectionFailure(ctx, account.ID, "excluded", nil)
 				localExcluded[account.ID] = struct{}{}
 				continue
 			}
@@ -268,17 +280,47 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
 	}
 	layer2CandidateEligibility := func(account *Account, sticky bool) (bool, bool) {
-		if account == nil || isExcluded(account.ID) || !s.isAccountSchedulableForSelection(account) ||
-			!s.isGatewayAccountProfitEligible(ctx, account) || !s.isAccountAllowedForPlatform(account, platform, useMixed) ||
-			(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) {
+		reject := func(reason string, channel bool) (bool, bool) {
+			if account != nil {
+				observeSelectionFailure(ctx, account.ID, reason, nil)
+			}
+			return false, channel
+		}
+		if account == nil {
 			return false, false
 		}
-		if isChannelRestricted(account) {
-			return false, true
+		if isExcluded(account.ID) {
+			return reject("excluded", false)
 		}
-		return s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) &&
-			s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, sticky) &&
-			s.isAccountSchedulableForRPM(ctx, account, sticky), false
+		if !s.isAccountSchedulableForSelection(account) {
+			return reject(accountSchedulingFailureReason(account), false)
+		}
+		if !s.isGatewayAccountProfitEligible(ctx, account) {
+			_, reason := openAIProfitControlVetoReason(ctx, account)
+			return reject(reason, false)
+		}
+		if !s.isAccountAllowedForPlatform(account, platform, useMixed) {
+			return reject("platform_mismatch", false)
+		}
+		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, account, requestedModel) {
+			return reject("model_not_supported", false)
+		}
+		if isChannelRestricted(account) {
+			return reject("channel_upstream_restricted", true)
+		}
+		if !s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) {
+			return reject("model_rate_limited", false)
+		}
+		if !s.isAccountSchedulableForQuota(account) {
+			return reject("balance_exhausted", false)
+		}
+		if !s.isAccountSchedulableForWindowCost(ctx, account, sticky) {
+			return reject("excluded", false)
+		}
+		if !s.isAccountSchedulableForRPM(ctx, account, sticky) {
+			return reject("rate_limited", false)
+		}
+		return true, false
 	}
 	layer2Eligible := func(account *Account, sticky bool) bool {
 		eligible, _ := layer2CandidateEligibility(account, sticky)
@@ -415,6 +457,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
+									observeSelectionFailure(ctx, stickyAccount.ID, "excluded", nil)
 									result.ReleaseFunc() // 释放槽位
 									stickyCacheMissReason = "session_limit"
 									// 继续到负载感知选择
@@ -438,6 +481,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								if waitingCount < cfg.StickySessionMaxWaiting {
 									// 会话数量限制检查（等待计划也需要占用会话配额）
 									if !s.checkAndRegisterSession(ctx, stickyAccount, sessionHash) {
+										observeSelectionFailure(ctx, stickyAccount.ID, "excluded", nil)
 										stickyCacheMissReason = "session_limit"
 										// 会话限制已满，继续到负载感知选择
 									} else {
@@ -536,6 +580,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+							observeSelectionFailure(ctx, item.account.ID, "excluded", nil)
 							result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 							continue
 						}
@@ -553,6 +598,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				// 遍历找到第一个满足会话限制的账号
 				for _, item := range monitorProbeRoutedWait(ctx, routingAvailable) {
 					if !s.checkAndRegisterSession(ctx, item.account, sessionHash) {
+						observeSelectionFailure(ctx, item.account.ID, "excluded", nil)
 						continue // 会话限制已满，尝试下一个
 					}
 					if s.debugModelRoutingEnabled() {
@@ -631,6 +677,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+							observeSelectionFailure(ctx, account.ID, "excluded", nil)
 							result.ReleaseFunc() // 释放槽位，继续到 Layer 2
 							slog.Debug("sticky.layer1_5_no_routing_miss",
 								"account_id", accountID,
@@ -661,6 +708,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					if waitingCount < cfg.StickySessionMaxWaiting {
 						// 会话数量限制检查（等待计划也需要占用会话配额）
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
+							observeSelectionFailure(ctx, account.ID, "excluded", nil)
 							// 会话限制已满，继续到 Layer 2
 						} else {
 							slog.Debug("sticky.layer1_5_no_routing_hit",
@@ -725,6 +773,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 			continue
 		}
+		observeSelectionReady(ctx, acc.ID)
 		candidates = append(candidates, acc)
 	}
 
@@ -802,6 +851,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
+					observeSelectionFailure(ctx, selected.account.ID, "excluded", nil)
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
 					if sessionHash != "" && s.cache != nil {
@@ -834,6 +884,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	for _, acc := range candidates {
 		// 会话数量限制检查（等待计划也需要占用会话配额）
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			observeSelectionFailure(ctx, acc.ID, "excluded", nil)
 			continue // 会话限制已满，尝试下一个账号
 		}
 		return s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
@@ -864,6 +915,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+				observeSelectionFailure(ctx, acc.ID, "excluded", nil)
 				result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				continue
 			}
@@ -1244,7 +1296,15 @@ func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID in
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	if err != nil {
+		observeSelectionFailure(ctx, accountID, "dependency_error", err)
+	} else if result == nil || !result.Acquired {
+		observeSelectionFailure(ctx, accountID, "concurrency_full", nil)
+	} else {
+		observeSelectionReady(ctx, accountID)
+	}
+	return result, err
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -1637,6 +1697,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 func (s *GatewayService) newSelectionResult(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) (*AccountSelectionResult, error) {
 	hydrated, err := s.hydrateSelectedAccount(ctx, account)
 	if err != nil {
+		if account != nil {
+			observeSelectionFailure(ctx, account.ID, "dependency_error", err)
+		}
 		if release != nil {
 			release()
 		}
@@ -2558,6 +2621,12 @@ func (s *GatewayService) collectSelectionFailureStats(
 	for i := range accounts {
 		acc := &accounts[i]
 		diagnosis := s.diagnoseSelectionFailure(ctx, acc, requestedModel, platform, excludedIDs, allowMixedScheduling)
+		if diagnosis.Category != "eligible" {
+			evidence, _ := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence)
+			if evidence == nil || (evidence.reasons[acc.ID] == "" && !evidence.ready[acc.ID]) {
+				observeSelectionFailure(ctx, acc.ID, gatewaySelectionDiagnosisReason(diagnosis), nil)
+			}
+		}
 		switch diagnosis.Category {
 		case "excluded":
 			stats.Excluded++
@@ -2600,7 +2669,7 @@ func (s *GatewayService) diagnoseSelectionFailure(
 		return selectionFailureDiagnosis{Category: "excluded"}
 	}
 	if !s.isAccountSchedulableForSelection(acc) {
-		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "generic_unschedulable"}
+		return selectionFailureDiagnosis{Category: "unschedulable", Detail: accountSchedulingFailureReason(acc)}
 	}
 	if isPlatformFilteredForSelection(acc, platform, allowMixedScheduling) {
 		return selectionFailureDiagnosis{
