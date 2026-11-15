@@ -37,11 +37,11 @@ const groupLast60Query = `WITH requests AS (
 	SELECT group_id, result, end_to_end_first_output_ms AS first_output_ms,
 		input_tokens, cache_read_tokens, cache_creation_tokens
 	FROM usage_logs
-	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3 AND (request_scope IS NULL OR request_scope = 'text')
 	UNION ALL
 	SELECT group_id, result, first_output_ms, input_tokens, cache_read_tokens, cache_creation_tokens
 	FROM gateway_unbilled_requests
-	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3 AND (request_scope IS NULL OR request_scope = 'text')
 )
 SELECT group_id, COUNT(*),
 	percentile_disc(0.5) WITHIN GROUP (ORDER BY first_output_ms) FILTER (WHERE first_output_ms IS NOT NULL),

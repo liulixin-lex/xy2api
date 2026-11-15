@@ -154,6 +154,8 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 ### 请求关联字段
 
+通用 Chat/Responses、Images、Responses 生图和 Embeddings 均在准入后关联 `gateway_request_id`；`request_scope=text/image/embedding` 独立于文本统计资格，图片及 embedding 不进入文本成功率分母。
+
 `post_output_failure`、`session_rebind`、`last_resort`、`turn_cap`、`keepalive_committed`、`stall` 等事件另带以下字段：
 
 | 字段 | 含义 |

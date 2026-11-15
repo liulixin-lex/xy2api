@@ -38,13 +38,15 @@ func (*handlerCompatStore) DeleteSessionAccountID(context.Context, int64, string
 
 type handlerCompatUsage struct {
 	service.UsageLogRepository
-	logs []*service.UsageLog
+	logs      []*service.UsageLog
+	unbilled  []*service.GatewayUnbilledRequest
+	billError error
 }
 
 func (r *handlerCompatUsage) Create(_ context.Context, log *service.UsageLog) (bool, error) {
 	copy := *log
 	r.logs = append(r.logs, &copy)
-	return true, nil
+	return r.billError == nil, r.billError
 }
 
 type handlerCompatAccounts struct {

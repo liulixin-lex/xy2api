@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strconv"
 	"strings"
@@ -191,6 +192,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	requestCtx = service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash)
 	c.Request = c.Request.WithContext(requestCtx)
 
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, resilience.GatewayRequestScopeText)()
+	requestCtx = c.Request.Context()
+
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 
@@ -312,6 +316,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		}
 
+		recordGatewayForwardUsage(c, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

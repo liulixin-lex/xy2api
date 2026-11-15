@@ -161,6 +161,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	defer inflightDone()
 
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, requestModel, parsed.Stream, h.gatewayService, resilience.GatewayRequestScopeImage)()
+
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
 
@@ -266,6 +268,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		recordOpenAIForwardUsage(c, account, result)
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.ImageCount > 0)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs

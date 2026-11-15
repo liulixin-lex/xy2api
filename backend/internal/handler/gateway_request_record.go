@@ -18,19 +18,23 @@ type gatewayRequestWriter interface {
 // Admission excludes authentication, malformed bodies and local policy rejects.
 // The closure reads the final API key because failover may change its group.
 func beginGatewayRequest(c *gin.Context, key func() *service.APIKey, model string, stream bool, writer gatewayRequestWriter) func() {
+	return beginGatewayRequestWithScope(c, key, model, stream, writer, resilience.GatewayRequestScopeText)
+}
+
+func beginGatewayRequestWithScope(c *gin.Context, key func() *service.APIKey, model string, stream bool, writer gatewayRequestWriter, scope resilience.GatewayRequestScope) func() {
 	st := resilience.StateFrom(c.Request.Context())
 	if st == nil {
 		st = resilience.NewRequestState()
 		st.InitDelivery(c.Request.Context(), time.Now(), nil)
 		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), st))
 	}
-	st.EnableGatewayRequest(time.Now())
+	st.EnableGatewayRequest(time.Now(), scope)
 	return func() { finishUnbilledGatewayRequest(c, key(), model, stream, false, writer) }
 }
 
 func gatewayBillingContext(ctx context.Context) context.Context {
 	st := resilience.StateFrom(ctx)
-	if st == nil || !st.GatewayRequestEnabled() {
+	if _, exists := st.GatewayRequestScope(); !exists {
 		return ctx
 	}
 	meta, _ := st.ClaimGatewayRequest(true)

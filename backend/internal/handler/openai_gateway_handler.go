@@ -703,9 +703,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
-	if !imageIntent {
-		defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	scope := resilience.GatewayRequestScopeText
+	if imageIntent {
+		scope = resilience.GatewayRequestScopeImage
 	}
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, scope)()
 
 	requireCompact := legacyCompact
 
