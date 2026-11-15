@@ -786,3 +786,30 @@ func TestM6TerminalWriteClaim(t *testing.T) {
 		require.Equal(t, int64(1), gjson.GetBytes(frames[1], "sequence_number").Int())
 	})
 }
+
+func TestM6ReviewGenericTerminalEventNames(t *testing.T) {
+	for _, event := range []string{"message", "error", "vendor.event"} {
+		for _, pass := range []bool{false, true} {
+			for _, stream := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/pass=%t/stream=%t", event, pass, stream), func(t *testing.T) {
+					body := m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + "event: " + event + "\n" + m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`)
+					if stream {
+						w, u, seen, valid, err := m6Stream(t, pass, body)
+						require.NoError(t, err)
+						require.True(t, seen)
+						require.True(t, valid)
+						require.Equal(t, 13, u.InputTokens)
+						require.Equal(t, 5, u.OutputTokens)
+						require.NotContains(t, w.Body.String(), `"type":"response.failed"`)
+					} else {
+						w, u, err := m6Nonstream(t, pass, body, "text/event-stream")
+						require.NoError(t, err)
+						require.Equal(t, 200, w.Code)
+						require.Equal(t, 13, u.InputTokens)
+						require.Equal(t, 5, u.OutputTokens)
+					}
+				})
+			}
+		}
+	}
+}
