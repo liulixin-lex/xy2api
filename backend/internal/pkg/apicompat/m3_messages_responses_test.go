@@ -588,3 +588,35 @@ func TestM3RefusalContent(t *testing.T) {
 		requireAnthropicBlockLifecycle(t, events)
 	})
 }
+
+func TestM3CompletionBoundaries(t *testing.T) {
+	t.Run("explicit unmatched index", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "a", CallID: "c", Name: "f"}}, st)
+		ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 3, "a", `{}`), st)
+		require.Error(t, st.Err())
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Usage: &ResponsesUsage{InputTokens: 8, OutputTokens: 4}}}, st)
+		require.Empty(t, events)
+		require.Equal(t, 8, st.InputTokens)
+		require.Equal(t, 4, st.OutputTokens)
+	})
+	t.Run("unused raw mismatch does not override summary", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		for _, e := range []*ResponsesStreamEvent{
+			{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"},
+			{Type: "response.reasoning_text.done", ItemID: "r", Text: "other raw"},
+			{Type: "response.reasoning_summary_text.delta", ItemID: "r", Delta: "summary"},
+			{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning", ID: "r", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary"}}}},
+		} {
+			ResponsesEventToAnthropicEvents(e, st)
+		}
+		require.NoError(t, st.Err())
+	})
+	t.Run("anonymous text is not repeated with new terminal ID", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_text.delta", Delta: "hello"}, st)
+		events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "message", ID: "late_id", Content: []ResponsesContentPart{{Type: "output_text", Text: "hello"}, {Type: "refusal", Refusal: "no"}}}}}}, st)...)
+		require.Equal(t, "hellono", collectAnthropicText(events))
+		require.NoError(t, st.Err())
+	})
+}
