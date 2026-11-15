@@ -48,6 +48,8 @@
 
 响应归属按用户判断，同一用户换了 API 密钥仍可续接自己的响应。走原生 Responses 的 API Key 账号收到的 `previous_response_id` 与 `store`（缺省、`false`、`true`）都不改动；DeepSeek、Kimi 等无状态上游照旧去掉 `previous_response_id`、把 `store` 设为 `false` 后发送，上游走 Chat Completions 或 Anthropic 协议的 API Key 账号也照旧转换后发送，都不返回上面的错误。上游只返回普通的 404、409 或含义不明的 4xx 时，不当作续接过期，照原样返回。以上错误都不罚号、不计会话失败；尚未提交时不带 `Retry-After`，并写 `x-should-retry: false`；已提交的流保持原 HTTP 状态，以同样的错误码写一个错误终止帧。
 
+实际错误字段中的会话政策拒绝（`session_blocked_by_cyber_policy`、`cyber_policy`）会结束本次请求，不跨账号重发；防护墙 1010 拦截不视为账号凭据失效。
+
 ## Retry-After 的取值
 
 - 估算方法：对本请求有资格的每个账号，取它仍有效的限制中最晚的结束时间（含按模型的冷却），再取各账号中最早的那个。

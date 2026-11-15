@@ -95,6 +95,9 @@ func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, mes
 // client errors keep their existing handling, except content-safety refusals,
 // which leave the account untouched.
 func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamMsg string) (handled bool, shouldDisable bool) {
+	if statusCode == http.StatusForbidden && isCloudflareBotBlockResponse(responseBody) {
+		return true, false
+	}
 	cfg := resilience.Current()
 	if !cfg.FailureOn() || account == nil {
 		return false, false

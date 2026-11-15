@@ -1088,6 +1088,14 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 }
 
 func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte, reasonPrefix string) (shouldDisable bool) {
+	classified := classifyUpstreamHTTP(http.StatusForbidden, nil, responseBody, upstreamMsg)
+	if resilience.Current().FailureOn() && classified.ContentPolicy() {
+		return false
+	}
+	if classified.Category == resilience.CategoryAuth && (classified.Reason == "auth_code" || classified.Reason == "auth_type") {
+		s.handleAuthError(ctx, account, buildForbiddenErrorMessage("Access forbidden (403):", upstreamMsg, responseBody, "credentials rejected"))
+		return true
+	}
 	// 上游代理 / CDN 在请求到达 OpenAI API 之前就拦下时，回的是 HTML 403 页面而不是
 	// {"error":{...}} 结构化错误。这类响应描述的是「这条链路 / 这个端点被挡了」，
 	// 不构成账号凭据或权限失效的证据——例如无效的 /v1/responses 子路径（#5334）。
@@ -1173,6 +1181,18 @@ func (s *RateLimitService) handle403InfrastructureFailure(account *Account, upst
 // (error code 1010). The upstream never reached the account API, so this is a
 // request/edge-level failure and must not consume the account 403 strike budget.
 func isCloudflareBotBlockResponse(body []byte) bool {
+	if gjson.ValidBytes(body) {
+		active := openAIStreamErrorObject(body)
+		if !active.IsObject() {
+			return false
+		}
+		code := active.Get("code").String()
+		if code == "" {
+			code = active.Get("error_code").String()
+		}
+		return code == "1010" && (active.Get("type").String() == "cloudflare_error" ||
+			active.Get("error_name").String() == "browser_signature_banned")
+	}
 	normalized := strings.ToLower(strings.TrimSpace(string(body)))
 	return strings.Contains(normalized, "error code: 1010")
 }

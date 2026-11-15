@@ -443,6 +443,45 @@ func ClassifyWithSettings(o Outcome, settings *Settings) Result {
 	if settings != nil {
 		extra = settings.Failure.BalanceKeywordsExtra
 	}
+	if o.Source == SourceHTTP || o.Source == SourceStreamEvent {
+		if o.StatusCode == http.StatusForbidden && !json.Valid(o.Body) &&
+			strings.Contains(strings.ToLower(string(o.Body)), "error code: 1010") {
+			return Result{Category: CategoryTransient, Reason: "edge_error_page"}
+		}
+		var envelope struct {
+			Error    json.RawMessage `json:"error"`
+			Response struct {
+				Error json.RawMessage `json:"error"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(o.Body, &envelope) == nil {
+			active := envelope.Response.Error
+			if len(active) == 0 || string(active) == "null" {
+				active = envelope.Error
+			}
+			var fields struct {
+				Code      json.RawMessage `json:"code"`
+				ErrorCode json.RawMessage `json:"error_code"`
+				Type      string          `json:"type"`
+				Name      string          `json:"error_name"`
+				Message   string          `json:"message"`
+			}
+			if len(active) > 0 && json.Unmarshal(active, &fields) == nil {
+				code := strings.ToLower(strings.Trim(string(fields.Code), `"`))
+				if code == "null" {
+					code = ""
+				}
+				if contentPolicyCode(code, strings.ToLower(fields.Type), "") {
+					o.Code, o.Type, o.Message = code, fields.Type, fields.Message
+				}
+				wafCode := strings.Trim(string(fields.ErrorCode), `"`)
+				if (code == "1010" || (code == "" && wafCode == "1010")) &&
+					(fields.Type == "cloudflare_error" || fields.Name == "browser_signature_banned") {
+					return Result{Category: CategoryTransient, Reason: "edge_error_page"}
+				}
+			}
+		}
+	}
 	return classify(o, extra, settings.DecisionV2On())
 }
 
@@ -685,16 +724,21 @@ func containsAnyFold(text string, keywords []string) bool {
 }
 
 // contentPolicyCode reports a content-safety refusal by its code or type.
-// Relays that put the code at the top level ({"code":...}) are matched on
-// the quoted value in the body.
+// Relays that put the code at the top level ({"code":...}) are read from
+// those fields only; a request echo cannot turn an unknown refusal into policy.
 func contentPolicyCode(code, typ, lowerBody string) bool {
+	if code == "session_blocked_by_cyber_policy" || code == "cyber_policy" || typ == "cyber_policy" {
+		return true
+	}
 	if _, ok := contentPolicyCodes[code]; ok {
 		return true
 	}
 	if _, ok := contentPolicyCodes[typ]; ok {
 		return true
 	}
-	return strings.Contains(lowerBody, `"request_check_blocked"`)
+	var top struct{ Code, Type string }
+	return json.Unmarshal([]byte(lowerBody), &top) == nil &&
+		(top.Code == "request_check_blocked" || top.Type == "request_check_blocked")
 }
 
 // contentPolicyText reports a content-safety refusal by its wording on a

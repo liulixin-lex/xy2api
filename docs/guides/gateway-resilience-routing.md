@@ -26,7 +26,8 @@
 - 瞬时失败、首输出超时与停滞的账号冷却：上游带 `Retry-After` 时按它冷却，封顶 `failure.retry_after_cap_seconds`（默认 120 秒）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；不带时，OpenAI 兼容账号冷却 `failure.transient_cooldown_seconds`（默认 30 秒），Anthropic、Gemini、Antigravity 账号改为按账号 × 模型逐级冷却（见“模型级冷却”）。
 - 中转前面的 CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页、HTML 页面）按瞬时失败处理，即使文案提到 overloaded。
 - `failure.decision_v2` 开启时，只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded”按瞬时或限流处理，可以换到同一主机上的其他账号。余额等更强的证据优先。
-- 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`）不罚号、不换号，返回 400，运维记录标为业务限制，不计入 SLA。
+- 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`），以及实际错误字段中的 `session_blocked_by_cyber_policy`、`cyber_policy`，不罚号、不换号，按请求拒绝结束，运维记录标为业务限制，不计入 SLA。裸 `Access denied` 仍按未知 403 处理；请求回显里的政策码不参与判定。
+- Cloudflare WAF 1010（HTML/文本，或错误对象中同时有 1010 与 `cloudflare_error` / `browser_signature_banned`）属于线路拦截，不消耗账号的 403 计数，也不触发账号冷却或停用。
 - 403 计数或持久化设施故障只触发 `failure.transient_cooldown_seconds` 的本地短时回避，不升级为坏凭据，也不清除已有硬暂停；正常计数达到阈值时的停用规则保持不变。
 - HTTP 503 与流内过载命中显式临时停调规则时，若已知实际出站模型，仅按规则期限冷却该账号的这个模型；未命中、模型为空或模型限流写入失败时不扩大为整号暂停。规则只匹配实际错误字段，不匹配请求回显；输出后的失败只影响后续选号。
 - 一个上游响应只罚一次。池模式账号、管理员配置的自定义错误码与临时不可调度规则在韧性处理之前生效。
