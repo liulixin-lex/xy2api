@@ -230,7 +230,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具历史 | 映射 | API Key 账号按轮次与出现顺序配对；后一轮复用同一 ID 时保留各轮自己的结果，历史工具不会补进本轮声明。缺结果、孤儿结果与同轮重复 ID 维持原有处理 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
-| Responses 结束原因与拒答 | 映射 | 自然完成为 end_turn，完整工具为 tool_use，长度截断为 max_tokens，过滤或正式 refusal 为 refusal；失败、取消或未知终态返回上游协议错误。正式 refusal 正文在 JSON 与流式中均作为 text 保留，只补未交付的后缀 |
+| Responses 结束原因与拒答 | 映射 | 自然完成为 end_turn，完整工具为 tool_use，长度截断为 max_tokens，过滤或正式 refusal 为 refusal；失败或取消返回上游协议错误；经 reader 认证的未列出非空结束原因沿原默认分支映射并记录 map 降级。正式 refusal 正文在 JSON 与流式中均作为 text 保留，只补未交付的后缀 |
 | Responses reasoning 响应 | 映射 | 非空 summary 优先，否则使用 reasoning_text；流式原文等到完成后再选择，同项不拼接两个载体，签名在 thinking 块关闭前交付 |
 | Responses 搜索响应来源 | 映射 | 只投影已完成搜索实际返回的 HTTP(S) 来源，URL 重复取首条；仅保留真实 title/content，open_page 使用真实 URL，缺来源为空列表，不编造搜索结果 |
 | Responses `custom_tool_call` 响应 | 映射 | JSON 与流式都生成 `tool_use`，自由文本以 `{"input":"原文"}` 包装，保留调用 ID、名称与空字符串 |

@@ -498,7 +498,7 @@ func TestM3TerminalReasonMapping(t *testing.T) {
 		{"completed", "", "end_turn", false, false, false}, {"completed", "", "tool_use", true, false, false},
 		{"completed", "", "refusal", true, true, false}, {"incomplete", "max_output_tokens", "max_tokens", true, false, false},
 		{"incomplete", "content_filter", "refusal", false, false, false}, {"incomplete", "", "max_tokens", false, false, false},
-		{"failed", "", "", false, false, true}, {"cancelled", "", "", false, false, true}, {"unknown", "", "", false, false, true},
+		{"failed", "", "", false, false, true}, {"cancelled", "", "", false, false, true}, {"unknown", "", "end_turn", false, false, false},
 	} {
 		t.Run(tc.status+"/"+tc.reason+"/"+tc.want, func(t *testing.T) {
 			resp := &ResponsesResponse{Status: tc.status, Usage: &ResponsesUsage{InputTokens: 7, OutputTokens: 3}}
@@ -627,4 +627,65 @@ func TestM3CompletionBoundaries(t *testing.T) {
 		require.Equal(t, "hellono", collectAnthropicText(events))
 		require.NoError(t, st.Err())
 	})
+}
+
+func TestM3UnknownTerminalMappingNotices(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, reason, want, field string
+		bad                               bool
+	}{
+		{name: "future status", status: "future_status", want: "end_turn", field: "status"},
+		{name: "future reason", status: "incomplete", reason: "future_reason", want: "end_turn", field: "incomplete_details.reason"},
+		{name: "known complete", status: "completed", want: "end_turn"},
+		{name: "known length", status: "incomplete", reason: "max_output_tokens", want: "max_tokens"},
+		{name: "failed", status: "failed", bad: true},
+		{name: "cancelled", status: "cancelled", bad: true},
+	} {
+		for _, tools := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/tools=%v", tc.name, tools), func(t *testing.T) {
+				resp := &ResponsesResponse{Status: tc.status}
+				if tc.reason != "" {
+					resp.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+				}
+				if tools {
+					resp.Output = []ResponsesOutput{{Type: "function_call", ID: "fc", CallID: "call", Name: "f", Arguments: `{}`}}
+				}
+				want := tc.want
+				if tools && want == "end_turn" {
+					want = "tool_use"
+				}
+				var notices []ConversionNotice
+				opts := ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }}
+				out := ResponsesToAnthropicWithOptions(resp, "test", opts)
+				if tc.bad {
+					require.Nil(t, out)
+				} else {
+					require.Equal(t, want, AnthropicStopReasonString(out.StopReason))
+					require.Equal(t, out, ResponsesToAnthropic(resp, "test"))
+				}
+				expected := []ConversionNotice(nil)
+				if tc.field != "" {
+					expected = []ConversionNotice{{Field: tc.field, Action: "map"}}
+				}
+				require.Equal(t, expected, notices)
+				notices = nil
+				st := NewResponsesEventToAnthropicStateWithOptions(opts)
+				if tools {
+					ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &resp.Output[0]}, st)
+					ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, "fc", `{}`), st)
+				}
+				terminal := &ResponsesStreamEvent{Type: "response.done", Response: resp}
+				events := ResponsesEventToAnthropicEvents(terminal, st)
+				if tc.bad {
+					require.Error(t, st.Err())
+					require.Empty(t, events)
+				} else {
+					require.NoError(t, st.Err())
+					require.Equal(t, want, events[len(events)-2].Delta.StopReason)
+				}
+				require.Empty(t, ResponsesEventToAnthropicEvents(terminal, st))
+				require.Equal(t, expected, notices)
+			})
+		}
+	}
 }
