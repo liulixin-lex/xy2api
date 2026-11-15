@@ -1187,6 +1187,7 @@ func TestM3ReviewTerminalToolOrder(t *testing.T) {
 		{"terminal omits reasoning", join(reasoning, tool(1), []string{completed(fc("fc_1", "call_1"))}), []string{"call_1"}},
 		{"terminal in order", join(reasoning, tool(1), []string{completed(rs, fc("fc_1", "call_1"))}), []string{"call_1"}},
 		{"terminal item without id", join(reasoning, tool(1), []string{completed(fc("", "call_1"))}), []string{"call_1"}},
+		{"terminal item with a new id", join(reasoning, tool(1), []string{completed(fc("fc_9", "call_1"))}), []string{"call_1"}},
 		{"new terminal tool listed first", join(tool(0), []string{completed(fc("fc_2", "call_2"), fc("fc_1", "call_1"))}), []string{"call_1", "call_2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
