@@ -174,6 +174,8 @@
 
 - 非流式 Responses 的 JSON 响应被上游标成 SSE 时，用量不再记为 0；SSE 拼成的 JSON 响应改用 JSON 响应头。
 
+- 固定 Chat 与 Grok API-key 路由可接收 Responses 形状请求，发送前转换或按既定策略降级，仅非法或无法表达的字段返回明确 400。
+
 ### 重试、调度与续接
 
 - 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。

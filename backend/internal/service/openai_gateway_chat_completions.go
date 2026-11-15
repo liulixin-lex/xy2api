@@ -88,6 +88,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	compatPromptCacheTenantIsolated bool,
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if c != nil {
@@ -123,7 +124,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
+	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
 	if account.Platform == PlatformGrok {
+		if isResponsesShape && account.Type == AccountTypeAPIKey {
+			converted, err := s.convertResponsesShapedChatBody(body, m7ConversionOptions(ctx))
+			if err != nil {
+				writeM7RequestConversionError(c, PreOutputProtocolChat, err)
+				return nil, err
+			}
+			body = converted
+		}
 		if account.IsGrokOAuth() {
 			if eligible, reason := grokChatResponsesBridgeEligibility(body); eligible {
 				return s.forwardGrokChatCompletionsViaResponses(ctx, c, account, body, promptCacheKey, defaultMappedModel)
@@ -140,14 +150,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// Cursor compatibility: some clients send a Responses-shaped body to the
 	// /v1/chat/completions URL. Detect it before protocol routing so adaptive
 	// accounts never forward the body unchanged to a Chat Completions endpoint.
-	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
 	inbound := APIProtocolChatCompletions
 	if isResponsesShape {
 		inbound = APIProtocolResponses
 	}
-	// 按模型分流与 adaptive 账号按请求体形状处理 Responses 形状入站；其余账号
-	// 维持原样把请求体交给所选路径。
-	convertResponsesShape := isResponsesShape && (account.routesByModel() || account.IsAdaptiveAPIProtocol())
+	// API-key 固定 Chat 路由也先转换请求形状；OAuth 沿原路由范围。
+	convertResponsesShape := isResponsesShape && (account.Type == AccountTypeAPIKey || account.routesByModel() || account.IsAdaptiveAPIProtocol())
 
 	// 上游协议统一由 resolveUpstreamProtocol 判定（按模型分流时带上游模型目录）。Anthropic 分流必须先于
 	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
@@ -165,8 +173,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return s.forwardChatCompletionsViaNativeAnthropic(ctx, c, account, body, defaultMappedModel)
 	case APIProtocolChatCompletions:
 		if convertResponsesShape {
-			chatBody, err := s.convertResponsesShapedChatBody(body)
+			chatBody, err := s.convertResponsesShapedChatBody(body, m7ConversionOptions(ctx))
 			if err != nil {
+				writeM7RequestConversionError(c, PreOutputProtocolChat, err)
 				return nil, err
 			}
 			return s.forwardAsRawChatCompletions(ctx, c, account, chatBody, defaultMappedModel)
@@ -236,16 +245,27 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("rewrite model in responses-shape body: %w", err)
 		}
-		// Strip Responses API parameters that no Codex upstream accepts.
-		// Because this branch forwards the raw body (the normal path rebuilds
-		// it from ChatCompletionsRequest and drops unknown fields naturally),
-		// we must filter these fields explicitly here — otherwise the upstream
-		// rejects the request with "Unsupported parameter: ...".
-		for _, field := range cursorResponsesUnsupportedFields {
-			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
-				responsesBody = stripped
+		if account.Type == AccountTypeAPIKey {
+			if gjson.GetBytes(responsesBody, "stream_options").Exists() {
+				responsesBody, err = sjson.DeleteBytes(responsesBody, "stream_options")
+				if err != nil {
+					return nil, err
+				}
+				resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "stream_options", Action: "omit"})
+			}
+			responsesBody, err = prepareM7NativeResponsesBody(ctx, responsesBody)
+			if err != nil {
+				writeM7RequestConversionError(c, PreOutputProtocolChat, err)
+				return nil, err
+			}
+		} else {
+			for _, field := range cursorResponsesUnsupportedFields {
+				if stripped, stripErr := sjson.DeleteBytes(responsesBody, field); stripErr == nil {
+					responsesBody = stripped
+				}
 			}
 		}
+
 		for _, field := range openAIUnsupportedCacheFields(account, upstreamModel) {
 			responsesBody, err = sjson.DeleteBytes(responsesBody, field)
 			if err != nil {

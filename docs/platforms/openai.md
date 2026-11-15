@@ -33,6 +33,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 ## 对外端点
 
+固定 Chat 与 Grok API-key 上游会在发送前将误投到 Chat 入口的 Responses 形状转换为 Chat 请求，保留可表达的多模态和工具历史；仅非法或目标无法表达的字段返回带 param 的 400。
+
 鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`。
 
 | 端点 | 说明 |
