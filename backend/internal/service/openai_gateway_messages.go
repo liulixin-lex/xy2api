@@ -642,10 +642,20 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (_ *OpenAIForwardResult, retErr error) {
+) (result *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
+	facts := OpenAIForwardResult{}
+	var usage OpenAIUsage
+	defer func() {
+		if result == nil && retErr != nil && facts.UsagePresent && GetOpsCyberPolicy(c) == nil {
+			result = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}
+		}
+		finishOpenAICompatResponse(c, account, result, retErr, &facts)
+	}()
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai messages buffered", requestID)
+	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai messages buffered", requestID, &facts)
+	usage = observedUsage
 	if err != nil {
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
@@ -721,7 +731,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	c.Header("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusOK, anthropicResp)
 
-	result := &OpenAIForwardResult{
+	result = &OpenAIForwardResult{
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    finalResponse.ID,
@@ -821,7 +831,15 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	model string,
 	logPrefix string,
 	requestID string,
+	factsOut ...*OpenAIForwardResult,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
+	defer func() {
+		if len(factsOut) > 0 && factsOut[0] != nil {
+			*factsOut[0] = facts
+		}
+		finishOpenAICompatResponse(c, account, nil, nil, &facts)
+	}()
 	acc := apicompat.NewBufferedResponseAccumulator()
 	var usage OpenAIUsage
 	if resp == nil || resp.Body == nil {
@@ -894,80 +912,67 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	}()
 	defer close(done)
 
+	processFrame := func(frame openAICompatSSEFrame) (*apicompat.ResponsesResponse, error) {
+		terminal := observeOpenAICompatFrame(c, resp, frame, &usage, &facts)
+		if terminal.Failure {
+			if !terminal.Valid {
+				return nil, &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}
+			}
+			return openAICompatFailedTerminalResponse(terminal, []byte(frame.Data)), nil
+		}
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
+		var event apicompat.ResponsesStreamEvent
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			if terminal.Seen {
+				return nil, &apicompat.UpstreamConversionError{Field: "response", Reason: "invalid terminal response", SourceProtocol: "responses"}
+			}
+			return nil, nil // Keep ignoring unrelated extension DTO fields.
+		}
+		observeSchedPayload(c, []byte(payload))
+		if terminal.Seen && terminal.Valid {
+			event.Type = terminal.EventType
+			if event.Response != nil {
+				event.Response.Status = terminal.Status
+			}
+		}
+		acc.ProcessEvent(&event)
+		if terminal.Seen && terminal.Valid && event.Response != nil {
+			if event.Response.Usage == nil {
+				event.Response.Usage = event.Usage
+			}
+			return event.Response, nil
+		}
+		return nil, nil
+	}
 	var parser openAICompatSSEFrameParser
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if frame, ok := parser.Finish(); ok {
-					payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
-					payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
-					var event apicompat.ResponsesStreamEvent
-					if err := json.Unmarshal([]byte(payload), &event); err == nil {
-						observeSchedPayload(c, []byte(payload))
-						s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-						acc.ProcessEvent(&event)
-						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-								if response.Usage == nil {
-									response.Usage = event.Usage
-								}
-							}
-							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
-							}
-							return response, usage, acc, nil
-						}
-					}
+				if frame, complete := parser.Finish(); complete {
+					response, err := processFrame(frame)
+					return response, usage, acc, err
 				}
 				return nil, usage, acc, nil
 			}
 			resetTimeout()
 			if ev.err != nil {
-				if !errors.Is(ev.err, context.Canceled) && !errors.Is(ev.err, context.DeadlineExceeded) {
-					logger.L().Warn(logPrefix+": read error",
-						zap.Error(ev.err),
-						zap.String("request_id", requestID),
-					)
+				// A complete last JSON data frame remains valid without a final blank line.
+				if frame, complete := parser.Finish(); complete {
+					if response, err := processFrame(frame); response != nil || err != nil {
+						return response, usage, acc, err
+					}
 				}
 				return nil, usage, acc, &openAICompatBufferedReadError{cause: ev.err}
 			}
-
 			if isOpenAICompatDoneSentinelLine(ev.line) {
 				return nil, usage, acc, nil
 			}
-			frame, ok := parser.AddLine(ev.line)
-			if !ok {
-				continue
-			}
-			payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
-			payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
-
-			var event apicompat.ResponsesStreamEvent
-			if err := json.Unmarshal([]byte(payload), &event); err != nil {
-				logger.L().Warn(logPrefix+": failed to parse event",
-					zap.Error(err),
-					zap.String("request_id", requestID),
-				)
-				continue
-			}
-			observeSchedPayload(c, []byte(payload))
-			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
-
-			acc.ProcessEvent(&event)
-
-			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-					if response.Usage == nil {
-						response.Usage = event.Usage
-					}
+			if frame, complete := parser.AddLine(ev.line); complete {
+				if response, err := processFrame(frame); response != nil || err != nil {
+					return response, usage, acc, err
 				}
-				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
-				}
-				return response, usage, acc, nil
 			}
 
 		case <-timeoutCh:
@@ -1003,7 +1008,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, retErr error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
+	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1145,7 +1152,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
-	processDataLine := func(payload string) bool {
+	processDataLine := func(payload string, terminal OpenAIResponsesTerminal) bool {
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
@@ -1157,16 +1164,26 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		var event apicompat.ResponsesStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("openai messages stream: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-			return false
+		if terminal.Failure {
+			event.Type = terminal.EventType
+		} else if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			if terminal.Seen {
+				WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
+				streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: "invalid terminal response", SourceProtocol: "responses"}
+				return true
+			}
+			return false // Unknown extension DTO fields retain the existing ignore behavior.
 		}
+		if terminal.Seen && terminal.Valid {
+			event.Type = terminal.EventType
+			if event.Response != nil {
+				event.Response.Status = terminal.Status
+			}
+		}
+
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload))
-		if stagePrelude && !clientOutputStarted && resilience.ClassifyStreamEvent("responses", event.Type, []byte(payload)).Kind == resilience.TerminalFailure {
+		if stagePrelude && !clientOutputStarted && terminal.Failure {
 			pendingPrelude.take()
 		}
 		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
@@ -1183,27 +1200,21 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		observeSchedPayload(c, []byte(payload))
 		observer.ObserveOpenAI([]byte(payload), event.Type)
-		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"
-		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
+		isTerminalEvent := terminal.Seen && terminal.Valid
 		if isTerminalEvent {
 			terminalEventType = eventType
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
 					responseID = id
 				}
-				if event.Response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
-				}
 			}
-			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-			}
+
 			// cyber_policy 致命不可重试：标记供 handler 事后记录；以 Anthropic SSE error 事件
 			// 回写让客户端感知并停止重试（F4），丢弃后续转换输出。
-			if eventType == "response.failed" || isBareErrorEvent {
+			if terminal.Failure {
 				payloadBytes := []byte(payload)
 				if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
 					MarkOpsCyberPolicy(c, CyberPolicyMark{
@@ -1233,7 +1244,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				// two model streams together. Surface a proper Anthropic error event
 				// instead of returning a failover error that the handler cannot retry.
 				captureOpenAIStateRejection(c, account, payloadBytes, message, "messages", clientOutputStarted, nil)
-				wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+				wrappedStatus, malformed := terminal.WrappedStatus, !terminal.Valid
 				if !malformed && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
 					if failure := s.failoverOpenAIStreamModelAvailability(c.Request.Context(), c, account, payloadBytes, message, resp.Header, upstreamModel, false, wrappedStatus); failure != nil {
 						streamFailoverErr = failure
@@ -1270,16 +1281,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					MarkResponseCommitted(c)
 				}
 				if !clientDisconnected {
-					if !clientOutputStarted {
-						writeAnthropicError(c, errStatus, errType, errMsg)
-						clientOutputStarted = true
-					} else {
-						writeStreamHeaders()
-						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, errMsg)); err == nil {
-							c.Writer.Flush()
-						}
-					}
+					_, code, param, _ := UpstreamClientErrorFields(payloadBytes, errMsg)
+					WriteTargetProtocolError(c, PreOutputProtocolAnthropic, errStatus, errType, code, param, errMsg)
 				}
+
 				streamNonFailoverErr = fmt.Errorf("upstream response failed: %s", errMsg)
 				return true
 			}
@@ -1412,8 +1417,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
-		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
-		return processDataLine(payload)
+		terminal := observeOpenAICompatFrame(c, resp, frame, &usage, &facts)
+		if terminal.Failure && !terminal.Valid {
+			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
+			streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}
+			return true
+		}
+		payload := frame.Data
+		if !terminal.Failure {
+			payload = openAICompatPayloadWithEventType(payload, frame.EventType)
+		}
+		return processDataLine(payload, terminal)
 	}
 
 	// ── Determine keepalive interval ──

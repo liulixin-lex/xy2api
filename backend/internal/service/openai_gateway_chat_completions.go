@@ -597,10 +597,20 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	billingModel string,
 	upstreamModel string,
 	startTime time.Time,
-) (_ *OpenAIForwardResult, retErr error) {
+) (result *OpenAIForwardResult, retErr error) {
 	requestID := resp.Header.Get("x-request-id")
+	facts := OpenAIForwardResult{}
+	var usage OpenAIUsage
+	defer func() {
+		if result == nil && retErr != nil && facts.UsagePresent && GetOpsCyberPolicy(c) == nil {
+			result = &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+				Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}
+		}
+		finishOpenAICompatResponse(c, account, result, retErr, &facts)
+	}()
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai chat_completions buffered", requestID)
+	finalResponse, observedUsage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, account, originalModel, "openai chat_completions buffered", requestID, &facts)
+	usage = observedUsage
 	if err != nil {
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -682,7 +692,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusOK, chatResp)
 
-	result := &OpenAIForwardResult{
+	result = &OpenAIForwardResult{
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
@@ -758,7 +768,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 	requestBodyLen int,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, retErr error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
+	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -903,7 +915,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return out
 	}
 
-	processDataLine := func(payload string) bool {
+	processDataLine := func(payload string, terminal OpenAIResponsesTerminal) bool {
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
@@ -915,16 +927,26 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 
 		var event apicompat.ResponsesStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("openai chat_completions stream: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-			return false
+		if terminal.Failure {
+			event.Type = terminal.EventType
+		} else if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			if terminal.Seen {
+				WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
+				streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: "invalid terminal response", SourceProtocol: "responses"}
+				return true
+			}
+			return false // Unknown extension DTO fields retain the existing ignore behavior.
 		}
+		if terminal.Seen && terminal.Valid {
+			event.Type = terminal.EventType
+			if event.Response != nil {
+				event.Response.Status = terminal.Status
+			}
+		}
+
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload))
-		if stagePrelude && !clientOutputStarted && resilience.ClassifyStreamEvent("responses", event.Type, []byte(payload)).Kind == resilience.TerminalFailure {
+		if stagePrelude && !clientOutputStarted && terminal.Failure {
 			pendingPrelude.take()
 		}
 		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
@@ -942,13 +964,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		observeSchedPayload(c, []byte(payload))
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
-		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
-		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		isTerminalEvent := terminal.Seen && terminal.Valid
 		if isTerminalEvent {
 			terminalEventType = strings.TrimSpace(event.Type)
 		}
-		if strings.TrimSpace(event.Type) == "response.failed" || strings.TrimSpace(event.Type) == "error" {
+		if terminal.Failure {
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
 			if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
@@ -984,7 +1005,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			if strings.TrimSpace(event.Type) == "response.failed" && !clientDisconnected &&
 				!openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
-				status, wrapped, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+				status, wrapped, malformed := terminal.WrappedStatus, terminal.WrappedStatus != 0, !terminal.Valid
 				repair := openAIRequestRepairFrom(c)
 				if !malformed && (!wrapped || status == http.StatusBadRequest) && repair != nil && repair.accountID == account.ID {
 					if signal := newOpenAIRejectedFieldRepairSignal(c.Request.Context(), repair, payloadBytes); signal != nil {
@@ -994,7 +1015,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 			}
 			captureOpenAIStateRejection(c, account, payloadBytes, message, "chat", clientOutputStarted, nil)
-			wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+			wrappedStatus, malformed := terminal.WrappedStatus, !terminal.Valid
 			if !malformed && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
 				if failure := s.failoverOpenAIStreamModelAvailability(c.Request.Context(), c, account, payloadBytes, message, resp.Header, upstreamModel, false, wrappedStatus); failure != nil {
 					streamFailoverErr = failure
@@ -1030,27 +1051,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				defaultStatus, defaultErrType, defaultMsg = status, errType, errMsg
 				MarkResponseCommitted(c)
 			}
-			errorPayload, _ := json.Marshal(gin.H{
-				"error": gin.H{
-					"type":    defaultErrType,
-					"message": defaultMsg,
-				},
-			})
-			if c != nil && c.Writer != nil && !c.Writer.Written() {
-				writeChatCompletionsError(c, defaultStatus, defaultErrType, defaultMsg)
-				clientOutputStarted = true
-			} else if c != nil && c.Writer != nil && !clientDisconnected {
-				if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", errorPayload); err != nil {
-					clientDisconnected = true
-					cancelSchedClient(c)
-					logger.L().Info("openai chat_completions stream: client disconnected while writing upstream error",
-						zap.String("request_id", requestID),
-					)
-				}
-			}
 			if !clientDisconnected {
-				c.Writer.Flush()
+				_, code, param, _ := UpstreamClientErrorFields(payloadBytes, defaultMsg)
+				WriteTargetProtocolError(c, PreOutputProtocolChat, defaultStatus, defaultErrType, code, param, defaultMsg)
 			}
+
 			streamNonFailoverErr = fmt.Errorf("upstream response failed: %s", message)
 			return true
 		}
@@ -1241,11 +1246,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
-		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
-		if strings.TrimSpace(payload) == "[DONE]" {
-			return false
+		terminal := observeOpenAICompatFrame(c, resp, frame, &usage, &facts)
+		if terminal.Failure && !terminal.Valid {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
+			streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}
+			return true
 		}
-		return processDataLine(payload)
+		payload := frame.Data
+		if !terminal.Failure {
+			payload = openAICompatPayloadWithEventType(payload, frame.EventType)
+		}
+		return processDataLine(payload, terminal)
 	}
 
 	// Determine keepalive interval
