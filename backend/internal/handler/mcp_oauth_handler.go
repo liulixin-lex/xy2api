@@ -33,9 +33,18 @@ func NewMCPOAuthHandler(oauth *service.MCPOAuthService, totp *service.TotpServic
 func (h *MCPOAuthHandler) Service() *service.MCPOAuthService { return h.oauth }
 
 // ResourceURL is anchored to operator configuration, never the request Host or
-// forwarded headers. MCP stays disabled until MANAGEMENT_MCP_PUBLIC_URL is set explicitly,
-// so upgrading never exposes client registration or management tools.
-func (h *MCPOAuthHandler) ResourceURL(_ context.Context) (string, error) {
+// forwarded headers. Saved admin settings override deployment defaults.
+func (h *MCPOAuthHandler) ResourceURL(ctx context.Context) (string, error) {
+	if h.settings != nil {
+		settings, err := h.settings.GetManagementMCPSettings(ctx)
+		if err != nil {
+			return "", errors.New("management MCP configuration is unavailable")
+		}
+		if !settings.Enabled {
+			return "", errors.New("management MCP is disabled")
+		}
+		return settings.PublicURL, nil
+	}
 	if h.cfg == nil || !h.cfg.ManagementMCP.Enabled() {
 		return "", errors.New("MCP is disabled; set MANAGEMENT_MCP_PUBLIC_URL to enable it")
 	}

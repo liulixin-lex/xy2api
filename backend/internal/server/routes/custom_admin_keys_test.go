@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestScopedAdminKeyManagementRoutesRequireStepUp(t *testing.T) {
+func TestAdminCredentialManagementRoutesRequireStepUp(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	stepUp := middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.AbortWithStatusJSON(403, gin.H{"reason": "STEP_UP_REQUIRED"}) })
@@ -30,6 +30,7 @@ func TestScopedAdminKeyManagementRoutesRequireStepUp(t *testing.T) {
 		{"POST", "/api/v1/admin/settings/admin-api-keys/key-1/rotate"},
 		{"DELETE", "/api/v1/admin/settings/admin-api-keys/key-1"},
 		{"DELETE", "/api/v1/admin/settings/admin-api-keys/key-1/record"},
+		{"PUT", "/api/v1/admin/settings/management-mcp"},
 	} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(test.method, test.path, nil))

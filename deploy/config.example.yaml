@@ -7,7 +7,8 @@
 # Documentation / 文档: https://github.com/liulixin-lex/xy2api
 
 # Management MCP is independently opt-in; read/write grants require consent.
-# See docs/guides/management-mcp.md. Clearing this URL disables management MCP.
+# Deployment default only: saved admin settings override this URL (including disable).
+# See docs/guides/management-mcp.md; manage it in Settings > Security after first save.
 management_mcp:
   public_url: "" # https://api.example.com/api/v1/mcp
 
