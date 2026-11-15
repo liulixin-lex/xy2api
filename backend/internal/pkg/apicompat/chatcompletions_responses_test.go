@@ -1894,3 +1894,41 @@ func TestChatSchemaStrictDefaultsFalse(t *testing.T) {
 		})
 	}
 }
+
+func TestImageDetailOmission(t *testing.T) {
+	for _, detail := range []string{"", "auto", "high", "low", "invalid"} {
+		t.Run(detail, func(t *testing.T) {
+			part := ResponsesContentPart{Type: "input_image", ImageURL: "https://example.com/image.png", Detail: detail}
+			var notices []ConversionNotice
+			out, err := responsesMediaToAnthropicWithOptions(part, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }}, "input[2].content[0].detail")
+			if detail == "invalid" {
+				requireUnsupportedConversion(t, err, "input[2].content[0].detail")
+				require.Empty(t, notices)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "image", out.Type)
+			require.Equal(t, part.ImageURL, out.Source.URL)
+			if detail == "" {
+				require.Empty(t, notices)
+			} else {
+				require.Equal(t, []ConversionNotice{{Field: "input[2].content[0].detail", Action: "omit"}}, notices)
+			}
+			wire, err := json.Marshal(out)
+			require.NoError(t, err)
+			require.NotContains(t, string(wire), `"detail"`)
+			var req ChatCompletionsRequest
+			raw := `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"` + detail + `"}}]}]}`
+			require.NoError(t, json.Unmarshal([]byte(raw), &req))
+			converted, err := ChatCompletionsToResponses(&req)
+			require.NoError(t, err)
+			if detail != "" {
+				require.Contains(t, string(converted.Input), `"detail":"`+detail+`"`)
+			}
+		})
+	}
+	notices := 0
+	_, err := responsesMediaToAnthropicWithOptions(ResponsesContentPart{Type: "input_image", Detail: "high", ImageURL: "bad"}, ConversionOptions{Record: func(ConversionNotice) { notices++ }}, "input[0].content[0].detail")
+	require.Error(t, err)
+	require.Zero(t, notices)
+}

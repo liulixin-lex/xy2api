@@ -110,6 +110,8 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 ## 对外端点
 
+图片转换中无法表达的 `detail` 质量提示（`auto`、`low`、`high`）省略并记录，图片保留；非法值返回 400，质量与费用不保证等价。
+
 | 端点 | 说明 |
 |---|---|
 | `GET /v1beta/models`、`GET /v1beta/models/:model` | Gemini 原生模型列表 |

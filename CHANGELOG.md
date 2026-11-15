@@ -15,6 +15,8 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
+- 图片携带合法 `detail` 提示时可转换为 Anthropic/Gemini，保留图片并记录提示省略，质量与费用不保证等价。
+
 - 带合法 `stop` 的请求可转换为 Responses，省略停止序列并记录，停止边界不再生效。
 
 - Chat 的 JSON Schema 响应格式未指定 `strict` 时，转 Responses 默认发送 `false`。
