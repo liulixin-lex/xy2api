@@ -16,8 +16,10 @@
  * - The actions column keeps two 28px buttons 4px apart; today's stats keep "用户扣费 $999.99" (104.6px of 106px);
  *   status "23h 59m 后恢复" (90.2px of 92px); the IQ check "Astra" and "检测中" with its spinner (123.4px of 125px).
  *
- * A table wider than the roomy widths and NAME_MAX shares the room left over evenly between the content columns only:
- * the check box, the scheduling switch, the two rate columns and the actions keep their width.
+ * In either size, once the name column has reached NAME_MAX the room left over is shared evenly between the content
+ * columns only: the check box, the scheduling switch, the two rate columns and the actions keep their width. The name
+ * column (auto in the table) takes what the others leave, so it stays between NAME_MIN and NAME_MAX at every width,
+ * also between the compact minimum and the switch to the roomy widths (12.12-1).
  */
 export const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
@@ -46,8 +48,8 @@ export function accountColumnLayout(keys: string[], tableWidth: number): Account
   const roomy = tableWidth >= sum(1) + NAME_MAX
   const size = roomy ? 1 : 0
   const sharers = keys.filter((key) => !FIXED.has(key)).length
-  // 2px for the borders, so the table never overflows by a rounding.
-  const share = sharers ? Math.max(0, (tableWidth - 2 - sum(size) - NAME_MAX) / sharers) : 0
+  // Exactly NAME_MAX left for the name column: the table has no side borders, and the auto column takes any rounding.
+  const share = sharers ? Math.max(0, (tableWidth - sum(size) - NAME_MAX) / sharers) : 0
   return {
     roomy,
     min: sum(size) + NAME_MIN,
