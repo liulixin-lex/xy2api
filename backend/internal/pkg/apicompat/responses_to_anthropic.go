@@ -15,6 +15,9 @@ import (
 // Anthropic Messages response. Reasoning output items are mapped to thinking
 // blocks; function_call items become tool_use blocks.
 func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicResponse {
+	if ValidateResponsesForAnthropic(resp) != nil {
+		return nil
+	}
 	out := &AnthropicResponse{
 		ID:    resp.ID,
 		Type:  "message",
@@ -53,11 +56,15 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 				}
 			}
 		case "function_call":
+			raw := item.Arguments
+			if raw == "" && resp.Status == "completed" {
+				raw = "{}"
+			}
 			blocks = append(blocks, AnthropicContentBlock{
 				Type:  "tool_use",
 				ID:    fromResponsesCallID(item.CallID),
 				Name:  item.Name,
-				Input: sanitizeAnthropicToolUseInput(item.Name, item.Arguments),
+				Input: sanitizeAnthropicToolUseInput(item.Name, raw),
 			})
 		case "web_search_call":
 			toolUseID := "srvtoolu_" + item.ID
@@ -93,6 +100,41 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 	}
 
 	return out
+}
+
+// ValidateResponsesForAnthropic checks complete generated values before projection.
+// Callers must surface this error before invoking the legacy pointer-only converter.
+func ValidateResponsesForAnthropic(resp *ResponsesResponse) error {
+	if resp == nil {
+		return &UpstreamConversionError{Field: "response", Reason: "missing response", SourceProtocol: "responses"}
+	}
+	for _, item := range resp.Output {
+		kind, raw := "function", item.Arguments
+		switch item.Type {
+		case "function_call":
+			if raw == "" && resp.Status == "completed" {
+				raw = "{}"
+			}
+		case "custom_tool_call":
+			kind, raw = "custom", item.Input
+		default:
+			continue
+		}
+		if err := resToAnthValidateArguments(kind, raw, len(normalizedRawJSON(item.EncryptedFunctionArgs)) > 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resToAnthValidateArguments(kind, raw string, opaque bool) error {
+	if err := ValidateToolArguments(kind, raw, true, opaque); err != nil {
+		return err
+	}
+	if opaque {
+		return &UpstreamConversionError{Field: "encrypted_function_args", Reason: "encrypted arguments have no Messages tool input representation", SourceProtocol: "responses"}
+	}
+	return nil
 }
 
 func anthropicUsageFromResponsesUsage(usage *ResponsesUsage) AnthropicUsage {
@@ -197,6 +239,7 @@ type ResponsesEventToAnthropicState struct {
 	toolOrder        []*responsesAnthropicTool
 	activeTool       *responsesAnthropicTool
 	pendingBlocks    []ResponsesStreamEvent
+	successTerminal  bool
 
 	ContentBlockIndex   int
 	ContentBlockOpen    bool
@@ -620,8 +663,14 @@ func resToAnthEmitTool(tool *responsesAnthropicTool, state *ResponsesEventToAnth
 		return nil
 	}
 	raw := tool.raw
+	if tool.opaque {
+		return nil
+	}
+	if tool.complete && raw == "" && tool.kind == "function_call" {
+		raw = "{}"
+	}
 	if tool.name == "Read" {
-		if !json.Valid([]byte(raw)) {
+		if ValidateToolArguments("function", raw, true, false) != nil {
 			return nil
 		}
 		raw = string(sanitizeAnthropicToolUseInput(tool.name, raw))
@@ -667,6 +716,23 @@ func resToAnthCompleteTool(tool *responsesAnthropicTool, raw string, present boo
 			return
 		}
 		tool.raw = raw
+	}
+	kind := "function"
+	if tool.kind == "custom_tool_call" {
+		kind = "custom"
+	}
+	raw = tool.raw
+	if kind == "function" && raw == "" && !tool.opaque {
+		if !state.successTerminal {
+			return
+		}
+		raw = "{}"
+	}
+	if err := resToAnthValidateArguments(kind, raw, tool.opaque); err != nil {
+		if state.err == nil {
+			state.err = err
+		}
+		return
 	}
 	tool.complete = true
 }
@@ -827,6 +893,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 
 	var events []AnthropicStreamEvent
 	if evt.Response != nil && evt.Response.Status == "completed" {
+		state.successTerminal = true
 		for _, item := range evt.Response.Output {
 			if tool := state.toolItems[item.ID]; tool != nil {
 				resToAnthCompleteTool(tool, item.Arguments, item.Arguments != "", state)
@@ -836,7 +903,10 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 			return nil
 		}
 		for _, tool := range state.toolOrder {
-			tool.complete = true
+			resToAnthCompleteTool(tool, "", false, state)
+		}
+		if state.err != nil {
+			return nil
 		}
 		if state.activeTool != nil {
 			events = append(events, resToAnthEmitTool(state.activeTool, state)...)
