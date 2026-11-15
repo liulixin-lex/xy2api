@@ -103,7 +103,7 @@ func ChatCompletionsResponseToAnthropicWithBridgeOptions(resp *ChatCompletionsRe
 	if message.Refusal != "" {
 		out.Content = append(out.Content, AnthropicContentBlock{Type: "text", Text: message.Refusal})
 	}
-	_, reason, err := ProjectTerminal("chat", "anthropic", "", resp.Choices[0].FinishReason, len(message.ToolCalls) > 0 && resp.Choices[0].FinishReason != "length", message.Refusal != "")
+	_, reason, err := bridgeProjectTerminal("chat", "anthropic", resp.Choices[0].FinishReason, len(message.ToolCalls) > 0 && resp.Choices[0].FinishReason != "length", message.Refusal != "", opts.Record)
 	if err != nil {
 		return nil, err
 	}
