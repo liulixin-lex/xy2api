@@ -6,75 +6,66 @@
 
 ### 参数与协议转换
 
-- Anthropic API Key 请求仅省略合法图片 detail；非法枚举和文件非 auto detail 继续返回对应字段错误。
-
-- Chat 上游的允许工具列表为空时，同时省略 tools 与 tool_choice，避免兼容上游拒绝孤立的工具选择字段。
-
-- Responses 转 Chat 时省略并记录 metadata 与非字符串 user，字符串 user 和 text.verbosity 继续发送。
-
-- Chat 上游嵌套数组形式的 thinking 保留为推理文本，未知类型的 content 片段忽略并记录，正文继续返回。
-
-- Anthropic 上游在允许 EOF 收尾的配置下省略 stop_reason 时，Responses 仍发送一次完整终态。
-
-- Chat 上游工具期发生长度截断或内容过滤时，Messages 响应保留排队正文与参数片段，并按原结束原因收尾。
-
-- Chat 上游省略 finish_reason、但以 DONE 或完整尾部用量正常结束时，完整工具调用继续正常交付。
-
-- tool_search 发现的 namespace 与长名工具转为 Chat、Anthropic 时不再重复声明或丢失原工具身份。
-
-- Anthropic 上游转 Responses 时，tool_search 参数保持 JSON 对象，custom 与 tool_search 工具项保留对应 ID 前缀。
-
 - 上游的非标准结束原因继续按原默认规则转换，并记录映射降级，不新增请求失败。
 
-- 转换桥只发送 allowed_tools 允许的工具声明，未知条目记录后忽略，auto 空集不允许工具调用。
+- API Key 账号的请求转为 Anthropic 时，只发送 `allowed_tools` 允许的工具；未知条目记录后忽略，`mode: auto` 且允许列表为空时不允许调用工具。
+
+- API Key 账号的 Responses 请求转为 Chat 上游时，同样只发送 `allowed_tools` 允许的工具；允许列表为空时同时省略 `tools` 与 `tool_choice`。
 
 - 工具历史跨轮重复使用同一 ID 时，各轮保留自己的结果和媒体，不新增历史闭合拒绝。
 
-- 图片和文件的 detail 提示在 Anthropic 转换桥中省略并记录，媒体内容继续发送。
+- API Key 账号的请求转为 Anthropic 时，图片、文件的转换错误中 `param` 指向原请求里的字段路径（如 `input[0].content[1].detail`）。
 
-- Claude Fable/Mythos 5.2 经转换桥继续对话时保留网关封装的已签名 thinking 历史。
+- Claude Fable 5.2、Mythos 5.2 经 `/v1/chat/completions`、`/v1/responses` 多轮对话时，网关先前返回的已签名 thinking 会随历史发回上游，与 5.5 相同。
 
-- Chat、Anthropic 转换桥保留截断、过滤与拒绝的区别及拒绝正文，非流和流式终态一致。
+- Chat、Anthropic 上游的响应转换中，上下文超限与内容过滤不再报成正常完成，拒答正文保留，Anthropic 的 `pause_turn` 改为返回错误。
 
-- Chat 转换桥的终态事件类型与响应 status 一致，length 返回 response.incomplete，且只结束一次。
+- Chat 上游转 Responses 流式时，长度截断以 `response.incomplete` 结束，不再是 `response.completed`，结束事件只发一次。
 
 - length 截断的 function、custom、tool_search 调用不再交付为可执行完成，合法 JSON 和空参数也遵守此规则。
 
-- 上游生成的非法工具参数在非流与流式转换中明确报错，不再删成空成功响应。
+- Chat 上游生成的工具参数不是合法 JSON 时改为返回错误，非流式不再删掉该调用后报成功。
 
-- Responses reasoning 历史仅从 summary_text 或 reasoning_text 提取明文，避免普通 content.text 被误当作推理内容。
+- Responses 请求转 Chat 时，历史 reasoning 只取 summary，没有摘要时取 `reasoning_text`，其他文本不再被当作推理内容。
 
-- Responses 转为 Chat 请求时保留 user、metadata、verbosity 和已选定的输出预算。
+- Responses 请求转 Chat 时不再丢失字符串 `user` 与 `text.verbosity`；API Key 账号的请求转为 Anthropic 时发送可识别的 `metadata.user_id`。
 
 - 纯空白 reasoning 不再生成 Anthropic thinking 块，真实思考的前导空白和块内空白仍完整保留。
 
-- Chat 响应数组中的 thinking 与 text 按原顺序保留，流式数组不再解码失败或丢失思考内容。
+- Chat 上游的 content 为数组时，thinking 与正文按原顺序保留（thinking 也可以是数组），流式不再解码失败；其他类型的片段忽略并记录。
 
 - Chat 正文或工具开始后的迟到 reasoning 不再写入已关闭项或仅出现在最终响应中。
 
-- Anthropic thinking 转为 Responses 流时补齐摘要分段的宣布与关闭事件，完成事件携带完整文本。
+- Anthropic 上游转 Responses 流式时，thinking 摘要补齐 `reasoning_summary_part.added` 与 `.done` 事件，`reasoning_summary_text.done` 带完整文本。
 
-- Chat、Anthropic 转换桥合成 reasoning 项使用 rs_ ID，流式事件与最终响应保持一致，便于后续历史回放。
+- Chat、Anthropic 上游转 Responses 时，网关合成的 reasoning 项 ID 以 `rs_` 开头，流式事件与最终响应一致。
 
-- Chat 工具流最终响应复用已宣布、已完成的工具项 ID，避免客户端将同一调用识别为另一项。
+- Chat 上游转 Responses 流式时，最终响应中的工具项沿用流中 added、done 事件的 ID，客户端不再把同一调用当成两项。
 
 - Chat 工具期交错的正文、thinking 与其他工具按到达顺序排队，迟到参数不再发往已关闭的 Anthropic 块。
 
-- Chat 工具流缺失或稀疏的 index 使用稳定槽位，工具宣布、完成和最终响应保持同一身份与顺序。
+- Chat 上游的并行工具调用缺 `index` 或 index 不连续时，不再合并或缺少收尾；工具调用片段无法确定归属或位于非 0 的 choice 中时改为返回错误。
 
-- namespace 中的 custom 工具可通过 Chat、Anthropic 转换桥调用，非流与流式响应恢复原始工具身份。
+- namespace 中的 custom 工具转为 Chat、Anthropic 上游时不再被丢弃，响应中还原原工具身份。
 
-- 长工具名、非 ASCII 名称与 namespace 拍平冲突在转换桥中使用可逆别名，响应恢复原始身份。
+- 转为 Chat、Anthropic 上游时，超长、含非 ASCII 字符或 namespace 展开后重名的工具名（包括 tool_search 发现的工具）改用短别名发送，响应中还原原名。
 
 - 跨位置重复声明工具时保留第一份定义，后续 schema 差异只记录省略，避免向上游发送重复工具。
 
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
+
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
+
 - API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。
+
 - Fable 5.2、Mythos 5.2 未指定档位时按 adaptive/high 思考，多轮对话保留已签名的 thinking 历史；`tool_choice` 为 required 或具名工具时返回 400。
+
 - GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
+
 - API Key 账号的请求显式写 `none` 时原样发送，不再因 Base URL 不是 OpenAI 官方地址或账号属于 DeepSeek、Kimi、智谱等兼容平台而被删除；第三方上游明确拒绝时在既有预算内省略并重发一次。`/v1/chat/completions` 收到的 Responses 格式正文保留 `metadata`。
+
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
+
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
 - Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
@@ -105,6 +96,11 @@
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
+### 流式传输与报错
+
+### 重试、调度与续接
+
+### 用量记录与计费
 
 ## [0.6.7] - 2026-11-15
 
