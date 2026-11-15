@@ -2096,3 +2096,44 @@ func TestReasoningTextFallback(t *testing.T) {
 	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, state))
 	require.NoError(t, state.Err())
 }
+
+func TestToolArgumentsJSONAndCompleteness(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{{`{"x":`, false}, {`{}`, true}, {`[]`, true}, {`42`, true}, {``, true}} {
+		item := ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: tc.raw}
+		response := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+		err := ValidateResponsesForChat(response)
+		require.Equal(t, tc.valid, err == nil)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: response}, state)
+		require.Equal(t, tc.valid, state.Err() == nil)
+		if !tc.valid {
+			require.Empty(t, chunks)
+		}
+		if tc.raw == "" {
+			require.Equal(t, "{}", ResponsesToChatCompletions(response, "m").Choices[0].Message.ToolCalls[0].Function.Arguments)
+		}
+		a := NewBufferedResponseAccumulator()
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+		a.SupplementResponseOutput(&ResponsesResponse{Status: "completed"})
+		require.Equal(t, tc.valid, a.Err() == nil)
+		req := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "c", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: tc.raw}}}}}}
+		_, err = ChatCompletionsToResponses(req)
+		require.Equal(t, tc.valid, err == nil)
+	}
+	for _, item := range []ResponsesOutput{{Type: "custom_tool_call", Input: "raw"}, {Type: "custom_tool_call", Input: ""}, {Type: "function_call", Arguments: "opaque", EncryptedFunctionArgs: json.RawMessage(`null`)}} {
+		require.NoError(t, ValidateResponsesForChat(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}))
+	}
+	require.Error(t, ValidateToolArguments("function", `[]`, true, false))
+	for _, raw := range []string{`{}`, ``} {
+		response := &ResponsesResponse{Status: "incomplete", IncompleteDetails: &ResponsesIncompleteDetails{Reason: "max_output_tokens"}, Output: []ResponsesOutput{{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: raw}}}
+		require.NoError(t, ValidateResponsesForChat(response))
+		require.Equal(t, "length", ResponsesToChatCompletions(response, "m").Choices[0].FinishReason)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.incomplete", Response: response}, state)
+		require.NoError(t, state.Err())
+		require.Equal(t, "length", *chunks[len(chunks)-1].Choices[0].FinishReason)
+	}
+}

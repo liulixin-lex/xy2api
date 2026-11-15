@@ -138,7 +138,7 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 func convertChatMessagesToResponsesInput(msgs []ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
 	var out []ResponsesInputItem
 	legacyIDs := legacyFunctionCallIDs{msgs: msgs}
-	for _, m := range msgs {
+	for messageIndex, m := range msgs {
 		switch {
 		case m.Role == "assistant" && m.FunctionCall != nil && len(m.ToolCalls) == 0:
 			m.ToolCalls = []ChatToolCall{{
@@ -149,7 +149,7 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage, opts ConversionOpti
 		case m.Role == "function" && m.ToolCallID == "":
 			m.ToolCallID = legacyIDs.claim(m.Name)
 		}
-		items, err := chatMessageToResponsesItems(m, opts)
+		items, err := chatMessageToResponsesItems(m, opts, messageIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -213,14 +213,14 @@ func (ids *legacyFunctionCallIDs) claim(name string) string {
 
 // chatMessageToResponsesItems converts a single ChatMessage into one or more
 // ResponsesInputItem values.
-func chatMessageToResponsesItems(m ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
+func chatMessageToResponsesItems(m ChatMessage, opts ConversionOptions, messageIndex int) ([]ResponsesInputItem, error) {
 	switch m.Role {
 	case "system", "developer":
 		return chatSystemToResponses(m)
 	case "user":
 		return chatUserToResponses(m)
 	case "assistant":
-		return chatAssistantToResponses(m, opts)
+		return chatAssistantToResponses(m, opts, messageIndex)
 	case "tool":
 		return chatToolToResponses(m)
 	case "function":
@@ -263,7 +263,7 @@ func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // text content and tool_calls, the text is emitted as an assistant message
 // first, then each tool_call becomes a function_call item. If the content is
 // empty/nil and there are tool_calls, only function_call items are emitted.
-func chatAssistantToResponses(m ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
+func chatAssistantToResponses(m ChatMessage, opts ConversionOptions, messageIndex int) ([]ResponsesInputItem, error) {
 	var prefix []ResponsesInputItem
 	if opts.SupportsPlaintextReasoningInput {
 		reasoning, visible, err := splitChatAssistantContent(m)
@@ -352,10 +352,13 @@ func chatAssistantToResponses(m ChatMessage, opts ConversionOptions) ([]Response
 	}
 
 	// Emit one function_call item per tool_call.
-	for _, tc := range m.ToolCalls {
+	for index, tc := range m.ToolCalls {
 		args := tc.Function.Arguments
 		if args == "" {
 			args = "{}"
+		}
+		if err := ValidateToolArguments("function", args, false, false); err != nil {
+			return nil, unsupportedConversion(fmt.Sprintf("messages[%d].tool_calls[%d].function.arguments", messageIndex, index), "expected complete JSON arguments")
 		}
 		items = append(items, ResponsesInputItem{
 			Type:      "function_call",

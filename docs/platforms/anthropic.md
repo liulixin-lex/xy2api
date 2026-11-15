@@ -217,6 +217,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
+客户端历史中非法普通工具 JSON 参数返回字段级 400；上游完整生成的非法参数属于上游转换错误。custom 原文与明确密文不按普通 JSON 解析，截断工具不宣告可执行完成。
+
 响应思考摘要与签名分离：非空 summary_text 优先，缺摘要时仅回退 reasoning_text，不把密文作为可见思考正文。
 
 Responses 响应补齐保留托管工具项及 custom 工具的身份、命名空间与原始输入，再按目标协议投影。
