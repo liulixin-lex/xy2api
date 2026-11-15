@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +62,37 @@ func TestGatewayHydrationFailureReleasesSlot(t *testing.T) {
 					require.Equal(t, 1, released)
 				}
 			}
+		})
+	}
+}
+
+func TestReviewLastResortHydrationReleasesOnce(t *testing.T) {
+	for _, mode := range []string{"missing", "repo_error", "success"} {
+		t.Run(mode, func(t *testing.T) {
+			until := time.Now().Add(time.Minute)
+			account := Account{ID: 606, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{7}, TempUnschedulableUntil: &until, TempUnschedulableReason: "transient:TRANSIENT HTTP 502"}
+			svc, _ := newLastResortGatewayFixture(t, []Account{account})
+			repo := &hydrationReleaseRepo{}
+			if mode == "repo_error" {
+				repo.err = errors.New("hydration unavailable")
+			}
+			if mode == "success" {
+				repo.account = &account
+			}
+			svc.schedulerSnapshot = NewSchedulerSnapshotService(nil, nil, repo, nil, nil)
+			var acquired, released []int64
+			svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquired, releasedIDs: &released})
+			groupID := int64(7)
+			result := svc.resilienceGatewayLastResort(context.Background(), &Group{ID: 7, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}, &groupID, "", "claude-sonnet-4", nil, nil)
+			require.Equal(t, []int64{606}, acquired)
+			if mode == "success" {
+				require.NotNil(t, result)
+				require.Empty(t, released)
+				result.ReleaseFunc()
+			} else {
+				require.Nil(t, result)
+			}
+			require.Equal(t, []int64{606}, released)
 		})
 	}
 }
