@@ -462,8 +462,7 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	}
 
 	if o.Source == SourceHTTP || o.Source == SourceStreamEvent {
-		if o.StatusCode == http.StatusForbidden && !json.Valid(o.Body) &&
-			strings.Contains(strings.ToLower(string(o.Body)), "error code: 1010") {
+		if o.StatusCode == http.StatusForbidden && IsCloudflareBotBlockResponse(o.Body) {
 			return Result{Category: CategoryTransient, Reason: "edge_error_page"}
 		}
 		var envelope struct {
@@ -492,11 +491,7 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 				if contentPolicyCode(code, strings.ToLower(fields.Type), "") {
 					o.Code, o.Type, o.Message = code, fields.Type, fields.Message
 				}
-				wafCode := strings.Trim(string(fields.ErrorCode), `"`)
-				if (code == "1010" || (code == "" && wafCode == "1010")) &&
-					(fields.Type == "cloudflare_error" || fields.Name == "browser_signature_banned") {
-					return Result{Category: CategoryTransient, Reason: "edge_error_page"}
-				}
+
 			}
 		}
 	}
@@ -829,4 +824,65 @@ func retryAfterHeader(h http.Header, now time.Time) time.Duration {
 		return 0
 	}
 	return hint.Delay
+}
+
+// IsCloudflareBotBlockResponse recognizes only the active failure and Cloudflare's
+// top-level 1010 envelope. Request echoes cannot turn an auth failure into WAF.
+func IsCloudflareBotBlockResponse(body []byte) bool {
+	if !json.Valid(body) {
+		return strings.Contains(strings.ToLower(string(body)), "error code: 1010")
+	}
+	type fields struct {
+		Code       json.RawMessage `json:"code"`
+		ErrorCode  json.RawMessage `json:"error_code"`
+		Type       string          `json:"type"`
+		Name       string          `json:"error_name"`
+		Cloudflare bool            `json:"cloudflare_error"`
+		Message    string          `json:"message"`
+	}
+	var envelope struct {
+		Error    json.RawMessage `json:"error"`
+		Response struct {
+			Error json.RawMessage `json:"error"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return false
+	}
+	active := envelope.Response.Error
+	if len(active) == 0 || string(active) == "null" {
+		active = envelope.Error
+	}
+	root := fields{}
+	if json.Unmarshal(body, &root) != nil {
+		return false
+	}
+	candidates := []fields{root}
+	if len(active) > 0 {
+		var failure fields
+		if json.Unmarshal(active, &failure) == nil {
+			candidates = append(candidates, failure)
+		}
+	}
+	value := func(raw json.RawMessage) string {
+		return strings.ToLower(strings.Trim(strings.TrimSpace(string(raw)), `"`))
+	}
+	for _, f := range candidates {
+		if _, ok := authCodes[value(f.Code)]; ok {
+			return false
+		}
+		if _, ok := authCodes[strings.ToLower(strings.TrimSpace(f.Type))]; ok {
+			return false
+		}
+	}
+	for i, f := range candidates {
+		if (value(f.Code) == "1010" || value(f.ErrorCode) == "1010") &&
+			(f.Type == "cloudflare_error" || f.Name == "browser_signature_banned" || f.Cloudflare) {
+			return true
+		}
+		if i > 0 && strings.Contains(strings.ToLower(f.Message), "error code: 1010") {
+			return true
+		}
+	}
+	return false
 }

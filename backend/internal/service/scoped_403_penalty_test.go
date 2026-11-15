@@ -23,6 +23,11 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 		{"policy", `{"error":{"code":"content_policy_violation","message":"Access denied"}}`, true, false},
 		{"unknown", `{"error":{"message":"Access denied"}}`, false, false},
 		{"echo", `{"error":{"message":"Access denied"},"request":{"code":"session_blocked_by_cyber_policy","policy":"request_check_blocked","error_code":1010,"type":"cloudflare_error"}}`, false, false},
+		{"relay_wrapped_text", `{"error":{"message":"error code: 1010","type":"upstream_error","code":"bad_response_status_code"}}`, false, true},
+		{"cloudflare_flat", `{"error_code":1010,"error_name":"browser_signature_banned","status":403}`, false, true},
+		{"cloudflare_flat_marker", `{"cloudflare_error":true,"error_code":1010,"status":403}`, false, true},
+		{"cloudflare_flag", `{"error":{"cloudflare_error":true,"error_code":1010}}`, false, true},
+		{"auth_with_waf_text", `{"error":{"code":"invalid_api_key","message":"error code: 1010"}}`, false, false},
 		{"json_number", `{"error":{"error_code":1010,"error_name":"browser_signature_banned","type":"cloudflare_error"}}`, false, true},
 		{"json_string", `{"error":{"code":"1010","type":"cloudflare_error"}}`, false, true},
 		{"json_without_marker", `{"error":{"code":1010,"message":"Access denied"}}`, false, false},
@@ -34,7 +39,11 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 				body := []byte(tc.body)
 				source := resilience.SourceHTTP
 				if stream {
-					body = []byte(fmt.Sprintf(`{"type":"response.failed","response":%s}`, tc.body))
+					if tc.name == "cloudflare_flat" || tc.name == "cloudflare_flat_marker" {
+						body = []byte(fmt.Sprintf(`{"type":"response.failed","response":{"error":%s}}`, tc.body))
+					} else {
+						body = []byte(fmt.Sprintf(`{"type":"response.failed","response":%s}`, tc.body))
+					}
 					source = resilience.SourceStreamEvent
 				}
 				classified := classifyUpstreamOutcome(resilience.Outcome{Source: source, StatusCode: 403, Body: body})

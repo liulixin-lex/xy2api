@@ -1187,20 +1187,7 @@ func (s *RateLimitService) handle403InfrastructureFailure(account *Account, upst
 // (error code 1010). The upstream never reached the account API, so this is a
 // request/edge-level failure and must not consume the account 403 strike budget.
 func isCloudflareBotBlockResponse(body []byte) bool {
-	if gjson.ValidBytes(body) {
-		active := openAIStreamErrorObject(body)
-		if !active.IsObject() {
-			return false
-		}
-		code := active.Get("code").String()
-		if code == "" {
-			code = active.Get("error_code").String()
-		}
-		return code == "1010" && (active.Get("type").String() == "cloudflare_error" ||
-			active.Get("error_name").String() == "browser_signature_banned")
-	}
-	normalized := strings.ToLower(strings.TrimSpace(string(body)))
-	return strings.Contains(normalized, "error code: 1010")
+	return resilience.IsCloudflareBotBlockResponse(body)
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
