@@ -8,12 +8,29 @@ import { anyOverlayOpen } from './overlayStack'
  * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
  * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
  * The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
+ * Instead of text the value may be a card (12.7): a title, a state at the top right, column heads and rows of data,
+ * built node by node (text only, never markup) in the same element, with the same timing and placement.
  */
 const TIP_ID = 'sq-tip'
 const HOVER_DELAY_MS = 400
 const GAP = 6
+const EDGE = 8
 
-type TipText = string | null | undefined | (() => string)
+export type TipTone = 'ok' | 'back' | 'exempt' | 'observe' | 'stopped' | 'error' | 'info' | 'muted'
+export interface TipCell { text: string; tone?: TipTone; dot?: boolean }
+export interface TipCard {
+  /** Top left. */
+  title?: string
+  /** Top right: the state, with its dot. */
+  chip?: TipCell
+  /** Column heads. */
+  head?: string[]
+  /** Rows of data, each with the same number of columns. */
+  rows?: (string | TipCell)[][]
+}
+export type TipContent = string | TipCard
+
+type TipText = TipContent | null | undefined | (() => TipContent | null | undefined)
 
 type TipTarget = HTMLElement & {
   __tipText?: TipText
@@ -49,19 +66,69 @@ function tip() {
   return tipEl
 }
 
+/** Above the target; below when it does not fit above; against the viewport's edge when it fits neither. */
 function place(target: HTMLElement, el: HTMLElement) {
   const rect = target.getBoundingClientRect()
   const width = el.offsetWidth
   const height = el.offsetHeight
-  const left = Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8))
+  const left = Math.max(EDGE, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - EDGE))
   const above = rect.top - height - GAP
+  const below = rect.bottom + GAP
+  const top = above >= EDGE ? above : below + height <= window.innerHeight - EDGE ? below : Math.max(EDGE, window.innerHeight - height - EDGE)
   el.style.left = `${left}px`
-  el.style.top = `${above >= 8 ? above : rect.bottom + GAP}px`
+  el.style.top = `${top}px`
 }
 
-const tipText = (target: TipTarget) => {
+const tipText = (target: TipTarget): TipContent => {
   const value = target.__tipText
   return (typeof value === 'function' ? value() : value) ?? ''
+}
+
+function node(tag: string, className: string, text?: string) {
+  const el = document.createElement(tag)
+  el.className = className
+  if (text !== undefined) el.textContent = text
+  return el
+}
+
+/** A cell's text with its tone and, for a state, its dot (the table's dot: a ring for stopped). */
+function cell(className: string, value: string | TipCell) {
+  const data = typeof value === 'string' ? { text: value } : value
+  const el = node('span', data.tone ? `${className} sq-tip__tone--${data.tone}` : className)
+  if (data.dot) el.appendChild(node('span', 'sq-tip__dot'))
+  el.appendChild(document.createTextNode(data.text))
+  return el
+}
+
+function render(el: HTMLElement, content: TipContent) {
+  if (typeof content === 'string') {
+    el.className = 'sq-tip'
+    el.textContent = content
+    return
+  }
+  el.className = 'sq-tip sq-tip--card'
+  const parts: HTMLElement[] = []
+  if (content.title || content.chip) {
+    const top = node('div', 'sq-tip__top')
+    if (content.title) top.appendChild(node('span', 'sq-tip__title', content.title))
+    if (content.chip) top.appendChild(cell('sq-tip__chip', content.chip))
+    parts.push(top)
+  }
+  const rows = content.rows ?? []
+  const cols = content.head?.length ?? rows[0]?.length ?? 0
+  if (cols) {
+    // The first column is the label; with three columns or more the last one is a note, at the right.
+    const column = (base: string, index: number) =>
+      index === 0 ? `${base} sq-tip__first` : cols >= 3 && index === cols - 1 ? `${base} sq-tip__end` : base
+    const grid = node('div', 'sq-tip__grid')
+    // Columns as wide as their text, a long one cut with an ellipsis when the card is at its widest; the note column
+    // keeps its text and takes what is left over, so it sits against the right edge.
+    grid.style.gridTemplateColumns = cols >= 3 ? `repeat(${cols - 1}, minmax(0, max-content)) minmax(max-content, 1fr)` : `repeat(${cols}, minmax(0, max-content))`
+    content.head?.forEach((text, index) => grid.appendChild(node('span', column('sq-tip__h', index), text)))
+    for (const row of rows) row.forEach((value, index) => grid.appendChild(cell(column('sq-tip__c', index), value)))
+    parts.push(grid)
+  }
+  el.replaceChildren(...parts)
 }
 
 const describedBy = (el: HTMLElement) => (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== TIP_ID)
@@ -76,7 +143,7 @@ function show(target: TipTarget) {
   if (!text || !target.isConnected) return
   if (current && current !== target) hide()
   const el = tip()
-  el.textContent = text
+  render(el, text)
   el.hidden = false
   place(target, el)
   current = target
@@ -161,7 +228,7 @@ export const vTip: Directive<TipTarget, TipText> = {
     const text = tipText(el)
     if (!text) hide()
     else if (tipEl) {
-      tipEl.textContent = text
+      render(tipEl, text)
       place(el, tipEl)
     }
   },
