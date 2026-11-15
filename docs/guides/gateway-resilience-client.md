@@ -4,8 +4,6 @@
 
 ## 错误响应
 
-非流 Responses 收到 SSE 时必须包含合法 response 终态；缺终态返回 502 JSON 错误 `upstream_stream_truncated`，损坏帧返回 `upstream_protocol_error`。经 CDN 的 502 保持既有 503 映射。仅缺用量的完整终态仍正常返回。
-
 | 场景 | 响应 |
 |---|---|
 | 分组内没有可用账号 | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
@@ -22,23 +20,20 @@
 | 5xx 但上游错误类型为请求错误，候选耗尽 | 保留上游状态与脱敏后的错误体，带 `x-should-retry: false`（只对识别该头的客户端生效，例如 OpenAI 官方 SDK） |
 | 不可重试的耗尽（413 请求过大、续链被拒的 400） | 不带 `Retry-After`，并清除前面尝试留下的重试提示 |
 | 同一会话连续第 5 次耗尽失败（120 秒内） | 终止应答：`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持），`x-should-retry: false`，不带 `Retry-After`。会话成功一次或两次失败相隔超过 120 秒后重新计数 |
+| 非流式 Responses 请求，上游返回的 SSE 没有合法的 `response` 结束事件 | 502 JSON，`code` 为 `upstream_stream_truncated`，不再以 200 原样返回 SSE；已读到的用量照常计费。经 CDN 时按下方 CDN 规则改为 503 |
+| 非流式 Responses 请求，上游返回的 SSE 结束事件损坏（坏 UTF-8、坏 JSON、缺 `response`、状态矛盾） | 502 JSON，`code` 为 `upstream_protocol_error`；其余同上 |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，带 `X-XY-Upstream-Status: 502` 或 `504`。直连请求保持原状态码 |
 | Gemini 入口组内账号全部暂时不可用 | 503 并带重试提示 |
 | Gemini 兼容入口选择未声明的工具或并行控制类型错误 | 400 `invalid_request_error`，错误指出 `tool_choice.name` 或 `tool_choice.disable_parallel_tool_use`；不发送上游、不换号或罚号 |
 
 补充说明：
 
-- 原样转发 Responses 遇到上游明确的工具历史配对 400 时，保留脱敏后的 type/code/param/message；请求只发送一次，不换号、不处罚账号。
-
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
-
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。
 - Anthropic 协议（`/v1/messages`）下，网关自身的无号与瞬时失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
 - 关闭 `errors` 段后不加重试头、不做负缓存与回合封顶，上述错误形态回到原样（内容安全拒绝回到 502）。
 
 ## Retry-After 的取值
-
-Responses 失败会保存 HTTP 头与错误对象内有效等待提示中最晚的恢复时刻。客户端无其他已知建议且允许重试时，失败帧使用剩余等待并按 2–10 秒限幅；账号的原始等待时刻不受这个限幅影响。
 
 - 估算方法：对本请求有资格的每个账号，取它仍有效的限制中最晚的结束时间（含按模型的冷却），再取各账号中最早的那个。
 - 各出口的范围：HTTP 无号 2–30 秒（`errors.no_account_retry_after`）；Codex 客户端（按 `User-Agent` 或 `originator` 识别）不超过 `errors.codex_retry_after_cap_seconds`（默认 10 秒），因为 Codex 会按它静默等待；流内失败帧 2–10 秒。
@@ -50,10 +45,6 @@ Responses 失败会保存 HTTP 头与错误对象内有效等待提示中最晚�
 
 ### 已提交后的失败
 
-原生、透传与 compact 的成功终态也会认领一次结束；后续错误不能再追加第二个终态。只有心跳已送达时，本地失败先补同一 ID 的 `response.created` 再发送 `response.failed`。
-
-完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。
-
 HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的失败按入站协议写终止帧：
 
 | 协议 | 终止帧 |
@@ -61,8 +52,6 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 | Responses | `response.failed`（`rate_limit_exceeded` 或 `server_error`）；客户端此前只收到心跳时，前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始） |
 | Chat Completions | `data: {"error":{…,"status":N}}`，随后 `data: [DONE]` |
 | Anthropic Messages | `event: error` |
-
-原生与透传 Responses 收齐完整 SSE 事件后才判定结束。坏 UTF-8、坏 JSON、缺 response 或状态冲突不能作为成功终态；输出后以单次失败终态结束，保留已读取用量。
 
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
 
@@ -88,6 +77,12 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 
 - 并行工具：按上游输出顺序逐个交付。前一个工具的参数完成之前，后面的工具以及随后的正文、思考与搜索块先暂存，完成后依次发出。重复的完成事件不会重复结束块。结束事件里的输出列表按 item ID、call ID 对应已流式的工具，排列与流式顺序不同、缺少或换了 item ID 时不重复交付、不报错；流式事件里同一工具的 item ID、call ID 或输出位置互相矛盾，或参数未完成就断流时，以 `event: error` 结束。
 
+原生与原样转发的 Responses 流还按以下规则结束，每个响应只写一个结束事件，成功结束后不会再追加失败：
+
+- 收齐完整的 SSE 事件后才判断是否结束。坏 UTF-8、坏 JSON、缺 `response` 或状态矛盾的结束事件不算成功；已经输出时以 `response.failed` 结束，保留已读到的用量。连续多行 `data:` 拼起来不是合法 JSON、但每行都是完整 JSON 对象时，继续按独立事件处理；拼起来合法的多行 JSON 保持一个事件。
+- 顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
+- 原生 OAuth 上游先给出字符串 `type:"error"`、随后又给出合法 `response.completed` 时，流式和非流式都继续按成功结束。通用的 SSE 事件名（如 `message`、`error`）不会覆盖合法 payload 的结束类型。
+
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
 
 ### `response.failed` 的重试时间
@@ -97,6 +92,7 @@ compact 心跳提交后的失败也只写一次 `response.failed`；已确认请
 - 本请求还有健康账号：1 秒。
 - 组内没有健康账号且能算出最早恢复时间：2–10 秒。
 - 按快照算不出恢复时间，但最后一个可重试的上游失败（429 或 5xx）给出了有效的 `Retry-After`：采用它，夹到 2–10 秒。
+- 以上都没有给出建议，但上游的失败带了有效的等待提示（HTTP 头、`response.error.headers`、`error.headers` 或错误正文，取其中最晚的恢复时刻）：采用剩余等待，夹到 2–10 秒。同一账号仍按上游原始时刻恢复，不受这个限幅影响。
 - 恢复时间未知：不带。
 - 回合封顶、用户自身余额不足、内容拒绝，以及模型不存在、请求或鉴权错误等不可重试的失败：不带，并去掉正文里的重试句。
 
@@ -106,7 +102,7 @@ compact 心跳提交后的失败也只写一次 `response.failed`；已确认请
 
 非流式 Responses 聚合时按输出项与内容索引补齐 delta 和 done，部分终态不会丢掉其他文本或工具结果；终态已明确给出的值（包括空值）优先，未知输出项与 compaction 字段保留。
 
-Responses 的 done/completed 同义事件按真实 status 处理，failed/cancelled 仍为失败，incomplete 正常返回。流式可兼容 `[DONE]`，或最后内容之后有完整输入/输出计量且干净 EOF 的收尾；这两种兼容结束不会被记录为上游 response 终态证据。
+Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancelled` 按失败结束，`incomplete` 照常返回；`response.completed` 的状态必须与事件类型一致。流式请求在没有 `response` 结束事件时，以下两种结束仍算正常：收到 `[DONE]`；或最后一段内容之后给出了完整的输入、输出用量，然后连接正常关闭。之后若又来新内容、读错或坏帧，后一种不再算正常。运维记录中，这两种结束不算作收到了上游结束事件。
 
 ### 中转伪保活帧
 
@@ -143,12 +139,6 @@ Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务�
 
 ## 送达与计费口径
 
-Responses 透传在最终模型确定后应用推理策略，重发保持同一目标的映射结果；实际档位取每次最终发送正文，部分失败也保留该值。
-
-完整响应缺少用量时仍正常返回；内部明确记录“上游未给用量”，与上游给出的真实零值区分。流式与非流聚合都会保留已取得的渐进用量，终态缺用量不会清空它。
-
-Grok API Key 的推理档位按实际发送的请求正文记录，正文未给档位时保持未知；输出后失败仍保留已读到的用量和该次实际档位。
-
 “已输出”与计费、换号共用同一个判据：客户端是否收到过语义内容。
 
 - 不算输出的事件：SSE 注释行、`ping`、`keepalive`，Anthropic `message_start` 与空的 text/thinking `content_block_start`，Responses 的 `response.created`、`response.in_progress`、`response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不带内容的 added 事件，只带角色的 Chat 分块，以及网关心跳与排队 ping。
@@ -163,3 +153,5 @@ Grok API Key 的推理档位按实际发送的请求正文记录，正文未给�
 | 换号前失败的尝试 | 不向用户计费 |
 
 原生 Anthropic 与 API Key 直通在开场暂存期失败并换号的尝试，不向用户计费、不产生用量记录；上游可能已对这次尝试的输入计费，这部分成本由网关承担。
+
+上游的完整响应只是缺少用量时照常返回；使用记录会标出“上游未给用量”，与上游给出的真实 0 区分。流式和非流式拼装都保留中途已拿到的用量，结束事件不带用量时不会把它清零。HTTP 200 正文明确表示失败时不当作成功计费；失败流没有向客户端交付语义内容时不写用量。

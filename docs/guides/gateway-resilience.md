@@ -155,9 +155,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 错误语义与防风暴 `errors`
 
-Responses 失败帧在脱敏和重建前保存上游原始恢复提示；后继 completed 不清除失败或提示。零等待不构成提示，客户端重试建议的限幅不会提前同账号的恢复时刻。
-
 - **做什么**：
+  - Responses 失败帧保留上游给出的等待提示（0 不算提示），没有其他已知建议时给客户端的等待夹到 2–10 秒，同一账号仍按上游原始时刻恢复；无 `type` 的失败不会被之后的 `response.completed` 清除。
   - 无可用账号时 503 带 `Retry-After`（`no_account_retry_after`，默认 2–30 秒，按组内最早恢复时间估算）；配置原因导致无号时 `Retry-After: 60` 并带 `x-should-retry: false`。
   - 同一分组、平台、模型的“无号”结论负缓存 `negative_cache_seconds`（默认 2 秒）；同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。
   - 同一会话连续 5 次耗尽失败（间隔 120 秒内）后改为终止应答，不再建议重试（`turn_cap`）。
@@ -181,12 +180,6 @@ Responses 失败帧在脱敏和重建前保存上游原始恢复提示；后继 
 - **观测**：`resilience.output_p99_refresh_failed`、`resilience.cache_ratio_store_failed`（存储失败时降级为原有估算）。
 
 ### 流式开场与终止 `stream`
-
-完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。
-
-Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled；流式保留 `[DONE]` 和完整尾部计量后干净 EOF 的兼容收尾，后续新内容、读错或坏帧会使尾部计量失效，且兼容收尾不伪造终态事实。
-
-原生与透传 Responses 以完整 SSE 帧校验终态，不接受损坏的多行 JSON 或只有事件名的伪结束；已输出后的协议失败只写一次错误终态。
 
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
@@ -215,10 +208,6 @@ Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled
 
 ## 不受开关控制的行为
 
-非流 Responses 聚合缺少合法终态时返回 JSON 协议错误，并保留已读用量；compact 心跳已经提交时，按 Responses created/failed 结束，终态只写一次。
-
-- Responses 终态的 UTF-8、JSON 与状态一致性校验始终执行，不能关闭开关后把坏帧视为成功。
-
 以下属于协议正确性修正，关闭总开关后仍然生效：
 
 - 是否“已开始输出”按实际写给客户端的字节判断；只有尚未写出、客户端未断开且请求未取消时才换号；客户端取消或写出失败不计为上游首输出超时，也不计账号失败。
@@ -227,6 +216,8 @@ Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled
 - 上游加密内容无法解密、会话状态拒绝按请求级处理，不罚号；对应的同号修复重放照常进行（见 [客户端可见的行为](gateway-resilience-client.md#请求修复与重放)）。
 - 余额不足、模型不可用在各平台换号；上游明确报告模型不可用时，该账号对该模型 30 分钟不可用。
 - 全为 0 的 `metadata.session_id` 视为缺失；读请求体时连接中断在运维记录里记为 499；模型不在分组白名单时 404 文案附白名单前 10 项。
+- 原生与原样转发的 Responses：收齐完整 SSE 事件后才判断结束，坏 UTF-8、坏 JSON、缺 `response`、状态矛盾或只有事件名的结束都不算成功；`response.done` 按其中的 `status` 处理；没有 `type`、只有数字 `code` 的顶层 `error` 也算失败，之后的 `response.completed` 不会把它改成成功。合法的通用事件名、连续完整 JSON 行及 OAuth 的带 `type` 错误恢复行为继续兼容，细节见 [客户端可见的行为](gateway-resilience-client.md#已提交后的失败)。
+- 非流式 Responses 请求遇到没有合法结束事件的上游 SSE 时返回 502 JSON 错误，保留已读到的用量；compact 请求在心跳已提交后失败时只写一次 `response.failed`。
 
 ## 限制与注意事项
 
