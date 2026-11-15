@@ -248,10 +248,6 @@ func convertResponsesInputToAnthropicWithOptions(instructions string, inputRaw j
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.RawMessage, error) {
-	return responsesFunctionOutputToAnthropicContentWithOptions(item, nil, "content")
-}
-
 func responsesFunctionOutputToAnthropicContentWithOptions(item ResponsesInputItem, opts *ConversionOptions, field string) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
 		output := item.Output
@@ -472,10 +468,6 @@ func anthropicContentIsOnlyBlankText(content json.RawMessage) bool {
 		}
 	}
 	return true
-}
-
-func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
-	return convertResponsesUserToAnthropicContentWithOptions(raw, nil, "content")
 }
 
 func convertResponsesUserToAnthropicContentWithOptions(raw json.RawMessage, opts *ConversionOptions, field string) (json.RawMessage, error) {
