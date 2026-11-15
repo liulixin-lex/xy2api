@@ -128,7 +128,8 @@ func TestOpenAIGatewayService_ChatStreamRejectedFieldAfterOutputDoesNotReplay(t 
 	require.Contains(t, recorder.Body.String(), `"content":"partial"`)
 	require.Contains(t, recorder.Body.String(), `"error"`)
 	require.Contains(t, recorder.Body.String(), "Unknown parameter: 'input[0].content[0].cache_control'.")
-	require.NotContains(t, recorder.Body.String(), "[DONE]")
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "data: [DONE]"))
+	require.NotContains(t, recorder.Body.String(), `"finish_reason":"stop"`)
 }
 
 func TestOpenAIGatewayService_ChatHTTPRetriesRewrappedContentCacheControlRejection(t *testing.T) {

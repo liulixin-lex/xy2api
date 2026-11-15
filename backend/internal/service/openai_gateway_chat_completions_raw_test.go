@@ -734,7 +734,8 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 	require.NotEmpty(t, message)
 	// 已写出的内容保持原样透传，客户端拿到的仍是它已经收到的那部分。
 	require.Contains(t, rec.Body.String(), `"content":"half an ans"`)
-	require.NotContains(t, rec.Body.String(), "data: [DONE]")
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]"))
+	require.NotContains(t, rec.Body.String(), `"finish_reason":"stop"`)
 
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)

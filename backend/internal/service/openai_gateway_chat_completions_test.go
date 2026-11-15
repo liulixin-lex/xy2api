@@ -644,7 +644,8 @@ func TestForwardAsChatCompletions_StreamBareErrorAfterOutputDoesNotFailOver(t *t
 	require.False(t, errors.As(err, &failoverErr))
 	require.Contains(t, rec.Body.String(), "partial")
 	require.Contains(t, rec.Body.String(), "temporary upstream failure")
-	require.NotContains(t, rec.Body.String(), "[DONE]")
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]"))
+	require.NotContains(t, rec.Body.String(), `"finish_reason":"stop"`)
 }
 
 func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {

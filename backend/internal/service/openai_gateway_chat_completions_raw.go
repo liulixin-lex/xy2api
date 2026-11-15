@@ -447,6 +447,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			line = stripEmptyChatToolCallIdentityFromSSELine(line)
 			writeLine(s.replaceModelInSSELine(line, upstreamModel, originalModel))
 		}
+		if len(lines) > 0 && lines[len(lines)-1] != "" && !clientDisconnected && clientOutputStarted {
+			writeLine("")
+		}
 		if !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}

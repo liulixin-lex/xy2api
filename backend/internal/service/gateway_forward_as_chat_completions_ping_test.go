@@ -192,7 +192,7 @@ func TestHandleCCStreamingFromAnthropic_PingDoesNotSetFirstToken(t *testing.T) {
 				require.Nil(t, result)
 				return
 			}
-			require.NoError(t, err)
+			require.Error(t, err)
 			require.Nil(t, result.FirstTokenMs)
 		})
 	}

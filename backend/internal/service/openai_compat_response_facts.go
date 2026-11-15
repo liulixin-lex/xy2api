@@ -74,6 +74,10 @@ func finishOpenAICompatResponse(c *gin.Context, account *Account, out *OpenAIFor
 	if c != nil && c.Request != nil && account != nil {
 		resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
 	}
+	var repair *openAIRequestRepairSignal
+	if errors.As(err, &repair) {
+		return
+	}
 	if err != nil && failover == nil && c != nil && c.Writer != nil && c.Writer.Written() && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") && (out == nil || !out.ClientDisconnect) {
 		protocol := PreOutputProtocolChat
 		if c.Request != nil && c.Request.URL != nil && strings.Contains(c.Request.URL.Path, "/messages") {
