@@ -2183,3 +2183,89 @@ func TestTerminalProjectionJSONAndSSE(t *testing.T) {
 	require.Empty(t, FinalizeResponsesChatStreamWithTerminal(state, true))
 	require.NotEmpty(t, FinalizeResponsesChatStream(NewResponsesEventToChatState()))
 }
+
+func TestChatFieldsPreservedForResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, want, errorField string
+		notices                        []ConversionNotice
+	}{
+		{"modeled fields", `"metadata":{"team":"blue"},"user":"client","max_output_tokens":22,"verbosity":"low","text":{"verbosity":"high"},"include":["message.output_text.logprobs","reasoning.encrypted_content","message.output_text.logprobs","file_search_call.results"],"reasoning":{"effort":"high","summary":"concise"}`,
+			`"metadata":{"team":"blue"},"user":"client","max_output_tokens":22,"text":{"verbosity":"high"},"include":["message.output_text.logprobs","reasoning.encrypted_content","file_search_call.results"],"reasoning":{"effort":"high","summary":"concise"}`, "", []ConversionNotice{{Field: "verbosity", Action: "omit"}}},
+		{"null fields", `"metadata":null,"user":null,"max_output_tokens":null,"verbosity":null,"text":null,"include":null,"reasoning":null`, ``, "", nil},
+		{"empty fields", `"metadata":{},"user":"","include":[]`, `"metadata":{},"user":""`, "", nil},
+		{"verbosity alias", `"verbosity":"low"`, `"text":{"verbosity":"low"}`, "", nil},
+		{"text null verbosity", `"verbosity":"low","text":{"verbosity":null}`, `"text":{"verbosity":"low"}`, "", nil},
+		{"format and verbosity", `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, "", nil},
+		{"existing format priority", `"response_format":{"type":"json_object"},"text":{"format":{"type":"text"}}`, `"text":{"format":{"type":"json_object"}}`, "", []ConversionNotice{{Field: "text.format", Action: "omit"}}},
+		{"explicit include appended", `"include":["file_search_call.results","file_search_call.results"],"reasoning":{"summary":"detailed"}`, `"include":["file_search_call.results","reasoning.encrypted_content"],"reasoning":{"effort":"","summary":"detailed"}`, "", nil},
+		{"metadata array", `"metadata":[]`, ``, "metadata", nil},
+		{"metadata nonstring", `"metadata":{"k":1}`, ``, "metadata", nil},
+		{"metadata null member", `"metadata":{"k":null}`, ``, "metadata", nil},
+		{"user object", `"user":{}`, ``, "user", nil},
+		{"include string", `"include":"reasoning.encrypted_content"`, ``, "include", nil},
+		{"include nonstring", `"include":[1]`, ``, "include", nil},
+		{"include null member", `"include":[null]`, ``, "include", nil},
+		{"invalid text format", `"text":{"format":{"type":"unknown"}}`, ``, "text.format.type", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req ChatCompletionsRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"model":"test",`+tc.fields+`}`), &req))
+			before, err := json.Marshal(req)
+			require.NoError(t, err)
+			var notices []ConversionNotice
+			out, err := ChatCompletionsToResponsesWithOptions(&req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+			if tc.errorField != "" {
+				var conversionErr *UnsupportedConversionError
+				require.ErrorAs(t, err, &conversionErr)
+				require.Equal(t, tc.errorField, conversionErr.Field)
+				return
+			}
+			require.NoError(t, err)
+			want := map[string]any{"model": "test", "input": nil, "stream": true, "include": []any{"reasoning.encrypted_content"}, "store": false}
+			var additions map[string]any
+			require.NoError(t, json.Unmarshal([]byte(`{`+tc.want+`}`), &additions))
+			for k, v := range additions {
+				want[k] = v
+			}
+			expected, err := json.Marshal(want)
+			require.NoError(t, err)
+			actual, err := json.Marshal(out)
+			require.NoError(t, err)
+			require.JSONEq(t, string(expected), string(actual))
+			require.Equal(t, tc.notices, notices)
+			after, err := json.Marshal(req)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+	t.Run("final Terra effort", func(t *testing.T) {
+		for _, model := range []string{"gpt-6.1-terra", "openai/GPT_6.1_TERRA"} {
+			for _, effort := range []string{"none", "low", "max"} {
+				limit, sampling := 23, 0.7
+				out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model, ReasoningEffort: effort, MaxOutputTokens: &limit, Temperature: &sampling, TopP: &sampling})
+				require.NoError(t, err)
+				require.Equal(t, model, out.Model)
+				require.Equal(t, effort, out.Reasoning.Effort)
+				require.Equal(t, 23, *out.MaxOutputTokens)
+				if effort == "none" {
+					require.Equal(t, &sampling, out.Temperature)
+					require.Equal(t, &sampling, out.TopP)
+				} else {
+					require.Nil(t, out.Temperature)
+					require.Nil(t, out.TopP)
+				}
+			}
+			_, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model, ReasoningEffort: "minimal"})
+			require.Error(t, err, "caller must apply D2 before passing the final Terra effort")
+		}
+	})
+	t.Run("text schema bytes", func(t *testing.T) {
+		format := json.RawMessage(`{"type":"json_schema","name":"result","schema":{"type":"object","maximum":9007199254740993}}`)
+		req := ChatCompletionsRequest{Model: "test", Text: &ResponsesText{Format: format}}
+		out, err := ChatCompletionsToResponses(&req)
+		require.NoError(t, err)
+		require.Equal(t, format, out.Text.Format)
+		out.Text.Format[0] = ' '
+		require.Equal(t, byte('{'), req.Text.Format[0], "converted format does not alias caller bytes")
+	})
+}

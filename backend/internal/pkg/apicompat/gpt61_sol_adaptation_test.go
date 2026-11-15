@@ -40,7 +40,8 @@ func TestGPT61SolConvertersValidateAppliedEffortBeforeModelAliases(t *testing.T)
 		out, err := AnthropicToResponses(&AnthropicRequest{Model: model})
 		require.NoError(t, err) // The converter has already selected its default effort.
 		require.Equal(t, "medium", out.Reasoning.Effort)
-		_, err = ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model})
-		require.Error(t, err)
+		chat, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model})
+		require.NoError(t, err) // Final model policy owns alias effort selection.
+		require.Nil(t, chat.Reasoning)
 	}
 }

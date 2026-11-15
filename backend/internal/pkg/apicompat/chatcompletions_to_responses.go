@@ -29,9 +29,6 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 	if _, err := parseStopSequences(req.Stop); err != nil {
 		return nil, err
 	}
-	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
-		return nil, err
-	}
 	input, err := convertChatMessagesToResponsesInput(req.Messages, opts)
 	if err != nil {
 		return nil, err
@@ -61,13 +58,6 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 	out.anthropicChatSource = &source
 	out.anthropicN = req.anthropicN
 	out.chatCacheControls = chatInputCacheControls(input)
-
-	// Reasoning models (gpt-5.x) do not accept sampling parameters.
-	// See isReasoningModel in anthropic_to_responses.go.
-	if !isReasoningModel(req.Model) || (openai.IsGPT6SolOrLunaModelSpelling(req.Model) && req.ReasoningEffort == "none") {
-		out.Temperature = req.Temperature
-		out.TopP = req.TopP
-	}
 
 	storeFalse := false
 	out.Store = &storeFalse
@@ -107,15 +97,22 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 		}
 	}
 
-	format, err := chatResponseFormatToResponsesTextFormat(req.ResponseFormat)
-	if err != nil {
+	// The caller supplies the final mapped model and applied effort after D2.
+	// Do not validate a Sol alias before that policy has selected its effort.
+	effort := ""
+	if out.Reasoning != nil {
+		effort = out.Reasoning.Effort
+	}
+	if err := openai.ValidateGPT61TerraReasoningEffort(out.Model, effort); err != nil {
 		return nil, err
 	}
-	if len(format) > 0 {
-		if out.Text == nil {
-			out.Text = &ResponsesText{}
-		}
-		out.Text.Format = format
+	terra := openai.IsGPT61TerraModelSpelling(out.Model)
+	if (!isReasoningModel(out.Model) && !terra) || ((openai.IsGPT6SolOrLunaModelSpelling(out.Model) || terra) && effort == "none") {
+		out.Temperature = req.Temperature
+		out.TopP = req.TopP
+	}
+	if err := applyChatResponsesFields(req, out, opts); err != nil {
+		return nil, err
 	}
 
 	// tools[] and legacy functions[] → ResponsesTool[]
@@ -137,6 +134,79 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 	}
 
 	return out, nil
+}
+
+// applyChatResponsesFields carries only the modeled Chat extensions.
+func applyChatResponsesFields(req *ChatCompletionsRequest, out *ResponsesRequest, opts ConversionOptions) error {
+	if metadata := normalizedRawJSON(req.Metadata); len(metadata) > 0 {
+		values, ok := rawJSONObject(metadata)
+		if !ok {
+			return unsupportedConversion("metadata", "expected a string map")
+		}
+		for _, raw := range values {
+			var value string
+			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
+				return unsupportedConversion("metadata", "expected a string map")
+			}
+		}
+		out.Metadata = metadata
+	}
+	if user := normalizedRawJSON(req.User); len(user) > 0 {
+		var value string
+		if json.Unmarshal(user, &value) != nil {
+			return unsupportedConversion("user", "expected a string")
+		}
+		out.User = user
+	}
+	if include := normalizedRawJSON(req.Include); len(include) > 0 {
+		var values []json.RawMessage
+		if json.Unmarshal(include, &values) != nil {
+			return unsupportedConversion("include", "expected an array of strings")
+		}
+		out.Include = nil
+		seen := make(map[string]bool, len(values)+1)
+		for _, raw := range values {
+			var value string
+			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
+				return unsupportedConversion("include", "expected an array of strings")
+			}
+			if !seen[value] {
+				out.Include = append(out.Include, value)
+				seen[value] = true
+			}
+		}
+		if !seen["reasoning.encrypted_content"] {
+			out.Include = append(out.Include, "reasoning.encrypted_content")
+		}
+	}
+
+	// Preserve the existing Chat response_format precedence. text.format is
+	// used when that field is absent; validation of the selected format is shared.
+	format, err := chatResponseFormatToResponsesTextFormat(req.ResponseFormat)
+	if err != nil {
+		return err
+	}
+	verbosity := req.Verbosity
+	if req.Text != nil {
+		if len(format) == 0 {
+			if err := validateResponseFormat(req.Text.Format, false); err != nil {
+				return err
+			}
+			format = normalizedRawJSON(req.Text.Format)
+		} else if len(normalizedRawJSON(req.Text.Format)) > 0 && opts.Record != nil {
+			opts.Record(ConversionNotice{Field: "text.format", Action: "omit"})
+		}
+		if req.Text.Verbosity != "" {
+			verbosity = req.Text.Verbosity
+			if req.Verbosity != "" && opts.Record != nil {
+				opts.Record(ConversionNotice{Field: "verbosity", Action: "omit"})
+			}
+		}
+	}
+	if len(format) > 0 || verbosity != "" {
+		out.Text = &ResponsesText{Format: format, Verbosity: verbosity}
+	}
+	return nil
 }
 
 // convertChatMessagesToResponsesInput converts the Chat Completions messages
