@@ -712,6 +712,8 @@ const OpenAIAlphaSearchE5001Reason GatewayFailureReason = "openai_alpha_search_e
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
+	UpstreamRecoveryHint            *resilience.UpstreamRecoveryHint
+	UpstreamTarget                  *resilience.UpstreamAttemptTarget
 	BudgetCutPlan                   *resilience.TimeoutPlan
 	cause                           error // Original read failure, never included in client-facing text.
 	PreDispatchSelectionInvalidated bool  // Candidate lost admission before any upstream call.

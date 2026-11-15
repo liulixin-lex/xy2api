@@ -16,8 +16,11 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
-	mu                sync.Mutex
-	conversionNotices []apicompat.ConversionNotice
+	upstreamRecoveryHint  *UpstreamRecoveryHint
+	accountRetryNotBefore map[int64]UpstreamRecoveryHint
+	upstreamAttemptTarget *UpstreamAttemptTarget
+	mu                    sync.Mutex
+	conversionNotices     []apicompat.ConversionNotice
 
 	timing            timingTrace
 	bodyFirstRead     time.Time
