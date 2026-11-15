@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -501,8 +502,7 @@ func (s *PricingService) customPricingFilesFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// validateCustomPricingFiles 要求每个已配置且存在的 fallback/override 文件可读且为 JSON
-// 对象，任一不满足即返回带路径的错误；文件不存在视为该层为空，属合法状态。
+// validateCustomPricingFiles 要求已配置的 fallback/override 文件可读且为 JSON 对象。
 func (s *PricingService) validateCustomPricingFiles() error {
 	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile} {
 		p := strings.TrimSpace(path)
@@ -510,9 +510,6 @@ func (s *PricingService) validateCustomPricingFiles() error {
 			continue
 		}
 		body, err := os.ReadFile(p)
-		if os.IsNotExist(err) {
-			continue
-		}
 		if err != nil {
 			return err
 		}
@@ -520,12 +517,15 @@ func (s *PricingService) validateCustomPricingFiles() error {
 		if err := json.Unmarshal(body, &entries); err != nil {
 			return fmt.Errorf("%s: %w", p, err)
 		}
+		if entries == nil {
+			return fmt.Errorf("%s: pricing root must be an object", p)
+		}
 	}
 	return nil
 }
 
 // reloadIfCustomFilesChanged 比对 fallback/override 文件指纹，与最近一次重建时不同则从
-// 本地目录缓存重建内存数据。文件被删除视为该层清空，照常重建；文件存在但不可读或不是
+// 本地目录缓存重建内存数据。文件缺失、不可读或不是
 // JSON 对象时保留当前数据且不更新指纹，下一轮会再次尝试并重复告警。目录正文与远程同步
 // 锚点(localHash)不受本路径影响。
 func (s *PricingService) reloadIfCustomFilesChanged() {
@@ -624,20 +624,13 @@ func (s *PricingService) downloadPricingData() error {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
 
-	// 保存到本地文件
-	pricingFile := s.getPricingFilePath()
-	if err := os.WriteFile(pricingFile, body, 0644); err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save file: %v", err)
-	}
-
 	// 同步锚点只确认实际下载正文；远端 hash 提前发布时下一轮仍须下载。
 	syncHash := dataHashStr
 	if strings.EqualFold(remoteHash, dataHashStr) {
 		syncHash = strings.ToLower(remoteHash)
 	}
-	hashFile := s.getHashFilePath()
-	if err := os.WriteFile(hashFile, []byte(syncHash+"\n"), 0644); err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to save hash: %v", err)
+	if err := s.savePricingFiles(body, syncHash); err != nil {
+		return err
 	}
 
 	// 更新内存数据
@@ -660,10 +653,16 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 	if err := json.Unmarshal(body, &rawData); err != nil {
 		return nil, fmt.Errorf("parse raw JSON: %w", err)
 	}
-	rawData = s.applyPricingOverrides(rawData)
+	if rawData == nil {
+		return nil, fmt.Errorf("pricing root must be an object")
+	}
+	var err error
+	rawData, err = s.applyPricingOverrides(rawData)
+	if err != nil {
+		return nil, err
+	}
 
 	result := make(map[string]*LiteLLMModelPricing)
-	skipped := 0
 	var orphanCacheTiers, lopsidedLadders []string
 
 	for modelName, rawEntry := range rawData {
@@ -675,8 +674,10 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		// 尝试解析每个条目
 		var entry LiteLLMRawEntry
 		if err := json.Unmarshal(rawEntry, &entry); err != nil {
-			skipped++
-			continue
+			return nil, fmt.Errorf("pricing %q: %w", modelName, err)
+		}
+		if err := validatePricingEntry(rawEntry, entry); err != nil {
+			return nil, fmt.Errorf("pricing %q: %w", modelName, err)
 		}
 
 		// 只保留有有效价格的条目
@@ -759,9 +760,6 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		result[modelName] = pricing
 	}
 
-	if skipped > 0 {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Skipped %d invalid entries", skipped)
-	}
 	warnOrphanCacheTierFields(orphanCacheTiers)
 	warnLopsidedLongContextLadders(lopsidedLadders)
 
@@ -922,10 +920,10 @@ func warnOrphanCacheTierFields(entries []string) {
 // 文件的解析都经过 parsePricingData，因此 override 是最高优先级的数据源。这里只修补
 // 已存在的条目：目录/回退里都没有的模型由 mergeOverrideOnlyModels 在两层数据合并后
 // 统一并入——若在此处抢先建条目，纯 override 条目会挡住回退文件中同名完整条目的合并。
-func (s *PricingService) applyPricingOverrides(rawData map[string]json.RawMessage) map[string]json.RawMessage {
-	overrides := s.loadPricingOverrideEntries()
-	if len(overrides) == 0 {
-		return rawData
+func (s *PricingService) applyPricingOverrides(rawData map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	overrides, err := s.loadPricingOverrideEntries()
+	if err != nil {
+		return nil, err
 	}
 	for name, patch := range overrides {
 		base, ok := rawData[name]
@@ -934,35 +932,37 @@ func (s *PricingService) applyPricingOverrides(rawData map[string]json.RawMessag
 		}
 		merged, valid := mergePricingOverrideEntry(base, patch)
 		if !valid {
-			logger.LegacyPrintf("service.pricing", "[Pricing] Warning: override entry %q skipped: not a JSON object", name)
-			continue
+			return nil, fmt.Errorf("override %q must be a JSON object", name)
 		}
 		rawData[name] = merged
 	}
-	return rawData
+	return rawData, nil
 }
 
-// loadPricingOverrideEntries 读取 override 文件的原始条目。未配置返回 nil；
-// 读取或解析失败打日志并跳过，不影响目录加载。
-func (s *PricingService) loadPricingOverrideEntries() map[string]json.RawMessage {
-	if s == nil || s.cfg == nil {
-		return nil
+// loadPricingOverrideEntries rejects unreadable or malformed configured overrides.
+func (s *PricingService) loadPricingOverrideEntries() (map[string]json.RawMessage, error) {
+	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.OverrideFile) == "" {
+		return nil, nil
 	}
 	path := strings.TrimSpace(s.cfg.Pricing.OverrideFile)
-	if path == "" {
-		return nil
-	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: override merge skipped: %v", err)
-		return nil
+		return nil, fmt.Errorf("read pricing override: %w", err)
 	}
 	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(body, &entries); err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: override merge skipped: %v", err)
-		return nil
+		return nil, fmt.Errorf("parse pricing override: %w", err)
 	}
-	return entries
+	if entries == nil {
+		return nil, fmt.Errorf("pricing override root must be an object")
+	}
+	for name, raw := range entries {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+			return nil, fmt.Errorf("override %q must be a JSON object", name)
+		}
+	}
+	return entries, nil
 }
 
 // mergePricingOverrideEntry 在 JSON 字段层浅合并：patch 字段覆盖 base 同名字段，
@@ -975,9 +975,9 @@ func mergePricingOverrideEntry(base, patch json.RawMessage) (json.RawMessage, bo
 	}
 	merged := make(map[string]any, len(patchFields))
 	if len(base) > 0 {
-		// base 非对象时忽略，仅以 patch 为准。
-		if err := json.Unmarshal(base, &merged); err != nil {
-			merged = make(map[string]any, len(patchFields))
+		// 基础条目必须也是对象，不能用补丁掩盖损坏的目录。
+		if err := json.Unmarshal(base, &merged); err != nil || merged == nil {
+			return nil, false
 		}
 	}
 	for k, v := range patchFields {
@@ -994,17 +994,12 @@ func mergePricingOverrideEntry(base, patch json.RawMessage) (json.RawMessage, bo
 	return out, true
 }
 
-// mergeOverrideOnlyModels 把 override 中目录/回退两层都不存在的模型作为独立条目并入
-// （条目须自带价格字段才能通过有效性过滤），并对最终仍未生效的条目打 WARN：
-// 模型名拼错、或纯补丁条目落在不存在的模型上时会被静默丢弃，让"已改价/已关阶梯"
-// 的运营预期与实际计费脱节，这里是唯一的哨兵。
-func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPricing) map[string]*LiteLLMModelPricing {
-	overrides := s.loadPricingOverrideEntries()
-	if len(overrides) == 0 {
-		return data
-	}
-	if data == nil {
-		data = make(map[string]*LiteLLMModelPricing)
+// mergeOverrideOnlyModels validates standalone overrides after catalog/fallback
+// merging, so a partial patch can still inherit its required price dimensions.
+func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPricing) (map[string]*LiteLLMModelPricing, error) {
+	overrides, err := s.loadPricingOverrideEntries()
+	if err != nil {
+		return nil, err
 	}
 	leftover := make(map[string]json.RawMessage)
 	for name, patch := range overrides {
@@ -1013,27 +1008,26 @@ func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPr
 		}
 	}
 	if len(leftover) == 0 {
-		return data
+		return data, nil
 	}
-	// 复用主解析路径（含 above_XXXk 折算与有效性过滤）；applyPricingOverrides
-	// 对已存在条目做的自我修补是幂等的，不会二次改值。
-	if body, err := json.Marshal(leftover); err == nil {
-		if parsed, err := s.parsePricingData(body); err == nil {
-			maps.Copy(data, parsed)
-		}
+	body, err := json.Marshal(leftover)
+	if err != nil {
+		return nil, err
 	}
-	var missing []string
+	parsed, err := s.parsePricingData(body)
+	if err != nil {
+		return nil, fmt.Errorf("standalone pricing override: %w", err)
+	}
 	for name := range leftover {
-		if _, ok := data[name]; !ok {
-			missing = append(missing, name)
+		if _, ok := parsed[name]; !ok {
+			return nil, fmt.Errorf("standalone override %q has no price fields", name)
 		}
 	}
-	if len(missing) == 0 {
-		return data
+	if data == nil {
+		data = make(map[string]*LiteLLMModelPricing)
 	}
-	sort.Strings(missing)
-	logger.LegacyPrintf("service.pricing", "[Pricing] Warning: override had no effect for %d model(s): %s (unknown model name, or patch-only entry without price fields)", len(missing), strings.Join(missing, ", "))
-	return data
+	maps.Copy(data, parsed)
+	return data, nil
 }
 
 // buildPricingData 解析目录正文并依次叠加 fallback、override 两层，返回合并结果与
@@ -1045,8 +1039,14 @@ func (s *PricingService) buildPricingData(body []byte) (map[string]*LiteLLMModel
 	if err != nil {
 		return nil, "", err
 	}
-	data = s.mergeFallbackPricingData(data)
-	data = s.mergeOverrideOnlyModels(data)
+	data, err = s.mergeFallbackPricingData(data)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err = s.mergeOverrideOnlyModels(data)
+	if err != nil {
+		return nil, "", err
+	}
 	return data, fingerprint, nil
 }
 
@@ -1084,22 +1084,20 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	return nil
 }
 
-func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelPricing) map[string]*LiteLLMModelPricing {
+func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelPricing) (map[string]*LiteLLMModelPricing, error) {
 	if data == nil {
 		data = make(map[string]*LiteLLMModelPricing)
 	}
 	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.FallbackFile) == "" {
-		return data
+		return data, nil
 	}
 	fallbackBody, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
 	if err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge skipped: %v", err)
-		return data
+		return nil, fmt.Errorf("read pricing fallback: %w", err)
 	}
 	fallbackData, err := s.parsePricingData(fallbackBody)
 	if err != nil {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
-		return data
+		return nil, fmt.Errorf("parse pricing fallback: %w", err)
 	}
 	merged := 0
 	for modelName, pricing := range fallbackData {
@@ -1112,7 +1110,7 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 	if merged > 0 {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
 	}
-	return data
+	return data, nil
 }
 
 // warnDroppedLongContextLadders 对比新旧目录数据：原本带长上下文阶梯的条目在新数据里
@@ -1145,26 +1143,27 @@ func warnDroppedLongContextLadders(old, next map[string]*LiteLLMModelPricing) {
 
 // useFallbackPricing 使用回退价格文件
 func (s *PricingService) useFallbackPricing() error {
-	fallbackFile := s.cfg.Pricing.FallbackFile
-
-	if _, err := os.Stat(fallbackFile); os.IsNotExist(err) {
-		return fmt.Errorf("fallback file not found: %s", fallbackFile)
-	}
-
-	logger.LegacyPrintf("service.pricing", "[Pricing] Using fallback file: %s", fallbackFile)
-
-	// 复制到数据目录
-	data, err := os.ReadFile(fallbackFile)
+	body, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
 	if err != nil {
 		return fmt.Errorf("read fallback failed: %w", err)
 	}
-
-	pricingFile := s.getPricingFilePath()
-	if err := os.WriteFile(pricingFile, data, 0644); err != nil { //nolint:gosec // G703: 路径为配置的数据目录 + 硬编码文件名，非请求输入
-		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to copy fallback: %v", err)
+	data, fingerprint, err := s.buildPricingData(body)
+	if err != nil {
+		return fmt.Errorf("parse pricing fallback: %w", err)
 	}
-
-	return s.loadPricingData(fallbackFile)
+	hash := sha256.Sum256(body)
+	syncHash := hex.EncodeToString(hash[:])
+	if err := s.savePricingFiles(body, syncHash); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	warnDroppedLongContextLadders(s.pricingData, data)
+	s.pricingData = data
+	s.customFilesHash = fingerprint
+	s.localHash = syncHash
+	s.lastUpdated = time.Now()
+	s.mu.Unlock()
+	return nil
 }
 
 // fetchRemoteHash 从远程获取哈希值
@@ -1752,4 +1751,120 @@ func isNumeric(s string) bool {
 		}
 	}
 	return true
+}
+
+// validatePricingEntry checks the merged price card; explicit zero is valid.
+func validatePricingEntry(raw json.RawMessage, entry LiteLLMRawEntry) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return fmt.Errorf("entry must be a JSON object")
+	}
+	priced := false
+	for key, value := range fields {
+		if !strings.HasPrefix(key, "input_cost_per_token") && !strings.HasPrefix(key, "output_cost_per_token") &&
+			!strings.HasPrefix(key, "cache_creation_input_token_cost") && !strings.HasPrefix(key, "cache_read_input_token_cost") &&
+			key != "output_cost_per_image" && key != "output_cost_per_image_token" && key != "input_cost_per_image_token" && key != "cache_read_input_image_token_cost" {
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			continue
+		}
+		var price float64
+		if err := json.Unmarshal(value, &price); err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+			return fmt.Errorf("%s must be a finite non-negative price", key)
+		}
+		priced = true
+	}
+	if !priced {
+		return nil
+	}
+	hasImagePrice := entry.OutputCostPerImage != nil || entry.OutputCostPerImageToken != nil
+	if hasImagePrice {
+		return nil
+	}
+	if entry.Mode == "embedding" && entry.InputCostPerToken != nil {
+		return nil
+	}
+	if entry.InputCostPerToken == nil || entry.OutputCostPerToken == nil {
+		return fmt.Errorf("token pricing requires input_cost_per_token and output_cost_per_token")
+	}
+	return nil
+}
+
+// savePricingFiles stages validated bytes before publishing the local cache.
+func (s *PricingService) savePricingFiles(body []byte, hash string) error {
+	paths := []string{s.getPricingFilePath(), s.getHashFilePath()}
+	contents := [][]byte{body, []byte(hash + "\n")}
+	temps := make([]string, 0, 2)
+	defer func() {
+		for _, path := range temps {
+			_ = os.Remove(path)
+		}
+	}()
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("pricing cache path is not a regular file: %s", path)
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	for i, path := range paths {
+		f, err := os.CreateTemp(filepath.Dir(path), ".pricing-*")
+		if err != nil {
+			return fmt.Errorf("stage pricing file: %w", err)
+		}
+		temps = append(temps, f.Name())
+		_, writeErr := f.Write(contents[i])
+		closeErr := f.Close()
+		if writeErr != nil {
+			return fmt.Errorf("write pricing file: %w", writeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close pricing file: %w", closeErr)
+		}
+		if err := os.Chmod(f.Name(), 0644); err != nil {
+			return err
+		}
+	}
+	// Keep a restorable data file until the corresponding hash has been published.
+	backup := ""
+	oldBody, err := os.ReadFile(paths[0])
+	if err == nil {
+		f, createErr := os.CreateTemp(filepath.Dir(paths[0]), ".pricing-previous-*")
+		if createErr != nil {
+			return createErr
+		}
+		backup = f.Name()
+		temps = append(temps, backup)
+		_, writeErr := f.Write(oldBody)
+		closeErr := f.Close()
+		if writeErr != nil {
+			return writeErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if err := os.Chmod(backup, 0644); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(temps[0], paths[0]); err != nil {
+		return fmt.Errorf("publish pricing file: %w", err)
+	}
+	if err := os.Rename(temps[1], paths[1]); err != nil {
+		var restoreErr error
+		if backup != "" {
+			restoreErr = os.Rename(backup, paths[0])
+		} else {
+			restoreErr = os.Remove(paths[0])
+		}
+		if restoreErr != nil {
+			return fmt.Errorf("publish pricing hash: %w; restore previous cache: %w", err, restoreErr)
+		}
+		return fmt.Errorf("publish pricing hash: %w", err)
+	}
+
+	return nil
 }

@@ -125,51 +125,33 @@ func TestPricingOverride_LoadPipelineAddsNewModelAndPatchesFallbackOnly(t *testi
 	require.InDelta(t, 1e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12)
 }
 
-// 拼错模型名（或纯补丁落在不存在的模型上）会被有效性过滤丢弃，必须有哨兵 WARN。
-func TestPricingOverride_IneffectiveEntryWarns(t *testing.T) {
-	logSink, restore := captureStructuredLog(t)
-	defer restore()
-
-	dir := t.TempDir()
-	catalogPath := filepath.Join(dir, "catalog.json")
-	require.NoError(t, os.WriteFile(catalogPath, []byte(`{
-		"remote-model": {"litellm_provider": "test", "mode": "chat", "input_cost_per_token": 1e-06}
-	}`), 0644))
-	overridePath := filepath.Join(dir, "overrides.json")
-	require.NoError(t, os.WriteFile(overridePath, []byte(`{
-		"typo-model": {"long_context_input_token_threshold": 0}
-	}`), 0644))
-
-	svc := &PricingService{cfg: &config.Config{}}
-	svc.cfg.Pricing.OverrideFile = overridePath
-	require.NoError(t, svc.loadPricingData(catalogPath))
-
-	require.NotContains(t, svc.pricingData, "typo-model")
-	require.True(t, logSink.ContainsMessageAtLevel("override had no effect for 1 model(s): typo-model", "warn"))
+// Invalid override candidates must not silently publish only the valid rows.
+func TestPricingOverride_IneffectiveEntryRejected(t *testing.T) {
+	svc := newPricingServiceWithOverride(t, `{"typo-model":{"long_context_input_token_threshold":0}}`)
+	_, _, err := svc.buildPricingData([]byte(gpt55OverrideCatalogJSON))
+	require.Error(t, err)
 }
 
-func TestPricingOverride_NonObjectEntryKeepsCatalogEntry(t *testing.T) {
-	svc := newPricingServiceWithOverride(t, `{"gpt-5.5": "oops"}`)
+func TestPricingOverride_NonObjectEntryRejected(t *testing.T) {
+	svc := newPricingServiceWithOverride(t, `{"gpt-5.5":"oops"}`)
 	data, err := svc.parsePricingData([]byte(gpt55OverrideCatalogJSON))
-	require.NoError(t, err)
-	require.Equal(t, 272000, data["gpt-5.5"].LongContextInputTokenThreshold, "非法补丁忽略，目录条目原样保留")
-	require.InDelta(t, 5e-6, data["gpt-5.5"].InputCostPerToken, 1e-12)
+	require.Error(t, err)
+	require.Nil(t, data)
 }
 
-func TestPricingOverride_MissingOrInvalidFileIsIgnored(t *testing.T) {
+func TestPricingOverride_MissingOrInvalidFileRejected(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		svc := &PricingService{cfg: &config.Config{}}
 		svc.cfg.Pricing.OverrideFile = filepath.Join(t.TempDir(), "absent.json")
 		data, err := svc.parsePricingData([]byte(gpt55OverrideCatalogJSON))
-		require.NoError(t, err)
-		require.Equal(t, 272000, data["gpt-5.5"].LongContextInputTokenThreshold)
+		require.Error(t, err)
+		require.Nil(t, data)
 	})
-
 	t.Run("invalid json", func(t *testing.T) {
 		svc := newPricingServiceWithOverride(t, `{invalid`)
 		data, err := svc.parsePricingData([]byte(gpt55OverrideCatalogJSON))
-		require.NoError(t, err)
-		require.Equal(t, 272000, data["gpt-5.5"].LongContextInputTokenThreshold)
+		require.Error(t, err)
+		require.Nil(t, data)
 	})
 }
 
