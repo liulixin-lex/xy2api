@@ -46,8 +46,14 @@ func (s *OpenAIGatewayService) handleM7EncryptedFailure(ctx context.Context, c *
 	if repair := openAIRequestRepairFrom(c); repair != nil {
 		repair.setBody(wire)
 	}
+	var failure error
 	if outputStarted {
-		return terminateHTTPEncryptedContent(ctx, c, account, wire, payload, message, status, true, sse)
+		failure = terminateHTTPEncryptedContent(ctx, c, account, wire, payload, message, status, true, sse)
+	} else {
+		failure = newHTTPEncryptedContentRepairSignal(ctx, c, account, wire, payload, message, status, sse)
 	}
-	return newHTTPEncryptedContentRepairSignal(ctx, c, account, wire, payload, message, status, sse)
+	if _, repairing := failure.(*openAIRequestRepairSignal); failure != nil && !repairing {
+		s.recordOpenAIStreamUpstreamError(c, account, false, "", "terminal_rejection", payload, message, status)
+	}
+	return failure
 }
