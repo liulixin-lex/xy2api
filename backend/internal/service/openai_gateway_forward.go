@@ -822,15 +822,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
-	markEncryptedLineage := func(src []byte) {
-		invalidDigests := collectOpenAIEncryptedContentDigestsRaw(src)
-		if len(invalidDigests) == 0 {
+	markEncryptedLineage := func(selected httpRejectedEncryptedItem) {
+		if selected.Digest == "" {
 			return
 		}
 		if lineageSessionHash == "" {
 			lineageSessionHash = s.GenerateSessionHash(c, lineageEntryBody)
 		}
-		s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, invalidDigests)
+		s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, []string{selected.Digest})
 	}
 	imageBillingModel := ""
 	imageSizeTier := ""
@@ -1265,13 +1264,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if requestRepair != nil && !requestRepair.encryptedTried &&
 				(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&
 				invalidEncryptedContentError {
-				nextBody, changed, repairErr := openAIEncryptedContentRepairBody(body, upstreamMsg)
+				selected, repairErr := openAIEncryptedContentRepairBody(body, respBody)
 				if repairErr != nil {
 					return nil, fmt.Errorf("prepare invalid_encrypted_content retry body: %w", repairErr)
 				}
-				if changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-					markEncryptedLineage(body)
-					body, requestView, reqBody = nextBody, newOpenAIRequestView(nextBody), nil
+				if selected.Changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+					markEncryptedLineage(selected)
+					body, requestView, reqBody = selected.Body, newOpenAIRequestView(selected.Body), nil
 					requestRepair.encryptedTried = true
 					rejectedFieldRetryState.remember(body)
 					logger.FromContext(ctx).Info("resilience.request_repair_replay",
@@ -1412,7 +1411,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
 					if kind == resilience.ReasonEncryptedContent {
-						markEncryptedLineage(body)
+						var signal *openAIRequestRepairSignal
+						if errors.As(err, &signal) {
+							markEncryptedLineage(signal.encryptedItem)
+						}
 					}
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue

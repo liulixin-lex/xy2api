@@ -36,19 +36,19 @@ func TestIsOpenAIEncryptedContentRejectionPayloadCoversHTTPAndInband(t *testing.
 
 func TestOpenAIEncryptedContentRepairBodyHonorsPrefixesAndPreservesOpaqueItems(t *testing.T) {
 	body := []byte(`{"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"cipher"},{"type":"function_call_output","call_id":"call_1","output":"keep"},{"type":"agent_message","content":[{"type":"encrypted_content","data":"keep"}]}]}`)
-	next, changed, err := openAIEncryptedContentRepairBody(body, "encrypted content could not be verified")
+	selected, err := openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted content could not be verified"}}`))
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.NotContains(t, string(next), `"encrypted_content":"cipher"`)
-	require.Contains(t, string(next), `"call_id":"call_1"`)
-	require.Contains(t, string(next), `"agent_message"`)
+	require.True(t, selected.Changed)
+	require.NotContains(t, string(selected.Body), `"encrypted_content":"cipher"`)
+	require.Contains(t, string(selected.Body), `"call_id":"call_1"`)
+	require.Contains(t, string(selected.Body), `"agent_message"`)
 
-	_, changed, err = openAIEncryptedContentRepairBody(body, "encrypted content could not be verified for item amsg_1")
+	selected, err = openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted content could not be verified for item amsg_1"}}`))
 	require.NoError(t, err)
-	require.False(t, changed)
-	_, changed, err = openAIEncryptedContentRepairBody(body, "encrypted function output content could not be decrypted")
+	require.False(t, selected.Changed)
+	selected, err = openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted function output content could not be decrypted"}}`))
 	require.NoError(t, err)
-	require.False(t, changed)
+	require.False(t, selected.Changed)
 }
 
 func TestOpenAIEncryptedContentRoutingAndOpsCategory(t *testing.T) {

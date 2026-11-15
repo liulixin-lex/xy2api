@@ -1,12 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,8 +13,6 @@ import (
 )
 
 const openAIRequestRepairContextKey = "xy_resilience_request_repair"
-
-var openAIEncryptedItemPrefixPattern = regexp.MustCompile(`(?i)\bfor item\s+([a-z0-9]+)_`)
 
 // openAIRequestRepair carries one account attempt's request-local repair
 // state. body is replaced at the start of every forwarding loop iteration;
@@ -63,8 +58,9 @@ func openAIRequestRepairFrom(c *gin.Context) *openAIRequestRepair {
 }
 
 type openAIRequestRepairSignal struct {
-	kind string
-	next []byte
+	kind          string
+	next          []byte
+	encryptedItem httpRejectedEncryptedItem
 }
 
 func (e *openAIRequestRepairSignal) Error() string {
@@ -74,32 +70,8 @@ func (e *openAIRequestRepairSignal) Error() string {
 	return "upstream request repair required: " + e.kind
 }
 
-func openAIEncryptedContentRepairBody(body []byte, message string) ([]byte, bool, error) {
-	if len(body) == 0 || strings.Contains(strings.ToLower(message), "encrypted function output") {
-		return nil, false, nil
-	}
-	for _, match := range openAIEncryptedItemPrefixPattern.FindAllStringSubmatch(message, -1) {
-		prefix := strings.ToLower(match[1])
-		if prefix != "rs" && prefix != "cmp" {
-			return nil, false, nil
-		}
-	}
-	var decoded map[string]any
-	err := decodeOpenAIJSONUseNumber(body, &decoded)
-	if err != nil {
-		return nil, false, err
-	}
-	if !trimOpenAIEncryptedReasoningItems(decoded) {
-		return nil, false, nil
-	}
-	next, err := marshalOpenAIUpstreamJSON(decoded)
-	if err != nil {
-		return nil, false, err
-	}
-	if bytes.Equal(next, body) {
-		return nil, false, nil
-	}
-	return next, true, nil
+func openAIEncryptedContentRepairBody(body, payload []byte) (httpRejectedEncryptedItem, error) {
+	return selectHTTPRejectedEncryptedItem(body, payload)
 }
 
 func openAIRequestRepairErrorObject(payload []byte) []byte {
@@ -145,9 +117,9 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 		return nil
 	}
 	if !r.encryptedTried && (isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message)) {
-		next, changed, err := openAIEncryptedContentRepairBody(r.body, message)
-		if err == nil && changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: next}
+		selected, err := openAIEncryptedContentRepairBody(r.body, payload)
+		if err == nil && selected.Changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: selected.Body, encryptedItem: selected}
 		}
 	}
 

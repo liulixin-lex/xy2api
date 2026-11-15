@@ -4,11 +4,166 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
+// HTTP repair evidence identifies exactly one top-level encrypted item. WS
+// continues to use its existing session-wide repair and lineage functions.
+type httpRejectedEncryptedItem struct {
+	Body                     []byte
+	ItemIndex                int
+	ItemType, ItemID, Digest string
+	Changed                  bool
+}
+
+var httpEncryptedIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))`)
+var httpEncryptedItemPattern = regexp.MustCompile("(?i)\\b(?:for\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)|((?:rs|cmp)_[a-z0-9_-]+))\\b")
+
+// selectHTTPRejectedEncryptedItem never guesses between multiple locations.
+// The error payload is inspected only in its structured error fields; request
+// content and nested tool output are not locator sources.
+func selectHTTPRejectedEncryptedItem(body, payload []byte) (httpRejectedEncryptedItem, error) {
+	result := httpRejectedEncryptedItem{Body: body, ItemIndex: -1}
+	root := gjson.ParseBytes(body)
+	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUniqueObject(root) {
+		return result, nil
+	}
+	input := root.Get("input")
+	items := input.Array()
+	if input.IsObject() {
+		items = []gjson.Result{input}
+	} else if !input.IsArray() {
+		return result, nil
+	}
+	object := openAIStreamErrorObject(payload)
+	if !object.IsObject() {
+		object = openAITopLevelStreamError(payload)
+	}
+	if object.IsObject() && !codexCollabUniqueObject(object) {
+		return result, nil
+	}
+	selected, located := -1, false
+	selectIndex := func(index int) bool {
+		located = true
+		if index < 0 || index >= len(items) || (selected >= 0 && index != selected) {
+			return false
+		}
+		selected = index
+		return true
+	}
+	selectID := func(id string) bool {
+		index := -1
+		for i, item := range items {
+			if item.Get("id").String() == id {
+				if index >= 0 {
+					return false
+				}
+				index = i
+			}
+		}
+		return selectIndex(index)
+	}
+	for _, field := range []string{"code", "param", "message", "item_id"} {
+		value := object.Get(field)
+		if value.Type != gjson.String {
+			continue
+		}
+		text := value.String()
+		if strings.Contains(strings.ToLower(text), "encrypted function output") {
+			return result, nil
+		}
+		if field == "item_id" && text != "" {
+			if !selectID(text) {
+				return result, nil
+			}
+			continue
+		}
+		matches := httpEncryptedIndexPattern.FindAllStringSubmatch(text, -1)
+		if field == "param" && (strings.Contains(text, "input[") || strings.HasPrefix(text, "input.")) && len(matches) == 0 {
+			return result, nil
+		}
+		for _, match := range matches {
+			index, err := strconv.Atoi(firstNonEmpty(match[1], match[2]))
+			if err != nil || !selectIndex(index) {
+				return result, nil
+			}
+		}
+		for _, match := range httpEncryptedItemPattern.FindAllStringSubmatch(text, -1) {
+			if !selectID(firstNonEmpty(match[1], match[2])) {
+				return result, nil
+			}
+		}
+	}
+	if !located {
+		for i, item := range items {
+			switch item.Get("type").String() {
+			case "compaction", "compaction_summary":
+				return result, nil
+			case "reasoning":
+				if selected >= 0 {
+					return result, nil
+				}
+				selected = i
+			}
+		}
+	}
+	if selected < 0 {
+		return result, nil
+	}
+	item := items[selected]
+	id := item.Get("id").String()
+	if id != "" && !selectID(id) {
+		return result, nil
+	}
+	return repairHTTPEncryptedItem(body, input, item, selected)
+}
+
+func repairHTTPEncryptedItem(body []byte, input, item gjson.Result, selected int) (httpRejectedEncryptedItem, error) {
+	result := httpRejectedEncryptedItem{Body: body, ItemIndex: -1}
+	kind, id := item.Get("type").String(), item.Get("id").String()
+	if !item.IsObject() || !codexCollabUniqueObject(item) || !openAIEncryptedLineageItemType(kind) {
+		return result, nil
+	}
+	result.ItemIndex, result.ItemType, result.ItemID = selected, kind, id
+	encrypted := item.Get("encrypted_content")
+	if encrypted.Type != gjson.String || encrypted.String() == "" {
+		return result, nil
+	}
+	result.Digest = openAIEncryptedContentDigest(encrypted.String())
+	var decoded map[string]any
+	if err := decodeOpenAIJSONUseNumber([]byte(item.Raw), &decoded); err != nil {
+		return result, err
+	}
+	next, changed, keep := sanitizeEncryptedReasoningInputItem(decoded)
+	if !changed {
+		return result, nil
+	}
+	path := "input"
+	if input.IsArray() {
+		path += "." + strconv.Itoa(selected)
+	}
+	var err error
+	if keep {
+		var encoded []byte
+		encoded, err = marshalOpenAIUpstreamJSON(next)
+		if err == nil {
+			result.Body, err = sjson.SetRawBytes(body, path, encoded)
+		}
+	} else {
+		result.Body, err = sjson.DeleteBytes(body, path)
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Changed = true
+	return result, nil
+}
 
 // invalid_encrypted_content 失效密文 lineage。
 //
