@@ -100,7 +100,7 @@ func terminateHTTPEncryptedContentWith(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	captureOpenAIStateRejection(c, account, payload, message, path, outputStarted, body, status)
-	rejection := newOpenAIEncryptedContentRejection(ctx, account, body, payload, selected)
+	rejection := newOpenAIEncryptedContentRejection(ctx, c, account, body, payload, selected)
 	writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
 	return &OpenAIRequestRejectionError{rejection}
 }

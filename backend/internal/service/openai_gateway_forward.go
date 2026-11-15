@@ -1279,7 +1279,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))
 					continue
 				}
-				rejection := newOpenAIEncryptedContentRejection(ctx, account, body, encryptedErrorPayload, plan.Selected)
+				rejection := newOpenAIEncryptedContentRejection(ctx, c, account, body, encryptedErrorPayload, plan.Selected)
 				captureOpenAIStateRejection(c, account, encryptedErrorPayload, upstreamMsg, "native_http", false, body)
 				writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
 				return nil, &OpenAIRequestRejectionError{rejection}

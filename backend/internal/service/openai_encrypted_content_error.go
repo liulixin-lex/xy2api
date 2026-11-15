@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -105,23 +106,53 @@ func httpEncryptedNamedItem(payload []byte) string {
 	return named
 }
 
+// httpEncryptedCiphertexts lists every encrypted_content string under input,
+// longest first, so earlier attempts' removed items are redacted as well.
+func httpEncryptedCiphertexts(bodies ...[]byte) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	var walk func(gjson.Result)
+	walk = func(value gjson.Result) {
+		value.ForEach(func(key, child gjson.Result) bool {
+			if key.String() == "encrypted_content" && child.Type == gjson.String && child.String() != "" {
+				if _, ok := seen[child.String()]; !ok {
+					seen[child.String()] = struct{}{}
+					out = append(out, child.String())
+				}
+			}
+			if child.IsObject() || child.IsArray() {
+				walk(child)
+			}
+			return true
+		})
+	}
+	for _, body := range bodies {
+		if input := gjson.GetBytes(body, "input"); input.IsObject() || input.IsArray() {
+			walk(gjson.Parse("[" + input.Raw + "]"))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
 // selected must be the same selection the repair decision used, so a
 // location found through the original request is not lost here.
-func newOpenAIEncryptedContentRejection(ctx context.Context, account *Account, body, payload []byte, selected httpRejectedEncryptedItem) *openAIEncryptedContentRejectionError {
+func newOpenAIEncryptedContentRejection(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, selected httpRejectedEncryptedItem) *openAIEncryptedContentRejectionError {
+	// The request as received still carries ciphertext a repair removed from
+	// the current attempt; the upstream may echo either.
+	var original []byte
+	if c != nil {
+		value, _ := c.Get(openAIStateRejectionBodyKey)
+		original, _ = value.([]byte)
+	}
+	ciphers := httpEncryptedCiphertexts(body, original)
 	// Project only error fields, using the existing credential scrubber before
 	// exposing details. The original payload is still used for item selection.
 	safe := redactOpenAITerminalOpsSensitiveBody(ctx, nil, account, payload)
 	clean := func(text string) string {
 		text = string(redactOpenAITerminalOpsSensitiveBody(ctx, nil, account, []byte(text)))
-		input := gjson.GetBytes(body, "input")
-		items := input.Array()
-		if input.IsObject() {
-			items = []gjson.Result{input}
-		}
-		for _, item := range items {
-			if cipher := item.Get("encrypted_content"); cipher.Type == gjson.String && cipher.String() != "" {
-				text = strings.ReplaceAll(text, cipher.String(), "[redacted]")
-			}
+		for _, cipher := range ciphers {
+			text = strings.ReplaceAll(text, cipher, "[redacted]")
 		}
 		return SanitizeUpstreamErrorMessage(text)
 	}
