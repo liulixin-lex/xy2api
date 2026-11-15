@@ -228,3 +228,32 @@ func TestM4ReviewAnthropicTruncatedTools(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewAnthropicEOFTerminal(t *testing.T) {
+	for _, kind := range []string{"text", "thinking"} {
+		st := NewAnthropicEventToResponsesState()
+		opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+		var events []ResponsesStreamEvent
+		for _, raw := range []string{`{"type":"message_start","message":{"id":"fixed","model":"m","usage":{"input_tokens":5}}}`, `{"type":"content_block_start","index":0,"content_block":{"type":"` + kind + `"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"` + kind + `_delta","` + kind + `":"kept"}}`, `{"type":"content_block_stop","index":0}`} {
+			var e AnthropicStreamEvent
+			if err := json.Unmarshal([]byte(raw), &e); err != nil {
+				t.Fatal(err)
+			}
+			events = append(events, AnthropicEventToResponsesEventsWithBridgeOptions(&e, st, opts)...)
+		}
+		events = append(events, FinalizeAnthropicResponsesStreamWithBridgeOptions(st, opts)...)
+		count := 0
+		for _, e := range events {
+			if e.Type == "response.completed" {
+				count++
+				raw, _ := json.Marshal(e.Response)
+				if !strings.Contains(string(raw), "kept") || e.Response.Usage.InputTokens != 5 {
+					t.Fatalf("lost content/usage: %s", raw)
+				}
+			}
+		}
+		if count != 1 || st.Err() != nil || !st.CompletedSent || len(FinalizeAnthropicResponsesStreamWithBridgeOptions(st, opts)) != 0 {
+			t.Fatalf("EOF terminal: count=%d err=%v", count, st.Err())
+		}
+	}
+}

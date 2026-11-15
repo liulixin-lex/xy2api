@@ -47,9 +47,6 @@ func FinalizeAnthropicResponsesStreamWithBridgeOptions(state *AnthropicEventToRe
 		state.Bridge = opts.Bridge
 		state.bridgeRecord = opts.Record
 	}
-	if bridgeEnabled(state.Bridge) && !state.CompletedSent && state.StopReason == "" {
-		return closeCurrentResponsesItem(state)
-	}
 	return FinalizeAnthropicResponsesStream(state)
 }
 
