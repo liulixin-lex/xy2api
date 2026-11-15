@@ -92,6 +92,8 @@
 
 协议转换、模型映射、正文整理、分组 system 提示词与补断点先执行，然后统一 TTL、执行上游能力清理，最后构造并签名 HTTP 请求。是否适用取决于实际账号、映射后的模型与出站协议；Anthropic 兼容接口承载 Kimi、DeepSeek、GLM 等模型时不应用 Claude TTL。
 
+Messages 转 OpenAI Responses 或 Chat Completions 时，不复制 Anthropic 顶层 `cache_control`，其中的 TTL 不映射为 OpenAI 缓存设置。原 Anthropic 请求、现有块级缓存键及真实 Anthropic 目标的 TTL 处理不变。
+
 - 只访问顶层、tools、system 与 messages 内容块的协议字段，不递归修改工具 schema、工具入参或用户数据；保留合法声明的类型、其他属性、内容与断点位置。
 - Chat / Responses 转换保留工具调用与结果上的缓存标记：Chat `role=tool`（以及旧版 `role=function`）消息的消息级标记、或其内容分片上的最后一个标记，落在对应的 `tool_result` 块；只含 `tool_calls` 的 assistant 消息的标记落在最后一个 `tool_use` 块。Responses `function_call_output`（含降级后的 `custom_tool_call_output`）以项级标记为准，否则取数组 `output` 中最后一个带标记的分片；`function_call` 的项级标记落在 `tool_use`。每个工具块只保留一个标记。这些标记只随 Anthropic 转换转发，不加入发往 OpenAI Responses 上游的请求。
 - 顶层 automatic 与显式断点共占最多 4 个槽位，空间不足时不新增断点，也不删除合法的客户端声明。网关构造的 Chat / Responses 转换请求中，顶层 automatic 与末块显式标记一个为 1 小时、另一个为 5 分钟或省略时统一为 1 小时，并把之前的 ephemeral 断点提升到 1 小时，以保持“长 TTL 在前”的顺序。`off` 保留合法的混合 TTL。

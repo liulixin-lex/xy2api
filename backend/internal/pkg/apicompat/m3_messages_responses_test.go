@@ -46,3 +46,38 @@ func TestM3ForeignReasoningEnvelope(t *testing.T) {
 		})
 	}
 }
+
+func TestM3TopLevelCacheControlBoundary(t *testing.T) {
+	var req AnthropicRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"test","max_tokens":1024,"cache_control":{"type":"ephemeral","ttl":"1h","scope":"global","future_flag":true},"system":[{"type":"text","text":"instructions","cache_control":{"type":"ephemeral","ttl":"5m"}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`), &req))
+	before, err := json.Marshal(req)
+	require.NoError(t, err)
+	responses, err := AnthropicToResponses(&req)
+	require.NoError(t, err)
+	native, err := responses.NativeWireRequest()
+	require.NoError(t, err)
+	chat, err := AnthropicToChatCompletionsRequest(&req)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		wire any
+	}{
+		{"responses", responses}, {"native responses", native}, {"chat", chat},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire, err := json.Marshal(tc.wire)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(wire, &fields))
+			require.NotContains(t, fields, "cache_control")
+			// Existing block markers are not copied into either OpenAI wire.
+			require.NotContains(t, string(wire), `"cache_control"`)
+		})
+	}
+	after, err := json.Marshal(req)
+	require.NoError(t, err)
+	require.JSONEq(t, string(before), string(after))
+	require.Equal(t, "1h", req.CacheControl.TTL)
+	require.Equal(t, "global", req.CacheControl.Scope)
+	require.JSONEq(t, `true`, string(req.CacheControl.Extra["future_flag"]))
+}
