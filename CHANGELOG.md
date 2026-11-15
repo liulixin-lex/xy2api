@@ -94,6 +94,10 @@
 
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
+- Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择。
+
+- Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
+
 - Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
 
 - Chat 请求的 `reasoning` 写成字符串或对象时生效，`reasoning_effort` 仍优先；转 Responses 时显式 `summary` 不再被改成 `auto`，只给 summary 时不再丢失。
@@ -131,6 +135,7 @@
 - Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
 
 - Gemini Messages 兼容请求保留 JSON 输出格式与 schema 精度，不支持的格式约束会记录降级。
+
 - Gemini 缓存读取不再产生负输入用量，流中的缺失字段与明确修正值分别处理。
 
 - Gemini AI Studio 请求携带搜索工具时，输出 schema 中的大整数保持原值。

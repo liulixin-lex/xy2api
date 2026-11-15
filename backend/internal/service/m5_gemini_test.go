@@ -497,6 +497,221 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 	}
 }
 
+func m5HistoryCall(id, args string) apicompat.ChatMessage {
+	return apicompat.ChatMessage{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: id, Type: "function", Function: apicompat.ChatFunctionCall{Name: "lookup", Arguments: args}}}}
+}
+
+func m5HistoryResult(id string, raw json.RawMessage) apicompat.ChatMessage {
+	return apicompat.ChatMessage{Role: "tool", ToolCallID: id, Content: raw}
+}
+
+func TestM5ToolHistoryRounds(t *testing.T) {
+	t.Run("chat_occurrences", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, messages string
+			want           []string
+		}{
+			{"rounds", `[{"role":"assistant","tool_calls":[{"id":"same","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"tool","tool_call_id":"same","content":"first"},{"role":"assistant","tool_calls":[{"id":"same","type":"function","function":{"name":"g","arguments":"{}"}}]},{"role":"tool","tool_call_id":"same","content":"second"}]`, []string{"f:first", "g:second"}},
+			{"interleaved", `[{"role":"assistant","tool_calls":[{"id":"a","type":"function","function":{"name":"a","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"b","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":"A"},{"role":"assistant","tool_calls":[{"id":"c","type":"function","function":{"name":"c","arguments":"{}"}}]},{"role":"tool","tool_call_id":"b","content":"B"},{"role":"tool","tool_call_id":"c","content":"C"}]`, []string{"a:A", "b:B", "c:C"}},
+			{"legacy_fifo", `[{"role":"assistant","function_call":{"name":"f","arguments":"{}"}},{"role":"assistant","function_call":{"name":"f","arguments":"{}"}},{"role":"function","name":"f","content":"one"},{"role":"function","name":"f","content":"two"}]`, []string{"f:one", "f:two"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				body := []byte(`{"model":"gemini-2.5-flash","messages":` + tc.messages + `}`)
+				wire, _, _ := m5ForwardChat(t, body)
+				var got []string
+				for _, content := range gjson.GetBytes(wire, "contents").Array() {
+					for _, part := range content.Get("parts").Array() {
+						if result := part.Get("functionResponse"); result.Exists() {
+							got = append(got, result.Get("name").String()+":"+result.Get("response.content").String())
+						}
+					}
+				}
+				require.Equal(t, tc.want, got)
+			})
+		}
+	})
+	t.Run("messages_slots", func(t *testing.T) {
+		for _, tt := range []struct{ name, messages, want string }{
+			{"reused_id", `[{"role":"assistant","content":[{"type":"tool_use","id":"same","name":"f","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"same","content":"first"}]},{"role":"assistant","content":[{"type":"tool_use","id":"same","name":"g","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"same","content":"second"}]}]`, `f:first,g:second`},
+			{"reversed_results", `[{"role":"assistant","content":[{"type":"tool_use","id":"a","name":"a","input":{}},{"type":"tool_use","id":"b","name":"b","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"b","content":"B"},{"type":"tool_result","tool_use_id":"a","content":"A"}]}]`, `a:A,b:B`},
+			{"interleaved", `[{"role":"assistant","content":[{"type":"tool_use","id":"a","name":"a","input":{}},{"type":"tool_use","id":"b","name":"b","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"a","content":"A"}]},{"role":"assistant","content":[{"type":"tool_use","id":"c","name":"c","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"c","content":"C"},{"type":"tool_result","tool_use_id":"b","content":"B"}]}]`, `a:A,b:B,c:C`},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				body := []byte(`{"model":"gemini-2.5-flash","max_tokens":512,"messages":` + tt.messages + `}`)
+				wire, _, _ := m5ForwardMessages(t, body)
+				var got []string
+				for _, content := range gjson.GetBytes(wire, "contents").Array() {
+					for _, part := range content.Get("parts").Array() {
+						if result := part.Get("functionResponse"); result.Exists() {
+							got = append(got, result.Get("name").String()+":"+result.Get("response.content").String())
+						}
+					}
+				}
+				require.Equal(t, tt.want, strings.Join(got, ","))
+			})
+		}
+	})
+
+	t.Run("messages_projection", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"a","name":"first","input":{},"signature":"signed-first"},{"type":"tool_use","id":"b","name":"second","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"b","content":"two"},{"type":"text","text":"between"},{"type":"tool_result","tool_use_id":"a","content":"one"}]}]}`)
+		wire, _, _ := m5ForwardMessages(t, body)
+		require.Equal(t, "signed-first", gjson.GetBytes(wire, "contents.0.parts.0.thoughtSignature").String())
+		require.Equal(t, "first", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.name").String())
+		require.Equal(t, "one", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.response.content").String())
+		require.Equal(t, "between", gjson.GetBytes(wire, "contents.1.parts.1.text").String())
+		require.Equal(t, "second", gjson.GetBytes(wire, "contents.1.parts.2.functionResponse.name").String())
+		require.Equal(t, "two", gjson.GetBytes(wire, "contents.1.parts.2.functionResponse.response.content").String())
+	})
+	t.Run("messages_interleaved", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"a","name":"A","input":{}},{"type":"tool_use","id":"b","name":"B","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"a","content":"a"}]},{"role":"assistant","content":[{"type":"tool_use","id":"c","name":"C","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"c","content":"c"},{"type":"tool_result","tool_use_id":"b","content":"b"}]}]}`)
+		wire, _, _ := m5ForwardMessages(t, body)
+		require.Equal(t, "A", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.name").String())
+		require.Equal(t, "B", gjson.GetBytes(wire, "contents.3.parts.0.functionResponse.name").String())
+		require.Equal(t, "C", gjson.GetBytes(wire, "contents.3.parts.1.functionResponse.name").String())
+	})
+	t.Run("messages_reused_id", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"same","name":"first","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"same","content":"one"}]},{"role":"assistant","content":[{"type":"tool_use","id":"same","name":"second","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"same","content":"two"}]}]}`)
+		wire, _, _ := m5ForwardMessages(t, body)
+		require.Equal(t, "first", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.name").String())
+		require.Equal(t, "one", gjson.GetBytes(wire, "contents.1.parts.0.functionResponse.response.content").String())
+		require.Equal(t, "second", gjson.GetBytes(wire, "contents.3.parts.0.functionResponse.name").String())
+		require.Equal(t, "two", gjson.GetBytes(wire, "contents.3.parts.0.functionResponse.response.content").String())
+	})
+
+	wantInputs := map[string]string{
+		"id_length_41":                "[{\"type\":\"function_call\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"output\":\"ok\"}]",
+		"id_length_65":                "[{\"type\":\"function_call\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"output\":\"ok\"}]",
+		"id_length_129":               "[{\"type\":\"function_call\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"output\":\"ok\"}]",
+		"id_no_prefix":                "[{\"type\":\"function_call\",\"call_id\":\"xyz789\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"xyz789\",\"output\":\"ok\"}]",
+		"id_special":                  "[{\"type\":\"function_call\",\"call_id\":\"abc:/+?= 空格#[]\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"abc:/+?= 空格#[]\",\"output\":\"ok\"}]",
+		"content_string":              "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"content_text_array":          "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"onetwo\"}]",
+		"content_image_array":         "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":[{\"type\":\"input_image\",\"image_url\":\"https://example.invalid/image.png\"}]}]",
+		"content_empty_string":        "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"(empty)\"}]",
+		"content_missing":             "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"(empty)\"}]",
+		"content_null":                "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"(empty)\"}]",
+		"content_empty_array":         "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"(empty)\"}]",
+		"parallel_reverse_results":    "[{\"type\":\"function_call\",\"call_id\":\"a\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call\",\"call_id\":\"b\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"b\",\"output\":\"B\"},{\"type\":\"function_call_output\",\"call_id\":\"a\",\"output\":\"A\"}]",
+		"intervening_user":            "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"message\",\"role\":\"user\",\"content\":\"intervening\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"intervening_system":          "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"message\",\"role\":\"system\",\"content\":\"intervening\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"id_reused_across_rounds":     "[{\"type\":\"function_call\",\"call_id\":\"same\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"same\",\"output\":\"first\"},{\"type\":\"message\",\"role\":\"user\",\"content\":\"next\"},{\"type\":\"function_call\",\"call_id\":\"same\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"same\",\"output\":\"second\"}]",
+		"arguments_empty":             "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"arguments_invalid":           "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{broken\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"legacy_function_pair":        "[{\"type\":\"function_call\",\"call_id\":\"call_legacy_1\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"call_legacy_1\",\"output\":\"ok\"}]",
+		"legacy_same_name_fifo":       "[{\"type\":\"function_call\",\"call_id\":\"call_legacy_1\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call\",\"call_id\":\"call_legacy_2\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"call_legacy_1\",\"output\":\"one\"},{\"type\":\"function_call_output\",\"call_id\":\"call_legacy_2\",\"output\":\"two\"}]",
+		"assistant_content_and_calls": "[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"I will call lookup\"}]},{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"call_without_result":         "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"}]",
+		"result_without_call":         "[{\"type\":\"function_call_output\",\"call_id\":\"c\",\"output\":\"ok\"}]",
+		"result_missing_id":           "[{\"type\":\"function_call_output\",\"output\":\"ok\"}]",
+		"result_wrong_id":             "[{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"lookup\",\"arguments\":\"{}\"},{\"type\":\"function_call_output\",\"call_id\":\"other\",\"output\":\"ok\"}]",
+		"legacy_result_without_call":  "[{\"type\":\"function_call_output\",\"call_id\":\"lookup\",\"output\":\"ok\"}]",
+	}
+
+	type fixture struct {
+		name                   string
+		msgs                   []apicompat.ChatMessage
+		wantCalls, wantOutputs int
+		wantPair, wantError    bool
+	}
+	var cases []fixture
+	pair := func(name, id string, raw json.RawMessage) {
+		cases = append(cases, fixture{name, []apicompat.ChatMessage{m5HistoryCall(id, `{}`), m5HistoryResult(id, raw)}, 1, 1, true, false})
+	}
+	for _, n := range []int{41, 65, 129} {
+		pair(fmt.Sprintf("id_length_%d", n), strings.Repeat("a", n), json.RawMessage(`"ok"`))
+	}
+	pair("id_no_prefix", "xyz789", json.RawMessage(`"ok"`))
+	pair("id_special", "abc:/+?= 空格#[]", json.RawMessage(`"ok"`))
+	pair("content_string", "c", json.RawMessage(`"ok"`))
+	pair("content_text_array", "c", json.RawMessage(`[{"type":"text","text":"one"},{"type":"text","text":"two"}]`))
+	pair("content_image_array", "c", json.RawMessage(`[{"type":"image_url","image_url":{"url":"https://example.invalid/image.png"}}]`))
+	pair("content_empty_string", "c", json.RawMessage(`""`))
+	pair("content_missing", "c", nil)
+	pair("content_null", "c", json.RawMessage(`null`))
+	pair("content_empty_array", "c", json.RawMessage(`[]`))
+	cases = append(cases, fixture{"content_unknown_array", []apicompat.ChatMessage{m5HistoryCall("c", `{}`), m5HistoryResult("c", json.RawMessage(`[{"type":"mystery","text":"ok"}]`))}, 0, 0, false, true})
+	parallel := m5HistoryCall("a", `{}`)
+	parallel.ToolCalls = append(parallel.ToolCalls, m5HistoryCall("b", `{}`).ToolCalls[0])
+	cases = append(cases, fixture{"parallel_reverse_results", []apicompat.ChatMessage{parallel, m5HistoryResult("b", json.RawMessage(`"B"`)), m5HistoryResult("a", json.RawMessage(`"A"`))}, 2, 2, true, false})
+	for _, role := range []string{"user", "system"} {
+		cases = append(cases, fixture{"intervening_" + role, []apicompat.ChatMessage{m5HistoryCall("c", `{}`), {Role: role, Content: json.RawMessage(`"intervening"`)}, m5HistoryResult("c", json.RawMessage(`"ok"`))}, 1, 1, true, false})
+	}
+	cases = append(cases, fixture{"id_reused_across_rounds", []apicompat.ChatMessage{m5HistoryCall("same", `{}`), m5HistoryResult("same", json.RawMessage(`"first"`)), {Role: "user", Content: json.RawMessage(`"next"`)}, m5HistoryCall("same", `{}`), m5HistoryResult("same", json.RawMessage(`"second"`))}, 2, 2, true, false})
+	for _, arg := range []string{"", "{broken"} {
+		name := "arguments_invalid"
+		if arg == "" {
+			name = "arguments_empty"
+		}
+		cases = append(cases, fixture{name, []apicompat.ChatMessage{m5HistoryCall("c", arg), m5HistoryResult("c", json.RawMessage(`"ok"`))}, 1, 1, true, false})
+	}
+	legacy := apicompat.ChatMessage{Role: "assistant", FunctionCall: &apicompat.ChatFunctionCall{Name: "lookup", Arguments: `{}`}}
+	cases = append(cases, fixture{"legacy_function_pair", []apicompat.ChatMessage{legacy, {Role: "function", Name: "lookup", Content: json.RawMessage(`"ok"`)}}, 1, 1, true, false})
+	cases = append(cases, fixture{"legacy_same_name_fifo", []apicompat.ChatMessage{legacy, legacy, {Role: "function", Name: "lookup", Content: json.RawMessage(`"one"`)}, {Role: "function", Name: "lookup", Content: json.RawMessage(`"two"`)}}, 2, 2, true, false})
+	both := m5HistoryCall("c", `{}`)
+	both.Content = json.RawMessage(`"I will call lookup"`)
+	cases = append(cases, fixture{"assistant_content_and_calls", []apicompat.ChatMessage{both, m5HistoryResult("c", json.RawMessage(`"ok"`))}, 1, 1, true, false})
+	cases = append(cases, fixture{"call_without_result", []apicompat.ChatMessage{m5HistoryCall("c", `{}`)}, 1, 0, false, false}, fixture{"result_without_call", []apicompat.ChatMessage{m5HistoryResult("c", json.RawMessage(`"ok"`))}, 0, 1, false, false}, fixture{"result_missing_id", []apicompat.ChatMessage{m5HistoryResult("", json.RawMessage(`"ok"`))}, 0, 1, false, false}, fixture{"result_wrong_id", []apicompat.ChatMessage{m5HistoryCall("c", `{}`), m5HistoryResult("other", json.RawMessage(`"ok"`))}, 1, 1, false, false}, fixture{"legacy_result_without_call", []apicompat.ChatMessage{{Role: "function", Name: "lookup", Content: json.RawMessage(`"ok"`)}}, 0, 1, false, false})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := apicompat.ChatCompletionsToResponses(&apicompat.ChatCompletionsRequest{Model: "probe", Messages: tc.msgs})
+			if tc.name == "arguments_invalid" {
+				require.EqualError(t, err, "unsupported protocol conversion at messages[0].tool_calls[0].function.arguments: expected complete JSON arguments")
+				return
+			}
+			if err != nil {
+				require.EqualError(t, err, "unsupported protocol conversion at content.type: unsupported Chat content part")
+				if !tc.wantError {
+					t.Fatal(err)
+				}
+				return
+			}
+			if tc.wantError {
+				t.Fatal("wanted local error")
+			}
+			require.Equal(t, wantInputs[tc.name], string(out.Input))
+			var items []map[string]any
+			if err = json.Unmarshal(out.Input, &items); err != nil {
+				t.Fatal(err)
+			}
+			pending := map[string]int{}
+			nc, no := 0, 0
+			order := true
+			intervened := false
+			for _, it := range items {
+				id, _ := it["call_id"].(string)
+				switch it["type"] {
+				case "function_call":
+					nc++
+					pending[id]++
+				case "function_call_output":
+					no++
+					if id == "" || pending[id] == 0 {
+						order = false
+					} else {
+						pending[id]--
+					}
+				case "message":
+					for _, v := range pending {
+						if v > 0 {
+							intervened = true
+						}
+					}
+				}
+			}
+			paired := order
+			for id, v := range pending {
+				if id == "" || v != 0 {
+					paired = false
+				}
+			}
+			t.Logf("calls=%d outputs=%d paired=%v call_before_output=%v intervening_message=%v input=%s", nc, no, paired, order, intervened, out.Input)
+			if nc != tc.wantCalls || no != tc.wantOutputs || paired != tc.wantPair {
+				t.Fatalf("unexpected shape")
+			}
+		})
+	}
+}
+
 func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
 	t.Helper()
 	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
