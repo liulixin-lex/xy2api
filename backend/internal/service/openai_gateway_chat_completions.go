@@ -115,12 +115,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"type":    "forbidden_error",
-				"message": "This account only allows Codex official clients",
-			},
-		})
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusForbidden, "forbidden_error", "", "", "This account only allows Codex official clients")
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
@@ -300,6 +295,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Effort: effort}
 		}
 	} else {
+		if account.Type == AccountTypeAPIKey && gjson.GetBytes(body, "stream_options").Exists() {
+			resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "stream_options", Action: "omit"})
+		}
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
 		chatReq.Model = upstreamModel
@@ -347,7 +345,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			OmitPromotedSystemMessagesFromInput: !isResponsesShape && !isJSONObjectFormat,
 		})
 		if codexResult.Error != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": codexResult.Error.Error()}})
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadRequest, "invalid_request_error", "", "", codexResult.Error.Error())
 			return nil, codexResult.Error
 		}
 		setCodexToolNameReverse(c, codexResult.ToolNameReverse)

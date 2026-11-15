@@ -127,7 +127,8 @@ func TestOpenAIAdmissionError_StreamingNonResponsesIncludesGatewayCode(t *testin
 		gatewayQueueFullCode, "Too many pending requests, please retry later", true, false)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\n"))
+	assert.True(t, strings.HasPrefix(body, "data: "))
+	assert.Contains(t, body, "data: [DONE]\n\n")
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
 	assert.Equal(t, gatewayQueueFullCode, gjson.Get(payload, "error.code").String())
@@ -259,7 +260,7 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	require.Equal(t, http.StatusBadGateway, status)
 }
 
-func TestGatewayAdmissionError_SynchronousIncludesGatewayCode(t *testing.T) {
+func TestGatewayAdmissionError_SynchronousKeepsAnthropicShape(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -268,10 +269,10 @@ func TestGatewayAdmissionError_SynchronousIncludesGatewayCode(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	assert.Equal(t, "error", gjson.GetBytes(w.Body.Bytes(), "type").String())
 	assert.Equal(t, "rate_limit_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
-	assert.Equal(t, gatewayQueueFullCode, gjson.GetBytes(w.Body.Bytes(), "error.code").String())
+	assert.False(t, gjson.GetBytes(w.Body.Bytes(), "error.code").Exists())
 }
 
-func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T) {
+func TestGatewayAdmissionError_MessagesStreamingKeepsAnthropicShape(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -279,10 +280,10 @@ func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T
 
 	body := w.Body.String()
 	// xy2api G3: Anthropic SDKs drop data frames without an event line.
-	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: "), "got: %q", body)
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
-	assert.Equal(t, gatewayConcurrencyLimitCode, gjson.Get(payload, "error.code").String())
+	assert.False(t, gjson.Get(payload, "error.code").Exists())
 }
 
 func TestGatewayAdmissionError_BareResponsesFailedIncludesGatewayCode(t *testing.T) {
@@ -304,7 +305,7 @@ func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testin
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: "), "got: %q", body)
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、

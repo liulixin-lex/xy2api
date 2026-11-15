@@ -51,7 +51,11 @@ func TestSpecialExhaustedPathsShareTurnCap(t *testing.T) {
 					} else {
 						require.Empty(t, c.Writer.Header().Get("Retry-After"))
 						require.Equal(t, "false", c.Writer.Header().Get("x-should-retry"))
-						require.Contains(t, rec.Body.String(), codeServerIsOverloaded)
+						if endpoint == EndpointMessages {
+							require.NotContains(t, rec.Body.String(), `"code":`)
+						} else {
+							require.Contains(t, rec.Body.String(), codeServerIsOverloaded)
+						}
 						require.NotContains(t, rec.Body.String(), "try again in")
 						if !stream {
 							require.Equal(t, http.StatusServiceUnavailable, rec.Code)

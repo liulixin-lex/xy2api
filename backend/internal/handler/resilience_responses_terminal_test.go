@@ -106,15 +106,7 @@ func TestQueuePingsThenResponsesFailure(t *testing.T) {
 		recordGatewayStreamHeartbeat(c, n)
 
 		require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, "api_error", "", "no account"))
-		if enabled {
-			requireCreatedThenFailed(t, rec.Body.String())
-			continue
-		}
-		// Switched off: the 0.3.0 frame.
-		events := parseSSEEvents(rec.Body.String())
-		require.Len(t, events, 1, rec.Body.String())
-		require.Equal(t, "response.failed", events[0].name)
-		require.Equal(t, int64(0), gjson.Get(events[0].data, "sequence_number").Int())
+		requireCreatedThenFailed(t, rec.Body.String())
 	}
 }
 

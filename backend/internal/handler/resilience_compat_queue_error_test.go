@@ -66,8 +66,10 @@ func TestCompatibleQueueErrorsEndInInboundProtocol(t *testing.T) {
 		c, rec := newGinContextForEndpoint(t, EndpointResponses)
 		c.Writer = &compatDisconnectedWriter{ResponseWriter: c.Writer}
 		require.True(t, writeResponsesFailedSSEWithOpeningStatus(c, http.StatusBadGateway, "upstream_error", "", "upstream gone", true))
-		_, marked := service.OpsGatewayTerminalStatus(c)
-		require.False(t, marked)
+		status, marked := service.OpsGatewayTerminalStatus(c)
+		require.True(t, marked)
+		require.Equal(t, http.StatusBadGateway, status)
+		require.True(t, service.ProtocolTerminalClaimed(c))
 		require.Empty(t, rec.Body.String())
 	})
 }

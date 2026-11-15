@@ -65,6 +65,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 
 	// OpenAI routes (Chat Completions, Responses, images...).
 	c, w := newResilienceTestContext(t)
+	c.Request.URL.Path = EndpointResponses
 	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), false)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())

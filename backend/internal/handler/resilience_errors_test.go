@@ -93,6 +93,7 @@ func TestRetryHintsOffRestoresLegacy(t *testing.T) {
 func TestUserBalanceErrorsCarryCodes(t *testing.T) {
 	withHandlerResilience(t, nil)
 	c, w := newResilienceTestContext(t)
+	c.Request.URL.Path = EndpointResponses
 	status, code, msg, _ := billingErrorDetails(service.ErrInsufficientBalance)
 	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, code, msg, false)
 	require.Equal(t, http.StatusForbidden, w.Code)
@@ -101,6 +102,7 @@ func TestUserBalanceErrorsCarryCodes(t *testing.T) {
 
 	// Spec: concurrent requests with a small balance -> 429 reservation.
 	c, w = newResilienceTestContext(t)
+	c.Request.URL.Path = EndpointResponses
 	status, code, msg, retry := billingErrorDetails(service.NewInflightBalanceReservedError(0.8, 0.74))
 	c.Header("Retry-After", strconv.Itoa(retry))
 	(&GatewayHandler{}).handleStreamingAwareError(c, status, code, msg, false)
@@ -259,6 +261,7 @@ func TestTurnCapEndsCodexTurn(t *testing.T) {
 	resetTurnCap(t)
 	for i := 1; i <= 4; i++ {
 		c, w := turnCapContext(t, "")
+		c.Request.URL.Path = EndpointResponses
 		status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
 		(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", false)
 		require.Equal(t, http.StatusBadGateway, w.Code, "failure %d", i)
@@ -266,6 +269,7 @@ func TestTurnCapEndsCodexTurn(t *testing.T) {
 		require.Empty(t, gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 	}
 	c, w := turnCapContext(t, "")
+	c.Request.URL.Path = EndpointResponses
 	c.Header("Retry-After", "60") // copied from the upstream page
 	status := applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
 	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "upstream_error", "Upstream service temporarily unavailable", false)
@@ -277,6 +281,7 @@ func TestTurnCapEndsCodexTurn(t *testing.T) {
 
 	// A 429 stays 429 without Retry-After, which Codex does not retry.
 	c, w = turnCapContext(t, "")
+	c.Request.URL.Path = EndpointResponses
 	status = applyExhaustedRetryHint(c, nil, http.StatusTooManyRequests)
 	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "rate_limit_error", "Upstream rate limit exceeded, please retry later", false)
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
@@ -362,19 +367,21 @@ func TestPassthroughRuleBeatsHiddenBalanceOnOpenAIRoutes(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "quota")
 }
 
-func TestCommittedAnthropicErrorFrameFollowsTheErrorsSwitch(t *testing.T) {
-	// The named error event is part of the resilience error semantics; with
-	// the switch off the 0.3.0 frame is written.
+func TestCommittedAnthropicErrorFrameIgnoresTheErrorsSwitch(t *testing.T) {
+	// The target protocol framing is required with either errors setting.
 	withHandlerResilience(t, nil)
 	c, w := newResilienceTestContext(t)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
 	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "upstream failed", true)
-	require.Contains(t, w.Body.String(), "event: error\ndata: {\"type\":\"error\"")
+	require.Contains(t, w.Body.String(), "event: error\ndata: ")
+	require.Contains(t, w.Body.String(), `"type":"error"`)
 
 	withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.Enabled = false })
 	c, w = newResilienceTestContext(t)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
 	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "upstream failed", true)
-	require.NotContains(t, w.Body.String(), "event: error")
-	require.Contains(t, w.Body.String(), "data: {\"type\":\"error\"")
+	require.Contains(t, w.Body.String(), "event: error")
+	require.Contains(t, w.Body.String(), `"type":"error"`)
 }
