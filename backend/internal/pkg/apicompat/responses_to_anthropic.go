@@ -1234,7 +1234,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 			status = "completed"
 		}
 	}
-	_, _, _, err := ProjectTerminalWithMapping("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	_, _, unknownMapped, err := ProjectTerminalWithMapping("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		if state.err == nil {
 			state.err = err
@@ -1243,7 +1243,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	}
 
 	var events []AnthropicStreamEvent
-	if evt.Response != nil && evt.Response.Status == "completed" {
+	if evt.Response != nil && (evt.Response.Status == "completed" || unknownMapped) {
 		state.successTerminal = true
 		terminalOnlyTools := len(state.toolOrder) == 0
 		for i, item := range evt.Response.Output {
