@@ -28,7 +28,7 @@
 
 补充说明：
 
-- 上游明确报告 `No tool call found for function call output` 或 `No tool output found for function call` 的工具历史 400 时，原生、透传和 Chat→Responses 均保留安全的 type/code/param/message；上游没有提供 param 就不生成位置。请求只发送一次，不换号、不罚号，也不新增本地历史闭合校验。
+- 上游明确报告 `No tool call found for function call output` 或 `No tool output found for function call` 的工具历史 400 时，原生、原样转发和 Chat→Responses 都保留上游脱敏后的 `type`、`code`、`param`、`message`；上游没给 `param` 时不补。请求只发送一次，不换号、不罚号。
 
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。
@@ -40,11 +40,11 @@
 | 场景 | HTTP / `error.code` | `error.param` / message |
 |---|---|---|
 | 响应归属不通过 | 400 / `previous_response_owner_mismatch` | `previous_response_id` / `previous_response_id is not available for this user` |
-| 目标协议不支持 HTTP 续接 | 400 / `http_continuation_unsupported` | `previous_response_id` / `The selected upstream does not support previous_response_id over HTTP; send complete input history` |
+| 可选账号都不支持 HTTP 续接（OAuth、SetupToken） | 400 / `http_continuation_unsupported` | `previous_response_id` / `The selected upstream does not support previous_response_id over HTTP; send complete input history` |
 | 既有工具输出校验发现缺 call_id | 400 / `tool_output_missing_call_id` | `input[i].call_id` / `input[i] (<type>) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null` |
 | 上游明确报告续接状态过期或不存在 | 410 / `upstream_continuation_expired` | `previous_response_id` / `The upstream continuation state is no longer available; send complete input history` |
 
-归属仍按用户校验，同一用户更换 API 密钥不改变归属；不新增工具历史闭合校验。支持 HTTP 续接的原生 Responses 目标保留 `previous_response_id` 与 `store` 的缺省/false/true。DeepSeek/Kimi 无状态目标沿用既有归一化：清除 `previous_response_id`、强制 `store=false` 后发送；上游走 Chat Completions 或 Anthropic 协议的 API Key 账号照旧转换后发送。普通 404、409 与模糊 4xx 不强分为续接过期。上述请求错误不罚号、不计会话失败；未提交时不带 `Retry-After` 并写 `x-should-retry: false`，已提交 SSE 保持原 HTTP 状态，按相同原因写一次协议错误终态。
+响应归属按用户判断，同一用户换了 API 密钥仍可续接自己的响应。走原生 Responses 的 API Key 账号收到的 `previous_response_id` 与 `store`（缺省、`false`、`true`）都不改动；DeepSeek、Kimi 等无状态上游照旧去掉 `previous_response_id`、把 `store` 设为 `false` 后发送，上游走 Chat Completions 或 Anthropic 协议的 API Key 账号也照旧转换后发送，都不返回上面的错误。上游只返回普通的 404、409 或含义不明的 4xx 时，不当作续接过期，照原样返回。以上错误都不罚号、不计会话失败；尚未提交时不带 `Retry-After`，并写 `x-should-retry: false`；已提交的流保持原 HTTP 状态，以同样的错误码写一个错误终止帧。
 
 ## Retry-After 的取值
 
@@ -143,14 +143,14 @@ Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancell
 |---|---|
 | 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
-| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生与透传 Responses 在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时，仅在请求顶层恰好只有一项带密文的 reasoning 或 compaction 时修复该项；位置冲突、重复 ID 或越界时不做猜测性清理 |
+| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生与原样转发的 Responses 在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时，仅在请求顶层恰好只有一项带密文的 reasoning 或 compaction 时修复该项；位置冲突、重复 ID 或越界时不做猜测性清理 |
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 补上 web_search 工具声明后重放一次；成功后该账号 6 小时内同类请求直接补声明。仍失败时返回 502 并说明原因，不换号 |
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
 
-原生与透传 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
+原生与原样转发的 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
-原生与透传 HTTP 跨请求复用拒绝证据时，按租户会话、账号、上游地址与实际凭据版本隔离，只清理唯一匹配的被拒摘要；旧会话级证据不迁移。凭据版本不可用或本地缓存 miss 时保留首发正文，本次明确拒绝后的安全单项修复仍可执行。
+网关会记住被上游拒绝后去掉的密文项，下次请求中唯一命中同一项时，在第一次发送前就去掉它。这份记录按会话、账号、上游地址和本次实际使用的凭据分开保存：换账号、换 API Key、换实例、重启或记录过期后都不沿用，第一次发送保留原文；旧版本按会话保存的记录不再读取。即使没有记录，本次被明确拒绝后仍按上面的规则修复。
 
 Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务正文，网关优先把它调度到父线程的粘性账号（只有父线程的账号能解开），父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`。父账号不可用时普通选号。
 
