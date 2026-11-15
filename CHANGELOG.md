@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-15
+
+管理后台可配置 OAuth 管理 MCP；账号列表重新排版，主要管理页面支持原地实时刷新，分组新增别名。
+
 ### 新增
 
 - 后台「系统设置 → 安全与认证」可启停 OAuth 管理 MCP 并配置公开接入地址，保存后无需重启，优先于部署默认配置。关闭后阻断新的工具请求、授权及令牌刷新，仍可撤销已有授权；配置仅允许超级管理员浏览器会话管理，保存遵循敏感操作二次验证。见 [管理 MCP](docs/guides/management-mcp.md)。
@@ -2056,7 +2060,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/liulixin-lex/xy2api/compare/v0.6.5...v0.6.6
 [0.6.1]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/liulixin-lex/xy2api/compare/v0.5.15...v0.6.0
 [0.5.15]: https://github.com/liulixin-lex/xy2api/compare/v0.5.14...v0.5.15
