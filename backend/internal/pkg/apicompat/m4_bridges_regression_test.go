@@ -1203,8 +1203,11 @@ func TestM4AnthropicMediaHandoffs(t *testing.T) {
 	if !reflect.DeepEqual(notices, want) {
 		t.Fatalf("notices=%#v", notices)
 	}
-	if _, err := ResponsesToAnthropicRequest(req); err == nil {
-		t.Fatal("legacy detail rejection changed")
+	// M2 T2F-01: the legacy entry also drops a valid image hint and keeps the image.
+	if legacy, err := ResponsesToAnthropicRequest(req); err != nil {
+		t.Fatalf("legacy valid detail: %v", err)
+	} else if legacyRaw, _ := json.Marshal(legacy.Messages); string(legacyRaw) != string(raw) {
+		t.Fatalf("legacy media: %s / %s", legacyRaw, raw)
 	}
 	req.Input = json.RawMessage(`[{"role":"user","content":[{"type":"input_file","file_id":"provider"}]}]`)
 	if _, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{}); err == nil || !strings.Contains(err.Error(), "input[0].content[0].file_id") {
