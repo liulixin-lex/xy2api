@@ -63,6 +63,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | 兼容模式（默认） | `requires_openai_auth = true`，密钥写在 `auth.json` 的 `OPENAI_API_KEY` | 旧版 Codex 配置 |
 | API Key Mode | `requires_openai_auth = false`，密钥写在 `experimental_bearer_token`，并带 `http_headers = { "x-openai-actor-authorization" = "local-image-extension" }` | 需要授权客户端图片执行器时；保存后必须完全退出并重启 Codex Desktop 或 CLI，再新建 task |
 
+模型别名的能力来自唯一的映射目标；配置合并追加的别名与完整目录使用同一能力来源。多个账号将同一别名映射到不同目标时，不猜测其中一个目标的能力，已获取的上游目录条目保持不变。
+
 模型目录来源有两种：**远程目录**（Codex 0.156.0 及以上，配置 `model_catalog_url` 并开启 `api_key_model_discovery`）和 **本地文件**（旧版客户端，下载目录保存为 `~/.codex/codex-models.json` 并配置 `model_catalog_json`）。完整目录超过 1 MiB 时弹窗会自动改用本地文件。
 
 兼容模式 + 远程目录的 `~/.codex/config.toml` 示例（Windows 为 `%userprofile%\.codex\config.toml`），以下内容需放在文件开头：
