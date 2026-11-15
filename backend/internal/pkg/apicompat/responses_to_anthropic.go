@@ -1073,7 +1073,12 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 			event := ResponsesStreamEvent{OutputIndex: evt.OutputIndex, ItemID: evt.Item.ID, ContentIndex: i, Type: "response.output_text.done", Text: part.Text}
 			switch part.Type {
 			case "output_text":
-				events = append(events, resToAnthRecoverText(part.Text, resToAnthTextPartOf(&event, state), state)...)
+				key := resToAnthTextPartOf(&event, state)
+				anonymous := responsesTextPart{OutputIndex: evt.OutputIndex, ContentIndex: i, Kind: "output_text"}
+				if _, delivered := state.textByPart[anonymous]; delivered {
+					key = anonymous
+				}
+				events = append(events, resToAnthRecoverText(part.Text, key, state)...)
 			case "refusal":
 				event.Type = "response.refusal.done"
 				events = append(events, resToAnthRecoverText(part.Refusal, resToAnthTextPartOf(&event, state), state)...)

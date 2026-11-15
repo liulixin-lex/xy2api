@@ -846,3 +846,22 @@ func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
 		})
 	}
 }
+
+func TestM3ReviewR3AnonymousMessageDone(t *testing.T) {
+	for _, final := range []string{"Hello world", "Hello world!"} {
+		t.Run(final, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			var events []AnthropicStreamEvent
+			feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+			feed(&ResponsesStreamEvent{Type: "response.output_text.delta", Delta: "Hello"})
+			feed(&ResponsesStreamEvent{Type: "response.output_text.delta", Delta: " world"})
+			item := ResponsesOutput{Type: "message", ID: "msg_1", Content: []ResponsesContentPart{{Type: "output_text", Text: final}, {Type: "refusal", Refusal: " refusal"}}}
+			feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+			feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+			feed(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}})
+			require.NoError(t, st.Err())
+			require.Equal(t, final+" refusal", collectAnthropicText(events))
+			requireAnthropicBlockLifecycle(t, events)
+		})
+	}
+}
