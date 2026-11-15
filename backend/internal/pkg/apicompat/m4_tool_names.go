@@ -212,7 +212,7 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 // ChatCompletionsResponseToResponsesWithBridgeOptions restores the request's
 // aliases. The legacy single-result entry retains its original contract.
 func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsResponse, model string, customTools, functionTools map[string]bool, toolSearch bool, namespaceTools map[string]NamespacedToolName, opts ConversionOptions) (*ResponsesResponse, error) {
-	if bridgeEnabled(opts.Bridge) {
+	if bridgeEnabled(opts.Bridge) && opts.Bridge.ToolNames != nil {
 		customTools, functionTools, namespaceTools = bridgeChatNameIndexes(opts.Bridge.ToolNames)
 	}
 	if bridgeEnabled(opts.Bridge) {
@@ -225,6 +225,7 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 		if err := applyBridgeBufferedParts(out, resp); err != nil {
 			return nil, err
 		}
+		bridgeLengthToolGate(out, resp, opts.Bridge, customTools, toolSearch)
 		for i := range out.Output {
 			if out.Output[i].Type == "reasoning" {
 				out.Output[i].ID = generateReasoningItemID()

@@ -1744,7 +1744,7 @@ func ChatCompletionsChunkToResponsesEvents(
 	if chunk == nil || state == nil || state.Err() != nil {
 		return nil
 	}
-	if bridgeEnabled(state.Bridge) {
+	if bridgeEnabled(state.Bridge) && state.Bridge.ToolNames != nil {
 		state.CustomTools, state.FunctionTools, state.NamespaceTools = bridgeChatNameIndexes(state.Bridge.ToolNames)
 	}
 	if chunk.ID != "" {
@@ -2166,6 +2166,9 @@ func announceChatToolItem(
 // arguments so codex can deserialize and execute the call. Mirrors cc-switch's
 // finalize_tools.
 func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if bridgeEnabled(state.Bridge) && state.FinishReason == "length" {
+		return nil
+	}
 	if len(state.ToolCalls) == 0 {
 		return nil
 	}
@@ -2294,7 +2297,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			continue
 		}
 		arguments := toolCall.Function.Arguments
-		if strings.TrimSpace(arguments) == "" {
+		if strings.TrimSpace(arguments) == "" && !(bridgeEnabled(state.Bridge) && state.FinishReason == "length") {
 			arguments = "{}"
 		}
 		if state.toolIsCustom[i] {
@@ -2334,6 +2337,9 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	}
 	if bridgeEnabled(state.Bridge) {
 		for i := range outputs {
+			if state.FinishReason == "length" && (outputs[i].Type == "function_call" || outputs[i].Type == "custom_tool_call" || outputs[i].Type == "tool_search_call") {
+				outputs[i].Status = "incomplete"
+			}
 			restoreBridgeOutputIdentity(&outputs[i], state.Bridge.ToolNames)
 		}
 	}
