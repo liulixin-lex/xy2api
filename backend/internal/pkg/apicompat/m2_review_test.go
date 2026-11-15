@@ -289,3 +289,38 @@ func TestReviewM2UnspecifiedIncompleteRetainsPartialArguments(t *testing.T) {
 		require.Equal(t, tc.want, *chunks[len(chunks)-1].Choices[0].FinishReason, "stream %s/%s %s", tc.status, tc.reason, tc.arguments)
 	}
 }
+
+func TestReviewM2InvalidTextFormatIsOmitted(t *testing.T) {
+	for _, tc := range []struct{ fields, verbosity string }{
+		{`"text":{"format":{"type":"bogus"}}`, ""},
+		{`"text":{"format":"json"}`, ""},
+		{`"text":{"format":{"type":"json_schema"},"verbosity":"low"}`, "low"},
+	} {
+		var req ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],`+tc.fields+`}`), &req))
+		for _, record := range []bool{false, true} {
+			var notices []ConversionNotice
+			opts := ConversionOptions{}
+			if record {
+				opts.Record = func(n ConversionNotice) { notices = append(notices, n) }
+			}
+			out, err := ChatCompletionsToResponsesWithOptions(&req, opts)
+			require.NoError(t, err, tc.fields)
+			if tc.verbosity == "" {
+				require.Nil(t, out.Text)
+			} else {
+				require.Empty(t, out.Text.Format)
+				require.Equal(t, tc.verbosity, out.Text.Verbosity)
+			}
+			if record {
+				require.Equal(t, []ConversionNotice{{Field: "text.format", Action: "omit"}}, notices)
+			}
+		}
+	}
+	var req ChatCompletionsRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"bogus"}}`), &req))
+	_, err := ChatCompletionsToResponses(&req)
+	var conversionErr *UnsupportedConversionError
+	require.ErrorAs(t, err, &conversionErr, "an invalid response_format keeps the baseline error")
+	require.Equal(t, "response_format.type", conversionErr.Field)
+}

@@ -2205,7 +2205,7 @@ func TestChatFieldsPreservedForResponses(t *testing.T) {
 		{"include string", `"include":"reasoning.encrypted_content"`, ``, "include", nil},
 		{"include nonstring", `"include":[1]`, ``, "include", nil},
 		{"include null member", `"include":[null]`, ``, "include", nil},
-		{"invalid text format", `"text":{"format":{"type":"unknown"}}`, ``, "text.format.type", nil},
+		{"invalid text format", `"text":{"format":{"type":"unknown"}}`, ``, "", []ConversionNotice{{Field: "text.format", Action: "omit"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var req ChatCompletionsRequest
