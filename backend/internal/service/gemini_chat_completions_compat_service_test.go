@@ -1,10 +1,18 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {
@@ -160,4 +168,31 @@ func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)
 	require.Len(t, choice.Message.ToolCalls, 1)
 	require.Equal(t, "get_weather", choice.Message.ToolCalls[0].Function.Name)
 	require.JSONEq(t, `{"city":"Paris"}`, choice.Message.ToolCalls[0].Function.Arguments)
+}
+
+func m5ForwardChat(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
+	t.Helper()
+	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
+	contentType := "application/json"
+	if gjson.GetBytes(body, "stream").Bool() {
+		response = "data: " + response + "\n\n"
+		contentType = "text/event-stream"
+	}
+	account := &Account{ID: 703, Name: "gemini-signal-test", Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	expectedModel := account.GetMappedModel(gjson.GetBytes(body, "model").String())
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}, onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+		require.Contains(t, req.URL.Path, "/models/"+expectedModel+":")
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	c.Request = c.Request.WithContext(ctx)
+	result, err := svc.ForwardAsChatCompletions(ctx, c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, upstream.requestBodies, 1)
+	return upstream.requestBodies[0], result, resilience.SnapshotConversionNotices(ctx)
 }

@@ -10,6 +10,12 @@
 
 ### 参数与协议转换
 
+- Chat 通往 Gemini 时按最终模型处理思考与 JSON 格式，小输出预算保持原值，历史工具结果各归其轮。
+
+- Chat 转 Responses 保留 metadata、user、文本详细程度和显式 include，GPT-6.1 Terra 使用最终模型的推理档位与输出上限。
+
+- Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
+
 - 上游的非标准结束原因继续按原默认规则转换，并记录映射降级，不新增请求失败。
 
 - API Key 账号的请求转为 Anthropic 时，只发送 `allowed_tools` 允许的工具；未知条目记录后忽略，`mode: auto` 且允许列表为空时不允许调用工具。
@@ -55,7 +61,6 @@
 - 转为 Chat、Anthropic 上游时，超长、含非 ASCII 字符或 namespace 展开后重名的工具名（包括 tool_search 发现的工具）改用短别名发送，响应中还原原名。
 
 - 跨位置重复声明工具时保留第一份定义，后续 schema 差异只记录省略，避免向上游发送重复工具。
-
 
 - Messages 转 Responses 时，工具的显式 `strict: true` 仅在各层对象禁止额外属性且所有属性必填时保留，否则按 `false` 发送并记录降级；显式 `false` 与未指定照旧，`allowed_callers` 中无法表达的限制省略并记录，不是字符串数组时返回 400。
 
@@ -122,6 +127,7 @@
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
 - Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
+
 - Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
 
 - Gemini 兼容入口返回的思考文本与普通正文分开，JSON 和流式响应均保留思考内容。

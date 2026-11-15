@@ -127,6 +127,7 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 ### 兼容入口参数
 
 
+API Key 账号的兼容请求按最终映射后的模型转换。Chat 的 Anthropic 中间对象仅保留意图，不套用 Claude 的最小思考预算、不生成默认 thinking；输出上限保持原值，最终 Gemini 请求才按实际目标校验和映射：
 
 - **思考控制**：没有显式意图时保留模型默认。优先级为 `disabled`/`none`、显式 effort、数值预算、单独的 `adaptive`；中间对象中的 adaptive 不覆盖 effort。Gemini 2.5 Flash 的 low/medium/high 分别映射为 1024/8192/24576，none 为 0；2.5 Pro 不能完全关闭，最低预算为 128。已确认接受 level 的型号采用最近的支持档位，不能保证原请求的思考强度或完全关闭；未知能力省略并记录。计费只读取最终实际发出的 `thinkingLevel`，预算与默认模式不推断收费档位。
 
