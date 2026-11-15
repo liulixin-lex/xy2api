@@ -466,3 +466,55 @@ func TestM4AnthropicToolInterleave(t *testing.T) {
 		})
 	}
 }
+
+func TestM4ChatToolTerminalIdentityE14(t *testing.T) {
+	for _, kind := range []string{"function", "custom", "tool_search"} {
+		t.Run(kind, func(t *testing.T) {
+			state := NewChatCompletionsToResponsesStreamState("m")
+			name := "lookup"
+			arguments := "{}"
+			if kind == "custom" {
+				name = "exec"
+				arguments = `{"input":"echo ok"}`
+				state.CustomTools = map[string]bool{name: true}
+			}
+			if kind == "tool_search" {
+				name = toolSearchProxyName
+				state.ToolSearchDeclared = true
+			}
+			index := 0
+			reason := "tool_calls"
+			chunk := &ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: []ChatToolCall{{Index: &index, ID: "c", Function: ChatFunctionCall{Name: name, Arguments: arguments}}}}, FinishReason: &reason}}}
+			events := ChatCompletionsChunkToResponsesEvents(chunk, state)
+			events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+			added, done, terminal := "", "", ""
+			for _, e := range events {
+				if e.Item != nil {
+					if e.Type == "response.output_item.added" {
+						added = e.Item.ID
+					}
+					if e.Type == "response.output_item.done" {
+						done = e.Item.ID
+					}
+				}
+				if e.Type == "response.completed" {
+					terminal = e.Response.Output[0].ID
+				}
+			}
+			if added == "" || added != done || added != terminal {
+				t.Fatalf("added=%q done=%q terminal=%q", added, done, terminal)
+			}
+		})
+	}
+	state := NewChatCompletionsToResponsesStreamState("m")
+	state.MessageItemID = "fixed"
+	_, _ = state.Text.WriteString("answer")
+	raw, err := json.Marshal(state.chatOutput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"type":"message","id":"fixed","role":"assistant","content":[{"type":"output_text","text":"answer"}],"status":"completed"}]`
+	if string(raw) != want {
+		t.Fatalf("no-tool output changed: %s", raw)
+	}
+}
