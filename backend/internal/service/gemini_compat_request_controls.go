@@ -1,7 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
@@ -23,6 +27,35 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 		return nil, err
 	}
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+	for toolIndex, tool := range gjson.GetBytes(body, "tools").Array() {
+		for declarationIndex, declaration := range tool.Get("functionDeclarations").Array() {
+			parameters := declaration.Get("parameters")
+			if !parameters.IsObject() {
+				continue
+			}
+			var schema map[string]any
+			decoder := json.NewDecoder(bytes.NewReader([]byte(parameters.Raw)))
+			decoder.UseNumber()
+			if err := decoder.Decode(&schema); err != nil {
+				return nil, err
+			}
+			field := fmt.Sprintf("tools[%d].functionDeclarations[%d].parameters", toolIndex, declarationIndex)
+			omitted := pruneGeminiEmptyEnums(schema, field)
+			if len(omitted) == 0 {
+				continue
+			}
+			path := fmt.Sprintf("tools.%d.functionDeclarations.%d.parameters", toolIndex, declarationIndex)
+			body, err = sjson.SetBytes(body, path, schema)
+			if err != nil {
+				return nil, err
+			}
+			for _, field := range omitted {
+				if opts.Record != nil {
+					opts.Record(apicompat.ConversionNotice{Field: field, Action: "omit"})
+				}
+			}
+		}
+	}
 	capabilities := geminiCompatCapabilities(mappedModel)
 	body, err = applyGeminiCompatThinkingConfig(claudeBody, body, capabilities, opts)
 	if err != nil {
@@ -172,4 +205,106 @@ func applyGeminiCompatResponseFormat(claudeBody, body []byte, caps GeminiCompatC
 		return body, nil
 	}
 	return sjson.SetRawBytes(body, "generationConfig.responseJsonSchema", []byte(schema.Raw))
+}
+
+func pruneGeminiEmptyEnums(schema map[string]any, path string) []string {
+	var omitted []string
+	remove := func(keyword string) {
+		if _, exists := schema[keyword]; exists {
+			delete(schema, keyword)
+			omitted = append(omitted, path+"."+keyword)
+		}
+	}
+	for _, keyword := range []string{"not", "oneOf"} {
+		if hasGeminiEmptyEnum(schema[keyword]) {
+			remove(keyword)
+		}
+	}
+	if hasGeminiEmptyEnum(schema["if"]) || hasGeminiEmptyEnum(schema["then"]) || hasGeminiEmptyEnum(schema["else"]) {
+		for _, keyword := range []string{"if", "then", "else"} {
+			remove(keyword)
+		}
+	}
+	if hasGeminiEmptyEnum(schema["contains"]) {
+		for _, keyword := range []string{"contains", "minContains", "maxContains"} {
+			remove(keyword)
+		}
+	}
+	if values, ok := schema["enum"].([]any); ok {
+		kept := make([]any, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); !ok || text != "" {
+				kept = append(kept, value)
+			}
+		}
+		if len(kept) == 0 {
+			remove("enum")
+		} else if len(kept) != len(values) {
+			schema["enum"] = kept
+			omitted = append(omitted, path+".enum")
+		}
+	}
+	visitGeminiSchemaChildren(schema, func(child any, suffix string) {
+		if object, ok := child.(map[string]any); ok {
+			omitted = append(omitted, pruneGeminiEmptyEnums(object, path+suffix)...)
+		}
+	})
+	return omitted
+}
+
+func hasGeminiEmptyEnum(schema any) bool {
+	if branches, ok := schema.([]any); ok {
+		for _, branch := range branches {
+			if hasGeminiEmptyEnum(branch) {
+				return true
+			}
+		}
+		return false
+	}
+	object, ok := schema.(map[string]any)
+	if !ok {
+		return false
+	}
+	if values, ok := object["enum"].([]any); ok {
+		if len(values) == 0 {
+			return true
+		}
+		for _, value := range values {
+			if text, ok := value.(string); ok && text == "" {
+				return true
+			}
+		}
+	}
+	found := false
+	visitGeminiSchemaChildren(object, func(child any, _ string) {
+		found = found || hasGeminiEmptyEnum(child)
+	})
+	return found
+}
+
+func visitGeminiSchemaChildren(schema map[string]any, visit func(any, string)) {
+	for _, keyword := range []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"} {
+		if container, ok := schema[keyword].(map[string]any); ok {
+			names := make([]string, 0, len(container))
+			for name := range container {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				visit(container[name], "."+keyword+"."+name)
+			}
+		}
+	}
+	for _, keyword := range []string{"items", "prefixItems", "anyOf", "allOf", "oneOf"} {
+		if children, ok := schema[keyword].([]any); ok {
+			for index, child := range children {
+				visit(child, fmt.Sprintf(".%s[%d]", keyword, index))
+			}
+		} else if keyword == "items" {
+			visit(schema[keyword], "."+keyword)
+		}
+	}
+	for _, keyword := range []string{"additionalProperties", "propertyNames", "not", "if", "then", "else", "contains"} {
+		visit(schema[keyword], "."+keyword)
+	}
 }
