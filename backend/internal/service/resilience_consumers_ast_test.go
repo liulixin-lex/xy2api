@@ -127,7 +127,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/service/openai_messages_continuation.go:resilienceContinuationReplayAllowed":              1,
 			"internal/service/resilience_budget.go:resilienceInServiceRetryAllowed":                             1,
 			"internal/service/resilience_request_repair_replay.go:newOpenAIRejectedFieldRepairSignal":           1,
-			"internal/service/resilience_request_repair_replay.go:newOpenAIRequestRepairSignal":                 1,
+			"internal/service/openai_encrypted_content_http.go:newHTTPEncryptedContentRepairSignal":             1,
 			"internal/service/resilience_web_search_replay.go:OpenAIGatewayService.openAIWebSearchReplayDecide": 1,
 		},
 		"ConsumeInPlaceRetryWithTimer": {
