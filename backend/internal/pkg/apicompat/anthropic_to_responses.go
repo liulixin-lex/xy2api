@@ -25,6 +25,9 @@ func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptio
 	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
 		return nil, err
 	}
+	if err := openai.ValidateGPT61TerraReasoningEffort(req.Model, anthropicReasoningEffort(req)); err != nil {
+		return nil, err
+	}
 	input, err := convertAnthropicToResponsesInput(req.System, req.Messages)
 	if err != nil {
 		return nil, err
@@ -77,7 +80,7 @@ func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptio
 
 	// An explicit thinking disable takes precedence over output_config.effort.
 	effort := anthropicReasoningEffort(req)
-	if openai.IsGPT61SolModelSpelling(req.Model) && req.OutputConfig != nil && req.OutputConfig.Effort == "max" && effort != "none" {
+	if (openai.IsGPT61SolModelSpelling(req.Model) || openai.IsGPT61TerraModelSpelling(req.Model)) && req.OutputConfig != nil && req.OutputConfig.Effort == "max" && effort != "none" {
 		effort = "max"
 	}
 	out.Reasoning = &ResponsesReasoning{
