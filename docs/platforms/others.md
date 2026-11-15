@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Responses→Chat 桥保留 `user`、`metadata`，将 `text.verbosity` 映射为 `verbosity`，沿用入口已选定的输出预算。
+
 Chat 响应支持字符串、null，以及按顺序包含 text/thinking 的内容数组；数组已带 thinking 时不重复输出独立 reasoning 字段，未知 part 返回转换错误。此规则不改变 Chat 请求媒体数组。
 
 Chat 响应的独立 `reasoning_content`/`reasoning` 在正文或工具开始后封闭；迟到字段不再开启新 reasoning 项，也不改写已完成摘要。

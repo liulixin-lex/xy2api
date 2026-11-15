@@ -845,3 +845,26 @@ func TestM4WhitespaceThinking(t *testing.T) {
 		}
 	}
 }
+
+func TestM4RequestFieldContract(t *testing.T) {
+	limit := 22
+	req := &ResponsesRequest{Model: "probe", Input: json.RawMessage(`"hello"`), User: json.RawMessage(`"alice"`), Metadata: json.RawMessage(`{"project":"p"}`), Text: &ResponsesText{Verbosity: "low"}, MaxOutputTokens: &limit}
+	out, err := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out.User) != `"alice"` || string(out.Metadata) != `{"project":"p"}` || out.Verbosity != "low" || out.MaxCompletionTokens == nil || *out.MaxCompletionTokens != 22 {
+		t.Fatalf("fields=%+v", out)
+	}
+	legacy, err := ResponsesToChatCompletionsRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy.User) != 0 || len(legacy.Metadata) != 0 || legacy.Verbosity != "" {
+		t.Fatal("legacy fields changed")
+	}
+	out.Metadata[0] = 'x'
+	if req.Metadata[0] != '{' {
+		t.Fatal("metadata aliases input")
+	}
+}
