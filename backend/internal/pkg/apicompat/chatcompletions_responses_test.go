@@ -1932,3 +1932,36 @@ func TestImageDetailOmission(t *testing.T) {
 	require.Error(t, err)
 	require.Zero(t, notices)
 }
+
+func TestChatHistoryReasoningSeparated(t *testing.T) {
+	for _, content := range []string{`"answer"`, `null`, `[{"type":"thinking","thinking":"more"},{"type":"text","text":"answer","cache_control":{"type":"ephemeral"}}]`} {
+		t.Run(content, func(t *testing.T) {
+			req := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ReasoningContent: "thought", Content: json.RawMessage(content), ToolCalls: []ChatToolCall{{ID: "c", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: `{}`}}}}}}
+			legacy, err := ChatCompletionsToResponses(req)
+			require.NoError(t, err)
+			zero, err := ChatCompletionsToResponsesWithOptions(req, ConversionOptions{})
+			require.NoError(t, err)
+			require.Equal(t, string(legacy.Input), string(zero.Input))
+			require.Contains(t, string(zero.Input), "thinking")
+			converted, err := ChatCompletionsToResponsesWithOptions(req, ConversionOptions{SupportsPlaintextReasoningInput: true})
+			require.NoError(t, err)
+			var items []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(converted.Input, &items))
+			require.Equal(t, "reasoning", items[0].Type)
+			require.Contains(t, string(items[0].Content), "thought")
+			require.Equal(t, "function_call", items[len(items)-1].Type)
+			require.NotContains(t, string(converted.Input), "<thinking>")
+			require.NotContains(t, string(converted.Input), `\u003cthinking`)
+			if content == `null` {
+				require.Len(t, items, 2)
+			} else {
+				require.Equal(t, "message", items[1].Type)
+				require.Contains(t, string(items[1].Content), "answer")
+			}
+			if content[0] == '[' {
+				require.Contains(t, string(items[1].Content), "cache_control")
+				require.Contains(t, string(items[0].Content), "thoughtmore")
+			}
+		})
+	}
+}
