@@ -16,6 +16,12 @@ import (
 // Anthropic Messages response. Reasoning output items are mapped to thinking
 // blocks; function_call items become tool_use blocks.
 func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicResponse {
+	return ResponsesToAnthropicWithOptions(resp, model, ConversionOptions{})
+}
+
+// ResponsesToAnthropicWithOptions records terminal mappings when a sink is set.
+// Call ValidateResponsesForAnthropic first to handle projection errors.
+func ResponsesToAnthropicWithOptions(resp *ResponsesResponse, model string, opts ConversionOptions) *AnthropicResponse {
 	if ValidateResponsesForAnthropic(resp) != nil {
 		return nil
 	}
@@ -98,10 +104,7 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 	}
 	out.Content = blocks
 
-	stopReason := responsesStatusToAnthropicStopReason(resp.Status, resp.IncompleteDetails, blocks)
-	if responsesHasRefusal(resp) {
-		_, stopReason, _ = ProjectTerminal("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), containsAnthropicToolUseBlock(blocks), true)
-	}
+	stopReason := responsesStatusToAnthropicStopReason(resp.Status, resp.IncompleteDetails, blocks, responsesHasRefusal(resp), opts)
 	out.StopReason = AnthropicStopReasonPtr(stopReason)
 
 	if resp.Usage != nil {
@@ -120,7 +123,7 @@ func ValidateResponsesForAnthropic(resp *ResponsesResponse) error {
 	if resp.Error != nil {
 		return &UpstreamConversionError{Field: "response.error", Reason: "upstream response failed", SourceProtocol: "responses"}
 	}
-	if _, _, err := ProjectTerminal("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), false, responsesHasRefusal(resp)); err != nil {
+	if _, _, _, err := ProjectTerminalWithMapping("responses", "anthropic", resp.Status, responsesIncompleteReason(resp), false, responsesHasRefusal(resp)); err != nil {
 		return err
 	}
 	for _, item := range resp.Output {
@@ -193,13 +196,27 @@ func responsesHasRefusal(resp *ResponsesResponse) bool {
 	return false
 }
 
-func responsesStatusToAnthropicStopReason(status string, details *ResponsesIncompleteDetails, blocks []AnthropicContentBlock) string {
+func responsesStatusToAnthropicStopReason(status string, details *ResponsesIncompleteDetails, blocks []AnthropicContentBlock, hasRefusal bool, opts ConversionOptions) string {
 	reason := ""
 	if details != nil {
 		reason = details.Reason
 	}
-	_, stop, _ := ProjectTerminal("responses", "anthropic", status, reason, containsAnthropicToolUseBlock(blocks), false)
+	_, stop, mapped, err := ProjectTerminalWithMapping("responses", "anthropic", status, reason, containsAnthropicToolUseBlock(blocks), hasRefusal)
+	if err == nil && mapped {
+		resToAnthRecordTerminalMapping(reason, opts.Record)
+	}
 	return stop
+}
+
+func resToAnthRecordTerminalMapping(reason string, record func(ConversionNotice)) {
+	if record == nil {
+		return
+	}
+	field := "status"
+	if reason != "" {
+		field = "incomplete_details.reason"
+	}
+	record(ConversionNotice{Field: field, Action: "map"})
 }
 
 func containsAnthropicToolUseBlock(blocks []AnthropicContentBlock) bool {
@@ -279,6 +296,7 @@ type ResponsesEventToAnthropicState struct {
 	itemIDs          map[int]string
 	reasoning        map[string]*responsesAnthropicReasoning
 	activeReasoning  *responsesAnthropicReasoning
+	record           func(ConversionNotice)
 
 	ContentBlockIndex   int
 	ContentBlockOpen    bool
@@ -314,7 +332,13 @@ type ResponsesEventToAnthropicState struct {
 
 // NewResponsesEventToAnthropicState returns an initialised stream state.
 func NewResponsesEventToAnthropicState() *ResponsesEventToAnthropicState {
+	return NewResponsesEventToAnthropicStateWithOptions(ConversionOptions{})
+}
+
+// NewResponsesEventToAnthropicStateWithOptions attaches a request notice sink.
+func NewResponsesEventToAnthropicStateWithOptions(opts ConversionOptions) *ResponsesEventToAnthropicState {
 	return &ResponsesEventToAnthropicState{
+		record:                opts.Record,
 		OutputIndexToBlockIdx: make(map[int]int),
 		tools:                 make(map[int]*responsesAnthropicTool),
 		toolItems:             make(map[string]*responsesAnthropicTool),
@@ -513,7 +537,7 @@ func FinalizeResponsesAnthropicStream(state *ResponsesEventToAnthropicState) []A
 	var events []AnthropicStreamEvent
 	events = append(events, closeCurrentBlock(state)...)
 
-	_, stopReason, err := ProjectTerminal("responses", "anthropic", "completed", "", state.HasToolCall, state.hasRefusal)
+	_, stopReason, _, err := ProjectTerminalWithMapping("responses", "anthropic", "completed", "", state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		state.err = err
 		return events
@@ -1210,7 +1234,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 			status = "completed"
 		}
 	}
-	_, _, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	_, _, _, err := ProjectTerminalWithMapping("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		if state.err == nil {
 			state.err = err
@@ -1273,12 +1297,15 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		}
 	}
 
-	_, stopReason, err := ProjectTerminal("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
+	_, stopReason, mapped, err := ProjectTerminalWithMapping("responses", "anthropic", status, reason, state.HasToolCall, state.hasRefusal)
 	if err != nil {
 		if state.err == nil {
 			state.err = err
 		}
 		return events
+	}
+	if mapped {
+		resToAnthRecordTerminalMapping(reason, state.record)
 	}
 
 	events = append(events,
