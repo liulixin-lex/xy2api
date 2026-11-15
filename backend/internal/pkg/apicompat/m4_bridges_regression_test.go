@@ -1412,6 +1412,11 @@ func TestM4ToolChoiceSubset(t *testing.T) {
 	if !strings.Contains(string(raw), "echo ok") || !strings.Contains(string(raw), alias) {
 		t.Fatalf("custom history: %s", raw)
 	}
+	required := &ResponsesRequest{Model: "m", Tools: []ResponsesTool{{Type: "function", Name: "f", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: json.RawMessage(`{"type":"allowed_tools","mode":"required","tools":[{"type":"function","name":"f"}]}`)}
+	requiredOut, e := ResponsesToChatCompletionsRequestWithOptions(required, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+	if e != nil || string(requiredOut.ToolChoice) != `"required"` {
+		t.Fatalf("required mode: %#v %v", requiredOut, e)
+	}
 	// The private original Chat source remains a copied policy input after aliasing.
 	chatReq := &ChatCompletionsRequest{Model: "claude-sonnet-4-6", Tools: []ChatTool{{Type: "function", Function: &ChatFunction{Name: "工具", Parameters: json.RawMessage(`{"type":"object"}`)}}}, Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}}}
 	intermediate, err := ChatCompletionsToResponses(chatReq)
@@ -1498,4 +1503,37 @@ func TestM4UnknownTerminalMapping(t *testing.T) {
 		t.Fatalf("unknown Anthropic: %v %#v", state.Err(), events)
 	}
 	check("stop_reason")
+}
+
+func TestM4AnthropicToChatHistoryUnchanged(t *testing.T) {
+	var req AnthropicRequest
+	input := []byte(`{"model":"probe","cache_control":{"type":"ephemeral"},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call_a","name":"工具","input":{},"cache_control":{"type":"ephemeral"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_a","content":"one"}]},{"role":"assistant","content":[{"type":"tool_use","id":"call_a","name":"工具","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_a","content":"two"}]}]}`)
+	if err := json.Unmarshal(input, &req); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(req.Messages)
+	out, err := AnthropicToChatCompletionsRequest(&req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.CacheControl != nil {
+		t.Fatal("unexpected top-level cache control")
+	}
+	req.CacheControl = nil
+	control, err := AnthropicToChatCompletionsRequest(&req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(out)
+	b, _ := json.Marshal(control)
+	if string(a) != string(b) {
+		t.Fatalf("top-level cache marker affected projection: %s / %s", a, b)
+	}
+	if strings.Count(string(a), `"content":"two"`) != 2 || strings.Contains(string(a), "one") {
+		t.Fatalf("legacy pairing changed: %s", a)
+	}
+	after, _ := json.Marshal(req.Messages)
+	if string(before) != string(after) {
+		t.Fatal("input block declarations changed")
+	}
 }
