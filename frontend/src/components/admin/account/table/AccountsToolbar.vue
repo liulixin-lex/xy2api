@@ -19,20 +19,20 @@
       </template>
       <template #filters>
       <div ref="filtersRef" class="tb-filters">
+        <!-- The shared Select's sm (12.6): the filter's name until a value is chosen, "all" first in its panel. -->
         <template v-for="key in DIRECT" :key="key">
-          <span v-if="!foldedSelects.includes(key)" class="tb-sel">
-            <select
-              :class="{ 'has-value': !!filters[FIELD[key]] }"
-              :value="filters[FIELD[key]] ?? ''"
-              :aria-label="label(key)"
-              :data-filter="key"
-              @change="setFilter(key, ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">{{ label(key) }}</option>
-              <option v-for="option in options(key)" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-            <Icon name="chevronDown" size="xs" class="tb-sel__icon" />
-          </span>
+          <Select
+            v-if="!foldedSelects.includes(key)"
+            size="sm"
+            class="tb-sel"
+            :model-value="filters[FIELD[key]] ?? ''"
+            :options="selectOptions(key)"
+            :aria-label="label(key)"
+            :data-filter="key"
+            @update:model-value="setFilter(key, String($event ?? ''))"
+          >
+            <template #selected="{ option }">{{ option && option.value !== '' ? option.label : label(key) }}</template>
+          </Select>
         </template>
         <button
           ref="moreRef"
@@ -95,16 +95,18 @@
           </span>
         </div>
       </div>
-      <label v-for="key in menuKeys" :key="key" class="tb-menu__field">
-        <span>{{ label(key) }}</span>
-        <span class="tb-sel tb-sel--full">
-          <select :value="filters[FIELD[key]] ?? ''" :class="{ 'has-value': !!filters[FIELD[key]] }" :data-filter="key" @change="setFilter(key, ($event.target as HTMLSelectElement).value)">
-            <option value="">{{ t('admin.accounts.table.any') }}</option>
-            <option v-for="option in options(key)" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-          <Icon name="chevronDown" size="xs" class="tb-sel__icon" />
-        </span>
-      </label>
+      <div v-for="key in menuKeys" :key="key" class="tb-menu__field">
+        <span aria-hidden="true">{{ label(key) }}</span>
+        <Select
+          size="sm"
+          class="tb-sel tb-sel--full"
+          :model-value="filters[FIELD[key]] ?? ''"
+          :options="selectOptions(key)"
+          :aria-label="label(key)"
+          :data-filter="key"
+          @update:model-value="setFilter(key, String($event ?? ''))"
+        />
+      </div>
       <button v-if="tags.length" type="button" class="tb-menu__clear" @click="clearAll">{{ t('admin.accounts.table.clearFilters') }}</button>
     </div>
   </div>
@@ -128,6 +130,7 @@ import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import Select from '@/components/common/Select.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
@@ -217,6 +220,8 @@ const optionsByKey = computed<Record<ToolbarFilterKey, Option[]>>(() => ({
   category: categories.categories.map((category) => ({ value: String(category.id), label: category.name }))
 }))
 const options = (key: ToolbarFilterKey) => optionsByKey.value[key]
+/** A filter's Select: "all" (no value) first, then its options. */
+const selectOptions = (key: ToolbarFilterKey): Option[] => [{ value: '', label: t('admin.accounts.table.any') }, ...options(key)]
 
 const showCategory = computed(() => !authStore.isSimpleMode && (categories.categories.length > 0 || !!props.filters.group_category))
 const moreKeys = computed(() => MORE.filter((key) => key !== 'category' || showCategory.value))
@@ -387,7 +392,8 @@ useEventListener(document, 'mousedown', (event: MouseEvent) => {
   menuOpen.value = false
 })
 useEventListener(document, 'keydown', (event: KeyboardEvent) => {
-  if (event.key !== 'Escape' || !menuOpen.value) return
+  // A Select open in the menu took this Escape (its panel prevents it): it closes the Select alone.
+  if (event.key !== 'Escape' || !menuOpen.value || event.defaultPrevented) return
   event.preventDefault()
   menuOpen.value = false
   moreRef.value?.focus({ preventScroll: true })
@@ -527,51 +533,17 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 .tb-input::placeholder {
   color: var(--color-text-muted);
 }
-.tb-input:focus-visible,
-.tb-sel select:focus-visible {
+.tb-input:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: -1px;
   border-color: transparent;
 }
 .tb-sel {
-  position: relative;
-  display: inline-block;
+  width: 96px;
   flex: none;
 }
-.tb-sel select {
-  width: 96px;
-  height: var(--control-height);
-  padding: 0 28px 0 10px;
-  overflow: hidden;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  appearance: none;
-  background: var(--color-bg-control);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-body);
-  text-overflow: ellipsis;
-}
-.tb-sel select.has-value {
-  color: var(--color-text-primary);
-}
-.tb-sel--full,
-.tb-sel--full select {
+.tb-sel--full {
   width: 100%;
-}
-.tb-sel__icon {
-  position: absolute;
-  top: 50%;
-  right: 9px;
-  width: 12px;
-  height: 12px;
-  margin-top: -6px;
-  color: var(--color-text-secondary);
-  pointer-events: none;
-}
-@media (hover: hover) {
-  .tb-sel select:hover {
-    background: var(--color-bg-control-hover);
-  }
 }
 .tb-btn {
   display: inline-flex;
@@ -746,7 +718,6 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     height: 40px;
     font-size: 15px;
   }
-  .tb-sel select,
   .tb-btn {
     height: 40px;
   }
@@ -774,7 +745,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-search {
     width: 160px;
   }
-  .tb-sel select {
+  .tb-sel {
     width: 88px;
   }
 }

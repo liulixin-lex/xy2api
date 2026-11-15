@@ -39,6 +39,13 @@ const mountToolbar = (filters: Record<string, string>) => mount(AccountsToolbar,
   props: { filters, search: '', groups: [], liveStatus: 'live', pause: () => {}, resume: () => {} },
   global: { stubs: { LiveStatusIndicator: true } }
 })
+/** Opens a filter's Select (12.6) and clicks the option with this text in its panel, in the body. */
+const pick = async (wrapper: ReturnType<typeof mountToolbar>, selector: string, text: string) => {
+  await wrapper.get(`${selector} button`).trigger('click')
+  await flushPromises()
+  Array.from(document.body.querySelectorAll<HTMLElement>('.select-option')).find((option) => option.textContent?.trim() === text)!.click()
+  await flushPromises()
+}
 const shownTags = (wrapper: ReturnType<typeof mountToolbar>) =>
   wrapper.findAll('[data-test="filter-tags"] .tb-tag').filter((tag) => !(tag.element as HTMLElement).hidden).map((tag) => tag.attributes('data-key'))
 
@@ -103,17 +110,34 @@ describe('AccountsToolbar', () => {
   it('emits the filters with the one that changed, as the list request takes them (7d-12)', async () => {
     const wrapper = mountToolbar({ platform: 'openai', iq_status: '' })
     await flushPromises()
-    await wrapper.get('select[data-filter="quality"]').setValue('substandard')
+    await pick(wrapper, '[data-filter="quality"]', 'admin.accounts.table.quality.substandard')
     expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: '', sched_quality: 'substandard' }])
     // A tag's close button clears its filter only.
     await wrapper.get('[data-test="filter-tags"] .tb-tag[data-key="platform"] .tb-tag__x').trigger('click')
     expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: '', iq_status: '' }])
     // A filter from the menu goes by its own field name.
     await wrapper.get('[data-test="more-filters"]').trigger('click')
-    await wrapper.get('[data-test="more-filters-menu"] select[data-filter="iq"]').setValue('degraded')
+    await pick(wrapper, '[data-test="more-filters-menu"] [data-filter="iq"]', 'admin.accounts.iqCheckStatus.degraded')
     expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: 'degraded' }])
     await wrapper.get('[data-test="accounts-search"]').setValue('acc')
     expect(wrapper.emitted('update:search')!.at(-1)).toEqual(['acc'])
+    wrapper.unmount()
+  })
+
+  it('folds the direct filters, now Selects, into "more filters" from the right while the row overflows (12.6)', async () => {
+    // A filter is 100px; the filter box ends at 250px: platform and status stay (208px with the 8px gap).
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const right = this.classList.contains('tb-filters') ? this.querySelectorAll('.tb-sel').length * 100 : this.dataset.test === 'toolbar-filters' ? 250 : 0
+      return { left: 0, top: 0, bottom: 0, height: 0, width: right, right, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+    onTestFinished(() => { vi.restoreAllMocks() })
+    const wrapper = mountToolbar({})
+    await flushPromises()
+    const keys = (selector: string) => wrapper.findAll(`${selector} [data-filter]`).map((filter) => filter.attributes('data-filter'))
+    expect(keys('.tb-filters')).toEqual(['platform', 'status'])
+    expect(wrapper.get('[data-filter="platform"] button').text()).toBe('admin.accounts.table.filterLabels.platform')
+    await wrapper.get('[data-test="more-filters"]').trigger('click')
+    expect(keys('[data-test="more-filters-menu"]')).toEqual(['quality', 'group', 'type', 'privacy', 'iq'])
     wrapper.unmount()
   })
 
