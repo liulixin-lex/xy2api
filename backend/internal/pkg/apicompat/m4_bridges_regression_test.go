@@ -587,3 +587,74 @@ func m4AssertReasoningIdentity(t *testing.T, events []ResponsesStreamEvent) {
 		t.Fatalf("ID=%s", id)
 	}
 }
+
+func TestM4AnthropicSummaryLifecycle(t *testing.T) {
+	for _, ending := range []string{"block_stop", "next_item", "message_stop", "EOF", "signature_only"} {
+		t.Run(ending, func(t *testing.T) {
+			state := NewAnthropicEventToResponsesState()
+			opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+			var events []ResponsesStreamEvent
+			emit := func(e *AnthropicStreamEvent) {
+				events = append(events, AnthropicEventToResponsesEventsWithBridgeOptions(e, state, opts)...)
+			}
+			emit(&AnthropicStreamEvent{Type: "message_start", Message: &AnthropicResponse{ID: "fixed", Model: "m"}})
+			text := "FIRST"
+			if ending == "signature_only" {
+				text = ""
+			}
+			emit(&AnthropicStreamEvent{Type: "content_block_start", ContentBlock: &AnthropicContentBlock{Type: "thinking", Thinking: text, Signature: "signature"}})
+			if ending != "signature_only" {
+				emit(&AnthropicStreamEvent{Type: "content_block_delta", Delta: &AnthropicDelta{Type: "thinking_delta", Thinking: "SECOND"}})
+			}
+			switch ending {
+			case "block_stop", "signature_only":
+				emit(&AnthropicStreamEvent{Type: "content_block_stop"})
+			case "next_item":
+				emit(&AnthropicStreamEvent{Type: "content_block_start", ContentBlock: &AnthropicContentBlock{Type: "text"}})
+			case "message_stop":
+				emit(&AnthropicStreamEvent{Type: "message_delta", Delta: &AnthropicDelta{StopReason: "end_turn"}})
+				emit(&AnthropicStreamEvent{Type: "message_stop"})
+			case "EOF":
+				events = append(events, FinalizeAnthropicResponsesStreamWithBridgeOptions(state, opts)...)
+			}
+			counts := map[string]int{}
+			id := ""
+			var order []string
+			for _, e := range events {
+				if e.Item != nil && e.Item.Type == "reasoning" {
+					if id == "" {
+						id = e.Item.ID
+					}
+					if e.Item.ID != id {
+						t.Fatal("ID changed")
+					}
+					if e.Type == "response.output_item.done" && ending != "signature_only" && e.Item.Summary[0].Text != "FIRSTSECOND" {
+						t.Fatal("summary differs")
+					}
+				}
+				if strings.HasPrefix(e.Type, "response.reasoning_summary_") {
+					counts[e.Type]++
+					order = append(order, e.Type)
+					if e.ItemID != id || e.OutputIndex != 0 {
+						t.Fatal("summary identity differs")
+					}
+					if e.Type == "response.reasoning_summary_text.done" && e.Text != "FIRSTSECOND" {
+						t.Fatalf("done=%q", e.Text)
+					}
+				}
+			}
+			if ending == "signature_only" {
+				if len(counts) != 0 {
+					t.Fatalf("empty part created: %v", counts)
+				}
+				return
+			}
+			if counts["response.reasoning_summary_part.added"] != 1 || counts["response.reasoning_summary_text.done"] != 1 || counts["response.reasoning_summary_part.done"] != 1 {
+				t.Fatalf("counts=%v", counts)
+			}
+			if len(order) != 5 || order[0] != "response.reasoning_summary_part.added" || order[3] != "response.reasoning_summary_text.done" || order[4] != "response.reasoning_summary_part.done" {
+				t.Fatalf("order=%v", order)
+			}
+		})
+	}
+}

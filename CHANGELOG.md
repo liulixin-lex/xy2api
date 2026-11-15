@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Anthropic thinking 转为 Responses 流时补齐摘要分段的宣布与关闭事件，完成事件携带完整文本。
+
 - Chat、Anthropic 转换桥合成 reasoning 项使用 rs_ ID，流式事件与最终响应保持一致，便于后续历史回放。
 
 - Chat 工具流最终响应复用已宣布、已完成的工具项 ID，避免客户端将同一调用识别为另一项。

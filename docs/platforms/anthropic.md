@@ -260,6 +260,8 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 }
 ```
 
+Responses 流式响应中的 thinking 摘要先宣布 part，再发送文本增量，关闭时发送完整 text.done 与 part.done，最后关闭 item；仅签名或 redacted 内容不生成空摘要。
+
 流式响应已经开始时，Chat Completions 以流内错误事件、Responses 以 `response.failed` 事件返回，`type` 与 `code` 相同。
 
 ## 限制与注意事项

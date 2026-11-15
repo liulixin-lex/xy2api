@@ -31,6 +31,9 @@ func FinalizeAnthropicResponsesStreamWithBridgeOptions(state *AnthropicEventToRe
 	if !state.CreatedSent {
 		state.Bridge = opts.Bridge
 	}
+	if bridgeEnabled(state.Bridge) && !state.CompletedSent && state.StopReason == "" {
+		return closeCurrentResponsesItem(state)
+	}
 	return FinalizeAnthropicResponsesStream(state)
 }
 
@@ -39,4 +42,28 @@ func (state *AnthropicEventToResponsesState) Err() error {
 		return nil
 	}
 	return state.bridgeErr
+}
+
+func appendAnthropicReasoningSummary(state *AnthropicEventToResponsesState, text string) []ResponsesStreamEvent {
+	if text == "" {
+		return nil
+	}
+	var events []ResponsesStreamEvent
+	if !state.bridgeSummaryOpen {
+		state.bridgeSummaryOpen = true
+		events = append(events, makeResponsesEvent(state, "response.reasoning_summary_part.added", &ResponsesStreamEvent{ItemID: state.CurrentItemID, OutputIndex: state.OutputIndex, SummaryIndex: 0, Part: &ResponsesContentPart{Type: "summary_text"}}))
+	}
+	state.CurrentSummary += text
+	return append(events, makeResponsesEvent(state, "response.reasoning_summary_text.delta", &ResponsesStreamEvent{ItemID: state.CurrentItemID, OutputIndex: state.OutputIndex, SummaryIndex: 0, Delta: text}))
+}
+
+func closeAnthropicReasoningSummary(state *AnthropicEventToResponsesState) []ResponsesStreamEvent {
+	if !state.bridgeSummaryOpen {
+		return nil
+	}
+	state.bridgeSummaryOpen = false
+	return []ResponsesStreamEvent{
+		makeResponsesEvent(state, "response.reasoning_summary_text.done", &ResponsesStreamEvent{ItemID: state.CurrentItemID, OutputIndex: state.OutputIndex, SummaryIndex: 0, Text: state.CurrentSummary}),
+		makeResponsesEvent(state, "response.reasoning_summary_part.done", &ResponsesStreamEvent{ItemID: state.CurrentItemID, OutputIndex: state.OutputIndex, SummaryIndex: 0, Part: &ResponsesContentPart{Type: "summary_text", Text: state.CurrentSummary}}),
+	}
 }
