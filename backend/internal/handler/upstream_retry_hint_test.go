@@ -99,3 +99,37 @@ func TestM8RetryNotBefore(t *testing.T) {
 	})
 
 }
+
+func TestM8RetryHintReachesFinalAdvice(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name, agent, want string
+		suppress          bool
+		status            int
+	}{
+		{"http_cap", "client", "30", false, 503},
+		{"codex_cap", "codex_cli_rs/0.158.0", "10", false, 503},
+		{"suppressed", "client", "", true, 503},
+		{"nonretryable", "client", "", false, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := upstreamWaitContext(t, EndpointResponses, false)
+			c.Request.Header.Set("User-Agent", tc.agent)
+			st := resilience.StateFrom(c.Request.Context())
+			hint, ok := resilience.ParseUpstreamRecoveryHint(nil, []byte(`{"error":{"retry_after":310}}`), time.Now())
+			require.True(t, ok)
+			st.SetUpstreamRecoveryHint(&hint)
+			if tc.suppress {
+				resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true})
+			}
+			copyFailoverRetryAfter(c, tc.status, http.Header{"Retry-After": {"2"}})
+			require.Equal(t, tc.want, c.Writer.Header().Get("Retry-After"))
+			require.Equal(t, hint.NotBefore, st.UpstreamRecoveryHint().NotBefore)
+			if tc.want != "" {
+				applyExhaustedRetryHint(c, &upstreamWaitAdvisor{}, tc.status)
+				require.Equal(t, tc.want, c.Writer.Header().Get("Retry-After"))
+				require.Equal(t, 10, upstreamRecoverySeconds(c))
+			}
+		})
+	}
+}

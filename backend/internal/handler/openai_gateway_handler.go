@@ -4034,6 +4034,25 @@ func copyFailoverRetryAfter(c *gin.Context, status int, headers http.Header) {
 	if !resilience.RetryAdviceEligible(status, "", "") {
 		return
 	}
+	if c.Request != nil {
+		ctx := c.Request.Context()
+		if resilience.RetryAdviceFrom(ctx).Suppress {
+			return
+		}
+		if hint := resilience.StateFrom(ctx).UpstreamRecoveryHint(); hint != nil {
+			wait := time.Until(hint.NotBefore)
+			if wait <= 0 {
+				return
+			}
+			cfg := resilience.Current()
+			seconds := resilience.ClampRetryAfter(wait, cfg.Errors.NoAccountRetryAfter.Min, cfg.Errors.NoAccountRetryAfter.Max)
+			seconds = codexNoAccountRetryAfter(c, cfg, seconds)
+			retryAfter := strconv.Itoa(seconds)
+			c.Set(ginKeyResilienceUpstreamRetryAfter, retryAfter)
+			c.Header("Retry-After", retryAfter)
+			return
+		}
+	}
 	retryAfter := strings.TrimSpace(headers.Get("Retry-After"))
 	if retryAfter == "" || len(retryAfter) > 128 || strings.ContainsAny(retryAfter, "\r\n") || !isSafeRetryAfter(retryAfter) {
 		return

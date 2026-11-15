@@ -18,7 +18,7 @@
 | 上游余额不足 | 本请求换号；全部耗尽时 503。单账号分组在账号暂停期间返回 503，`Retry-After` 为暂停剩余时间（2–30 秒） |
 | 上游明确报告模型不可用，候选耗尽 | 404，OpenAI 与 Anthropic 为 `model_not_found`，Gemini 为 `NOT_FOUND`，消息为 `Model "<model>" is not supported by any configured account in this group`，不附重试建议 |
 | 上游内容安全拒绝 | 400 `invalid_request_error`，code `content_policy_violation`，附脱敏后的上游原文（最多 500 字符）；不重试、不换号 |
-| 换号耗尽的 429 或 5xx | 带 `Retry-After`：上游给出的值封顶到 2–30 秒，没有时取组内最早恢复时间 |
+| 换号耗尽的 429 或 5xx | 带 `Retry-After`：先取当前失败保存的原始恢复时刻，再封顶到 2–30 秒；没有时取组内最早恢复时间 |
 | 5xx 但上游错误类型为请求错误，候选耗尽 | 保留上游状态与脱敏后的错误体，带 `x-should-retry: false`（只对识别该头的客户端生效，例如 OpenAI 官方 SDK） |
 | 不可重试的耗尽（413 请求过大、续链被拒的 400） | 不带 `Retry-After`，并清除前面尝试留下的重试提示 |
 | 同一会话连续第 5 次耗尽失败（120 秒内） | 终止应答：`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持），`x-should-retry: false`，不带 `Retry-After`。会话成功一次或两次失败相隔超过 120 秒后重新计数 |
