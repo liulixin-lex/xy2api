@@ -762,6 +762,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			if err := applyAntigravityReasoningEffortPolicyForRequest(c, account, attemptParsedReq); err != nil {
+				sessionSlotAccounts[account.ID] = account // Include an unsent denial in the existing deferred session release.
 				if selection.Acquired && selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
 				}
