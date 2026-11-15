@@ -642,7 +642,6 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	}()
 	firstChunk := true
 	finishReason := ""
-	sawDone := false
 	var terminalResponse map[string]any
 	sawToolUse := false
 
@@ -748,9 +747,6 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 				}
 				if geminiStreamMayWrite(resp) && startMessage() {
 					return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, ccState.Err()
-				}
-				if payload == "[DONE]" {
-					sawDone = true
 				}
 				if payload != "" && payload != "[DONE]" {
 					rawBytes := []byte(payload)
@@ -896,10 +892,6 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	if err := completeGeminiResponse(resp, nil); err != nil {
 		return nil, err
 	}
-	if finishReason == "" && terminalResponse == nil && !sawDone {
-		apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, false)
-		return nil, ccState.Err()
-	}
 	if startMessage() {
 		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, ccState.Err()
 	}
@@ -958,7 +950,9 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			}
 		}
 	}
-	for _, chunk := range apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, finishReason != "" || terminalResponse != nil || sawDone) {
+	// A clean EOF ends the Gemini stream; like the Messages reader, it qualifies
+	// as the terminal when no finishReason was sent.
+	for _, chunk := range apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, true) {
 		if disconnected := writeChatChunk(chunk); disconnected {
 			return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, ccState.Err()
 		}

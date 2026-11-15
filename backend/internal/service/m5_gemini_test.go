@@ -907,10 +907,24 @@ func TestM5FinishReasonMapping(t *testing.T) {
 		}
 	})
 	t.Run("missing_terminal", func(t *testing.T) {
-		c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", nil)
-		resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n"))}
-		_, err := (&GeminiMessagesCompatService{cfg: &config.Config{}}).handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
-		require.Error(t, err)
-		require.NotContains(t, recorder.Body.String(), `"finish_reason":"`)
+		// Gemini sends no [DONE]; a clean EOF without finishReason ends normally, as in Messages.
+		raw := `data: {"candidates":[{"content":{"parts":[{"text":"complete answer"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}` + "\n\n"
+		for _, protocol := range []string{"messages", "chat"} {
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, nil)
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(raw))}
+			svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+			var err error
+			if protocol == "messages" {
+				_, err = svc.handleStreamingResponse(c, resp, time.Now(), "gemini-2.5-flash")
+				require.Contains(t, recorder.Body.String(), `"stop_reason":"end_turn"`)
+			} else {
+				_, err = svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
+				require.Contains(t, recorder.Body.String(), `"finish_reason":"stop"`)
+				require.True(t, strings.HasSuffix(recorder.Body.String(), "data: [DONE]\n\n"))
+			}
+			require.NoError(t, err, protocol)
+			require.Contains(t, recorder.Body.String(), "complete answer")
+			require.NotContains(t, recorder.Body.String(), `"error"`)
+		}
 	})
 }
