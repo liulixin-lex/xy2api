@@ -124,6 +124,29 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
+  it('takes a mouse pick in a Select of "more filters" and stays open, the Select closing (12.12-3)', async () => {
+    const wrapper = mountToolbar({ platform: '', iq_status: '' })
+    await flushPromises()
+    await wrapper.get('[data-test="more-filters"]').trigger('click')
+    await wrapper.get('[data-test="more-filters-menu"] [data-filter="iq"] button').trigger('click')
+    await flushPromises()
+    // The panel just opened is the body's last one, outside the menu: a real press, mousedown first, as a mouse sends it.
+    const panel = Array.from(document.body.querySelectorAll<HTMLElement>('.select-dropdown-portal')).at(-1)!
+    const option = Array.from(panel.querySelectorAll<HTMLElement>('.select-option')).find((el) => el.textContent?.trim() === 'admin.accounts.iqCheckStatus.degraded')!
+    for (const type of ['mousedown', 'mouseup', 'click']) {
+      option.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }))
+      await flushPromises()
+    }
+    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: '', iq_status: 'degraded' }])
+    expect(wrapper.find('[data-test="more-filters-menu"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="more-filters-menu"] [data-filter="iq"] button').attributes('aria-expanded')).toBe('false')
+    // A press really outside closes the menu.
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('[data-test="more-filters-menu"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('folds the direct filters, now Selects, into "more filters" from the right while the row overflows (12.6)', async () => {
     // A filter is 100px; the filter box ends at 250px: platform and status stay (208px with the 8px gap).
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

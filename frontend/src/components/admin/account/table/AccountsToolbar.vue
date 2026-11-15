@@ -136,6 +136,7 @@ import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { LiveStatus } from '@/composables/useLiveTable'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupCategoriesStore } from '@/stores/groupCategories'
 import type { AdminGroup } from '@/types'
@@ -386,18 +387,23 @@ watch(menuOpen, async (open) => {
   await nextTick()
   placeMenu()
 })
+// A sub-layer of the overlay stack: a Select opened in the menu is a layer above it, its panel in the body. A press
+// in that panel is not a press outside the menu, so the option's click lands and the menu stays open; Escape closes
+// the open Select first, then the menu (12.12-3).
+const menuLayer = useOverlayLayer(menuOpen, {
+  root: menuRef,
+  modal: false,
+  onEscape: () => {
+    menuOpen.value = false
+    moreRef.value?.focus({ preventScroll: true })
+  },
+  onCovered: () => { menuOpen.value = false }
+})
 useEventListener(document, 'mousedown', (event: MouseEvent) => {
   if (!menuOpen.value) return
-  const target = event.target as Node
-  if (menuRef.value?.contains(target) || moreRef.value?.contains(target)) return
+  const target = event.target as Element
+  if (menuRef.value?.contains(target) || moreRef.value?.contains(target) || menuLayer.insideAbove(target)) return
   menuOpen.value = false
-})
-useEventListener(document, 'keydown', (event: KeyboardEvent) => {
-  // A Select open in the menu took this Escape (its panel prevents it): it closes the Select alone.
-  if (event.key !== 'Escape' || !menuOpen.value || event.defaultPrevented) return
-  event.preventDefault()
-  menuOpen.value = false
-  moreRef.value?.focus({ preventScroll: true })
 })
 
 onMounted(() => {
