@@ -136,6 +136,8 @@ goals = true
 
 分组开启「允许 /v1/messages 调度」后，Claude Code 的配置与 Anthropic 分组相同（`ANTHROPIC_BASE_URL` 填根地址，不带 `/v1`），见 [Anthropic](anthropic.md#claude-code)。OpenCode 配置文件为 `~/.config/opencode/opencode.json`，按弹窗内容复制。
 
+Messages 转 Responses 时，CC Switch 的 `ccswitch-openai-reasoning-v1:` 本地签名包装（包括损坏的包装）不会作为供应商密文发出；判断前去除外侧空白。普通签名和未知版本保持原有处理，原有的空签名与 `gAAAA` 过滤不变。
+
 ### 反向代理
 
 在 Nginx 后使用 Codex CLI 时，需要在 `http` 块中加入 `underscores_in_headers on;`。Nginx 默认丢弃名称含下划线的请求头（如 `session_id`），会导致多账号下的粘性会话失效。更多见 [反向代理](../deployment/reverse-proxy.md)。

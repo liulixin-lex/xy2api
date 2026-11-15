@@ -315,9 +315,9 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 			continue
 		}
 		sig := strings.TrimSpace(b.Signature)
-		// Only replay provider ciphertext. Skip GPT/Codex-style gAAAA blobs and
-		// empty placeholders — xAI returns 400 on decrypt for foreign signatures.
-		if sig == "" || strings.HasPrefix(sig, "gAAAA") {
+		// Skip known foreign ciphertext and CC Switch's local v1 envelope.
+		// Unknown versions and ordinary provider signatures retain their behavior.
+		if sig == "" || strings.HasPrefix(sig, "gAAAA") || strings.HasPrefix(sig, "ccswitch-openai-reasoning-v1:") {
 			continue
 		}
 		items = append(items, ResponsesInputItem{

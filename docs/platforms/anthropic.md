@@ -147,6 +147,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 兼容账号对 thinking 签名历史的处理与普通 API Key 账号完全相同。
 
+Messages 转 Responses 时，签名去除外侧空白后，跳过空值、`gAAAA` 前缀及 CC Switch 的 `ccswitch-openai-reasoning-v1:` 本地包装，不把它们作为供应商密文发送。普通签名和未知包装版本仍沿用原有处理，正文与工具历史不变。
+
 | 情形 | 行为 |
 |---|---|
 | 同一会话的后续轮次 | 粘性调度把会话留在同一账号，thinking 签名发回产生它的账号 |
