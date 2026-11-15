@@ -658,3 +658,57 @@ func TestM4AnthropicSummaryLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestM4LateReasoningSealed(t *testing.T) {
+	for _, first := range []string{"text", "tool", "reasoning_then_text", "reasoning_only"} {
+		t.Run(first, func(t *testing.T) {
+			state := NewChatCompletionsToResponsesStreamState("m")
+			state.Bridge = &BridgeOptions{Enabled: true}
+			var events []ResponsesStreamEvent
+			emit := func(delta ChatDelta) {
+				events = append(events, ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: delta}}}, state)...)
+			}
+			before := "BEFORE"
+			after := "LATE"
+			text := "ANSWER"
+			if first == "reasoning_then_text" || first == "reasoning_only" {
+				emit(ChatDelta{ReasoningContent: &before})
+			}
+			if first == "text" || first == "reasoning_then_text" {
+				emit(ChatDelta{Content: &text})
+			}
+			if first == "tool" {
+				emit(ChatDelta{ToolCalls: []ChatToolCall{{ID: "c", Function: ChatFunctionCall{Name: "lookup", Arguments: "{}"}}}})
+			}
+			emit(ChatDelta{ReasoningContent: &after})
+			state.FinishReason = "stop"
+			events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+			terminal := events[len(events)-1].Response
+			visible := ""
+			for _, item := range terminal.Output {
+				if item.Type == "reasoning" {
+					visible += item.Summary[0].Text
+				}
+			}
+			want := ""
+			if first == "reasoning_then_text" {
+				want = "BEFORE"
+			}
+			if first == "reasoning_only" {
+				want = "BEFORELATE"
+			}
+			if visible != want {
+				t.Fatalf("visible=%q want=%q", visible, want)
+			}
+			closed := false
+			for _, e := range events {
+				if e.Type == "response.reasoning_summary_text.done" {
+					closed = true
+				}
+				if closed && e.Type == "response.reasoning_summary_text.delta" {
+					t.Fatal("delta after done")
+				}
+			}
+		})
+	}
+}
