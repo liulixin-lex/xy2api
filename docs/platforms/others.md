@@ -8,7 +8,7 @@ Responses reasoning 历史转为 Chat 时优先使用 `summary_text`，为空时
 
 Responses→Chat 桥保留 `user`、`metadata`，将 `text.verbosity` 映射为 `verbosity`，沿用入口已选定的输出预算。
 
-Chat 响应支持字符串、null，以及按顺序包含 text/thinking 的内容数组；数组已带 thinking 时不重复输出独立 reasoning 字段，未知 part 返回转换错误。此规则不改变 Chat 请求媒体数组。
+Chat 响应支持字符串、null，以及按顺序包含 text/thinking 的内容数组；数组已带 thinking 时不重复输出独立 reasoning 字段，未知类型片段忽略并记录字段省略。此规则不改变 Chat 请求媒体数组。
 
 Chat 响应的独立 `reasoning_content`/`reasoning` 在正文或工具开始后封闭；迟到字段不再开启新 reasoning 项，也不改写已完成摘要。
 
@@ -160,3 +160,5 @@ Embeddings、图片、视频、语音等端点对这些平台返回 `404 not_fou
 通过 tool_search 发现的工具每轮只加入一次声明；发现的 namespace 与长工具名同样使用短别名，响应还原原 namespace 和工具名。
 
 Chat 上游因长度或过滤结束工具输出时，Messages 响应仍返回 max_tokens 或 refusal，已排队的正文和工具参数按顺序发出；参数保留原片段，不补空对象。
+
+Chat thinking 支持字符串、含 text 的对象及按顺序拼接的字符串/text 对象数组；其他有类型片段忽略并记录，正文仍正常返回。缺少类型或已支持片段的文本类型错误仍报转换错误。

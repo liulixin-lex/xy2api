@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ChatOutputPart is an ordered text or thinking segment in a Chat response.
@@ -16,6 +17,10 @@ type ChatOutputPart struct {
 
 // DecodeChatOutputContent accepts the output dialects supported by the bridge.
 func DecodeChatOutputContent(raw json.RawMessage) ([]ChatOutputPart, error) {
+	return decodeChatOutputContent(raw, nil, "content")
+}
+
+func decodeChatOutputContent(raw json.RawMessage, record func(ConversionNotice), field string) ([]ChatOutputPart, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil, nil
@@ -42,27 +47,68 @@ func DecodeChatOutputContent(raw json.RawMessage) ([]ChatOutputPart, error) {
 		}
 		switch kind {
 		case "text":
-			if err := json.Unmarshal(part["text"], &value); err != nil {
+			var err error
+			value, err = bridgeChatOutputText(part["text"])
+			if err != nil {
 				return nil, fmt.Errorf("content[%d].text: %w", i, err)
 			}
 		case "thinking":
 			thinking := bytes.TrimSpace(part["thinking"])
-			if len(thinking) > 0 && thinking[0] == '{' {
-				var nested map[string]json.RawMessage
+			if len(thinking) > 0 && thinking[0] == '[' {
+				var nested []json.RawMessage
 				if err := json.Unmarshal(thinking, &nested); err != nil {
 					return nil, fmt.Errorf("content[%d].thinking: %w", i, err)
 				}
-				thinking = nested["text"]
-			}
-			if err := json.Unmarshal(thinking, &value); err != nil {
-				return nil, fmt.Errorf("content[%d].thinking: %w", i, err)
+				var joined strings.Builder
+				for j, raw := range nested {
+					text, err := bridgeChatThinkingText(raw)
+					if err != nil {
+						return nil, fmt.Errorf("content[%d].thinking[%d]: %w", i, j, err)
+					}
+					joined.WriteString(text)
+				}
+				value = joined.String()
+			} else {
+				var err error
+				value, err = bridgeChatThinkingText(thinking)
+				if err != nil {
+					return nil, fmt.Errorf("content[%d].thinking: %w", i, err)
+				}
 			}
 		default:
-			return nil, fmt.Errorf("content[%d]: unsupported output part %q", i, kind)
+			if kind == "" {
+				return nil, fmt.Errorf("content[%d].type: expected a nonempty string", i)
+			}
+			if record != nil {
+				record(ConversionNotice{Field: fmt.Sprintf("%s[%d]", field, i), Action: "omit"})
+			}
+			continue
 		}
 		out = append(out, ChatOutputPart{Kind: kind, Text: value})
 	}
 	return out, nil
+}
+
+func bridgeChatOutputText(raw json.RawMessage) (string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '"' {
+		return "", fmt.Errorf("expected a string")
+	}
+	var text string
+	err := json.Unmarshal(raw, &text)
+	return text, err
+}
+
+func bridgeChatThinkingText(raw json.RawMessage) (string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '{' {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return "", err
+		}
+		raw = object["text"]
+	}
+	return bridgeChatOutputText(raw)
 }
 
 // DecodeChatBridgeChunk preserves content arrays separately while using the

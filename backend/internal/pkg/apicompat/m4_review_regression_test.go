@@ -257,3 +257,62 @@ func TestM4ReviewAnthropicEOFTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewNestedThinkingAndUnknownParts(t *testing.T) {
+	content := json.RawMessage(`[{"type":"thinking","thinking":[{"type":"text","text":"T"},"2",{"text":"3"}]},{"type":"reference","id":"r"},{"type":"text","text":"ANSWER"}]`)
+	var notices []ConversionNotice
+	record := func(n ConversionNotice) { notices = append(notices, n) }
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}, Record: record}
+	response := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Role: "assistant", Content: content}, FinishReason: "stop"}}}
+	for _, anthropic := range []bool{false, true} {
+		notices = nil
+		var out any
+		var err error
+		if anthropic {
+			out, err = ChatCompletionsResponseToAnthropicWithBridgeOptions(response, "m", opts)
+		} else {
+			out, err = ChatCompletionsResponseToResponsesWithBridgeOptions(response, "m", nil, nil, false, nil, opts)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(out)
+		if !strings.Contains(string(raw), "T23") || !strings.Contains(string(raw), "ANSWER") || strings.Contains(string(raw), "reference") || len(notices) != 1 || notices[0] != (ConversionNotice{Field: "choices[0].message.content[1]", Action: "omit"}) {
+			t.Fatalf("buffered: %s notices=%#v", raw, notices)
+		}
+		notices = nil
+		first, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": content}}}})
+		answer := []byte(`{"choices":[{"index":0,"delta":{"content":"NEXT"},"finish_reason":"stop"}]}`)
+		if anthropic {
+			state := NewChatCompletionsToAnthropicStreamState("m")
+			state.Bridge = opts.Bridge
+			state.SetConversionRecorder(record)
+			events := ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(first, state)
+			events = append(events, ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(answer, state)...)
+			events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+			if state.Err() != nil {
+				t.Fatal(state.Err())
+			}
+			raw, _ = json.Marshal(events)
+		} else {
+			state := NewChatCompletionsToResponsesStreamState("m")
+			state.Bridge = opts.Bridge
+			state.SetConversionRecorder(record)
+			events := ChatCompletionsChunkToResponsesEventsWithBridgeOptions(first, state)
+			events = append(events, ChatCompletionsChunkToResponsesEventsWithBridgeOptions(answer, state)...)
+			events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+			if state.Err() != nil {
+				t.Fatal(state.Err())
+			}
+			raw, _ = json.Marshal(events)
+		}
+		if !strings.Contains(string(raw), "T23") || !strings.Contains(string(raw), "ANSWER") || !strings.Contains(string(raw), "NEXT") || len(notices) != 1 || notices[0] != (ConversionNotice{Field: "choices[0].delta.content[1]", Action: "omit"}) {
+			t.Fatalf("stream: %s notices=%#v", raw, notices)
+		}
+	}
+	for _, raw := range []string{`[{"text":"missing type"}]`, `[{"type":"text","text":3}]`, `[{"type":"thinking","thinking":[{"text":false}]}]`, `[{`} {
+		if _, err := DecodeChatOutputContent(json.RawMessage(raw)); err == nil {
+			t.Fatalf("invalid output accepted: %s", raw)
+		}
+	}
+}
