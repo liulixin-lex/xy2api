@@ -63,3 +63,30 @@ func TestStateRejectionLeavesRecoverableCategories(t *testing.T) {
 		}
 	}
 }
+
+func TestM8ContinuationStateFamilies(t *testing.T) {
+	for _, tc := range []struct {
+		code   string
+		family StateFamily
+	}{
+		{"previous_response_owner_mismatch", StateContinuationOwnerMismatch},
+		{"http_continuation_unsupported", StateHTTPContinuationUnsupported},
+		{"tool_output_missing_call_id", StateToolOutputMissingCallID},
+		{"upstream_continuation_expired", StateUpstreamContinuationExpired},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			for _, source := range []Source{SourceHTTP, SourceStreamEvent} {
+				got := Classify(Outcome{Source: source, StatusCode: 400, Code: tc.code, Message: "details redacted"}, nil)
+				if got.Category != CategoryClientError || got.StateFamily != tc.family || got.Category.CountsForSession() || got.Category.SwitchAccount() || got.Category.SoftCooldown() {
+					t.Fatalf("unexpected continuation classification: %+v", got)
+				}
+			}
+		})
+	}
+	for _, status := range []int{400, 404, 409} {
+		got := Classify(Outcome{Source: SourceHTTP, StatusCode: status, Message: "previous response unavailable"}, nil)
+		if got.StateFamily != StateNone {
+			t.Fatalf("ambiguous %d acquired a continuation family: %+v", status, got)
+		}
+	}
+}

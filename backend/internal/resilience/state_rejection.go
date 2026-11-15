@@ -34,6 +34,19 @@ func (r StateRejection) RequestScoped() bool { return r.Family != StateNone }
 func ClassifyStateRejection(code, message string) StateRejection {
 	r := StateRejection{Encrypted: IsEncryptedContentRejection(code, message)}
 	code = strings.ToLower(strings.TrimSpace(code))
+	switch code {
+	case "previous_response_owner_mismatch":
+		r.Family = StateContinuationOwnerMismatch
+	case "http_continuation_unsupported":
+		r.Family = StateHTTPContinuationUnsupported
+	case "tool_output_missing_call_id":
+		r.Family = StateToolOutputMissingCallID
+	case "upstream_continuation_expired":
+		r.Family = StateUpstreamContinuationExpired
+	}
+	if r.RequestScoped() {
+		return r
+	}
 	message = strings.ToLower(message)
 	relay := code == "client_tool_continuation_unavailable" || (code == "" &&
 		(strings.Contains(message, "opaque conversation state") || strings.Contains(message, "unrecognized conversation state")))
