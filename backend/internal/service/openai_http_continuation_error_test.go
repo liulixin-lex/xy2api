@@ -11,6 +11,10 @@ import (
 )
 
 func TestFoundationHTTPContinuationErrors(t *testing.T) {
+	var absent *HTTPContinuationError
+	if absent.Error() != "" {
+		t.Fatal("nil error message")
+	}
 	for _, tc := range []struct {
 		family      resilience.StateFamily
 		value, code string

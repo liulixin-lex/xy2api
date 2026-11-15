@@ -9,4 +9,9 @@ type HTTPContinuationError struct {
 	Family               resilience.StateFamily
 }
 
-func (e *HTTPContinuationError) Error() string { return e.Message }
+func (e *HTTPContinuationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
