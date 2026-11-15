@@ -366,7 +366,7 @@ type PublicSettings struct {
 	WeChatOAuthMPEnabled     bool
 	WeChatOAuthMobileEnabled bool
 	BackendModeEnabled       bool
-	MCPEnabled               bool // 由部署配置 MCP_PUBLIC_URL 决定，不可在后台修改
+	MCPEnabled               bool // 后台管理 MCP 设置优先于部署默认配置
 	PaymentEnabled           bool
 	PaymentBalanceDisabled   bool
 	OIDCOAuthEnabled         bool

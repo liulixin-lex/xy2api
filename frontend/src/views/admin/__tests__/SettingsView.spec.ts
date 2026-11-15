@@ -8,6 +8,11 @@ import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
 
+// This card owns its API and router dependencies and has a dedicated test suite.
+vi.mock("@/components/admin/settings/ManagementMCPSettings.vue", () => ({
+  default: { template: '<section data-testid="management-mcp-settings" />' },
+}));
+
 const {
   getSettings,
   updateSettings,

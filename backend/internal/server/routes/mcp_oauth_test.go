@@ -432,6 +432,40 @@ func TestMCPOAuthHTTPFlowDiscoveryConsentRefreshAndRevocation(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
 }
 
+func TestManagementMCPAdminSettingsImmediatelyGateOAuthAndTools(t *testing.T) {
+	f := newMCPOAuthHTTPFixture(t, service.RoleAdmin)
+	client, tokens := f.authorize(t, service.MCPScopeAdmin, true)
+	require.Equal(t, http.StatusOK, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+	_, err := f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{PublicURL: f.resource})
+	require.NoError(t, err)
+	for _, path := range []string{"/.well-known/oauth-protected-resource/api/v1/mcp", "/.well-known/oauth-authorization-server/api/v1/mcp", "/api/v1/user/mcp/config", "/api/v1/user/mcp/authorize"} {
+		res := f.request(t, http.MethodGet, path, "browser-session", "", nil, false)
+		require.Equal(t, http.StatusServiceUnavailable, res.status, string(res.body))
+	}
+	require.Equal(t, http.StatusServiceUnavailable, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+	registration := f.json(t, http.MethodPost, "/api/v1/mcp/oauth/register", "", map[string]any{"redirect_uris": []string{"http://127.0.0.1/callback"}})
+	require.Equal(t, http.StatusServiceUnavailable, registration.status)
+	refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {client.ClientID}, "refresh_token": {tokens.RefreshToken}}
+	require.Equal(t, http.StatusServiceUnavailable, f.form(t, "/api/v1/mcp/oauth/token", refresh).status)
+	// Revocation remains available when disabled.
+	grants := f.request(t, http.MethodGet, "/api/v1/user/mcp/grants", "browser-session", "", nil, false)
+	require.Equal(t, http.StatusOK, grants.status, string(grants.body))
+	_, err = f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: "https://other.example/api/v1/mcp"})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+	_, err = f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: f.resource})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+	require.Equal(t, http.StatusOK, f.form(t, "/api/v1/mcp/oauth/token", refresh).status)
+	_, err = f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{PublicURL: f.resource})
+	require.NoError(t, err)
+	revoke := url.Values{"client_id": {client.ClientID}, "token": {tokens.AccessToken}}
+	require.Equal(t, http.StatusOK, f.form(t, "/api/v1/mcp/oauth/revoke", revoke).status)
+	_, err = f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: f.resource})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+}
+
 func TestMCPOAuthHTTPPermissionAndCredentialBoundaries(t *testing.T) {
 	f := newMCPOAuthHTTPFixture(t, service.RoleAdmin)
 	_, user := f.authorize(t, service.MCPScopeUser, true)

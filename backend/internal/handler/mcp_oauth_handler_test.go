@@ -54,10 +54,35 @@ func (r *handlerMCPUsers) GetUserAvatar(context.Context, int64) (*service.UserAv
 type handlerMCPSettings struct {
 	service.SettingRepository
 	values map[string]string
+	err    error
 }
 
 func (r *handlerMCPSettings) GetValue(_ context.Context, key string) (string, error) {
 	return r.values[key], nil
+}
+
+func (r *handlerMCPSettings) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	values := map[string]string{}
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
+func TestMCPOAuthSettingsFailureDoesNotExposeDatabaseDetails(t *testing.T) {
+	cfg := &config.Config{ManagementMCP: config.ManagementMCPConfig{PublicURL: handlerMCPResource}}
+	settings := service.NewSettingService(&handlerMCPSettings{err: errors.New("private database connection details")}, cfg)
+	h := NewMCPOAuthHandler(nil, nil, nil, settings, cfg)
+	c, rec := handlerMCPContext(t, http.MethodGet, "/.well-known/oauth-protected-resource/api/v1/mcp", "", "")
+	h.ResourceMetadata(c)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "management MCP configuration is unavailable")
+	require.NotContains(t, rec.Body.String(), "private database")
 }
 
 type handlerMCPCache struct {

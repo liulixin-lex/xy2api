@@ -657,6 +657,8 @@ func registerPromoCodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	adminSettings := admin.Group("/settings")
 	registerScopedAdminKeyRoutes(adminSettings, h, stepUpAuth)
+	adminSettings.GET("/management-mcp", h.Admin.Setting.GetManagementMCPSettings)
+	adminSettings.PUT("/management-mcp", gin.HandlerFunc(stepUpAuth), h.Admin.Setting.UpdateManagementMCPSettings)
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
