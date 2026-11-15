@@ -813,3 +813,51 @@ func TestM6ReviewGenericTerminalEventNames(t *testing.T) {
 		}
 	}
 }
+
+func TestM6ReviewOAuthTypedErrorRecovery(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, untyped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stream=%t/untyped=%t", stream, untyped), func(t *testing.T) {
+				payload := `{"type":"error","error":{"code":"transient","message":"retrying"}}`
+				if untyped {
+					payload = `{"error":{"code":503}}`
+				}
+				body := m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(payload) + m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`)
+				w := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(w)
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(context.Background(), st)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+				a := newOpenAIRejectedFieldTestAccount()
+				a.Type = AccountTypeOAuth
+				svc := &OpenAIGatewayService{cfg: &config.Config{}}
+				resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+				var usage *OpenAIUsage
+				var err error
+				if stream {
+					r, e := svc.handleStreamingResponse(ctx, resp, c, a, time.Now(), "m", "m")
+					require.NotNil(t, r)
+					usage, err = r.usage, e
+				} else {
+					r, e := svc.handleNonStreamingResponse(ctx, resp, c, a, "m", "m")
+					require.NotNil(t, r)
+					usage, err = r.usage, e
+				}
+				require.Equal(t, 13, usage.InputTokens)
+				require.Equal(t, 5, usage.OutputTokens)
+				if untyped {
+					require.Error(t, err)
+					require.NotContains(t, w.Body.String(), `"status":"completed"`)
+					if stream {
+						require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
+					}
+				} else {
+					require.NoError(t, err)
+					require.Contains(t, w.Body.String(), `"status":"completed"`)
+					require.NotContains(t, w.Body.String(), `"type":"response.failed"`)
+					require.Nil(t, st.UpstreamRecoveryHint())
+				}
+			})
+		}
+	}
+}

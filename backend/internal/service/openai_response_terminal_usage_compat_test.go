@@ -3,6 +3,7 @@
 package service
 
 import (
+	"github.com/tidwall/gjson"
 	"strings"
 	"testing"
 	"time"
@@ -41,9 +42,9 @@ func TestExtractOpenAISSETerminalEventUsesFinalAuthoritativeTerminal(t *testing.
 	terminal, _, payload := extractOpenAISSETerminalEvent(body)
 	eventType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
-	require.Equal(t, "error", eventType)
-	require.True(t, terminal.Failure)
-	require.Equal(t, "recovering", extractOpenAISSEErrorMessage(payload))
+	require.Equal(t, "response.completed", eventType)
+	require.True(t, terminal.Success)
+	require.Equal(t, "resp_1", gjson.GetBytes(payload, "response.id").String())
 }
 
 func TestExtractOpenAISSETerminalEventPreservesRawEventForWrapperValidation(t *testing.T) {
