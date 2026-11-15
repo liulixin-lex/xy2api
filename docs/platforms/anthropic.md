@@ -217,6 +217,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
+图片的 `image_url.detail` / `input_image.detail` 为合法 `auto`、`low`、`high` 时，转换为 Anthropic 会省略提示并记录，图片来源保留；非法值仍返回 400。质量与费用不保证等价。
+
 Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转换为 Anthropic Messages 后发往上游，普通账号与兼容账号的转换相同。字段语义以 Anthropic 官方 [OpenAI SDK 兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) 为准：官方支持的映射，官方忽略的忽略。标「网关扩展」的是官方文档之外网关额外提供的映射。所有字段的 JSON `null` 都视为未提供。
 
 | 字段 | 处理 | 说明 |

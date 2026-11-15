@@ -40,10 +40,17 @@ func anthropicMediaToResponses(b AnthropicContentBlock) (ResponsesContentPart, e
 }
 
 func responsesMediaToAnthropic(p ResponsesContentPart) (AnthropicContentBlock, error) {
+	return responsesMediaToAnthropicWithOptions(p, ConversionOptions{}, "content.detail")
+}
+
+func responsesMediaToAnthropicWithOptions(p ResponsesContentPart, opts ConversionOptions, fieldPath string) (AnthropicContentBlock, error) {
 	block := AnthropicContentBlock{CacheControl: p.CacheControl}
-	if p.Detail != "" && p.Detail != "auto" {
-		return block, unsupportedConversion("content.detail", "Anthropic has no image/file detail equivalent")
+	if p.Detail != "" {
+		if (p.Type != "input_image" && p.Detail != "auto") || (p.Detail != "auto" && p.Detail != "low" && p.Detail != "high") {
+			return block, unsupportedConversion(fieldPath, "unsupported media detail")
+		}
 	}
+
 	if p.FileID != "" {
 		return block, unsupportedConversion("content.file_id", "provider-scoped file IDs cannot be transferred to Anthropic")
 	}
@@ -66,6 +73,7 @@ func responsesMediaToAnthropic(p ResponsesContentPart) (AnthropicContentBlock, e
 	}
 	if validRemoteMediaURL(reference) {
 		block.Source = &AnthropicImageSource{Type: "url", URL: reference}
+		recordOmittedImageDetail(p, opts, fieldPath)
 		return block, nil
 	}
 	source := dataURIToAnthropicImageSource(reference)
@@ -84,7 +92,14 @@ func responsesMediaToAnthropic(p ResponsesContentPart) (AnthropicContentBlock, e
 		}
 	}
 	block.Source = source
+	recordOmittedImageDetail(p, opts, fieldPath)
 	return block, nil
+}
+
+func recordOmittedImageDetail(p ResponsesContentPart, opts ConversionOptions, fieldPath string) {
+	if p.Type == "input_image" && p.Detail != "" && opts.Record != nil {
+		opts.Record(ConversionNotice{Field: fieldPath, Action: "omit"})
+	}
 }
 
 // Preserve typed media in function outputs across marshal/unmarshal boundaries.

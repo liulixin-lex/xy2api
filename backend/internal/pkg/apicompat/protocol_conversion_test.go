@@ -171,7 +171,7 @@ func TestProtocolMediaRoundTrips(t *testing.T) {
 	require.JSONEq(t, string(content), string(back.Messages[0].Content))
 	// The same image hint cannot be represented by Anthropic and must not vanish.
 	_, err = ResponsesToAnthropicRequest(&decoded)
-	requireUnsupportedConversion(t, err, "detail")
+	requireUnsupportedConversion(t, err, "file_id")
 
 	tool := ChatMessage{Role: "tool", ToolCallID: "call_1", Content: json.RawMessage(`[{"type":"text","text":"see image"},{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]`)}
 	out, err = ChatCompletionsToResponses(&ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "call_1", Type: "function", Function: ChatFunctionCall{Name: "probe", Arguments: "{}"}}}}, tool}})
