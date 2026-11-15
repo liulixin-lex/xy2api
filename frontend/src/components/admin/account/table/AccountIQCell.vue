@@ -6,17 +6,18 @@
       type="button"
       class="iq__lines"
       :aria-label="t('admin.accounts.iqRecords')"
+      v-tip="tipCard"
       data-test="iq-lines"
       @click="emit('records')"
     >
       <template v-for="line in lines" :key="line.model">
         <span class="iq__m" data-testid="iq-target-tag">{{ line.name }}</span>
-        <span class="iq__v" :class="`iq__v--${line.state}`" v-tip="() => lineTip(line.target, line.state)">
+        <span class="iq__v" :class="`iq__v--${line.state}`">
           <Icon v-if="line.state === 'checking'" name="refresh" size="xs" class="iq__spin" />{{ t(`admin.accounts.table.iqStates.${line.state}`) }}
         </span>
         <span v-if="detailed" class="iq__r" data-test="iq-recheck">{{ recheckOf(line.target, line.state) }}</span>
       </template>
-      <span v-if="more > 0" v-tip="allTip" class="iq__more" data-test="iq-more">{{ t('admin.accounts.table.iqMore', { n: more }) }}</span>
+      <span v-if="more > 0" class="iq__more" data-test="iq-more">{{ t('admin.accounts.table.iqMore', { n: more }) }}</span>
     </button>
     <span v-else class="iq__none">—</span>
   </div>
@@ -27,8 +28,9 @@
 /**
  * IQ check column (spec 4.4, 7c, prototype): the switch and one line per model, at most two, then "+N". The words are
  * only smart (secondary colour), degraded (amber, regular weight), checking (queued included) and paused (muted);
- * unknown and disabled targets show "—". The recheck time lives in the tip. The narrow card's details (`detailed`)
- * list every model with its recheck time beside it: touch screens have no hover.
+ * unknown and disabled targets show "—". The records button has one tip card (12.7) listing every model, the folded
+ * ones too, with its state, last check and recheck. The narrow card's details (`detailed`) list every model with its
+ * recheck time beside it: touch screens have no hover.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -36,7 +38,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { iqGateEntries, iqModelLabel, isIQBuiltinModel, sortIQTargets } from '@/components/admin/account/iqCheckPresentation'
 import { currentTime, useLiveClock } from '@/composables/useLiveClock'
 import type { Account, IQTargetSummary } from '@/types'
-import { vTip } from '@/utils/tip'
+import { vTip, type TipCard, type TipTone } from '@/utils/tip'
 import AccountSwitch from './AccountSwitch.vue'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 
@@ -58,7 +60,7 @@ const stateOf = (target: IQTargetSummary): LineState | null => {
 }
 
 // Enabled targets, and disabled ones that still hold a gate or are being checked by hand. Two lines fit; with more,
-// "+N" counts the rest and its tip lists every model with its state (spec 7c).
+// "+N" counts the rest (spec 7c).
 const allLines = computed(() =>
   targets.value
     .filter((target) => target.enabled || target.gate_active || target.state === 'queued' || target.state === 'running')
@@ -69,28 +71,42 @@ const allLines = computed(() =>
 )
 const lines = computed(() => (props.detailed ? allLines.value : allLines.value.slice(0, 2)))
 const more = computed(() => allLines.value.length - lines.value.length)
-const allTip = () =>
-  allLines.value.map((line) => t('admin.accounts.table.iqTip', { model: line.target.model, state: t(`admin.accounts.table.iqStates.${line.state}`) })).join('\n')
 
 const gates = computed(() => new Map(iqGateEntries(props.account.extra as Record<string, unknown> | undefined).map((gate) => [gate.model, gate.reset_at])))
 
-/** When the model is checked again (the gate's end while it holds one); empty while checking or paused. */
-function recheckOf(target: IQTargetSummary, state: LineState): string {
-  if (state === 'checking' || state === 'paused') return ''
+/** When the model is checked again: the gate's end while it holds one, else its next run; none while checking or paused. */
+function recheckAt(target: IQTargetSummary, state: LineState): string | null {
+  if (state === 'checking' || state === 'paused') return null
   const gate = target.gate_active ? gates.value.get(target.model) : undefined
-  const next = gate ?? target.next_run_at
+  return gate ?? target.next_run_at ?? null
+}
+
+/** The card details' recheck: "3m 后复检", "等待复检" once due, empty without a time. */
+function recheckOf(target: IQTargetSummary, state: LineState): string {
+  const next = recheckAt(target, state)
   if (!next) return ''
   // The ticking clock only for a time still ahead (7g-1).
   const left = msLeft(next, currentTime()) === null ? null : msLeft(next, now.value)
   return left === null ? t('admin.accounts.table.iqRecheckPending') : t('admin.accounts.table.iqRecheckIn', { time: formatRemaining(t, left) })
 }
 
-function lineTip(target: IQTargetSummary, state: LineState): string {
-  const head = t('admin.accounts.table.iqTip', { model: target.model, state: t(`admin.accounts.table.iqStates.${state}`) })
-  if (state === 'checking') return `${head}\n${t('admin.accounts.table.iqChecking')}`
-  const last = target.last_run_at ? t('admin.accounts.table.iqLastRun', { time: formatShortTime(target.last_run_at) }) : ''
-  if (state === 'paused') return [[head, last].filter(Boolean).join(' · '), t('admin.accounts.table.iqPausedTip')].join('\n')
-  return [[head, last].filter(Boolean).join(' · '), recheckOf(target, state)].filter(Boolean).join('\n')
+const STATE_TONES: Record<LineState, TipTone | undefined> = { smart: 'ok', degraded: 'error', checking: 'info', paused: undefined }
+
+/** Every model in check: full name, state, last check, recheck ("3m 后", "等待" once due, "—" checking or paused). */
+function tipCard(): TipCard {
+  return {
+    head: [t('admin.accounts.table.tip.iqModel'), t('admin.accounts.table.tip.iqState'), t('admin.accounts.table.tip.iqLastRun'), t('admin.accounts.table.tip.iqRecheck')],
+    rows: allLines.value.map(({ target, state }) => {
+      const next = recheckAt(target, state)
+      const left = next ? msLeft(next, currentTime()) : null
+      return [
+        target.model,
+        { text: t(`admin.accounts.table.iqStates.${state}`), tone: STATE_TONES[state] },
+        formatShortTime(target.last_run_at),
+        !next ? '—' : left === null ? t('admin.accounts.table.tip.iqDue') : t('admin.accounts.table.tip.iqIn', { time: formatRemaining(t, left) })
+      ]
+    })
+  }
 }
 </script>
 
