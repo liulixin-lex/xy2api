@@ -156,3 +156,10 @@ goals = true
 - [Codex STATE](../guides/codex-state.md)：为 OAuth 账号获取并注入 STATE 票据。
 - [OpenAI 模型降档识别](../guides/quality-routing.md)、[提示词缓存](../guides/caching.md)、[分组与 Fast 优先级](../guides/groups.md)。
 - 同样经 OpenAI 网关转发的 Kimi、智谱、DeepSeek、MiniMax、OpenCode、Command Code、Cline 见 [其他平台](others.md)；这些平台的分组使用 `/v1/messages` 不需要开启「允许 /v1/messages 调度」。
+
+### 模型支持：GPT-6.1 Terra
+
+- **名称**：`gpt-6.1-terra`，供应商前缀、大小写、下划线与已知推理/compact 后缀精确归一；未知日期或近似别名不自动匹配。
+- **推理档位**：支持 `none`，`minimal` 按最近可用档位映射到 `none`；工具调用使用 Responses 接口。
+- **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
+- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。

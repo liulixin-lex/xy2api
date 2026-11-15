@@ -2603,10 +2603,13 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 // validateGPT61SolCompatRequest runs after model mapping, before conversion can
 // discard unsupported explicit effort selections or disabled thinking.
 func validateGPT61SolCompatRequest(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) {
+	if !openai.RequiresResponsesForToolCalls(model) {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		if err := openai.ValidateGPT61TerraReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
+			return err
+		}
 		if err := openai.ValidateGPT61SolReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
 			return err
 		}

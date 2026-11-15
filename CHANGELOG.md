@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
+
 - API Key 请求的显式 `none` 不再因第三方端点而被删除，Responses-shaped Chat 按实际端点保留参数。
 
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
