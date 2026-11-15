@@ -1563,6 +1563,10 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	}
 	retained := openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(usage)
 	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	usage.InputTokensPresent = usage.InputTokensPresent || parsedUsage.InputTokensPresent
+	usage.OutputTokensPresent = usage.OutputTokensPresent || parsedUsage.OutputTokensPresent
+	usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent || parsedUsage.CacheReadInputTokensPresent
+	usage.CacheCreationInputTokensPresent = usage.CacheCreationInputTokensPresent || parsedUsage.CacheCreationInputTokensPresent
 	if retained {
 		return source
 	}
@@ -2287,13 +2291,16 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model
 	}
-	response["created_at"] = time.Now().Unix()
+	createdAt := time.Now().Unix()
 	if at := gjson.GetBytes(source, "response.created_at"); at.Exists() {
-		response["created_at"] = at.Int()
+		createdAt = at.Int()
 	}
+	response["created_at"] = createdAt
 	for _, path := range []string{"response.usage", "usage"} {
 		if value := gjson.GetBytes(source, path); value.IsObject() {
-			response["usage"] = value.Value()
+			if normalized := targetProtocolFailureUsage(json.RawMessage(value.Raw)); len(normalized) > 0 {
+				response["usage"] = normalized
+			}
 			break
 		}
 	}
@@ -2304,12 +2311,19 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 	if sequence := gjson.GetBytes(source, "sequence_number"); sequence.Exists() {
 		frame["sequence_number"] = sequence.Int()
 	}
+	var opening []byte
+	if only, tracked := DeliveryOnlyHeartbeats(c); tracked && only {
+		opening = ResponsesCreatedFrame(responseID, model, createdAt)
+		if sequence := gjson.GetBytes(source, "sequence_number").Int(); sequence < 1 {
+			frame["sequence_number"] = int64(1)
+		}
+	}
 	payload, err := marshalOpenAIUpstreamJSON(frame)
 	if err != nil {
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
-	return "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
+	return string(opening) + "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
 }
 
 func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {
@@ -2753,7 +2767,7 @@ func openAIResponsesFailureMetadata(usage *OpenAIUsage, createdAt int64) gin.H {
 	if createdAt > 0 {
 		metadata["created_at"] = createdAt
 	}
-	if openAIUsageHasTokens(usage) {
+	if usage != nil && (openAIUsageHasTokens(usage) || usage.InputTokensPresent || usage.OutputTokensPresent) {
 		metadata["usage"] = gin.H{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
 	}
 	return metadata

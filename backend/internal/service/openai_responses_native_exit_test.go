@@ -701,3 +701,62 @@ func TestM6PassthroughRejectedFieldRecord(t *testing.T) {
 		})
 	}
 }
+
+func TestM6TerminalWriteClaim(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, pass := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pass=%t", pass), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), st)
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+			InstallDeliveryTracking(c, time.Now())
+			body := m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			a := newOpenAIRejectedFieldTestAccount()
+			if pass {
+				_, err := svc.handleStreamingResponsePassthrough(ctx, resp, c, a, time.Now(), "m", "m")
+				require.NoError(t, err)
+			} else {
+				_, err := svc.handleStreamingResponse(ctx, resp, c, a, time.Now(), "m", "m")
+				require.NoError(t, err)
+			}
+			require.True(t, ProtocolTerminalClaimed(c))
+			before := w.Body.String()
+			require.False(t, WriteTargetProtocolError(c, PreOutputProtocolResponses, 502, "server_error", "failed", "", "late"))
+			require.Equal(t, before, w.Body.String())
+		})
+	}
+	t.Run("compact_success", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil)
+		MarkOpenAICompactClientStream(c)
+		require.True(t, writeOpenAICompactSSEBridge(c, 200, []byte(`{"id":"r1","output":[{"type":"compaction","encrypted_content":"fixture"}]}`)))
+		require.True(t, ProtocolTerminalClaimed(c))
+		before := w.Body.String()
+		writeOpenAICompactSSEFailureMessage(c, 502, "server_error", "late")
+		require.Equal(t, before, w.Body.String())
+	})
+	t.Run("heartbeat_failure", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		st := resilience.NewRequestState()
+		st.NoteTurn(1, "client-model", "")
+		c.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil).WithContext(resilience.WithRequestState(context.Background(), st))
+		InstallDeliveryTracking(c, time.Now())
+		c.Header("Content-Type", "text/event-stream")
+		_, err := c.Writer.Write([]byte(": heartbeat\n\n"))
+		require.NoError(t, err)
+		writeOpenAICompactSSEFailureMessage(c, 502, "server_error", "failed")
+		var frames [][]byte
+		forEachOpenAIResponsesFrame(w.Body.String(), func(_ string, data []byte) { frames = append(frames, data) })
+		require.Len(t, frames, 2)
+		require.Equal(t, "response.created", gjson.GetBytes(frames[0], "type").String())
+		require.Equal(t, "response.failed", gjson.GetBytes(frames[1], "type").String())
+		require.Equal(t, gjson.GetBytes(frames[0], "response.id").String(), gjson.GetBytes(frames[1], "response.id").String())
+		require.Equal(t, int64(1), gjson.GetBytes(frames[1], "sequence_number").Int())
+	})
+}
