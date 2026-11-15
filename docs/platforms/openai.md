@@ -66,10 +66,10 @@ Chat 转 Responses 的参数承载规则如下；null 视为未提供，不透�
 
 | 参数 | 转换规则 |
 |---|---|
-| `metadata`、`user` | 分别保留字符串表和字符串；类型不符时指出字段 |
+| `metadata`、`user` | 分别保留字符串表和字符串；类型不符时省略该字段并记录降级，不拒绝请求 |
 | `text.verbosity`、`verbosity` | 前者优先，落选的顶层别名记录省略 |
 | `response_format`、`text.format` | 沿用 Chat 的 `response_format` 优先级；缺省时采用 `text.format`，复用格式校验，落选项记录省略 |
-| `include` | 显式字符串数组保序去重，并保留转换所需的 `reasoning.encrypted_content`；`store` 固定为 false |
+| `include` | 显式字符串数组保序去重，并保留转换所需的 `reasoning.encrypted_content`；类型不符时省略该字段并记录降级；`store` 固定为 false |
 
 推理档位先按最终模型执行兼容映射，再交给转换器；GPT-6.1 Terra 保留 `none` 与显式输出上限，`minimal` 须先按目标能力映射。
 

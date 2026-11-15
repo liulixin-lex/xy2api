@@ -138,45 +138,56 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 
 // applyChatResponsesFields carries only the modeled Chat extensions.
 func applyChatResponsesFields(req *ChatCompletionsRequest, out *ResponsesRequest, opts ConversionOptions) error {
-	if metadata := normalizedRawJSON(req.Metadata); len(metadata) > 0 {
-		values, ok := rawJSONObject(metadata)
-		if !ok {
-			return unsupportedConversion("metadata", "expected a string map")
+	omit := func(field string) {
+		if opts.Record != nil {
+			opts.Record(ConversionNotice{Field: field, Action: "omit"})
 		}
+	}
+	if metadata := normalizedRawJSON(req.Metadata); len(metadata) > 0 {
+		values, valid := rawJSONObject(metadata)
 		for _, raw := range values {
 			var value string
 			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
-				return unsupportedConversion("metadata", "expected a string map")
+				valid = false
 			}
 		}
-		out.Metadata = metadata
+		if valid {
+			out.Metadata = metadata
+		} else {
+			omit("metadata")
+		}
 	}
 	if user := normalizedRawJSON(req.User); len(user) > 0 {
 		var value string
-		if json.Unmarshal(user, &value) != nil {
-			return unsupportedConversion("user", "expected a string")
+		if json.Unmarshal(user, &value) == nil {
+			out.User = user
+		} else {
+			omit("user")
 		}
-		out.User = user
 	}
 	if include := normalizedRawJSON(req.Include); len(include) > 0 {
 		var values []json.RawMessage
-		if json.Unmarshal(include, &values) != nil {
-			return unsupportedConversion("include", "expected an array of strings")
-		}
-		out.Include = nil
+		valid := json.Unmarshal(include, &values) == nil
+		var included []string
 		seen := make(map[string]bool, len(values)+1)
 		for _, raw := range values {
 			var value string
 			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
-				return unsupportedConversion("include", "expected an array of strings")
+				valid = false
+				break
 			}
 			if !seen[value] {
-				out.Include = append(out.Include, value)
+				included = append(included, value)
 				seen[value] = true
 			}
 		}
-		if !seen["reasoning.encrypted_content"] {
-			out.Include = append(out.Include, "reasoning.encrypted_content")
+		if valid {
+			if !seen["reasoning.encrypted_content"] {
+				included = append(included, "reasoning.encrypted_content")
+			}
+			out.Include = included
+		} else {
+			omit("include")
 		}
 	}
 
