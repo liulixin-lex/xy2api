@@ -4,9 +4,12 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -79,6 +82,63 @@ func TestHTTPEncryptedRepairSoleItemUnmappedLocator(t *testing.T) {
 					return items[len(items)-1].Raw
 				}
 				require.Equal(t, last(upstream.bodies[0]), last(upstream.bodies[1]))
+			})
+		}
+	}
+}
+
+// encryptedForeignUpstream rejects the first undecryptable item and names it,
+// as the provider does when a whole history came from another credential.
+type encryptedForeignUpstream struct {
+	bad    map[string]string // ciphertext -> item id named by the provider
+	bodies [][]byte
+}
+
+func (u *encryptedForeignUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	RecordOpsUpstreamSendBoundary(req.Context(), accountID)
+	body, _ := io.ReadAll(req.Body)
+	u.bodies = append(u.bodies, body)
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if id, ok := u.bad[item.Get("encrypted_content").String()]; ok {
+			return newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"The encrypted content for item `+id+` could not be verified. Reason: Encrypted content could not be decrypted or parsed.","type":"invalid_request_error","param":null,"code":"invalid_encrypted_content"}}`), nil
+		}
+	}
+	return webSearchSuccessStream("resp_ok"), nil
+}
+
+func (u *encryptedForeignUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
+}
+
+// Red review inputs: when more than one item fails, the request still ends
+// in 200 within the existing budget and the next turn sends once.
+func TestHTTPEncryptedRepairMultipleRejectedItems(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		bad        map[string]string
+	}{
+		{"three_reasoning", `{"model":"gpt-5.5","stream":true,"store":false,"prompt_cache_key":"red-sess","input":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"c1"},{"role":"assistant","content":"a1"},{"type":"reasoning","id":"rs_2","summary":[],"encrypted_content":"c2"},{"role":"assistant","content":"a2"},{"type":"reasoning","id":"rs_3","summary":[],"encrypted_content":"c3"},{"role":"user","content":"q"}]}`, map[string]string{"c1": "rs_1", "c2": "rs_2", "c3": "rs_3"}},
+		{"compaction_plus_reasoning", `{"model":"gpt-5.5","stream":true,"store":false,"prompt_cache_key":"red-sess2","input":[{"type":"compaction","id":"cmp_1","encrypted_content":"c1"},{"type":"reasoning","id":"rs_2","summary":[],"encrypted_content":"c2"},{"role":"user","content":"q"}]}`, map[string]string{"c1": "cmp_1", "c2": "rs_2"}},
+	} {
+		for _, pass := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, pass), func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				upstream := &encryptedForeignUpstream{bad: tc.bad}
+				cfg := &config.Config{}
+				cfg.JWT.Secret = "fixture-jwt-secret"
+				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector()}
+				for turn, sends := range []int{3, 1} {
+					req := newWebSearchReplayRequest(t)
+					before := len(upstream.bodies)
+					_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(pass), []byte(tc.body))
+					require.NoError(t, err, "turn %d", turn+1)
+					require.Equal(t, http.StatusOK, req.rec.Code, "turn %d", turn+1)
+					require.Len(t, upstream.bodies[before:], sends, "turn %d", turn+1)
+					last := upstream.bodies[len(upstream.bodies)-1]
+					require.NotContains(t, string(last), "encrypted_content")
+					require.Equal(t, `"q"`, gjson.GetBytes(last, "input.#(role==\"user\").content").Raw)
+					require.Empty(t, req.session.failures)
+				}
 			})
 		}
 	}

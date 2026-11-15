@@ -280,7 +280,7 @@ func TestHTTPEncryptedLineageCredentialScope(t *testing.T) {
 	body := []byte(`{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good"},{"type":"compaction","id":"cmp_good","encrypted_content":"compact"}]}`)
 	selected, err := selectHTTPRejectedEncryptedItem(body, []byte(`{"error":{"param":"input[0].encrypted_content"}}`))
 	require.NoError(t, err)
-	svc.markHTTPInvalidEncryptedContent(1, "session", 10, "version-a", selected)
+	svc.markHTTPInvalidEncryptedContent(1, "session", 10, "version-a", []string{selected.Digest})
 	for _, tc := range []struct {
 		name, session, version string
 		group, account         int64

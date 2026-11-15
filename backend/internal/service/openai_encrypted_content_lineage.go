@@ -212,14 +212,47 @@ func httpEncryptedLineageKey(session string, accountID int64, credentialVersion 
 	return openAIEncryptedLineageVersionedSession(session, strconv.FormatInt(accountID, 10)+":"+credentialVersion)
 }
 
-func (s *OpenAIGatewayService) markHTTPInvalidEncryptedContent(groupID int64, session string, accountID int64, credentialVersion string, selected httpRejectedEncryptedItem) {
-	if s == nil || selected.Digest == "" || credentialVersion == "" {
+func (s *OpenAIGatewayService) markHTTPInvalidEncryptedContent(groupID int64, session string, accountID int64, credentialVersion string, digests []string) {
+	if s == nil || len(digests) == 0 || credentialVersion == "" {
 		return
 	}
 	key := httpEncryptedLineageKey(session, accountID, credentialVersion)
 	if key != "" {
-		s.markOpenAIWSInvalidEncryptedContentLineage(groupID, key, []string{selected.Digest})
+		s.markOpenAIWSInvalidEncryptedContentLineage(groupID, key, digests)
 	}
+}
+
+// stripHTTPTopLevelEncryptedItems clears every remaining top-level
+// reasoning/compaction ciphertext. It is used only after a single-item repair
+// was rejected again for another item; nested M3 slots are left untouched.
+func stripHTTPTopLevelEncryptedItems(body []byte) ([]byte, []string, error) {
+	root := gjson.ParseBytes(body)
+	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUniqueObject(root) {
+		return body, nil, nil
+	}
+	input := root.Get("input")
+	items := input.Array()
+	if input.IsObject() {
+		items = []gjson.Result{input}
+	} else if !input.IsArray() {
+		return body, nil, nil
+	}
+	next := body
+	var digests []string
+	for i := len(items) - 1; i >= 0; i-- {
+		if !httpEncryptedRepairCandidate(items[i]) {
+			continue
+		}
+		selected, err := repairHTTPEncryptedItem(next, input, items[i], i)
+		if err != nil {
+			return body, nil, err
+		}
+		if selected.Changed {
+			next = selected.Body
+			digests = append(digests, selected.Digest)
+		}
+	}
+	return next, digests, nil
 }
 
 func (s *OpenAIGatewayService) stripHTTPInvalidEncryptedContent(body []byte, groupID int64, session string, accountID int64, credentialVersion string) ([]byte, int) {

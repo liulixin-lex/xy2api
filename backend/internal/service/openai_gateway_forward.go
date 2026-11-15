@@ -823,11 +823,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
-	markEncryptedLineage := func(selected httpRejectedEncryptedItem) {
-		if selected.Digest == "" {
-			return
-		}
-		s.markHTTPInvalidEncryptedContent(lineageGroupID, lineageSessionHash, account.ID, credentialVersion, selected)
+	markEncryptedLineage := func(digests []string) {
+		s.markHTTPInvalidEncryptedContent(lineageGroupID, lineageSessionHash, account.ID, credentialVersion, digests)
 	}
 	imageBillingModel := ""
 	imageSizeTier := ""
@@ -1272,11 +1269,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) && isHTTPReasoningEncryptedRejection(body, encryptedErrorPayload, upstreamMsg) {
-				selected, repairErr := openAIRequestEncryptedContentRepairBody(c, body, encryptedErrorPayload)
-				if requestRepair != nil && !requestRepair.encryptedTried && repairErr == nil && selected.Changed && ctx.Err() == nil && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-					markEncryptedLineage(selected)
-					body, requestView, reqBody = selected.Body, newOpenAIRequestView(selected.Body), nil
-					requestRepair.encryptedTried = true
+				if plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, requestRepair, body, encryptedErrorPayload); ok {
+					markEncryptedLineage(plan.Digests)
+					body, requestView, reqBody = plan.Next, newOpenAIRequestView(plan.Next), nil
+					requestRepair.noteHTTPEncryptedRepair(plan)
 					rejectedFieldRetryState.remember(body)
 					logger.FromContext(ctx).Info("resilience.request_repair_replay",
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))

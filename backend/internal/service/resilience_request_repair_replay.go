@@ -23,6 +23,7 @@ type openAIRequestRepair struct {
 	body                    []byte
 	credentialVersion       string
 	encryptedTried          bool
+	encryptedBulkTried      bool
 	passthrough             bool
 	m3                      *openAIM3Attempt
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
@@ -68,7 +69,7 @@ func openAIRequestRepairFrom(c *gin.Context) *openAIRequestRepair {
 type openAIRequestRepairSignal struct {
 	kind                 string
 	next                 []byte
-	encryptedItem        httpRejectedEncryptedItem
+	encrypted            httpEncryptedRepairPlan
 	rejectedFieldPayload []byte
 }
 
@@ -243,10 +244,10 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 		r.rejectedFieldSequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
 	}
 	if signal.kind == resilience.ReasonEncryptedContent {
-		r.encryptedTried = true
+		r.noteHTTPEncryptedRepair(signal.encrypted)
 		r.rejectedFieldRetryState.remember(signal.next)
 		if lineage := s.beginOpenAIM3(c, r.body); lineage != nil {
-			s.markHTTPInvalidEncryptedContent(lineage.groupID, lineage.session, account.ID, r.credentialVersion, signal.encryptedItem)
+			s.markHTTPInvalidEncryptedContent(lineage.groupID, lineage.session, account.ID, r.credentialVersion, signal.encrypted.Digests)
 		}
 	}
 	logger.FromContext(ctx).Info("resilience.request_repair_replay",

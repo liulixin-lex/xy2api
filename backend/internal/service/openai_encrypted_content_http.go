@@ -20,15 +20,61 @@ func isHTTPEncryptedContentFailure(body, payload []byte, message string, status 
 	return (status == 0 || status == http.StatusBadRequest || status == http.StatusBadGateway) && isHTTPReasoningEncryptedRejection(body, payload, message)
 }
 
-// Both HTTP and buffered/pre-output SSE use this same single-item budget.
+// httpEncryptedRepairPlan is one same-account replay for an encrypted
+// rejection; Selected is the selection the terminal error also reports.
+type httpEncryptedRepairPlan struct {
+	Selected httpRejectedEncryptedItem
+	Next     []byte
+	Digests  []string
+	Bulk     bool
+}
+
+// planHTTPEncryptedContentRepair consumes the shared in-place budget only
+// when it returns true. The first rejection repairs the uniquely located
+// item. A further rejection that does not point at an item already cleared
+// shows more than one item failed, so the remaining top-level ciphertext is
+// cleared once, as the earlier whole-request repair did.
+func planHTTPEncryptedContentRepair(ctx context.Context, c *gin.Context, account *Account, r *openAIRequestRepair, body, payload []byte) (httpEncryptedRepairPlan, bool) {
+	selected, err := openAIRequestEncryptedContentRepairBody(c, body, payload)
+	plan := httpEncryptedRepairPlan{Selected: selected}
+	if err != nil || r == nil || account == nil || r.accountID != account.ID || r.encryptedBulkTried || ctx.Err() != nil {
+		return plan, false
+	}
+	if !r.encryptedTried {
+		if !selected.Changed {
+			return plan, false
+		}
+		plan.Next, plan.Digests = selected.Body, []string{selected.Digest}
+	} else {
+		if selected.ItemIndex >= 0 && !selected.Changed {
+			return plan, false
+		}
+		next, digests, err := stripHTTPTopLevelEncryptedItems(body)
+		if err != nil || len(digests) == 0 {
+			return plan, false
+		}
+		plan.Next, plan.Digests, plan.Bulk = next, digests, true
+	}
+	if !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+		return plan, false
+	}
+	return plan, true
+}
+
+func (r *openAIRequestRepair) noteHTTPEncryptedRepair(plan httpEncryptedRepairPlan) {
+	if r != nil {
+		r.encryptedTried = true
+		r.encryptedBulkTried = r.encryptedBulkTried || plan.Bulk
+	}
+}
+
+// Both HTTP and buffered/pre-output SSE use this same repair budget.
 func newHTTPEncryptedContentRepairSignal(ctx context.Context, c *gin.Context, account *Account, body, payload []byte, message string, status int, sse bool) error {
 	if !isHTTPEncryptedContentFailure(body, payload, message, status) {
 		return nil
 	}
-	r := openAIRequestRepairFrom(c)
-	selected, err := openAIRequestEncryptedContentRepairBody(c, body, payload)
-	if r != nil && account != nil && r.accountID == account.ID && !r.encryptedTried && err == nil && selected.Changed && ctx.Err() == nil && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-		return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: selected.Body, encryptedItem: selected}
+	if plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, openAIRequestRepairFrom(c), body, payload); ok {
+		return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: plan.Next, encrypted: plan}
 	}
 	return terminateHTTPEncryptedContent(ctx, c, account, body, payload, message, status, false, sse)
 }
