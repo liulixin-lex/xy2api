@@ -82,9 +82,6 @@ func supportedInferenceEffortsForAccount(account *Account, model string) ([]stri
 	case claude.IsClaudeModel(model):
 		supported = claude.EffortLevelsForModel(model)
 		reliable = len(supported) > 0
-		if reliable {
-			supported = append([]string{"minimal"}, supported...) // Existing converters express minimal as adaptive/low, not disabled.
-		}
 		spec, _ := claude.Claude55(model)
 		if claude.SupportsDisabledThinking(model) || spec.BetweenTools {
 			supported = append([]string{"none"}, supported...)
@@ -164,6 +161,12 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 		state.accountID, state.model, state.appliedSet = account.ID, model, true
 	}
 	effort := state.applied
+	if claude.IsClaudeModel(model) && effort == "minimal" && state.field != "" {
+		if protocol == "anthropic" && state.field == "output_config.effort" && state.original == "minimal" {
+			return body, false, nil // Preserve an unchanged native Messages preference and mode.
+		}
+		effort = "low" // Converter semantics: minimal uses adaptive/low, never none's mode.
+	}
 	if grokSupportsReasoningEffort(model) {
 		if normalized, ok := normalizeGrokReasoningEffortValue(effort, model); ok {
 			effort = normalized
@@ -195,9 +198,6 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 	}
 	if state.field == "" && effort == state.original {
 		return body, false, nil // Suffixes are requested metadata, not explicit wire fields.
-	}
-	if protocol == "anthropic" && claude.IsClaudeModel(model) && effort == "minimal" && state.field != "output_config.effort" {
-		effort = "low" // Converted Chat/Responses minimal already uses adaptive/low.
 	}
 	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none" && effort != "none")
 	if err != nil {
