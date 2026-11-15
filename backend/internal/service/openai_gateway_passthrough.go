@@ -1953,6 +1953,14 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, headers, payload, model)
 	}
 	switch statusCode {
+	case http.StatusServiceUnavailable:
+		if s != nil && s.rateLimitService != nil {
+			stateCtx, cancel := openAIAccountStateContext(ctx)
+			defer cancel()
+			_, applied := s.rateLimitService.applyConfiguredModelCooldown(stateCtx, account, statusCode, payload, firstNonEmpty(canonicalModel...))
+			return statusCode, applied
+		}
+		return statusCode, false
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
 			return statusCode, false

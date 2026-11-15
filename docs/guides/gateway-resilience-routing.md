@@ -28,6 +28,7 @@
 - `failure.decision_v2` 开启时，只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded”按瞬时或限流处理，可以换到同一主机上的其他账号。余额等更强的证据优先。
 - 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`）不罚号、不换号，返回 400，运维记录标为业务限制，不计入 SLA。
 - 403 计数或持久化设施故障只触发 `failure.transient_cooldown_seconds` 的本地短时回避，不升级为坏凭据，也不清除已有硬暂停；正常计数达到阈值时的停用规则保持不变。
+- HTTP 503 与流内过载命中显式临时停调规则时，若已知实际出站模型，仅按规则期限冷却该账号的这个模型；未命中、模型为空或模型限流写入失败时不扩大为整号暂停。规则只匹配实际错误字段，不匹配请求回显；输出后的失败只影响后续选号。
 - 一个上游响应只罚一次。池模式账号、管理员配置的自定义错误码与临时不可调度规则在韧性处理之前生效。
 
 ## 软罚与硬罚

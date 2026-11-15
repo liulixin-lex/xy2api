@@ -2364,6 +2364,35 @@ func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account 
 	return s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel))
 }
 
+// applyConfiguredModelCooldown distinguishes a matching rule from a successful
+// write, so a storage failure cannot turn a model rule into an account block.
+func (s *RateLimitService) applyConfiguredModelCooldown(ctx context.Context, account *Account, statusCode int, responseBody []byte, canonicalModel string) (matched, applied bool) {
+	canonicalModel = strings.TrimSpace(canonicalModel)
+	if s == nil || s.accountRepo == nil || account == nil || canonicalModel == "" || statusCode == http.StatusUnauthorized ||
+		(account.IsPoolMode() && !account.IsCustomErrorCodesEnabled()) || !account.ShouldHandleErrorCode(statusCode) {
+		return false, false
+	}
+	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if match.rule.DurationMinutes <= 0 {
+			continue
+		}
+		now := time.Now()
+		until := now.Add(time.Duration(match.rule.DurationMinutes) * time.Minute)
+		state := TempUnschedState{
+			UntilUnix: until.Unix(), TriggeredAtUnix: now.Unix(), StatusCode: statusCode,
+			MatchedKeyword: match.matchedKeyword, RuleIndex: match.ruleIndex,
+			ErrorMessage: truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
+		}
+		raw, _ := json.Marshal(state)
+		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, canonicalModel, until, string(raw)); err != nil {
+			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", canonicalModel, "error", err)
+			return true, false
+		}
+		return true, true
+	}
+	return false, false
+}
+
 func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
@@ -2705,6 +2734,17 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 		return nil
 	}
 	body := responseBody
+	if active := openAIStreamErrorObject(responseBody); active.IsObject() {
+		// Only the active error's fields may match a rule. Request echoes and
+		// metadata beside (or inside) the error are not upstream failure evidence.
+		fields := make(map[string]any)
+		for _, key := range []string{"code", "type", "message", "error_code", "error_name"} {
+			if value := active.Get(key); value.Exists() {
+				fields[key] = value.Value()
+			}
+		}
+		body, _ = json.Marshal(fields)
+	}
 	if len(body) > tempUnschedBodyMaxBytes {
 		body = body[:tempUnschedBodyMaxBytes]
 	}
