@@ -180,6 +180,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 流式开场与终止 `stream`
 
+原生与透传 Responses 以完整 SSE 帧校验终态，不接受损坏的多行 JSON 或只有事件名的伪结束；已输出后的协议失败只写一次错误终态。
+
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
   - `native_prelude_whitelist`：原生 Responses 把 `response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不含内容的 added 事件也算作开场。
@@ -206,6 +208,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **观测**：计数 `collab_plaintext`、`collab_call`、`collab_call_action`；日志 `resilience.collab_plaintext`（冲突、异常计数或转换后被拒时记录）。
 
 ## 不受开关控制的行为
+
+- Responses 终态的 UTF-8、JSON 与状态一致性校验始终执行，不能关闭开关后把坏帧视为成功。
 
 以下属于协议正确性修正，关闭总开关后仍然生效：
 

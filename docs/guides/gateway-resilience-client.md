@@ -54,6 +54,8 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 | Chat Completions | `data: {"error":{…,"status":N}}`，随后 `data: [DONE]` |
 | Anthropic Messages | `event: error` |
 
+原生与透传 Responses 收齐完整 SSE 事件后才判定结束。坏 UTF-8、坏 JSON、缺 response 或状态冲突不能作为成功终态；输出后以单次失败终态结束，保留已读取用量。
+
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
 
 Gemini 分组的 `/v1/chat/completions`、`/v1/messages` 流式请求（见 [Gemini](../platforms/gemini.md#兼容入口参数)），遇到无法转换的结束原因（如 `MALFORMED_FUNCTION_CALL`），或工具参数不是 JSON 对象时，按上表写一次终止帧，保留已读到的用量，不再补发成功结束。

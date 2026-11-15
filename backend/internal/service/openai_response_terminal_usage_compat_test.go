@@ -9,7 +9,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 func TestEffectiveOpenAISSEEventTypeKeepsPayloadTerminalAuthoritative(t *testing.T) {
@@ -27,7 +26,8 @@ func TestExtractOpenAISSETerminalEventUsesEventField(t *testing.T) {
 	body := "event: error\n" +
 		"data: {\"error\":{\"message\":\"provider failed\"}}\n\n" +
 		"data: [DONE]\n\n"
-	eventType, _, payload, ok := extractOpenAISSETerminalEvent(body)
+	terminal, _, payload := extractOpenAISSETerminalEvent(body)
+	eventType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "error", eventType)
 	require.Equal(t, "provider failed", extractOpenAISSEErrorMessage(payload))
@@ -38,10 +38,12 @@ func TestExtractOpenAISSETerminalEventUsesFinalAuthoritativeTerminal(t *testing.
 
 	body := "data: {\"type\":\"error\",\"error\":{\"message\":\"recovering\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n"
-	eventType, _, payload, ok := extractOpenAISSETerminalEvent(body)
+	terminal, _, payload := extractOpenAISSETerminalEvent(body)
+	eventType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
-	require.Equal(t, "response.completed", eventType)
-	require.Equal(t, "resp_1", gjson.GetBytes(payload, "response.id").String())
+	require.Equal(t, "error", eventType)
+	require.True(t, terminal.Failure)
+	require.Equal(t, "recovering", extractOpenAISSEErrorMessage(payload))
 }
 
 func TestExtractOpenAISSETerminalEventPreservesRawEventForWrapperValidation(t *testing.T) {
@@ -52,9 +54,9 @@ func TestExtractOpenAISSETerminalEventPreservesRawEventForWrapperValidation(t *t
 		{"completed error event", "error", `{"type":"response.completed","response":{"output":[]}}`, "response.completed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			terminal, sseEvent, payload, ok := extractOpenAISSETerminalEvent("event: " + tc.event + "\ndata: " + tc.payload + "\n\n")
-			require.True(t, ok)
-			require.Equal(t, tc.terminal, terminal)
+			terminal, sseEvent, payload := extractOpenAISSETerminalEvent("event: " + tc.event + "\ndata: " + tc.payload + "\n\n")
+			require.True(t, terminal.Seen)
+			require.Equal(t, tc.terminal, terminal.EventType)
 			require.Equal(t, tc.event, sseEvent)
 			require.Equal(t, tc.payload, string(payload))
 		})

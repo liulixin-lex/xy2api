@@ -2406,7 +2406,8 @@ func TestOpenAIStreamingNormalizesTerminalOutputFromDeltas(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	terminalType, _, terminalPayload, ok := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminal, _, terminalPayload := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminalType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "response.completed", terminalType)
 	output := gjson.GetBytes(terminalPayload, "response.output")
@@ -2443,7 +2444,8 @@ func TestOpenAIStreamingNormalizesTerminalOutputToEmptyArray(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	terminalType, _, terminalPayload, ok := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminal, _, terminalPayload := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminalType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "response.completed", terminalType)
 	output := gjson.GetBytes(terminalPayload, "response.output")

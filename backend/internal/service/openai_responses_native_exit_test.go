@@ -197,3 +197,63 @@ func TestM6PassthroughToolHistory400(t *testing.T) {
 		})
 	}
 }
+
+func m6Stream(t *testing.T, pass bool, body string) (*httptest.ResponseRecorder, *OpenAIUsage, bool, bool, error) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+	account := newOpenAIRejectedFieldTestAccount()
+	if pass {
+		result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, account, time.Now(), "client-model", "mapped-model")
+		if result == nil {
+			return w, nil, false, false, err
+		}
+		return w, result.usage, result.TerminalSeen, result.TerminalValid, err
+	}
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, account, time.Now(), "client-model", "mapped-model")
+	if result == nil {
+		return w, nil, false, false, err
+	}
+	return w, result.usage, result.TerminalSeen, result.TerminalValid, err
+}
+
+func TestM6MalformedTerminal(t *testing.T) {
+	prefix := m6Frame(`{"type":"response.created","response":{"id":"r1","created_at":123}}`) + m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`)
+	for _, pass := range []bool{false, true} {
+		for _, bad := range []string{
+			"event: response.completed\ndata: \xff\n\n",
+			m6Frame(`{"type":"response.completed","response":`),
+			m6Frame(`{"type":"response.completed"}`),
+			m6Frame(`{"type":"response.completed","response":{"status":"failed"}}`),
+			m6Frame(`{"type":"response.output_text.delta","delta":`),
+			"event: response.completed\ndata: {\"type\":\"response.created\"}\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+		} {
+			t.Run(fmt.Sprintf("pass=%t/%q", pass, bad), func(t *testing.T) {
+				w, usage, _, valid, err := m6Stream(t, pass, prefix+bad)
+				require.Error(t, err)
+				require.False(t, valid)
+				require.NotNil(t, usage)
+				require.Equal(t, 13, usage.InputTokens)
+				require.Equal(t, 5, usage.OutputTokens)
+				require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"), w.Body.String())
+				require.NotContains(t, w.Body.String(), "event: response.completed")
+				terminal, _, payload := extractOpenAISSETerminalEvent(w.Body.String())
+				require.True(t, terminal.Failure)
+				require.Equal(t, "r1", gjson.GetBytes(payload, "response.id").String())
+				require.Equal(t, int64(13), gjson.GetBytes(payload, "response.usage.input_tokens").Int())
+			})
+		}
+		for _, validBody := range []string{
+			"event: response.completed\ndata: {\ndata: \"response\":{\"id\":\"r1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"output_tokens\":5}}}\n\n",
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"output_tokens\":5}}}",
+		} {
+			_, _, seen, valid, err := m6Stream(t, pass, validBody)
+			require.NoError(t, err)
+			require.True(t, seen)
+			require.True(t, valid)
+		}
+	}
+}
