@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 响应数组中的 thinking 与 text 按原顺序保留，流式数组不再解码失败或丢失思考内容。
+
 - Chat 正文或工具开始后的迟到 reasoning 不再写入已关闭项或仅出现在最终响应中。
 
 - Anthropic thinking 转为 Responses 流时补齐摘要分段的宣布与关闭事件，完成事件携带完整文本。
