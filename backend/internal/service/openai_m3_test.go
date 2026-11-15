@@ -139,7 +139,7 @@ func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
 func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		for _, stream := range []bool{false, true} {
-			for _, terminal := range []string{"", "response.cancelled"} {
+			for _, terminal := range []string{"", "response.cancelled", "response.completed"} {
 				for _, output := range []bool{false, true} {
 					t.Run(fmt.Sprintf("passthrough=%t/stream=%t/terminal=%s/output=%t", passthrough, stream, terminal, output), func(t *testing.T) {
 						withResilienceSettings(t, nil)
@@ -150,7 +150,7 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 							frames += "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 						}
 						if terminal != "" {
-							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":\"cancelled\",\"output\":[]}}\n\n", terminal)
+							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":%q,\"output\":[]}}\n\n", terminal, strings.TrimPrefix(terminal, "response."))
 						}
 						upstream := &httpUpstreamRecorder{responses: []*http.Response{
 							newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
@@ -166,8 +166,13 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 						require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
 						attempt := openAIRequestRepairFrom(req.c).m3
 						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID)
-						// Neither truncated nor cancelled responses run the success hook.
-						require.Empty(t, bad)
+						// Partial failures do not run the M6 success hook, even
+						// after output. Only a valid completion commits batch evidence.
+						if terminal == "response.completed" {
+							require.Len(t, bad, 2)
+						} else {
+							require.Empty(t, bad)
+						}
 					})
 				}
 			}
