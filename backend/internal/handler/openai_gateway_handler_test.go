@@ -3756,3 +3756,12 @@ func (r *openAIWSFailoverHandlerAccountRepoStub) UpdateExtra(_ context.Context, 
 	}
 	return nil
 }
+
+func (s *openAIWSUsageHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+	for _, platform := range platforms {
+		if s.account.Platform == platform && s.account.Status == service.StatusActive && s.account.Schedulable {
+			return []service.Account{s.account}, nil
+		}
+	}
+	return nil, nil
+}
