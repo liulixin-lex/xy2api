@@ -94,8 +94,8 @@ func UpstreamClientErrorFields(body []byte, upstreamMsg string) (errType, code, 
 // HTTP 400 tool-history rejection, without validating local history.
 //
 //nolint:unused // M6/M8 own the passthrough call sites after this prerequisite.
-func isToolHistoryUpstreamClientError(status int, body []byte) bool {
-	if status != http.StatusBadRequest || !utf8.Valid(body) || !gjson.ValidBytes(body) {
+func isToolHistoryUpstreamClientError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusBadRequest || !utf8.Valid(body) || !gjson.ValidBytes(body) {
 		return false
 	}
 	object := gjson.GetBytes(body, "error")
