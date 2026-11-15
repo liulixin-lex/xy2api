@@ -34,7 +34,7 @@ const (
 	// no-account response to the writers, which add the message hint.
 	ginKeyResilienceRetryAfter  = "xy_resilience_retry_after"
 	ginKeyResilienceTurnCounted = "xy_resilience_turn_counted"
-	ginKeyResilienceFinalized   = "xy_resilience_terminal_finalized"
+	ginKeyResilienceFinalized   = resilience.GinKeyProtocolTerminal
 
 	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
 	// (design §9.7); the writers give it the code server_is_overloaded.
