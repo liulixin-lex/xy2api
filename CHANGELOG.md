@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Responses 转 Chat 时省略并记录 metadata 与非字符串 user，字符串 user 和 text.verbosity 继续发送。
+
 - Chat 上游嵌套数组形式的 thinking 保留为推理文本，未知类型的 content 片段忽略并记录，正文继续返回。
 
 - Anthropic 上游在允许 EOF 收尾的配置下省略 stop_reason 时，Responses 仍发送一次完整终态。
