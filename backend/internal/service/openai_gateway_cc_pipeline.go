@@ -362,6 +362,11 @@ func (s *OpenAIGatewayService) scanCCStream(
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
 		}
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil {
+				recordConvertedTerminalMapping(c.Request.Context(), "chat", "responses", "", *choice.FinishReason)
+			}
+		}
 		emit(&chunk)
 		return false
 	}

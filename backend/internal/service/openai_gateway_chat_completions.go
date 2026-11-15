@@ -1065,7 +1065,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				MarkResponseCommitted(c)
 			}
 			if !clientDisconnected {
-				_, code, param, _ := UpstreamClientErrorFields(payloadBytes, defaultMsg)
+				code := extractUpstreamErrorCode(payloadBytes)
+				param := gjson.GetBytes(payloadBytes, "error.param").String()
 				WriteTargetProtocolError(c, PreOutputProtocolChat, defaultStatus, defaultErrType, code, param, defaultMsg)
 			}
 

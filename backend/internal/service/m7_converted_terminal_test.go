@@ -60,6 +60,7 @@ func TestM7ConvertedTerminalOutcomes(t *testing.T) {
 						require.Error(t, err)
 					} else {
 						require.NoError(t, err)
+						require.True(t, ProtocolTerminalClaimed(c))
 					}
 					require.NotNil(t, result)
 					require.True(t, result.ResponseFactsKnown)

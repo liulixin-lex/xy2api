@@ -290,6 +290,7 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 
 func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOutcome, bool) {
 	st.evidence.observe(name, payload)
+	recordAnthropicTerminalMapping(st.ctx(), payload)
 	var event apicompat.AnthropicStreamEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logger.L().Warn("gateway convert stream: failed to parse event", zap.Error(err),

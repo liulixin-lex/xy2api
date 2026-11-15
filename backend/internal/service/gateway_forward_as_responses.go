@@ -446,6 +446,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 
 		evidence.observe(eventType, payload)
+		recordAnthropicTerminalMapping(c.Request.Context(), payload)
 		if evidence.err != nil {
 			break
 		}

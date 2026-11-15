@@ -250,6 +250,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 		observeSchedPayload(c, []byte(payload))
 		evidence.observe(eventType, payload)
+		recordAnthropicTerminalMapping(c.Request.Context(), payload)
 		if evidence.err != nil {
 			break
 		}
@@ -354,7 +355,12 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, retErr error) {
+	defer func() {
+		if result != nil && retErr == nil && !result.ClientDisconnect {
+			ClaimProtocolTerminal(c)
+		}
+	}()
 	requestID := resp.Header.Get("x-request-id")
 
 	if s.responseHeaderFilter != nil {
@@ -510,6 +516,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 
 		observeSchedPayload(c, []byte(payload))
+		recordAnthropicTerminalMapping(c.Request.Context(), payload)
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue

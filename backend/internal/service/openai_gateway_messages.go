@@ -1290,7 +1290,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					MarkResponseCommitted(c)
 				}
 				if !clientDisconnected {
-					_, code, param, _ := UpstreamClientErrorFields(payloadBytes, errMsg)
+					code := extractUpstreamErrorCode(payloadBytes)
+					param := gjson.GetBytes(payloadBytes, "error.param").String()
 					WriteTargetProtocolError(c, PreOutputProtocolAnthropic, errStatus, errType, code, param, errMsg)
 				}
 
