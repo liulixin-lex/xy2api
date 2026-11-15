@@ -193,6 +193,23 @@ func TestM1ReviewDerivedIntent(t *testing.T) {
 		require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning").Exists())
 		require.Nil(t, result.ReasoningEffort)
 	}
+	// A third-party thinking mode alone is not a wire effort on Responses/Chat bodies either.
+	thinkingBody := []byte(`{"model":"kimi-k2.5","input":"hi","thinking":{"type":"disabled"}}`)
+	thinkingUpstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+	_, err := newOpenAIRejectedFieldTestService(thinkingUpstream).Forward(m1EffortContext(thinkingBody), newOpenAIRejectedFieldTestContext(thinkingBody), newOpenAIRejectedFieldTestAccount(), thinkingBody)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(thinkingUpstream.lastBody, "reasoning").Exists())
+	require.Equal(t, "disabled", gjson.GetBytes(thinkingUpstream.lastBody, "thinking.type").String())
+	chatBody := []byte(`{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"}}`)
+	chatOut, changed, err := applyFinalReasoningEffortForAccount(m1EffortContext(chatBody), nil, newOpenAIRejectedFieldTestAccount(), chatBody, "deepseek-chat", "chat")
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, chatBody, chatOut)
+	solBody := []byte(`{"model":"gpt-6.1-sol","input":"hi","thinking":{"type":"disabled"}}`)
+	solOut, _, err := applyFinalReasoningEffortForAccount(m1EffortContext(solBody), nil, newOpenAIRejectedFieldTestAccount(), solBody, "gpt-6.1-sol", "responses")
+	require.NoError(t, err)
+	require.Equal(t, "low", gjson.GetBytes(solOut, "reasoning.effort").String())
+	require.False(t, gjson.GetBytes(solOut, "thinking").Exists())
 	body := []byte(`{"model":"glm-4.6","max_tokens":1024,"thinking":{"type":"disabled"},"messages":[{"role":"user","content":"hi"}]}`)
 	account := newAnthropicAPIKeyAccountForTest()
 	account.Credentials["base_url"] = "https://open.bigmodel.example/api/anthropic"

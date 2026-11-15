@@ -196,8 +196,9 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 			return body, false, err
 		}
 	}
-	if state.field == "" && effort == state.original {
-		return body, false, nil // Suffixes are requested metadata, not explicit wire fields.
+	derivedOnly := state.field == "" || (state.field == "thinking.type" && !claude.IsClaudeModel(model))
+	if derivedOnly && effort == state.original {
+		return body, false, nil // Suffixes and thinking modes are requested metadata, not explicit wire fields.
 	}
 	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none" && effort != "none")
 	if err != nil {
