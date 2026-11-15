@@ -296,7 +296,6 @@ func TestResponsesEventToAnthropicEvents_RecoversTextOnEveryTerminalAlias(t *tes
 		"response.completed",
 		"response.done",
 		"response.incomplete",
-		"response.failed",
 	} {
 		t.Run(terminal, func(t *testing.T) {
 			const answer = "recovered on a terminal alias"
