@@ -61,7 +61,12 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal chat completions compat request: %w", err)
 	}
 
-	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime)
+	result, err := s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime)
+	if result != nil && account.Type == AccountTypeAPIKey && ccReq.ReasoningEffort != "" {
+		requested := ccReq.ReasoningEffort
+		result.RequestedReasoningEffort = &requested
+	}
+	return result, err
 }
 
 func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
@@ -73,7 +78,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	clientStream bool,
 	includeUsage bool,
 	startTime time.Time,
-) (_ *ForwardResult, retErr error) {
+) (result *ForwardResult, retErr error) {
 	var req struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -85,13 +90,31 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 	}
 
+	var lastSentGeminiBody []byte
+	defer func() {
+		if result != nil && account.Type == AccountTypeAPIKey {
+			result.ReasoningEffort = extractGeminiReasoningEffortFromBody(lastSentGeminiBody)
+		}
+	}()
+
 	mappedModel := req.Model
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
 
-	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
+	convertRequest := convertClaudeMessagesToGeminiGenerateContent
+	if account.Type == AccountTypeAPIKey {
+		opts := geminiCompatConversionOptions(ctx)
+		convertRequest = func(body []byte) ([]byte, error) {
+			return buildGeminiAPIKeyCompatRequest(body, mappedModel, opts)
+		}
+	}
+	geminiReq, err := convertRequest(claudeBody)
 	if err != nil {
+		var conversion *apicompat.UnsupportedConversionError
+		if errors.As(err, &conversion) {
+			return nil, err
+		}
 		_ = s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -113,6 +136,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		geminiReq,
 		clientStream,
 		useUpstreamStream,
+		func(body []byte) { lastSentGeminiBody = body },
 	)
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, clientStream, PreOutputProtocolChat, startTime)
@@ -323,6 +347,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 	geminiReq []byte,
 	clientStream bool,
 	useUpstreamStream bool,
+	sentBody func([]byte),
 ) (func(context.Context) (*http.Request, string, error), string) {
 	switch account.Type {
 	case AccountTypeAPIKey:
@@ -353,6 +378,9 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
+			if sentBody != nil {
+				sentBody(restGeminiReq)
+			}
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
 			return upstreamReq, "x-request-id", nil
 		}, "x-request-id"
@@ -618,6 +646,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	openBlockIndex := -1
 	openBlockType := ""
 	seenText := ""
+	seenThinking := ""
 	openToolIndex := -1
 	openToolName := ""
 	seenToolJSON := ""
@@ -684,36 +713,43 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
-								delta, newSeen := computeGeminiTextDelta(seenText, text)
-								seenText = newSeen
+								blockType := "text"
+								seen := &seenText
+								if thought, _ := part["thought"].(bool); thought {
+									blockType = "thinking"
+									seen = &seenThinking
+								}
+								delta, newSeen := computeGeminiTextDelta(*seen, text)
+								*seen = newSeen
 								if delta == "" {
 									continue
 								}
-								if openBlockType != "text" {
+								if openBlockType != blockType {
 									if closeOpenBlock() {
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 									idx := nextBlockIndex
 									nextBlockIndex++
 									openBlockIndex = idx
-									openBlockType = "text"
+									openBlockType = blockType
 									if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
 										Type:  "content_block_start",
 										Index: &idx,
 										ContentBlock: &apicompat.AnthropicContentBlock{
-											Type: "text",
+											Type: blockType,
 											Text: "",
 										},
 									}) {
 										return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 									}
 								}
+								contentDelta := &apicompat.AnthropicDelta{Type: "text_delta", Text: delta}
+								if blockType == "thinking" {
+									contentDelta = &apicompat.AnthropicDelta{Type: "thinking_delta", Thinking: delta}
+								}
 								if emitAnthropicEvent(&apicompat.AnthropicStreamEvent{
-									Type: "content_block_delta",
-									Delta: &apicompat.AnthropicDelta{
-										Type: "text_delta",
-										Text: delta,
-									},
+									Type:  "content_block_delta",
+									Delta: contentDelta,
 								}) {
 									return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil
 								}

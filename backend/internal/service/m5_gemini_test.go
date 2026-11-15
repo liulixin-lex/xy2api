@@ -1,0 +1,155 @@
+//go:build unit
+
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+func TestM5ThinkingConfig(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, tt := range []struct {
+			name, model, fields, want string
+			actual                    string
+			multiplier                float64
+		}{
+			{"default", "gemini-2.5-flash", ``, ``, "", 1},
+			{"null", "gemini-2.5-flash", `,"output_config":{"effort":null}`, ``, "", 1},
+			{"empty", "gemini-2.5-flash", `,"output_config":{"effort":""}`, ``, "", 1},
+			{"none", "gemini-2.5-flash", `,"output_config":{"effort":"none"}`, `{"thinkingBudget":0,"includeThoughts":false}`, "", 1},
+			{"low", "gemini-2.5-flash", `,"output_config":{"effort":"low"}`, `{"thinkingBudget":1024}`, "", 1},
+			{"medium", "gemini-2.5-flash", `,"output_config":{"effort":"medium"}`, `{"thinkingBudget":8192}`, "", 1},
+			{"high", "gemini-2.5-flash", `,"output_config":{"effort":"high"}`, `{"thinkingBudget":24576}`, "", 1},
+			{"level_low", "gemini-3.1-pro", `,"output_config":{"effort":"low"}`, `{"thinkingLevel":"low"}`, "low", 1.2},
+			{"level_high", "gemini-3.1-pro", `,"output_config":{"effort":"high"}`, `{"thinkingLevel":"high"}`, "high", 2},
+			{"effort_before_adaptive", "gemini-3.1-pro", `,"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}`, `{"thinkingLevel":"low","includeThoughts":true}`, "low", 1.2},
+			{"disabled_before_effort", "gemini-2.5-flash", `,"thinking":{"type":"disabled"},"output_config":{"effort":"high"}`, `{"thinkingBudget":0,"includeThoughts":false}`, "", 1},
+			{"budget", "gemini-2.5-flash", `,"thinking":{"type":"enabled","budget_tokens":2048}`, `{"thinkingBudget":2048,"includeThoughts":true}`, "", 1},
+			{"budget_on_level_model", "gemini-3.1-pro", `,"thinking":{"type":"enabled","budget_tokens":2048}`, `{"thinkingBudget":2048,"includeThoughts":true}`, "", 1},
+			{"adaptive", "gemini-2.5-flash", `,"thinking":{"type":"adaptive"}`, `{"thinkingBudget":-1,"includeThoughts":true}`, "", 1},
+			{"pro_cannot_disable", "gemini-2.5-pro", `,"output_config":{"effort":"none"}`, `{"thinkingBudget":128,"includeThoughts":false}`, "", 1},
+			{"unknown", "gemini-9-flash", `,"output_config":{"effort":"high"}`, ``, "", 1},
+			{"nearest", "gemini-3.1-pro", `,"output_config":{"effort":"max"}`, `{"thinkingLevel":"high"}`, "high", 2},
+		} {
+			t.Run(fmt.Sprintf("messages/%s/stream=%t", tt.name, stream), func(t *testing.T) {
+				body := []byte(fmt.Sprintf(`{"model":%q,"max_tokens":512,"stream":%t,"messages":[{"role":"user","content":"hi"}]%s}`, tt.model, stream, tt.fields))
+				wire, result, notices := m5ForwardMessages(t, body)
+				thinking := gjson.GetBytes(wire, "generationConfig.thinkingConfig")
+				if tt.want == "" {
+					require.False(t, thinking.Exists())
+				} else {
+					require.JSONEq(t, tt.want, thinking.Raw)
+				}
+				require.Equal(t, int64(512), gjson.GetBytes(wire, "generationConfig.maxOutputTokens").Int())
+				require.Equal(t, tt.actual, optionalStringValue(result.ReasoningEffort))
+				require.Equal(t, gjson.GetBytes(body, "output_config.effort").String(), optionalStringValue(result.RequestedReasoningEffort))
+				if tt.name == "unknown" {
+					require.Contains(t, notices, apicompat.ConversionNotice{Field: "output_config.effort", Action: "omit"})
+				}
+				billing := NewBillingService(&config.Config{}, nil)
+				cost, err := billing.CalculateTokenCostForRequest(TokenCostRequest{
+					Ctx: context.Background(), Model: tt.model,
+					Group:  &Group{ID: 77, Platform: PlatformGemini, ModelPricing: []ChannelModelPricing{{Models: []string{tt.model}, BillingMode: BillingModeToken, InputPrice: testPtrFloat64(0.05), OutputPrice: testPtrFloat64(0.1), ReasoningEffortMultipliers: map[string]float64{"low": 1.2, "high": 2}}}},
+					Tokens: UsageTokens{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}, ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+					Resolver: NewModelPricingResolver(nil, billing), RateMultiplier: 1,
+				})
+				require.NoError(t, err)
+				require.InDelta(t, tt.multiplier, cost.TotalCost, 1e-12)
+			})
+		}
+	}
+
+	t.Run("last_rebuilt_body", func(t *testing.T) {
+		body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":512,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"},"output_config":{"effort":"high"}}`)
+		upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+			{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"invalid thought_signature"}}`))},
+			{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`))},
+		}}
+		account := geminiSignalTestAccount()
+		account.Credentials["model_mapping"] = map[string]any{"claude-sonnet-4-5": "gemini-3.1-pro"}
+		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+		c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/messages", body)
+		result, err := svc.Forward(c.Request.Context(), c, account, body)
+		require.NoError(t, err)
+		require.Len(t, upstream.requestBodies, 2)
+		require.Equal(t, "low", gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig.thinkingLevel").String())
+		require.Equal(t, "high", gjson.GetBytes(upstream.requestBodies[1], "generationConfig.thinkingConfig.thinkingLevel").String())
+		require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
+		require.Equal(t, "high", optionalStringValue(result.RequestedReasoningEffort))
+	})
+	t.Run("thought_output", func(t *testing.T) {
+		raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"private thought","thought":true},{"text":"public answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"thoughtsTokenCount":3}}`)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(raw, &response))
+		messages, _ := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+
+		blocks := messages["content"].([]any)
+		require.Equal(t, map[string]any{"type": "thinking", "thinking": "private thought", "signature": ""}, blocks[0])
+		require.Equal(t, map[string]any{"type": "text", "text": "public answer"}, blocks[1])
+		chat, _, err := geminiResponseToChatCompletions(response, "gemini-2.5-flash", raw, nil)
+		require.NoError(t, err)
+		require.Equal(t, "private thought", chat.Choices[0].Message.ReasoningContent)
+		require.JSONEq(t, `"public answer"`, string(chat.Choices[0].Message.Content))
+		for _, protocol := range []string{"messages", "chat"} {
+			t.Run(protocol, func(t *testing.T) {
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, nil)
+				svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + string(raw) + "\n\n"))}
+				if protocol == "messages" {
+					_, err = svc.handleStreamingResponse(c, resp, time.Now(), "gemini-2.5-flash")
+				} else {
+					_, err = svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
+				}
+				require.NoError(t, err)
+				out := recorder.Body.String()
+				if protocol == "messages" {
+					require.Contains(t, out, `"thinking":"private thought"`)
+					require.NotContains(t, out, `"text":"private thought"`)
+					require.Contains(t, out, `"text":"public answer"`)
+				} else {
+					require.Contains(t, out, `"reasoning_content":"private thought"`)
+					require.NotContains(t, out, `"content":"private thought"`)
+					require.Contains(t, out, `"content":"public answer"`)
+				}
+			})
+		}
+	})
+}
+
+func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
+	t.Helper()
+	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
+	contentType := "application/json"
+	if gjson.GetBytes(body, "stream").Bool() {
+		response = "data: " + response + "\n\n"
+		contentType = "text/event-stream"
+	}
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/messages", body)
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	c.Request = c.Request.WithContext(ctx)
+	account := geminiSignalTestAccount()
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	result, err := svc.Forward(ctx, c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, upstream.requestBodies, 1)
+	return upstream.requestBodies[0], result, resilience.SnapshotConversionNotices(ctx)
+}

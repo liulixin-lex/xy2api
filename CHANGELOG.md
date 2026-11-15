@@ -118,6 +118,9 @@
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
 - Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
+- Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
+
+- Gemini 兼容入口返回的思考文本与普通正文分开，JSON 和流式响应均保留思考内容。
 
 ### 流式传输与报错
 
