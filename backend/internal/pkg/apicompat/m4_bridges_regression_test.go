@@ -319,3 +319,86 @@ func TestM4NamespaceCustomRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ChatToolSlots(t *testing.T) {
+	for _, calls := range []string{
+		`[{"id":"a","function":{"name":"one","arguments":"{}"}},{"id":"b","function":{"name":"two","arguments":"{}"}}]`,
+		`[{"index":2,"id":"a","function":{"name":"one","arguments":"{}"}}]`,
+	} {
+		t.Run(calls, func(t *testing.T) {
+			var chunk ChatCompletionsChunk
+			if err := json.Unmarshal([]byte(`{"choices":[{"index":0,"delta":{"tool_calls":`+calls+`},"finish_reason":"tool_calls"}]}`), &chunk); err != nil {
+				t.Fatal(err)
+			}
+			rs := NewChatCompletionsToResponsesStreamState("m")
+			rs.Bridge = &BridgeOptions{Enabled: true}
+			events := ChatCompletionsChunkToResponsesEvents(&chunk, rs)
+			events = append(events, FinalizeChatCompletionsResponsesStream(rs)...)
+			if rs.Err() != nil {
+				t.Fatal(rs.Err())
+			}
+			added, done := map[string]int{}, map[string]int{}
+			for _, e := range events {
+				if e.Item != nil {
+					if e.Type == "response.output_item.added" {
+						added[e.Item.ID] = e.OutputIndex
+					}
+					if e.Type == "response.output_item.done" {
+						done[e.Item.ID] = e.OutputIndex
+					}
+				}
+			}
+			if len(added) != len(chunk.Choices[0].Delta.ToolCalls) || !reflect.DeepEqual(added, done) {
+				t.Fatalf("added=%v done=%v", added, done)
+			}
+			terminal := events[len(events)-1].Response
+			for i, item := range terminal.Output {
+				if added[item.ID] != i {
+					t.Fatalf("terminal identity/index changed: %+v", terminal.Output)
+				}
+			}
+			as := NewChatCompletionsToAnthropicStreamState("m")
+			as.Bridge = &BridgeOptions{Enabled: true}
+			ae := ChatCompletionsChunkToAnthropicEvents(&chunk, as)
+			ae = append(ae, FinalizeChatCompletionsAnthropicStream(as)...)
+			started := 0
+			for _, e := range ae {
+				if e.ContentBlock != nil && e.ContentBlock.Type == "tool_use" {
+					started++
+				}
+			}
+			if as.Err() != nil || started != len(chunk.Choices[0].Delta.ToolCalls) {
+				t.Fatalf("starts=%d err=%v", started, as.Err())
+			}
+		})
+	}
+	rs := NewChatCompletionsToResponsesStreamState("m")
+	rs.Bridge = &BridgeOptions{Enabled: true}
+	as := NewChatCompletionsToAnthropicStreamState("m")
+	as.Bridge = &BridgeOptions{Enabled: true}
+	for _, raw := range []string{`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"function":{"name":"one","arguments":"{"}}]}}]}`, `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"late","function":{"arguments":"}"}}]},"finish_reason":"tool_calls"}]}`} {
+		var chunk ChatCompletionsChunk
+		if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range ChatCompletionsChunkToResponsesEvents(&chunk, rs) {
+			if e.Item != nil && e.Item.CallID != "late" {
+				t.Fatalf("premature ID: %+v", e.Item)
+			}
+		}
+		for _, e := range ChatCompletionsChunkToAnthropicEvents(&chunk, as) {
+			if e.ContentBlock != nil && e.ContentBlock.Type == "tool_use" && e.ContentBlock.ID != "late" {
+				t.Fatalf("premature ID: %+v", e.ContentBlock)
+			}
+		}
+	}
+	if rs.Err() != nil || as.Err() != nil {
+		t.Fatalf("late identity failed: %v %v", rs.Err(), as.Err())
+	}
+	bad := &ChatCompletionsChunk{Choices: []ChatChunkChoice{{Index: 1}}}
+	ChatCompletionsChunkToResponsesEvents(bad, rs)
+	ChatCompletionsChunkToAnthropicEvents(bad, as)
+	if rs.Err() == nil || as.Err() == nil || len(FinalizeChatCompletionsResponsesStream(rs)) != 0 || len(FinalizeChatCompletionsAnthropicStream(as)) != 0 {
+		t.Fatal("nonzero choice completed")
+	}
+}
