@@ -164,7 +164,7 @@
                   :key="filter.key"
                   type="button"
                   @click="toggleBuiltInFilter(filter.key)"
-                  :class="[POPOVER_ITEM, visibleFilters.has(filter.key) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF]"
+                  :class="[POPOVER_ITEM, POPOVER_ITEM_TEXT]"
                 >
                   <span>{{ filter.name }}</span>
                   <Icon
@@ -186,7 +186,7 @@
                   :key="attr.id"
                   type="button"
                   @click="toggleAttributeFilter(attr)"
-                  :class="[POPOVER_ITEM, visibleFilters.has(`attr_${attr.id}`) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF]"
+                  :class="[POPOVER_ITEM, POPOVER_ITEM_TEXT]"
                 >
                   <span>{{ attr.name }}</span>
                   <Icon
@@ -228,7 +228,7 @@
                     POPOVER_ITEM,
                     isForcedVisibleColumn(col.key)
                       ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                      : isColumnVisible(col.key) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF
+                      : POPOVER_ITEM_TEXT
                   ]"
                   :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
                 >
@@ -1533,10 +1533,10 @@ const {
 })
 const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 
-// The toolbar's dropdown rows in the popover material (12.6): the ticked ones drawn as selected.
+// The toolbar's dropdown rows in the popover material (12.6). Filter and column settings are multi-select lists: a
+// ticked row is told by its brand check alone, without the selected background or text colour (12.6-5).
 const POPOVER_ITEM = 'flex w-full items-center justify-between px-4 py-2 text-left text-sm'
-const POPOVER_ITEM_ON = 'bg-surface-popover-selected text-fg-popover-selected'
-const POPOVER_ITEM_OFF = 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'
+const POPOVER_ITEM_TEXT = 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'
 const BULK_ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
 // The bulk menu is a sub-layer like the row menu: Escape closes it and gives focus back to its button, a dialog it
 // opens closes it, a press outside closes it (handleClickOutside). It closes when the last row is unticked.

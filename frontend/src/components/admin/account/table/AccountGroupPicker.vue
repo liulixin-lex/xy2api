@@ -41,7 +41,7 @@
       <div class="gp-list" data-test="group-picker-list">
         <div v-if="!fresh" class="gp-empty">{{ t('common.loading') }}</div>
         <div v-else-if="!visible.length" class="gp-empty">{{ query.trim() ? t('admin.accounts.groupPicker.noMatch', { q: query.trim() }) : t('admin.accounts.groupPicker.none') }}</div>
-        <label v-for="group in visible" :key="group.id" class="gp-item" :class="{ 'is-checked': selectedSet.has(group.id) }">
+        <label v-for="group in visible" :key="group.id" class="gp-item">
           <input
             type="checkbox"
             class="gp-check"
@@ -474,9 +474,8 @@ defineExpose({ requestClose })
     background: var(--color-bg-popover-hover);
   }
 }
-.gp-item.is-checked {
-  background: var(--color-bg-popover-selected);
-}
+/* A multi-select list: a ticked group is told by its checkbox alone, in the brand colour, without the selected
+   background or text colour, which would cover a list that is mostly ticked (12.6-5). */
 .gp-check {
   width: 14px;
   height: 14px;
@@ -484,7 +483,7 @@ defineExpose({ requestClose })
   border: 1px solid var(--color-line-control);
   border-radius: var(--radius-xs);
   background: var(--color-bg-control);
-  color: theme('colors.primary.600');
+  accent-color: theme('colors.primary.600');
 }
 .gp-check:focus-visible {
   outline: 2px solid theme('colors.primary.500');
@@ -498,9 +497,6 @@ defineExpose({ requestClose })
   font-size: var(--font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.gp-item.is-checked .gp-name {
-  color: var(--color-text-popover-selected);
 }
 .gp-tag {
   flex: none;

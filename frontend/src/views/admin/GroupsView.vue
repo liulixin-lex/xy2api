@@ -83,13 +83,14 @@
                 v-if="showColumnDropdown"
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
               >
+                <!-- A multi-select list: a shown column is told by its brand check alone, without the selected background
+                     or text colour (12.6-5). -->
                 <button
                   v-for="col in toggleableColumns"
                   :key="col.key"
                   type="button"
                   @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm"
-                  :class="isColumnVisible(col.key) ? 'bg-surface-popover-selected text-fg-popover-selected' : 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300"
                 >
                   <span>{{ col.label }}</span>
                   <Icon
