@@ -60,11 +60,7 @@ const (
 // Handler writes run on the request goroutine; heartbeat writers are stopped
 // before this marker is used.
 func beginResilienceTerminal(c *gin.Context) bool {
-	if c == nil || c.GetBool(ginKeyResilienceFinalized) {
-		return false
-	}
-	c.Set(ginKeyResilienceFinalized, true)
-	return true
+	return service.ClaimProtocolTerminal(c)
 }
 
 // upstreamURLPattern finds URLs in upstream text, which may name the
