@@ -511,3 +511,106 @@ func TestM6NonstreamMissingTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestM6FailureRecoveryHint(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, pass := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, tc := range []struct {
+				http, nested, ms string
+				seconds          int
+			}{
+				{"2", "30", "90000", 90}, {"0", "5", "0", 5}, {"0", "0", "0", 0},
+			} {
+				t.Run(fmt.Sprintf("pass=%t/stream=%t/delay=%d", pass, stream, tc.seconds), func(t *testing.T) {
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					st := resilience.NewRequestState()
+					ctx := resilience.WithRequestState(context.Background(), st)
+					c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+					a := newNonStreamingFailoverAccount()
+					payload := []byte(fmt.Sprintf(`{"type":"response.failed","response":{"id":"r1","status":"failed","error":{"type":"server_error","message":"temporary failure","headers":{"retry-after":%q,"retry-after-ms":%s}},"usage":{"input_tokens":13,"output_tokens":5}}}`, tc.nested, tc.ms))
+					body := m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(string(payload)) + m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}`)
+					resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Retry-After": {tc.http}}, Body: io.NopCloser(strings.NewReader(body))}
+					svc := newNonStreamingFailoverService()
+					var err error
+					if stream {
+						if pass {
+							_, err = svc.handleStreamingResponsePassthrough(ctx, resp, c, a, time.Now(), "m", "m")
+						} else {
+							_, err = svc.handleStreamingResponse(ctx, resp, c, a, time.Now(), "m", "m")
+						}
+					} else if pass {
+						_, err = svc.handleNonStreamingResponsePassthrough(ctx, resp, c, a, "m", "m")
+					} else {
+						_, err = svc.handleNonStreamingResponse(ctx, resp, c, a, "m", "m")
+					}
+					require.Error(t, err)
+					hint := st.UpstreamRecoveryHint()
+					if tc.seconds == 0 {
+						require.Nil(t, hint)
+						return
+					}
+					require.NotNil(t, hint)
+					require.Equal(t, time.Duration(tc.seconds)*time.Second, hint.Delay)
+					require.Equal(t, hint.ObservedAt.Add(hint.Delay), hint.NotBefore)
+					accountHint, ok := st.AccountRetryNotBefore(a.ID)
+					require.True(t, ok)
+					require.Equal(t, hint.NotBefore, accountHint.NotBefore)
+					for _, wrapped := range []bool{false, true} {
+						var failure *UpstreamFailoverError
+						if wrapped {
+							failure = svc.newOpenAIWrappedStreamFailoverError(ctx, c, a, pass, "rid", payload, "temporary failure", "m", resp.Header, 503)
+						} else {
+							failure = svc.newOpenAIStreamFailoverError(c, a, pass, "rid", payload, "temporary failure", resp.Header)
+						}
+						if stream && wrapped {
+							require.Nil(t, failure)
+							continue
+						}
+						require.NotNil(t, failure)
+						require.NotNil(t, failure.UpstreamRecoveryHint)
+						require.Equal(t, hint.NotBefore, failure.UpstreamRecoveryHint.NotBefore)
+					}
+					local := openAIResponseFailureError(ctx, 503, "server_error", "server_error", "temporary failure")
+					want := tc.seconds
+					if want > 10 {
+						want = 10
+					}
+					require.Equal(t, fmt.Sprint(want), local["headers"].(map[string]string)["retry-after"])
+					require.Equal(t, hint.NotBefore, st.UpstreamRecoveryHint().NotBefore)
+					resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true})
+					require.NotContains(t, openAIResponseFailureError(ctx, 503, "server_error", "server_error", "temporary failure"), "headers")
+					st.SetUpstreamRecoveryHint(nil) // The next send boundary is owned by M8.
+					noteOpenAIResponsesRecoveryHint(c, a, http.Header{}, []byte(`{"error":{"code":503}}`), time.Now())
+					require.Nil(t, st.UpstreamRecoveryHint())
+				})
+			}
+		}
+	}
+	// Both M3 early returns retain the already parsed raw hint.
+	for _, wrapped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("early/wrapped=%t", wrapped), func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			svc := &OpenAIGatewayService{}
+			a := webSearchReplayAccount(false)
+			st := resilience.NewRequestState()
+			req.ctx = resilience.WithRequestState(req.ctx, st)
+			req.c.Request = req.c.Request.WithContext(req.ctx)
+			r := armOpenAIRequestRepair(req.c, a, nil)
+			r.m3 = svc.armOpenAIM3(req.c, a, []byte(m3TwoItemRequest))
+			r.m3.state.replaced[openAIM3SlotID{}] = struct{}{}
+			payload := []byte(`{"error":{"type":"invalid_request_error","message":"shape rejected","headers":{"retry-after":30}}}`)
+			noteOpenAIResponsesRecoveryHint(req.c, a, nil, payload, time.Now())
+			var failure *UpstreamFailoverError
+			if wrapped {
+				failure = svc.newOpenAIWrappedStreamFailoverError(req.ctx, req.c, a, false, "rid", payload, "shape rejected", "m", nil, 400)
+			} else {
+				failure = svc.newOpenAIStreamFailoverError(req.c, a, false, "rid", payload, "shape rejected")
+			}
+			require.NotNil(t, failure)
+			require.NotNil(t, failure.UpstreamRecoveryHint)
+			require.Equal(t, 30*time.Second, failure.UpstreamRecoveryHint.Delay)
+		})
+	}
+}

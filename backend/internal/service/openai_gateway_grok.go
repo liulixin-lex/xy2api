@@ -326,6 +326,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	result.TerminalSeen = responseFacts.TerminalSeen
 	result.TerminalValid = responseFacts.TerminalValid
 	result.ResponseBodyKind = responseFacts.ResponseBodyKind
+	result.UpstreamRecoveryHint = resilience.StateFrom(ctx).UpstreamRecoveryHint()
 
 	return result, partialErr
 }

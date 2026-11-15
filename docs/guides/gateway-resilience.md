@@ -155,6 +155,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 错误语义与防风暴 `errors`
 
+Responses 失败帧在脱敏和重建前保存上游原始恢复提示；后继 completed 不清除失败或提示。零等待不构成提示，客户端重试建议的限幅不会提前同账号的恢复时刻。
+
 - **做什么**：
   - 无可用账号时 503 带 `Retry-After`（`no_account_retry_after`，默认 2–30 秒，按组内最早恢复时间估算）；配置原因导致无号时 `Retry-After: 60` 并带 `x-should-retry: false`。
   - 同一分组、平台、模型的“无号”结论负缓存 `negative_cache_seconds`（默认 2 秒）；同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。

@@ -342,7 +342,7 @@ func randomKeepaliveHex(n int) string {
 }
 
 // openAIResponseFailureError is shared by the three local failed-frame writers.
-// It never forwards upstream headers or computes a candidate recommendation.
+// Client advice is capped independently from the original upstream recovery time.
 func openAIResponseFailureError(ctx context.Context, status int, errType, code, message string) map[string]any {
 	errBody := map[string]any{"code": code, "message": message}
 	if resilience.Current().FailedFrameRetryAfterOn() {
@@ -352,6 +352,11 @@ func openAIResponseFailureError(ctx context.Context, status int, errType, code, 
 			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "non_retryable"})
 		}
 		advice := resilience.ResolveRetryAdvice(ctx)
+		if !advice.Suppress && advice.Seconds == 0 && resilience.RetryAdviceEligible(status, errType, code) {
+			if hint := resilience.StateFrom(ctx).UpstreamRecoveryHint(); hint != nil && hint.NotBefore.After(time.Now()) {
+				advice = resilience.RetryAdvice{Seconds: resilience.ClampRetryAfter(time.Until(hint.NotBefore), 2, 10), Source: "upstream_recovery"}
+			}
+		}
 		errBody["message"] = advice.Message(message)
 		if headers := advice.Headers(); len(headers) > 0 {
 			errBody["headers"] = headers

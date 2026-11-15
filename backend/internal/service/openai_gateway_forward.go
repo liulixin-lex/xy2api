@@ -1598,6 +1598,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		forwardResult.TerminalSeen = responseFacts.TerminalSeen
 		forwardResult.TerminalValid = responseFacts.TerminalValid
 		forwardResult.ResponseBodyKind = responseFacts.ResponseBodyKind
+		forwardResult.UpstreamRecoveryHint = resilience.StateFrom(ctx).UpstreamRecoveryHint()
 
 		return forwardResult, partialErr
 	}

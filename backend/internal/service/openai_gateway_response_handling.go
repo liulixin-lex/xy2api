@@ -1050,6 +1050,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var responsesParser openAICompatSSEFrameParser
 	processFrame := func(frame openAICompatSSEFrame) {
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
+			noteOpenAIResponsesRecoveryHint(c, account, resp.Header, []byte(frame.Data), time.Now())
+		}
 		if source := s.parseSSEUsageBytesWithType([]byte(frame.Data), currentTerminal.EventType, usage); source != "" {
 			usageSource = source
 		}
@@ -1566,6 +1569,20 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	return ""
 }
 
+// Parse only the first authenticated failure, before any client/ops rewriting.
+func noteOpenAIResponsesRecoveryHint(c *gin.Context, account *Account, headers http.Header, payload []byte, observedAt time.Time) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	state := resilience.StateFrom(c.Request.Context())
+	if hint, ok := resilience.ParseUpstreamRecoveryHint(headers, payload, observedAt); ok {
+		state.SetUpstreamRecoveryHint(&hint)
+		if account != nil {
+			state.NoteAccountRetryNotBefore(account.ID, hint)
+		}
+	}
+}
+
 func noteOpenAIResponsesFacts(c *gin.Context, account *Account, source string, terminal OpenAIResponsesTerminal, kind string) {
 	if c == nil || c.Request == nil || account == nil {
 		return
@@ -2075,6 +2092,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 	terminalType := terminal.EventType
 	observeSchedPayload(c, terminalPayload, terminalType)
+	if terminal.Failure && terminal.Valid {
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, terminalPayload, time.Now())
+	}
 	if terminal.Failure {
 		if !terminal.Valid {
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid Responses terminal event", OpenAIUpstreamProtocolErrorCode)

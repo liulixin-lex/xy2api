@@ -720,6 +720,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	forwardResult.TerminalSeen = responseFacts.TerminalSeen
 	forwardResult.TerminalValid = responseFacts.TerminalValid
 	forwardResult.ResponseBodyKind = responseFacts.ResponseBodyKind
+	forwardResult.UpstreamRecoveryHint = resilience.StateFrom(ctx).UpstreamRecoveryHint()
 
 	return forwardResult, partialErr
 }
@@ -2010,7 +2011,12 @@ func (s *OpenAIGatewayService) newOpenAIWrappedStreamFailoverError(
 	canonicalModel string,
 	headers http.Header,
 	wrappedStatus int,
-) *UpstreamFailoverError {
+) (result *UpstreamFailoverError) {
+	defer func() {
+		if result != nil && c != nil && c.Request != nil {
+			result.UpstreamRecoveryHint = resilience.StateFrom(c.Request.Context()).UpstreamRecoveryHint()
+		}
+	}()
 	if wrappedStatus < http.StatusBadRequest || wrappedStatus > 599 || account == nil || IsResponseCommitted(c) {
 		return nil
 	}
@@ -2089,7 +2095,12 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	message string,
 	canonicalModel string,
 	responseHeaders ...http.Header,
-) *UpstreamFailoverError {
+) (result *UpstreamFailoverError) {
+	defer func() {
+		if result != nil && c != nil && c.Request != nil {
+			result.UpstreamRecoveryHint = resilience.StateFrom(c.Request.Context()).UpstreamRecoveryHint()
+		}
+	}()
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "OpenAI stream disconnected before completion"
@@ -2969,6 +2980,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	var responsesParser openAICompatSSEFrameParser
 	processFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
+			noteOpenAIResponsesRecoveryHint(c, account, resp.Header, []byte(frame.Data), time.Now())
+		}
 		if source := s.parseSSEUsageBytesWithType([]byte(frame.Data), currentTerminal.EventType, usage); source != "" {
 			usageSource = source
 		}
@@ -3289,6 +3303,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 
 	terminalType := terminal.EventType
 	observeSchedPayload(c, terminalPayload, terminalType)
+	if terminal.Failure && terminal.Valid {
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, terminalPayload, time.Now())
+	}
 	if terminal.Failure {
 		if !terminal.Valid {
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid Responses terminal event", OpenAIUpstreamProtocolErrorCode)
