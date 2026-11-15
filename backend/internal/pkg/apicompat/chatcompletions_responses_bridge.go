@@ -1932,8 +1932,17 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
 	}
 
+	eventType := "response.completed"
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		eventType, err = ResponsesTerminalEventType(status)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
+	}
 	state.CompletedSent = true
-	events = append(events, chatToResponsesEvent(state, "response.completed", &ResponsesStreamEvent{
+	events = append(events, chatToResponsesEvent(state, eventType, &ResponsesStreamEvent{
 		Response: &ResponsesResponse{
 			ID:                state.ResponseID,
 			Object:            "response",

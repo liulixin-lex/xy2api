@@ -986,3 +986,27 @@ func TestM4LengthToolGate(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ChatTerminalEventType(t *testing.T) {
+	for _, reason := range []string{"stop", "length"} {
+		state := NewChatCompletionsToResponsesStreamState("m")
+		state.Bridge = &BridgeOptions{Enabled: true}
+		text := "answer"
+		events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{ID: "fixed", Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: &text}, FinishReason: &reason}}, Usage: &ChatUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}}, state)
+		events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+		last := events[len(events)-1]
+		status := "completed"
+		if reason == "length" {
+			status = "incomplete"
+		}
+		if last.Type != "response."+status || last.Response.Status != status || last.Response.ID != "fixed" || last.Response.Usage.TotalTokens != 7 || last.Response.Output[0].Content[0].Text != "answer" {
+			t.Fatalf("terminal=%+v", last)
+		}
+		if reason == "length" && last.Response.IncompleteDetails.Reason != "max_output_tokens" {
+			t.Fatal("length reason lost")
+		}
+		if len(FinalizeChatCompletionsResponsesStream(state)) != 0 {
+			t.Fatal("duplicate terminal")
+		}
+	}
+}
