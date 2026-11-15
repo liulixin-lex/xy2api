@@ -449,6 +449,14 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     flex: none;
     width: 220px;
   }
+  /* The direct filters' triggers spaced tighter than the shared sm (10px sides, 6px gap), so a filter's name fits whole
+     at 96 and 88px (12.12-14): 8px before the text, 2px to the chevron, 4px after it (the chevron is drawn 3px inside
+     its 16px box). Text room: width − 2 border − 8 − 2 − 16 − 4, so 64px and 56px, against about 52px for the longest
+     names ("质量状态", "Platform"). */
+  .tb-filters .tb-sel :deep(.select-trigger--sm) {
+    gap: 2px;
+    padding: 0 4px 0 8px;
+  }
 }
 .tb-filters {
   display: flex;
