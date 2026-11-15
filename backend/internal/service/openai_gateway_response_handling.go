@@ -2437,9 +2437,6 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 			break
 		}
 	}
-	if rawCode := openAIStreamErrorField(source, "code"); rawCode.Type == gjson.Number {
-		errorBody["code"] = rawCode.Value()
-	}
 	frame := gin.H{"type": "response.failed", "response": response}
 	if sequence := gjson.GetBytes(source, "sequence_number"); sequence.Exists() {
 		frame["sequence_number"] = sequence.Int()
