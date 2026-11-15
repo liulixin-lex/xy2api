@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
+
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
 - API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。

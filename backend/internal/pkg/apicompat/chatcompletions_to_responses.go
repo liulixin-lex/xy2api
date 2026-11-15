@@ -93,11 +93,17 @@ func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts Con
 		}
 	}
 
-	// reasoning_effort → reasoning.effort + reasoning.summary="auto"
-	if req.ReasoningEffort != "" {
-		out.Reasoning = &ResponsesReasoning{
-			Effort:  req.ReasoningEffort,
-			Summary: "auto",
+	out.Reasoning, err = decodeChatReasoning(req.Reasoning, req.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	if out.Reasoning != nil && out.Reasoning.Effort != "" && out.Reasoning.Summary == "" {
+		// An explicit string summary, including an empty one, wins over the
+		// legacy default. Ignored extension shapes do not suppress the default.
+		fields, _ := rawJSONObject(req.Reasoning)
+		var summary string
+		if len(normalizedRawJSON(fields["summary"])) == 0 || json.Unmarshal(fields["summary"], &summary) != nil {
+			out.Reasoning.Summary = "auto"
 		}
 	}
 

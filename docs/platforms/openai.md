@@ -60,6 +60,8 @@ Chat 的合法 `stop` 字符串或数组在最终 Responses 请求中省略并�
 
 Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_tokens` 取首个非 null 值，预留与转换使用相同顺序；选中值必须为正整数，落选的合法别名记录省略。
 
+Chat 的 `reasoning` 支持档位字符串或包含 `effort`、`summary` 的对象；非空 `reasoning_effort` 优先，显式摘要设置保留，只有档位而没有摘要时补 `auto`。未知扩展及此前忽略的数组、数字等形状仍按原方式忽略，不新增冲突报错。
+
 用量中未提供的计数仅在内部记录为缺失；对外 JSON 和流式用量保留原计数、字段及合计补和，未知来源也维持原输出。
 
 仅在已确认最终目标支持明文 reasoning 输入的转换路径中，助手历史思考单独承载为 `reasoning_text`，可见答案与工具调用保持分离；未确认能力的路径保留原有历史处理。
