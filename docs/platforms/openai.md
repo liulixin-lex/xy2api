@@ -70,6 +70,8 @@ Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_to
 
 Responses 工具项结构化重建保留 `encrypted_content` 与 `encrypted_function_args` 的原始片段及缺省、null、空值区别；不解密，Chat 标准格式没有对应的无损密文载体。
 
+Chat 流式工具参数可从 arguments.done、item.done 或结束快照补齐，只发送尚未交付的后缀；重复终值和关闭后的迟到增量不重复输出，身份或前缀冲突转为上游转换错误。
+
 ## 客户端配置
 
 ### Codex CLI
