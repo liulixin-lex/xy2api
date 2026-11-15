@@ -209,7 +209,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingJSONEscaping(t *testi
 
 // OpenAI handler: /v1/chat/completions streaming keeps the legacy event: error format
 // (out of scope for this fix; covered to prevent regression of unrelated paths).
-func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *testing.T) {
+func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingUsesProtocolTerminal(t *testing.T) {
 	// xy2api resilience off: the 0.3.0 "event: error" frame.
 	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
@@ -217,7 +217,9 @@ func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+	require.True(t, strings.HasPrefix(body, "data: "))
+	require.Equal(t, 1, strings.Count(body, "data: [DONE]"))
+	require.NotContains(t, body, "event: error")
 }
 
 func TestChatCompletionsStreamingTerminalFrame(t *testing.T) {

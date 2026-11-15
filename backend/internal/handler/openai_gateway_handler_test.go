@@ -376,6 +376,8 @@ func TestOpenAIEnsureForwardErrorResponse_AfterDeltaAppendsSingleValidResponseFa
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	service.InstallDeliveryTracking(c, time.Now())
 	delta := `{"type":"response.output_text.delta","delta":"ok","sequence_number":1}`
 	c.Header("Content-Type", "text/event-stream")
 	_, err := c.Writer.WriteString("event: response.output_text.delta\ndata: " + delta + "\n\n")
@@ -618,7 +620,9 @@ func TestOpenAIRecoverResponsesPanic_AppendsResponseFailedAfterWritten(t *testin
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c.String(http.StatusTeapot, "already written")
+	c.Header("Content-Type", "text/event-stream")
+	c.Status(http.StatusTeapot)
+	_, _ = c.Writer.WriteString("already written")
 
 	h := &OpenAIGatewayHandler{}
 	streamStarted := false
