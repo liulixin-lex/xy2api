@@ -33,6 +33,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 ## 对外端点
 
+API Key 原生非流式 Images 没有有效图片时返回 `invalid_image_response`（`param: data`）。响应尚未提交时为 HTTP 502；JSON 保活已提交时停止后续心跳，以 HTTP 200 返回相同错误封套。少于请求张数时按实际有效图片数收费。
+
 鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`。
 
 | 端点 | 说明 |
