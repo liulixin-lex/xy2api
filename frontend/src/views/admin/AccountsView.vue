@@ -256,9 +256,10 @@
             </template>
             <template #cell-rate_multiplier="{ row }">
               <div class="acell acell--row">
-                <span class="inline-flex items-center gap-1 text-sm text-fg-primary">
-                  <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
-                  <span v-if="row.extra?.upstream_billing_rate_sync_enabled === true" class="inline-flex cursor-help text-fg-secondary" :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')" :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')" data-testid="account-rate-sync-indicator"><Icon name="sync" size="xs" /></span>
+                <span class="acc-rate">
+                  <!-- A value longer than "9.9999x" may be cut: the tip then has it whole (12.5). -->
+                  <span class="acc-rate__v" v-tip="rateText(row).length > 7 ? rateText(row) : ''">{{ rateText(row) }}</span>
+                  <span v-if="row.extra?.upstream_billing_rate_sync_enabled === true" class="inline-flex flex-none cursor-help text-fg-secondary" :aria-label="t('admin.accounts.upstreamBilling.syncedRateTooltip')" :title="t('admin.accounts.upstreamBilling.syncedRateTooltip')" data-testid="account-rate-sync-indicator"><Icon name="sync" size="xs" /></span>
                 </span>
               </div>
             </template>
@@ -431,6 +432,7 @@ import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { formatMultiplier } from '@/utils/formatters'
+import { accountColumnLayout } from '@/components/admin/account/table/accountColumns'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { vTip } from '@/utils/tip'
 import { getAccountPlanType, getAntigravityTier, getOpenAIAuthMode, getOpenAICompactMeta, getOpenAICompactTitle } from './accountRowMeta'
@@ -678,39 +680,18 @@ const resetColumns = () => {
   new Set(shown.flatMap((key) => COLUMN_SOURCES[key] ?? [])).forEach((name) => void table.refresh(name))
 }
 
-// Column widths (prototype): fixed widths in two sizes. Compact, the ten default columns and a name column of at
-// least 188px take 1286px. At 1440 with the navigation folded the table's scroll container is 1302px wide, 1287px
-// once a classic scrollbar (15px on Windows) takes its reserved gutter, so nothing scrolls sideways (7i-2, 7m-1).
-// Capacity is 155px compact and 154px roomy, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1,
-// 7l-11); compact, the amounts need 90px and had 89.5px at 154px, so it takes one more of the 10px back (7q-9).
-// The 10px under 1294 come from the actions (two 28px buttons 4px apart, 4px of padding on the left instead of 12)
-// and today's stats ("用户扣费 $999.99", the widest line, is 104.6px of the 106px left); the other columns are full:
-// status "23h 59m 后恢复" 90.2px of 92, the ratio "9.9999x" and its button 75.1px of 76 (CoreText, 12/13px). The IQ
-// check takes one of them back: "Astra" and "检测中" with its 9px spinner come to 123.4px of 125 (switch 28, gaps 10
-// and 6, name 29.7, spinner 9 and 2, word 38.7).
-// Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
-const COLUMN_WIDTHS: Record<string, [number, number]> = {
-  select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
-  capacity: [155, 154], upstream_billing_rate: [100, 124], today_stats: [130, 152], actions: [76, 104], id: [80, 88],
-  platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
-  upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
-}
-const NAME_MIN = 188
-const NAME_MAX = 300
 // The scroll container's own content width: what the table really has, a classic scrollbar's gutter left out (7m-1).
 const tableWidth = ref(0)
 useResizeObserver(() => dataTableRef.value?.tableWrapperEl ?? null, (entries) => {
   tableWidth.value = entries[0]?.contentRect.width ?? 0
 })
+const rateText = (row: Account) => `${formatMultiplier(row.rate_multiplier ?? 1)}x`
+// Column widths: see accountColumns.ts (12.5).
 const columnLayout = computed(() => {
-  const keys = cols.value.map((column) => column.key).filter((key) => key !== 'name')
-  const sum = (size: 0 | 1) => keys.reduce((total, key) => total + (COLUMN_WIDTHS[key]?.[size] ?? 120), 0)
-  const roomy = tableWidth.value >= sum(1) + NAME_MAX
-  const size = roomy ? 1 : 0
-  const share = Math.max(0, (tableWidth.value - 2 - sum(size) - NAME_MAX) / keys.length)
-  const vars: Record<string, string> = { '--acc-share': `${share}px`, '--acc-min': `${sum(size) + NAME_MIN}px` }
-  for (const key of keys) vars[`--acc-w-${key}`] = `${COLUMN_WIDTHS[key]?.[size] ?? 120}px`
-  return { roomy, vars }
+  const layout = accountColumnLayout(cols.value.map((column) => column.key).filter((key) => key !== 'name'), tableWidth.value)
+  const vars: Record<string, string> = { '--acc-min': `${layout.min}px` }
+  for (const [key, width] of Object.entries(layout.widths)) vars[`--acc-w-${key}`] = `${width}px`
+  return { roomy: layout.roomy, vars }
 })
 
 // ---- Selection ----
@@ -1490,7 +1471,7 @@ onUnmounted(() => cancelModalPrefetch?.())
 /* The accounts table only (prototype): fixed 78px rows, 40px header, the column widths above; other table pages keep
    the shared table's own spacing. */
 .account-table :deep(.table-wrapper) {
-  --select-col-width: calc(var(--acc-w-select, 36px) + var(--acc-share, 0px));
+  --select-col-width: var(--acc-w-select, 36px);
 }
 .account-table :deep(.table-wrapper > table) {
   width: 100%;
@@ -1548,6 +1529,13 @@ onUnmounted(() => cancelModalPrefetch?.())
 .account-table :deep(td.acol-groups) {
   padding: 0 8px;
 }
+/* The rate columns' tighter padding: "9.9999x" and its button fit 88px (12.5). */
+.account-table :deep(th.acol-upstream_billing_rate),
+.account-table :deep(td.acol-upstream_billing_rate),
+.account-table :deep(th.acol-rate_multiplier),
+.account-table :deep(td.acol-rate_multiplier) {
+  padding: 0 6px 0 8px;
+}
 .account-table :deep(th.acol-actions),
 .account-table :deep(td.acol-actions) {
   padding-left: 4px;
@@ -1576,9 +1564,10 @@ onUnmounted(() => cancelModalPrefetch?.())
   justify-content: flex-end;
   gap: 4px;
 }
-/* Column widths: each column's own width plus an even share of the room left over (see columnLayout). */
+/* Column widths: each column's own width, the content columns' share of the room left over included (see
+   accountColumns.ts). */
 .account-table :deep(th.acol) {
-  width: calc(var(--acc-w, 120px) + var(--acc-share, 0px));
+  width: var(--acc-w, 120px);
 }
 .account-table :deep(th.acol-name) {
   width: auto;
@@ -1648,6 +1637,22 @@ onUnmounted(() => cancelModalPrefetch?.())
 }
 .acard-all .acard-hit {
   margin: -2px 0 -2px -8px;
+}
+/* The account rate: a value in the body text with tabular digits (12.1), cut with "…" past its column (12.5). */
+.acc-rate {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--line-height-body);
+}
+.acc-rate__v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .acc-check {
   width: 14px;

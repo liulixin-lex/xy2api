@@ -116,17 +116,22 @@ function rateTip(): string {
 </script>
 
 <style scoped>
+/* "9.9999x", the 3px gap and the 18px button fit the column's 74px; a longer value ends in "…", the tip has the rate
+   in force whole (12.5). */
 .ratio {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 .ratio__v {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
   font-variant-numeric: tabular-nums;
   line-height: var(--line-height-body);
+  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: help;
 }
@@ -136,8 +141,8 @@ function rateTip(): string {
 }
 .ratio__btn {
   display: inline-grid;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   flex: none;
   place-items: center;
   padding: 0;
