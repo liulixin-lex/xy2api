@@ -128,11 +128,14 @@ func finalizeBridgeAnthropicBlocks(state *ChatCompletionsToAnthropicStreamState)
 		return nil
 	}
 	_, reason, err := ProjectTerminal("chat", "anthropic", "", state.FinishReason, true, false)
-	if err != nil || reason != "tool_use" {
+	if err != nil {
 		state.bridgeErr = bridgeConversionError("finish_reason", fmt.Errorf("tool input has no complete finish"))
 		return nil
 	}
 	for _, call := range flow.calls {
+		if reason != "tool_use" {
+			continue
+		}
 		arguments := call.Function.Arguments
 		if strings.TrimSpace(arguments) == "" {
 			arguments = "{}"
