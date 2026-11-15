@@ -172,6 +172,29 @@ func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)
 	require.JSONEq(t, `{"city":"Paris"}`, choice.Message.ToolCalls[0].Function.Arguments)
 }
 
+func TestImageDetailOmittedWithNotice(t *testing.T) {
+	for _, detail := range []string{"", "auto", "low", "high"} {
+		t.Run("detail="+detail, func(t *testing.T) {
+			image := map[string]any{"url": "data:image/png;base64,aW1hZ2U="}
+			if detail != "" {
+				image["detail"] = detail
+			}
+			body, err := json.Marshal(map[string]any{"model": "gemini-2.5-flash", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "image_url", "image_url": image}}}}})
+			require.NoError(t, err)
+			wire, _, notices := m5ForwardChat(t, body)
+			require.Equal(t, "aW1hZ2U=", gjson.GetBytes(wire, "contents.0.parts.0.inlineData.data").String())
+			require.NotContains(t, string(wire), `"detail"`)
+			if detail == "" {
+				require.Empty(t, notices)
+			} else {
+				require.Len(t, notices, 1)
+				require.Equal(t, "omit", notices[0].Action)
+				require.Contains(t, notices[0].Field, "detail")
+			}
+		})
+	}
+}
+
 func m5ForwardChat(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
 	t.Helper()
 	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
