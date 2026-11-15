@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- 跨位置重复声明工具时保留第一份定义，后续 schema 差异只记录省略，避免向上游发送重复工具。
+
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
 - API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。
@@ -42,6 +44,7 @@
 - 上游以流式返回、网关拼成非流式结果时，只在 done 事件中出现的网页搜索项不再丢失，custom 工具调用保留原类型，转为 Chat 时仍以 `function` 返回。
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
+
 
 ## [0.6.7] - 2026-11-15
 

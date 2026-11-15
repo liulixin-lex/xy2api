@@ -77,6 +77,9 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
 	effectiveTools, err := EffectiveResponsesTools(req)
+	if opts != nil && opts.Bridge != nil && opts.Bridge.Enabled {
+		effectiveTools, err = effectiveBridgeTools(req, ConversionOptions{Record: opts.Record, Bridge: opts.Bridge})
+	}
 	if err != nil {
 		return nil, err
 	}

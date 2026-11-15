@@ -14,6 +14,80 @@ type bridgeToolDeclaration struct {
 	childKey string
 }
 
+// MergeResponsesToolDeclarations merges top-level tools followed by input-item
+// batches. Callers retain empty batches for input items without additional tools
+// so notices keep the original input indices.
+func MergeResponsesToolDeclarations(opts ConversionOptions, batches ...[]json.RawMessage) ([]json.RawMessage, error) {
+	return mergeBridgeToolBatches(batches, func(field string) {
+		if opts.Record != nil {
+			opts.Record(ConversionNotice{Field: field, Action: "omit"})
+		}
+	})
+}
+
+func effectiveBridgeTools(req *ResponsesRequest, opts ConversionOptions) ([]ResponsesTool, error) {
+	top, err := json.Marshal(req.Tools)
+	if err != nil {
+		return nil, err
+	}
+	var declarations []json.RawMessage
+	if err := json.Unmarshal(top, &declarations); err != nil {
+		return nil, err
+	}
+	batches := [][]json.RawMessage{declarations}
+	var items []json.RawMessage
+	if len(bytesTrimSpace(req.Input)) > 0 && bytesTrimSpace(req.Input)[0] == '[' {
+		if err := json.Unmarshal(req.Input, &items); err != nil {
+			return nil, err
+		}
+	}
+	for _, raw := range items {
+		var item struct {
+			Type  string            `json:"type"`
+			Tools []json.RawMessage `json:"tools"`
+		}
+		// Non-object input items retain the original converter's handling.
+		if json.Unmarshal(raw, &item) != nil || item.Type != "additional_tools" {
+			batches = append(batches, nil)
+			continue
+		}
+		batches = append(batches, item.Tools)
+	}
+	merged, err := MergeResponsesToolDeclarations(opts, batches...)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	var tools []ResponsesTool
+	if err := json.Unmarshal(encoded, &tools); err != nil {
+		return nil, err
+	}
+	// Keep the established tool-discovery promotion, with additional_tools
+	// removed from this copy so they are not appended a second time.
+	copyReq := *req
+	copyReq.Tools = tools
+	var kept []json.RawMessage
+	for _, raw := range items {
+		var item struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(raw, &item)
+		if item.Type != "additional_tools" {
+			kept = append(kept, raw)
+		}
+	}
+	if items != nil {
+		copyReq.Input, err = json.Marshal(kept)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return EffectiveResponsesTools(&copyReq)
+}
+
 func mergeBridgeToolBatches(batches [][]json.RawMessage, record func(string)) ([]json.RawMessage, error) {
 	var merged []*bridgeToolDeclaration
 	seen := make(map[string]*bridgeToolDeclaration)
