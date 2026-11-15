@@ -434,7 +434,8 @@ func writeOpenAIResponsesFallbackError(c *gin.Context, statusCode int, errType, 
 }
 
 // WriteTargetProtocolError finishes an inbound protocol once, after stopping its
-// heartbeat. True means handled, including an already terminal/closed response.
+// heartbeat. True means this call claimed the terminal (including write failure).
+// An existing terminal, written JSON or canceled connection returns false.
 func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errType, code, param, message string) bool {
 	if c == nil || c.Writer == nil {
 		return false
@@ -446,18 +447,18 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	}
 	StopOpenAICompactSSEKeepaliveCommitted(c)
 	if ProtocolTerminalClaimed(c) {
-		return true
+		return false
 	}
 	if c.Request != nil && c.Request.Context().Err() != nil || GatewayDeliveryFailed(c) {
-		return true
+		return false
 	}
 	written := c.Writer.Written()
 	sse := written && strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream")
 	if written && !sse {
-		return true
+		return false
 	}
 	if !ClaimProtocolTerminal(c) {
-		return true
+		return false
 	}
 	errorBody := gin.H{"type": errType, "message": message}
 	if code != "" {
@@ -468,6 +469,8 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	}
 	payload := gin.H{"error": errorBody}
 	if protocol == PreOutputProtocolAnthropic {
+		delete(errorBody, "code")
+		delete(errorBody, "param")
 		payload["type"] = "error"
 	}
 	MarkOpsGatewayTerminalStatus(c, status)

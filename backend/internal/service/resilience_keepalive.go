@@ -244,14 +244,7 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 	param := gjson.GetBytes(body, "error.param").String()
 	switch protocol {
 	case PreOutputProtocolAnthropic:
-		errObj := map[string]any{"type": errType, "message": message}
-		if code != "" {
-			errObj["code"] = code
-		}
-		if param != "" {
-			errObj["param"] = param
-		}
-		payload, _ := json.Marshal(map[string]any{"type": "error", "error": errObj})
+		payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": errType, "message": message}})
 		return []byte("event: error\ndata: " + string(payload) + "\n\n")
 	case PreOutputProtocolGemini:
 		payload, _ := json.Marshal(map[string]any{"error": map[string]any{

@@ -29,7 +29,11 @@ func TestM7ServiceErrorAfterHeartbeat(t *testing.T) {
 					t.Fatal("unhandled")
 				}
 				body := rec.Body.String()
-				if !strings.Contains(body, `"param":"input[1]"`) {
+				if protocol == PreOutputProtocolAnthropic {
+					if strings.Contains(body, `"param"`) || strings.Contains(body, `"code"`) {
+						t.Fatal(body)
+					}
+				} else if !strings.Contains(body, `"param":"input[1]"`) {
 					t.Fatal(body)
 				}
 				if stream {
@@ -50,7 +54,9 @@ func TestM7ServiceErrorAfterHeartbeat(t *testing.T) {
 				} else if rec.Code != 400 {
 					t.Fatal(rec.Code)
 				}
-				WriteTargetProtocolError(c, protocol, 500, "server_error", "", "", "second")
+				if WriteTargetProtocolError(c, protocol, 500, "server_error", "", "", "second") {
+					t.Fatal("duplicate call claimed terminal")
+				}
 				if rec.Body.String() != body {
 					t.Fatal("duplicate terminal")
 				}
