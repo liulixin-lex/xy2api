@@ -40,3 +40,15 @@ func TestChatReasoningUnion(t *testing.T) {
 		})
 	}
 }
+
+func TestChatReasoningWithLegacyExtensionTypes(t *testing.T) {
+	for _, raw := range []string{`"high"`, `{"effort":"low"}`, `false`} {
+		var req ChatCompletionsRequest
+		body := `{"model":"test","reasoning":` + raw + `,"reasoning_effort":"medium","verbosity":12,"text":{"verbosity":false},"max_output_tokens":"invalid"}`
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+		require.Equal(t, "medium", req.ReasoningEffort)
+		require.Empty(t, req.Verbosity)
+		require.Nil(t, req.Text)
+		require.Nil(t, req.MaxOutputTokens)
+	}
+}
