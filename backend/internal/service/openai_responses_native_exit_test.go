@@ -651,3 +651,57 @@ func TestM6PassthroughFinalEffort(t *testing.T) {
 		})
 	}
 }
+
+type m6CloseFuncBody struct {
+	io.Reader
+	close func()
+}
+
+func (b m6CloseFuncBody) Close() error {
+	if b.close != nil {
+		b.close()
+	}
+	return nil
+}
+
+func TestM6PassthroughRejectedFieldRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		cap, buildFail bool
+		sends          int
+		resent         bool
+	}{
+		{"resent", false, false, 2, true}, {"budget_denied", true, false, 1, false}, {"build_failed", false, true, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.5","input":"hi","metadata":{"tag":"fixture"},"max_output_tokens":20}`)
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), st)
+			c := newOpenAIRejectedFieldTestContext(body)
+			c.Request = c.Request.WithContext(ctx)
+			a := newOpenAIRejectedFieldTestAccount()
+			a.Extra["openai_passthrough"] = true
+			if tc.cap {
+				c.Set(openAIResponsesRejectedFieldRetryBudgetContextKey, &openAIResponsesRejectedFieldRetryBudget{attempts: maxOpenAIResponsesRejectedFieldRetries})
+			}
+			response := newOpenAIRejectedFieldTestResponse(400, `{"error":{"code":"unsupported_parameter","param":"max_output_tokens","message":"Unsupported parameter: max_output_tokens"}}`)
+			if tc.buildFail {
+				response.Body = m6CloseFuncBody{Reader: response.Body, close: func() { a.Credentials["base_url"] = "://invalid" }}
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{response, newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}}
+			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(ctx, c, a, body)
+			if tc.resent {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.Len(t, upstream.bodies, tc.sends)
+			value, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events := value.([]*OpsUpstreamErrorEvent)
+			require.Len(t, events, 1)
+			require.Equal(t, "max_output_tokens", events[0].RejectedField)
+			require.Equal(t, tc.resent, events[0].Resent)
+		})
+	}
+}

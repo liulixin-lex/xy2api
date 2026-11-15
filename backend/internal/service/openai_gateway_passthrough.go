@@ -356,6 +356,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	body = webSearchBody
 	agentTaskRecoveryTried := false
 	compactModelFallbackRetried := false
+	var rejectedFieldRetryEvent *OpsUpstreamErrorEvent
+	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	var resp *http.Response
 	var usage *OpenAIUsage
@@ -430,6 +432,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 		upstreamStart := time.Now()
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		if rejectedFieldRetryEvent != nil {
+			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
+				rejectedFieldRetryEvent.Resent = true
+			}
+			rejectedFieldRetryEvent = nil
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {
@@ -463,6 +471,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
+				rejectedFieldRetryEvent = recordOpenAIResponsesRejectedFieldRetry(c, account, resp, probeBody)
+				if rejectedFieldRetryEvent != nil {
+					rejectedFieldRetryEvent.Passthrough = true
+				}
+				rejectedFieldRetrySequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+				recordOpenAIRejectedOutputLimitOmission(ctx, body, retryBody)
 				body = retryBody
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
@@ -1107,6 +1121,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		AccountName:          account.Name,
 		UpstreamStatusCode:   resp.StatusCode,
 		UpstreamRequestID:    resp.Header.Get("x-request-id"),
+		RejectedField:        openAIResponsesRejectedFieldForRecord(resp.StatusCode, responseBody),
 		Passthrough:          true,
 		Kind:                 "failover",
 		Message:              upstreamMsg,
@@ -1181,6 +1196,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		AccountName:          account.Name,
 		UpstreamStatusCode:   resp.StatusCode,
 		UpstreamRequestID:    resp.Header.Get("x-request-id"),
+		RejectedField:        openAIResponsesRejectedFieldForRecord(resp.StatusCode, responseBody),
 		Passthrough:          true,
 		Kind:                 "http_error",
 		Message:              upstreamMsg,
