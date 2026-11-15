@@ -50,7 +50,10 @@ func prepareBridgeAnthropicRequest(req *ResponsesRequest, opts ConversionOptions
 	copyReq.Tools, copyReq.Input, copyReq.ToolChoice = adapted.Tools, adapted.Input, adapted.ToolChoice
 	if req.anthropicChatSource != nil {
 		source := *req.anthropicChatSource
-		source.Tools = responsesToolsToChatTools(copyReq.Tools)
+		source.Tools, err = responsesToolsToChatTools(copyReq.Tools)
+		if err != nil {
+			return nil, err
+		}
 		source.Functions = nil
 		copyReq.anthropicChatSource = &source
 	}
