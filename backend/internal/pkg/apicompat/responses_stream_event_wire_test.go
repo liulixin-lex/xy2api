@@ -209,3 +209,41 @@ func TestResponsesStreamEventUnmarshal_ToolSearchObjectArguments(t *testing.T) {
 	require.NotNil(t, event.Item)
 	require.Equal(t, `{"query":"gmail"}`, event.Item.Arguments)
 }
+
+func TestSealedFunctionAndRefusalFieldsPreserved(t *testing.T) {
+	for _, fields := range []string{``, `,"encrypted_content":null,"encrypted_function_args":null`, `,"encrypted_content":"","encrypted_function_args":[]`, `,"encrypted_content":"opaque","encrypted_function_args":["opaque"]`} {
+		raw := `{"type":"function_call","id":"i","call_id":"c","name":"f","arguments":"raw"` + fields + `}`
+		var item ResponsesOutput
+		require.NoError(t, json.Unmarshal([]byte(raw), &item))
+		var expected map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(raw), &expected))
+		for _, kind := range []string{"response.output_item.added", "response.output_item.done"} {
+			event := ResponsesStreamEvent{Type: kind, Item: &item}
+			wire, err := json.Marshal(event)
+			require.NoError(t, err)
+			var envelope struct {
+				Item map[string]json.RawMessage `json:"item"`
+			}
+			require.NoError(t, json.Unmarshal(wire, &envelope))
+			for _, field := range []string{"encrypted_content", "encrypted_function_args"} {
+				require.Equal(t, string(expected[field]), string(envelope.Item[field]))
+			}
+		}
+		a := NewBufferedResponseAccumulator()
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+		resp := &ResponsesResponse{Status: "completed"}
+		a.SupplementResponseOutput(resp)
+		require.NoError(t, a.Err())
+		require.Len(t, resp.Output, 1)
+		for round := 0; round < 2; round++ {
+			wire, err := json.Marshal(resp.Output[0])
+			require.NoError(t, err)
+			var actual map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(wire, &actual))
+			for _, field := range []string{"encrypted_content", "encrypted_function_args"} {
+				require.Equal(t, string(expected[field]), string(actual[field]))
+			}
+			require.NoError(t, json.Unmarshal(wire, &resp.Output[0]))
+		}
+	}
+}

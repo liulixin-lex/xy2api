@@ -68,6 +68,8 @@ Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_to
 
 缓冲重建保留仅在 done 中出现的托管搜索项及其状态、动作；custom 工具保留类别、命名空间与原始 input，不改成普通 function 参数。
 
+Responses 工具项结构化重建保留 `encrypted_content` 与 `encrypted_function_args` 的原始片段及缺省、null、空值区别；不解密，Chat 标准格式没有对应的无损密文载体。
+
 ## 客户端配置
 
 ### Codex CLI
