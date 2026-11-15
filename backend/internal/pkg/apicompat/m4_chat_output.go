@@ -65,7 +65,7 @@ func decodeChatOutputContent(raw json.RawMessage, record func(ConversionNotice),
 					if err != nil {
 						return nil, fmt.Errorf("content[%d].thinking[%d]: %w", i, j, err)
 					}
-					joined.WriteString(text)
+					_, _ = joined.WriteString(text)
 				}
 				value = joined.String()
 			} else {

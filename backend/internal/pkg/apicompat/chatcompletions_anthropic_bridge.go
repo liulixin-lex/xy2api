@@ -989,7 +989,7 @@ func closeCCAnthropicBlock(state *ChatCompletionsToAnthropicStreamState) []Anthr
 	}
 	idx := state.ContentBlockIndex
 	var events []AnthropicStreamEvent
-	if state.CurrentBlockType == "tool_use" && !state.CurrentToolHadDelta && !(bridgeEnabled(state.Bridge) && (state.FinishReason == "length" || state.FinishReason == "content_filter")) {
+	if state.CurrentBlockType == "tool_use" && !state.CurrentToolHadDelta && !bridgeTruncatedToolFinish(state) {
 		events = append(events, AnthropicStreamEvent{
 			Type:  "content_block_delta",
 			Index: &idx,
