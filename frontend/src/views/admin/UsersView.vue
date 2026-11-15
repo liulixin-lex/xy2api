@@ -24,7 +24,7 @@
 
           <template #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-28">
+            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter">
               <Select
                 v-model="filters.role"
                 size="sm"
@@ -39,7 +39,7 @@
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-28">
+            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter">
               <Select
                 v-model="filters.status"
                 size="sm"
@@ -53,7 +53,7 @@
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-28">
+            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter">
               <Select
                 v-model="filters.group"
                 size="sm"
@@ -67,7 +67,7 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-28">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter">
               <Select
                 v-model="filters.apiKeyGroup"
                 size="sm"
@@ -82,7 +82,7 @@
             <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-28"
+                class="relative table-toolbar__filter"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input

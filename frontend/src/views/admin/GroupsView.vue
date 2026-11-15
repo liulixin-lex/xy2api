@@ -26,7 +26,7 @@
               size="sm"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
-              class="w-28"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
             <Select
@@ -34,7 +34,7 @@
               size="sm"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
-              class="w-28"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
             <Select
@@ -43,10 +43,10 @@
               size="sm"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
-              class="w-28"
+              class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="w-28" @change="applyGroupFilters" />
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="table-toolbar__filter" @change="applyGroupFilters" />
           </template>
 
           <template #actions>

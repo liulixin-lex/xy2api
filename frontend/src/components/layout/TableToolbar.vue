@@ -30,7 +30,8 @@ import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
  * square's size is set, for every page. The primary action ("create", "add") uses neither class and keeps its text.
  *
  * `compact` (spec 12.9), for the dense pages (accounts, groups, users): from 1024px the controls are 32px high in
- * 13px type and 8px apart, the search box 220px. Their looks are set here once for those pages:
+ * 13px type and 8px apart, the search box 220px and a filter with `table-toolbar__filter` 112px. Their looks are set
+ * here once for those pages:
  * - `table-toolbar__search-box` holding `table-toolbar__search-icon` and `table-toolbar__input` (a field without the
  *   icon adds `table-toolbar__input--plain`);
  * - `table-toolbar__btn`, outlined with `--secondary`, the brand gradient with `--primary` (12.1-5, the one filled
@@ -39,7 +40,10 @@ import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
  * - `table-toolbar__divider`, the 1px rule between the view tools and the page's actions.
  * A secondary action whose text sits in `table-toolbar__label table-toolbar__label--wide` shows it only while the
  * toolbar is at least 1184px wide, the widest compact row with every text (the groups page with its four filters);
- * narrower it is its icon in a 32px square. Below 1024px the narrow layout above applies, the controls 40px high.
+ * narrower it is its icon in a 32px square, and the search box narrows to 192px, a filter to 104px: the groups page at
+ * 1366 with the navigation open stays one row whatever the live indicator says (12.9-4). The accounts toolbar keeps
+ * its own widths (its selects are not `table-toolbar__filter`). Below 1024px the narrow layout above applies, the
+ * controls 40px high.
  */
 defineProps<{ compact?: boolean }>()
 
@@ -116,6 +120,9 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 .table-toolbar--compact :deep(.table-toolbar__search-box) {
   position: relative;
   display: block;
+}
+.table-toolbar--compact :deep(.table-toolbar__filter) {
+  width: 112px;
 }
 .table-toolbar--compact :deep(.table-toolbar__search-icon) {
   position: absolute;
@@ -215,10 +222,16 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
   flex: none;
   background: var(--color-line-strong);
 }
-/* From 1024px, under the widest row with every text (1184px, see above) the secondary actions keep their icons;
-   below 1024px the narrow layout makes them 40px squares. */
+/* From 1024px, under the widest row with every text (1184px, see above) the secondary actions keep their icons and
+   the search box and filters narrow (12.9-4); below 1024px the narrow layout makes them 40px squares. */
 @media (min-width: 1024px) {
   @container (max-width: 1183px) {
+    .table-toolbar--compact .table-toolbar__search {
+      width: 192px;
+    }
+    .table-toolbar--compact :deep(.table-toolbar__filter) {
+      width: 104px;
+    }
     .table-toolbar--compact :deep(.table-toolbar__label--wide) {
       display: none;
     }
