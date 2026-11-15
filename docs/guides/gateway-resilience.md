@@ -173,6 +173,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 在途预留 `reservation`
 
+Chat 在途预留与转发统一按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 选择输出上限；估价的默认值和 P99 封顶保持不变。
+
 - **做什么**：用户余额会为在途请求预留一部分。`cache_aware_estimate` 按该会话最近一次的缓存读比例估算输入费用；`output_p99_cap` 把输出 Token 估算封顶为该模型近 7 天的 P99（下限 1024）。两者都让预留更接近实际费用，减少余额充足却因预留被拒的情况。
 - **客户端**：余额被在途请求占用时返回 429 `rate_limit_error`（`concurrent_balance_reserved`），`Retry-After` 约 5 秒（`errors.reservation_retry_after_seconds`），运维记录标为业务限制。
 - **何时关闭**：需要更保守的预留（按最坏情况估算）时关闭。
@@ -224,5 +226,3 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - 兜底分组只支持标准（余额）分组；进入兜底的记忆按 API Key 而不是会话。
 - WebSocket 不挂连接级预算，建连首回合的换号次数按网关的账号切换上限；余额暂停的升档与复位在 WebSocket 路径上尚不生效（照常暂停）。
 - 输出后的失败补记只覆盖 HTTP，WebSocket 不补。
-
-Chat 在途预留与转发统一按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 选择输出上限；估价的默认值和 P99 封顶保持不变。
