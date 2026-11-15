@@ -254,10 +254,12 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 			total := time.Duration(0)
 			valid := true
 			for _, part := range recoveryCompoundParts.FindAllStringSubmatch(strings.ToLower(match[1]), -1) {
-				d, ok := recoveryDelay(part[1], recoveryUnit(part[2]))
-				if part[1] == "0" {
+				// The component regex guarantees decimal syntax. All-zero
+				// decimal spellings contribute zero without invalidating the sum.
+				if strings.Trim(part[1], "0.") == "" {
 					continue
 				}
+				d, ok := recoveryDelay(part[1], recoveryUnit(part[2]))
 				if !ok || d > time.Duration(math.MaxInt64)-total {
 					valid = false
 					break

@@ -107,3 +107,22 @@ func TestFoundationRecoveryTrustedBody(t *testing.T) {
 		})
 	}
 }
+
+func TestFoundationRecoveryCompoundZero(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		duration string
+		want     time.Duration
+	}{
+		{"1m0.0s", time.Minute}, {"0.0m1s", time.Second}, {"00.00m0.0s", 0}, {"1m00.000s", time.Minute},
+		{"1h9223372036854775807s", 0}, {"0.0m0.0000000001s", time.Nanosecond},
+	} {
+		t.Run(tc.duration, func(t *testing.T) {
+			body := []byte(`{"error":{"message":"Try again in ` + tc.duration + `"}}`)
+			got, ok := ParseUpstreamRecoveryHint(nil, body, now)
+			if ok != (tc.want > 0) || got.Delay != tc.want {
+				t.Fatalf("got %+v %v, want %v", got, ok, tc.want)
+			}
+		})
+	}
+}
