@@ -27,8 +27,8 @@
 <script setup lang="ts">
 /**
  * IQ check column (spec 4.4, 7c, prototype): the switch and one line per model, at most two, then "+N". The words are
- * only smart (secondary colour), degraded (amber, regular weight), checking (queued included) and paused (muted);
- * unknown and disabled targets show "—". The records button has one tip card (12.7) listing every model, the folded
+ * only smart (ok green), degraded (error red), checking (queued included, info blue), all at 500, and paused (the
+ * secondary text, uncoloured) (12.3); the tip card uses the same tones. Unknown and disabled targets show "—". The records button has one tip card (12.7) listing every model, the folded
  * ones too, with its state, last check and recheck. The narrow card's details (`detailed`) list every model with its
  * recheck time beside it: touch screens have no hover.
  */
