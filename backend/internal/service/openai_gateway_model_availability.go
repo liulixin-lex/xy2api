@@ -53,6 +53,11 @@ func (s *OpenAIGatewayService) openAIModelAvailability(ctx context.Context, grou
 	for i := range accounts {
 		account := &accounts[i]
 		diag.Members++
+		if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
+			if publicModel, known := RequestedPublicModelFromContext(ctx); known && !explicitModelMappingClaims(*account, publicModel) {
+				continue
+			}
+		}
 		if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 			continue
 		}

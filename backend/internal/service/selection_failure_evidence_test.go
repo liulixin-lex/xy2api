@@ -152,6 +152,16 @@ func TestSelectionExhaustionEvidence(t *testing.T) {
 		require.ErrorIs(t, observed, ErrNoAvailableAccounts)
 		require.False(t, e.GroupLevel)
 	})
+	t.Run("persistent_model_ownership_matches_admission", func(t *testing.T) {
+		a := account(1)
+		svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{a}}}
+		ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{Matched: true, TargetPlatform: PlatformOpenAI, PublicModel: "alias", Source: CompositeRouteSourceAccount})
+		diag := svc.DiagnoseModelAvailabilityForPlatform(ctx, ptrInt64Selection(7), "alias", PlatformOpenAI)
+		require.True(t, diag.Known)
+		require.Equal(t, 1, diag.Members)
+		require.Zero(t, diag.ModelSupported)
+		require.Zero(t, diag.RequestSupported)
+	})
 	t.Run("complete_persistent_scan", func(t *testing.T) {
 		a, b, c := account(1), account(2), account(3)
 		a.RateLimitResetAt = &future
