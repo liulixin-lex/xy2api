@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -19,6 +20,13 @@ func geminiCompatConversionOptions(ctx context.Context) apicompat.ConversionOpti
 	return apicompat.ConversionOptions{Record: func(notice apicompat.ConversionNotice) {
 		resilience.RecordConversionNotices(ctx, notice)
 	}}
+}
+
+func geminiCompatResponseOptions(c *gin.Context) apicompat.ConversionOptions {
+	if c == nil || c.Request == nil {
+		return apicompat.ConversionOptions{}
+	}
+	return geminiCompatConversionOptions(c.Request.Context())
 }
 
 func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts apicompat.ConversionOptions) ([]byte, error) {

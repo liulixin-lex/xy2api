@@ -100,6 +100,8 @@
 
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择。
 
+- Gemini 兼容响应保留截断与过滤原因，坏工具生成以错误结束并保留已读用量。
+
 - Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
 
 - Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
