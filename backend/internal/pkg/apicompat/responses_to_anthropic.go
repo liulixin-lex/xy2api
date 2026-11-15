@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,12 +31,7 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 	for _, item := range resp.Output {
 		switch item.Type {
 		case "reasoning":
-			summaryText := ""
-			for _, s := range item.Summary {
-				if s.Type == "summary_text" && s.Text != "" {
-					summaryText += s.Text
-				}
-			}
+			summaryText := ResponsesOutputReasoningText(item)
 			// Always surface encrypted_content as thinking.signature so Claude
 			// Code / multi-turn clients can send it back. Signature-only
 			// thinking blocks are valid when the model omits a visible summary.
@@ -233,6 +229,13 @@ type responsesAnthropicTool struct {
 	opaque                     bool
 }
 
+type responsesAnthropicReasoning struct {
+	summary, raw  map[int]string
+	delivered     string
+	signature     string
+	signatureSent bool
+}
+
 // ResponsesEventToAnthropicState tracks state for converting a sequence of
 // Responses SSE events directly into Anthropic SSE events.
 type ResponsesEventToAnthropicState struct {
@@ -246,6 +249,9 @@ type ResponsesEventToAnthropicState struct {
 	pendingBlocks    []ResponsesStreamEvent
 	successTerminal  bool
 	searchesDone     map[string]bool
+	itemIDs          map[int]string
+	reasoning        map[string]*responsesAnthropicReasoning
+	activeReasoning  *responsesAnthropicReasoning
 
 	ContentBlockIndex   int
 	ContentBlockOpen    bool
@@ -396,6 +402,12 @@ func ResponsesEventToAnthropicEvents(
 }
 
 func resToAnthDispatchEvent(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	if evt.Type == "response.output_item.added" && evt.Item != nil && evt.Item.ID != "" {
+		if state.itemIDs == nil {
+			state.itemIDs = make(map[int]string)
+		}
+		state.itemIDs[evt.OutputIndex] = evt.Item.ID
+	}
 	switch evt.Type {
 	case "response.created":
 		return resToAnthHandleCreated(evt, state)
@@ -417,11 +429,9 @@ func resToAnthDispatchEvent(evt *ResponsesStreamEvent, state *ResponsesEventToAn
 		// 原始推理文本增量，与 reasoning summary 一样映射为 thinking。
 		"response.reasoning_text.delta":
 		return resToAnthHandleReasoningDelta(evt, state)
-	case "response.reasoning_summary_text.done":
-		// Keep the thinking block open until response.output_item.done.
-		// Grok/Codex attach encrypted_content on the finished reasoning item;
-		// closing early would drop signature_delta and break multi-turn cache.
-		return nil
+	case "response.reasoning_summary_text.done", "response.reasoning_text.done":
+		return resToAnthHandleReasoningDelta(evt, state)
+
 	// response.done 是 Realtime/WS 与项目透传路径使用的终止别名；
 	// 普通 Responses HTTP SSE 的公开终止事件仍以 response.completed 为主。
 	case "response.completed", "response.done", "response.incomplete", "response.failed":
@@ -546,24 +556,14 @@ func resToAnthHandleOutputItemAdded(evt *ResponsesStreamEvent, state *ResponsesE
 		return append(events, resToAnthEmitTool(tool, state)...)
 
 	case "reasoning":
-		var events []AnthropicStreamEvent
-		events = append(events, closeCurrentBlock(state)...)
-
-		idx := state.ContentBlockIndex
-		state.OutputIndexToBlockIdx[evt.OutputIndex] = idx
-		state.ContentBlockOpen = true
-		state.CurrentBlockType = "thinking"
-		state.PendingThinkingSignature = strings.TrimSpace(evt.Item.EncryptedContent)
-
-		events = append(events, AnthropicStreamEvent{
-			Type:  "content_block_start",
-			Index: &idx,
-			ContentBlock: &AnthropicContentBlock{
-				Type:     "thinking",
-				Thinking: "",
-			},
-		})
-		return events
+		r := resToAnthReasoningOf(evt, state)
+		if evt.Item.EncryptedContent != "" {
+			r.signature = evt.Item.EncryptedContent
+		}
+		if state.activeReasoning == r {
+			return nil
+		}
+		return resToAnthOpenReasoning(r, state)
 
 	case "message":
 		return nil
@@ -754,24 +754,146 @@ func resToAnthCompleteTool(tool *responsesAnthropicTool, raw string, present boo
 	tool.complete = true
 }
 
+func resToAnthItemKey(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) string {
+	if evt.Item != nil && evt.Item.ID != "" {
+		return evt.Item.ID
+	}
+	if evt.ItemID != "" {
+		return evt.ItemID
+	}
+	if id := state.itemIDs[evt.OutputIndex]; id != "" {
+		return id
+	}
+	return fmt.Sprintf("output:%d", evt.OutputIndex)
+}
+
+func resToAnthReasoningOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) *responsesAnthropicReasoning {
+	if state.reasoning == nil {
+		state.reasoning = make(map[string]*responsesAnthropicReasoning)
+	}
+	key := resToAnthItemKey(evt, state)
+	r := state.reasoning[key]
+	if r == nil {
+		r = &responsesAnthropicReasoning{summary: make(map[int]string), raw: make(map[int]string)}
+		state.reasoning[key] = r
+	}
+	return r
+}
+
+func resToAnthJoinReasoning(parts map[int]string) string {
+	keys := make([]int, 0, len(parts))
+	for k := range parts {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(parts[k])
+	}
+	return b.String()
+}
+
+func resToAnthOpenReasoning(r *responsesAnthropicReasoning, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	events := closeCurrentBlock(state)
+	idx := state.ContentBlockIndex
+	state.ContentBlockOpen = true
+	state.CurrentBlockType = "thinking"
+	state.activeReasoning = r
+	state.PendingThinkingSignature = r.signature
+	events = append(events, AnthropicStreamEvent{Type: "content_block_start", Index: &idx, ContentBlock: &AnthropicContentBlock{Type: "thinking", Thinking: ""}})
+	return events
+}
+
+func resToAnthEmitReasoning(r *responsesAnthropicReasoning, text string, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	if !strings.HasPrefix(text, r.delivered) {
+		state.fail("reasoning", "selected reasoning text disagrees with delivered text")
+		return nil
+	}
+	if text == r.delivered {
+		return nil
+	}
+	var events []AnthropicStreamEvent
+	if state.activeReasoning != r || !state.ContentBlockOpen {
+		events = append(events, resToAnthOpenReasoning(r, state)...)
+	}
+	idx := state.ContentBlockIndex
+	events = append(events, AnthropicStreamEvent{Type: "content_block_delta", Index: &idx, Delta: &AnthropicDelta{Type: "thinking_delta", Thinking: text[len(r.delivered):]}})
+	r.delivered = text
+	return events
+}
+
 func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	if evt.Delta == "" {
-		return nil
+	r := resToAnthReasoningOf(evt, state)
+	parts, index := r.raw, evt.ContentIndex
+	summary := strings.HasPrefix(evt.Type, "response.reasoning_summary")
+	if summary {
+		parts, index = r.summary, evt.SummaryIndex
 	}
-
-	blockIdx, ok := state.OutputIndexToBlockIdx[evt.OutputIndex]
-	if !ok {
-		return nil
+	if strings.HasSuffix(evt.Type, ".done") {
+		if !strings.HasPrefix(evt.Text, parts[index]) {
+			state.fail("reasoning", "reasoning completion disagrees with its deltas")
+			return nil
+		}
+		parts[index] = evt.Text
+	} else {
+		parts[index] += evt.Delta
 	}
+	if summary {
+		return resToAnthEmitReasoning(r, resToAnthJoinReasoning(r.summary), state)
+	}
+	return nil
+}
 
-	return []AnthropicStreamEvent{{
-		Type:  "content_block_delta",
-		Index: &blockIdx,
-		Delta: &AnthropicDelta{
-			Type:     "thinking_delta",
-			Thinking: evt.Delta,
-		},
-	}}
+func resToAnthRecoverReasoning(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	r := resToAnthReasoningOf(evt, state)
+	item := evt.Item
+	summary := resToAnthJoinReasoning(r.summary)
+	// A supplied nonempty summary is authoritative; raw text never overrides it.
+	hasSummary := false
+	for _, part := range item.Summary {
+		if part.Type == "summary_text" && part.Text != "" {
+			hasSummary = true
+		}
+	}
+	if hasSummary {
+		final := ResponsesOutputReasoningText(*item)
+		if !strings.HasPrefix(final, summary) {
+			state.fail("reasoning", "summary completion disagrees with its deltas")
+			return nil
+		}
+		summary = final
+		r.summary = map[int]string{0: final}
+	}
+	selected := summary
+	if selected == "" {
+		selected = resToAnthJoinReasoning(r.raw)
+		final := ResponsesOutputReasoningText(*item)
+		if final != "" {
+			if !strings.HasPrefix(final, selected) {
+				state.fail("reasoning", "reasoning completion disagrees with its deltas")
+				return nil
+			}
+			selected = final
+			r.raw = map[int]string{0: final}
+		}
+	}
+	events := resToAnthEmitReasoning(r, selected, state)
+	if state.err != nil {
+		return events
+	}
+	if sig := strings.TrimSpace(item.EncryptedContent); sig != "" {
+		r.signature = sig
+	}
+	if r.signature != "" && !r.signatureSent && state.activeReasoning != r {
+		events = append(events, resToAnthOpenReasoning(r, state)...)
+	}
+	if state.activeReasoning == r {
+		if !r.signatureSent {
+			state.PendingThinkingSignature = r.signature
+		}
+		events = append(events, closeCurrentBlock(state)...)
+	}
+	return events
 }
 
 func resToAnthHandleBlockDone(state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
@@ -811,11 +933,8 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 		return resToAnthHandleWebSearchDone(evt, state)
 	}
 
-	// Capture encrypted_content on reasoning item done (often only present here).
 	if evt.Item.Type == "reasoning" {
-		if sig := strings.TrimSpace(evt.Item.EncryptedContent); sig != "" {
-			state.PendingThinkingSignature = sig
-		}
+		return resToAnthRecoverReasoning(evt, state)
 	}
 
 	if state.ContentBlockOpen {
@@ -960,6 +1079,16 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		state.fail("arguments", "tool arguments ended without completion")
 		return events
 	}
+	if evt.Response != nil {
+		for i, item := range evt.Response.Output {
+			if item.Type == "reasoning" {
+				events = append(events, resToAnthRecoverReasoning(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
+			}
+		}
+	}
+	if state.err != nil {
+		return events
+	}
 	events = append(events, closeCurrentBlock(state)...)
 	events = append(events, resToAnthRecoverTerminalText(evt, state)...)
 	if evt.Response != nil {
@@ -1040,6 +1169,10 @@ func closeCurrentBlock(state *ResponsesEventToAnthropicState) []AnthropicStreamE
 			})
 		}
 		state.PendingThinkingSignature = ""
+		if state.activeReasoning != nil {
+			state.activeReasoning.signatureSent = state.activeReasoning.signature != ""
+			state.activeReasoning = nil
+		}
 	}
 	state.ContentBlockOpen = false
 	state.ContentBlockIndex++

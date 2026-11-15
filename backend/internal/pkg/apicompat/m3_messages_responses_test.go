@@ -404,3 +404,88 @@ func TestM3WebSearchSources(t *testing.T) {
 		})
 	}
 }
+
+func TestM3ReasoningTextFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, summary string
+		terminalOnly       bool
+	}{
+		{"summary wins", "raw thought", "summary", false}, {"raw only", "raw thought", "", false},
+		{"whitespace", "  ", "", false}, {"signature only", "", "", false},
+		{"terminal only", "raw thought", "summary", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := ResponsesOutput{Type: "reasoning", ID: "rs_a", EncryptedContent: "signature", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: tc.raw}}}
+			if tc.summary != "" {
+				item.Summary = []ResponsesSummary{{Type: "summary_text", Text: tc.summary}}
+			}
+			resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+			out := ResponsesToAnthropic(resp, "test")
+			require.Len(t, out.Content, 1)
+			want := tc.raw
+			if tc.summary != "" {
+				want = tc.summary
+			}
+			require.Equal(t, want, out.Content[0].Thinking)
+			st := NewResponsesEventToAnthropicState()
+			var events []AnthropicStreamEvent
+			feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+			if !tc.terminalOnly {
+				feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "reasoning", ID: item.ID}})
+				feed(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: item.ID, Delta: tc.raw})
+				for _, e := range events {
+					if e.Delta != nil {
+						require.NotEqual(t, "thinking_delta", e.Delta.Type)
+					}
+				}
+				if tc.summary != "" {
+					feed(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: item.ID, Delta: tc.summary})
+				}
+				feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+			}
+			feed(&ResponsesStreamEvent{Type: "response.completed", Response: resp})
+			require.NoError(t, st.Err())
+			var got string
+			signatures := 0
+			closed := map[int]bool{}
+			for _, e := range events {
+				if e.Type == "content_block_stop" {
+					closed[*e.Index] = true
+				}
+				if e.Delta == nil {
+					continue
+				}
+				if e.Delta.Type == "thinking_delta" {
+					got += e.Delta.Thinking
+				}
+				if e.Delta.Type == "signature_delta" {
+					require.False(t, closed[*e.Index])
+					require.Equal(t, "signature", e.Delta.Signature)
+					signatures++
+				}
+			}
+			require.Equal(t, want, got)
+			require.Equal(t, 1, signatures)
+		})
+	}
+	t.Run("multiple summary parts and final suffix", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		var got string
+		feed := func(e *ResponsesStreamEvent) {
+			for _, v := range ResponsesEventToAnthropicEvents(e, st) {
+				if v.Delta != nil {
+					got += v.Delta.Thinking
+				}
+			}
+		}
+		feed(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: "r", SummaryIndex: 0, Delta: "a"})
+		feed(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: "r", SummaryIndex: 1, Delta: "b"})
+		item := ResponsesOutput{Type: "reasoning", ID: "r", Summary: []ResponsesSummary{{Type: "summary_text", Text: "a"}, {Type: "summary_text", Text: "bc"}}}
+		feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+		require.NoError(t, st.Err())
+		require.Equal(t, "abc", got)
+		item.Summary[1].Text = "different"
+		feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+		require.Error(t, st.Err())
+	})
+}
