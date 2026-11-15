@@ -174,6 +174,10 @@ func geminiCompatCapabilities(model string) GeminiCompatCapabilities {
 		return GeminiCompatCapabilities{ThinkingLevels: []string{"low", "medium", "high"}, Budget: true, JSONMIME: true, JSONSchema: true}
 	case "gemini-3-flash", "gemini-3-flash-preview", "gemini-3.5-flash":
 		return GeminiCompatCapabilities{ThinkingLevels: []string{"minimal", "low", "medium", "high"}, Budget: true, JSONMIME: true, JSONSchema: true}
+	case "gemini-3.8-flash":
+		// Production model; the repository only confirms low/medium/high levels
+		// (antigravity_gemini_thinking_variant.go), so minimal is not listed.
+		return GeminiCompatCapabilities{ThinkingLevels: []string{"low", "medium", "high"}, Budget: true, JSONMIME: true, JSONSchema: true}
 	default:
 		return GeminiCompatCapabilities{}
 	}

@@ -25,7 +25,7 @@ func TestM5IntermediateThinkingBudget(t *testing.T) {
 	for _, limit := range []int{512, 8192} {
 		for _, stream := range []bool{false, true} {
 			for _, alias := range []bool{false, true} {
-				for _, model := range []string{"gemini-2.5-flash", "gemini-3.1-pro"} {
+				for _, model := range []string{"gemini-2.5-flash", "gemini-3.8-flash"} {
 					for _, tc := range []struct{ name, field, effort string }{
 						{"default", "", ""}, {"null", `,"reasoning_effort":null`, ""}, {"empty", `,"reasoning_effort":""`, ""},
 						{"none", `,"reasoning_effort":"none"`, "none"}, {"low", `,"reasoning_effort":"low"`, "low"}, {"medium", `,"reasoning_effort":"medium"`, "medium"}, {"high", `,"reasoning_effort":"high"`, "high"},
@@ -106,6 +106,8 @@ func TestM5ThinkingConfig(t *testing.T) {
 			{"high", "gemini-2.5-flash", `,"output_config":{"effort":"high"}`, `{"thinkingBudget":24576}`, "", 1},
 			{"level_low", "gemini-3.1-pro", `,"output_config":{"effort":"low"}`, `{"thinkingLevel":"low"}`, "low", 1.2},
 			{"level_high", "gemini-3.1-pro", `,"output_config":{"effort":"high"}`, `{"thinkingLevel":"high"}`, "high", 2},
+			{"production_level_low", "gemini-3.8-flash", `,"output_config":{"effort":"low"}`, `{"thinkingLevel":"low"}`, "low", 1.2},
+			{"production_level_high", "gemini-3.8-flash", `,"output_config":{"effort":"high"}`, `{"thinkingLevel":"high"}`, "high", 2},
 			{"effort_before_adaptive", "gemini-3.1-pro", `,"thinking":{"type":"adaptive"},"output_config":{"effort":"low"}`, `{"thinkingLevel":"low","includeThoughts":true}`, "low", 1.2},
 			{"disabled_before_effort", "gemini-2.5-flash", `,"thinking":{"type":"disabled"},"output_config":{"effort":"high"}`, `{"thinkingBudget":0,"includeThoughts":false}`, "", 1},
 			{"budget", "gemini-2.5-flash", `,"thinking":{"type":"enabled","budget_tokens":2048}`, `{"thinkingBudget":2048,"includeThoughts":true}`, "", 1},
@@ -372,6 +374,17 @@ func TestM5StructuredOutput(t *testing.T) {
 		}
 	}
 
+	t.Run("production_model", func(t *testing.T) {
+		body := []byte(`{"model":"alias","reasoning_effort":"high","response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}},"messages":[{"role":"user","content":"hi"}]}`)
+		account := geminiSignalTestAccount()
+		account.Credentials["model_mapping"] = map[string]any{"alias": "gemini-3.8-flash"}
+		wire, result, notices := m5ForwardChat(t, body, account)
+		require.JSONEq(t, `{"thinkingLevel":"high"}`, gjson.GetBytes(wire, "generationConfig.thinkingConfig").Raw)
+		require.Equal(t, "application/json", gjson.GetBytes(wire, "generationConfig.responseMimeType").String())
+		require.JSONEq(t, `{"type":"object"}`, gjson.GetBytes(wire, "generationConfig.responseJsonSchema").Raw)
+		require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
+		require.Empty(t, notices)
+	})
 	t.Run("google_search_preserves_schema", func(t *testing.T) {
 		body := []byte(`{"generationConfig":{"responseJsonSchema": { "type":"integer", "minimum":9007199254740993, "maximum":18446744073709551615 }},"tools":[{"googleSearch":{"timeRangeFilter": { "startTime":"2026-01-01T00:00:00Z" }}},{"functionDeclarations":[{"name":"lookup","parameters":{"type":"OBJECT"}}]}],"contents":[{"role":"user","parts":[{"text":"lookup"}]}]}`)
 		original := string(body)
