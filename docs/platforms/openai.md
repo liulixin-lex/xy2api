@@ -170,6 +170,6 @@ Chat 请求的 `reasoning` 接受字符串或对象；同时提供 `reasoning_ef
 
 HTTP API Key 请求在最终账号和模型确定后执行一次分组推理策略，再将模型明确不支持的档位映射到最近可用档位，等距取较低档。模型支持的 none 原样保留；目录缺少某档本身不构成不支持的证据。请求档位与最终出站档位分别记录，计费使用实际出站值。
 
-GPT-6.1 Sol 的 API Key 原生 HTTP 请求先把 none/minimal 映射为 low 再校验；未确认不支持 minimal 的其他模型保留该值。OAuth 与 WebSocket 沿用原校验规则。
+GPT-6.1 Sol 的 API Key 原生 HTTP 请求先把 none/minimal 映射为 low 再校验；其他 Responses 模型继续沿用 minimal→none 的既有归一，修复重入也不会把 minimal 补回。OAuth 与 WebSocket 沿用原校验规则。
 
 模型后缀只记录请求意图，不单独触发分组映射或注入正文；只有最终模型的可靠能力限制确实要求调整时才投影该值。

@@ -161,6 +161,9 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 		}
 	}
 	supported, reliable := supportedInferenceEffortsForAccount(account, model)
+	if protocol == "responses" && !reliable && effort == "minimal" {
+		effort = "none" // Preserve the existing Responses compatibility normalization on reentry too.
+	}
 	if reliable && normalizeReasoningEffortMappingSource(effort) != "" {
 		if maxRank, hasMax := reasoningEffortRank(state.policy.maxEffort); hasMax {
 			candidates := make([]string, 0, len(supported))

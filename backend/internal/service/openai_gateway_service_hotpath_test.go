@@ -138,7 +138,7 @@ func TestOpenAIGatewayService_Forward_APIKeyMissingInstructionsKeepsLargeInputRa
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	require.JSONEq(t, string(body), string(upstream.lastBody))
+	require.JSONEq(t, strings.Replace(string(body), `"minimal"`, `"none"`, 1), string(upstream.lastBody))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "input.0.content.0.nonce").Raw)
 }

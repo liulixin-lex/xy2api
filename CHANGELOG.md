@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- API Key Responses 请求继续将既有 minimal 兼容值归一为 none，避免上游拒绝。
+
 - 模型后缀与第三方 thinking 模式不再被误写成显式推理档位或触发分组拒绝。
 
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
