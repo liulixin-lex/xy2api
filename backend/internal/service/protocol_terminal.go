@@ -11,9 +11,9 @@ func ClaimProtocolTerminal(c *gin.Context) bool {
 	if c == nil || ProtocolTerminalClaimed(c) {
 		return false
 	}
-	c.Set(resilience.GinKeyProtocolTerminal, true)
+	c.Set(resilience.GinKeyTerminalFinalized, true)
 	return true
 }
 func ProtocolTerminalClaimed(c *gin.Context) bool {
-	return c != nil && c.GetBool(resilience.GinKeyProtocolTerminal)
+	return c != nil && c.GetBool(resilience.GinKeyTerminalFinalized)
 }
