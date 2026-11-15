@@ -928,8 +928,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 				return
 			}
 			require.ErrorIs(t, err, context.Canceled)
-			require.NotNil(t, result, "the reader preserves facts; billing eligibility remains a handler decision")
-			require.True(t, result.PartialFailure)
+			require.Nil(t, result, "no semantic output was delivered")
 			require.True(t, body.closed.Load(), "the upstream body is closed")
 			require.False(t, state.AccountFailed(account.ID), "no account failure")
 			require.False(t, state.TurnFailed())

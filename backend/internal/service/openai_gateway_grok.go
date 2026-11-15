@@ -258,7 +258,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		}
 		if err != nil {
 			var failoverErr *UpstreamFailoverError
-			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil || errors.As(err, &failoverErr) {
+			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr) {
 				return nil, err
 			}
 			partialErr = err

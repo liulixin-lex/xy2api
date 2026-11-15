@@ -611,7 +611,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				// error so the handler bills it once (#5148). Failovers and a
 				// client that left before output keep a nil result.
 				var failoverErr *UpstreamFailoverError
-				if result != nil && !errors.As(handleErr, &failoverErr) {
+				if result != nil && result.clientSawOutput && !errors.As(handleErr, &failoverErr) {
 					usage, firstTokenMs = result.usage, result.firstTokenMs
 					responseID = strings.TrimSpace(result.responseID)
 					imageCount, imageOutputSizes = result.imageCount, result.imageOutputSizes
@@ -2424,6 +2424,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	failedMessage := ""
 	semanticOutputSeen := false
 	clientOutputStarted := false
+	clientSawSemanticOutput := false
 	attemptStagedBlankPlaceholder := false
 	eventHasBlankPlaceholder := false
 	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI
@@ -2587,7 +2588,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
-			clientSawOutput:  clientOutputStarted || clientDisconnected,
+			clientSawOutput:  clientSawSemanticOutput,
 			upstreamAccepted: !sawFailedEvent && (openAIM3TerminalAccepted(terminalEventType, semanticOutputSeen) || cleanEOF && semanticOutputSeen),
 		}
 	}
@@ -2989,7 +2990,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					return passthroughLineContinue
 				}
 			}
-			if _, err := io.WriteString(w, wireLine); err != nil {
+			written, writeErr := io.WriteString(w, wireLine)
+			if written > 0 {
+				if data, ok := extractOpenAISSEDataLine(line); ok && resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).SemanticOutput {
+					clientSawSemanticOutput = true
+				}
+			}
+			if err := writeErr; err != nil {
 				clientDisconnected = true
 				cancelSchedClient(c)
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)

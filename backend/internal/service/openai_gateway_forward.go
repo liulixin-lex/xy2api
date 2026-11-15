@@ -1469,7 +1469,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
 				var failoverErr *UpstreamFailoverError
-				if streamResult == nil || errors.As(err, &failoverErr) {
+				if streamResult == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr) {
 					return nil, err
 				}
 				// Keep metered usage after output without turning a failed attempt into success.

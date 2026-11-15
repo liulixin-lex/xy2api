@@ -79,7 +79,7 @@ func TestOpenAINativePartialUsageRequiresDeliveredSemanticBytes(t *testing.T) {
 		name        string
 		limit, rows int
 	}{
-		{"zero", 0, 0}, {"opening only", len(opening), 0},
+		{"zero", 0, 0}, {"opening only", len(opening), 0}, {"partial opening", len(opening) / 2, 0},
 		{"partial content", len(opening) + strings.Index(output, "hello") + 2, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
