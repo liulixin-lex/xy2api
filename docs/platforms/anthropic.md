@@ -21,7 +21,11 @@ OAuth 类账号的授权接口位于 `/api/v1/admin/accounts` 下：`generate-au
 2. 「分组管理」中创建平台为 Anthropic 的分组，把账号加入该分组。分组的调度、系统提示词等设置见 [分组](../guides/groups.md) 与 [账号调度](../guides/scheduling.md)。
 3. 用户在「API 密钥」中创建绑定该分组的密钥，点击「使用密钥」即可获得各客户端的配置。
 
+API Key 账号的上游 Base URL 可填写根地址、版本前缀（如 `/v1`）或对应完整端点；Messages、Token 计数和模型发现按版本段拼接，保留查询参数并清除 fragment。需要 `beta=true` 的请求只设置一次；原生第三方 Messages 不额外添加 beta。
+
 ## 对外端点
+
+上述 Base URL 是账号的上游地址；客户端仍填写本页「客户端配置」规定的网关地址。
 
 Anthropic 分组的密钥可以调用以下端点。鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`；不接受 URL 查询参数里的密钥。
 

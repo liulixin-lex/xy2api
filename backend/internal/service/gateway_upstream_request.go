@@ -37,7 +37,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, nil, err
 			}
-			targetURL = validatedURL + "/v1/messages?beta=true"
+			parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages"))
+			if err != nil {
+				return nil, nil, err
+			}
+			query := parsedURL.Query()
+			query.Set("beta", "true")
+			parsedURL.RawQuery = query.Encode()
+			targetURL = parsedURL.String()
 		}
 	} else if account.IsCustomBaseURLEnabled() {
 		customURL := account.GetCustomBaseURL()

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -339,7 +340,14 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, nil, err
 		}
-		targetURL = validatedURL + "/v1/messages?beta=true"
+		parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages"))
+		if err != nil {
+			return nil, nil, err
+		}
+		query := parsedURL.Query()
+		query.Set("beta", "true")
+		parsedURL.RawQuery = query.Encode()
+		targetURL = parsedURL.String()
 	}
 
 	// 能力维度 body sanitize：透传路径上 anthropic-beta header 原样透传客户端值，
