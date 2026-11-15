@@ -2515,8 +2515,9 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 }
 
 func normalizeOpenAIReasoningEffortForModel(raw, _ string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "max") {
-		return "max"
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "max" || value == "ultra" {
+		return value
 	}
 	return normalizeOpenAIReasoningEffort(raw)
 }
