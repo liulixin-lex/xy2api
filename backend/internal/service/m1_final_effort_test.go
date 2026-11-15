@@ -183,7 +183,7 @@ func TestM1ReviewUnknownReasoningIntent(t *testing.T) {
 }
 
 func TestM1ReviewDerivedIntent(t *testing.T) {
-	for _, model := range []string{"gpt-5.1-codex-max", "qwen3-max", "gpt-5.4-high"} {
+	for _, model := range []string{"gpt-5.1-codex-max", "qwen3-max", "gpt-5.4-high", "gpt-5.4-minimal"} {
 		body := []byte(`{"model":"` + model + `","input":"hi"}`)
 		ctx := WithOpenAIReasoningEffortPolicy(m1EffortContext(body), "", []ReasoningEffortMapping{{From: "high", To: "deny"}, {From: "max", To: "deny"}}, "")
 		upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
