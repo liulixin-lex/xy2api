@@ -34,6 +34,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
@@ -54,12 +55,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	originalModel := ccReq.Model
 	clientStream := ccReq.Stream
 
-	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
-	if err != nil {
-		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
-	}
-
 	// Resolve the final upstream model before model-specific conversion.
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -76,6 +71,20 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			mappedModel = normalized
 		}
 	}
+	body, err = applyM7FinalReasoning(ctx, c, account, body, mappedModel, "chat", PreOutputProtocolChat)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, &ccReq); err != nil {
+		return nil, err
+	}
+	ccReq.Model = mappedModel
+	// 2. Convert CC → Responses → Anthropic (chained conversion)
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
+	}
+
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
 	if err != nil {
@@ -144,7 +153,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})

@@ -37,6 +37,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
@@ -50,6 +51,12 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+
 	if upstreamModel != originalModel {
 		rewritten, err := sjson.SetBytes(body, "model", upstreamModel)
 		if err != nil {
@@ -60,16 +67,6 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	if normalized, changed := NormalizeGLM53AnthropicThinking(body, upstreamModel); changed {
 		body = normalized
 	}
-
-	// 记录客户端请求的推理强度：优先 Claude 协议的 output_config.effort；
-	// 缺失且 thinking 已启用时，按国产 passback-required 模型兜底为 high
-	// （对齐 Anthropic 网关 gateway_handler 的记录语义，避免该路径长期落 NULL）。
-	requestedReasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String())
-	reasoningEffort := ApplyThinkingEnabledFallback(
-		requestedReasoningEffort,
-		body,
-		billingModel,
-	)
 
 	// 与 Anthropic 平台 passthrough 相同的 pre-filter：剥离空文本块与上游
 	// 无法接受的 web-search 历史块（GLM/Kimi/DeepSeek 对 server_tool_use 400）。
@@ -99,6 +96,8 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	if err != nil {
 		return nil, err
 	}
+
+	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 
 	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, forwardedBody, clientStream, &schedCapture)
 	if err != nil {

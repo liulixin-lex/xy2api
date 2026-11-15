@@ -41,6 +41,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
@@ -69,6 +70,15 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	// Resolve the mapped model before choosing its thinking/tool protocol.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	adaptedBody, projectionErr = applyM7FinalReasoning(ctx, c, account, adaptedBody, upstreamModel, "responses", PreOutputProtocolResponses)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(adaptedBody, &responsesReq); err != nil {
+		return nil, err
+	}
+
 	if err := validateClaude55Parameters(body, upstreamModel); err != nil {
 		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -129,7 +139,6 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	}
 	// Bill the Anthropic effort actually sent upstream (for example xhigh → max).
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
 
 	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, forwardedBody, clientStream, &schedCapture)
 	if err != nil {

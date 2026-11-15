@@ -211,6 +211,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	bearerToken string,
 	userAgent string,
 	grokCacheIdentity string,
+	actualEffort **string,
 	captureOwner ...**schedAttemptCapture,
 ) (*http.Response, error) {
 	var schedCapture *schedAttemptCapture
@@ -270,6 +271,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
 	s.captureCacheRequestDiagnostic(c, upstreamReq)
+	if actualEffort != nil {
+		*actualEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

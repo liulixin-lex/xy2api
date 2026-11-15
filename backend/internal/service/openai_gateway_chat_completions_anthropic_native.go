@@ -41,6 +41,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
@@ -58,6 +59,18 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	}
 	clientStream := ccReq.Stream
 
+	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
+	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "chat", PreOutputProtocolChat)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(body, &ccReq); err != nil {
+		return nil, err
+	}
+
+	ccReq.Model = upstreamModel
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
 	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, m7ConversionOptions(ctx))
 	if err != nil {
@@ -65,8 +78,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 	}
 	// Resolve the mapped model before choosing its thinking/tool protocol.
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+
 	if err := validateClaude55Parameters(body, upstreamModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -144,7 +156,6 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 
 	// Bill the Anthropic effort actually sent upstream (for example xhigh → max).
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
 
 	if clientStream {
 		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)

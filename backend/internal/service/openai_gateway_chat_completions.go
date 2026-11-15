@@ -207,6 +207,19 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// derive a stable seed from the final upstream model family.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	wireProtocol := "chat"
+	if isResponsesShape {
+		wireProtocol = "responses"
+	}
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, wireProtocol, PreOutputProtocolChat)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(body, &chatReq); err != nil {
+		return nil, err
+	}
+
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -421,6 +434,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
+	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
+	defer func() {
+		if schedResult != nil {
+			schedResult.ReasoningEffort = actualReasoningEffort
+		}
+	}()
+
 	if promptCacheKey != "" {
 		upstreamReq.Header.Set("session_id", compatSessionUUID)
 	}
@@ -468,6 +488,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); repairErr == nil &&
 			changed && rejectedFieldRetryState.Allow(retryBody) {
+			defer recordM7RejectedFieldReplay(ctx, c, account, resp, respBody, body, retryBody)()
 			closeAttempt()
 			logger.FromContext(ctx).Info("resilience.request_repair_replay",
 				zap.Int64("account_id", account.ID),
@@ -506,6 +527,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		schedCapture.noteUsage(&result.Usage)
 	}
 	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
+		if value, exists := c.Get("xy_m7_field_replay_completion"); exists {
+			if done, ok := value.(func()); ok {
+				defer done()
+			}
+			c.Set("xy_m7_field_replay_completion", nil)
+		}
 		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
@@ -530,10 +557,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody)); tier != nil {
 			result.ServiceTier = tier
 		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
-			result.ReasoningEffort = &re
-		}
+
 	}
 
 	// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
@@ -1044,6 +1068,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				repair := openAIRequestRepairFrom(c)
 				if !malformed && (!wrapped || status == http.StatusBadRequest) && repair != nil && repair.accountID == account.ID {
 					if signal := newOpenAIRejectedFieldRepairSignal(c.Request.Context(), repair, payloadBytes); signal != nil {
+						if repairSignal, ok := signal.(*openAIRequestRepairSignal); ok {
+							failed := &http.Response{StatusCode: http.StatusBadRequest, Header: resp.Header}
+							c.Set("xy_m7_field_replay_completion", recordM7RejectedFieldReplay(c.Request.Context(), c, account, failed, openAIRequestRepairErrorObject(payloadBytes), repair.body, repairSignal.next))
+						}
 						streamNonFailoverErr = signal
 						return true
 					}

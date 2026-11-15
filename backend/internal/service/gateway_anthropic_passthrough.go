@@ -61,7 +61,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	c *gin.Context,
 	account *Account,
 	input anthropicPassthroughForwardInput,
-) (*ForwardResult, error) {
+) (result *ForwardResult, forwardErr error) {
+	var actualEffort *string
+	defer func() {
+		if result != nil {
+			result.ReasoningEffort = actualEffort
+		}
+	}()
+
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -110,6 +117,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		if err != nil {
 			return nil, err
 		}
+		actualEffort = NormalizeClaudeOutputEffort(gjson.GetBytes(wireBody, "output_config.effort").String())
 		cleanBody := withoutClaudeCacheFallback(ctx, wireBody)
 		if input.Parsed != nil && !bytes.Equal(cleanBody, input.Body) {
 			// build 阶段会按 beta 能力清理 body，发送前同步到 ParsedRequest 当前视图。

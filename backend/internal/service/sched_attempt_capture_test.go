@@ -176,7 +176,7 @@ func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.1","messages":[]}`)
 	prior := svc.beginSchedAttempt(ctx, account, body, len(body), false)
 	owned := prior
-	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", &owned)
+	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", nil, &owned)
 	require.Error(t, err)
 	require.Nil(t, owned)
 	owned.finish(nil, err)

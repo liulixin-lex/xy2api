@@ -36,6 +36,7 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
@@ -86,6 +87,13 @@ func (s *GatewayService) ForwardAsResponses(
 		if normalized != originalModel {
 			mappedModel = normalized
 		}
+	}
+	adaptedBody, err = applyM7FinalReasoning(ctx, c, account, adaptedBody, mappedModel, "responses", PreOutputProtocolResponses)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(adaptedBody, &responsesReq); err != nil {
+		return nil, err
 	}
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
@@ -155,7 +163,6 @@ func (s *GatewayService) ForwardAsResponses(
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})

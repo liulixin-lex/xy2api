@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	account *Account,
 	body []byte,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	startTime := time.Now()
 
 	var responsesReq apicompat.ResponsesRequest
@@ -43,6 +44,18 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, fmt.Errorf("missing model in request")
 	}
 
+	billingModel := resolveOpenAIForwardModel(account, originalModel, "")
+	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "responses", PreOutputProtocolResponses)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(body, &responsesReq); err != nil {
+		return nil, err
+	}
+
+	responsesReq.Model = upstreamModel
 	clientStream := responsesReq.Stream
 	// custom 工具（如 codex 的 exec）降级为 function 工具转发，回程需按名字还原为
 	// custom_tool_call 项，先记下名字集合；tool_search 工具同理，回程还原为
@@ -70,20 +83,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, fmt.Errorf("convert responses to chat completions: %w", err)
 	}
 
-	billingModel := resolveOpenAIForwardModel(account, originalModel, "")
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && len(effectiveTools) > 0 {
-		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
+	if openai.RequiresResponsesForToolCalls(upstreamModel) && len(effectiveTools) > 0 {
+		err := fmt.Errorf("%s requires Responses for tool calls; this account only supports Chat Completions", upstreamModel)
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
-	// 国产模型默认 effort 补充：需要 mappedModel 判定，推迟到 billingModel 算出之后。
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
+	var reasoningEffort *string
 	chatReq.Model = upstreamModel
 	if clientStream {
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
@@ -123,7 +132,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	var schedCapture *schedAttemptCapture
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &schedCapture)
+	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &reasoningEffort, &schedCapture)
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err

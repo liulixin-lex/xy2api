@@ -34,6 +34,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(forwardResult, forwardErr) }()
 	if c != nil {
@@ -99,6 +100,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(body, &anthropicReq); err != nil {
+		return nil, err
+	}
+
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -309,7 +319,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 		}
 	}
-	if account.Platform == PlatformOpenAI {
+	if account.Platform == PlatformOpenAI && account.Type != AccountTypeAPIKey {
 		policyBody, changed, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, responsesBody)
 		if policyErr != nil {
 			if IsReasoningEffortPolicyDenied(policyErr) {

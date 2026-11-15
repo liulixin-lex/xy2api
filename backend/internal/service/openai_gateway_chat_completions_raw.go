@@ -63,6 +63,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	startTime := time.Now()
 
 	// 1. Parse minimal fields needed for routing/billing
@@ -76,6 +77,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "chat", PreOutputProtocolChat)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -87,8 +94,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		// anchored to the client's stable conversation prefix.
 		grokCacheIdentity = resolveGrokCacheIdentity(c, body, "", upstreamModel)
 	}
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) {
-		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
+	if openai.RequiresResponsesForToolCalls(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) {
+		err := fmt.Errorf("%s requires Responses for tool calls; this account only supports Chat Completions", upstreamModel)
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -203,10 +210,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	// Record the final provider-normalized effort, so usage and pricing match
 	// the outbound request (for example GLM xhigh is forwarded as max).
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(upstreamBody, upstreamModel, billingModel, originalModel)
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, upstreamBody, upstreamModel)
+	var reasoningEffort *string
 	var schedCapture *schedAttemptCapture
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity, &schedCapture)
+	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity, &reasoningEffort, &schedCapture)
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -49,4 +50,37 @@ func prepareM7NativeResponsesBody(ctx context.Context, body []byte) ([]byte, err
 		body, err = sjson.SetBytes(body, "max_output_tokens", *prepared.MaxOutputTokens)
 	}
 	return body, err
+}
+
+// Apply the supplied policy only at an API-key leaf's resolved target. Legacy
+// OAuth policy calls remain at their existing sites.
+func applyM7FinalReasoning(ctx context.Context, c *gin.Context, account *Account, body []byte, model, wireProtocol, inboundProtocol string) ([]byte, error) {
+	if account.Type != AccountTypeAPIKey {
+		return body, nil
+	}
+	updated, _, err := applyFinalReasoningEffortForAccount(ctx, c, account, body, model, wireProtocol)
+	if err != nil {
+		if IsReasoningEffortPolicyDenied(err) {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			WriteTargetProtocolError(c, inboundProtocol, http.StatusForbidden, "permission_error", "", "", err.Error())
+		} else {
+			writeM7RequestConversionError(c, inboundProtocol, err)
+		}
+	}
+	return updated, err
+}
+
+// The returned completion runs after recursive repair and only marks a resend
+// when the transport observed a new send boundary after this refusal.
+func recordM7RejectedFieldReplay(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, payload, before, after []byte) func() {
+	event := recordOpenAIResponsesRejectedFieldRetry(c, account, resp, payload)
+	sequence := resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+	recordOpenAIRejectedOutputLimitOmission(ctx, before, after)
+	return func() {
+		if event != nil {
+			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && sequence > 0 && boundary >= sequence {
+				event.Resent = true
+			}
+		}
+	}
 }
