@@ -165,6 +165,83 @@ func repairHTTPEncryptedItem(body []byte, input, item gjson.Result, selected int
 	return result, nil
 }
 
+// Only HTTP uses this namespace. Empty credential versions disable evidence
+// reuse; they do not disable a repair justified by the current response.
+func openAIEncryptedLineageVersionedSession(session, credentialVersion string) string {
+	if session == "" || credentialVersion == "" {
+		return ""
+	}
+	return "encrypted-lineage-v2:" + openAIEncryptedContentDigest(session+"\x00"+credentialVersion)
+}
+
+func httpEncryptedLineageKey(session string, accountID int64, credentialVersion string) string {
+	if accountID <= 0 || session == "" || credentialVersion == "" {
+		return ""
+	}
+	return openAIEncryptedLineageVersionedSession(session, strconv.FormatInt(accountID, 10)+":"+credentialVersion)
+}
+
+func (s *OpenAIGatewayService) markHTTPInvalidEncryptedContent(groupID int64, session string, accountID int64, credentialVersion string, selected httpRejectedEncryptedItem) {
+	if s == nil || selected.Digest == "" || credentialVersion == "" {
+		return
+	}
+	key := httpEncryptedLineageKey(session, accountID, credentialVersion)
+	if key != "" {
+		s.markOpenAIWSInvalidEncryptedContentLineage(groupID, key, []string{selected.Digest})
+	}
+}
+
+func (s *OpenAIGatewayService) stripHTTPInvalidEncryptedContent(body []byte, groupID int64, session string, accountID int64, credentialVersion string) ([]byte, int) {
+	if s == nil || credentialVersion == "" {
+		return body, 0
+	}
+	key := httpEncryptedLineageKey(session, accountID, credentialVersion)
+	invalid := s.sessionInvalidEncryptedContentDigests(groupID, key)
+	if len(invalid) == 0 {
+		return body, 0
+	}
+	root := gjson.ParseBytes(body)
+	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUniqueObject(root) {
+		return body, 0
+	}
+	input := root.Get("input")
+	items := input.Array()
+	if input.IsObject() {
+		items = []gjson.Result{input}
+	} else if !input.IsArray() {
+		return body, 0
+	}
+	counts := make(map[string]int)
+	ids := make(map[string]int)
+	for _, item := range items {
+		if id := item.Get("id").String(); id != "" {
+			ids[id]++
+		}
+		if encrypted := item.Get("encrypted_content"); encrypted.Type == gjson.String && encrypted.String() != "" {
+			counts[openAIEncryptedContentDigest(encrypted.String())]++
+		}
+	}
+	next, changed := body, 0
+	// Descending indices keep earlier locator positions stable when a selected
+	// compaction item or empty reasoning skeleton is removed.
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		digest := openAIEncryptedContentDigest(item.Get("encrypted_content").String())
+		if _, hit := invalid[digest]; !hit || counts[digest] != 1 || ids[item.Get("id").String()] > 1 {
+			continue
+		}
+		selected, err := repairHTTPEncryptedItem(next, input, item, i)
+		if err != nil {
+			return body, 0
+		}
+		if selected.Changed {
+			next = selected.Body
+			changed++
+		}
+	}
+	return next, changed
+}
+
 // invalid_encrypted_content 失效密文 lineage。
 //
 // 上游判定某轮请求中的加密 reasoning/compaction 项不可解后，同一失效密文会随

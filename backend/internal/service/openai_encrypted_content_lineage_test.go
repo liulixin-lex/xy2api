@@ -269,3 +269,49 @@ func TestHTTPEncryptedRepairUniqueItem(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPEncryptedLineageCredentialScope(t *testing.T) {
+	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	body := []byte(`{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good"},{"type":"compaction","id":"cmp_good","encrypted_content":"compact"}]}`)
+	selected, err := selectHTTPRejectedEncryptedItem(body, []byte(`{"error":{"param":"input[0].encrypted_content"}}`))
+	require.NoError(t, err)
+	svc.markHTTPInvalidEncryptedContent(1, "session", 10, "version-a", selected)
+	for _, tc := range []struct {
+		name, session, version string
+		group, account         int64
+		count                  int
+	}{
+		{"same", "session", "version-a", 1, 10, 1},
+		{"other_account", "session", "version-a", 1, 11, 0},
+		{"rotated_credential", "session", "version-b", 1, 10, 0},
+		{"missing_version", "session", "", 1, 10, 0},
+		{"other_group", "session", "version-a", 2, 10, 0},
+		{"other_session", "other-session", "version-a", 1, 10, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next, count := svc.stripHTTPInvalidEncryptedContent(body, tc.group, tc.session, tc.account, tc.version)
+			require.Equal(t, tc.count, count)
+			if count == 0 {
+				require.Equal(t, body, next)
+			} else {
+				require.False(t, gjson.GetBytes(next, "input.0.encrypted_content").Exists())
+				require.Equal(t, "good", gjson.GetBytes(next, "input.1.encrypted_content").String())
+				require.Equal(t, "compact", gjson.GetBytes(next, "input.2.encrypted_content").String())
+			}
+		})
+	}
+	duplicate := []byte(`{"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"bad"},{"type":"reasoning","id":"rs_2","encrypted_content":"bad"}]}`)
+	next, count := svc.stripHTTPInvalidEncryptedContent(duplicate, 1, "session", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, duplicate, next)
+	svc.markOpenAIWSInvalidEncryptedContentLineage(1, "old", []string{selected.Digest})
+	next, count = svc.stripHTTPInvalidEncryptedContent(body, 1, "old", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, body, next)
+	other := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	next, count = other.stripHTTPInvalidEncryptedContent(body, 1, "session", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, body, next)
+	require.Empty(t, httpEncryptedLineageKey("session", 10, ""))
+	require.Empty(t, openAIEncryptedLineageVersionedSession("session", ""))
+}
