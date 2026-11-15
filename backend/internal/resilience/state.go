@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 )
 
 // RequestState is the mutable per-request resilience state. Gateway routes
@@ -15,7 +16,8 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
-	mu sync.Mutex
+	mu                sync.Mutex
+	conversionNotices []apicompat.ConversionNotice
 
 	timing            timingTrace
 	bodyFirstRead     time.Time
