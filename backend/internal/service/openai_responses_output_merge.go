@@ -16,18 +16,19 @@ func mergeResponsesOutputFromSSE(finalResponse []byte, bodyText string) ([]byte,
 }
 
 type responsesOutputMergeItem struct {
-	index     int
-	indexed   bool
-	added     map[string]json.RawMessage
-	done      map[string]json.RawMessage
-	terminal  map[string]json.RawMessage
-	delta     map[string]json.RawMessage
-	parts     map[int]map[string]json.RawMessage
-	summary   map[int]map[string]json.RawMessage
-	seenSeq   map[int64]bool
-	arguments string
-	argsDone  bool
-	textDone  map[string]bool
+	terminalOrder int
+	index         int
+	indexed       bool
+	added         map[string]json.RawMessage
+	done          map[string]json.RawMessage
+	terminal      map[string]json.RawMessage
+	delta         map[string]json.RawMessage
+	parts         map[int]map[string]json.RawMessage
+	summary       map[int]map[string]json.RawMessage
+	seenSeq       map[int64]bool
+	arguments     string
+	argsDone      bool
+	textDone      map[string]bool
 }
 
 func mergeResponsesOutputItems(finalResponse []byte, bodyText string, rawOnly bool) ([]byte, bool) {
@@ -175,8 +176,16 @@ func mergeResponsesOutputItems(finalResponse []byte, bodyText string, rawOnly bo
 		}
 		item := resolve(index, id, false)
 		_ = json.Unmarshal([]byte(raw.Raw), &item.terminal)
+		item.terminalOrder = i
+	}
+	allTerminal := len(items) > 0
+	for _, item := range items {
+		allTerminal = allTerminal && len(item.terminal) > 0
 	}
 	sort.SliceStable(items, func(i, j int) bool {
+		if allTerminal {
+			return items[i].terminalOrder < items[j].terminalOrder
+		}
 		if items[i].indexed && items[j].indexed {
 			return items[i].index < items[j].index
 		}
@@ -192,25 +201,15 @@ func mergeResponsesOutputItems(finalResponse []byte, bodyText string, rawOnly bo
 			}
 			continue
 		}
-		for field, parts := range map[string]map[int]map[string]json.RawMessage{"content": item.parts, "summary": item.summary} {
-			if len(parts) == 0 {
-				continue
-			}
-			indices := make([]int, 0, len(parts))
-			for index := range parts {
-				indices = append(indices, index)
-			}
-			sort.Ints(indices)
-			ordered := make([]map[string]json.RawMessage, 0, len(parts))
-			for _, index := range indices {
-				ordered = append(ordered, parts[index])
-			}
-			item.delta[field] = responsesMergeJSON(ordered)
-		}
 		// added is an initial shell: its empty content/arguments are not final.
 		fields := responsesMergeMissing(item.delta, item.added)
-		fields = responsesMergeMissing(item.done, fields)
-		fields = responsesMergeMissing(item.terminal, fields)
+		fields = responsesMergeFinal(item.done, fields)
+		fields = responsesMergeFinal(item.terminal, fields)
+		for field, parts := range map[string]map[int]map[string]json.RawMessage{"content": item.parts, "summary": item.summary} {
+			if len(parts) > 0 {
+				fields[field] = responsesMergeContent(parts, item.added[field], item.done[field], item.terminal[field])
+			}
+		}
 		if len(fields) > 0 {
 			output = append(output, fields)
 		}
@@ -233,20 +232,62 @@ func responsesMergeMissing(primary, fallback map[string]json.RawMessage) map[str
 		merged[key] = value
 	}
 	for key, value := range primary {
-		if key == "content" || key == "summary" {
-			var finalParts, earlierParts []map[string]json.RawMessage
-			if json.Unmarshal(value, &finalParts) == nil && len(finalParts) > 0 && json.Unmarshal(fallback[key], &earlierParts) == nil {
-				for i, part := range earlierParts {
-					if i < len(finalParts) {
-						finalParts[i] = responsesMergeMissing(finalParts[i], part)
-					} else {
-						finalParts = append(finalParts, part)
-					}
-				}
-				value = responsesMergeJSON(finalParts)
-			}
-		}
 		merged[key] = value
 	}
 	return merged
+}
+
+// Keep content_index until all authoritative arrays have been merged; a stream
+// may provide only content index 1 while the terminal carries index 0.
+func responsesMergeContent(deltas map[int]map[string]json.RawMessage, added, done, terminal json.RawMessage) json.RawMessage {
+	parts := make(map[int]map[string]json.RawMessage)
+	var initial []map[string]json.RawMessage
+	_ = json.Unmarshal(added, &initial)
+	for index, part := range initial {
+		parts[index] = part
+	}
+	for index, part := range deltas {
+		parts[index] = responsesMergeMissing(part, parts[index])
+	}
+	for _, raw := range []json.RawMessage{done, terminal} {
+		if len(raw) == 0 {
+			continue
+		}
+		var final []map[string]json.RawMessage
+		if json.Unmarshal(raw, &final) != nil || string(raw) == "null" {
+			return raw
+		}
+		if len(final) == 0 {
+			clear(parts)
+		}
+		for index, part := range final {
+			parts[index] = responsesMergeMissing(part, parts[index])
+		}
+	}
+	indices := make([]int, 0, len(parts))
+	for index := range parts {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	ordered := make([]map[string]json.RawMessage, 0, len(parts))
+	for _, index := range indices {
+		ordered = append(ordered, parts[index])
+	}
+	return responsesMergeJSON(ordered)
+}
+
+// Final items supersede the earlier opaque metadata. Only missing generated
+// fields can be completed from earlier evidence; omitted encryption is not
+// resurrected from an added frame.
+func responsesMergeFinal(final, earlier map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(final) == 0 {
+		return earlier
+	}
+	missing := make(map[string]json.RawMessage)
+	for _, key := range []string{"id", "type", "role", "call_id", "name", "arguments", "content", "summary"} {
+		if value, ok := earlier[key]; ok {
+			missing[key] = value
+		}
+	}
+	return responsesMergeMissing(final, missing)
 }

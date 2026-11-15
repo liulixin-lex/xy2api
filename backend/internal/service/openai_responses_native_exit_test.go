@@ -1,5 +1,3 @@
-//go:build unit
-
 package service
 
 import (
@@ -72,6 +70,9 @@ func TestM6NonstreamBodyKindAndContentType(t *testing.T) {
 }
 
 func TestM6NativeMixedDoneDelta(t *testing.T) {
+	raw, ok := collectRawResponsesOutputItemsFromSSE(m6Frame(`{"type":"response.output_item.done","output_index":1,"item":{"id":"b","type":"future"}}`) + m6Frame(`{"type":"response.output_item.done","output_index":0,"item":{"id":"a","type":"future"}}`))
+	require.True(t, ok)
+	require.JSONEq(t, `[{"id":"a","type":"future"},{"id":"b","type":"future"}]`, string(raw))
 	text := `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"answer"}`
 	tool := `{"type":"response.output_item.done","output_index":1,"item":{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}}`
 	for _, tc := range []struct {
@@ -84,6 +85,7 @@ func TestM6NativeMixedDoneDelta(t *testing.T) {
 		{"content_indices", m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"sequence_number":2,"delta":"second"}`) + m6Frame(text) + m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"sequence_number":2,"delta":"second"}`), `[]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"},{"type":"output_text","text":"second"}]}]`},
 		{"text_done_tool_delta", m6Frame(`{"type":"response.output_item.done","output_index":0,"item":{"id":"m1","type":"message","content":[{"type":"output_text","text":"answer"}]}}`) + m6Frame(`{"type":"response.function_call_arguments.delta","output_index":1,"item_id":"f1","call_id":"c1","name":"f","delta":"{}"}`), `[]`, `[{"id":"m1","type":"message","content":[{"type":"output_text","text":"answer"}]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}]`},
 		{"partial_content", m6Frame(text) + m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"delta":"second"}`), `[{"type":"message","content":[{"type":"output_text","text":""}]}]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":""},{"type":"output_text","text":"second"}]}]`},
+		{"sparse_content", m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"delta":"second"}`), `[{"type":"message","content":[{"type":"output_text","text":"first"}]}]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second"}]}]`},
 		{"id_only", m6Frame(`{"type":"response.output_item.added","output_index":0,"item":{"id":"m1","type":"message","content":[],"opaque":{"v":1}}}`) + m6Frame(`{"type":"response.output_text.delta","item_id":"m1","delta":"answer"}`), `[]`, `[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}],"opaque":{"v":1}}]`},
 		{"unknown_and_compaction", m6Frame(`{"type":"response.output_item.added","output_index":1,"item":{"id":"cmp","type":"compaction","encrypted_content":"fixture"}}`) + m6Frame(`{"type":"response.output_item.done","output_index":0,"item":{"id":"u","type":"future_item","opaque":[1,{"keep":true}]}}`), `[]`, `[{"id":"u","type":"future_item","opaque":[1,{"keep":true}]},{"id":"cmp","type":"compaction","encrypted_content":"fixture"}]`},
 	} {
