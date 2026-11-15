@@ -2766,15 +2766,8 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 	}
 	body := responseBody
 	if active := openAIStreamErrorObject(responseBody); active.IsObject() {
-		// Only the active error's fields may match a rule. Request echoes and
-		// metadata beside (or inside) the error are not upstream failure evidence.
-		fields := make(map[string]any)
-		for _, key := range []string{"code", "type", "message", "error_code", "error_name"} {
-			if value := active.Get(key); value.Exists() {
-				fields[key] = value.Value()
-			}
-		}
-		body, _ = json.Marshal(fields)
+		// Preserve provider status/details/metadata while excluding request echoes.
+		body = []byte(active.Raw)
 	}
 	if len(body) > tempUnschedBodyMaxBytes {
 		body = body[:tempUnschedBodyMaxBytes]
