@@ -28,6 +28,8 @@
 
 补充说明：
 
+- 上游明确报告 `No tool call found for function call output` 或 `No tool output found for function call` 的工具历史 400 时，原生、透传和 Chat→Responses 均保留安全的 type/code/param/message；上游没有提供 param 就不生成位置。请求只发送一次，不换号、不罚号，也不新增本地历史闭合校验。
+
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。
 - Anthropic 协议（`/v1/messages`）下，网关自身的无号与瞬时失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
