@@ -789,6 +789,22 @@ func TestM3ReviewR1DeferredReasoningIdentity(t *testing.T) {
 }
 
 func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
+	t.Run("raw conflict at close", func(t *testing.T) {
+		for _, finalize := range []bool{false, true} {
+			st := NewResponsesEventToAnthropicState()
+			ResponsesEventToAnthropicEvents(responsesCreated(), st)
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"}, st)
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.reasoning_text.done", ItemID: "r", Text: "different"}, st)
+			var events []AnthropicStreamEvent
+			if finalize {
+				events = FinalizeResponsesAnthropicStream(st)
+			} else {
+				events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed"}}, st)
+			}
+			require.Error(t, st.Err())
+			require.Empty(t, events)
+		}
+	})
 	for _, mode := range []string{"done only", "empty terminal", "text empty terminal", "text full terminal", "late summary"} {
 		t.Run(mode, func(t *testing.T) {
 			st := NewResponsesEventToAnthropicState()
