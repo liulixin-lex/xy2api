@@ -132,7 +132,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	canonicalImageIntentBody []byte,
 	reqModel string,
 	attemptImageIntentInvalidated bool,
-	reasoningEffort *string,
+	budgetReasoningEffort *string,
 	reqStream bool,
 	startTime time.Time,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
@@ -365,9 +365,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	responseID := ""
 	imageCount := 0
 	var imageOutputSizes []string
+	// Timeout preference retains legacy suffix/thinking fallbacks; usage records
+	// only the actual field read after each final request build.
+	var reasoningEffort *string
 	reasoningEffortValue := ""
-	if reasoningEffort != nil {
-		reasoningEffortValue = *reasoningEffort
+	if budgetReasoningEffort != nil {
+		reasoningEffortValue = *budgetReasoningEffort
 	}
 	// xy2api resilience (W1.2): with stream.strict_terminal the first-output
 	// deadline of a streaming passthrough also bounds the header wait.

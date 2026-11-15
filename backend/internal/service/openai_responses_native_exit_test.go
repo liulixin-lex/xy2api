@@ -934,3 +934,49 @@ func TestM6ReviewFailedJSONIsNotSuccessfulUsage(t *testing.T) {
 		}
 	}
 }
+
+type m6ReviewBudgetUpstream struct {
+	httpUpstreamRecorder
+	delayHeaders bool
+}
+
+func (u *m6ReviewBudgetUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+	if u.delayHeaders {
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		case <-time.After(1200 * time.Millisecond):
+		}
+	}
+	body := m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+	var reader io.ReadCloser = io.NopCloser(strings.NewReader(body))
+	if !u.delayHeaders {
+		gate := make(chan struct{})
+		time.AfterFunc(1200*time.Millisecond, func() { close(gate) })
+		reader = &stagedOpenAISSEReadCloser{segments: [][]byte{[]byte(body)}, gates: []<-chan struct{}{gate}}
+	}
+	u.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}
+	return u.httpUpstreamRecorder.Do(req, proxy, id, concurrency)
+}
+func TestM6ReviewPassthroughBudgetUsesLegacyEffort(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Budget.Enabled = false })
+	for _, headers := range []bool{false, true} {
+		t.Run(fmt.Sprintf("headers=%t", headers), func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.4-xhigh","input":"hi","stream":true}`)
+			c := newOpenAIRejectedFieldTestContext(body)
+			a := newOpenAIRejectedFieldTestAccount()
+			a.Extra["openai_passthrough"] = true
+			up := &m6ReviewBudgetUpstream{delayHeaders: headers}
+			svc := newOpenAIRejectedFieldTestService(nil)
+			svc.httpUpstream = up
+			svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+			svc.cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds = 3
+			r, err := svc.Forward(c.Request.Context(), c, a, body)
+			require.NoError(t, err)
+			require.NotNil(t, r)
+			require.Nil(t, r.ReasoningEffort)
+			require.Len(t, up.bodies, 1)
+			require.False(t, gjson.GetBytes(up.lastBody, "reasoning.effort").Exists())
+		})
+	}
+}
