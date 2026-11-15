@@ -2,10 +2,9 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -74,53 +73,102 @@ func anthropicLocalErrorType(status int, errType string) string {
 //     operator may be in the middle of adding accounts).
 type noAccountErrorClassification struct {
 	Status         int
+	Code           string
+	Param          string
+	LastCause      error
 	ErrType        string
 	Message        string
 	ModelNotFound  bool // true when this is a 404 model_not_found classification
 	CapabilityOnly bool // every candidate was excluded for non-streaming capability
 }
 
-var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
-
-// classifySelectionFailureError preserves the scheduler's compact reason when
-// every model-capable account is temporarily rate limited.
+// classifySelectionFailureError consumes actual selection evidence; diagnostic
+// prose is never evidence that every candidate is temporarily rate limited.
 func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
 	if err == nil {
 		return fallback
 	}
+	e, known := service.SelectionExhaustionFromError(err)
+	if known && e.LastCause != nil {
+		result := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable", LastCause: e.LastCause}
+		var failure *service.UpstreamFailoverError
+		if errors.As(e.LastCause, &failure) {
+			result.Status, result.ErrType, result.Message = (&OpenAIGatewayHandler{}).mapUpstreamError(failure.StatusCode)
+			if failure.ClientStatusCode > 0 {
+				result.Status = failure.ClientStatusCode
+			}
+			if failure.ClientMessage != "" {
+				result.Message = failure.ClientMessage
+			}
+		}
+		return result
+	}
 	if service.IsCapabilityOnlySelectionError(err) {
-		return noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: service.CapabilityOnlyMessage, CapabilityOnly: true}
+		return noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: service.CapabilityOnlyMessage, CapabilityOnly: true}
 	}
-	// A 404 model_not_found fallback is authoritative and must not be downgraded
-	// to a rate-limit verdict. classifyNoAccountError only reaches it through
-	// DiagnoseModelAvailabilityForPlatform, a dedicated database query over
-	// persistent eligibility (active + schedulable + model_mapping) that already
-	// established no account in the group can serve this model at all. A transient
-	// per-model cooldown on one of the remaining candidates does not make "all
-	// available accounts are rate-limited" true.
-	//
-	// Reporting 429 here is actively harmful: retrying can never succeed, and
-	// clients that treat 429 as a rate limit retry hard and swallow the body
-	// (Codex surfaces only "exceeded retry limit, last status: 429"), losing the
-	// one message that names the real problem. It also flips the ops attribution
-	// from a local model-configuration issue to routing capacity, because call
-	// sites gate markOpsRoutingCapacityLimitedIfNoAvailable on ModelNotFound.
-	if fallback.ModelNotFound {
+	if !known {
 		return fallback
 	}
-	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
-	if len(match) != 2 {
-		return fallback
+	result := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	if !e.Known {
+		return result
 	}
-	count, parseErr := strconv.Atoi(match[1])
-	if parseErr != nil || count <= 0 {
-		return fallback
+	persistentOnly, capabilityOnly, capacityOnly := true, true, true
+	capacity, capabilities, streamOnly := 0, 0, 0
+	for reason, count := range e.Reasons {
+		if count <= 0 {
+			continue
+		}
+		switch reason {
+		case service.SelectionReasonNoMembers, service.SelectionReasonPlatformMismatch, service.SelectionReasonModelNotSupported, service.SelectionReasonAccountModelNotOwned:
+		case service.SelectionReasonResponsesRequired, service.SelectionReasonCapabilityMismatch, service.SelectionReasonTransportIncompatible:
+			persistentOnly = false
+			capacityOnly = false
+			capabilities += count
+		case service.SelectionReasonCapabilityStreamOnly:
+			persistentOnly = false
+			capacityOnly = false
+			streamOnly += count
+		case service.SelectionReasonRateLimited, service.SelectionReasonModelRateLimited, service.SelectionReasonConcurrencyFull, service.SelectionReasonQueueFull, service.SelectionReasonQueueTimeout:
+			persistentOnly = false
+			capabilityOnly = false
+			capacity += count
+		default:
+			persistentOnly = false
+			capabilityOnly = false
+			capacityOnly = false
+		}
 	}
-	return noAccountErrorClassification{
-		Status:  http.StatusTooManyRequests,
-		ErrType: "rate_limit_error",
-		Message: "All available accounts are currently rate-limited. Please retry later.",
+	if persistentOnly && (e.Members == 0 || e.ModelSupported == 0 && len(e.Reasons) > 0) {
+		result.Status, result.ErrType, result.Code, result.ModelNotFound = 404, "model_not_found", "model_not_found", true
+		result.Message = "Model is not supported by any configured account in this group"
+		if fallback.ModelNotFound {
+			result.Message = fallback.Message
+		}
+		return result
 	}
+	if capabilityOnly && e.ModelSupported > 0 && e.RequestSupported == 0 {
+		if streamOnly > 0 && capabilities == 0 {
+			result.CapabilityOnly = true
+			result.Message = service.CapabilityOnlyMessage
+			return result
+		}
+		if capabilities > 0 && streamOnly == 0 {
+			result.Status, result.ErrType = 400, "invalid_request_error"
+			if e.Reasons[service.SelectionReasonResponsesRequired] > 0 {
+				result.Code, result.Param = "responses_required", "tools"
+				result.Message = `Request field "tools" requires a Responses-capable upstream for this model and reasoning_effort; no configured account can serve it.`
+			} else {
+				result.Message = "No configured account supports the required request capability"
+			}
+			return result
+		}
+	}
+	if capacityOnly && capacity > 0 && e.RequestSupported > 0 && capacity >= e.RequestSupported {
+		result.Status, result.ErrType = 429, "rate_limit_error"
+		result.Message = "All available accounts are currently rate-limited. Please retry later."
+	}
+	return result
 }
 
 // classifyNoAccountError decides between 404 model_not_found and 503
@@ -171,7 +219,7 @@ func classifyNoAccountError(
 	}
 
 	result := diag.DiagnoseModelAvailabilityForPlatform(ctx, apiKey.GroupID, routingModel, platform)
-	if result.HasAccountsInPool && !result.HasModelSupport {
+	if result.Known && result.Err == nil && (result.Members == 0 || result.ModelSupported == 0) {
 		return noAccountErrorClassification{
 			Status:        http.StatusNotFound,
 			ErrType:       "model_not_found",
@@ -198,12 +246,30 @@ func classifyNoAccountErrorFromGin(
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	var classification noAccountErrorClassification
-	if len(selectionErrors) > 0 && service.IsCapabilityOnlySelectionError(selectionErrors[0]) {
-		classification = classifySelectionFailureError(selectionErrors[0], classification)
+	classification := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	if len(selectionErrors) > 0 {
+		if _, typed := service.SelectionExhaustionFromError(selectionErrors[0]); typed || service.IsCapabilityOnlySelectionError(selectionErrors[0]) {
+			classification = classifySelectionFailureError(selectionErrors[0], classification)
+		} else {
+			classification = classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
+		}
 	} else {
 		classification = classifyNoAccountError(ctx, diag, apiKey, routingModel, displayModel, platform)
 	}
+	if classification.ModelNotFound {
+		model := strings.TrimSpace(displayModel)
+		if model == "" {
+			model = strings.TrimSpace(routingModel)
+		}
+		classification.Message = fmt.Sprintf("Model %q is not supported by any configured account in this group", model)
+	}
+	if classification.Code == "responses_required" {
+		if req, ok := service.ChatRequestRequirementFromContext(ctx); ok && req.ToolField == "functions" {
+			classification.Param = "functions"
+			classification.Message = strings.Replace(classification.Message, `"tools"`, `"functions"`, 1)
+		}
+	}
+
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	}

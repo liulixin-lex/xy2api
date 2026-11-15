@@ -65,7 +65,7 @@ func TestClassifySelectionFailureError_RateLimitedPool(t *testing.T) {
 	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
 
 	got := classifySelectionFailureError(
-		fmt.Errorf("no available accounts supporting model: gpt-5.6-sol (total=3 eligible=0 model_rate_limited=3)"),
+		&service.SelectionExhaustion{Known: true, Members: 3, ModelSupported: 3, RequestSupported: 3, Reasons: map[service.SelectionReason]int{service.SelectionReasonModelRateLimited: 3}},
 		fallback,
 	)
 
@@ -78,7 +78,7 @@ func TestClassifySelectionFailureError_RateLimitedPool(t *testing.T) {
 
 func TestClassifyNoAccountError_NilAPIKey_Falls503(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, nil, "gpt-5", "gpt-5", service.PlatformOpenAI)
 
@@ -89,7 +89,7 @@ func TestClassifyNoAccountError_NilAPIKey_Falls503(t *testing.T) {
 
 func TestClassifyNoAccountError_NilGroupID_Falls503(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: nil}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
@@ -101,7 +101,7 @@ func TestClassifyNoAccountError_NilGroupID_Falls503(t *testing.T) {
 
 func TestClassifyNoAccountError_EmptyModel_Falls503(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "   ", "", service.PlatformOpenAI)
@@ -113,7 +113,7 @@ func TestClassifyNoAccountError_EmptyModel_Falls503(t *testing.T) {
 
 func TestClassifyNoAccountError_ModelNotSupported_Returns404(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(42)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5.1-codex-mini", "gpt-5.1-codex-mini", service.PlatformOpenAI)
@@ -134,7 +134,7 @@ func TestClassifyNoAccountError_ModelNotSupported_Returns404(t *testing.T) {
 
 func TestClassifyOpenAICompatibleNoAccountError_GrokUsesGrokPlatform(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	groupID := int64(43)
 	apiKey := &service.APIKey{
 		GroupID: &groupID,
@@ -163,7 +163,7 @@ func TestClassifyOpenAICompatibleNoAccountError_GrokUsesGrokPlatform(t *testing.
 
 func TestClassifyNoAccountError_PureClassifierDoesNotMarkGinContext(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountError(c.Request.Context(), fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
@@ -175,7 +175,7 @@ func TestClassifyNoAccountError_PureClassifierDoesNotMarkGinContext(t *testing.T
 
 func TestClassifyNoAccountError_HasModelSupport_KeepsRoutingMessageGenerationToCaller(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, ModelSupported: 1, RequestSupported: 1, HasAccountsInPool: true, HasModelSupport: true}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
@@ -189,7 +189,7 @@ func TestClassifyNoAccountError_ModelSupportedOnlyByRateLimitedAccount_Returns50
 	c := newTestGinContextWithRequest()
 	// The diagnoser's configured-state lookup still sees the model-supporting
 	// account even though normal scheduling has excluded it during cooldown.
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, ModelSupported: 1, RequestSupported: 1, HasAccountsInPool: true, HasModelSupport: true}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "claude-opus-4-8", "claude-opus-4-8", service.PlatformAnthropic)
@@ -212,7 +212,7 @@ func TestClassifyNoAccountError_NoAccountsInPool_Stays503(t *testing.T) {
 
 func TestClassifyNoAccountError_DisplayModelOverridesRoutingForMessage(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5", "claude-3-fancy", service.PlatformOpenAI)
@@ -224,7 +224,7 @@ func TestClassifyNoAccountError_DisplayModelOverridesRoutingForMessage(t *testin
 }
 
 func TestClassifyNoAccountError_FromGin_NilContextStillSafe(t *testing.T) {
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(7)}
 
 	cls := classifyNoAccountErrorFromGin(nil, fd, apiKey, "gpt-5", "gpt-5", service.PlatformOpenAI)
@@ -267,7 +267,7 @@ func TestClassifySelectionFailureError_ModelNotFoundIsNotOverriddenByRateLimited
 // local model configuration 又被标成容量问题，自相矛盾。
 func TestClassifySelectionFailureError_CallSiteChainKeepsModelNotFoundAttribution(t *testing.T) {
 	c := newTestGinContextWithRequest()
-	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}
+	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true, HasModelSupport: false}}
 	apiKey := &service.APIKey{GroupID: ptrInt64(43)}
 
 	cls := classifyNoAccountErrorFromGin(c, fd, apiKey, "gpt-5.3-codex", "gpt-5.3-codex", service.PlatformOpenAI)
@@ -295,11 +295,48 @@ func TestClassifySelectionFailureError_StillUpgradesNonModelNotFoundFallback(t *
 	}
 
 	got := classifySelectionFailureError(
-		fmt.Errorf("no available accounts supporting model: gpt-5.6-sol (total=3 eligible=0 model_rate_limited=3)"),
+		&service.SelectionExhaustion{Known: true, Members: 3, ModelSupported: 3, RequestSupported: 3, Reasons: map[service.SelectionReason]int{service.SelectionReasonModelRateLimited: 3}},
 		fallback,
 	)
 
 	require.Equal(t, http.StatusTooManyRequests, got.Status)
 	require.Equal(t, "rate_limit_error", got.ErrType)
 	require.False(t, got.ModelNotFound)
+}
+
+func TestM8SelectionFailureMapping(t *testing.T) {
+	fallback := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	for _, tc := range []struct {
+		name   string
+		e      service.SelectionExhaustion
+		status int
+		code   string
+	}{
+		{"unknown", service.SelectionExhaustion{}, 503, ""},
+		{"empty", service.SelectionExhaustion{Known: true, Reasons: map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}}, 404, "model_not_found"},
+		{"model", service.SelectionExhaustion{Known: true, Members: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonModelNotSupported: 2}}, 404, "model_not_found"},
+		{"responses", service.SelectionExhaustion{Known: true, Members: 2, ModelSupported: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonResponsesRequired: 2}}, 400, "responses_required"},
+		{"capacity", service.SelectionExhaustion{Known: true, Members: 2, ModelSupported: 2, RequestSupported: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonRateLimited: 1, service.SelectionReasonQueueFull: 1}}, 429, ""},
+		{"mixed", service.SelectionExhaustion{Known: true, Members: 2, ModelSupported: 2, RequestSupported: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonRateLimited: 1, service.SelectionReasonBalanceExhausted: 1}}, 503, ""},
+		{"dependency", service.SelectionExhaustion{Reasons: map[service.SelectionReason]int{service.SelectionReasonDependencyError: 1}}, 503, ""},
+		{"owner", service.SelectionExhaustion{Known: true, Members: 1, Reasons: map[service.SelectionReason]int{service.SelectionReasonOwnerFixed: 1}}, 503, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cls := classifySelectionFailureError(&tc.e, fallback)
+			require.Equal(t, tc.status, cls.Status)
+			require.Equal(t, tc.code, cls.Code)
+		})
+	}
+	cause := &service.UpstreamFailoverError{StatusCode: 429}
+	cls := classifySelectionFailureError(&service.SelectionExhaustion{Known: true, LastCause: cause, Reasons: map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}}, fallback)
+	require.Equal(t, 429, cls.Status)
+	require.Same(t, cause, cls.LastCause)
+	require.Equal(t, fallback, classifySelectionFailureError(fmt.Errorf("rate_limited=999"), fallback))
+	c := newTestGinContextWithRequest()
+	c.Request = c.Request.WithContext(service.WithChatRequestRequirement(c.Request.Context(), service.ChatRequestRequirement{HasTools: true, ToolField: "functions"}))
+	fd := &fakeDiagnoser{}
+	cls = classifyNoAccountErrorFromGin(c, fd, &service.APIKey{GroupID: ptrInt64(7)}, "model", "model", service.PlatformOpenAI, &service.SelectionExhaustion{Known: true, Members: 1, ModelSupported: 1, Reasons: map[service.SelectionReason]int{service.SelectionReasonResponsesRequired: 1}})
+	require.Equal(t, "functions", cls.Param)
+	require.Contains(t, cls.Message, `"functions"`)
+	require.Empty(t, fd.calls)
 }

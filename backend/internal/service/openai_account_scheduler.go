@@ -318,7 +318,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	// xy2api resilience: selections that are never cached still count for the
 	// per-key fast fail when no account of the group could serve them.
 	if !negativeCacheable && isNoAccountSelectionError(err) {
-		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
+		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {
 		if sessionHash != "" {
