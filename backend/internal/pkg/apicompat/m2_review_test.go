@@ -256,3 +256,18 @@ func TestReviewM2VisibleSnapshotsDoNotRetractOrRepeat(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewM2UnspecifiedIncompleteRetainsPartialArguments(t *testing.T) {
+	for _, reason := range []string{"", "max_tool_calls"} {
+		response := &ResponsesResponse{Status: "incomplete", Output: []ResponsesOutput{{Type: "function_call", CallID: "c", Name: "f", Arguments: `{"a":`}}}
+		if reason != "" {
+			response.IncompleteDetails = &ResponsesIncompleteDetails{Reason: reason}
+		}
+		require.NoError(t, ValidateResponsesForChat(response))
+		require.Equal(t, `{"a":`, ResponsesToChatCompletions(response, "m").Choices[0].Message.ToolCalls[0].Function.Arguments)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.incomplete", Response: response}, state)
+		require.NoError(t, state.Err())
+		require.Equal(t, "tool_calls", *chunks[len(chunks)-1].Choices[0].FinishReason)
+	}
+}

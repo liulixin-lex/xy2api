@@ -38,15 +38,11 @@ func ValidateResponsesForChatWithOptions(resp *ResponsesResponse, opts Conversio
 			hasRefusal = hasRefusal || (part.Type == "refusal" && part.Refusal != "")
 		}
 	}
-	_, finish, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, hasTools, hasRefusal)
+	_, _, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, hasTools, hasRefusal)
 	if err != nil {
 		return err
 	}
-	complete := *resp
-	if finish == "stop" || finish == "tool_calls" {
-		complete.Status = "completed"
-	}
-	if err := validateResponsesChatTools(&complete); err != nil {
+	if err := validateResponsesChatTools(resp); err != nil {
 		return err
 	}
 	if mapped && opts.Record != nil {
