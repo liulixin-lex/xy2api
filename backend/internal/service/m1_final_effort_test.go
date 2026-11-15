@@ -170,3 +170,14 @@ func TestM1NativeMessagesFinalEffortWire(t *testing.T) {
 		}
 	}
 }
+
+func TestM1ReviewUnknownReasoningIntent(t *testing.T) {
+	for _, raw := range []string{`"turbo"`, `{"effort":"auto"}`} {
+		body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"reasoning":` + raw + `}`)
+		converted := []byte(`{"model":"claude-sonnet-4-6","reasoning":{"effort":"medium"}}`)
+		got, changed, err := applyFinalReasoningEffortForAccount(m1EffortContext(body), nil, newOpenAIRejectedFieldTestAccount(), converted, "claude-sonnet-4-6", "responses")
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, converted, got)
+	}
+}
