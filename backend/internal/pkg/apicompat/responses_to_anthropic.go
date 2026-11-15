@@ -70,6 +70,9 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 			input, _ := json.Marshal(map[string]string{"input": item.Input})
 			blocks = append(blocks, AnthropicContentBlock{Type: "tool_use", ID: fromResponsesCallID(item.CallID), Name: item.Name, Input: input})
 		case "web_search_call":
+			if item.Status != "completed" {
+				continue
+			}
 			toolUseID := "srvtoolu_" + item.ID
 			query := ""
 			if item.Action != nil {
@@ -82,11 +85,10 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 				Name:  "web_search",
 				Input: inputJSON,
 			})
-			emptyResults, _ := json.Marshal([]struct{}{})
 			blocks = append(blocks, AnthropicContentBlock{
 				Type:      "web_search_tool_result",
 				ToolUseID: toolUseID,
-				Content:   emptyResults,
+				Content:   responsesWebSearchSources(item),
 			})
 		}
 	}
@@ -243,6 +245,7 @@ type ResponsesEventToAnthropicState struct {
 	activeTool       *responsesAnthropicTool
 	pendingBlocks    []ResponsesStreamEvent
 	successTerminal  bool
+	searchesDone     map[string]bool
 
 	ContentBlockIndex   int
 	ContentBlockOpen    bool
@@ -825,6 +828,17 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 // into Anthropic server_tool_use + web_search_tool_result content block pairs.
 // This allows Claude Code to count the searches performed.
 func resToAnthHandleWebSearchDone(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	key := evt.Item.ID
+	if key == "" {
+		key = fmt.Sprintf("output:%d", evt.OutputIndex)
+	}
+	if state.searchesDone == nil {
+		state.searchesDone = make(map[string]bool)
+	}
+	if state.searchesDone[key] {
+		return nil
+	}
+	state.searchesDone[key] = true
 	var events []AnthropicStreamEvent
 	events = append(events, closeCurrentBlock(state)...)
 
@@ -854,9 +868,7 @@ func resToAnthHandleWebSearchDone(evt *ResponsesStreamEvent, state *ResponsesEve
 	state.ContentBlockIndex++
 
 	// Emit web_search_tool_result block (start + stop).
-	// Content is empty because OpenAI does not expose individual search results;
-	// the model consumes them internally and produces text output.
-	emptyResults, _ := json.Marshal([]struct{}{})
+	// Return only sources present on this completed upstream item.
 	idx2 := state.ContentBlockIndex
 	events = append(events, AnthropicStreamEvent{
 		Type:  "content_block_start",
@@ -864,7 +876,7 @@ func resToAnthHandleWebSearchDone(evt *ResponsesStreamEvent, state *ResponsesEve
 		ContentBlock: &AnthropicContentBlock{
 			Type:      "web_search_tool_result",
 			ToolUseID: toolUseID,
-			Content:   emptyResults,
+			Content:   responsesWebSearchSources(*evt.Item),
 		},
 	})
 	events = append(events, AnthropicStreamEvent{
@@ -950,6 +962,13 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	}
 	events = append(events, closeCurrentBlock(state)...)
 	events = append(events, resToAnthRecoverTerminalText(evt, state)...)
+	if evt.Response != nil {
+		for i, item := range evt.Response.Output {
+			if item.Type == "web_search_call" && item.Status == "completed" {
+				events = append(events, resToAnthHandleWebSearchDone(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
+			}
+		}
+	}
 
 	stopReason := "end_turn"
 	if evt.Usage != nil {
