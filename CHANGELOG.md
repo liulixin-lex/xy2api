@@ -52,6 +52,8 @@
 
 - 跨位置重复声明工具时保留第一份定义，后续 schema 差异只记录省略，避免向上游发送重复工具。
 
+- Messages 转 Responses 保留工具显式 strict，缺省仍为 false；无法表达的 allowed_callers 字符串列表省略限制并记录，工具声明与 schema 保留。
+
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
@@ -96,13 +98,13 @@
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
+- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
+
 ### 流式传输与报错
 
 ### 重试、调度与续接
 
 ### 用量记录与计费
-
-- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
 
 ## [0.6.7] - 2026-11-15
 
