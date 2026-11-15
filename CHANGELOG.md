@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Anthropic 上游转 Responses 时，tool_search 参数保持 JSON 对象，custom 与 tool_search 工具项保留对应 ID 前缀。
+
 - 上游的非标准结束原因继续按原默认规则转换，并记录映射降级，不新增请求失败。
 
 - 转换桥只发送 allowed_tools 允许的工具声明，未知条目记录后忽略，auto 空集不允许工具调用。
