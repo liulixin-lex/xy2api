@@ -1065,17 +1065,7 @@ func deleteOpenAIWSLegacyNoneReasoningEffort(account *Account, body map[string]a
 	if body == nil || shouldPreserveOpenAIWSLegacyNoneEffort(account) {
 		return
 	}
-	if effort, ok := body["reasoning_effort"].(string); ok && strings.EqualFold(strings.TrimSpace(effort), "none") {
-		delete(body, "reasoning_effort")
-	}
-	reasoning, ok := body["reasoning"].(map[string]any)
-	if !ok {
-		return
-	}
-	if effort, ok := reasoning["effort"].(string); ok && strings.EqualFold(strings.TrimSpace(effort), "none") {
-		delete(reasoning, "effort")
-	}
-	if len(reasoning) == 0 {
-		delete(body, "reasoning")
-	}
+	// The WS gate above already decided omission; nil avoids applying the HTTP
+	// account policy again while reusing the unchanged object field deletion.
+	deleteOpenAIResponsesNoneReasoningEffortFromObject(nil, body)
 }
