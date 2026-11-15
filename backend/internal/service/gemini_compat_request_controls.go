@@ -56,6 +56,10 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 			}
 		}
 	}
+	body, err = applyGeminiCompatToolChoice(claudeBody, body, opts)
+	if err != nil {
+		return nil, err
+	}
 	capabilities := geminiCompatCapabilities(mappedModel)
 	body, err = applyGeminiCompatThinkingConfig(claudeBody, body, capabilities, opts)
 	if err != nil {
@@ -205,6 +209,85 @@ func applyGeminiCompatResponseFormat(claudeBody, body []byte, caps GeminiCompatC
 		return body, nil
 	}
 	return sjson.SetRawBytes(body, "generationConfig.responseJsonSchema", []byte(schema.Raw))
+}
+
+func applyGeminiCompatToolChoice(claudeBody, body []byte, opts apicompat.ConversionOptions) ([]byte, error) {
+	choice := gjson.GetBytes(claudeBody, "tool_choice")
+	if !choice.Exists() || choice.Type == gjson.Null {
+		return body, nil
+	}
+	invalid := func(field, reason string) ([]byte, error) {
+		return nil, &apicompat.UnsupportedConversionError{Field: field, Reason: reason}
+	}
+	if !choice.IsObject() || choice.Get("type").Type != gjson.String {
+		return invalid("tool_choice", "expected a tool choice object with a type")
+	}
+	if parallel := choice.Get("disable_parallel_tool_use"); parallel.Exists() {
+		if parallel.Type != gjson.True && parallel.Type != gjson.False {
+			return invalid("tool_choice.disable_parallel_tool_use", "expected a boolean")
+		}
+		if parallel.Bool() && opts.Record != nil {
+			opts.Record(apicompat.ConversionNotice{Field: "tool_choice.disable_parallel_tool_use", Action: "omit"})
+		}
+	}
+	mode := ""
+	var names []string
+	switch choice.Get("type").String() {
+	case "auto":
+		mode = "AUTO"
+	case "none":
+		mode = "NONE"
+		// Remove builtin declarations that could still start a call. Historical
+		// functionCall/functionResponse parts in contents are untouched.
+		var tools []json.RawMessage
+		for _, tool := range gjson.GetBytes(body, "tools").Array() {
+			if declarations := tool.Get("functionDeclarations"); declarations.Exists() {
+				tools = append(tools, json.RawMessage(`{"functionDeclarations":`+declarations.Raw+`}`))
+			}
+		}
+		var err error
+		if len(tools) == 0 {
+			body, err = sjson.DeleteBytes(body, "tools")
+		} else {
+			body, err = sjson.SetBytes(body, "tools", tools)
+		}
+		if err != nil {
+			return nil, err
+		}
+	case "any":
+		mode = "ANY"
+	case "tool":
+		name := choice.Get("name")
+		if name.Type != gjson.String || strings.TrimSpace(name.String()) == "" {
+			return invalid("tool_choice.name", "expected a declared tool name")
+		}
+		declared, builtin := false, false
+		for _, tool := range gjson.GetBytes(claudeBody, "tools").Array() {
+			if tool.Get("name").String() == name.String() {
+				declared = true
+				kind := tool.Get("type").String()
+				builtin = strings.HasPrefix(kind, "web_search") || kind == "google_search"
+				break
+			}
+		}
+		if !declared {
+			return invalid("tool_choice.name", "tool is not declared in tools")
+		}
+		if builtin {
+			if opts.Record != nil {
+				opts.Record(apicompat.ConversionNotice{Field: "tool_choice", Action: "map"})
+			}
+			return body, nil
+		}
+		mode, names = "ANY", []string{name.String()}
+	default:
+		return invalid("tool_choice.type", "expected auto, none, any or tool")
+	}
+	calling := map[string]any{"mode": mode}
+	if len(names) > 0 {
+		calling["allowedFunctionNames"] = names
+	}
+	return sjson.SetBytes(body, "toolConfig.functionCallingConfig", calling)
 }
 
 func pruneGeminiEmptyEnums(schema map[string]any, path string) []string {

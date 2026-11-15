@@ -22,6 +22,7 @@
 | 同一会话连续第 5 次耗尽失败（120 秒内） | 终止应答：`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持），`x-should-retry: false`，不带 `Retry-After`。会话成功一次或两次失败相隔超过 120 秒后重新计数 |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，带 `X-XY-Upstream-Status: 502` 或 `504`。直连请求保持原状态码 |
 | Gemini 入口组内账号全部暂时不可用 | 503 并带重试提示 |
+| Gemini 兼容入口选择未声明的工具或并行控制类型错误 | 400 `invalid_request_error`，错误指出 `tool_choice.name` 或 `tool_choice.disable_parallel_tool_use`；不发送上游、不换号或罚号 |
 
 补充说明：
 
