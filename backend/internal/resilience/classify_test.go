@@ -52,11 +52,11 @@ func TestClassifySpecScenarios(t *testing.T) {
 			want: CategoryRateLimit,
 		},
 		{
-			// HTML text is not a trusted retry-hint field.
+			// Confirmed HTTP failures retain the legacy body hint under E17.
 			name:       "524 relay page",
 			in:         Outcome{StatusCode: 524, Body: []byte(`<html>error code: 524 ... "retry_after":120 </html>`)},
 			want:       CategoryTransient,
-			retryAfter: 0,
+			retryAfter: 120 * time.Second,
 		},
 		{
 			name:       "502 cloudflare json retry_after 60",
@@ -357,9 +357,9 @@ func TestRetryAfterFrom(t *testing.T) {
 	h.Set("retry-after-ms", "1500")
 	require.Equal(t, 1500*time.Millisecond, RetryAfterFrom(h, nil))
 
-	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`please try again in 2 minutes`)))
+	require.Equal(t, 2*time.Minute, RetryAfterFrom(nil, []byte(`please try again in 2 minutes`)))
 	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`nothing here`)))
-	require.Equal(t, time.Duration(0), RetryAfterFrom(nil, []byte(`retry_after: 45`)))
+	require.Equal(t, 45*time.Second, RetryAfterFrom(nil, []byte(`retry_after: 45`)))
 }
 
 func TestChainedGatewayErrorShapes(t *testing.T) {
@@ -541,11 +541,7 @@ func TestEdgeErrorPagesAreTransientNotCapacity(t *testing.T) {
 	} {
 		r := Classify(Outcome{Source: SourceHTTP, StatusCode: tc.status, Message: tc.msg, Body: []byte(tc.body)}, nil)
 		require.Equal(t, CategoryTransient, r.Category, "%s: %s", tc.name, r.Reason)
-		if tc.name == "relay 502 JSON" {
-			require.Equal(t, 60*time.Second, r.RetryAfter, tc.name)
-		} else {
-			require.Zero(t, r.RetryAfter, "non-error-envelope bodies do not supply retry hints: %s", tc.name)
-		}
+		require.Equal(t, 60*time.Second, r.RetryAfter, tc.name)
 		require.True(t, r.Category.AccountScoped() && r.Category.CountsForSession() && r.Category.SoftCooldown(), tc.name)
 	}
 
@@ -585,4 +581,20 @@ func TestDecisionV2PreservesExplicitRateLimitTextOn5xx(t *testing.T) {
 	}
 	cfg.Failure.DecisionV2 = false
 	require.Equal(t, CategoryRateLimit, ClassifyWithSettings(Outcome{StatusCode: 502, Message: "The service is busy"}, &cfg).Category)
+}
+
+func TestM8LegacyHTTPRecoveryHints(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want time.Duration
+	}{
+		{`{"error":"rate limited","retry_after":30}`, 30 * time.Second},
+		{`{"message":"Please try again in 45 seconds","code":429}`, 45 * time.Second},
+		{`{"detail":{"message":"Please try again in 12s"}}`, 12 * time.Second},
+	} {
+		require.Equal(t, tc.want, RetryAfterFrom(nil, []byte(tc.body)))
+		require.Equal(t, 60*time.Second, RetryAfterFrom(http.Header{"Retry-After": {"60"}}, []byte(tc.body)))
+		got := Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Body: []byte(tc.body)}, nil)
+		require.Equal(t, tc.want, got.RetryAfter)
+	}
 }

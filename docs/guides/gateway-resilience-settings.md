@@ -99,7 +99,7 @@
 | 字段 | 默认 | 范围 | 说明 |
 |---|---|---|---|
 | `transient_cooldown_seconds` | 30 | 1–3600 | 瞬时失败的账号短冷却时长 |
-| `retry_after_cap_seconds` | 120 | 1–3600 | 上游带 `Retry-After` 时，按它冷却，但不超过此值 |
+| `retry_after_cap_seconds` | 120 | 1–3600 | 上游给出等待提示时的账号冷却上限；不截短请求内同账号的最早重试时刻 |
 | `balance_keywords_extra` | `[]` | 最多 64 条，每条 2–128 字符 | 追加识别为“上游余额不足”的错误文案关键词 |
 | `decision_v2` | true | 布尔 | 失败分类修正；也是仅流式学习后本请求立即换号的前提 |
 
@@ -150,7 +150,7 @@
 | `model_overrides` | `{}` | 键非空；值 5 至预算总时长 | 按模型覆盖首输出截止，键为精确模型名或以 `*` 结尾的前缀，最长前缀优先；命中时不再按推理强度取档 |
 | `same_account_retry_max` | 1 | 0–5 | 一个请求内每个账号的同号重试次数上限 |
 | `gemini_same_account_retries` | 1 | 0–5 | Gemini 普通瞬时失败的同号重试次数 |
-| `upstream_retry_after_cap_seconds` | 60 | 1–600 | 请求内等待上游给出的重试时间（例如 Antigravity 的短重试）时的上限，同时受剩余预算约束 |
+| `upstream_retry_after_cap_seconds` | 60 | 1–600 | 本请求愿意等待上游恢复的上限，同时受剩余预算约束；超过上限跳过该账号，不截短等待后提前重试 |
 
 ### 首包前保活 `keepalive`
 

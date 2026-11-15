@@ -19,6 +19,7 @@ type RequestState struct {
 	upstreamRecoveryHint  *UpstreamRecoveryHint
 	accountRetryNotBefore map[int64]UpstreamRecoveryHint
 	upstreamAttemptTarget *UpstreamAttemptTarget
+	lastUpstreamFailure   error
 	mu                    sync.Mutex
 	conversionNotices     []apicompat.ConversionNotice
 

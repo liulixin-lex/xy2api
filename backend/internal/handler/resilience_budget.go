@@ -40,7 +40,11 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
 	st := resilience.StateFrom(ctx)
+	if failoverErr != nil && failoverErr.PreDispatchSelectionInvalidated {
+		return true
+	}
 	if failoverErr != nil {
+		st.SetLastUpstreamFailure(failoverErr)
 		hint := failoverErr.UpstreamRecoveryHint
 		if hint == nil {
 			hint = st.UpstreamRecoveryHint()

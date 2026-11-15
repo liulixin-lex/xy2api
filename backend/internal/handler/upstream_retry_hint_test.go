@@ -68,4 +68,34 @@ func TestM8RetryNotBefore(t *testing.T) {
 		cancel()
 		require.False(t, sameAccountRetryAllowedCtx(ctx, 11, &service.UpstreamFailoverError{StatusCode: 503, RetryableOnSameAccount: true}, 0, 1))
 	})
+	t.Run("reselection_does_not_clear_long_hint", func(t *testing.T) {
+		ctx := budgetCtx(t, resilience.KindText, 7)
+		st := resilience.StateFrom(ctx)
+		hint := resilience.UpstreamRecoveryHint{NotBefore: time.Now().Add(310 * time.Second)}
+		st.NoteAccountRetryNotBefore(11, hint)
+		fs := NewFailoverState(2, false)
+		fs.LastFailoverErr = &service.UpstreamFailoverError{StatusCode: 503, UpstreamRecoveryHint: &hint}
+		fs.FailedAccountIDs[11] = struct{}{}
+		require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx))
+		require.Contains(t, fs.FailedAccountIDs, int64(11))
+		kept, ok := st.AccountRetryNotBefore(11)
+		require.True(t, ok)
+		require.Equal(t, hint.NotBefore, kept.NotBefore)
+	})
+	t.Run("reselection_waits_for_hint", func(t *testing.T) {
+		ctx := budgetCtx(t, resilience.KindText, 7)
+		st := resilience.StateFrom(ctx)
+		hint := resilience.UpstreamRecoveryHint{NotBefore: time.Now().Add(2100 * time.Millisecond)}
+		st.NoteAccountRetryNotBefore(11, hint)
+		fs := NewFailoverState(2, false)
+		fs.LastFailoverErr = &service.UpstreamFailoverError{StatusCode: 503, UpstreamRecoveryHint: &hint}
+		fs.FailedAccountIDs[11] = struct{}{}
+		require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(ctx))
+		require.False(t, time.Now().Before(hint.NotBefore))
+		require.NotContains(t, fs.FailedAccountIDs, int64(11))
+		kept, ok := st.AccountRetryNotBefore(11)
+		require.True(t, ok)
+		require.Equal(t, hint.NotBefore, kept.NotBefore)
+	})
+
 }

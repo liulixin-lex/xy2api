@@ -291,7 +291,15 @@ func newOpenAIUpstreamFailoverError(
 		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
 		RequestScopedTransient: requestScopedCapacity,
 	}
-	if hint, ok := resilience.ParseUpstreamRecoveryHint(responseHeaders, responseBody, time.Now()); ok {
+	observedAt := time.Now()
+	hint, found := resilience.ParseUpstreamRecoveryHint(responseHeaders, responseBody, observedAt)
+	if statusCode >= http.StatusBadRequest {
+		if legacy := resilience.RetryAfterFrom(responseHeaders, responseBody); legacy > hint.Delay {
+			hint = resilience.UpstreamRecoveryHint{Source: "legacy_http_error", ObservedAt: observedAt, NotBefore: observedAt.Add(legacy), Delay: legacy}
+			found = true
+		}
+	}
+	if found {
 		failoverErr.UpstreamRecoveryHint = &hint
 	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, upstreamMsg, responseBody) {

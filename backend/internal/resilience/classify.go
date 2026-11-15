@@ -409,7 +409,8 @@ func isStructuredModelUnsupportedError(err structuredModelError, statusCode int)
 }
 
 var (
-	reTryAgainIn = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
+	reRetryAfterJSON = regexp.MustCompile(`(?i)"?retry[_-]after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)`)
+	reTryAgainIn     = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
 	// reTryAgainInCompound matches Go-style compound hints such as
 	// "try again in 1m30.5s" or "1h2m" (OpenAI rate limits).
 	reTryAgainInCompound = regexp.MustCompile(`(?i)try again in\s+((?:\d+(?:\.\d+)?(?:ms|h|m|s)){2,})\b`)
@@ -473,7 +474,11 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if strings.TrimSpace(text) == "" {
 		text = lowerBody
 	}
-	retryAfter := RetryAfterFrom(o.Headers, body)
+	hint, _ := ParseUpstreamRecoveryHint(o.Headers, body, time.Now())
+	retryAfter := hint.Delay
+	if o.StatusCode >= http.StatusBadRequest && o.Source != SourceStreamEvent {
+		retryAfter = max(retryAfter, RetryAfterFrom(o.Headers, body))
+	}
 	if retryAfter == 0 && o.Message != "" {
 		messageBody, _ := json.Marshal(map[string]any{"error": map[string]string{"message": o.Message}})
 		retryAfter = RetryAfterFrom(nil, messageBody)
@@ -722,18 +727,40 @@ func looksLikeHTMLBlock(lowerBody string) bool {
 		strings.Contains(lowerBody, "just a moment...")
 }
 
-// RetryAfterFrom preserves the legacy duration API while using the shared
-// parser's latest valid boundary across trusted headers and error fields.
+// RetryAfterFrom is the compatibility entry point for confirmed upstream
+// failures. E17 retains the legacy error-body hint as another lower bound;
+// callers inspecting arbitrary SSE payloads use ParseUpstreamRecoveryHint.
 func RetryAfterFrom(h http.Header, body []byte) time.Duration {
 	now := time.Now()
 	if len(body) == 0 {
 		return retryAfterHeader(h, now)
 	}
-	hint, ok := ParseUpstreamRecoveryHint(h, body, now)
-	if !ok {
-		return 0
+	hint, _ := ParseUpstreamRecoveryHint(h, body, now)
+	return max(hint.Delay, legacyUpstreamRetryDelay(body))
+}
+
+func legacyUpstreamRetryDelay(body []byte) time.Duration {
+	if len(body) > inspectLimit {
+		body = body[:inspectLimit]
 	}
-	return hint.Delay
+	text := string(body)
+	var delay time.Duration
+	for _, match := range reRetryAfterJSON.FindAllStringSubmatch(text, -1) {
+		if d, ok := recoveryDelay(match[1], time.Second); ok {
+			delay = max(delay, d)
+		}
+	}
+	for _, match := range reTryAgainInCompound.FindAllStringSubmatch(text, -1) {
+		if d, err := time.ParseDuration(strings.ToLower(match[1])); err == nil && d > 0 {
+			delay = max(delay, d)
+		}
+	}
+	for _, match := range reTryAgainIn.FindAllStringSubmatch(text, -1) {
+		if d, ok := recoveryDelay(match[1], recoveryUnit(match[2])); ok {
+			delay = max(delay, d)
+		}
+	}
+	return delay
 }
 
 // resetFrom extracts a rate-limit reset distance: Retry-After, the body
