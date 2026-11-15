@@ -546,6 +546,7 @@ func TestOpsErrorLoggerMiddleware_StreamFailureUsesTerminalErrorOverAttemptConte
 	router.POST("/v1/responses", func(c *gin.Context) {
 		service.SetOpsUpstreamError(c, http.StatusBadGateway, "Upstream transport error", "earlier attempt failed")
 		c.Status(http.StatusOK)
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString("event: er")
 		_, _ = c.Writer.WriteString("ror\n")
 		_, _ = c.Writer.WriteString(`data: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"input exceeds the context window"}}`)
@@ -632,6 +633,7 @@ func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus(t *
 	router.POST("/v1/responses", func(c *gin.Context) {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, "upstream terminal", "")
 		c.Status(http.StatusOK)
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"invalid_request\",\"message\":\"bad request\"}}}\n\n")
 	})
 
@@ -1991,6 +1993,7 @@ func TestOpsErrorLoggerMiddleware_LargeTerminalFrameUsesEventFallback(t *testing
 	router.Use(OpsErrorLoggerMiddleware(ops))
 	router.POST("/v1/responses", func(c *gin.Context) {
 		c.Status(http.StatusOK)
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString("event: response.failed\n")
 		_, _ = c.Writer.WriteString("data: {\"authorization\":\"Bearer must-not-persist\",\"padding\":\"" + strings.Repeat("x", opsTerminalSSEFrameProbeLimit*2) + "\"}")
 	})

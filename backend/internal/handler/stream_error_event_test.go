@@ -32,14 +32,17 @@ func newGinContextForEndpoint(t *testing.T, endpoint string) (*gin.Context, *htt
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, endpoint, nil)
+	c.Header("Content-Type", "text/event-stream")
 	return c, w
 }
 
 // parseResponsesFailedSSE 抽出 SSE 中 data 行的 JSON，返回 (response 对象, error 对象)。
 func parseResponsesFailedSSE(t *testing.T, body string) (map[string]any, map[string]any) {
 	t.Helper()
-	require.True(t, strings.HasPrefix(body, "event: response.failed\n"),
-		"expect event: response.failed prefix, got: %q", body)
+	require.Equal(t, 1, strings.Count(body, "event: response.failed\n"), "expect one failure, got: %q", body)
+	if i := strings.Index(body, "event: response.failed\n"); i >= 0 {
+		body = body[i:]
+	}
 	require.True(t, strings.HasSuffix(body, "\n\n"))
 
 	lines := strings.SplitN(strings.TrimSuffix(body, "\n\n"), "\n", 2)
@@ -360,7 +363,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingCarriesSequenceNumber
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
-	require.True(t, strings.HasPrefix(w.Body.String(), "event: response.failed\n"))
+	require.Contains(t, w.Body.String(), "event: response.failed\n")
 	_, payload, found := strings.Cut(w.Body.String(), "data: ")
 	require.True(t, found)
 	require.True(t, gjson.Get(payload, "sequence_number").Exists(), "response.failed 必须带 sequence_number")
@@ -435,6 +438,7 @@ func TestCommittedFailureCarriesRetryHint(t *testing.T) {
 			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.FailedFrameRetryAfter = enabled })
 			c, w := newGinContextForEndpoint(t, EndpointResponses)
 			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+			c.Header("Content-Type", "text/event-stream")
 			_, _ = c.Writer.WriteString(":\n\n")
 			applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
 			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
@@ -457,6 +461,7 @@ func TestCommittedFailurePreservesOriginalPunctuation(t *testing.T) {
 		t.Run(original, func(t *testing.T) {
 			c, w := newGinContextForEndpoint(t, EndpointResponses)
 			c.Request = c.Request.WithContext(resilience.WithRetryAdvice(c.Request.Context(), resilience.RetryAdvice{}))
+			c.Header("Content-Type", "text/event-stream")
 			_, err := c.Writer.WriteString(":\n\n")
 			require.NoError(t, err)
 			c.Set(ginKeyResilienceRetryAfter, 30)

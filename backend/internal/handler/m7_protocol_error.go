@@ -32,6 +32,14 @@ func writeHandlerProtocolError(c *gin.Context, protocol string, status int, errT
 	if service.ProtocolTerminalClaimed(c) {
 		return false
 	}
+	if service.OpenAIImagesJSONKeepalivePresent(c) && service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) < 0 && service.ClaimProtocolTerminal(c) {
+		errorBody := gin.H{"type": errType, "message": message}
+		if code != "" {
+			errorBody["code"] = code
+		}
+		c.JSON(status, gin.H{"error": errorBody})
+		return true
+	}
 	if protocol == service.PreOutputProtocolResponses && c.Request != nil && c.Writer.Written() && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
 		code = mapResponsesErrorCode(errType, code)
 		service.MarkOpsStreamError(c, errType, message, status)

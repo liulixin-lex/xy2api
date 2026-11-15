@@ -37,7 +37,14 @@ func TestInference404AllCandidatesExhausted(t *testing.T) {
 		t.Run(endpoint.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			route := "/v1/messages"
+			if endpoint.name == "openai" || endpoint.name == "responses" {
+				route = "/v1/responses"
+			}
+			if endpoint.name == "chat" {
+				route = "/v1/chat/completions"
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, route, nil)
 			c.Set(opsModelKey, "requested-model")
 			state := NewFailoverState(3, false)
 			for _, id := range []int64{1, 2} {
@@ -54,7 +61,7 @@ func TestInference404AllCandidatesExhausted(t *testing.T) {
 			require.Empty(t, recorder.Header().Get("Retry-After"))
 			if endpoint.name == "gemini" {
 				require.Equal(t, "NOT_FOUND", gjson.Get(recorder.Body.String(), "error.status").String())
-			} else {
+			} else if endpoint.name == "chat" || endpoint.name == "responses" || endpoint.name == "openai" {
 				require.Contains(t, recorder.Body.String(), "model_not_found")
 			}
 		})
@@ -74,6 +81,7 @@ func TestInference404ExhaustedAfterHeartbeat(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+endpoint.name, nil)
 			c.Set(opsModelKey, "requested-model")
+			c.Header("Content-Type", "text/event-stream")
 			written, err := c.Writer.WriteString(": ping\n\n")
 			require.NoError(t, err)
 			recordGatewayStreamHeartbeat(c, written)

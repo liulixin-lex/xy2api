@@ -1774,6 +1774,9 @@ func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int
 // anthropicStreamingAwareError handles errors that may occur during streaming,
 // using Anthropic SSE error format.
 func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	if streamStarted && !c.Writer.Written() {
+		prepareHandlerErrorSSE(c)
+	}
 	errType = anthropicLocalErrorType(status, errType)
 	if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError && errType == "api_error" {
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
@@ -4100,6 +4103,9 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	streamStarted bool,
 	countTowardsSLA bool,
 ) {
+	if streamStarted && !c.Writer.Written() {
+		prepareHandlerErrorSSE(c)
+	}
 	applyConcurrencyRetryHint(c, status, code)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	if streamStarted || c.Writer.Written() {
@@ -4156,6 +4162,9 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	}
 	if c.Writer.Written() && !imageKeepalivePaddingOnly {
 		streamStarted = true
+	}
+	if service.ProtocolTerminalClaimed(c) || c.Writer.Written() && !imageKeepalivePaddingOnly && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+		return false
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true

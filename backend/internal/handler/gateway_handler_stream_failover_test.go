@@ -34,6 +34,7 @@ func TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten(t *tes
 	require.Equal(t, -1, sizeBeforeForward, "gin writer 初始 Size 应为 -1（未写入任何字节）")
 
 	// 步骤 2：模拟 Forward 已向客户端写入部分 SSE 内容（message_start + content_block_start）
+	c.Header("Content-Type", "text/event-stream")
 	_, err := c.Writer.Write([]byte(partialMessageStartSSE))
 	require.NoError(t, err)
 
@@ -78,6 +79,7 @@ func TestStreamWrittenGuard_GeminiPath_AbortFailoverOnSSEContentWritten(t *testi
 
 	sizeBeforeForward := c.Writer.Size()
 
+	c.Header("Content-Type", "text/event-stream")
 	_, err := c.Writer.Write([]byte(partialMessageStartSSE))
 	require.NoError(t, err)
 

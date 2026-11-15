@@ -2086,6 +2086,9 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	if streamStarted && !c.Writer.Written() {
+		prepareHandlerErrorSSE(c)
+	}
 	applyConcurrencyRetryHint(c, status, code)
 	if !inboundIsResponses(c) && !inboundIsChatCompletions(c) {
 		errType = anthropicLocalErrorType(status, errType)
@@ -2115,6 +2118,9 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	}
 	if c.Writer.Written() {
 		streamStarted = true
+	}
+	if service.ProtocolTerminalClaimed(c) || c.Writer.Written() && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+		return false
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true
