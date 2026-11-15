@@ -51,7 +51,6 @@ func TestFoundationTerminalProjection(t *testing.T) {
 	}
 	for _, source := range [][3]string{
 		{"responses", "failed", ""}, {"responses", "cancelled", ""}, {"responses", "canceled", ""}, {"responses", "", ""},
-		{"gemini", "", "OTHER"},
 		{"chat", "", "tool_calls"}, {"chat", "", "function_call"}, {"anthropic", "", "tool_use"}, {"bad", "", "stop"},
 	} {
 		cases = append(cases, terminalCase{source[0], source[1], source[2], false, false, [4]string{"ERR", "ERR", "ERR", "ERR"}})
@@ -149,6 +148,27 @@ func TestFoundationTerminalUnknownMapping(t *testing.T) {
 				if oldErr != nil || oldStatus != status || oldReason != reason {
 					t.Fatalf("compatibility wrapper differs: %s/%s %v", oldStatus, oldReason, oldErr)
 				}
+			}
+		}
+	}
+}
+
+func TestFoundationTerminalGeminiOther(t *testing.T) {
+	// The existing Gemini-to-Claude mapper defaults OTHER to end_turn.
+	for _, tools := range []bool{false, true} {
+		want := map[string][2]string{
+			"responses": {"completed", ""},
+			"chat":      {"", "stop"},
+			"anthropic": {"", "end_turn"},
+		}
+		if tools {
+			want["chat"] = [2]string{"", "tool_calls"}
+			want["anthropic"] = [2]string{"", "tool_use"}
+		}
+		for target, expected := range want {
+			status, reason, mapped, err := ProjectTerminalWithMapping("gemini", target, "", "OTHER", tools, false)
+			if err != nil || !mapped || [2]string{status, reason} != expected {
+				t.Fatalf("OTHER -> %s tools=%t: %s/%s mapped=%t err=%v; want %v", target, tools, status, reason, mapped, err, expected)
 			}
 		}
 	}

@@ -97,8 +97,6 @@ func ProjectTerminalWithMapping(source, target, status, reason string, hasComple
 				return "", reason, unknownReasonMapped, nil
 			}
 			return fail()
-		case "OTHER":
-			return fail()
 		default:
 			unknownReasonMapped = true
 		}
