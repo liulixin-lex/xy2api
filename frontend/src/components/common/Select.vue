@@ -734,6 +734,12 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+/* sm: the search box's placeholder in the muted text colour of both themes (12.12-7); two classes, over the shared
+   dark placeholder rule. md keeps its own. */
+.select-dropdown-portal.select-dropdown-portal--sm .select-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
 .select-dropdown-enter-active,
 .select-dropdown-leave-active {
   transition: all 0.2s ease;
