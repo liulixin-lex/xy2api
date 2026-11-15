@@ -161,6 +161,29 @@ func TestM5ThinkingConfig(t *testing.T) {
 		require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
 		require.Equal(t, "high", optionalStringValue(result.RequestedReasoningEffort))
 	})
+	t.Run("history_thinking_round_trip", func(t *testing.T) {
+		turn1 := []byte(`{"model":"gemini-2.5-flash","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":2048},"messages":[{"role":"user","content":"q1"}]}`)
+		upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"**Planning** I will look at X first.","thought":true},{"text":"a1"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":11}}`))}}}
+		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+		c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/messages", turn1)
+		_, err := svc.Forward(c.Request.Context(), c, geminiSignalTestAccount(), turn1)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"includeThoughts":true,"thinkingBudget":2048}`, gjson.GetBytes(upstream.requestBodies[0], "generationConfig.thinkingConfig").Raw)
+		assistant := gjson.Get(recorder.Body.String(), "content").Raw
+		require.Equal(t, "thinking", gjson.Get(assistant, "0.type").String())
+
+		turn2, err := sjson.SetRawBytes(turn1, "messages", []byte(`[{"role":"user","content":"q1"},{"role":"assistant","content":`+assistant+`},{"role":"user","content":"q2"}]`))
+		require.NoError(t, err)
+		wire, _, _ := m5ForwardMessages(t, turn2)
+		require.JSONEq(t, `[{"role":"user","parts":[{"text":"q1"}]},{"role":"model","parts":[{"text":"a1"}]},{"role":"user","parts":[{"text":"q2"}]}]`, gjson.GetBytes(wire, "contents").Raw)
+
+		// A turn holding only thinking keeps its existing conversion, so no turn is removed.
+		onlyThinking, err := sjson.SetRawBytes(turn1, "messages", []byte(`[{"role":"user","content":"q1"},{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":""}]},{"role":"user","content":"q2"}]`))
+		require.NoError(t, err)
+		wire, _, _ = m5ForwardMessages(t, onlyThinking)
+		require.Len(t, gjson.GetBytes(wire, "contents").Array(), 3)
+		require.Equal(t, "model", gjson.GetBytes(wire, "contents.1.role").String())
+	})
 	t.Run("thought_output", func(t *testing.T) {
 		raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"private thought","thought":true},{"text":"public answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"thoughtsTokenCount":3}}`)
 		var response map[string]any

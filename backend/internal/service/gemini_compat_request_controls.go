@@ -30,7 +30,7 @@ func geminiCompatResponseOptions(c *gin.Context) apicompat.ConversionOptions {
 }
 
 func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts apicompat.ConversionOptions) ([]byte, error) {
-	history, err := prepareGeminiMessagesToolHistory(claudeBody)
+	history, err := prepareGeminiMessagesToolHistory(dropGeminiHistoryThinkingBlocks(claudeBody))
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +78,43 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 		return nil, err
 	}
 	return applyGeminiCompatResponseFormat(claudeBody, body, capabilities, opts)
+}
+
+// dropGeminiHistoryThinkingBlocks removes thinking summaries returned to the
+// client in earlier turns. The shared converter would otherwise send each one
+// back as model text. Tool signatures live on tool_use blocks and are kept. A
+// message made only of thinking blocks keeps its existing conversion so the
+// turn sequence sent upstream does not change.
+func dropGeminiHistoryThinkingBlocks(body []byte) []byte {
+	out := body
+	for index, message := range gjson.GetBytes(body, "messages").Array() {
+		content := message.Get("content")
+		if message.Get("role").String() != "assistant" || !content.IsArray() {
+			continue
+		}
+		blocks := content.Array()
+		kept := make([]string, 0, len(blocks))
+		thinking := false
+		for _, block := range blocks {
+			switch kind := block.Get("type").String(); {
+			case kind == "thinking" || kind == "redacted_thinking":
+				thinking = true
+			case len(blocks) > 1 && kind == "text" && strings.TrimSpace(block.Get("text").String()) == "":
+				// The converter drops blank text from multi-block messages; keep that.
+			default:
+				kept = append(kept, block.Raw)
+			}
+		}
+		if !thinking || len(kept) == 0 {
+			continue
+		}
+		updated, err := sjson.SetRawBytes(out, fmt.Sprintf("messages.%d.content", index), []byte("["+strings.Join(kept, ",")+"]"))
+		if err != nil {
+			return body
+		}
+		out = updated
+	}
+	return out
 }
 
 // GeminiCompatCapabilities is local to the API-key compatibility builder.
