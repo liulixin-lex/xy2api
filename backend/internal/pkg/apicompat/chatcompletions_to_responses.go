@@ -428,13 +428,10 @@ func chatAssistantToResponses(m ChatMessage, opts ConversionOptions, messageInde
 	}
 
 	// Emit one function_call item per tool_call.
-	for index, tc := range m.ToolCalls {
+	for _, tc := range m.ToolCalls {
 		args := tc.Function.Arguments
 		if args == "" {
 			args = "{}"
-		}
-		if err := ValidateToolArguments("function", args, false, false); err != nil {
-			return nil, unsupportedConversion(fmt.Sprintf("messages[%d].tool_calls[%d].function.arguments", messageIndex, index), "expected complete JSON arguments")
 		}
 		items = append(items, ResponsesInputItem{
 			Type:      "function_call",

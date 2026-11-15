@@ -2124,7 +2124,7 @@ func TestToolArgumentsJSONAndCompleteness(t *testing.T) {
 		require.Equal(t, tc.valid, a.Err() == nil)
 		req := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "c", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: tc.raw}}}}}}
 		_, err = ChatCompletionsToResponses(req)
-		require.Equal(t, tc.valid, err == nil)
+		require.NoError(t, err, "history retains raw arguments")
 	}
 	for _, item := range []ResponsesOutput{{Type: "custom_tool_call", Input: "raw"}, {Type: "custom_tool_call", Input: ""}, {Type: "function_call", Arguments: "opaque", EncryptedFunctionArgs: json.RawMessage(`null`)}} {
 		require.NoError(t, ValidateResponsesForChat(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}))
@@ -2268,4 +2268,31 @@ func TestChatFieldsPreservedForResponses(t *testing.T) {
 		out.Text.Format[0] = ' '
 		require.Equal(t, byte('{'), req.Text.Format[0], "converted format does not alias caller bytes")
 	})
+}
+
+func TestReviewM2HistoryArgumentsRemainRaw(t *testing.T) {
+	for _, raw := range []string{`{"a":`, `ls -la`, `{broken`, ``} {
+		for _, legacy := range []bool{false, true} {
+			assistant := ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "call", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: raw}}}}
+			result := ChatMessage{Role: "tool", ToolCallID: "call", Content: json.RawMessage(`"parameter parse failed"`)}
+			if legacy {
+				assistant.FunctionCall = &assistant.ToolCalls[0].Function
+				assistant.ToolCalls = nil
+				result.Role = "function"
+				result.Name = "f"
+				result.ToolCallID = ""
+			}
+			out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Messages: []ChatMessage{assistant, result}})
+			require.NoError(t, err)
+			var input []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(out.Input, &input))
+			require.Len(t, input, 2)
+			want := raw
+			if want == "" {
+				want = "{}"
+			}
+			require.Equal(t, want, input[0].Arguments)
+			require.Equal(t, input[0].CallID, input[1].CallID)
+		}
+	}
 }
