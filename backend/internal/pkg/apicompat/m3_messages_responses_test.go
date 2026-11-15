@@ -208,3 +208,50 @@ func TestM3ParallelToolQueue(t *testing.T) {
 		require.Empty(t, FinalizeResponsesAnthropicStream(st))
 	})
 }
+
+func TestM3FunctionArgumentsFinalValue(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, delta, final, want string
+		bad                            bool
+	}{
+		{"same", "f", `{"x":1}`, `{"x":1}`, `{"x":1}`, false},
+		{"tail", "f", `{"x":`, `{"x":1}`, `{"x":1}`, false},
+		{"mismatch", "f", `{"x":1}`, `{"x":2}`, `{"x":1}`, true},
+		{"no delta", "f", "", `{"x":1}`, `{"x":1}`, false},
+		{"Read", "Read", `{"file_path":"x","pages":""}`, `{"file_path":"x","pages":""}`, `{"file_path":"x"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			var out []AnthropicStreamEvent
+			feed := func(e *ResponsesStreamEvent) { out = append(out, ResponsesEventToAnthropicEvents(e, st)...) }
+			feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: tc.tool}})
+			feed(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "fc_a", Delta: tc.delta})
+			feed(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", tc.final))
+			var got string
+			for _, e := range out {
+				if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+					got += e.Delta.PartialJSON
+				}
+			}
+			require.Equal(t, tc.want, got)
+			if tc.bad {
+				require.Error(t, st.Err())
+				require.Equal(t, tc.delta, st.tools[0].raw)
+				require.Empty(t, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed"}}, st))
+				return
+			}
+			require.NoError(t, st.Err())
+			require.Empty(t, ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", tc.final), st))
+			ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, "fc_a", `{"changed":true}`), st)
+			require.Error(t, st.Err())
+		})
+	}
+	t.Run("terminal mismatch", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f"}}, st)
+		ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "fc_a", Delta: `{"x":1}`}, st)
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "function_call", ID: "fc_a", Arguments: `{"x":2}`}}}}, st)
+		require.Error(t, st.Err())
+		require.Empty(t, events)
+	})
+}

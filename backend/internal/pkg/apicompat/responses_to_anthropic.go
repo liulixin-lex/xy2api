@@ -656,11 +656,19 @@ func resToAnthHandleFuncArgsDone(evt *ResponsesStreamEvent, state *ResponsesEven
 	if tool == nil {
 		return nil
 	}
-	if evt.Arguments != "" {
-		tool.raw = evt.Arguments
+	resToAnthCompleteTool(tool, evt.Arguments, evt.ArgumentsPresent || evt.Arguments != "", state)
+	return resToAnthEmitTool(tool, state)
+}
+
+func resToAnthCompleteTool(tool *responsesAnthropicTool, raw string, present bool, state *ResponsesEventToAnthropicState) {
+	if present {
+		if (tool.complete && raw != tool.raw) || !strings.HasPrefix(raw, tool.raw) {
+			state.fail("arguments", "final tool arguments disagree with delivered input")
+			return
+		}
+		tool.raw = raw
 	}
 	tool.complete = true
-	return resToAnthEmitTool(tool, state)
 }
 
 func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
@@ -700,10 +708,7 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 		if tool == nil {
 			return nil
 		}
-		if evt.Item.Arguments != "" {
-			tool.raw = evt.Item.Arguments
-		}
-		tool.complete = true
+		resToAnthCompleteTool(tool, evt.Item.Arguments, evt.Item.Arguments != "", state)
 		if !tool.opened {
 			return resToAnthHandleOutputItemAdded(evt, state)
 		}
@@ -822,6 +827,14 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 
 	var events []AnthropicStreamEvent
 	if evt.Response != nil && evt.Response.Status == "completed" {
+		for _, item := range evt.Response.Output {
+			if tool := state.toolItems[item.ID]; tool != nil {
+				resToAnthCompleteTool(tool, item.Arguments, item.Arguments != "", state)
+			}
+		}
+		if state.err != nil {
+			return nil
+		}
 		for _, tool := range state.toolOrder {
 			tool.complete = true
 		}
