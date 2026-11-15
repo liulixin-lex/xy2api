@@ -10,8 +10,6 @@
 
 ### 参数与协议转换
 
-- Chat 通往 Gemini 时按最终模型处理思考与 JSON 格式，小输出预算保持原值，历史工具结果各归其轮。
-
 - Chat 转 Responses 保留 metadata、user、文本详细程度和显式 include，GPT-6.1 Terra 使用最终模型的推理档位与输出上限。
 
 - Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
@@ -142,7 +140,21 @@
 
 - Gemini Messages 兼容请求保留 JSON 输出格式与 schema 精度，不支持的格式约束会记录降级。
 
+- Gemini 分组的 Chat 请求设置了较小的输出上限，同时带 medium、high 推理档位时，不再按 Claude 的思考预算被本地拒绝，输出上限按原值发送。
+
+- Gemini 分组的兼容请求按最终模型写入思考控制，按最后实际发出的 `thinkingLevel` 计费，只给预算时不推断档位。
+
+- Gemini 分组的 `json_object` 与 `json_schema` 输出格式会传到 Gemini（Chat 与 Messages 都适用），模型不支持的格式约束省略并记录。
+
+- Gemini 工具 schema 中空的 `enum` 不再导致上游 400；位于条件、否定等位置、无法单独删除时，省略整段约束并记录。
+
+- Gemini 分组的 `tool_choice` 生效；选了未声明的工具或并行控制类型不对时返回 400，无法表达的强制内置工具与禁并行控制省略并记录。
+
+- Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
+
 - Gemini 缓存读取不再产生负输入用量，流中的缺失字段与明确修正值分别处理。
+
+- Gemini 分组的响应保留截断与内容过滤原因，不再显示为正常结束；上游生成的工具调用无效时以错误结束，保留已读用量。
 
 - Gemini AI Studio 请求携带搜索工具时，输出 schema 中的大整数保持原值。
 

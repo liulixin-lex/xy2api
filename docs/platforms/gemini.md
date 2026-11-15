@@ -126,9 +126,7 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 ### 兼容入口参数
 
-AI Studio 请求规范化仅调整搜索工具的字段拼写，保留输出 schema 的原始 JSON 与整数精度。
-
-API Key 账号的兼容请求按最终映射后的模型转换。Chat 的 Anthropic 中间对象仅保留意图，不套用 Claude 的最小思考预算、不生成默认 thinking；输出上限保持原值，最终 Gemini 请求才按实际目标校验和映射：
+兼容入口指 Gemini 分组的 `/v1/chat/completions` 与 `/v1/messages`。API Key 账号的兼容请求按最终映射后的模型转换；Chat 请求会先转为 Anthropic 格式，这一步不套用 Claude 的最小思考预算，也不添加默认 thinking，输出上限保持原值，到生成 Gemini 请求时才按实际模型校验和映射：
 
 - **思考控制**：没有显式意图时保留模型默认。优先级为 `disabled`/`none`、显式 effort、数值预算、单独的 `adaptive`；中间对象中的 adaptive 不覆盖 effort。Gemini 2.5 Flash 的 low/medium/high 分别映射为 1024/8192/24576，none 为 0；2.5 Pro 不能完全关闭，最低预算为 128。已确认接受 level 的型号采用最近的支持档位，不能保证原请求的思考强度或完全关闭；未知能力省略并记录。计费只读取最终实际发出的 `thinkingLevel`，预算与默认模式不推断收费档位。
 - **JSON 输出**：Chat 的 `response_format` / `text.format` 和 Messages 的 `output_config.format` 为 `json_object` 时写入 `application/json`，`json_schema` 另外保留原始 `responseJsonSchema`；text/缺省不设置格式。仅支持 MIME 的型号省略 schema 并记录，不能保证 schema；未知 JSON 能力省略格式并记录，不能保证 JSON。图片、工具和正文仍保留，输出 schema 不经过工具 schema 清理。
@@ -137,9 +135,8 @@ API Key 账号的兼容请求按最终映射后的模型转换。Chat 的 Anthro
 - **工具历史**：按轮次与调用出现顺序配对结果，旧式同名调用继续按 FIFO 消费；不新增历史闭合校验，缺结果、孤儿结果与同轮重复 ID 沿原有转换方式处理。
 - **结束原因**：正常停止保留为自然结束或工具调用；MAX_TOKENS 优先保留长度截断，工具存在也不改成正常工具结束。安全过滤映射为 Messages refusal 或 Chat content_filter；OTHER 与未列出的非空停因沿用自然结束/完整工具的兼容映射，并记录 map；明确的坏工具停因返回上游转换错误，流式错误后不再追加成功结束帧。已读用量保留，完整工具参数必须是 JSON 对象。
 - **缓存用量**：未缓存输入为 `max(promptTokenCount - cachedContentTokenCount, 0)`，缓存读取保留原值；输出只加一次 candidates 与 thoughts。流中按字段保留最近一次有效计数，缺字段不覆盖已知值，显式零或修正值正常覆盖。缺失 prompt 与缓存大于 prompt 分别记录内部不完整、矛盾证据；存在位只用于内部记录，不据此省略客户端原有计数。
-
-
-兼容入口将上游 `thought:true` 的文本放入 Messages 的 `thinking` 块或 Chat 的 `reasoning_content`，普通正文单独输出；JSON 与流式响应采用相同规则。
+- **思考文本**：上游 `thought: true` 的文本放进 Messages 的 `thinking` 块或 Chat 的 `reasoning_content`，普通正文单独输出；非流式与流式相同。
+- **AI Studio 搜索工具**：只调整搜索工具的字段拼写，输出 schema 原样保留，大整数不丢精度。
 
 ## 客户端配置
 
