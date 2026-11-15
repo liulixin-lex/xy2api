@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path"
 	"sort"
 	"strings"
 
@@ -34,7 +36,7 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 	if err != nil {
 		return nil, err
 	}
-	body, err := convertClaudeMessagesToGeminiGenerateContent(history)
+	body, err := convertClaudeMessagesToGeminiGenerateContentWithOptions(history, geminiContentOptions{URLImages: true})
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +80,35 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 		return nil, err
 	}
 	return applyGeminiCompatResponseFormat(claudeBody, body, capabilities, opts)
+}
+
+// geminiContentOptions enables API-key-only content mappings in the shared
+// Claude→Gemini converter; the zero value keeps the converter unchanged.
+type geminiContentOptions struct {
+	URLImages bool
+}
+
+var geminiImageMIMETypes = map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif"}
+
+// geminiURLImagePart sends a URL image as Gemini fileData instead of dropping
+// it. The MIME type comes from the source or a known file extension and is left
+// out otherwise.
+func geminiURLImagePart(source map[string]any) map[string]any {
+	uri, _ := source["url"].(string)
+	if strings.TrimSpace(uri) == "" {
+		return nil
+	}
+	file := map[string]any{"fileUri": uri}
+	mimeType, _ := source["media_type"].(string)
+	if mimeType == "" {
+		if parsed, err := url.Parse(uri); err == nil {
+			mimeType = geminiImageMIMETypes[strings.ToLower(path.Ext(parsed.Path))]
+		}
+	}
+	if mimeType != "" {
+		file["mimeType"] = mimeType
+	}
+	return map[string]any{"fileData": file}
 }
 
 // dropGeminiHistoryThinkingBlocks removes thinking summaries returned to the
