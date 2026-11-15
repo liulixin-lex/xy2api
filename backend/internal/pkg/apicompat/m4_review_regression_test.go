@@ -351,3 +351,22 @@ func TestM4ReviewChatUserMetadataOmission(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewEmptyChatAllowedTools(t *testing.T) {
+	var req ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"m","input":"hi","tools":[{"type":"function","name":"f","parameters":{"type":"object"}}],"tool_choice":{"type":"allowed_tools","mode":"auto","tools":[{"type":"function","name":"gone"}]}}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	var notices []ConversionNotice
+	out, err := ResponsesToChatCompletionsRequestWithOptions(&req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}, Record: func(n ConversionNotice) { notices = append(notices, n) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(out)
+	if len(out.Tools) != 0 || len(out.ToolChoice) != 0 || strings.Contains(string(raw), `"tools"`) || strings.Contains(string(raw), `"tool_choice"`) {
+		t.Fatalf("orphan choice sent: %s", raw)
+	}
+	if len(notices) != 1 || notices[0] != (ConversionNotice{Field: "tool_choice.tools[0]", Action: "omit"}) {
+		t.Fatalf("notice=%#v", notices)
+	}
+}

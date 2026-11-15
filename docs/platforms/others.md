@@ -164,3 +164,5 @@ Chat 上游因长度或过滤结束工具输出时，Messages 响应仍返回 ma
 Chat thinking 支持字符串、含 text 的对象及按顺序拼接的字符串/text 对象数组；其他有类型片段忽略并记录，正文仍正常返回。缺少类型或已支持片段的文本类型错误仍报转换错误。
 
 Responses 转 Chat 时仅转发字符串 user；metadata 与非字符串 user 省略并记录字段降级，避免兼容上游因这些字段拒绝请求。text.verbosity 继续转为 verbosity。
+
+Chat 上游的 allowed_tools 允许列表为空时，同时省略 tools 与 tool_choice；不发送工具本身即禁止本轮工具调用。
