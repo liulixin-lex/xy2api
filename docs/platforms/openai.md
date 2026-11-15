@@ -50,6 +50,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | `POST /v1/alpha/search` | Codex 使用的独立搜索端点 |
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
 
+API Key 请求中显式的 `reasoning.effort: none` 或 `reasoning_effort: none` 会保留，不因第三方端点而视为目录占位值；不支持该档位的最终模型按兼容策略映射。Responses-shaped Chat 的 API Key 请求保留 `metadata`；原生 Chat 保留 `stream_options`，转发至 Responses 时省略并记录该用量格式提示，实际用量仍按上游结果返回。
+
 ## 客户端配置
 
 ### Codex CLI

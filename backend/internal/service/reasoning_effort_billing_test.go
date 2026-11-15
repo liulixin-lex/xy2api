@@ -237,9 +237,9 @@ func TestReasoningEffortBillingPreservesForwardedNoneAndMinimal(t *testing.T) {
 		})
 	}
 
-	// A compatibility endpoint that strips none must not bill the removed request preference.
+	// A compatibility endpoint preserves explicit none as the actual wire effort.
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://compat.example/v1"}}
 	filtered, err := filterOpenAIResponsesNoneReasoningEffortForAccount(account, []byte(`{"model":"custom-model","reasoning":{"effort":"none"}}`))
 	require.NoError(t, err)
-	require.Nil(t, extractOpenAIReasoningEffortFromBody(filtered, "custom-model"))
+	require.Equal(t, "none", *extractOpenAIReasoningEffortFromBody(filtered, "custom-model"))
 }
