@@ -588,7 +588,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   border: 1px solid var(--color-line-popover);
   border-radius: var(--radius-popover);
   background: var(--color-bg-popover);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--shadow-dropdown);
 }
 .tb-menu__folded {
   display: grid;

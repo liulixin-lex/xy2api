@@ -18,7 +18,7 @@
       <div
         v-if="open"
         ref="menuRef"
-        class="fixed overflow-hidden rounded-popover border border-line-popover bg-surface-popover shadow-popover"
+        class="fixed overflow-hidden rounded-popover border border-line-popover bg-surface-popover shadow-dropdown"
         :style="[panelStyle, { zIndex: layer.zIndex.value }]"
         @click.stop
       >

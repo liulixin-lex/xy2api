@@ -127,6 +127,7 @@ export default {
       },
       boxShadow: {
         popover: 'var(--shadow-popover)',
+        dropdown: 'var(--shadow-dropdown)',
         panel: 'var(--shadow-panel)',
         glass: '0 8px 32px rgba(0, 0, 0, 0.08)',
         'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.06)',

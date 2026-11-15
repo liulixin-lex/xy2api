@@ -156,7 +156,7 @@
               </button>
               <div
                 v-if="showFilterDropdown"
-                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
+                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <!-- Built-in filters -->
                 <button
@@ -216,7 +216,7 @@
               </button>
               <div
                 v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <button
                   v-for="col in toggleableColumns"
@@ -280,7 +280,7 @@
                 v-if="bulkMenuOpen"
                 ref="bulkMenuRef"
                 role="menu"
-                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
+                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
                 :style="{ zIndex: bulkMenuLayer.zIndex.value }"
                 data-test="bulk-menu"
               >

@@ -375,7 +375,7 @@ defineExpose({ requestClose })
   border: 1px solid var(--color-line-popover);
   border-radius: var(--radius-popover);
   background: var(--color-bg-popover);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--shadow-dropdown);
   color: var(--color-text-primary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);

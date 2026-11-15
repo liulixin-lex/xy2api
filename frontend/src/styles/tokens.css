@@ -131,13 +131,15 @@
   --popover-width: 280px;
   --motion-panel: 240ms;
 
-  /* Popover material (spec 12.6): the shared Select's panel, for every dropdown-like layer; shadow --shadow-popover */
+  /* Popover material (spec 12.6): the shared Select's panel, for every dropdown-like layer; shadow --shadow-dropdown
+     (the Select panel's own, below; --shadow-popover stays for tips and the other layers) */
   --color-bg-popover: #ffffff;
   --color-line-popover: #e5e7eb;
   --color-bg-popover-hover: #f9fafb;
   --color-bg-popover-selected: #f0fdfa;
   --color-text-popover-selected: #0f766e;
   --radius-popover: 12px;
+  --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 
 .dark {
@@ -211,4 +213,5 @@
   --color-bg-popover-hover: #334155;
   --color-bg-popover-selected: rgb(19 78 74 / 0.2);
   --color-text-popover-selected: #5eead4;
+  --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
 }

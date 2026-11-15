@@ -5,7 +5,7 @@
       <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
-        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover shadow-popover"
+        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover shadow-dropdown"
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >

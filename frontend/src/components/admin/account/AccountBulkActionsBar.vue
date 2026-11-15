@@ -48,7 +48,7 @@
         <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="moreRect = null" />
         <div
           role="menu"
-          class="fixed w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
+          class="fixed w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
           :style="{ top: `${moreRect.bottom + 4}px`, right: `${Math.max(8, viewportWidth - moreRect.right)}px`, zIndex: (layer.zIndex.value ?? 9998) + 1 }"
           data-test="bulk-more-menu"
         >
