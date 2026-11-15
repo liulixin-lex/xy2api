@@ -230,6 +230,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具历史 | 映射 | API Key 账号按轮次与出现顺序配对；后一轮复用同一 ID 时保留各轮自己的结果，历史工具不会补进本轮声明。缺结果、孤儿结果与同轮重复 ID 维持原有处理 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
+| Responses `custom_tool_call` 响应 | 映射 | JSON 与流式都生成 `tool_use`，自由文本以 `{"input":"原文"}` 包装，保留调用 ID、名称与空字符串 |
 | Responses 工具生成参数 | 校验 | 普通 function 必须是完整 JSON 对象；仅成功结束的空参数兼容为 `{}`。坏 JSON、数组、null 或标量不修补；显式加密参数没有 Messages tool input 表达方式，返回上游协议错误，不解密或伪造对象 |
 | function 的 `strict` | 映射 | Responses 与 Messages 两方向保留显式 true/false；Messages 转 Responses 未指定时仍为 false |
 | Anthropic `allowed_callers` 转 Responses | 省略并记录 | 未提供、null 或仅 direct 正常转换；其他字符串列表（含空列表、空名称）省略执行主体限制并记录，声明与 schema 保留，模型仍可直接提出函数调用；非数组或非字符串成员返回字段错误 |

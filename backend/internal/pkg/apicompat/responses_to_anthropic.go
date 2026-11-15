@@ -66,6 +66,9 @@ func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicRespo
 				Name:  item.Name,
 				Input: sanitizeAnthropicToolUseInput(item.Name, raw),
 			})
+		case "custom_tool_call":
+			input, _ := json.Marshal(map[string]string{"input": item.Input})
+			blocks = append(blocks, AnthropicContentBlock{Type: "tool_use", ID: fromResponsesCallID(item.CallID), Name: item.Name, Input: input})
 		case "web_search_call":
 			toolUseID := "srvtoolu_" + item.ID
 			query := ""
@@ -403,7 +406,7 @@ func resToAnthDispatchEvent(evt *ResponsesStreamEvent, state *ResponsesEventToAn
 		// custom/freeform 工具的输入增量与 function_call 参数增量同形。
 		"response.custom_tool_call_input.delta":
 		return resToAnthHandleFuncArgsDelta(evt, state)
-	case "response.function_call_arguments.done":
+	case "response.function_call_arguments.done", "response.custom_tool_call_input.done":
 		return resToAnthHandleFuncArgsDone(evt, state)
 	case "response.output_item.done":
 		return resToAnthHandleOutputItemDone(evt, state)
@@ -663,13 +666,20 @@ func resToAnthEmitTool(tool *responsesAnthropicTool, state *ResponsesEventToAnth
 		return nil
 	}
 	raw := tool.raw
+	if tool.kind == "custom_tool_call" {
+		if !tool.complete {
+			return nil
+		}
+		wrapped, _ := json.Marshal(map[string]string{"input": raw})
+		raw = string(wrapped)
+	}
 	if tool.opaque {
 		return nil
 	}
 	if tool.complete && raw == "" && tool.kind == "function_call" {
 		raw = "{}"
 	}
-	if tool.name == "Read" {
+	if tool.name == "Read" && tool.kind == "function_call" {
 		if ValidateToolArguments("function", raw, true, false) != nil {
 			return nil
 		}
@@ -705,7 +715,11 @@ func resToAnthHandleFuncArgsDone(evt *ResponsesStreamEvent, state *ResponsesEven
 	if tool == nil {
 		return nil
 	}
-	resToAnthCompleteTool(tool, evt.Arguments, evt.ArgumentsPresent || evt.Arguments != "", state)
+	raw, present := evt.Arguments, evt.ArgumentsPresent || evt.Arguments != ""
+	if tool.kind == "custom_tool_call" {
+		raw, present = evt.Input, evt.InputPresent || evt.Input != ""
+	}
+	resToAnthCompleteTool(tool, raw, present, state)
 	return resToAnthEmitTool(tool, state)
 }
 
@@ -774,8 +788,16 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 		if tool == nil {
 			return nil
 		}
-		resToAnthCompleteTool(tool, evt.Item.Arguments, evt.Item.Arguments != "", state)
+		raw, present := evt.Item.Arguments, evt.Item.Arguments != ""
+		if tool.kind == "custom_tool_call" {
+			raw, present = evt.Item.Input, evt.Item.Input != "" || tool.raw == ""
+		}
+		resToAnthCompleteTool(tool, raw, present, state)
 		if !tool.opened {
+			if state.activeTool != nil && !state.activeTool.complete {
+				state.pendingBlocks = append(state.pendingBlocks, *evt)
+				return nil
+			}
 			return resToAnthHandleOutputItemAdded(evt, state)
 		}
 		return resToAnthEmitTool(tool, state)
@@ -894,9 +916,18 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	var events []AnthropicStreamEvent
 	if evt.Response != nil && evt.Response.Status == "completed" {
 		state.successTerminal = true
-		for _, item := range evt.Response.Output {
+		terminalOnlyTools := len(state.toolOrder) == 0
+		for i, item := range evt.Response.Output {
+			if terminalOnlyTools && (item.Type == "function_call" || item.Type == "custom_tool_call") {
+				events = append(events, resToAnthHandleOutputItemDone(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
+				continue
+			}
 			if tool := state.toolItems[item.ID]; tool != nil {
-				resToAnthCompleteTool(tool, item.Arguments, item.Arguments != "", state)
+				raw, present := item.Arguments, item.Arguments != ""
+				if tool.kind == "custom_tool_call" {
+					raw, present = item.Input, item.Input != "" || tool.raw == ""
+				}
+				resToAnthCompleteTool(tool, raw, present, state)
 			}
 		}
 		if state.err != nil {

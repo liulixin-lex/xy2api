@@ -318,3 +318,51 @@ func TestM3FunctionArgumentValidation(t *testing.T) {
 		require.Equal(t, "cipher", resp.Output[0].Arguments)
 	})
 }
+
+func TestM3CustomToolResponse(t *testing.T) {
+	for _, input := range []string{"patch\ntext", "", "你好 🌍"} {
+		for _, carrier := range []string{"delta done", "done", "item", "terminal"} {
+			t.Run(input+"/"+carrier, func(t *testing.T) {
+				item := ResponsesOutput{Type: "custom_tool_call", ID: "ct_a", CallID: "call_a", Name: "patch", Input: input, Status: "completed"}
+				resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+				nonstream := ResponsesToAnthropic(resp, "test")
+				require.Len(t, nonstream.Content, 1)
+				var wrapped map[string]string
+				require.NoError(t, json.Unmarshal(nonstream.Content[0].Input, &wrapped))
+				require.Equal(t, input, wrapped["input"])
+				st := NewResponsesEventToAnthropicState()
+				var events []AnthropicStreamEvent
+				feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+				if carrier != "terminal" {
+					added := item
+					added.Input = ""
+					feed(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &added})
+				}
+				if carrier == "delta done" {
+					feed(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.delta", ItemID: item.ID, Delta: input})
+				}
+				if carrier == "done" || carrier == "delta done" {
+					feed(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", ItemID: item.ID, Input: input, InputPresent: true})
+				}
+				if carrier == "item" {
+					feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+				}
+				feed(&ResponsesStreamEvent{Type: "response.completed", Response: resp})
+				require.NoError(t, st.Err())
+				var raw string
+				var stops int
+				for _, e := range events {
+					if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+						raw += e.Delta.PartialJSON
+					}
+					if e.Type == "content_block_stop" {
+						stops++
+					}
+				}
+				require.JSONEq(t, string(nonstream.Content[0].Input), raw)
+				require.Equal(t, 1, stops)
+			})
+		}
+	}
+	require.NoError(t, ValidateResponsesForAnthropic(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "function_call", Arguments: `{"input":"normal"}`}}}))
+}
