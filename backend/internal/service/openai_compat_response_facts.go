@@ -42,7 +42,7 @@ func observeOpenAICompatFrame(c *gin.Context, resp *http.Response, frame openAIC
 	if terminal.Seen {
 		facts.TerminalSeen, facts.TerminalValid = true, terminal.Valid
 	}
-	if terminal.Seen && terminal.Valid && !terminal.Failure && c != nil && c.Request != nil {
+	if terminal.Seen && terminal.Valid && !terminal.Failure && c != nil && c.Request != nil && !strings.Contains(c.Request.URL.Path, "/messages") {
 		recordConvertedTerminalMapping(c.Request.Context(), "responses", "chat", terminal.Status, gjson.GetBytes(data, "response.incomplete_details.reason").String())
 	}
 	facts.PartialFailure = facts.PartialFailure || terminal.Failure

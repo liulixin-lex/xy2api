@@ -155,7 +155,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
 	anthropicReq.Model = upstreamModel
-	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	responsesReq, err := apicompat.AnthropicToResponsesWithOptions(&anthropicReq, m7ConversionOptions(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}
@@ -739,7 +739,11 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
 		return nil, err
 	}
-	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, originalModel)
+	if err := apicompat.ValidateResponsesForAnthropic(finalResponse); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
+	anthropicResp := apicompat.ResponsesToAnthropicWithOptions(finalResponse, originalModel, m7ConversionOptions(c.Request.Context()))
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -1025,7 +1029,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
-	state := apicompat.NewResponsesEventToAnthropicState()
+	state := apicompat.NewResponsesEventToAnthropicStateWithOptions(m7ConversionOptions(c.Request.Context()))
 	state.Model = originalModel
 	var usage OpenAIUsage
 	responseID := ""
@@ -1314,6 +1318,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				resilience.StateFrom(c.Request.Context()).NotePreludeStaged(startTime)
 			}
 			deferredOpenAIAnthropicEvents(&event, state, true)
+			if err := state.Err(); err != nil {
+				WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+				streamNonFailoverErr = err
+				return true
+			}
 			return false
 		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
@@ -1327,6 +1336,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			events = append(events, deferredOpenAIAnthropicEvents(&event, state, false)...)
 		} else {
 			events = apicompat.ResponsesEventToAnthropicEvents(&event, state)
+		}
+		if err := state.Err(); err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			streamNonFailoverErr = err
+			return true
 		}
 		if !clientDisconnected {
 			for _, evt := range events {
@@ -1370,7 +1384,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if streamNonFailoverErr != nil {
 			return resultWithUsage(), streamNonFailoverErr
 		}
-		if finalEvents := apicompat.FinalizeResponsesAnthropicStream(state); len(finalEvents) > 0 && !clientDisconnected {
+		finalEvents := apicompat.FinalizeResponsesAnthropicStream(state)
+		if err := state.Err(); err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			return resultWithUsage(), err
+		}
+		if len(finalEvents) > 0 && !clientDisconnected {
 			for _, evt := range finalEvents {
 				sse, err := apicompat.ResponsesAnthropicEventToSSE(evt)
 				if err != nil {
