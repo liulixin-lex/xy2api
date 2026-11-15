@@ -415,7 +415,7 @@ func FlattenResponsesNamespacesWithBridgeOptions(req map[string]any, opts Conver
 	}
 	names := make(map[string]ResponsesNamespaceName)
 	for alias, id := range opts.Bridge.ToolNames.Reverse {
-		names[alias] = ResponsesNamespaceName{Kind: id.Kind, Namespace: id.Namespace, Name: id.Name}
+		names[alias] = ResponsesNamespaceName(id)
 	}
 	return names, true, nil
 }
@@ -500,13 +500,14 @@ func bridgeChatNameIndexes(names *BridgeToolNameMap) (map[string]bool, map[strin
 	namespaces := make(map[string]NamespacedToolName)
 	if names != nil {
 		for alias, id := range names.Reverse {
-			if id.Kind == "custom" {
+			switch id.Kind {
+			case "custom":
 				custom[alias] = true
-			} else if id.Kind == "function" {
+			case "function":
 				functions[alias] = true
 			}
 			if id.Namespace != "" {
-				namespaces[alias] = NamespacedToolName{Kind: id.Kind, Namespace: id.Namespace, Name: id.Name}
+				namespaces[alias] = NamespacedToolName(id)
 			}
 		}
 	}

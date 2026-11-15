@@ -2322,7 +2322,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			continue
 		}
 		arguments := toolCall.Function.Arguments
-		if strings.TrimSpace(arguments) == "" && !(bridgeEnabled(state.Bridge) && state.FinishReason == "length") {
+		if strings.TrimSpace(arguments) == "" && (!bridgeEnabled(state.Bridge) || state.FinishReason != "length") {
 			arguments = "{}"
 		}
 		if state.toolIsCustom[i] {
