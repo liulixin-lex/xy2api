@@ -475,7 +475,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			}
 			for _, restored := range payloads {
 				eventType := gjson.GetBytes(restored, "type").String()
-				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+				if _, err := writeConvertedResponsesFrame(c, fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, restored)); err != nil {
 					clientDisconnected = true
 					cancelSchedClient(c)
 					return
@@ -542,7 +542,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			}
 			for _, restored := range payloads {
 				eventType := gjson.GetBytes(restored, "type").String()
-				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+				if _, err := writeConvertedResponsesFrame(c, fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, restored)); err != nil {
 					clientDisconnected = true
 					cancelSchedClient(c)
 					break

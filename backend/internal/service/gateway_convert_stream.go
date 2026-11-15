@@ -573,7 +573,7 @@ func (st *gatewayConvertStream) write(frames []string) {
 	}
 	st.headers(true)
 	for _, frame := range frames {
-		n, err := st.c.Writer.Write([]byte(frame))
+		n, err := writeConvertedResponsesFrame(st.c, frame)
 		if n > 0 && !st.written {
 			st.written = true
 			// After the first output a departed client no longer stops the

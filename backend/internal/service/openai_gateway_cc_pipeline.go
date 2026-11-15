@@ -535,8 +535,7 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 		id, model, createdAt, sequence := "", "", time.Now().Unix(), int64(0)
 		opened := false
 		var usage json.RawMessage
-		if w := deliveryWriterFrom(c); w != nil {
-			s := &w.terminal
+		if s := convertedResponsesErrorState(c); s != nil {
 			s.mu.Lock()
 			id, model, sequence, opened = s.id, s.model, s.nextSequence, s.opened
 			if s.createdAt != 0 {
