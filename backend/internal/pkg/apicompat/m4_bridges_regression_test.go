@@ -936,3 +936,53 @@ func TestM4InvalidToolArguments(t *testing.T) {
 		t.Fatal("EOF became successful empty arguments")
 	}
 }
+
+func TestM4LengthToolGate(t *testing.T) {
+	for _, kind := range []string{"function", "custom", "tool_search"} {
+		for _, args := range []string{`{}`, ``, `{broken`} {
+			t.Run(kind+args, func(t *testing.T) {
+				bridge := &BridgeOptions{Enabled: true}
+				name := "lookup"
+				custom := map[string]bool(nil)
+				search := false
+				if kind == "custom" {
+					name = "exec"
+					custom = map[string]bool{name: true}
+					bridge.ToolNames = &BridgeToolNameMap{Reverse: map[string]ToolNameIdentity{name: {Kind: "custom", Name: name}}}
+				}
+				if kind == "tool_search" {
+					name = toolSearchProxyName
+					search = true
+				}
+				call := ChatToolCall{ID: "c", Function: ChatFunctionCall{Name: name, Arguments: args}}
+				response := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Content: json.RawMessage(`"partial"`), ToolCalls: []ChatToolCall{call}}, FinishReason: "length"}}, Usage: &ChatUsage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}}
+				out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(response, "m", custom, nil, search, nil, ConversionOptions{Bridge: bridge})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if out.Status != "incomplete" || len(out.Output) != 2 || out.Output[1].Status != "incomplete" || out.Usage.TotalTokens != 7 {
+					t.Fatalf("buffered=%+v", out)
+				}
+				state := NewChatCompletionsToResponsesStreamState("m")
+				state.Bridge = bridge
+				state.CustomTools = custom
+				state.ToolSearchDeclared = search
+				reason := "length"
+				events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: []ChatToolCall{call}}, FinishReason: &reason}}, Usage: response.Usage}, state)
+				events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+				if state.Err() != nil {
+					t.Fatal(state.Err())
+				}
+				for _, e := range events {
+					if e.Type == "response.function_call_arguments.done" || e.Type == "response.custom_tool_call_input.done" || (e.Type == "response.output_item.done" && e.Item.Type != "message") {
+						t.Fatalf("truncated executable completion: %+v", e)
+					}
+				}
+				terminal := events[len(events)-1].Response
+				if terminal.Status != "incomplete" || terminal.Output[0].Status != "incomplete" || terminal.Usage.TotalTokens != 7 {
+					t.Fatalf("terminal=%+v", terminal)
+				}
+			})
+		}
+	}
+}
