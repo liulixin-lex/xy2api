@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-11-15
+
+账号列表恢复状态颜色、悬停提示改为数据卡片，分组和用户管理的工具栏更紧凑。
+
 ### 账号管理
 
 - 调度与智商检测开关的开启色用回品牌青绿。
@@ -2076,7 +2080,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/liulixin-lex/xy2api/compare/v0.6.5...v0.6.6
 [0.6.1]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/liulixin-lex/xy2api/compare/v0.5.15...v0.6.0
