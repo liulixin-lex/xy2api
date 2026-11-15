@@ -214,6 +214,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	logger.L().Debug("openai messages: model mapping applied", logFields...)
 
 	// 4. Marshal Responses request body, then apply the ChatGPT/Codex transform.
+	prepared, prepareErr := apicompat.PrepareNativeResponsesRequest(*responsesReq, m7ConversionOptions(ctx))
+	if prepareErr != nil {
+		return nil, fmt.Errorf("prepare Responses request: %w", prepareErr)
+	}
+	*responsesReq = prepared
 	responsesBody, err := json.Marshal(responsesReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)

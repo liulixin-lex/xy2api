@@ -70,6 +70,15 @@ func TestOpenAIProtocolConversionRejectsBeforeUpstreamAndHealthReporting(t *test
 			})
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.endpoint, strings.NewReader(tc.body)))
+			if tc.field == "stop" {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Positive(t, upstream.calls)
+				require.Empty(t, repo.setErrorIDs)
+				require.Empty(t, repo.setTempIDs)
+				require.Empty(t, repo.rateLimitIDs)
+				require.False(t, state.AccountFailed(801))
+				return
+			}
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
 			require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), tc.field)
