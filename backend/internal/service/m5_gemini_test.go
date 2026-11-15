@@ -20,6 +20,75 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestM5IntermediateThinkingBudget(t *testing.T) {
+	for _, limit := range []int{512, 8192} {
+		for _, stream := range []bool{false, true} {
+			for _, alias := range []bool{false, true} {
+				for _, model := range []string{"gemini-2.5-flash", "gemini-3.1-pro"} {
+					for _, tc := range []struct{ name, field, effort string }{
+						{"default", "", ""}, {"null", `,"reasoning_effort":null`, ""}, {"empty", `,"reasoning_effort":""`, ""},
+						{"none", `,"reasoning_effort":"none"`, "none"}, {"low", `,"reasoning_effort":"low"`, "low"}, {"medium", `,"reasoning_effort":"medium"`, "medium"}, {"high", `,"reasoning_effort":"high"`, "high"},
+						{"reasoning_string", `,"reasoning":"high"`, "high"},
+					} {
+						t.Run(fmt.Sprintf("%s/%d/%s/alias=%t/stream=%t", model, limit, tc.name, alias, stream), func(t *testing.T) {
+							account := geminiSignalTestAccount()
+							requested := model
+							if alias {
+								requested = "claude-sonnet-4-5"
+								account.Credentials["model_mapping"] = map[string]any{requested: model, model: "wrong-second-mapping"}
+							}
+							body := []byte(fmt.Sprintf(`{"model":%q,"max_tokens":%d,"stream":%t,"messages":[{"role":"user","content":"hi"}]%s}`, requested, limit, stream, tc.field))
+							wire, result, _ := m5ForwardChat(t, body, account)
+							require.Equal(t, int64(limit), gjson.GetBytes(wire, "generationConfig.maxOutputTokens").Int())
+							thinking := gjson.GetBytes(wire, "generationConfig.thinkingConfig")
+							if tc.effort == "" {
+								require.False(t, thinking.Exists())
+								require.Nil(t, result.ReasoningEffort)
+								return
+							}
+							require.Equal(t, tc.effort, optionalStringValue(result.RequestedReasoningEffort))
+							if model == "gemini-2.5-flash" {
+								require.Equal(t, int64(map[string]int{"none": 0, "low": 1024, "medium": 8192, "high": 24576}[tc.effort]), thinking.Get("thinkingBudget").Int())
+								require.Nil(t, result.ReasoningEffort)
+							} else {
+								actual := tc.effort
+								if actual == "none" {
+									actual = "low"
+								}
+								require.Equal(t, actual, thinking.Get("thinkingLevel").String())
+								require.Equal(t, actual, optionalStringValue(result.ReasoningEffort))
+							}
+							if tc.effort != "none" {
+								require.False(t, thinking.Get("includeThoughts").Exists(), "the intermediate must not invent adaptive/output intent")
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+	t.Run("real_claude_budget_and_copy", func(t *testing.T) {
+		limit := 512
+		req := &apicompat.ResponsesRequest{Model: "claude-sonnet-4-5", MaxOutputTokens: &limit, Reasoning: &apicompat.ResponsesReasoning{Effort: "high"}, Input: json.RawMessage(`"hi"`)}
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+		out, err := apicompat.ResponsesToGeminiIntermediateRequest(req, "gemini-2.5-flash", apicompat.ConversionOptions{})
+		require.NoError(t, err)
+		require.Nil(t, out.Thinking)
+		require.Equal(t, 512, out.MaxTokens)
+		require.Equal(t, "high", out.OutputConfig.Effort)
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+		_, err = apicompat.ResponsesToAnthropicRequest(req)
+		require.Error(t, err, "Gemini tagging must not leak into a real Claude request")
+		limit = 8192
+		claude, err := apicompat.ResponsesToAnthropicRequest(req)
+		require.NoError(t, err)
+		require.Equal(t, 8191, claude.Thinking.BudgetTokens)
+	})
+}
+
 func TestM5ThinkingConfig(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		for _, tt := range []struct {

@@ -43,17 +43,43 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	clientStream := ccReq.Stream
 	includeUsage := ccReq.StreamOptions != nil && ccReq.StreamOptions.IncludeUsage
 
-	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
+	opts := apicompat.ConversionOptions{}
+	convertChat := apicompat.ChatCompletionsToResponses
+	if account.Type == AccountTypeAPIKey {
+		opts = geminiCompatConversionOptions(ctx)
+		convertChat = func(req *apicompat.ChatCompletionsRequest) (*apicompat.ResponsesRequest, error) {
+			return apicompat.ChatCompletionsToResponsesWithOptions(req, opts)
+		}
+	}
+	responsesReq, err := convertChat(&ccReq)
 	if err != nil {
+		var conversion *apicompat.UnsupportedConversionError
+		if account.Type == AccountTypeAPIKey && errors.As(err, &conversion) {
+			return nil, err
+		}
 		_ = s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
 
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	convertIntermediate := apicompat.ResponsesToAnthropicRequest
+	if account.Type == AccountTypeAPIKey {
+		mappedModel := account.GetMappedModel(originalModel)
+		convertIntermediate = func(req *apicompat.ResponsesRequest) (*apicompat.AnthropicRequest, error) {
+			return apicompat.ResponsesToGeminiIntermediateRequest(req, mappedModel, opts)
+		}
+	}
+	anthropicReq, err := convertIntermediate(responsesReq)
 	if err != nil {
+		var conversion *apicompat.UnsupportedConversionError
+		if account.Type == AccountTypeAPIKey && errors.As(err, &conversion) {
+			return nil, err
+		}
 		_ = s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
+	// The intermediate policy used the final model; the forwarder below still
+	// owns the single account mapping of the original request model.
+	anthropicReq.Model = originalModel
 	anthropicReq.Stream = clientStream
 
 	claudeBody, err := json.Marshal(anthropicReq)
