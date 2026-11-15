@@ -2,32 +2,32 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <TableToolbar>
+        <!-- The compact toolbar (12.9): live, refresh, filter and column settings, a rule, then attributes, the bulk
+             menu and create. -->
+        <TableToolbar compact>
           <template #status>
             <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
           </template>
           <template #search>
-            <div class="relative">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
+            <label class="table-toolbar__search-box">
+              <span class="sr-only">{{ t('admin.users.searchUsers') }}</span>
+              <Icon name="search" size="sm" class="table-toolbar__search-icon" />
               <input
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10"
+                class="table-toolbar__input"
                 @input="handleSearch"
               />
-            </div>
+            </label>
           </template>
 
           <template #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-32">
+            <div v-if="visibleFilters.has('role')" class="w-28">
               <Select
                 v-model="filters.role"
+                size="sm"
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
                   { value: 'admin', label: t('admin.users.admin') },
@@ -39,9 +39,10 @@
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-32">
+            <div v-if="visibleFilters.has('status')" class="w-28">
               <Select
                 v-model="filters.status"
+                size="sm"
                 :options="[
                   { value: '', label: t('admin.users.allStatus') },
                   { value: 'active', label: t('common.active') },
@@ -52,9 +53,10 @@
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-44">
+            <div v-if="visibleFilters.has('group')" class="w-28">
               <Select
                 v-model="filters.group"
+                size="sm"
                 :options="groupFilterOptions"
                 searchable
                 creatable
@@ -65,9 +67,10 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-44">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-28">
               <Select
                 v-model="filters.apiKeyGroup"
+                size="sm"
                 :options="apiKeyGroupFilterOptions"
                 searchable
                 :search-placeholder="t('admin.users.searchApiKeyGroups')"
@@ -79,7 +82,7 @@
             <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-36"
+                class="relative w-28"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input
@@ -88,7 +91,7 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
                 <!-- Number type: number input -->
                 <input
@@ -98,13 +101,14 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
                 <!-- Select/Multi-select type -->
                 <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
                   <div class="w-full">
                     <Select
                       :model-value="value"
+                      size="sm"
                       :options="[
                         { value: '', label: getAttributeDefinitionName(Number(attrId)) },
                         ...(getAttributeDefinition(Number(attrId))?.options || [])
@@ -120,45 +124,47 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
               </div>
             </template>
           </template>
 
           <template #actions>
-            <!-- Refresh Button -->
             <button
+              type="button"
               @click="refreshUsers"
               :disabled="loading"
-              class="btn btn-secondary px-3 table-toolbar__icon"
+              class="table-toolbar__icon-btn table-toolbar__icon"
               :aria-label="t('common.refresh')"
               v-tip="t('common.refresh')"
             >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
             </button>
             <!-- Filter Settings Dropdown -->
             <div class="relative" ref="filterDropdownRef">
               <button
+                type="button"
                 @click="showFilterDropdown = !showFilterDropdown"
-                class="btn btn-secondary px-3"
+                class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.users.filterSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showFilterDropdown ? 'true' : 'false'"
                 v-tip="t('admin.users.filterSettings')"
               >
-                <Icon name="filter" size="sm" class="mr-1.5" />
-                <span class="table-toolbar__label">{{ t('admin.users.filterSettings') }}</span>
+                <Icon name="filter" size="sm" />
               </button>
-              <!-- Dropdown menu -->
               <div
                 v-if="showFilterDropdown"
-                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
               >
                 <!-- Built-in filters -->
                 <button
                   v-for="filter in builtInFilters"
                   :key="filter.key"
+                  type="button"
                   @click="toggleBuiltInFilter(filter.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  :class="[POPOVER_ITEM, visibleFilters.has(filter.key) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF]"
                 >
                   <span>{{ filter.name }}</span>
                   <Icon
@@ -172,14 +178,15 @@
                 <!-- Divider if custom attributes exist -->
                 <div
                   v-if="filterableAttributes.length > 0"
-                  class="my-1 border-t border-gray-100 dark:border-dark-700"
+                  class="my-1 border-t border-line-popover"
                 ></div>
                 <!-- Custom attribute filters -->
                 <button
                   v-for="attr in filterableAttributes"
                   :key="attr.id"
+                  type="button"
                   @click="toggleAttributeFilter(attr)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  :class="[POPOVER_ITEM, visibleFilters.has(`attr_${attr.id}`) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF]"
                 >
                   <span>{{ attr.name }}</span>
                   <Icon
@@ -195,31 +202,33 @@
             <!-- Column Settings Dropdown -->
             <div class="relative" ref="columnDropdownRef">
               <button
+                type="button"
                 @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-3"
+                class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.users.columnSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
                 v-tip="t('admin.users.columnSettings')"
               >
-                <svg class="h-4 w-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
-                <span class="table-toolbar__label">{{ t('admin.users.columnSettings') }}</span>
               </button>
-              <!-- Dropdown menu -->
               <div
                 v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
               >
                 <button
                   v-for="col in toggleableColumns"
                   :key="col.key"
+                  type="button"
                   :disabled="isForcedVisibleColumn(col.key)"
                   @click="toggleColumn(col.key)"
                   :class="[
-                    'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
+                    POPOVER_ITEM,
                     isForcedVisibleColumn(col.key)
                       ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                      : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
+                      : isColumnVisible(col.key) ? POPOVER_ITEM_ON : POPOVER_ITEM_OFF
                   ]"
                   :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
                 >
@@ -234,75 +243,65 @@
                 </button>
               </div>
             </div>
-            <!-- Attributes Config Button -->
+            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
               v-if="canManage"
+              type="button"
               @click="showAttributesModal = true"
-              class="btn btn-secondary px-3"
+              class="table-toolbar__btn table-toolbar__btn--secondary"
               :aria-label="t('admin.users.attributes.configButton')"
               v-tip="t('admin.users.attributes.configButton')"
             >
-              <Icon name="cog" size="sm" class="mr-1.5" />
-              <span class="table-toolbar__label">{{ t('admin.users.attributes.configButton') }}</span>
+              <Icon name="cog" size="sm" />
+              <span class="table-toolbar__label table-toolbar__label--wide">{{ t('admin.users.attributes.configButton') }}</span>
             </button>
 
-            <!-- The bulk actions are always there, disabled until a row is ticked: the toolbar keeps its rows and the
-                 table its place when the selection starts (7s-4). The count goes in the tip (read with the button on
-                 focus), so the buttons keep their width. -->
-            <button
-              v-if="canManage"
-              class="btn btn-secondary"
-              data-test="bulk-edit-limits"
-              :disabled="selectedCount === 0"
-              :aria-label="t('admin.users.bulkLimits.label')"
-              v-tip="t('admin.users.bulkLimits.action', { count: selectedCount })"
-              @click="showBulkEditModal = true"
-            >
-              <Icon name="users" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.bulkLimits.label') }}</span>
-            </button>
+            <!-- The four bulk actions in one menu (12.9-5), disabled until a row is ticked, the count on the button in a
+                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. -->
+            <div v-if="canManage" ref="bulkRootRef" class="relative">
+              <button
+                ref="bulkButtonRef"
+                type="button"
+                class="table-toolbar__btn table-toolbar__btn--secondary users-bulk"
+                data-test="bulk-actions"
+                :disabled="selectedCount === 0"
+                aria-haspopup="menu"
+                :aria-expanded="bulkMenuOpen ? 'true' : 'false'"
+                :aria-label="t('admin.users.bulkActions')"
+                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : t('admin.users.bulkActions')"
+                @click="bulkMenuOpen = !bulkMenuOpen"
+              >
+                <Icon name="users" size="sm" />
+                <span class="table-toolbar__label">{{ t('admin.users.bulkActions') }}</span>
+                <span class="users-bulk__count" :class="{ 'is-empty': selectedCount === 0 }" data-test="bulk-count">{{ selectedCount || '' }}</span>
+                <Icon name="chevronDown" size="xs" class="users-bulk__chevron" />
+              </button>
+              <div
+                v-if="bulkMenuOpen"
+                ref="bulkMenuRef"
+                role="menu"
+                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-popover"
+                :style="{ zIndex: bulkMenuLayer.zIndex.value }"
+                data-test="bulk-menu"
+              >
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" @click="bulkMenuOpen = false; showBulkEditModal = true">
+                  {{ t('admin.users.bulkLimits.label') }}
+                </button>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
+                  {{ t('admin.users.enable') }}
+                </button>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
+                  {{ t('admin.users.disable') }}
+                </button>
+                <div class="my-1 border-t border-line-popover"></div>
+                <button type="button" role="menuitem" :class="[BULK_ITEM, '!text-status-error-text']" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
+                  {{ t('common.delete') }}
+                </button>
+              </div>
+            </div>
 
-            <button
-              v-if="canManage"
-              class="btn btn-secondary"
-              data-test="bulk-disable-users"
-              :disabled="selectedCount === 0 || bulkStatusUpdating"
-              :aria-label="t('admin.users.disable')"
-              v-tip="t('admin.users.bulkStatus.disableAction', { count: selectedCount })"
-              @click="openBulkStatus('disabled')"
-            >
-              <Icon name="ban" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.disable') }}</span>
-            </button>
-
-            <button
-              v-if="canManage"
-              class="btn btn-secondary"
-              data-test="bulk-enable-users"
-              :disabled="selectedCount === 0 || bulkStatusUpdating"
-              :aria-label="t('admin.users.enable')"
-              v-tip="t('admin.users.bulkStatus.enableAction', { count: selectedCount })"
-              @click="openBulkStatus('active')"
-            >
-              <Icon name="checkCircle" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.enable') }}</span>
-            </button>
-
-            <button
-              v-if="canManage"
-              class="btn btn-danger"
-              data-test="bulk-delete-users"
-              :disabled="selectedCount === 0 || bulkDeleting"
-              :aria-label="t('common.delete')"
-              v-tip="t('admin.users.bulkDelete.action', { count: selectedCount })"
-              @click="bulkDeleteIds = [...selectedIds]"
-            >
-              <Icon name="trash" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('common.delete') }}</span>
-            </button>
-
-            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary max-lg:gap-1.5 max-lg:px-3">
-              <Icon name="plus" size="md" class="mr-2 max-lg:mr-0 max-lg:h-4 max-lg:w-4" />
+            <button v-if="canManage" type="button" @click="showCreateModal = true" class="table-toolbar__btn table-toolbar__btn--primary">
+              <Icon name="plus" size="sm" />
               {{ t('admin.users.createUser') }}
             </button>
           </template>
@@ -1533,6 +1532,31 @@ const {
   getId: (user) => user.id
 })
 const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
+
+// The toolbar's dropdown rows in the popover material (12.6): the ticked ones drawn as selected.
+const POPOVER_ITEM = 'flex w-full items-center justify-between px-4 py-2 text-left text-sm'
+const POPOVER_ITEM_ON = 'bg-surface-popover-selected text-fg-popover-selected'
+const POPOVER_ITEM_OFF = 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'
+const BULK_ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
+// The bulk menu is a sub-layer like the row menu: Escape closes it and gives focus back to its button, a dialog it
+// opens closes it, a press outside closes it (handleClickOutside). It closes when the last row is unticked.
+const bulkMenuOpen = ref(false)
+const bulkRootRef = ref<HTMLElement | null>(null)
+const bulkButtonRef = ref<HTMLButtonElement | null>(null)
+const bulkMenuRef = ref<HTMLElement | null>(null)
+const bulkMenuLayer = useOverlayLayer(bulkMenuOpen, {
+  root: bulkMenuRef,
+  modal: false,
+  floor: 9999,
+  onEscape: () => {
+    bulkMenuOpen.value = false
+    bulkButtonRef.value?.focus({ preventScroll: true })
+  },
+  onCovered: () => { bulkMenuOpen.value = false }
+})
+watch(selectedCount, (count) => {
+  if (count === 0) bulkMenuOpen.value = false
+})
 const userRowClass = (row: LiveUser) =>
   liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
 watch(usageSort, (sort, previous) => {
@@ -1635,6 +1659,9 @@ const handleClickOutside = (event: MouseEvent) => {
   // Close column dropdown when clicking outside
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
     showColumnDropdown.value = false
+  }
+  if (bulkRootRef.value && !bulkRootRef.value.contains(target)) {
+    bulkMenuOpen.value = false
   }
   // Close usage sort dropdown when clicking outside any usage-sort-trigger
   if (openUsageSortMenu.value !== null && !target.closest('.usage-sort-trigger')) {
@@ -2003,5 +2030,39 @@ onUnmounted(() => {
 .dense-cells :deep(tbody td) {
   padding-right: var(--cell-pad-x);
   padding-left: var(--cell-pad-x);
+}
+/* The bulk menu's button (12.9-5): the count in a slot as wide as three digits, empty until a row is ticked, so the
+   button keeps its width; below 1024px a badge on the corner of the 40px square, the chevron gone. */
+.users-bulk {
+  position: relative;
+}
+.users-bulk__count {
+  min-width: 30px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-pill-hover);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+}
+.users-bulk__count.is-empty {
+  visibility: hidden;
+}
+@media (max-width: 1023px) {
+  .users-bulk__count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    background: theme('colors.primary.500');
+    color: #fff;
+  }
+  .users-bulk__count.is-empty,
+  .users-bulk__chevron {
+    display: none;
+  }
 }
 </style>

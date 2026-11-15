@@ -507,20 +507,18 @@ export default {
 
     // Users Management
     users: {
+      bulkActions: '批量操作',
       title: '用户管理',
       description: '管理用户账户和权限',
       liveDetail: '余额与并发 10 秒、用量 30 秒',
       createUser: '创建用户',
       bulkDelete: {
-        action: '批量删除（{count}）',
         title: '删除已选用户',
         confirm: '确定删除已选的 {count} 个用户吗？此操作无法撤销。管理员账号无法删除。',
         success: '已删除 {count} 个用户',
         failed: '{count} 个用户删除失败，已保留选中，可重试。'
       },
       bulkStatus: {
-        disableAction: '批量禁用（{count}）',
-        enableAction: '批量启用（{count}）',
         disableTitle: '禁用已选用户',
         enableTitle: '启用已选用户',
         disableConfirm: '确定禁用已选的 {count} 个用户吗？禁用后这些用户无法登录，名下 API Key 立即停止服务；账号、余额和 API Key 都会保留，可随时批量启用恢复。管理员账号不会被禁用。',
@@ -531,7 +529,6 @@ export default {
         failed: '批量修改用户状态失败，已保留选中，可重试。'
       },
       bulkLimits: {
-        action: '批量设置限制（{count}）',
         label: '设置限制',
         title: '批量设置用户限制',
         selectedCount: '已选择 {count} 个用户',
