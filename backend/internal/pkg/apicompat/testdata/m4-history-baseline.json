@@ -1,0 +1,2355 @@
+[
+  {
+    "Name": "id_length_41",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "id_length_65",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "id_length_129",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "id_no_prefix",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "xyz789",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "xyz789"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "xyz789",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "xyz789",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "xyz789",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "xyz789"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_xyz789",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_xyz789",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "id_special",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "abc:/+?= 空格#[]",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "abc:/+?= 空格#[]"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "abc:/+?= 空格#[]",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "abc:/+?= 空格#[]",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "abc:/+?= 空格#[]",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "abc:/+?= 空格#[]"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_abc:/+?= 空格#[]",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_abc:/+?= 空格#[]",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_string",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_text_array",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "text",
+            "text": "one"
+          },
+          {
+            "type": "text",
+            "text": "two"
+          }
+        ],
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "onetwo"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "onetwo",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "onetwo"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_image_array",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://example.invalid/image.png"
+            }
+          }
+        ],
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": [
+          {
+            "type": "input_image",
+            "image_url": "https://example.invalid/image.png"
+          }
+        ]
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "[{\"text\":\"[Tool output media moved to the following user message]\",\"type\":\"input_text\"}]",
+          "tool_call_id": "c"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "[Tool output media for call c]"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "https://example.invalid/image.png"
+              }
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": [
+                {
+                  "type": "image",
+                  "source": {
+                    "type": "url",
+                    "url": "https://example.invalid/image.png"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_empty_string",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "(empty)"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "(empty)",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "(empty)"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_missing",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "(empty)"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "(empty)",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "(empty)"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_null",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": null,
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "(empty)"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "(empty)",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "(empty)"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_empty_array",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [],
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "(empty)"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "(empty)",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "(empty)"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "content_unknown_array",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "mystery",
+            "text": "ok"
+          }
+        ],
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": null,
+    "SourceError": "unsupported protocol conversion at content.type: unsupported Chat content part",
+    "Chat": null,
+    "ChatError": "",
+    "Anthropic": null,
+    "AnthropicError": ""
+  },
+  {
+    "Name": "parallel_reverse_results",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "a",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          },
+          {
+            "id": "b",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "B",
+        "tool_call_id": "b"
+      },
+      {
+        "role": "tool",
+        "content": "A",
+        "tool_call_id": "a"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "a",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call",
+        "call_id": "b",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "b",
+        "output": "B"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "a",
+        "output": "A"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "a",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "b",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "A",
+          "tool_call_id": "a"
+        },
+        {
+          "role": "tool",
+          "content": "B",
+          "tool_call_id": "b"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_a",
+              "name": "lookup",
+              "input": {}
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_b",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_a",
+              "content": "A"
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_b",
+              "content": "B"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "intervening_user",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "intervening"
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": "intervening"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "c"
+        },
+        {
+          "role": "user",
+          "content": "intervening"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "ok"
+            },
+            {
+              "text": "intervening",
+              "type": "text"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "intervening_system",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "system",
+        "content": "intervening"
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "message",
+        "role": "system",
+        "content": "intervening"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "c"
+        },
+        {
+          "role": "user",
+          "content": "intervening"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "system": "intervening",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "id_reused_across_rounds",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "same",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "first",
+        "tool_call_id": "same"
+      },
+      {
+        "role": "user",
+        "content": "next"
+      },
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "same",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "second",
+        "tool_call_id": "same"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "same",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "same",
+        "output": "first"
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": "next"
+      },
+      {
+        "type": "function_call",
+        "call_id": "same",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "same",
+        "output": "second"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "same",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "second",
+          "tool_call_id": "same"
+        },
+        {
+          "role": "user",
+          "content": "next"
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "same",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "second",
+          "tool_call_id": "same"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_same",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_same",
+              "content": "second"
+            },
+            {
+              "text": "next",
+              "type": "text"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_same",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_same",
+              "content": "second"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "arguments_empty",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": ""
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "arguments_invalid",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{broken"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{broken"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": null
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "legacy_function_pair",
+    "Messages": [
+      {
+        "role": "assistant",
+        "function_call": {
+          "name": "lookup",
+          "arguments": "{}"
+        }
+      },
+      {
+        "role": "function",
+        "content": "ok",
+        "name": "lookup"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "call_legacy_1",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_legacy_1",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_legacy_1",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "call_legacy_1"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "call_legacy_1",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_legacy_1",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "legacy_same_name_fifo",
+    "Messages": [
+      {
+        "role": "assistant",
+        "function_call": {
+          "name": "lookup",
+          "arguments": "{}"
+        }
+      },
+      {
+        "role": "assistant",
+        "function_call": {
+          "name": "lookup",
+          "arguments": "{}"
+        }
+      },
+      {
+        "role": "function",
+        "content": "one",
+        "name": "lookup"
+      },
+      {
+        "role": "function",
+        "content": "two",
+        "name": "lookup"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "call_legacy_1",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call",
+        "call_id": "call_legacy_2",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_legacy_1",
+        "output": "one"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_legacy_2",
+        "output": "two"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_legacy_1",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_legacy_2",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "one",
+          "tool_call_id": "call_legacy_1"
+        },
+        {
+          "role": "tool",
+          "content": "two",
+          "tool_call_id": "call_legacy_2"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "call_legacy_1",
+              "name": "lookup",
+              "input": {}
+            },
+            {
+              "type": "tool_use",
+              "id": "call_legacy_2",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_legacy_1",
+              "content": "one"
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_legacy_2",
+              "content": "two"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "assistant_content_and_calls",
+    "Messages": [
+      {
+        "role": "assistant",
+        "content": "I will call lookup",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "I will call lookup"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "I will call lookup",
+          "tool_calls": [
+            {
+              "id": "c",
+              "type": "function",
+              "function": {
+                "name": "lookup",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "ok",
+          "tool_call_id": "c"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "text": "I will call lookup",
+              "type": "text"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_c",
+              "name": "lookup",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_c",
+              "content": "ok"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "call_without_result",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "result_without_call",
+    "Messages": [
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "c"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call_output",
+        "call_id": "c",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "result_missing_id",
+    "Messages": [
+      {
+        "role": "tool",
+        "content": "ok"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call_output",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [
+        {
+          "role": "tool",
+          "content": "ok"
+        }
+      ],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "result_wrong_id",
+    "Messages": [
+      {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "id": "c",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "ok",
+        "tool_call_id": "other"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call",
+        "call_id": "c",
+        "name": "lookup",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "other",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [],
+      "stream": true
+    },
+    "AnthropicError": ""
+  },
+  {
+    "Name": "legacy_result_without_call",
+    "Messages": [
+      {
+        "role": "function",
+        "content": "ok",
+        "name": "lookup"
+      }
+    ],
+    "Input": [
+      {
+        "type": "function_call_output",
+        "call_id": "lookup",
+        "output": "ok"
+      }
+    ],
+    "SourceError": "",
+    "Chat": {
+      "model": "probe",
+      "messages": [],
+      "stream": true
+    },
+    "ChatError": "",
+    "Anthropic": {
+      "model": "probe",
+      "max_tokens": 8192,
+      "messages": [],
+      "stream": true
+    },
+    "AnthropicError": ""
+  }
+]
