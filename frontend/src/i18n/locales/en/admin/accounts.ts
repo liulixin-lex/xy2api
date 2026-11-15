@@ -26,10 +26,6 @@ export default {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },
         dimReasons: { ttfo: 'slow first token', error: 'error rate too high', cache: 'cache too low' },
-        recentValue: '{label} {value}',
-        recentShort: '{label} · too few samples ({n})',
-        recentNone: '{label} · no data',
-        recentScope: 'The whole account over the last hour; the group dots tell which group and model fall short',
         dotStates: { ok: 'Normal', back: 'Back of queue', exempt: 'Exempt', observe: 'Observing', stopped: 'Stopped' },
         pillTip: '{name} · {state}',
         pillNoQuality: 'No quality data',
@@ -48,7 +44,10 @@ export default {
           sources: { auto: 'Automatic', manual: 'Manual' },
           resume: 'Resumes',
           samples: 'TTFT',
-          count: '{n} sample | {n} samples'
+          count: '{n} sample | {n} samples',
+          countShort: '{n} sample · too few | {n} samples · too few',
+          recentTitle: 'Last hour',
+          recentSince: 'Since {time}'
         },
         statusUntil: 'back in {time}',
         modelLimits: '{n} models rate limited',

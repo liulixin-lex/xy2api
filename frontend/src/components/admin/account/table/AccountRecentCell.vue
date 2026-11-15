@@ -1,8 +1,8 @@
 <template>
-  <div class="recent" :class="{ 'recent--card': card }" data-test="account-recent">
+  <div class="recent" :class="{ 'recent--card': card }" data-test="account-recent" v-tip="tipCard">
     <template v-for="line in lines" :key="line.dim">
       <span class="recent__k">{{ line.label }}</span>
-      <span class="recent__v" :class="line.cls" :data-dim="line.dim" v-tip="line.tip">{{ line.text }}</span>
+      <span class="recent__v" :class="{ 'recent__v--na': line.muted }" :data-dim="line.dim">{{ line.text }}</span>
     </template>
   </div>
 </template>
@@ -13,27 +13,28 @@
  * are the whole account's values over the last hour, so they are never coloured by the summary's `red` mark, which
  * judges one group and model (7k-2): which group, model and dimension fall short is the group dots' and their tips'
  * to tell. Too few samples or no data reads muted. In the narrow card (`card`) the three sit side by side, each label
- * over its value; the thresholds are in the quality panel.
+ * over its value; the thresholds are in the quality panel. The whole cell has one tip card (12.7): the window, then
+ * each dimension's value and sample count.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BackendAccountSummary, BackendMark } from '@/api/admin/schedQualityTypes'
-import { vTip } from '@/utils/tip'
+import { vTip, type TipCard } from '@/utils/tip'
 import { formatRecentPercent, formatRecentSeconds } from './accountRecent'
+import { formatShortTime } from './accountTime'
 
-const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'> | null; card?: boolean }>()
+const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'> | null; card?: boolean }>()
 const { t } = useI18n()
+
+const HOUR_MS = 3_600_000
 
 type Dim = 'ttfo' | 'error' | 'cache'
 const lines = computed(() => {
   const q = props.quality
   const row = (dim: Dim, mark: BackendMark | undefined, value: number | null | undefined, format: (v: number) => string) => {
     const label = t(`admin.accounts.table.dims.${dim}`)
-    if (!mark || value == null) return { dim, label, text: '—', cls: 'recent__v--na', tip: mark ? t('admin.accounts.table.recentNone', { label }) : '' }
-    const text = format(value)
-    const scope = t('admin.accounts.table.recentScope')
-    if (mark.short) return { dim, label, text, cls: 'recent__v--na', tip: `${t('admin.accounts.table.recentShort', { label, n: mark.n })}\n${scope}` }
-    return { dim, label, text, cls: '', tip: `${t('admin.accounts.table.recentValue', { label, value: text })}\n${scope}` }
+    if (!mark || value == null) return { dim, label, mark, text: '—', muted: true }
+    return { dim, label, mark, text: format(value), muted: mark.short }
   }
   return [
     row('ttfo', q?.ttfo, q?.ttfo.p50_ms, formatRecentSeconds),
@@ -41,6 +42,27 @@ const lines = computed(() => {
     row('cache', q?.cache, q?.cache.ratio, (v) => `${Math.round(v * 100)}%`)
   ]
 })
+
+/** "近 1 小时", or "HH:MM 起" when the account's stats were reset within the hour; no tip without quality data. */
+function tipCard(): TipCard | '' {
+  const quality = props.quality
+  if (!quality) return ''
+  const reset = quality.reset_at ? Date.parse(quality.reset_at) : Number.NaN
+  const title = reset > Date.now() - HOUR_MS
+    ? t('admin.accounts.table.tip.recentSince', { time: formatShortTime(quality.reset_at) })
+    : t('admin.accounts.table.tip.recentTitle')
+  return {
+    title,
+    rows: lines.value.map((line) => {
+      const n = line.mark?.n ?? 0
+      return [
+        line.label,
+        line.muted ? { text: line.text, tone: 'muted' } : line.text,
+        t(line.mark?.short ? 'admin.accounts.table.tip.countShort' : 'admin.accounts.table.tip.count', { n }, n)
+      ]
+    })
+  }
+}
 </script>
 
 <style scoped>

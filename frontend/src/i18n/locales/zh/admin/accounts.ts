@@ -26,10 +26,6 @@ export default {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '错误', cache: '缓存' },
         dimReasons: { ttfo: '首字超限', error: '错误率超限', cache: '缓存偏低' },
-        recentValue: '{label} {value}',
-        recentShort: '{label} · 样本不足（{n} 次）',
-        recentNone: '{label} · 暂无数据',
-        recentScope: '全账号近 1 小时的总体数值；哪个分组、哪个模型不达标看分组圆点',
         dotStates: { ok: '正常', back: '后排', exempt: '豁免', observe: '观察中', stopped: '停止' },
         pillTip: '{name} · {state}',
         pillNoQuality: '无质量数据',
@@ -48,7 +44,10 @@ export default {
           sources: { auto: '自动', manual: '手动' },
           resume: '恢复',
           samples: '首字样本',
-          count: '{n} 次'
+          count: '{n} 次',
+          countShort: '{n} 次 · 样本不足',
+          recentTitle: '近 1 小时',
+          recentSince: '{time} 起'
         },
         statusUntil: '{time} 后恢复',
         modelLimits: '{n} 个模型限流',
