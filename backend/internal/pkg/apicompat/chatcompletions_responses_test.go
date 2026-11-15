@@ -2214,6 +2214,14 @@ func TestChatFieldsPreservedForResponses(t *testing.T) {
 			require.NoError(t, err)
 			var notices []ConversionNotice
 			out, err := ChatCompletionsToResponsesWithOptions(&req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+			if tc.errorField == "metadata" || tc.errorField == "user" || tc.errorField == "include" {
+				require.NoError(t, err)
+				require.Empty(t, out.Metadata)
+				require.Empty(t, out.User)
+				require.Equal(t, []string{"reasoning.encrypted_content"}, out.Include)
+				require.Equal(t, []ConversionNotice{{Field: tc.errorField, Action: "omit"}}, notices)
+				return
+			}
 			if tc.errorField != "" {
 				var conversionErr *UnsupportedConversionError
 				require.ErrorAs(t, err, &conversionErr)
@@ -2294,5 +2302,34 @@ func TestReviewM2HistoryArgumentsRemainRaw(t *testing.T) {
 			require.Equal(t, want, input[0].Arguments)
 			require.Equal(t, input[0].CallID, input[1].CallID)
 		}
+	}
+}
+
+func TestReviewM2IllTypedChatFieldsAreOmitted(t *testing.T) {
+	for _, fields := range []string{`"metadata":123,"user":123,"reasoning":[1],"include":false`, `"metadata":{"session":1,"tags":["a"]},"user":12345,"include":"reasoning.encrypted_content"`} {
+		var req ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],`+fields+`}`), &req))
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+		for _, record := range []bool{false, true} {
+			var notices []ConversionNotice
+			opts := ConversionOptions{}
+			if record {
+				opts.Record = func(n ConversionNotice) { notices = append(notices, n) }
+			}
+			out, err := ChatCompletionsToResponsesWithOptions(&req, opts)
+			require.NoError(t, err)
+			require.Empty(t, out.Metadata)
+			require.Empty(t, out.User)
+			require.Nil(t, out.Reasoning)
+			require.Equal(t, []string{"reasoning.encrypted_content"}, out.Include)
+			require.Contains(t, string(out.Input), "hi")
+			if record {
+				require.Equal(t, []ConversionNotice{{Field: "metadata", Action: "omit"}, {Field: "user", Action: "omit"}, {Field: "include", Action: "omit"}}, notices)
+			}
+		}
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
 	}
 }
