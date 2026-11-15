@@ -95,3 +95,32 @@ func TestM1ReviewOAuthChatPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestM1ReviewMixedAntigravityPolicy(t *testing.T) {
+	for _, typ := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+		for _, mode := range []string{"downgrade", "deny", "mapping"} {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+			body := []byte(`{"model":"claude-sonnet-4-6","max_tokens":8192,"output_config":{"effort":"max"},"messages":[{"role":"user","content":"hi"}]}`)
+			key := &service.APIKey{Group: &service.Group{Platform: service.PlatformAnthropic, MaxReasoningEffort: "medium", MaxReasoningEffortOverLimit: mode}}
+			if mode == "mapping" {
+				key.Group.MaxReasoningEffort = ""
+				key.Group.ReasoningEffortMappings = []service.ReasoningEffortMapping{{From: "max", To: "medium"}, {From: "medium", To: "high"}}
+			}
+			bound, _, err := applyAnthropicReasoningEffortPolicyForRequest(c, key, body)
+			require.NoError(t, err)
+			parsed, err := service.ParseGatewayRequest(service.NewRequestBodyRef(bound), service.PlatformAnthropic)
+			require.NoError(t, err)
+			account := &service.Account{Platform: service.PlatformAntigravity, Type: typ, Extra: map[string]any{"mixed_scheduling": true}}
+			err = applyAntigravityReasoningEffortPolicyForRequest(c, account, parsed)
+			if mode == "deny" {
+				require.True(t, service.IsReasoningEffortPolicyDenied(err))
+				require.Equal(t, body, parsed.Body.Bytes())
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "medium", parsed.OutputEffort)
+				require.Equal(t, "medium", gjson.GetBytes(parsed.Body.Bytes(), "output_config.effort").String())
+			}
+		}
+	}
+}

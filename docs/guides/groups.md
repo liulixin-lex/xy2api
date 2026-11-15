@@ -225,3 +225,5 @@ HTTP 请求先保存原始推理档位和分组规则；选定最终账号与模
 Messages 没有显式 output_config.effort 时，不对转换器生成的默认档位执行 cap、mapping 或 deny；OAuth 与 API Key 都保留默认行为。
 
 OAuth Chat 在进入转发链时执行一次分组规则；链式 mapping 不会因内部修复重入而执行第二遍，cap 与 deny 继续生效。
+
+Anthropic 分组混合调度到 Antigravity 时，OAuth 与 API Key 均在转发前执行一次既有分组策略，解析后的实际请求档位随改写更新。

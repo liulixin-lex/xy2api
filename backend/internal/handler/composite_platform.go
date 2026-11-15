@@ -179,3 +179,18 @@ func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *s
 	}
 	c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicy(c.Request.Context(), maxEffort, mappings, overLimit))
 }
+
+// Mixed Antigravity accounts retain the pre-routing group policy semantics.
+func applyAntigravityReasoningEffortPolicyForRequest(c *gin.Context, account *service.Account, parsed *service.ParsedRequest) error {
+	if account == nil || account.Platform != service.PlatformAntigravity || c == nil || c.Request == nil || parsed == nil {
+		return nil
+	}
+	body, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(c.Request.Context(), parsed.Body.Bytes())
+	if err != nil {
+		return err
+	}
+	if changed {
+		return parsed.ReplaceBody(body)
+	}
+	return nil
+}
