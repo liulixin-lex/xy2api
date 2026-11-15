@@ -409,8 +409,8 @@ func TestReconstructResponseOutputFromSSE_MixedDoneAndCompactionAdded(t *testing
 	require.True(t, ok)
 	items := gjson.ParseBytes(outputJSON).Array()
 	require.Len(t, items, 2)
-	require.Equal(t, "msg_1", items[0].Get("id").String())
-	require.Equal(t, "cmp_mixed", items[1].Get("id").String())
+	require.Equal(t, "cmp_mixed", items[0].Get("id").String())
+	require.Equal(t, "msg_1", items[1].Get("id").String())
 
 	// done 已含 compaction：added 中的同一 item（无 id 可去重的最坏情况用
 	// 不同 raw 表达）不得再收集，Codex 要求恰好一个 compaction item。

@@ -70,3 +70,32 @@ func TestM6NonstreamBodyKindAndContentType(t *testing.T) {
 		}
 	}
 }
+
+func TestM6NativeMixedDoneDelta(t *testing.T) {
+	text := `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"answer"}`
+	tool := `{"type":"response.output_item.done","output_index":1,"item":{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}}`
+	for _, tc := range []struct {
+		name, frames, final, expected string
+	}{
+		{"mixed", m6Frame(text) + m6Frame(tool), `[]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}]`},
+		{"reversed", m6Frame(tool) + m6Frame(text) + m6Frame(tool), `[]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}]`},
+		{"partial_terminal", m6Frame(text) + m6Frame(tool), `[{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{\"final\":true}"}]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{\"final\":true}"}]`},
+		{"authoritative_empty", m6Frame(text) + m6Frame(tool), `[{"type":"message","content":[]},{"id":"f1","arguments":""}]`, `[{"type":"message","role":"assistant","content":[]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":""}]`},
+		{"content_indices", m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"sequence_number":2,"delta":"second"}`) + m6Frame(text) + m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"sequence_number":2,"delta":"second"}`), `[]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"},{"type":"output_text","text":"second"}]}]`},
+		{"text_done_tool_delta", m6Frame(`{"type":"response.output_item.done","output_index":0,"item":{"id":"m1","type":"message","content":[{"type":"output_text","text":"answer"}]}}`) + m6Frame(`{"type":"response.function_call_arguments.delta","output_index":1,"item_id":"f1","call_id":"c1","name":"f","delta":"{}"}`), `[]`, `[{"id":"m1","type":"message","content":[{"type":"output_text","text":"answer"}]},{"id":"f1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}]`},
+		{"partial_content", m6Frame(text) + m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":1,"delta":"second"}`), `[{"type":"message","content":[{"type":"output_text","text":""}]}]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":""},{"type":"output_text","text":"second"}]}]`},
+		{"id_only", m6Frame(`{"type":"response.output_item.added","output_index":0,"item":{"id":"m1","type":"message","content":[],"opaque":{"v":1}}}`) + m6Frame(`{"type":"response.output_text.delta","item_id":"m1","delta":"answer"}`), `[]`, `[{"id":"m1","type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}],"opaque":{"v":1}}]`},
+		{"unknown_and_compaction", m6Frame(`{"type":"response.output_item.added","output_index":1,"item":{"id":"cmp","type":"compaction","encrypted_content":"fixture"}}`) + m6Frame(`{"type":"response.output_item.done","output_index":0,"item":{"id":"u","type":"future_item","opaque":[1,{"keep":true}]}}`), `[]`, `[{"id":"u","type":"future_item","opaque":[1,{"keep":true}]},{"id":"cmp","type":"compaction","encrypted_content":"fixture"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			final := `{"id":"r1","status":"completed","output":` + tc.final + `,"usage":{"input_tokens":41,"output_tokens":7}}`
+			for _, pass := range []bool{false, true} {
+				w, usage, err := m6Nonstream(t, pass, tc.frames+m6Frame(`{"type":"response.completed","response":`+final+`}`), "text/event-stream")
+				require.NoError(t, err)
+				require.Equal(t, 41, usage.InputTokens)
+				require.Equal(t, 7, usage.OutputTokens)
+				require.JSONEq(t, tc.expected, gjson.Get(w.Body.String(), "output").Raw, "pass=%t", pass)
+			}
+		})
+	}
+}

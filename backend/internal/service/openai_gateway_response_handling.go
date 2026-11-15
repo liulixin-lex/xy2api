@@ -1966,14 +1966,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
 			*usage = parsedUsage
 		}
-		// When the terminal event has an empty output array, reconstruct
-		// output from accumulated delta events so the client gets full content.
-		// gjson Array() returns empty slice for null, missing, or empty arrays.
-		if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
-			if outputJSON, reconstructed := reconstructResponseOutputFromSSE(bodyText); reconstructed {
-				if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
-					finalResponse = patched
-				}
+		if outputJSON, reconstructed := mergeResponsesOutputFromSSE(finalResponse, bodyText); reconstructed {
+			if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
+				finalResponse = patched
 			}
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
@@ -2431,67 +2426,10 @@ func responsesStreamEventMayContributeToOutput(eventType string) bool {
 	}
 }
 
-// collectRawResponsesOutputItemsFromSSE 按到达顺序收集 SSE 流中
-// response.output_item.done 携带的原始 item。除已产生结果但仍停留在进行中
-// 的图片状态外，item 以 raw JSON 逐字节保留，
-// 避免经窄结构体重建时丢弃 encrypted_content/summary/opaque 等 compact
-// 专属或未来新增字段（#3777 问题 2）。若整条流没有任何 done 事件，退回
-// 收集 output_item.added 中的 compaction 类 item——compaction 结果没有
-// delta 事件，部分上游只在 added 事件中携带完整 item。
+// collectRawResponsesOutputItemsFromSSE keeps raw done items and added-only
+// compaction items in the same output-index order as nonstream reconstruction.
 func collectRawResponsesOutputItemsFromSSE(bodyText string) ([]byte, bool) {
-	var items []json.RawMessage
-	seen := make(map[string]struct{})
-	hasCompactionItem := false
-	appendItem := func(item gjson.Result) {
-		if !item.Exists() || !item.IsObject() {
-			return
-		}
-		key := strings.TrimSpace(item.Get("id").String())
-		if key == "" {
-			key = item.Raw
-		}
-		if _, dup := seen[key]; dup {
-			return
-		}
-		seen[key] = struct{}{}
-		if isResponsesCompactionItemType(item.Get("type").String()) {
-			hasCompactionItem = true
-		}
-		items = append(items, json.RawMessage(item.Raw))
-	}
-	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
-		if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
-			data = normalized
-		}
-		if eventType != "response.output_item.done" {
-			return
-		}
-		appendItem(gjson.GetBytes(data, "item"))
-	})
-	// done 事件未携带 compaction item 时再看 added：覆盖"其他 item 有 done、
-	// compaction 只在 added 中"的混合形态；done 已含 compaction 时跳过，
-	// 避免同一 item 在无 id 可去重时被收集两份（Codex 要求恰好一个）。
-	if !hasCompactionItem {
-		forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-			if eventType != "response.output_item.added" {
-				return
-			}
-			item := gjson.GetBytes(data, "item")
-			if !isResponsesCompactionItemType(item.Get("type").String()) {
-				return
-			}
-			appendItem(item)
-		})
-	}
-	if len(items) == 0 {
-		return nil, false
-	}
-	outputJSON, err := json.Marshal(items)
-	if err != nil {
-		return nil, false
-	}
-	return outputJSON, true
+	return mergeResponsesOutputItems(nil, bodyText, true)
 }
 
 // isResponsesCompactionItemType reports whether the item type is the Codex
@@ -2570,34 +2508,9 @@ func findRawCompactionItemFromSSE(bodyText string) (json.RawMessage, bool) {
 	return found, found != nil
 }
 
-// reconstructResponseOutputFromSSE scans raw SSE body text and returns a
-// JSON-encoded output array for a terminal event whose output is empty.
-// Raw output_item.done items are preferred: per the Responses protocol they
-// are the authoritative final form of each item. Delta accumulation only
-// covers text/function_call/reasoning content and silently drops unknown
-// item types such as compaction — Codex remote compact v2 then fails with
-// "expected exactly one compaction output item, got 0" (#3887).
-// Returns (nil, false) if nothing could be reconstructed.
+// reconstructResponseOutputFromSSE merges each item's done and delta evidence.
 func reconstructResponseOutputFromSSE(bodyText string) ([]byte, bool) {
-	if outputJSON, ok := collectRawResponsesOutputItemsFromSSE(bodyText); ok {
-		return outputJSON, true
-	}
-	acc := apicompat.NewBufferedResponseAccumulator()
-	imageOutputs := make([]json.RawMessage, 0, 1)
-	seenImages := make(map[string]struct{})
-	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
-		if imageOutput, ok := extractImageGenerationOutputFromSSEData(data, seenImages); ok {
-			imageOutputs = append(imageOutputs, imageOutput)
-		}
-		if responsesStreamEventMayContributeToOutput(eventType) {
-			var event apicompat.ResponsesStreamEvent
-			if err := json.Unmarshal(data, &event); err == nil {
-				acc.ProcessEvent(&event)
-			}
-		}
-	})
-	return buildResponsesOutputJSON(acc, imageOutputs)
+	return mergeResponsesOutputFromSSE(nil, bodyText)
 }
 
 func buildResponsesOutputJSON(acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {

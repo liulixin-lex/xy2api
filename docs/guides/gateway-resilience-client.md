@@ -90,6 +90,8 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 
 上游已经发出开场事件、但还没有正文时失败（过载、服务忙、断流、读错），网关会换号重试，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 ID），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。包括工具被 length 截断在内的 `response.incomplete`、内容拒绝与只有用量的合法空回答照常返回，不重放。一旦写出正文（哪怕只写出一部分），就不再换号。
 
+非流式 Responses 聚合时按输出项与内容索引补齐 delta 和 done，部分终态不会丢掉其他文本或工具结果；终态已明确给出的值（包括空值）优先，未知输出项与 compaction 字段保留。
+
 ### 中转伪保活帧
 
 部分中转会插入 `SSE-Keep-Alive` 空 delta 帧，或在 `response.created` 之前发出空字符串、纯空白的 delta。网关直接丢弃它们，不转发、不算首个输出（openai-python 遇到会报错），但仍算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即转发；这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。
