@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -101,9 +100,4 @@ func WriteHTTPContinuationError(c *gin.Context, account *Account, rejection *HTT
 	}
 	noteLocalHTTPContinuationRejection(c, account, rejection)
 	return writeHTTPContinuationError(c, rejection)
-}
-
-func (s *OpenAIGatewayService) SupportsOpenAIHTTPContinuation(ctx context.Context, account *Account, model string) bool {
-	return account != nil && account.IsOpenAIApiKey() && !account.UsesNativeCNResponses() &&
-		s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, account.GetMappedModel(model)) == APIProtocolResponses
 }

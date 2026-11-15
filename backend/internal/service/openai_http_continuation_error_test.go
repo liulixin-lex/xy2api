@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -81,20 +83,31 @@ func TestNativeHTTPContinuationErrorClassification(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "resp_parent", gjson.GetBytes(wire, "previous_response_id").String())
 			require.Equal(t, gjson.GetBytes(body, "store").Raw, gjson.GetBytes(wire, "store").Raw)
-			require.True(t, svc.SupportsOpenAIHTTPContinuation(context.Background(), account, "gpt-5.5"))
-			account.Extra["openai_responses_supported"] = false
-			require.False(t, svc.SupportsOpenAIHTTPContinuation(context.Background(), account, "gpt-5.5"))
-			for _, platform := range []string{PlatformDeepseek, PlatformKimi} {
-				account = &Account{Platform: platform, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_protocol": APIProtocolResponses, "api_key": "fixture-key"}}
-				c = adaptiveProtocolTestContext("/v1/responses", body)
-				request, err = svc.buildUpstreamRequest(context.Background(), c, account, body, "fixture-key", false, "", false)
-				var rejection *HTTPContinuationError
-				require.ErrorAs(t, err, &rejection)
-				require.Nil(t, request)
-				require.Equal(t, "http_continuation_unsupported", rejection.Code)
-				require.Equal(t, 400, c.Writer.Status())
-				require.Equal(t, "resp_parent", gjson.GetBytes(body, "previous_response_id").String())
-			}
 		})
+	}
+}
+
+// Red/blue review input: stateless DeepSeek/Kimi Responses targets keep the
+// baseline normalization (pointer removed, store=false) and succeed.
+func TestNativeHTTPContinuationCNTargetsKeepBaseline(t *testing.T) {
+	for _, platform := range []string{PlatformDeepseek, PlatformKimi} {
+		for _, store := range []string{"", `,"store":false`, `,"store":true`} {
+			t.Run(platform+store, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				req := newWebSearchReplayRequest(t)
+				body := []byte(`{"model":"deepseek-v4","input":"hello","previous_response_id":"resp_old","stream":false` + store + `}`)
+				account := webSearchReplayAccount(false)
+				account.Platform = platform
+				account.Credentials["api_protocol"] = APIProtocolResponses
+				up := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_ok","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))}}}
+				svc := newOpenAIImageGenerationControlTestService(up)
+				_, err := svc.Forward(req.ctx, req.c, account, body)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, req.rec.Code)
+				require.Len(t, up.bodies, 1)
+				require.False(t, gjson.GetBytes(up.bodies[0], "previous_response_id").Exists())
+				require.Equal(t, "false", gjson.GetBytes(up.bodies[0], "store").Raw)
+			})
+		}
 	}
 }

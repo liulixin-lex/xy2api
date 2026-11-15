@@ -811,9 +811,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Int64("latency_ms", scheduleDecision.LatencyMs),
 		)
 		account := selection.Account
-		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !h.gatewayService.SupportsOpenAIHTTPContinuation(c.Request.Context(), account, reqModel) {
-			// Keep searching until the selected protocol supports HTTP continuation;
-			// an API key alone does not prove the target can retain response state.
+		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
+			// The public Responses HTTP API supports previous_response_id on API-key
+			// accounts. OAuth/SetupToken upstreams do not, so keep searching instead
+			// of silently deleting continuation state from a mixed account pool.
 			failedAccountIDs[account.ID] = struct{}{}
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()

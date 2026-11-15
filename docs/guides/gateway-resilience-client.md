@@ -44,7 +44,7 @@
 | 既有工具输出校验发现缺 call_id | 400 / `tool_output_missing_call_id` | `input[i].call_id` / `input[i] (<type>) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null` |
 | 上游明确报告续接状态过期或不存在 | 410 / `upstream_continuation_expired` | `previous_response_id` / `The upstream continuation state is no longer available; send complete input history` |
 
-归属仍按用户校验，同一用户更换 API 密钥不改变归属；不新增工具历史闭合校验。API Key 本身不证明目标支持 HTTP 续接，无状态 DeepSeek/Kimi 目标不会静默删除 pointer 后发送。普通 404、409 与模糊 4xx 不强分为续接过期，`store` 缺省、false、true 保持原样。上述请求错误不罚号、不计会话失败；未提交时不带 `Retry-After` 并写 `x-should-retry: false`，已提交 SSE 保持原 HTTP 状态，按相同原因写一次协议错误终态。
+归属仍按用户校验，同一用户更换 API 密钥不改变归属；不新增工具历史闭合校验。支持 HTTP 续接的原生 Responses 目标保留 `previous_response_id` 与 `store` 的缺省/false/true。DeepSeek/Kimi 无状态目标沿用既有归一化：清除 `previous_response_id`、强制 `store=false` 后发送；上游走 Chat Completions 或 Anthropic 协议的 API Key 账号照旧转换后发送。普通 404、409 与模糊 4xx 不强分为续接过期。上述请求错误不罚号、不计会话失败；未提交时不带 `Retry-After` 并写 `x-should-retry: false`，已提交 SSE 保持原 HTTP 状态，按相同原因写一次协议错误终态。
 
 ## Retry-After 的取值
 
