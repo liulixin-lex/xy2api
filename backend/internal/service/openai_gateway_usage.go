@@ -780,12 +780,12 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 				tokenPricing := *resolved
 				tokenPricing.Mode = BillingModeToken
 				base, provenance, err := s.billingService.getModelPricingAtWithSource(billingModel, pricingAt)
-				if err != nil {
+				if err != nil && !errors.Is(err, ErrModelPricingUnavailable) {
 					return nil, err
 				}
 				tokenPricing.BasePricing = base
 				tokenPricing.PricingSource = provenance
-				tokenPricing.SupportsCacheBreakdown = base.SupportsCacheBreakdown
+				tokenPricing.SupportsCacheBreakdown = base != nil && base.SupportsCacheBreakdown
 				if tokenPricing.channelPricing != nil {
 					s.resolver.applyTokenOverrides(tokenPricing.channelPricing, &tokenPricing)
 				}

@@ -141,3 +141,36 @@ func TestBillingPricingProvenance(t *testing.T) {
 		require.Equal(t, 0.3, decodePricingSource(cost.PricingSource).EffectivePrices["per_request"])
 	})
 }
+
+func TestZeroImageCustomTokenPricingWithoutCatalog(t *testing.T) {
+	for _, mode := range []BillingMode{BillingModeImage, BillingModePerRequest} {
+		for _, origin := range []string{PricingSourceGroup, PricingSourceChannel} {
+			t.Run(string(mode)+"/"+origin, func(t *testing.T) {
+				card := ChannelModelPricing{Platform: PlatformOpenAI, Models: []string{"custom-image"}, BillingMode: mode, PerRequestPrice: new(float64(0.5)), InputPrice: new(float64(0.001)), OutputPrice: new(float64(0.002))}
+				billing, resolver := newTokenCostTestEnv(t, PlatformOpenAI, []ChannelModelPricing{card}, nil)
+				repo := &openAIRecordUsageLogRepoStub{inserted: true}
+				svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+				svc.billingService = billing
+				svc.resolver = resolver
+				svc.cfg.Default.RateMultiplier = 1
+				group := &Group{ID: 100, Platform: PlatformOpenAI, RateMultiplier: 1}
+				if origin == PricingSourceGroup {
+					group.ModelPricing = []ChannelModelPricing{card}
+				}
+				key := &APIKey{ID: 2, GroupID: &group.ID, Group: group}
+				result := &OpenAIForwardResult{RequestID: "zero-custom", Model: "custom-image", ImageCountObserved: true, PartialFailure: true, Usage: OpenAIUsage{InputTokens: 50}}
+				require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: key, User: &User{ID: 1}, Account: &Account{ID: 3}}))
+				require.NotNil(t, repo.lastLog)
+				require.Equal(t, 50, repo.lastLog.InputTokens)
+				require.Zero(t, repo.lastLog.ImageCount)
+				require.InDelta(t, 0.05, repo.lastLog.TotalCost, 1e-12)
+				require.InDelta(t, 0.05, repo.lastLog.ActualCost, 1e-12)
+				source := decodePricingSource(repo.lastLog.PricingSource)
+				require.Equal(t, origin, source.Source)
+				require.Contains(t, source.Overrides["input"], origin+":")
+				require.Equal(t, 0.001, source.EffectivePrices["input"])
+			})
+		}
+	}
+}
+
