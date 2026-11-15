@@ -116,7 +116,8 @@ func TestConvertGeminiToClaudeMessageOmitsInlineDataForAnthropicMessages(t *test
 	rawData, err := json.Marshal(geminiResp)
 	require.NoError(t, err)
 
-	withInlineData, _ := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, true)
+	withInlineData, _, err := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, true)
+	require.NoError(t, err)
 	contentWithInlineData, ok := withInlineData["content"].([]any)
 	require.True(t, ok)
 	require.Len(t, contentWithInlineData, 4)
@@ -128,7 +129,8 @@ func TestConvertGeminiToClaudeMessageOmitsInlineDataForAnthropicMessages(t *test
 	require.Equal(t, "get_weather", toolUse["name"])
 	require.Equal(t, map[string]any{"type": "text", "text": "after"}, contentWithInlineData[3])
 
-	withoutInlineData, _ := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, false)
+	withoutInlineData, _, err := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, false)
+	require.NoError(t, err)
 	contentWithoutInlineData, ok := withoutInlineData["content"].([]any)
 	require.True(t, ok)
 	require.Len(t, contentWithoutInlineData, 3)

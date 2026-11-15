@@ -165,8 +165,8 @@ func TestM5ThinkingConfig(t *testing.T) {
 		raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"private thought","thought":true},{"text":"public answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":2,"thoughtsTokenCount":3}}`)
 		var response map[string]any
 		require.NoError(t, json.Unmarshal(raw, &response))
-		messages, _ := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
-
+		messages, _, conversionErr := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+		require.NoError(t, conversionErr)
 		blocks := messages["content"].([]any)
 		require.Equal(t, map[string]any{"type": "thinking", "thinking": "private thought", "signature": ""}, blocks[0])
 		require.Equal(t, map[string]any{"type": "text", "text": "public answer"}, blocks[1])
@@ -427,8 +427,8 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 			}
 			var response map[string]any
 			require.NoError(t, json.Unmarshal(raw, &response))
-			messages, got := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
-
+			messages, got, conversionErr := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+			require.NoError(t, conversionErr)
 			require.Equal(t, u, got)
 			usage := messages["usage"].(map[string]any)
 			require.Equal(t, tt.input, usage["input_tokens"])
@@ -448,8 +448,8 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 			require.Nil(t, extractGeminiUsage([]byte(raw)))
 			var response map[string]any
 			require.NoError(t, json.Unmarshal([]byte(raw), &response))
-			message, usage := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", []byte(raw), false)
-
+			message, usage, conversionErr := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", []byte(raw), false)
+			require.NoError(t, conversionErr)
 			require.False(t, usage.InputTokensPresent)
 			encoded, err := json.Marshal(message["usage"])
 			require.NoError(t, err)
@@ -500,11 +500,9 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 func m5HistoryCall(id, args string) apicompat.ChatMessage {
 	return apicompat.ChatMessage{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: id, Type: "function", Function: apicompat.ChatFunctionCall{Name: "lookup", Arguments: args}}}}
 }
-
 func m5HistoryResult(id string, raw json.RawMessage) apicompat.ChatMessage {
 	return apicompat.ChatMessage{Role: "tool", ToolCallID: id, Content: raw}
 }
-
 func TestM5ToolHistoryRounds(t *testing.T) {
 	t.Run("chat_occurrences", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -734,4 +732,133 @@ func m5ForwardMessages(t *testing.T, body []byte, accounts ...*Account) ([]byte,
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Len(t, upstream.requestBodies, 1)
 	return upstream.requestBodies[0], result, resilience.SnapshotConversionNotices(ctx)
+}
+
+func TestM5FinishReasonMapping(t *testing.T) {
+	for _, tt := range []struct {
+		name, reason, args, messages, chat string
+		bad                                bool
+	}{
+		{"stop", "STOP", "", "end_turn", "stop", false},
+		{"tool", "STOP", `{"x":1}`, "tool_use", "tool_calls", false},
+		{"length_tool", "MAX_TOKENS", `{"x":1}`, "max_tokens", "length", false},
+		{"partial_tool", "MAX_TOKENS", `"{\"x\":"`, "max_tokens", "length", false},
+		{"filter", "SAFETY", "", "refusal", "content_filter", false},
+		{"recitation", "RECITATION", "", "refusal", "content_filter", false},
+		{"other", "OTHER", "", "end_turn", "stop", false},
+		{"unknown", "FUTURE_REASON", "", "end_turn", "stop", false},
+		{"bad_call", "MALFORMED_FUNCTION_CALL", "", "", "", true},
+		{"array_arguments", "STOP", `[]`, "", "", true},
+		{"scalar_arguments", "STOP", `123`, "", "", true},
+		{"null_arguments", "STOP", `null`, "", "", true},
+		{"absent_arguments", "STOP", `absent`, "tool_use", "tool_calls", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			parts := `[{"text":"answer"}]`
+			if tt.args != "" {
+				parts = `[{"functionCall":{"name":"f","args":` + tt.args + `}}]`
+				if tt.args == "absent" {
+					parts = `[{"functionCall":{"name":"f"}}]`
+				}
+			}
+			raw := []byte(`{"candidates":[{"content":{"parts":` + parts + `},"finishReason":"` + tt.reason + `"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2}}`)
+			var response map[string]any
+			require.NoError(t, json.Unmarshal(raw, &response))
+			messages, usage, err := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+			require.Equal(t, 5, usage.InputTokens)
+			if tt.bad {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.messages, messages["stop_reason"])
+			}
+			chat, usage, err := geminiResponseToChatCompletions(response, "gemini-2.5-flash", raw, nil)
+			require.Equal(t, 5, usage.InputTokens)
+			if tt.bad {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.chat, chat.Choices[0].FinishReason)
+			}
+			for _, protocol := range []string{"messages", "chat"} {
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, nil)
+				ctx := resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState())
+				c.Request = c.Request.WithContext(ctx)
+				svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + string(raw) + "\n\n"))}
+				var got *geminiStreamResult
+				if protocol == "messages" {
+					got, err = svc.handleStreamingResponse(c, resp, time.Now(), "gemini-2.5-flash")
+				} else {
+					got, err = svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
+				}
+				require.NotNil(t, got, protocol)
+				require.Equal(t, 5, got.usage.InputTokens)
+				if tt.name == "unknown" || tt.name == "other" {
+					require.Equal(t, []apicompat.ConversionNotice{{Field: "candidates[0].finishReason", Action: "map"}}, resilience.SnapshotConversionNotices(ctx))
+				}
+				if tt.bad {
+					var conversion *apicompat.UpstreamConversionError
+					require.ErrorAs(t, err, &conversion, protocol)
+					require.Contains(t, recorder.Body.String(), `"error":`)
+					require.NotContains(t, recorder.Body.String(), `"finish_reason":"`)
+					require.NotContains(t, recorder.Body.String(), `"type":"message_stop"`)
+				} else {
+					require.NoError(t, err, protocol)
+					if protocol == "messages" {
+						require.Contains(t, recorder.Body.String(), `"stop_reason":"`+tt.messages+`"`)
+					} else {
+						require.Contains(t, recorder.Body.String(), `"finish_reason":"`+tt.chat+`"`)
+					}
+				}
+			}
+		})
+	}
+	t.Run("prompt_feedback", func(t *testing.T) {
+		raw := []byte(`{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2}}`)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(raw, &response))
+		messages, _, err := convertGeminiToClaudeMessage(response, "gemini-2.5-flash", raw, false)
+		require.NoError(t, err)
+		require.Equal(t, "refusal", messages["stop_reason"])
+		chat, _, err := geminiResponseToChatCompletions(response, "gemini-2.5-flash", raw, nil)
+		require.NoError(t, err)
+		require.Equal(t, "content_filter", chat.Choices[0].FinishReason)
+	})
+	t.Run("partial_result", func(t *testing.T) {
+		for _, stream := range []bool{false, true} {
+			for _, protocol := range []string{"messages", "chat"} {
+				body := []byte(fmt.Sprintf(`{"model":"gemini-3.1-pro","stream":%t,"max_tokens":512,"messages":[{"role":"user","content":"hi"}],"output_config":{"effort":"high"}}`, stream))
+				response := `{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2}}`
+				contentType := "application/json"
+				if stream {
+					contentType = "text/event-stream"
+					response = "data: " + response + "\n\n"
+				}
+				upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}}
+				svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+				c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/"+protocol, body)
+				var result *ForwardResult
+				var err error
+				if protocol == "messages" {
+					result, err = svc.Forward(c.Request.Context(), c, geminiSignalTestAccount(), body)
+				} else {
+					result, err = svc.forwardClaudeBodyAsChatCompletions(c.Request.Context(), c, geminiSignalTestAccount(), body, "gemini-3.1-pro", stream, true, time.Now())
+				}
+				var conversion *apicompat.UpstreamConversionError
+				require.ErrorAs(t, err, &conversion)
+				require.NotNil(t, result)
+				require.Equal(t, 5, result.Usage.InputTokens)
+				require.Equal(t, "high", optionalStringValue(result.ReasoningEffort))
+				require.Len(t, upstream.requestBodies, 1)
+			}
+		}
+	})
+	t.Run("missing_terminal", func(t *testing.T) {
+		c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", nil)
+		resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n"))}
+		_, err := (&GeminiMessagesCompatService{cfg: &config.Config{}}).handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-2.5-flash", false, true)
+		require.Error(t, err)
+		require.NotContains(t, recorder.Body.String(), `"finish_reason":"`)
+	})
 }
