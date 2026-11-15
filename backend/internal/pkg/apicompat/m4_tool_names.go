@@ -41,7 +41,7 @@ func BuildBridgeToolNames(tools []ResponsesTool, input json.RawMessage, target s
 	var items []map[string]json.RawMessage
 	if json.Unmarshal(input, &items) == nil {
 		for _, item := range items {
-			kind := strings.TrimSuffix(rawString(item["type"]), "_call")
+			kind := bridgeHistoryToolKind(rawString(item["type"]))
 			if (kind == "function" || kind == "custom") && rawString(item["name"]) != "" {
 				identities[ToolNameIdentity{Kind: kind, Namespace: rawString(item["namespace"]), Name: rawString(item["name"])}] = true
 			}
@@ -126,7 +126,7 @@ func bridgeRewriteInput(input json.RawMessage, names *BridgeToolNameMap) (json.R
 			continue
 		}
 		if typ == "function_call" || typ == "custom_tool_call" {
-			id := ToolNameIdentity{Kind: strings.TrimSuffix(typ, "_call"), Namespace: rawString(item["namespace"]), Name: rawString(item["name"])}
+			id := ToolNameIdentity{Kind: bridgeHistoryToolKind(typ), Namespace: rawString(item["namespace"]), Name: rawString(item["name"])}
 			if alias, ok := names.Forward[id]; ok {
 				item["name"], _ = json.Marshal(alias)
 				delete(item, "namespace")
@@ -455,4 +455,17 @@ func bridgeRestoredToolName(name string, bridge *BridgeOptions) string {
 		}
 	}
 	return name
+}
+
+func bridgeHistoryToolKind(typ string) string {
+	switch typ {
+	case "function_call":
+		return "function"
+	case "custom_tool_call":
+		return "custom"
+	case "tool_search_call":
+		return "tool_search"
+	default:
+		return ""
+	}
 }
