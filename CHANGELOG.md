@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Responses 转为 Chat 请求时保留 user、metadata、verbosity 和已选定的输出预算。
+
 - 纯空白 reasoning 不再生成 Anthropic thinking 块，真实思考的前导空白和块内空白仍完整保留。
 
 - Chat 响应数组中的 thinking 与 text 按原顺序保留，流式数组不再解码失败或丢失思考内容。

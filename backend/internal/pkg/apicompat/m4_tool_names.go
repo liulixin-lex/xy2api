@@ -193,7 +193,16 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 	}
 	legacyOpts := *opts
 	legacyOpts.Bridge = nil
-	return ResponsesToChatCompletionsRequestWithOptions(prepared, &legacyOpts)
+	out, err := ResponsesToChatCompletionsRequestWithOptions(prepared, &legacyOpts)
+	if err != nil {
+		return nil, err
+	}
+	out.User = append(json.RawMessage(nil), normalizedRawJSON(req.User)...)
+	out.Metadata = append(json.RawMessage(nil), normalizedRawJSON(req.Metadata)...)
+	if req.Text != nil {
+		out.Verbosity = req.Text.Verbosity
+	}
+	return out, nil
 }
 
 // ChatCompletionsResponseToResponsesWithBridgeOptions restores the request's

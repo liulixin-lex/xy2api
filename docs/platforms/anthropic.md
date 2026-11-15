@@ -222,7 +222,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 字段 | 处理 | 说明 |
 |---|---|---|
 | `model`、`messages`、`input`、`instructions` | 映射 | 转为 Messages 的 `system` 与 `messages` |
-| `max_tokens`、`max_completion_tokens`、`max_output_tokens` | 映射 | 转为 `max_tokens`，`max_completion_tokens` 优先于 `max_tokens`；都没有时为 8192 |
+| `max_tokens`、`max_completion_tokens`、`max_output_tokens` | 映射 | 转为 `max_tokens`，Chat 按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的顺序取已提供值，Responses 取 `max_output_tokens`；都没有时为 8192 |
 | `stream`、`stream_options` | 映射 | 按入口协议返回流式事件；Chat 上游工具期交错的正文、thinking 与其他工具排队到合法 finish 后顺序发布，迟到参数不会写入已关闭块 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
@@ -243,9 +243,10 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
 | `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理 |
 | 图片的 `image_url.detail`、`input_image.detail` | 省略并记录 | `auto`、`low`、`high` 时去掉该提示并记录 `<字段路径>/omit` 降级，图片照常发送；其他值返回 400。Anthropic 没有对应参数，质量与费用不保证与指定 `detail` 时相同 |
+| Chat `user`、`metadata`，Responses `user`、`metadata` | 按方向处理 | Responses→Chat 桥保留两字段；Chat→Anthropic API Key 桥只回填可识别的 `metadata.user_id`，不把 `user` 当作 Anthropic 身份；账号身份兼容改写随后执行 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
-| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
+| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
 
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 
