@@ -49,6 +49,9 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
+	if opts != nil && bridgeEnabled(opts.Bridge) {
+		return responsesToChatBridgeRequest(req, opts)
+	}
 	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
 		return nil, err
 	}
@@ -1730,6 +1733,9 @@ func ChatCompletionsChunkToResponsesEvents(
 	if chunk == nil || state == nil {
 		return nil
 	}
+	if bridgeEnabled(state.Bridge) {
+		state.CustomTools, state.FunctionTools, state.NamespaceTools = bridgeChatNameIndexes(state.Bridge.ToolNames)
+	}
 	if chunk.ID != "" {
 		state.ResponseID = chunk.ID
 	}
@@ -2271,6 +2277,11 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			Status:    "completed",
 		})
 	}
+	if bridgeEnabled(state.Bridge) {
+		for i := range outputs {
+			restoreBridgeOutputIdentity(&outputs[i], state.Bridge.ToolNames)
+		}
+	}
 	return outputs
 }
 
@@ -2284,6 +2295,10 @@ func chatToResponsesEvent(
 	evt := *template
 	evt.Type = eventType
 	evt.SequenceNumber = seq
+	if bridgeEnabled(state.Bridge) {
+		restoreBridgeOutputIdentity(evt.Item, state.Bridge.ToolNames)
+		evt.Name = bridgeRestoredToolName(evt.Name, state.Bridge)
+	}
 	return evt
 }
 
