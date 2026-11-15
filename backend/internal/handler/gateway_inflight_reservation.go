@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
 )
@@ -44,6 +45,19 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 		Kind:       service.InflightEstimateToken,
 		SessionKey: requestCacheSessionKey(body),
 	}
+}
+
+// tokenInflightEstimateForProtocol uses the same output ceiling as conversion.
+func tokenInflightEstimateForProtocol(model string, body []byte, protocol string) (service.InflightEstimateRequest, error) {
+	limit, _, err := apicompat.EffectiveRequestMaxOutputTokens(protocol, body)
+	if err != nil {
+		return service.InflightEstimateRequest{}, err
+	}
+	estimate := service.InflightEstimateRequest{Model: model, BodyBytes: len(body), Kind: service.InflightEstimateToken, SessionKey: requestCacheSessionKey(body)}
+	if limit != nil {
+		estimate.MaxTokens = *limit
+	}
+	return estimate, nil
 }
 
 func inflightNoop() {}

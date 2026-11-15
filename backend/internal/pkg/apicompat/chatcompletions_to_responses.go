@@ -18,6 +18,11 @@ type chatMessageContent struct {
 // true. store is always false and reasoning.encrypted_content is always
 // included so that the response translator has full context.
 func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest, error) {
+	return ChatCompletionsToResponsesWithOptions(req, ConversionOptions{})
+}
+
+// ChatCompletionsToResponsesWithOptions reports deliberate parameter mappings.
+func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts ConversionOptions) (*ResponsesRequest, error) {
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
@@ -67,19 +72,25 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	storeFalse := false
 	out.Store = &storeFalse
 
-	// max_tokens / max_completion_tokens → max_output_tokens, prefer max_completion_tokens
-	maxTokens := req.MaxTokens
-	limitField := "max_tokens"
-	if req.MaxCompletionTokens != nil {
-		maxTokens = req.MaxCompletionTokens
-		limitField = "max_completion_tokens"
-	}
-	if err := validateTokenLimit(limitField, maxTokens); err != nil {
+	maxTokens, limitField, err := EffectiveChatMaxOutputTokens(req)
+	if err != nil {
 		return nil, err
 	}
 	if maxTokens != nil {
 		v := *maxTokens
 		out.MaxOutputTokens = &v
+	}
+	if opts.Record != nil {
+		for _, alias := range []struct {
+			field string
+			value *int
+		}{
+			{"max_completion_tokens", req.MaxCompletionTokens}, {"max_tokens", req.MaxTokens}, {"max_output_tokens", req.MaxOutputTokens},
+		} {
+			if alias.field != limitField && alias.value != nil && *alias.value > 0 {
+				opts.Record(ConversionNotice{Field: alias.field, Action: "omit"})
+			}
+		}
 	}
 
 	// reasoning_effort → reasoning.effort + reasoning.summary="auto"

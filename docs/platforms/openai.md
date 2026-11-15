@@ -58,6 +58,8 @@ Chat 的 `response_format.json_schema` 转为 Responses `text.format` 时，缺�
 
 Chat 的合法 `stop` 字符串或数组在最终 Responses 请求中省略并记录；Responses 不支持停止序列边界，返回文本可能变长。中间转换保留 `stop`，输出上限 1 至 15 提高到 16 时记录 `max_output_tokens/map`。
 
+Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_tokens` 取首个非 null 值，预留与转换使用相同顺序；选中值必须为正整数，落选的合法别名记录省略。
+
 ## 客户端配置
 
 ### Codex CLI

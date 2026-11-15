@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -257,4 +259,58 @@ func TestRequestCacheSessionKey(t *testing.T) {
 	require.Equal(t, "metadata.user_id=user_x_session_1", requestCacheSessionKey([]byte(`{"metadata":{"user_id":"user_x_session_1"}}`)))
 	require.Empty(t, requestCacheSessionKey([]byte(`{"model":"m"}`)))
 	require.Equal(t, "prompt_cache_key=c1", tokenInflightEstimate("m", []byte(`{"prompt_cache_key":"c1"}`)).SessionKey)
+}
+
+func TestChatReservationLimitMatchesConversion(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		want    int
+		invalid bool
+	}{
+		{`{"max_tokens":1,"max_completion_tokens":1000}`, 1000, false},
+		{`{"max_tokens":10,"max_completion_tokens":20,"max_output_tokens":30}`, 20, false},
+		{`{"max_completion_tokens":null,"max_tokens":null,"max_output_tokens":30}`, 30, false},
+		{`{"max_completion_tokens":0,"max_tokens":10}`, 0, true},
+		{`{"max_tokens":-1}`, 0, true}, {`{"max_tokens":1.5}`, 0, true},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			estimate, err := tokenInflightEstimateForProtocol("m", []byte(tc.raw), "chat")
+			parsed, _, parseErr := apicompat.EffectiveRequestMaxOutputTokens("chat", []byte(tc.raw))
+			var request apicompat.ChatCompletionsRequest
+			decodeErr := json.Unmarshal([]byte(tc.raw), &request)
+			if tc.invalid {
+				require.Error(t, err)
+				require.Error(t, parseErr)
+				if decodeErr == nil {
+					_, err = apicompat.ChatCompletionsToResponses(&request)
+					require.Error(t, err)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, parseErr)
+			require.NoError(t, decodeErr)
+			converted, err := apicompat.ChatCompletionsToResponses(&request)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, estimate.MaxTokens)
+			require.Equal(t, *parsed, *converted.MaxOutputTokens)
+			require.Equal(t, *parsed, estimate.MaxTokens)
+		})
+	}
+	for _, tc := range []struct {
+		protocol, raw string
+		want          int
+	}{
+		{"responses", `{"max_tokens":1,"max_output_tokens":100}`, 100},
+		{"gemini", `{"generationConfig":{"maxOutputTokens":101}}`, 101},
+		{"anthropic", `{"max_tokens":102,"max_output_tokens":1}`, 102},
+	} {
+		estimate, err := tokenInflightEstimateForProtocol("m", []byte(tc.raw), tc.protocol)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, estimate.MaxTokens)
+	}
+	estimate, err := tokenInflightEstimateForProtocol("m", []byte(`{"prompt_cache_key":"s"}`), "chat")
+	require.NoError(t, err)
+	require.Equal(t, "prompt_cache_key=s", estimate.SessionKey)
+	require.Equal(t, service.InflightEstimateToken, estimate.Kind)
 }
