@@ -792,9 +792,10 @@ func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
 	t.Run("closed raw final", func(t *testing.T) {
 		for _, tc := range []struct {
 			name, raw, summary string
-			bad                bool
+			emptyRaw, bad      bool
 		}{
 			{name: "same raw", raw: "raw"},
+			{name: "empty raw snapshot", emptyRaw: true},
 			{name: "contradictory raw", raw: "different", bad: true},
 			{name: "late summary", summary: "different summary"},
 			{name: "raw conflict with late summary", raw: "different", summary: "different summary", bad: true},
@@ -810,7 +811,7 @@ func TestM3ReviewR2B04RawBeforeClose(t *testing.T) {
 				feed(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"})
 				feed(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning", ID: "r", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}})
 				final := ResponsesOutput{Type: "reasoning", ID: "r"}
-				if tc.raw != "" {
+				if tc.raw != "" || tc.emptyRaw {
 					final.Content = []ResponsesContentPart{{Type: "reasoning_text", Text: tc.raw}}
 				}
 				if tc.summary != "" {
