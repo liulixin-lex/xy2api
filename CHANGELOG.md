@@ -17,7 +17,7 @@
 
 - Chat 的 JSON Schema 响应格式未指定 `strict` 时，转 Responses 默认发送 `false`。
 
-- 显式输出上限在 Chat 转 Responses 时原值保留，1 至 127 不再自动提高到 128。
+- Chat 转 Responses 的输出上限下限降为 16，1 至 15 提高到 16，16 及以上原值保留。
 
 ## [0.6.7] - 2026-11-15
 

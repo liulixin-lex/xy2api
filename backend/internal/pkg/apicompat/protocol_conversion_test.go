@@ -67,7 +67,7 @@ func TestProtocolExactTokenLimits(t *testing.T) {
 		require.NoError(t, err)
 		var native ResponsesRequest
 		require.NoError(t, json.Unmarshal(wire, &native))
-		require.Equal(t, n, *native.MaxOutputTokens)
+		require.Equal(t, max(n, 16), *native.MaxOutputTokens)
 		require.Equal(t, n, *out.MaxOutputTokens, "native wire projection must not mutate the intermediate request")
 	}
 	for _, n := range []int{0, -1} {

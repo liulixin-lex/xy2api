@@ -88,7 +88,7 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 
 | 上游拒绝 | 网关处理 |
 |---|---|
-| 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回；显式 `max_output_tokens` 硬输出上限不删除 |
+| 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
 | 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生 Responses 在第一个内容之前遇到时，删除 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后重放一次 |
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
