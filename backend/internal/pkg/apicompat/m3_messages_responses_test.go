@@ -949,3 +949,69 @@ func TestM3ReviewB01MixedTerminalTools(t *testing.T) {
 		}
 	}
 }
+
+func TestM3ReviewB02IncompleteToolValues(t *testing.T) {
+	for _, reason := range []string{"max_output_tokens", "content_filter"} {
+		for _, conflict := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/conflict=%v", reason, conflict), func(t *testing.T) {
+				st := NewResponsesEventToAnthropicState()
+				items := []ResponsesOutput{{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f"}, {Type: "function_call", ID: "fc_b", CallID: "call_b", Name: "g"}}
+				for i := range items {
+					ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, Item: &items[i]}, st)
+					ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", i, items[i].ID, `{"x":1}`), st)
+					items[i].Arguments = `{"x":1}`
+				}
+				if conflict {
+					items[1].Arguments = `{"x":2}`
+				}
+				events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.incomplete", Response: &ResponsesResponse{Status: "incomplete", IncompleteDetails: &ResponsesIncompleteDetails{Reason: reason}, Output: items, Usage: &ResponsesUsage{InputTokens: 7, OutputTokens: 3}}}, st)
+				require.Equal(t, 7, st.InputTokens)
+				require.Equal(t, 3, st.OutputTokens)
+				if conflict {
+					require.Error(t, st.Err())
+					require.Empty(t, events)
+				} else {
+					require.NoError(t, st.Err())
+					want := "max_tokens"
+					if reason == "content_filter" {
+						want = "refusal"
+					}
+					require.Equal(t, want, events[len(events)-2].Delta.StopReason)
+				}
+			})
+		}
+	}
+	for _, status := range []string{"completed", "incomplete"} {
+		t.Run("parallel suffix/"+status, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			var events []AnthropicStreamEvent
+			items := []ResponsesOutput{{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f"}, {Type: "function_call", ID: "fc_b", CallID: "call_b", Name: "g"}}
+			for i := range items {
+				events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, Item: &items[i]}, st)...)
+				events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", OutputIndex: i, ItemID: items[i].ID, Delta: `{"x":`}, st)...)
+				items[i].Arguments = `{"x":1}`
+			}
+			tail := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response." + status, Response: &ResponsesResponse{Status: status, IncompleteDetails: func() *ResponsesIncompleteDetails {
+				if status == "incomplete" {
+					return &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+				}
+				return nil
+			}(), Output: items}}, st)
+			if status == "incomplete" {
+				require.Error(t, st.Err())
+				require.Empty(t, tail)
+				return
+			}
+			events = append(events, tail...)
+			require.NoError(t, st.Err())
+			inputs := map[int]string{}
+			for _, e := range events {
+				if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+					inputs[*e.Index] += e.Delta.PartialJSON
+				}
+			}
+			require.Equal(t, map[int]string{0: `{"x":1}`, 1: `{"x":1}`}, inputs)
+			requireAnthropicBlockLifecycle(t, events)
+		})
+	}
+}
