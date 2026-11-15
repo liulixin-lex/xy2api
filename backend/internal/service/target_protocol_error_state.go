@@ -22,8 +22,8 @@ type targetProtocolErrorState struct {
 	opened       bool
 }
 
-func (s *targetProtocolErrorState) observe(c *gin.Context, data []byte) {
-	if c == nil || !strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
+func (s *targetProtocolErrorState) observe(c *gin.Context, contentType string, data []byte) {
+	if c == nil || !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
 		return
 	}
 	s.mu.Lock()

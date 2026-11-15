@@ -108,7 +108,7 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
-		w.terminal.observe(w.terminalContext, data[:n])
+		w.terminal.observe(w.terminalContext, w.ResponseWriter.Header().Get("Content-Type"), data[:n])
 		w.observeStream(data[:n])
 		w.observeSemanticOutput(data[:n], at)
 		w.noteFirstOutput(len(bytes.TrimSpace(data[:n])) > 0)
@@ -125,7 +125,7 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
-		w.terminal.observe(w.terminalContext, []byte(s[:n]))
+		w.terminal.observe(w.terminalContext, w.ResponseWriter.Header().Get("Content-Type"), []byte(s[:n]))
 	}
 	if n > 0 && w.stream.observing() {
 		w.observeStream([]byte(s[:n]))

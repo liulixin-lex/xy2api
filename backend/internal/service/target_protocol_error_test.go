@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -86,8 +87,29 @@ func TestM7ServiceErrorAfterHeartbeat(t *testing.T) {
 	c, _ = gin.CreateTestContext(rec)
 	c.JSON(200, gin.H{"ok": true})
 	before := rec.Body.String()
-	WriteTargetProtocolError(c, PreOutputProtocolChat, 500, "server_error", "", "", "later")
+	if WriteTargetProtocolError(c, PreOutputProtocolChat, 500, "server_error", "", "", "later") {
+		t.Fatal("written JSON claimed again")
+	}
 	if before != rec.Body.String() {
 		t.Fatal("appended to JSON")
 	}
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/", nil)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	cancel()
+	c.Request = c.Request.WithContext(ctx)
+	if WriteTargetProtocolError(c, PreOutputProtocolChat, 500, "server_error", "", "", "canceled") || rec.Body.Len() != 0 {
+		t.Fatal("canceled request claimed")
+	}
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/", nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.Write([]byte(": ping\n\n"))
+	c.Writer = foundationFailedWriter{c.Writer}
+	if !WriteTargetProtocolError(c, PreOutputProtocolChat, 500, "server_error", "", "", "write failure") || !ProtocolTerminalClaimed(c) || WriteTargetProtocolError(c, PreOutputProtocolChat, 500, "server_error", "", "", "duplicate") {
+		t.Fatal("write failure claim semantics")
+	}
+
 }
