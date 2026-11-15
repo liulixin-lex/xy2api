@@ -170,8 +170,8 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRej
 	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
 
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
+	require.False(t, changed)
+	require.Nil(t, retryBody)
 }
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyHandlesExplicitOptionalParameterRejections(t *testing.T) {
@@ -841,7 +841,7 @@ func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(
 	}
 }
 
-func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing.T) {
+func TestOpenAIGatewayService_PreservesRejectedMaxOutputTokens(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":4096,"input":[{"type":"message","role":"user","content":{"max_output_tokens":"keep"}}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
@@ -855,18 +855,17 @@ func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing
 		body,
 	)
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.bodies, 2)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
-	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input.0.content.max_output_tokens").String())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[0], "input.0.content.max_output_tokens").String())
 }
 
 func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRetry(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":2048,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
+	body := []byte(`{"model":"gpt-5.5","stream":false,"metadata":{"label":"test"},"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
-		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: metadata","param":"metadata"}}`),
 		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
 	}}
 
@@ -884,8 +883,8 @@ func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRe
 		require.False(t, gjson.GetBytes(forwardedBody, "input.0.namespace").Exists())
 		require.False(t, gjson.GetBytes(forwardedBody, "input.1.namespace").Exists())
 	}
-	require.Equal(t, int64(2048), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "metadata").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "metadata").Exists())
 }
 
 func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
