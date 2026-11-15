@@ -119,6 +119,30 @@ func jsonModelWithPaths(body []byte, paths []string) (string, string) {
 	return "", ""
 }
 
+// ValidateUniqueTopLevelModel rejects ambiguous root model keys without expanding
+// nested inputs or schemas. Other JSON validation remains with the endpoint.
+func ValidateUniqueTopLevelModel(body []byte) error {
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return nil
+	}
+	seen, duplicate := false, false
+	root.ForEach(func(key, _ gjson.Result) bool {
+		if strings.EqualFold(key.String(), "model") {
+			if seen {
+				duplicate = true
+				return false
+			}
+			seen = true
+		}
+		return true
+	})
+	if duplicate {
+		return errors.New("duplicate top-level field: model")
+	}
+	return nil
+}
+
 // jsonModelCandidates 返回顶层所有键名大小写不敏感等于 "model" 的字符串值，
 // 按出现顺序保留重复（覆盖 gjson 首 matches 与 encoding/json 末值绑定两类解析器）。
 func jsonModelCandidates(body []byte) []string {

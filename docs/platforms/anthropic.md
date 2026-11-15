@@ -1,5 +1,7 @@
 # Anthropic（Claude）
 
+推理 HTTP 入口遵循[顶层 model 唯一性规则](openai.md#对外端点)：重复字段在路由改写前返回 `400`，错误消息指出 `model`；嵌套同名字段不受影响。
+
 本文介绍如何把 Anthropic Claude 账号接入 XY2API：支持哪些账号类型、在管理后台如何添加、网关对外暴露哪些端点、如何配置 Claude Code 等客户端，以及只对 Anthropic 平台生效的选项（OAuth 转发行为、API Key 账号的“Claude Code 请求兼容”、OpenAI 协议到 Messages 的字段转换）。部署 XY2API 的管理员和调用 Claude 模型的用户需要阅读。
 
 ## 账号类型

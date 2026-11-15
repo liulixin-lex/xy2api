@@ -466,3 +466,16 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.NotEqual(t, http.StatusNotFound, w.Code)
 }
+
+func TestInferenceDuplicateTopLevelModel(t *testing.T) {
+	router := newGatewayRoutesTestRouterWithGroup(allowlistGroup(service.PlatformOpenAI, false))
+	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses", "/v1/responses/compact", "/responses/compact", "/backend-api/codex/responses/compact", "/v1/chat/completions", "/chat/completions", "/v1/messages", "/antigravity/v1/messages", "/v1/embeddings", "/embeddings", "/v1/images/generations", "/images/generations", "/v1/images/edits", "/images/edits"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"first","Model":"second"}`))
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), "Duplicate top-level field: model")
+		})
+	}
+}

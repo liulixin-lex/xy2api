@@ -1,5 +1,7 @@
 # Gemini
 
+推理 HTTP 入口遵循[顶层 model 唯一性规则](openai.md#对外端点)：重复字段在路由改写前返回 `400`，错误消息指出 `model`；嵌套同名字段不受影响。
+
 本文介绍如何把 Google Gemini 账号接入 XY2API：三种 OAuth 授权方式、AI Studio API Key 与 Vertex Service Account 账号的添加方法，自建 OAuth Client 时需要的环境变量，Gemini 分组对外暴露的端点，以及 Gemini CLI 的配置。部署 XY2API 的管理员和使用 Gemini SDK / CLI 的用户需要阅读。
 
 ## 账号类型

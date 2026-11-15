@@ -83,6 +83,8 @@ API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effo
 
 `/v1/responses` 的流式事件与非流式结果中，function_call 项原样保留上游的 `encrypted_content` 与 `encrypted_function_args`（缺省、null 与空值不混同），网关不解密；Chat Completions 没有对应字段，转为 Chat 时不携带。
 
+所有推理 HTTP 入口拒绝重复的顶层 `model` 字段（含大小写和 JSON 转义后的同名键），返回 `400`；OpenAI 封套为 `invalid_request_error`，`code=duplicate_model`、`param=model`。嵌套 schema 中的 `model` 不受影响，multipart 文件内容不作 JSON 扫描。
+
 Responses（含 compact）的 JSON 正文必须是合法 UTF-8。非法编码在正文改写和选号前返回 `400 invalid_request_error`，`code=invalid_utf8`、`param=body`，消息包含解压后原始正文中首个非法字节的 0 起始偏移；合法 BOM、Unicode 与已有字符串控制字节兼容保持不变。
 
 ## 客户端配置
