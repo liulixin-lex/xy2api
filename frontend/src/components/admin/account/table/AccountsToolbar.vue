@@ -443,9 +443,10 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb :deep(.table-toolbar__actions) {
     flex-wrap: nowrap;
   }
-  /* Its own search box, 220px (160px at 1024–1279, below), not the shared one narrowing under 1184px (12.9-4): this
-     row folds its filters into "more filters" instead. */
+  /* Its own fixed search box, 220px (160px at 1024–1279, below), not the shared flexible one (12.12-10): this row
+     folds its filters into "more filters" instead. */
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
+    flex: none;
     width: 220px;
   }
 }
