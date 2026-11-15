@@ -39,3 +39,35 @@ func TestM1ReviewThinkingBudget(t *testing.T) {
 	require.Nil(t, result.ReasoningEffort)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning.effort").Exists())
 }
+
+func TestM1ReviewThinkingBudgetBaselineModels(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Budget.Enabled = false })
+	for _, tc := range []struct {
+		name, path string
+		body       []byte
+		account    func(*Account)
+	}{
+		// Passthrough keeps the baseline suffix reading for its first-output budget.
+		{"passthrough-suffix", "/v1/responses", []byte(`{"model":"gpt-5.4-xhigh","input":"hi","stream":true}`), func(a *Account) { a.Extra["openai_passthrough"] = true }},
+		// The thinking fallback reads the billing model, as before, not a compact upstream.
+		{"compact-thinking", "/v1/responses/compact", []byte(`{"model":"kimi-k2.5","input":"hi","thinking":{"type":"enabled"},"stream":true}`), func(a *Account) {
+			a.Credentials["compact_model_mapping"] = map[string]any{"kimi-k2.5": "relay-compact"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &m1ReviewDelayedUpstream{}
+			svc := newOpenAIRejectedFieldTestService(nil)
+			svc.httpUpstream = upstream
+			svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+			svc.cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds = 3
+			c := newOpenAIRejectedFieldTestContext(tc.body)
+			c.Request.URL.Path = tc.path
+			account := newOpenAIRejectedFieldTestAccount()
+			tc.account(account)
+			result, err := svc.Forward(m1EffortContext(tc.body), c, account, tc.body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.bodies, 1)
+		})
+	}
+}

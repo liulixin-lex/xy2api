@@ -329,7 +329,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
-		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
+		// Passthrough keeps the baseline reading for its first-output budget until its final-wire actual is wired.
+		reasoningEffort := extractOpenAIWSLegacyReasoningEffort(body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
 		reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
 		return s.forwardOpenAIPassthrough(
@@ -1125,7 +1126,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}()
 	// Timeouts retain the baseline effective preference; billing uses final wire only.
-	budgetEffort := ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, upstreamModel, billingModel, originalModel), body, upstreamModel)
+	budgetEffort := ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, upstreamModel, billingModel, originalModel), body, reqModel)
 	reasoningEffortValue := ""
 	if budgetEffort != nil {
 		reasoningEffortValue = *budgetEffort
