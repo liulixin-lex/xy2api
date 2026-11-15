@@ -1063,3 +1063,27 @@ func TestM3ReviewB03TerminalMetadata(t *testing.T) {
 		require.Len(t, events, 2)
 	})
 }
+
+func TestM3ReviewEmptyErrorObject(t *testing.T) {
+	for _, raw := range []string{`null`, `{}`, `{"code":"","message":""}`, `{"code":"server_error"}`, `{"message":"failed"}`} {
+		t.Run(raw, func(t *testing.T) {
+			var resp ResponsesResponse
+			require.NoError(t, json.Unmarshal([]byte(`{"status":"completed","output":[{"type":"message","id":"m","content":[{"type":"output_text","text":"answer"}]}],"error":`+raw+`}`), &resp))
+			bad := strings.Contains(raw, "server_error") || strings.Contains(raw, "failed")
+			out := ResponsesToAnthropic(&resp, "test")
+			st := NewResponsesEventToAnthropicState()
+			events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &resp}, st)
+			if bad {
+				require.Nil(t, out)
+				require.Error(t, st.Err())
+				require.Empty(t, events)
+			} else {
+				require.NotNil(t, out)
+				require.NoError(t, st.Err())
+				require.Equal(t, "answer", out.Content[0].Text)
+				require.Equal(t, "answer", collectAnthropicText(events))
+				require.Equal(t, "message_stop", events[len(events)-1].Type)
+			}
+		})
+	}
+}
