@@ -47,11 +47,13 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 	}
 }
 
-// tokenInflightEstimateForProtocol uses the same output ceiling as conversion.
+// tokenInflightEstimateForProtocol uses conversion precedence when parsable.
+// Estimation never rejects a request: unsupported inputs retain the legacy estimate.
+// The error return is retained for existing callers and is always nil.
 func tokenInflightEstimateForProtocol(model string, body []byte, protocol string) (service.InflightEstimateRequest, error) {
 	limit, _, err := apicompat.EffectiveRequestMaxOutputTokens(protocol, body)
 	if err != nil {
-		return service.InflightEstimateRequest{}, err
+		return tokenInflightEstimate(model, body), nil
 	}
 	estimate := service.InflightEstimateRequest{Model: model, BodyBytes: len(body), Kind: service.InflightEstimateToken, SessionKey: requestCacheSessionKey(body)}
 	if limit != nil {
