@@ -282,15 +282,18 @@ func TestFilterOpenAIResponsesNoneReasoningEffortForAccount(t *testing.T) {
 		wantReasoning bool
 	}{
 		{
-			name:          "custom compatible endpoint strips none placeholders",
+			name:          "custom compatible endpoint preserves explicit none",
 			account:       &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://compat.example/v1"}},
 			body:          `{"reasoning":{"effort":"none"},"reasoning_effort":"NONE"}`,
-			wantReasoning: false,
+			wantNested:    true,
+			wantFlat:      true,
+			wantReasoning: true,
 		},
 		{
 			name:          "third-party platform keeps other reasoning members",
 			account:       &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey},
 			body:          `{"reasoning":{"effort":" none ","summary":"auto"}}`,
+			wantNested:    true,
 			wantSummary:   true,
 			wantReasoning: true,
 		},
