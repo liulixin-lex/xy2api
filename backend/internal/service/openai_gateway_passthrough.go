@@ -384,7 +384,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	upstreamAccepted := false
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.passthrough = true
-	requestRepair.encryptedTried = true // rs/cmp stripping remains exclusive to the native path.
 	requestRepair.credentialVersion = credentialVersion
 	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
@@ -471,6 +470,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			schedCapture.finishHTTP(resp, probeBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+			if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, body, probeBody, extractUpstreamErrorMessage(probeBody), resp.StatusCode); repairErr != nil {
+				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, repairErr); ok {
+					body = next
+					continue
+				}
+				return nil, repairErr
+			}
 			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, probeBody, resilience.CapabilityProtocolResponses); failure != nil {
 				return nil, failure
 			}
@@ -1160,6 +1166,9 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	defer func() {
 		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, responseBody, forwardErr)
 	}()
+	if rejection := terminateHTTPEncryptedContent(ctx, c, account, requestBody, responseBody, extractUpstreamErrorMessage(responseBody), resp.StatusCode, false); rejection != nil {
+		return rejection
+	}
 	captureOpenAIStateRejection(c, account, responseBody, "", "passthrough_http", false, requestBody)
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
@@ -3051,6 +3060,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
 			observedTerminal = currentTerminal
 		}
+		if currentTerminal.Valid && currentTerminal.Failure {
+			if rejection := handleHTTPEncryptedContentFrame(ctx, c, account, []byte(frame.Data), currentTerminal.WrappedStatus, openAIStreamClientOutputStarted(c, clientOutputStarted), nil); rejection != nil {
+				return passthroughReturn(resultWithUsage(), rejection)
+			}
+		}
 		if currentTerminal.Failure && !currentTerminal.Valid {
 			pendingSSEEventType, pendingSSEEventLine = frame.EventType, ""
 			return processResponseLine("data: " + frame.Data)
@@ -3450,6 +3464,8 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
+		} else if repairErr := newHTTPEncryptedContentRepairSignal(httpEncryptedRepairContext(c), c, account, openAIHTTPRepairBody(c), terminalPayload, msg, wrappedStatus); repairErr != nil {
+			return nil, repairErr
 		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg, wrappedStatus); compactErr != nil {
 			return nil, compactErr
 		}

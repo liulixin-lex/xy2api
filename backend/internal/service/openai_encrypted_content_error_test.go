@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/tidwall/gjson"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
@@ -47,59 +46,62 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 			}
 		})
 	}
-	for _, status := range []int{400, 502} {
-		for _, mode := range []string{"ambiguous", "conflicting", "budget", "twice"} {
-			t.Run(fmt.Sprintf("native_%d_%s", status, mode), func(t *testing.T) {
-				withResilienceSettings(t, func(settings *resilience.Settings) {
-					if mode == "budget" {
-						settings.Budget.MaxAttempts = 1
+	for _, passthrough := range []bool{false, true} {
+		for _, status := range []int{400, 502} {
+			for _, mode := range []string{"ambiguous", "conflicting", "budget", "twice"} {
+				t.Run(fmt.Sprintf("passthrough=%t/%d/%s", passthrough, status, mode), func(t *testing.T) {
+					withResilienceSettings(t, func(settings *resilience.Settings) {
+						if mode == "budget" {
+							settings.Budget.MaxAttempts = 1
+						}
+					})
+					req := newWebSearchReplayRequest(t)
+					req.c.Header("Retry-After", "9")
+					input := []byte(`{"model":"gpt-5.5","session_id":"encrypted-terminal","stream":true,"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"cipher-bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"cipher-good","summary":[]}]}`)
+					detail := `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified"}}`
+					param := ""
+					if mode != "ambiguous" {
+						param = "input[0].encrypted_content"
+						id := "rs_bad"
+						if mode == "conflicting" {
+							id = "rs_good"
+						}
+						detail = fmt.Sprintf(`{"error":{"code":"invalid_encrypted_content","param":%q,"message":"Encrypted content could not be verified for item %s"}}`, param, id)
+					}
+					upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIUpstreamErrorResponse(status, detail)}}
+					sends := 1
+					if mode == "twice" {
+						upstream.responses = append(upstream.responses, newOpenAIUpstreamErrorResponse(status, detail))
+						sends = 2
+					}
+					svc := newOpenAIImageGenerationControlTestService(upstream)
+					repo := &openAIModelAvailabilityRepo{}
+					svc.accountRepo = repo
+					_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(passthrough), input)
+					var rejection *OpenAIRequestRejectionError
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &rejection)
+					require.NotErrorAs(t, err, &failover)
+					require.Len(t, upstream.bodies, sends)
+					require.Equal(t, 400, req.rec.Code)
+					require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
+					require.Equal(t, param, gjson.GetBytes(req.rec.Body.Bytes(), "error.param").String())
+					require.Empty(t, req.rec.Header().Get("Retry-After"))
+					require.Equal(t, "false", req.rec.Header().Get("x-should-retry"))
+					require.Zero(t, repo.setErrorCalls)
+					require.Zero(t, repo.tempCalls)
+					require.Empty(t, repo.modelRateLimitCalls)
+					require.Empty(t, req.session.failures)
+					if mode == "ambiguous" || mode == "conflicting" {
+						require.Contains(t, req.rec.Body.String(), "Rebuild the request from complete readable history")
+					} else {
+						require.Contains(t, req.rec.Body.String(), "Remove only the identified encrypted item")
 					}
 				})
-				req := newWebSearchReplayRequest(t)
-				req.c.Header("Retry-After", "9")
-				input := []byte(`{"model":"gpt-5.5","session_id":"encrypted-terminal","stream":true,"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"cipher-bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"cipher-good","summary":[]}]}`)
-				detail := `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified"}}`
-				param := ""
-				if mode != "ambiguous" {
-					param = "input[0].encrypted_content"
-					id := "rs_bad"
-					if mode == "conflicting" {
-						id = "rs_good"
-					}
-					detail = fmt.Sprintf(`{"error":{"code":"invalid_encrypted_content","param":%q,"message":"Encrypted content could not be verified for item %s"}}`, param, id)
-				}
-				upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIUpstreamErrorResponse(status, detail)}}
-				sends := 1
-				if mode == "twice" {
-					upstream.responses = append(upstream.responses, newOpenAIUpstreamErrorResponse(status, detail))
-					sends = 2
-				}
-				svc := newOpenAIImageGenerationControlTestService(upstream)
-				repo := &openAIModelAvailabilityRepo{}
-				svc.accountRepo = repo
-				_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(false), input)
-				var rejection *OpenAIRequestRejectionError
-				var failover *UpstreamFailoverError
-				require.ErrorAs(t, err, &rejection)
-				require.NotErrorAs(t, err, &failover)
-				require.Len(t, upstream.bodies, sends)
-				require.Equal(t, 400, req.rec.Code)
-				require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
-				require.Equal(t, param, gjson.GetBytes(req.rec.Body.Bytes(), "error.param").String())
-				require.Empty(t, req.rec.Header().Get("Retry-After"))
-				require.Equal(t, "false", req.rec.Header().Get("x-should-retry"))
-				require.Zero(t, repo.setErrorCalls)
-				require.Zero(t, repo.tempCalls)
-				require.Empty(t, repo.modelRateLimitCalls)
-				require.Empty(t, req.session.failures)
-				if mode == "ambiguous" || mode == "conflicting" {
-					require.Contains(t, req.rec.Body.String(), "Rebuild the request from complete readable history")
-				} else {
-					require.Contains(t, req.rec.Body.String(), "Remove only the identified encrypted item")
-				}
-			})
+			}
 		}
 	}
+
 	for _, protocol := range []string{PreOutputProtocolResponses, PreOutputProtocolChat, PreOutputProtocolAnthropic} {
 		t.Run("committed_"+protocol, func(t *testing.T) {
 			req := newWebSearchReplayRequest(t)

@@ -1111,6 +1111,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
 			observedTerminal = currentTerminal
 		}
+		if currentTerminal.Valid && currentTerminal.Failure {
+			if rejection := handleHTTPEncryptedContentFrame(ctx, c, account, []byte(frame.Data), currentTerminal.WrappedStatus, openAIStreamClientOutputStarted(c, clientOutputStarted), flushBuffered); rejection != nil {
+				sawFailedEvent, streamEarlyErr = true, rejection
+				return
+			}
+		}
 		if currentTerminal.Failure && !currentTerminal.Valid {
 			pendingSSEEventType, pendingSSEEventLine = frame.EventType, ""
 			processResponseLine("data: "+frame.Data, queueDrained)
@@ -2261,6 +2267,8 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
+		} else if repairErr := newHTTPEncryptedContentRepairSignal(httpEncryptedRepairContext(c), c, account, openAIHTTPRepairBody(c), terminalPayload, msg, wrappedStatus); repairErr != nil {
+			return nil, repairErr
 		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg, wrappedStatus); compactErr != nil {
 			return nil, compactErr
 		}

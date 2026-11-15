@@ -178,15 +178,8 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 		}
 	}
 
-	if !r.passthrough && encryptedRejection {
-		selected, err := openAIRequestEncryptedContentRepairBody(c, r.body, payload)
-		if !r.encryptedTried && err == nil && selected.Changed && ctx.Err() == nil && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: selected.Body, encryptedItem: selected}
-		}
-		rejection := newOpenAIEncryptedContentRejection(ctx, account, r.body, payload)
-		captureOpenAIStateRejection(c, account, payload, message, "native_sse", false, r.body, wrappedStatus)
-		writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
-		return &OpenAIRequestRejectionError{rejection}
+	if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, r.body, payload, message, wrappedStatus); repairErr != nil {
+		return repairErr
 	}
 
 	_, m3Trigger := openAIM3Trigger(payload, message, wrappedStatus)
