@@ -53,6 +53,11 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if opts != nil && bridgeEnabled(opts.Bridge) {
 		return responsesToChatBridgeRequest(req, opts)
 	}
+	return responsesToChatCompletionsRequest(req, opts, false)
+}
+
+// preparedTools means the explicit bridge has already merged and promoted tools.
+func responsesToChatCompletionsRequest(req *ResponsesRequest, opts *ResponsesToChatOptions, preparedTools bool) (*ChatCompletionsRequest, error) {
 	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
 		return nil, err
 	}
@@ -80,9 +85,9 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
-	effectiveTools, err := EffectiveResponsesTools(req)
-	if opts != nil && opts.Bridge != nil && opts.Bridge.Enabled {
-		effectiveTools, err = effectiveBridgeTools(req, ConversionOptions{Record: opts.Record, Bridge: opts.Bridge})
+	effectiveTools := req.Tools
+	if !preparedTools {
+		effectiveTools, err = EffectiveResponsesTools(req)
 	}
 	if err != nil {
 		return nil, err

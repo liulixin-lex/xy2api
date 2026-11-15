@@ -224,7 +224,7 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 	}
 	legacyOpts := *opts
 	legacyOpts.Bridge = nil
-	out, err := ResponsesToChatCompletionsRequestWithOptions(prepared, &legacyOpts)
+	out, err := responsesToChatCompletionsRequest(prepared, &legacyOpts, true)
 	if err != nil {
 		return nil, err
 	}
@@ -318,16 +318,7 @@ func FlattenResponsesNamespacesWithBridgeOptions(req map[string]any, opts Conver
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		return nil, false, err
 	}
-	tools, err := effectiveBridgeTools(&typed, opts)
-	if err != nil {
-		return nil, false, err
-	}
-	if opts.Bridge.ToolNames == nil {
-		opts.Bridge.ToolNames, err = BuildBridgeToolNames(tools, typed.Input, "anthropic")
-		if err != nil {
-			return nil, false, err
-		}
-	}
+
 	var batches [][]json.RawMessage
 	appendBatch := func(value any) error {
 		encoded, e := json.Marshal(value)
@@ -358,6 +349,41 @@ func FlattenResponsesNamespacesWithBridgeOptions(req map[string]any, opts Conver
 	merged, err := MergeResponsesToolDeclarations(opts, batches...)
 	if err != nil {
 		return nil, false, err
+	}
+	// Promote discoveries while identities still have their original namespace.
+	// The lowerer consumes this final list and must not promote it a second time.
+	mergedRaw, err := json.Marshal(merged)
+	if err != nil {
+		return nil, false, err
+	}
+	var rawTools []any
+	if err = json.Unmarshal(mergedRaw, &rawTools); err != nil {
+		return nil, false, err
+	}
+	discovered, err := promotedResponsesToolSearchDiscoveries(rawTools, input)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, tool := range discovered {
+		encoded, e := json.Marshal(tool)
+		if e != nil {
+			return nil, false, e
+		}
+		merged = append(merged, encoded)
+	}
+	if opts.Bridge.ToolNames == nil {
+		raw, e := json.Marshal(merged)
+		if e != nil {
+			return nil, false, e
+		}
+		var tools []ResponsesTool
+		if e = json.Unmarshal(raw, &tools); e != nil {
+			return nil, false, e
+		}
+		opts.Bridge.ToolNames, e = BuildBridgeToolNames(tools, typed.Input, "anthropic")
+		if e != nil {
+			return nil, false, e
+		}
 	}
 	var flatten func([]json.RawMessage, string) ([]any, error)
 	flatten = func(declarations []json.RawMessage, namespace string) ([]any, error) {
@@ -430,7 +456,7 @@ func AdaptResponsesClientToolsWithBridgeOptions(req map[string]any, opts Convers
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
-	mapping, lowered, err := AdaptResponsesClientTools(req)
+	mapping, lowered, err := adaptResponsesClientTools(req, false)
 	if err != nil {
 		return mapping, false, err
 	}
