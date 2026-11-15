@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Gemini 中间转换保留推理意图与 JSON 格式，小输出上限不再提前受到 Claude 思考预算限制。
+
 - Anthropic 桥保留工具 strict，并在启用桥选项时将 allowed_tools 限制应用到实际声明。
 
 - Fable 5.2 与 Mythos 5.2 补齐模型目录及默认 adaptive/high 转换，强制工具选择按目标能力拒绝。
