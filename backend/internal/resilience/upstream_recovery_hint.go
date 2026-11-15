@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -78,6 +79,20 @@ func (s *RequestState) AccountRetryNotBefore(accountID int64) (UpstreamRecoveryH
 // recoveryDelay rounds upward at nanosecond precision, never shortening a hint.
 func recoveryDelay(value string, unit time.Duration) (time.Duration, bool) {
 	if strings.ContainsAny(value, "\r\n") {
+		return 0, false
+	}
+	if !recoveryDecimalNumber.MatchString(strings.TrimSpace(value)) {
+		return 0, false
+	}
+	numeric, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || math.IsInf(numeric, 0) || math.IsNaN(numeric) || numeric < 0 {
+		return 0, false
+	}
+	if numeric == 0 {
+		// Decimal underflow can still carry a positive sub-nanosecond hint.
+		if strings.ContainsAny(strings.SplitN(strings.ToLower(value), "e", 2)[0], "123456789") && !strings.HasPrefix(strings.TrimSpace(value), "-") {
+			return time.Nanosecond, true
+		}
 		return 0, false
 	}
 	number, ok := new(big.Rat).SetString(strings.TrimSpace(value))
@@ -235,3 +250,5 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 }
 
 var recoveryCompoundParts = regexp.MustCompile(`(\d+(?:\.\d+)?)(ms|h|m|s)`)
+
+var recoveryDecimalNumber = regexp.MustCompile(`^[+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)

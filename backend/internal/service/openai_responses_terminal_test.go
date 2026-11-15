@@ -25,6 +25,8 @@ func TestClassifyOpenAIResponsesTerminal(t *testing.T) {
 		{"", `{"type":"response.done","response":{"status":"future"}}`, true, false, false, true, "unknown_status", 0},
 		{"", `{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`, true, true, false, false, "max_output_tokens", 0},
 		{"", `{"error":{"code":503}}`, true, true, false, true, "upstream_failed", 0},
+		{"error", `{"type":"error","code":"rate_limit_exceeded","message":"busy"}`, true, true, false, true, "upstream_failed", 0},
+		{"response.completed", `{"type":1,"response":{}}`, true, false, false, true, "invalid_envelope", 0},
 		{"", `{"error":null}`, false, false, false, false, "", 0},
 		{"", `{"error":{}}`, false, false, false, false, "", 0},
 		{"response.output_text.delta", `{"error":{"code":503}}`, false, false, false, false, "", 0},

@@ -12,6 +12,7 @@ func TestOpenAIResponsesUsageEvidence(t *testing.T) {
 			input, output, cache int
 		}{
 			{`{}`, false, 0, 0, 0}, {`{"usage":null}`, false, 0, 0, 0}, {`{"usage":{}}`, false, 0, 0, 0},
+			{`{"usage":{"input_tokens_details":{"image_tokens":2}}}`, true, 0, 0, 0},
 			{`{"usage":{"input_tokens":0,"output_tokens":0}}`, true, 0, 0, 0},
 			{`{"response":{"usage":{"input_tokens":5}}}`, true, 5, 0, 0},
 			{`{"usage":{"input_tokens":null,"output_tokens":"2"}}`, false, 0, 0, 0},

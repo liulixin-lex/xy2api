@@ -48,6 +48,9 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIRespon
 		return invalid("invalid_envelope")
 	}
 	rawType := root.Get("type")
+	if rawType.Exists() && rawType.Type != gjson.String {
+		return invalid("invalid_envelope")
+	}
 	payloadType := ""
 	if rawType.Type == gjson.String {
 		payloadType = strings.TrimSpace(rawType.Str)
@@ -107,6 +110,12 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIRespon
 		}
 	}
 	if kind == "error" {
+		for _, key := range []string{"message", "code"} {
+			v := root.Get(key)
+			if v.Type == gjson.String && strings.TrimSpace(v.Str) != "" || key == "code" && v.Type == gjson.Number {
+				return OpenAIResponsesTerminal{Seen: true, Valid: true, Failure: true, EventType: "error", Reason: "upstream_failed", Message: root.Get("message").String()}
+			}
+		}
 		result.Seen = false
 		return result
 	}

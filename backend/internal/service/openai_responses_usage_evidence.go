@@ -8,6 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+//nolint:unused // M6/M7 wire readers after this prerequisite; no production caller is changed here.
 func openAIResponsesUsageEvidence(data []byte, source string) (usage OpenAIUsage, present bool) {
 	switch source {
 	case "upstream_json", "upstream_sse_terminal", "upstream_sse_progressive":
@@ -31,7 +32,7 @@ func openAIResponsesUsageEvidence(data []byte, source string) (usage OpenAIUsage
 			return v.Type == gjson.Number && v.Num >= 0 && v.Num < float64(math.MaxInt) && !math.IsInf(v.Num, 0) && v.Num == math.Trunc(v.Num)
 		}
 		counts := apicompat.ParseOpenAIUsageCounts(value)
-		for _, field := range []string{"input_tokens", "prompt_tokens", "output_tokens", "completion_tokens", "total_tokens", "input_tokens_details.cached_tokens", "prompt_tokens_details.cached_tokens", "cache_read_input_tokens", "cache_read_tokens", "cached_tokens", "input_tokens_details.cache_write_tokens", "prompt_tokens_details.cache_write_tokens", "input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens", "cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens"} {
+		for _, field := range []string{"input_tokens", "prompt_tokens", "output_tokens", "completion_tokens", "total_tokens", "input_tokens_details.cached_tokens", "prompt_tokens_details.cached_tokens", "cache_read_input_tokens", "cache_read_tokens", "cached_tokens", "input_tokens_details.cache_write_tokens", "prompt_tokens_details.cache_write_tokens", "input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens", "cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens", "completion_tokens_details.reasoning_tokens", "output_tokens_details.reasoning_tokens", "output_tokens_details.image_tokens", "completion_tokens_details.image_tokens", "input_tokens_details.image_tokens", "prompt_tokens_details.image_tokens"} {
 			if valid(field) {
 				present = true
 				break

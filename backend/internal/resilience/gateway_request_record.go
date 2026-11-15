@@ -46,7 +46,7 @@ type gatewayRequestTrace struct {
 	TerminalEventSeen  *bool
 	TerminalEventValid *bool
 	ResponseBodyType   *string
-	excluded           bool
+	excluded           bool //nolint:unused // M8 owns Enable/Exclude/Claim wiring after the foundation.
 
 	started                    time.Time
 	sends                      int

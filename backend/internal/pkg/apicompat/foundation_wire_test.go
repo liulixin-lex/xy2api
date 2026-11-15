@@ -9,6 +9,19 @@ import (
 )
 
 func TestFoundationWireCarriers(t *testing.T) {
+	var search ResponsesOutput
+	if err := json.Unmarshal([]byte(`{"type":"tool_search_call","arguments":{},"encrypted_content":null,"encrypted_function_args":"opaque"}`), &search); err != nil {
+		t.Fatal(err)
+	}
+	searchRaw, err := json.Marshal(search)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var searchFields map[string]json.RawMessage
+	if err := json.Unmarshal(searchRaw, &searchFields); err != nil || string(searchFields["encrypted_content"]) != "null" || string(searchFields["encrypted_function_args"]) != `"opaque"` || string(searchFields["arguments"]) != "{}" {
+		t.Fatal(string(searchRaw), err)
+	}
+
 	for _, raw := range []string{`{"type":"reasoning"}`, `{"type":"reasoning","encrypted_content":null}`, `{"type":"reasoning","encrypted_content":""}`, `{"type":"reasoning","encrypted_content":"opaque","encrypted_function_args":null}`} {
 		var in ResponsesInputItem
 		var out ResponsesOutput

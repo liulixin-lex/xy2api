@@ -26,6 +26,10 @@ func TestFoundationUpstreamRecoveryHintState(t *testing.T) {
 		{http.Header{"Retry-After": {"bad"}, "Retry-After-Ms": {"-1"}}, `{"error":{"retry_after":0,"retry_after_ms":"NaN"}}`, 0, ""},
 		{http.Header{"Retry-After": {"1\r\nx: 2"}}, `{"message":"try again in 60s"}`, 0, ""},
 		{nil, `{"error":{"retry_after":"999999999999999999999"}}`, 0, ""},
+		{nil, `{"error":{"retry_after":"0e10"}}`, 0, ""},
+		{nil, `{"error":{"retry_after":"1/2"}}`, 0, ""},
+		{nil, `{"error":{"retry_after":"0x1p2"}}`, 0, ""},
+		{nil, `{"error":{"retry_after":"1e-1000"}}`, time.Nanosecond, "error.retry_after"},
 	} {
 		h, ok := ParseUpstreamRecoveryHint(tc.h, []byte(tc.body), now)
 		if ok != (tc.delay > 0) || h.Delay != tc.delay || h.Source != tc.source {

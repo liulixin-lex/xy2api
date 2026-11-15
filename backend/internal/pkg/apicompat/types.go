@@ -509,6 +509,14 @@ func (o ResponsesOutput) MarshalJSON() ([]byte, error) {
 	if o.Status != "" {
 		m["status"] = o.Status
 	}
+	if len(o.encryptedContentRaw) > 0 {
+		m["encrypted_content"] = o.encryptedContentRaw
+	} else if o.EncryptedContent != "" {
+		m["encrypted_content"] = o.EncryptedContent
+	}
+	if len(o.EncryptedFunctionArgs) > 0 {
+		m["encrypted_function_args"] = o.EncryptedFunctionArgs
+	}
 	return json.Marshal(m)
 }
 
