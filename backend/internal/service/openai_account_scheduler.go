@@ -266,7 +266,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
-	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
+	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact && !openAISelectionNoWait(ctx)
 	negativeVariant := "openai:" + string(requiredTransport) + ":" + string(requiredCapability) + ":" + NormalizeOpenAICompatiblePlatform(platform)
 	negativeCtx := ctx
 	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
@@ -303,6 +303,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)
 		}
 		if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{
+			NoWait:  openAISelectionNoWait(ctx),
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,
@@ -317,7 +318,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	// xy2api resilience: selections that are never cached still count for the
 	// per-key fast fail when no account of the group could serve them.
-	if !negativeCacheable && isNoAccountSelectionError(err) {
+	if !negativeCacheable && !openAISelectionNoWait(ctx) && isNoAccountSelectionError(err) {
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {

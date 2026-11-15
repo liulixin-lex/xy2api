@@ -25,3 +25,26 @@ func ChatRequestRequirementFromContext(ctx context.Context) (ChatRequestRequirem
 	req, ok := ctx.Value(chatRequestRequirementKey{}).(ChatRequestRequirement)
 	return req, ok
 }
+
+type openAISelectionNoWaitKey struct{}
+
+func WithOpenAISelectionNoWait(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, openAISelectionNoWaitKey{}, true)
+}
+
+func openAISelectionNoWait(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	noWait, _ := ctx.Value(openAISelectionNoWaitKey{}).(bool)
+	return noWait
+}
+
+// OpenAIQueueReselectionAllowed preserves the existing hard owner/migration
+// guards when the HTTP admission path considers one local free-slot retry.
+func OpenAIQueueReselectionAllowed(ctx context.Context) bool {
+	return ctx != nil && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx)
+}

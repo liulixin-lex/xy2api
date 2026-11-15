@@ -152,7 +152,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		}
 		meta.addReason("capacity")
 	}
-	if len(verified) == 0 {
+	if len(verified) == 0 || req.NoWait || openAISelectionNoWait(ctx) {
 		return nil
 	}
 	cfg := s.schedulingConfig()

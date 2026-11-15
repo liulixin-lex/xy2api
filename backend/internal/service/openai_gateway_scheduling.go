@@ -1184,6 +1184,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	cfg := s.schedulingConfig()
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
+	req.NoWait = openAISelectionNoWait(ctx)
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
 	}
@@ -1329,7 +1330,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	var loadErr error
 	withLoads := s.concurrencyService != nil && cfg.LoadBatchEnabled
 	if withLoads {
-		loads, loadErr = s.concurrencyService.GetAccountsLoadBatch(ctx, loadRequests)
+		if req.NoWait {
+			loads, loadErr = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadRequests)
+		} else {
+			loads, loadErr = s.concurrencyService.GetAccountsLoadBatch(ctx, loadRequests)
+		}
 	}
 	if loadErr != nil {
 		loads = nil
@@ -1345,6 +1350,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return selected, err
 			}
 		}
+	}
+	if req.NoWait {
+		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary("concurrency_full"))
 	}
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
@@ -1696,6 +1704,16 @@ var (
 // selectOpenAIStickyCapacity is shared by all three sticky saturation paths.
 // The short retry never joins a queue; only the returned final wait plan does.
 func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {
+	if req.NoWait || openAISelectionNoWait(ctx) {
+		if req.DisableStickyEscape || req.PreviousResponseID != "" {
+			return nil, ErrNoAvailableAccounts
+		}
+		selection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)
+		if selection == nil && err == nil {
+			err = ErrNoAvailableAccounts
+		}
+		return selection, err
+	}
 	cfg := s.schedulingConfig()
 	wait := func() (*AccountSelectionResult, error) {
 		if s.concurrencyService != nil {
@@ -1789,6 +1807,9 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx contex
 }
 
 func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {
+	if req.NoWait || openAISelectionNoWait(ctx) {
+		fallbackWait = false
+	}
 	if account == nil {
 		return nil, nil
 	}
