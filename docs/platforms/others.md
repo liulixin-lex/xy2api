@@ -162,3 +162,5 @@ Embeddings、图片、视频、语音等端点对这些平台返回 `404 not_fou
 Chat 上游因长度或过滤结束工具输出时，Messages 响应仍返回 max_tokens 或 refusal，已排队的正文和工具参数按顺序发出；参数保留原片段，不补空对象。
 
 Chat thinking 支持字符串、含 text 的对象及按顺序拼接的字符串/text 对象数组；其他有类型片段忽略并记录，正文仍正常返回。缺少类型或已支持片段的文本类型错误仍报转换错误。
+
+Responses 转 Chat 时仅转发字符串 user；metadata 与非字符串 user 省略并记录字段降级，避免兼容上游因这些字段拒绝请求。text.verbosity 继续转为 verbosity。

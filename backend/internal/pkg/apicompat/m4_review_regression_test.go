@@ -316,3 +316,38 @@ func TestM4ReviewNestedThinkingAndUnknownParts(t *testing.T) {
 		}
 	}
 }
+
+func TestM4ReviewChatUserMetadataOmission(t *testing.T) {
+	for _, user := range []string{`123`, `{"id":"u"}`, `true`, `"alice"`, `null`} {
+		var req ResponsesRequest
+		if err := json.Unmarshal([]byte(`{"model":"m","input":"hi","user":`+user+`,"metadata":{"trace":"abc"}}`), &req); err != nil {
+			t.Fatal(err)
+		}
+		var notices []ConversionNotice
+		out, err := ResponsesToChatCompletionsRequestWithOptions(&req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}, Record: func(n ConversionNotice) { notices = append(notices, n) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Metadata) != 0 || (user == `"alice"` && string(out.User) != user) || (user != `"alice"` && len(out.User) != 0) {
+			t.Fatalf("fields: %#v", out)
+		}
+		want := 1
+		if user != `"alice"` && user != `null` {
+			want = 2
+		}
+		if len(notices) != want || notices[len(notices)-1] != (ConversionNotice{Field: "metadata", Action: "omit"}) {
+			t.Fatalf("notices=%#v", notices)
+		}
+		legacy, err := ResponsesToChatCompletionsRequest(&req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if user != `"alice"` {
+			a, _ := json.Marshal(out)
+			b, _ := json.Marshal(legacy)
+			if string(a) != string(b) {
+				t.Fatalf("baseline fields differ: %s / %s", a, b)
+			}
+		}
+	}
+}

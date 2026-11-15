@@ -856,7 +856,7 @@ func TestM4RequestFieldContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out.User) != `"alice"` || string(out.Metadata) != `{"project":"p"}` || out.Verbosity != "low" || out.MaxCompletionTokens == nil || *out.MaxCompletionTokens != 22 {
+	if string(out.User) != `"alice"` || len(out.Metadata) != 0 || out.Verbosity != "low" || out.MaxCompletionTokens == nil || *out.MaxCompletionTokens != 22 {
 		t.Fatalf("fields=%+v", out)
 	}
 	legacy, err := ResponsesToChatCompletionsRequest(req)
@@ -866,9 +866,9 @@ func TestM4RequestFieldContract(t *testing.T) {
 	if len(legacy.User) != 0 || len(legacy.Metadata) != 0 || legacy.Verbosity != "" {
 		t.Fatal("legacy fields changed")
 	}
-	out.Metadata[0] = 'x'
-	if req.Metadata[0] != '{' {
-		t.Fatal("metadata aliases input")
+	out.User[1] = 'x'
+	if string(req.User) != `"alice"` {
+		t.Fatal("user aliases input")
 	}
 }
 

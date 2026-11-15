@@ -232,8 +232,17 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 		out.ToolChoice = json.RawMessage(`"none"`)
 	}
 	restoreBridgeChatHistory(out.Messages, restore)
-	out.User = append(json.RawMessage(nil), normalizedRawJSON(req.User)...)
-	out.Metadata = append(json.RawMessage(nil), normalizedRawJSON(req.Metadata)...)
+	if raw := normalizedRawJSON(req.User); len(raw) > 0 {
+		var user string
+		if json.Unmarshal(raw, &user) == nil {
+			out.User = append(json.RawMessage(nil), raw...)
+		} else if opts.Record != nil {
+			opts.Record(ConversionNotice{Field: "user", Action: "omit"})
+		}
+	}
+	if len(normalizedRawJSON(req.Metadata)) > 0 && opts.Record != nil {
+		opts.Record(ConversionNotice{Field: "metadata", Action: "omit"})
+	}
 	if req.Text != nil {
 		out.Verbosity = req.Text.Verbosity
 	}
