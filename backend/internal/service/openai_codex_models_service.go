@@ -550,12 +550,16 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
-	if openai.IsGPT61SolModelSpelling(modelID) {
-		if err := json.Unmarshal(openai.CodexGPT61SolMetadata, &descriptor); err != nil {
+	if openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID) {
+		raw := openai.CodexGPT61SolMetadata
+		if openai.IsGPT61TerraModelSpelling(modelID) {
+			raw = openai.CodexGPT61TerraMetadata
+		}
+		if err := json.Unmarshal(raw, &descriptor); err != nil {
 			panic(err)
 		}
 		descriptor.Slug = modelID
-		descriptor.officialMetadata = openai.CodexGPT61SolMetadata
+		descriptor.officialMetadata = raw
 	}
 	return descriptor
 }
@@ -2111,6 +2115,7 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.1-terra": {},
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
 	"gpt-5.6-sol":   {},
@@ -2148,6 +2153,8 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		}
 		if isOpenAIGPT6AstraModel(target) {
 			target = "gpt-6-astra"
+		} else if openai.IsGPT61TerraModelSpelling(target) {
+			target = "gpt-6.1-terra"
 		} else if openai.IsGPT61SolModelSpelling(target) {
 			target = "gpt-6.1-sol"
 		}

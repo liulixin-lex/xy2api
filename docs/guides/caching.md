@@ -199,6 +199,8 @@ Responses、Chat Completions 转换、HTTP SSE 与原生 WebSocket 的缓存读�
 
 ### 请求中的缓存参数
 
+GPT-6.1 Terra 的精确型号及已知后缀支持兼容请求自动缓存键，缓存身份与 Sol 等其他模型分开。
+
 API Key 正文中的显式参数不因第三方 host 而当作目录占位值删除，包括 `none`。Responses-shaped Chat 保留 `metadata`；仅在最终 Responses 端点省略并记录 `stream_options`，因此 `include_usage` 的 Chat 用量格式提示不生效，实际 usage 不受影响。
 
 - API Key 账号原样保留客户端指定的 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options` 和 `safety_identifier`。其他 OpenAI 账号（Codex OAuth 协议）会去掉后三项，Debug 日志记录字段名与原因；Grok 会去掉 `prompt_cache_retention`、`safety_identifier` 与 `metadata`。
