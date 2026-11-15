@@ -50,11 +50,24 @@ func prepareBridgeAnthropicRequest(req *ResponsesRequest, opts ConversionOptions
 	copyReq.Tools, copyReq.Input, copyReq.ToolChoice = adapted.Tools, adapted.Input, adapted.ToolChoice
 	if req.anthropicChatSource != nil {
 		source := *req.anthropicChatSource
-		source.Tools, err = responsesToolsToChatTools(copyReq.Tools)
-		if err != nil {
-			return nil, err
+		source.Tools = append([]ChatTool(nil), source.Tools...)
+		alias := func(name string) string {
+			if mapped, ok := opts.Bridge.ToolNames.Forward[ToolNameIdentity{Kind: "function", Name: name}]; ok {
+				return mapped
+			}
+			return name
 		}
-		source.Functions = nil
+		for i := range source.Tools {
+			if source.Tools[i].Function != nil {
+				function := *source.Tools[i].Function
+				function.Name = alias(function.Name)
+				source.Tools[i].Function = &function
+			}
+		}
+		source.Functions = append([]ChatFunction(nil), source.Functions...)
+		for i := range source.Functions {
+			source.Functions[i].Name = alias(source.Functions[i].Name)
+		}
 		copyReq.anthropicChatSource = &source
 	}
 	return &copyReq, nil
