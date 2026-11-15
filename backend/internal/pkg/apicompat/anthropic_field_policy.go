@@ -537,6 +537,18 @@ func mapAnthropicResponseFormat(req *ResponsesRequest, out *AnthropicRequest) er
 		}
 		raw = converted
 	}
+	if req.conversionTarget == "gemini" {
+		if err := validateResponseFormat(raw, false); err != nil {
+			return err
+		}
+		if len(normalizedRawJSON(raw)) > 0 {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Format = append(json.RawMessage(nil), raw...)
+		}
+		return nil
+	}
 	format, err := responsesTextFormatToAnthropic(raw)
 	if err != nil {
 		return err

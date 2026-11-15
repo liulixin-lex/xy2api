@@ -25,6 +25,17 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	default:
 		return unsupportedConversion("reasoning.effort", "expected none, minimal, low, medium, high or xhigh (max is also supported by the gateway)")
 	}
+	if req.conversionTarget == "gemini" {
+		if effort == "none" {
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
+		} else if effort != "" {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = effort
+		}
+		return nil
+	}
 	if effort == "none" && claude.SupportsDisabledThinking(req.Model) {
 		out.Thinking = &AnthropicThinking{Type: "disabled"}
 		if spec, ok := claude.Claude55(req.Model); ok && spec.DisabledThinkingMaxEffort != "" {
