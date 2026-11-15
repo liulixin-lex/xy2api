@@ -84,3 +84,34 @@ func TestOpenAIUsageConversionExplicitZeroAndWritePrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesChatUsagePresenceRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		raw, want            string
+		input, output, total bool
+	}{
+		{`{"input_tokens":5,"output_tokens":2,"total_tokens":7}`, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`, true, true, true},
+		{`{"input_tokens":0,"output_tokens":0,"total_tokens":0}`, `{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, true, true, true},
+		{`{"input_tokens":5}`, `{"prompt_tokens":5,"completion_tokens":0,"total_tokens":5}`, true, false, false},
+	} {
+		var source ResponsesUsage
+		require.NoError(t, json.Unmarshal([]byte(tc.raw), &source))
+		converted := chatUsageFromResponsesUsage(&source)
+		wire, err := json.Marshal(converted)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, string(wire))
+		require.True(t, converted.UsagePresenceKnown)
+		require.Equal(t, tc.input, converted.PromptTokensPresent)
+		require.Equal(t, tc.output, converted.CompletionTokensPresent)
+		require.Equal(t, tc.total, converted.TotalTokensPresent)
+		unknown := source
+		unknown.UsagePresenceKnown = false
+		wire2, err := json.Marshal(chatUsageFromResponsesUsage(&unknown))
+		require.NoError(t, err)
+		require.Equal(t, string(wire), string(wire2))
+	}
+	constructed := chatUsageFromResponsesUsage(&ResponsesUsage{InputTokens: 5, OutputTokens: 2})
+	wire, err := json.Marshal(constructed)
+	require.NoError(t, err)
+	require.Equal(t, `{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}`, string(wire))
+}
