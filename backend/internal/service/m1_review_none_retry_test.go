@@ -82,18 +82,26 @@ func TestM1ReviewExplicitNoneRepair(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		status                   int
-		param, effort, host, typ string
+		status                             int
+		param, effort, host, typ, platform string
+		want                               bool
 	}{
-		{422, "reasoning.effort", "none", "https://compat.example", AccountTypeAPIKey},
-		{400, "", "none", "https://compat.example", AccountTypeAPIKey},
-		{400, "reasoning.effort", "high", "https://compat.example", AccountTypeAPIKey},
-		{400, "reasoning.effort", "none", "https://api.openai.com", AccountTypeAPIKey},
-		{400, "reasoning.effort", "none", "https://compat.example", AccountTypeOAuth},
+		{422, "reasoning.effort", "none", "https://compat.example", AccountTypeAPIKey, PlatformOpenAI, false},
+		{400, "", "none", "https://compat.example", AccountTypeAPIKey, PlatformOpenAI, false},
+		{400, "reasoning.effort", "high", "https://compat.example", AccountTypeAPIKey, PlatformOpenAI, false},
+		{400, "reasoning.effort", "none", "https://api.openai.com", AccountTypeAPIKey, PlatformOpenAI, false},
+		{400, "reasoning.effort", "none", "", AccountTypeAPIKey, PlatformOpenAI, false},
+		{400, "reasoning.effort", "none", "https://compat.example", AccountTypeOAuth, PlatformOpenAI, false},
+		// The baseline stripped none for every non-OpenAI platform key, including the default base_url.
+		{400, "reasoning.effort", "none", "", AccountTypeAPIKey, PlatformDeepseek, true},
+		{400, "reasoning", "none", "https://api.moonshot.cn/v1", AccountTypeAPIKey, PlatformKimi, true},
 	} {
-		account := &Account{Type: tc.typ, Credentials: map[string]any{"base_url": tc.host}}
-		_, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account, tc.status, []byte(`{"reasoning":{"effort":"`+tc.effort+`"}}`), []byte(`{"error":{"code":"unsupported_parameter","param":"`+tc.param+`","message":"Unsupported parameter: reasoning.effort"}}`))
+		account := &Account{Platform: tc.platform, Type: tc.typ, Credentials: map[string]any{"base_url": tc.host}}
+		next, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account, tc.status, []byte(`{"model":"company-coding-model","input":"hi","reasoning":{"effort":"`+tc.effort+`"}}`), []byte(`{"error":{"code":"unsupported_parameter","param":"`+tc.param+`","message":"Unsupported parameter: reasoning.effort"}}`))
 		require.NoError(t, err)
-		require.False(t, changed)
+		require.Equal(t, tc.want, changed, "%s %s %q", tc.platform, tc.typ, tc.host)
+		if tc.want {
+			require.JSONEq(t, `{"model":"company-coding-model","input":"hi"}`, string(next))
+		}
 	}
 }

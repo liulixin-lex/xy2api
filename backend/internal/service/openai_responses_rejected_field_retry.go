@@ -129,11 +129,10 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 // E21 is restricted to third-party API-key Responses requests and explicit none.
 // Existing callers retain their prior repair contract until they opt into this account-aware entry.
 func normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account *Account, statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
-	if account != nil && account.Type == AccountTypeAPIKey && statusCode == http.StatusBadRequest {
-		baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	if openAIAccountPreviouslyStrippedNoneReasoningEffort(account) && statusCode == http.StatusBadRequest {
 		param := strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String())
 		effort := gjson.GetBytes(body, "reasoning.effort")
-		if baseURL != "" && !isOfficialOpenAIModelsBaseURL(baseURL) && (param == "reasoning.effort" || param == "reasoning") && effort.Type == gjson.String && strings.EqualFold(strings.TrimSpace(effort.String()), "none") {
+		if (param == "reasoning.effort" || param == "reasoning") && effort.Type == gjson.String && strings.EqualFold(strings.TrimSpace(effort.String()), "none") {
 			next, err := sjson.DeleteBytes(body, param)
 			if err != nil {
 				return nil, "", false, err
@@ -154,6 +153,19 @@ func normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account *Account, 
 		}
 	}
 	return normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode, body, responseBody)
+}
+
+// The API-key targets whose none the baseline stripped before sending: OpenAI
+// keys on a non-official base_url and every other OpenAI-protocol platform key.
+func openAIAccountPreviouslyStrippedNoneReasoningEffort(account *Account) bool {
+	if account == nil || account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() {
+		return false
+	}
+	if !account.IsOpenAI() {
+		return true
+	}
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	return baseURL != "" && !isOfficialOpenAIModelsBaseURL(baseURL)
 }
 
 // Call only after the existing retry budget approves the omission.
