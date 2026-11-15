@@ -279,7 +279,8 @@ func TestChatReservationLimitMatchesConversion(t *testing.T) {
 			var request apicompat.ChatCompletionsRequest
 			decodeErr := json.Unmarshal([]byte(tc.raw), &request)
 			if tc.invalid {
-				require.Error(t, err)
+				require.NoError(t, err)
+				require.Equal(t, tokenInflightEstimate("m", []byte(tc.raw)), estimate)
 				require.Error(t, parseErr)
 				if decodeErr == nil {
 					_, err = apicompat.ChatCompletionsToResponses(&request)
@@ -313,4 +314,37 @@ func TestChatReservationLimitMatchesConversion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "prompt_cache_key=s", estimate.SessionKey)
 	require.Equal(t, service.InflightEstimateToken, estimate.Kind)
+}
+
+func TestReviewM2ReservationFallbackDoesNotReject(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{"invalid UTF-8", []byte("{\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"\xff\"}]}")},
+		{"integer decimal", []byte(`{"max_tokens":4096.0}`)},
+		{"Codex zero limit", []byte(`{"max_output_tokens":0}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := append([]byte(nil), tc.body...)
+			for _, protocol := range []string{"chat", "responses", "anthropic", "gemini"} {
+				estimate, err := tokenInflightEstimateForProtocol("m", tc.body, protocol)
+				require.NoError(t, err)
+				require.Equal(t, tokenInflightEstimate("m", tc.body), estimate)
+				for _, subscription := range []bool{false, true} {
+					cfg := &config.Config{}
+					cfg.Billing.InflightReservation.Enabled = subscription
+					billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+					t.Cleanup(billing.Stop)
+					key := &service.APIKey{User: &service.User{ID: 1}, Group: &service.Group{SubscriptionType: service.SubscriptionTypeSubscription}}
+					estimator := &countingEstimator{}
+					done, err := reserveInflightBalance(newInflightTestGinContext(), billing, estimator, key, &service.UserSubscription{}, estimate)
+					require.NoError(t, err)
+					done()
+					require.Zero(t, estimator.calls)
+				}
+			}
+			require.Equal(t, original, tc.body)
+		})
+	}
 }
