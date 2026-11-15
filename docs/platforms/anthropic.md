@@ -238,7 +238,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射 |
 | `response_format` 的 `json_object` | 忽略（网关放宽） | Anthropic 没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema` |
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
-| `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Claude 5 及以后 thinking 常开，按 `low` 处理（Sonnet 5.5 改为 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking |
+| `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致 |
 

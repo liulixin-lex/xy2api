@@ -19,8 +19,11 @@ func ThinkingModeForModel(model string) string {
 }
 
 // SupportsDisabledThinking reports whether reasoning_effort=none can turn
-// thinking off. Claude 5+ and Mythos Preview keep thinking enabled.
+// thinking off. Claude 5+ needs an explicit disabled-thinking capability.
 func SupportsDisabledThinking(model string) bool {
+	if spec, ok := Claude55(model); ok {
+		return spec.DisabledThinkingMaxEffort != ""
+	}
 	return !claudeVersionAtLeast(model, 5, 0)
 }
 

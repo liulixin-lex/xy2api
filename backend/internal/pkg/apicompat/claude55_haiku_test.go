@@ -11,7 +11,11 @@ func TestHaiku55ResponsesAdaptiveThinkingAndSampling(t *testing.T) {
 	for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max", "none"} {
 		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-haiku-5-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: effort}})
 		require.NoError(t, err, effort)
-		require.Equal(t, "adaptive", out.Thinking.Type, effort)
+		mode := "adaptive"
+		if effort == "none" {
+			mode = "disabled"
+		}
+		require.Equal(t, mode, out.Thinking.Type, effort)
 		require.Zero(t, out.Thinking.BudgetTokens, effort)
 		want := effort
 		switch effort {
