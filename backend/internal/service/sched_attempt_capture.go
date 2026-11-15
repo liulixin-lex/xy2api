@@ -336,7 +336,10 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	st := resilience.StateFrom(ctx)
 	*owner = nil
 	if st != nil {
-		if err := ctx.Err(); err != nil {
+		// Legacy service calls may carry state only for stream accounting and
+		// deliberately detach their first send. Revalidate admitted requests
+		// and handler retries without changing that existing behavior.
+		if err := ctx.Err(); err != nil && (st.Budget() != nil || st.LastUpstreamFailure() != nil) {
 			if !errors.Is(err, context.Canceled) {
 				return nil, schedHTTPPreDispatchFailure(ctx)
 			}

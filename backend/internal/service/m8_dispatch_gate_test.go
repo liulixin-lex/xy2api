@@ -85,6 +85,7 @@ func TestM8PreDispatchPreservesFailure(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, transport.requests, 1)
 		require.Nil(t, capture)
+		st.SetLastUpstreamFailure(&UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable})
 		ctx, cancel := context.WithCancel(ctx)
 		cancel()
 		_, err = svc.sendSchedHTTP(ctx, &Account{ID: 11}, req, "", nil, false, &capture)
