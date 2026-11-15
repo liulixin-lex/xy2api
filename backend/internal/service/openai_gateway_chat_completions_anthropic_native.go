@@ -344,7 +344,14 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
+	var evidence anthropicBufferedEvidence
 	defer func() {
+		if result != nil {
+			facts := evidence.facts()
+			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+			result.PartialFailure = retErr != nil
+		}
 		if result != nil && retErr == nil && !result.ClientDisconnect {
 			ClaimProtocolTerminal(c)
 		}
@@ -500,7 +507,8 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			logReadErr(rerr)
 			break
 		}
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
+		eventType, ok := extractOpenAISSEEventLine(line)
+		if !ok {
 			continue
 		}
 
@@ -519,6 +527,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			continue
 		}
 
+		evidence.observe(eventType, payload)
+		if evidence.err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream Anthropic stream")
+			return resultWithUsage(), evidence.err
+		}
 		observeSchedPayload(c, []byte(payload))
 		recordAnthropicTerminalMapping(c.Request.Context(), payload)
 		var event apicompat.AnthropicStreamEvent

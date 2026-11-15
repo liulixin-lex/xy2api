@@ -761,15 +761,6 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	return result, nil
 }
 
-func isOpenAICompatResponsesTerminalEvent(eventType string) bool {
-	switch strings.TrimSpace(eventType) {
-	case "response.completed", "response.done", "response.incomplete", "response.failed", "response.cancelled", "response.canceled", "error":
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, kind, message string) {
 	if c == nil {
 		return
@@ -806,28 +797,6 @@ type openAICompatBufferedReadError struct {
 
 func (e *openAICompatBufferedReadError) Error() string { return e.cause.Error() }
 func (e *openAICompatBufferedReadError) Unwrap() error { return e.cause }
-
-func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse {
-	if event == nil {
-		return nil
-	}
-	if event.Response != nil {
-		return event.Response
-	}
-	switch strings.TrimSpace(event.Type) {
-	case "response.failed", "error":
-		message := extractOpenAISSEErrorMessage(payload)
-		if message == "" {
-			message = "Upstream response failed"
-		}
-		return &apicompat.ResponsesResponse{
-			Status: "failed",
-			Error:  &apicompat.ResponsesError{Code: event.Code, Message: message},
-		}
-	default:
-		return nil
-	}
-}
 
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,

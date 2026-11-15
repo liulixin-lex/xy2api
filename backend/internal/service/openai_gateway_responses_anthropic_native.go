@@ -356,7 +356,14 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
 ) (result *OpenAIForwardResult, retErr error) {
+	var evidence anthropicBufferedEvidence
 	defer func() {
+		if result != nil {
+			facts := evidence.facts()
+			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+			result.PartialFailure = retErr != nil
+		}
 		if result != nil && retErr == nil && !result.ClientDisconnect {
 			ClaimProtocolTerminal(c)
 		}
@@ -497,7 +504,8 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			logReadErr(rerr)
 			break
 		}
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
+		eventType, ok := extractOpenAISSEEventLine(line)
+		if !ok {
 			continue
 		}
 
@@ -515,6 +523,11 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			continue
 		}
 
+		evidence.observe(eventType, payload)
+		if evidence.err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream Anthropic stream")
+			return resultWithUsage(), evidence.err
+		}
 		observeSchedPayload(c, []byte(payload))
 		recordAnthropicTerminalMapping(c.Request.Context(), payload)
 		var event apicompat.AnthropicStreamEvent
@@ -523,6 +536,12 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 
 		processAnthropicEvent(&event)
+	}
+
+	if !evidence.stopped {
+		err := &apicompat.UpstreamConversionError{Field: "stream", Reason: "missing Anthropic terminal event", SourceProtocol: "anthropic"}
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return resultWithUsage(), err
 	}
 
 	// Finalize state machine（客户端已断开时仍推进，保证 usage 汇总完整；仅在

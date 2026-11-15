@@ -473,6 +473,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			if !ok {
 				if frame, complete := deliveredParser.Finish(); complete {
 					evidence.observe(frame.EventType, frame.Data)
+					sawTerminalEvent = evidence.stopped
 				}
 				if !clientDisconnected {
 					flusher.Flush()
@@ -506,15 +507,13 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			line := ev.line
 			if frame, complete := deliveredParser.AddLine(line); complete {
 				evidence.observe(frame.EventType, frame.Data)
+				sawTerminalEvent = evidence.stopped
 				outputStarted = outputStarted || semanticSSEBlock([]byte("event: "+frame.EventType+"\ndata: "+frame.Data))
 			}
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
 				observeSchedPayload(c, []byte(trimmed))
 				observer.ObserveAnthropic([]byte(trimmed))
-				if anthropicStreamEventIsTerminal("", trimmed) {
-					sawTerminalEvent = true
-				}
 				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
@@ -522,11 +521,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				parseSSEUsagePassthrough(data, usage)
 				schedUsage := claudeUsageToOpenAIUsage(usage)
 				currentSchedAttempt(ctx).noteUsage(&schedUsage)
-			} else {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
-					sawTerminalEvent = true
-				}
 			}
 
 			if !clientDisconnected {
@@ -548,6 +542,13 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				} else {
 					inPartialEvent = true
 				}
+			}
+
+			if evidence.err != nil {
+				if evidence.terminalSeen && evidence.terminalValid {
+					ClaimProtocolTerminal(c)
+				}
+				return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), evidence.err
 			}
 
 		case <-intervalCh:

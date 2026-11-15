@@ -45,12 +45,13 @@ func (e *anthropicBufferedEvidence) observe(name, payload string) {
 	}
 	if kind == "error" {
 		e.terminalSeen, e.terminalValid = true, root.Get("error").IsObject()
-		e.err = fmt.Errorf("Anthropic upstream error: %s", extractUpstreamErrorMessage([]byte(payload)))
+		e.err = fmt.Errorf("anthropic upstream error: %s", extractUpstreamErrorMessage([]byte(payload)))
 		return
 	}
-	if kind == "message_stop" {
+	switch kind {
+	case "message_stop":
 		e.terminalSeen, e.terminalValid, e.stopped = true, true, true
-	} else if kind == "message_delta" {
+	case "message_delta":
 		reason := root.Get("delta.stop_reason")
 		if reason.Type == gjson.String && reason.Str != "" {
 			e.terminalSeen = true

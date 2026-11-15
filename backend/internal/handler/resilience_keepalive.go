@@ -99,7 +99,7 @@ func inboundIsChatCompletions(c *gin.Context) bool {
 // stream ends with the resilience terminal frame instead of the 0.3.0
 // "event: error" frame.
 func resilienceChatTerminalFrame(c *gin.Context) bool {
-	return resilience.Current().KeepaliveOn() && inboundIsChatCompletions(c)
+	return inboundIsChatCompletions(c)
 }
 
 // writeChatCompletionsErrorSSE ends a committed Chat Completions stream
@@ -109,5 +109,5 @@ func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string,
 	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
-	return service.WriteTargetProtocolError(c, service.PreOutputProtocolChat, status, errType, code, "", message)
+	return writeHandlerProtocolError(c, service.PreOutputProtocolChat, status, errType, code, "", message)
 }

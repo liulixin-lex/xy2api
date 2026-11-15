@@ -2094,7 +2094,7 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 		}
 	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	service.WriteTargetProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
+	writeHandlerProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
@@ -2199,7 +2199,7 @@ func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errTy
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	body := gin.H{"type": "error", "error": gin.H{"type": errType, "message": message}}
 	stashResilienceErrorResponse(c, status, errType, message, body)
-	service.WriteTargetProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
+	writeHandlerProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // CountTokens handles token counting endpoint

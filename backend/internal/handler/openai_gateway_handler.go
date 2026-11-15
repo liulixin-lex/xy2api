@@ -1768,7 +1768,7 @@ func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 	}
 	_, code, message := resilienceTranslateError(c, status, errType, "", message)
-	service.WriteTargetProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
+	writeHandlerProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
 }
 
 // anthropicStreamingAwareError handles errors that may occur during streaming,
@@ -1779,7 +1779,7 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 	}
 	_, code, message := resilienceTranslateError(c, status, errType, "", message)
-	service.WriteTargetProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
+	writeHandlerProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, code, "", message)
 }
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
@@ -4107,7 +4107,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 			service.MarkOpsStreamFailure(c, errType, code, message, status)
 		}
 	}
-	service.WriteTargetProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
+	writeHandlerProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
 }
 
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
@@ -4254,12 +4254,13 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
 	var code string
 	errType, code, message = resilienceTranslateError(c, status, errType, "", message)
-	body := gin.H{"error": gin.H{"type": errType, "message": message}}
+	errorBody := gin.H{"type": errType, "message": message}
 	if code != "" {
-		body["error"].(gin.H)["code"] = code
+		errorBody["code"] = code
 	}
+	body := gin.H{"error": errorBody}
 	stashResilienceErrorResponse(c, status, errType, message, body)
-	service.WriteTargetProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
+	writeHandlerProtocolError(c, inboundOpenAIErrorProtocol(c), status, errType, code, "", message)
 }
 
 // openAICompactKeepaliveInterval 复用流式 keepalive 配置作为 compact 下游

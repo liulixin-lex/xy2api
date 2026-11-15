@@ -327,7 +327,7 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 			releaseOpenAIPrelude(st.preludeLog, event.Type, []byte(payload))
 		}
 	}
-	if st.guarded && class.Kind == resilience.TerminalFailure {
+	if class.Kind == resilience.TerminalFailure {
 		return st.onErrorEvent(&event, payload, class.Retryable)
 	}
 	// A stop_reason already ends the message; some compatible upstreams
@@ -357,11 +357,9 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 		return gatewayConvertOutcome{err: &UpstreamFailoverError{StatusCode: status, ResponseBody: body}, noResult: true}, true
 	}
 	if !st.strict {
-		// 0.4.4: the event is dropped and the stream goes on. Its end is
-		// then no reason to replay (review DELTA-P2-1).
 		st.sawFailure = true
-		st.write(st.hooks.convert(event, payload, false))
-		return gatewayConvertOutcome{}, false
+		st.terminal(body)
+		return gatewayConvertOutcome{err: fmt.Errorf("upstream stream error: %s", extractUpstreamErrorMessage(body))}, true
 	}
 	outputStarted := st.outputStarted()
 	st.recordStreamError(body, outputStarted)
@@ -379,7 +377,7 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 
 // onEnd handles the end of the upstream: EOF (cause nil) or a read error.
 func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
-	if st.sawStop || st.sawFailure || !st.guarded {
+	if st.sawStop {
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 			logger.L().Warn("gateway convert stream: read error", zap.Error(cause),
 				zap.String("request_id", st.requestID), zap.String("protocol", st.protocol))
@@ -408,7 +406,8 @@ func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
 		return gatewayConvertOutcome{err: fmt.Errorf("stream usage incomplete: %w", st.ctx().Err())}
 	}
 	if !st.strict {
-		return st.finish()
+		st.terminal(gatewayConvertErrorSource("api_error", "upstream_disconnected", "Upstream stream ended without a terminal event"))
+		return gatewayConvertOutcome{err: errors.New("stream usage incomplete: missing terminal event")}
 	}
 	if st.gone || canceled {
 		MarkResponseCommitted(st.c)
@@ -517,10 +516,11 @@ func (st *gatewayConvertStream) finish() gatewayConvertOutcome {
 // terminal writes the inbound protocol's failure frames after the held
 // opening and keeps the handler from appending another terminal.
 func (st *gatewayConvertStream) terminal(source []byte) {
-	st.release()
-	st.write(st.hooks.failure(source))
 	errType := strings.TrimSpace(gjson.GetBytes(source, "error.type").String())
-	MarkOpsStreamError(st.c, errType, strings.TrimSpace(gjson.GetBytes(source, "error.message").String()), http.StatusBadGateway)
+	code := extractUpstreamErrorCode(source)
+	param := gjson.GetBytes(source, "error.param").String()
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(source)))
+	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, errType, code, param, message)
 	MarkResponseCommitted(st.c)
 }
 

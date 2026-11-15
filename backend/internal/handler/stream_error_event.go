@@ -10,37 +10,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-// responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
-type responsesFailedError struct {
-	Code    string            `json:"code"`
-	Message string            `json:"message"`
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
-// responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
-// Output 用空 slice（不是 nil）确保 marshal 为 `[]` 而非 `null`。
-// CreatedAt 不带 omitempty：严格客户端把它当必填字段，缺失会以
-// `missing field 'created_at'` 反序列化失败——那正是本文件要避免的"客户端读不懂终止事件"。
-type responsesFailedBody struct {
-	ID        string               `json:"id"`
-	Object    string               `json:"object"`
-	CreatedAt int64                `json:"created_at"`
-	Model     string               `json:"model,omitempty"`
-	Status    string               `json:"status"`
-	Output    []any                `json:"output"`
-	Error     responsesFailedError `json:"error"`
-}
-
-// responsesFailedEvent 是写入 SSE data 行的顶层结构。
-// SequenceNumber 不带 omitempty：grok-build 等 Rust serde 客户端把它当必填字段，
-// 缺失即 `missing field 'sequence_number'`。拿不到上一帧序号时写 0——这是终止事件，
-// 后面不会再续流。
-type responsesFailedEvent struct {
-	Type           string              `json:"type"`
-	SequenceNumber int                 `json:"sequence_number"`
-	Response       responsesFailedBody `json:"response"`
-}
-
 // writeResponsesFailedSSEWithStatus emits a `response.failed` SSE event in the OpenAI
 // Responses API protocol after the stream has already started.
 //
@@ -67,14 +36,15 @@ func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errTyp
 	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
-	return service.WriteTargetProtocolError(c, service.PreOutputProtocolResponses, status, errType, code, "", message)
+	return writeHandlerProtocolError(c, service.PreOutputProtocolResponses, status, errType, code, "", message)
 }
 
+//nolint:unused // Retains the legacy wrapper signature for handler integrations.
 func writeResponsesFailedSSEWithOpeningResult(c *gin.Context, errType, code, message string, forceOpening bool) (bool, bool) {
 	if service.ProtocolTerminalClaimed(c) {
 		return true, false
 	}
-	wrote := service.WriteTargetProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, errType, code, "", message)
+	wrote := writeHandlerProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, errType, code, "", message)
 	return wrote, wrote
 }
 
