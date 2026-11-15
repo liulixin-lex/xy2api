@@ -25,7 +25,7 @@ func TestM7FixedChatConvertsResponsesShape(t *testing.T) {
 			{"image", `"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]`, ""},
 			{"history", `"input":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"ok"}]`, ""},
 			{"messages win", `"messages":[{"role":"user","content":"original"}],"input":"ignored"`, ""},
-			{"unsupported", `"input":"hello","previous_response_id":"resp_1"`, "previous_response_id"},
+			{"unsupported", `"input":[{"role":"user","content":[{"type":"unsupported_media"}]}]`, "content.type"},
 		} {
 			t.Run(platform+"/"+tc.name, func(t *testing.T) {
 				body := []byte(`{"model":"grok-4.5","stream":false,` + tc.fields + `}`)
