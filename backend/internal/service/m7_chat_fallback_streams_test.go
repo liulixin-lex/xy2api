@@ -17,6 +17,7 @@ func TestM7ChatFallbackRequiresTerminal(t *testing.T) {
 	withResilienceSettings(t, nil)
 	content := `{"id":"chat_fixture","choices":[{"index":0,"delta":{"content":"hello"}}]}`
 	meter := `{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":6,"total_tokens":17}}`
+	tool := `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`
 	finish := `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 	for _, target := range []string{"responses", "messages"} {
 		for _, tc := range []struct {
@@ -25,6 +26,8 @@ func TestM7ChatFallbackRequiresTerminal(t *testing.T) {
 			readError, failed, terminal, usage bool
 		}{
 			{"tail_meter", []string{content, meter}, false, false, false, true},
+			{"tool_tail_meter", []string{tool, meter}, false, false, false, true},
+			{"tool_done", []string{tool, "[DONE]"}, false, false, true, false},
 			{"zero_meter", []string{content, `{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}`}, false, false, false, true},
 			{"finish_only", []string{content, finish}, false, false, true, false},
 			{"done_only", []string{content, "[DONE]"}, false, false, true, false},
@@ -50,12 +53,13 @@ func TestM7ChatFallbackRequiresTerminal(t *testing.T) {
 				c, rec := compatStreamContext("/v1/"+target, "")
 				resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}
 				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+				opts := m7BridgeConversionOptions(c.Request.Context(), rawChatCompletionsTestAccount())
 				var result *OpenAIForwardResult
 				var err error
 				if target == "responses" {
-					result, err = svc.streamChatCompletionsAsResponses(c, resp, rawChatCompletionsTestAccount(), "fixture", nil, nil, false, nil, "fixture", "fixture", nil, nil, time.Now())
+					result, err = svc.streamChatCompletionsAsResponses(c, resp, rawChatCompletionsTestAccount(), "fixture", nil, nil, false, nil, "fixture", "fixture", nil, nil, time.Now(), opts)
 				} else {
-					result, err = svc.streamChatCompletionsAsAnthropic(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now())
+					result, err = svc.streamChatCompletionsAsAnthropic(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), opts)
 				}
 				if tc.failed {
 					require.Error(t, err)

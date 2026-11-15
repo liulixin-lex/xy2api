@@ -258,6 +258,11 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	scan := s.scanCCStream(c, resp, account, "openai messages chat fallback", requestID, startTime, nil, emitChunk)
 	usage := scan.Usage
 
+	// Completion eligibility comes from the scanner, not from JSON validity.
+	// This is only the local target projection; do not alter upstream facts.
+	if scan.Err == nil && opts.Bridge != nil && anthropicState.FinishReason == "" && anthropicState.HasToolCall {
+		anthropicState.FinishReason = "tool_calls"
+	}
 	var finalEvents []apicompat.AnthropicStreamEvent
 	if scan.Err == nil {
 		finalEvents = apicompat.FinalizeChatCompletionsAnthropicStream(anthropicState)

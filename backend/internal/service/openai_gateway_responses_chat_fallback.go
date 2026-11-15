@@ -272,6 +272,12 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		writeEvents(events)
 		return nil
 	})
+	// The scanner authenticates DONE or complete trailing-meter EOF separately
+	// from finish_reason. Give the local finalizer its established tool-complete
+	// projection; the upstream facts below remain the scanner's unchanged facts.
+	if scan.Err == nil && opts.Bridge != nil && state.FinishReason == "" && len(state.ToolCalls) > 0 {
+		state.FinishReason = "tool_calls"
+	}
 	var finalEvents []apicompat.ResponsesStreamEvent
 	if scan.Err == nil {
 		if !(opts.Bridge != nil && state.FinishReason == "length") {
