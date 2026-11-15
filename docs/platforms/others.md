@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Chat 上游工具流转换为 Responses 时，function、custom 和 tool_search 项在 added、done 与最终响应中复用同一 item ID。
+
 Chat 上游工具流允许缺省或稀疏 `index`，按明确的 index、调用 ID 和可确定的位置绑定稳定槽位；歧义与非零 choice 返回转换错误。
 
 Responses→Chat 转换桥保留 namespace 中的 custom 子工具，使用 `{"input":string}` 参数包装，并在响应中恢复原 namespace、名称和 custom 类型。

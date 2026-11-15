@@ -2383,8 +2383,5 @@ func (state *ChatCompletionsToResponsesStreamState) Err() error {
 	return state.bridgeErr
 }
 func chatBridgeToolItemID(state *ChatCompletionsToResponsesStreamState, slot int) string {
-	if bridgeEnabled(state.Bridge) {
-		return state.ToolItemIDs[slot]
-	}
-	return generateItemID()
+	return state.ToolItemIDs[slot]
 }
