@@ -1,11 +1,11 @@
 <template>
-  <!-- Neutral chips (prototype, 7e-14): one per limit, 15px lines when there are several. -->
+  <!-- One chip per limit, filled by how much of it is in use (12.4); 15px lines when there are several. -->
   <div class="cap" :class="{ 'cap--multi': lines.length > 1 }" data-test="account-capacity">
     <span
       v-for="line in lines"
       :key="line.key"
       class="cap__chip"
-      :class="{ 'cap__chip--zero': line.used === 0 && !line.full, 'cap__chip--full': line.full }"
+      :class="`cap__chip--${line.tone}`"
       :data-cap="line.key"
       v-tip="() => tipOf(line)"
     >
@@ -25,9 +25,10 @@
  * Capacity column (spec 4.1, prototype): what is in use against each limit the account has. The lines and their tips
  * are the old badges' ones: concurrency always (with this group's share when the list is filtered to a group); for
  * Anthropic OAuth / setup-token the 5h window cost, sessions and RPM when limited; for API key and Bedrock the
- * daily, weekly and total quota when set. The look is the prototype's: a neutral chip with the UI font's tabular
- * digits, no icons (a short label names each line when there are several), greyed while nothing is in use, amber only
- * when the limit is reached. Money drops whole ".00" so a line fits the column, and from $1,000 takes the three-digit
+ * daily, weekly and total quota when set. A chip with the UI font's tabular digits, no icons (a short label names each
+ * line when there are several), filled by how much of the limit is in use, on the thresholds of the badges before the
+ * redesign (12.4): neutral while nothing is in use, then green, yellow from 80%, orange at a soft limit and red at the
+ * hard one; concurrency is yellow as soon as anything runs and red when full. Money drops whole ".00" so a line fits the column, and from $1,000 takes the three-digit
  * abbreviation ($1.23K); the tip has the exact amounts. A value that still does not fit ends in an ellipsis, never cut
  * off unmarked (7i-1), and its tip then carries the whole value.
  */
@@ -43,13 +44,14 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+type Tone = 'neutral' | 'green' | 'yellow' | 'orange' | 'red'
+
 interface CapLine {
   key: string
   label: string
   current: string | number
   max: string | number
-  used: number
-  full: boolean
+  tone: Tone
   tip: string
   group?: number | null
   suffix?: string
@@ -69,6 +71,9 @@ const isAnthropicOAuthOrSetupToken = computed(() =>
 )
 const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')
 const limited = (value: number | null | undefined): value is number => value != null && value > 0
+/** The first threshold reached gives the tone; below them all, green while something is in use, neutral at zero. */
+const toneOf = (value: number, steps: [threshold: number, tone: Tone][]): Tone =>
+  steps.find(([threshold]) => value >= threshold)?.[1] ?? (value > 0 ? 'green' : 'neutral')
 
 function concurrencyLine(): CapLine {
   const current = props.account.current_concurrency || 0
@@ -80,8 +85,7 @@ function concurrencyLine(): CapLine {
     label: t('admin.accounts.capacity.labels.concurrency'),
     current,
     max,
-    used: current,
-    full: current >= max,
+    tone: current >= max ? 'red' : current > 0 ? 'yellow' : 'neutral',
     group: group ?? null,
     tip: group == null ? '' : t('admin.accounts.capacity.concurrencyGroup', { current, max, group })
   }
@@ -100,8 +104,7 @@ function windowCostLine(): CapLine | null {
     label: t('admin.accounts.capacity.labels.windowCost'),
     current: shortMoney(current),
     max: shortMoney(limit),
-    used: current,
-    full: current >= limit,
+    tone: toneOf(current, [[limit + reserve, 'red'], [limit, 'orange'], [limit * 0.8, 'yellow']]),
     tip: withAmounts(tip, current, limit)
   }
 }
@@ -116,8 +119,7 @@ function sessionsLine(): CapLine | null {
     label: t('admin.accounts.capacity.labels.sessions'),
     current,
     max,
-    used: current,
-    full: current >= max,
+    tone: toneOf(current, [[max, 'red'], [max * 0.8, 'yellow']]),
     tip: current >= max ? t('admin.accounts.capacity.sessions.full', { idle }) : t('admin.accounts.capacity.sessions.normal', { idle })
   }
 }
@@ -142,8 +144,7 @@ function rpmLine(): CapLine | null {
     label: t('admin.accounts.capacity.labels.rpm'),
     current,
     max: base,
-    used: current,
-    full: current >= base,
+    tone: toneOf(current, [...(tiered ? [[base + buffer, 'red'] as [number, Tone]] : []), [base, 'orange'], [base * 0.8, 'yellow']]),
     suffix: tiered ? '[T]' : '[S]',
     tip
   }
@@ -153,7 +154,7 @@ function quotaLine(key: string, label: string, used: number | null | undefined, 
   if (!isQuotaEligible.value || !limited(limit)) return null
   const value = used ?? 0
   const tip = value >= limit ? t('admin.accounts.capacity.quota.exceeded') : t('admin.accounts.capacity.quota.normal')
-  return { key, label, current: shortMoney(value), max: shortMoney(limit), used: value, full: value >= limit, tip: withAmounts(tip, value, limit) }
+  return { key, label, current: shortMoney(value), max: shortMoney(limit), tone: toneOf(value, [[limit, 'red'], [limit * 0.8, 'yellow']]), tip: withAmounts(tip, value, limit) }
 }
 
 /** Each line's value element: the tip tells the whole value of one the column cuts off. */
@@ -225,13 +226,37 @@ const lines = computed<CapLine[]>(() => {
 .cap__suffix {
   color: var(--color-text-muted);
 }
-.cap__chip--zero,
-.cap__chip--zero .cap__l,
-.cap__chip--zero .cap__group,
-.cap__chip--zero .cap__suffix {
+.cap__chip--neutral,
+.cap__chip--neutral .cap__l,
+.cap__chip--neutral .cap__group,
+.cap__chip--neutral .cap__suffix {
   color: var(--color-text-muted-on-pill);
 }
-.cap__chip--full .cap__v {
-  color: var(--color-status-back-text);
+/* A filled chip: label and value in the fill's text colour, the value at 500 (12.4). */
+.cap__chip--green {
+  --cap-bg: var(--color-cap-green-bg);
+  --cap-text: var(--color-cap-green-text);
+}
+.cap__chip--yellow {
+  --cap-bg: var(--color-cap-yellow-bg);
+  --cap-text: var(--color-cap-yellow-text);
+}
+.cap__chip--orange {
+  --cap-bg: var(--color-cap-orange-bg);
+  --cap-text: var(--color-cap-orange-text);
+}
+.cap__chip--red {
+  --cap-bg: var(--color-cap-red-bg);
+  --cap-text: var(--color-cap-red-text);
+}
+.cap__chip:not(.cap__chip--neutral) {
+  background: var(--cap-bg);
+  color: var(--cap-text);
+}
+.cap__chip:not(.cap__chip--neutral) > * {
+  color: inherit;
+}
+.cap__chip:not(.cap__chip--neutral) .cap__v {
+  font-weight: var(--font-weight-medium);
 }
 </style>

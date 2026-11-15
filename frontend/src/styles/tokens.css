@@ -60,6 +60,16 @@
   --color-bg-selected-hover: #d9f0eb;
   /* A switch that is on, under the pointer (primary-600) */
   --color-switch-on-hover: #0d9488;
+  /* Capacity fills by use (12.4): background and text. Light yellow text is a step darker than the spec's #a16207,
+     which is 4.42:1 on its fill. */
+  --color-cap-green-bg: #d1fae5;
+  --color-cap-green-text: #047857;
+  --color-cap-yellow-bg: #fef3c7;
+  --color-cap-yellow-text: #9e6007;
+  --color-cap-orange-bg: #ffedd5;
+  --color-cap-orange-text: #c2410c;
+  --color-cap-red-bg: #fee2e2;
+  --color-cap-red-text: #b91c1c;
 
   /* Tooltips */
   --color-tooltip-bg: #111827;
@@ -163,6 +173,15 @@
 
   --color-bg-selected-hover: #163039;
   --color-switch-on-hover: #0d9488;
+  /* Dark red text is a step lighter than the spec's #f87171, which is 4.45:1 on its fill over a hovered row. */
+  --color-cap-green-bg: rgb(52 211 153 / 0.14);
+  --color-cap-green-text: #34d399;
+  --color-cap-yellow-bg: rgb(250 204 21 / 0.14);
+  --color-cap-yellow-text: #facc15;
+  --color-cap-orange-bg: rgb(251 146 60 / 0.16);
+  --color-cap-orange-text: #fb923c;
+  --color-cap-red-bg: rgb(248 113 113 / 0.16);
+  --color-cap-red-text: #f98686;
 
   --color-tooltip-bg: #222c40;
   --color-tooltip-text: #e3e8ef;
