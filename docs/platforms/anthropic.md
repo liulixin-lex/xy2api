@@ -269,3 +269,5 @@ Fable 5.2 与 Mythos 5.2 使用已核对的规范型号：缺省为 adaptive/hig
 显式标记为 Gemini 中间目标的请求保留推理意图和验证后的 JSON 格式：none 保留关闭意图，其他档位留给最终 Gemini 构造器处理，不提前施加 Claude 的思考预算或档位映射。真实 Anthropic 目标继续使用原预算与格式规则。
 
 通用 Chat、Responses 与 Messages 的 HTTP API Key 请求在最终模型处执行分组推理策略。Sonnet 5.5 的 none 保留 between_tools/low 模式，low 保留 adaptive/low；Haiku 5.5 的 none 使用 disabled/low。原生 Messages 的显式 thinking 模式在普通 effort 映射时保留；实际档位从最后发送正文读取，含带用量的部分失败结果。
+
+最近档位映射选中 none 时，仍通过目标的模式规则投影为关闭或 between_tools，并读取实际发出的 effort；不会把模式值 none 直接写入仅接受普通档位的 output_config。
