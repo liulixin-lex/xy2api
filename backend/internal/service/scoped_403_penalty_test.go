@@ -96,3 +96,26 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewScopedPolicySkipsConfiguredCooldown(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			repo := &modelNotFoundAccountRepoStub{}
+			rates := &RateLimitService{accountRepo: repo}
+			gateway := &OpenAIGatewayService{rateLimitService: rates}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"temp_unschedulable_enabled": true, "temp_unschedulable_rules": []any{map[string]any{"error_code": 403, "keywords": []any{"Access denied"}, "duration_minutes": 10}},
+			}}
+			body := []byte(`{"error":{"code":"session_blocked_by_cyber_policy","message":"Access denied"}}`)
+			if stream {
+				body = []byte(`{"type":"response.failed","response":` + string(body) + `}`)
+			}
+			require.False(t, gateway.handleOpenAIAccountUpstreamError(context.Background(), account, 403, nil, body, "model"))
+			require.False(t, rates.HandleUpstreamError(context.Background(), account, 403, nil, body, "model"))
+			require.Empty(t, repo.modelRateLimitCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Zero(t, repo.setErrorCalls)
+		})
+	}
+}

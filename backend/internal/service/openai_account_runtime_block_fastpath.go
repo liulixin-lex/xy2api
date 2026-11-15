@@ -98,6 +98,10 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
+	if statusCode == http.StatusForbidden && resilience.Current().FailureOn() &&
+		classifyUpstreamHTTP(statusCode, headers, responseBody, "").ContentPolicy() {
+		return false
+	}
 	// Any non-2xx upstream HTTP response means the model request was actually sent.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)

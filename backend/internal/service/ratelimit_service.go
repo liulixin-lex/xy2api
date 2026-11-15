@@ -341,6 +341,10 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
 		return false
 	}
+	if statusCode == http.StatusForbidden && resilience.Current().FailureOn() &&
+		classifyUpstreamHTTP(statusCode, headers, responseBody, "").ContentPolicy() {
+		return false
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
