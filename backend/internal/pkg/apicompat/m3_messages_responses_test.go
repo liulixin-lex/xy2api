@@ -53,7 +53,6 @@ func TestM3TerraMax(t *testing.T) {
 	}
 }
 
-
 func TestM3ForeignReasoningEnvelope(t *testing.T) {
 	for _, tc := range []struct {
 		name, signature string
@@ -675,6 +674,14 @@ func TestM3CompletionBoundaries(t *testing.T) {
 }
 
 func TestM3UnknownTerminalMappingNotices(t *testing.T) {
+	t.Run("terminal-only complete tool", func(t *testing.T) {
+		var notices []ConversionNotice
+		st := NewResponsesEventToAnthropicStateWithOptions(ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.done", Response: &ResponsesResponse{Status: "future_status", Output: []ResponsesOutput{{Type: "function_call", ID: "fc", CallID: "call", Name: "f", Arguments: `{}`}}}}, st)
+		require.NoError(t, st.Err())
+		require.Equal(t, "tool_use", events[len(events)-2].Delta.StopReason)
+		require.Equal(t, []ConversionNotice{{Field: "status", Action: "map"}}, notices)
+	})
 	for _, tc := range []struct {
 		name, status, reason, want, field string
 		bad                               bool
