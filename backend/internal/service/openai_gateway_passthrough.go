@@ -3348,6 +3348,16 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if present {
 		usageSource = "upstream_json"
 	}
+	if openAIResponsesJSONFailed(body) {
+		schedCapture.noteUsage(usage)
+		observedUsage = nil
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, body, time.Now())
+		message := extractUpstreamErrorMessage(body)
+		if strings.TrimSpace(message) == "" {
+			message = "Upstream response failed"
+		}
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, message)
+	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

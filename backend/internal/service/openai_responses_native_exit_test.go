@@ -917,3 +917,20 @@ func TestM6ReviewFailoverResultIsNil(t *testing.T) {
 		}
 	}
 }
+
+func TestM6ReviewFailedJSONIsNotSuccessfulUsage(t *testing.T) {
+	for _, pass := range []bool{false, true} {
+		for _, usage := range []string{"", `,"usage":{"input_tokens":1200,"output_tokens":0}`} {
+			t.Run(fmt.Sprintf("pass=%t/usage=%t", pass, usage != ""), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.5","input":"hi"}`)
+				c := newOpenAIRejectedFieldTestContext(body)
+				a := newOpenAIRejectedFieldTestAccount()
+				a.Extra["openai_passthrough"] = pass
+				up := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","status":"failed","error":{"code":"server_error","message":"synthetic"}`+usage+`}`)}
+				r, err := newOpenAIRejectedFieldTestService(up).Forward(c.Request.Context(), c, a, body)
+				require.Error(t, err)
+				require.Nil(t, r)
+			})
+		}
+	}
+}

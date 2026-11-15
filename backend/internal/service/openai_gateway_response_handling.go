@@ -2104,6 +2104,16 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if present {
 		usageSource = "upstream_json"
 	}
+	if openAIResponsesJSONFailed(body) {
+		schedCapture.noteUsage(usage)
+		observedUsage = nil
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, body, time.Now())
+		message := extractUpstreamErrorMessage(body)
+		if strings.TrimSpace(message) == "" {
+			message = "Upstream response failed"
+		}
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, message)
+	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	// Replace model in response if needed
@@ -2149,6 +2159,17 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
 	}, nil
+}
+
+// A complete JSON document can still describe a failed response. It must not
+// enter the successful no-usage path or acquire billing ownership.
+func openAIResponsesJSONFailed(body []byte) bool {
+	switch gjson.GetBytes(body, "status").String() {
+	case "failed", "cancelled", "canceled":
+		return true
+	}
+	terminal := ClassifyOpenAIResponsesTerminal("", body)
+	return terminal.Valid && terminal.Failure
 }
 
 func isOpenAIResponseJSONObject(body []byte) bool {
