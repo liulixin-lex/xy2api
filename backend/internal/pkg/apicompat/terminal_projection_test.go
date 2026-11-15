@@ -16,6 +16,7 @@ func TestFoundationTerminalProjection(t *testing.T) {
 		{"chat", "", "tool_calls", true, false, [4]string{"completed/", "/tool_calls", "/tool_use", "/STOP"}},
 		{"anthropic", "", "stop_sequence", false, false, [4]string{"completed/", "/stop", "/stop_sequence", "/STOP"}},
 		{"responses", "incomplete", "max_output_tokens", true, false, [4]string{"incomplete/max_output_tokens", "/length", "/max_tokens", "/MAX_TOKENS"}},
+		{"responses", "incomplete", "", false, false, [4]string{"incomplete/", "/length", "/max_tokens", "/MAX_TOKENS"}},
 		{"chat", "", "length", true, false, [4]string{"incomplete/max_output_tokens", "/length", "/max_tokens", "/MAX_TOKENS"}},
 		{"anthropic", "", "max_tokens", true, false, [4]string{"incomplete/max_output_tokens", "/length", "/max_tokens", "/MAX_TOKENS"}},
 		{"gemini", "", "MAX_TOKENS", true, false, [4]string{"incomplete/max_output_tokens", "/length", "/max_tokens", "/MAX_TOKENS"}},

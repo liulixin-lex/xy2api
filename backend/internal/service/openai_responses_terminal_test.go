@@ -14,6 +14,7 @@ func TestClassifyOpenAIResponsesTerminal(t *testing.T) {
 		{"", "[DONE]", false, false, false, false, "missing_response_terminal", 0},
 		{"", `{"type":"response.output_text.delta","delta":"error"}`, false, false, false, false, "", 0},
 		{"response.completed", `{`, true, false, false, true, "malformed_json", 0},
+		{"", `{"type":"response.completed",`, true, false, false, true, "malformed_json", 0},
 		{"response.completed", `[]`, true, false, false, true, "invalid_envelope", 0},
 		{"", `{"type":"response.completed"}`, true, false, false, true, "missing_response", 0},
 		{"response.completed", `{"type":"response.failed","response":{"status":"failed"}}`, true, false, false, true, "type_status_conflict", 0},

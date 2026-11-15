@@ -33,7 +33,8 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIRespon
 		result.Reason = reason
 		return result
 	}
-	result.Seen = candidate(eventName)
+	// A partial payload type identifies a candidate only; it never authenticates success.
+	result.Seen = candidate(eventName) || candidate(gjson.GetBytes(data, "type").String())
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		return OpenAIResponsesTerminal{Reason: "missing_response_terminal"}
 	}

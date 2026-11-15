@@ -27,7 +27,7 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 			}
 		case "incomplete":
 			switch reason {
-			case "max_output_tokens":
+			case "", "max_output_tokens":
 				semantic = "length"
 			case "content_filter":
 				semantic = "filter"
@@ -101,6 +101,9 @@ func ProjectTerminal(source, target, status, reason string, hasCompleteTools, ha
 	case "responses":
 		switch semantic {
 		case "length":
+			if source == "responses" && reason == "" {
+				return "incomplete", "", nil
+			}
 			return "incomplete", "max_output_tokens", nil
 		case "filter":
 			return "incomplete", "content_filter", nil
