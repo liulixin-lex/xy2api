@@ -6,6 +6,7 @@
 
 ### 参数与协议转换
 
+- 客户端历史中的坏工具参数继续原样转发，参数解析失败后的会话仍可继续。
 - Chat 转 Responses 保留 metadata、user、文本详细程度和显式 include，GPT-6.1 Terra 使用最终模型的推理档位与输出上限。
 
 - Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
