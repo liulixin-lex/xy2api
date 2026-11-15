@@ -244,7 +244,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing
 	}
-	writeUnbilled := !r.billing && !r.claimed
+	writeUnbilled := !r.billing && !r.claimed && !(r.excluded && r.RequestScope == "")
 	r.claimed = true
 	return cloneGatewayRequest(r.final), writeUnbilled
 }

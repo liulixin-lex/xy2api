@@ -165,7 +165,7 @@ func TestM8GatewayMetadataFreeze(t *testing.T) {
 			s.EnableGatewayRequest(time.Now())
 			require.False(t, s.GatewayRequestEnabled(), "repeated Enable must not undo exclusion")
 			meta, write := s.ClaimGatewayRequest(false)
-			require.True(t, write)
+			require.Equal(t, !tc.text, write, "excluded text keeps correlation without creating a statistics row")
 			require.Equal(t, id, meta.RequestID)
 			require.Equal(t, scope, meta.RequestScope)
 			require.Equal(t, at, meta.StartedAt)
