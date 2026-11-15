@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2330,6 +2331,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 
 	var firstTokenMs *int
 	var usage ClaudeUsage
+	var usageAccumulator geminiUsageAccumulator
 	finishReason := ""
 	sawToolUse := false
 
@@ -2431,13 +2433,12 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					openBlockType = blockType
 					openBlockIndex = nextBlockIndex
 					nextBlockIndex++
+					block := map[string]any{"type": blockType, textField: ""}
+					if blockType == "thinking" {
+						block["signature"] = ""
+					}
 					writeSSE(c.Writer, "content_block_start", map[string]any{
-						"type":  "content_block_start",
-						"index": openBlockIndex,
-						"content_block": map[string]any{
-							"type":    blockType,
-							textField: "",
-						},
+						"type": "content_block_start", "index": openBlockIndex, "content_block": block,
 					})
 				}
 
@@ -2534,7 +2535,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			}
 		}
 
-		if u := extractGeminiUsage(unwrappedBytes); u != nil {
+		if u := usageAccumulator.merge(unwrappedBytes); u != nil {
 			usage = *u
 		}
 
@@ -2571,6 +2572,9 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	}
 	if usage.InputTokens > 0 {
 		usageObj["input_tokens"] = usage.InputTokens
+	}
+	if usage.CacheReadInputTokens > 0 {
+		usageObj["cache_read_input_tokens"] = usage.CacheReadInputTokens
 	}
 	writeSSE(c.Writer, "message_delta", map[string]any{
 		"type": "message_delta",
@@ -2663,6 +2667,7 @@ func collectGeminiSSEObserved(body io.Reader, isOAuth bool, observe func(rawByte
 	var lastWithParts map[string]any
 	var collectedTextParts []string // Collect all text parts for aggregation
 	usage := &ClaudeUsage{}
+	var usageAccumulator geminiUsageAccumulator
 	stats := geminiSSECollectStats{fallback: &geminiSSEFallbackBody{}}
 
 	for {
@@ -2701,7 +2706,7 @@ func collectGeminiSSEObserved(body io.Reader, isOAuth bool, observe func(rawByte
 					}
 					if parsed != nil {
 						last = parsed
-						if u := extractGeminiUsage(rawBytes); u != nil {
+						if u := usageAccumulator.merge(rawBytes); u != nil {
 							usage = u
 						}
 						if parts := extractGeminiParts(parsed); len(parts) > 0 {
@@ -3178,10 +3183,12 @@ func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin
 							if thought, _ := pm["thought"].(bool); thought {
 								blockType, textField = "thinking", "thinking"
 							}
-							contentBlocks = append(contentBlocks, map[string]any{
-								"type":    blockType,
-								textField: text,
-							})
+							block := map[string]any{"type": blockType, textField: text}
+							if blockType == "thinking" {
+								signature, _ := pm["thoughtSignature"].(string)
+								block["signature"] = signature
+							}
+							contentBlocks = append(contentBlocks, block)
 						}
 						if inlineData, ok := pm["inlineData"].(map[string]any); includeInlineData && ok {
 							mimeType, _ := inlineData["mimeType"].(string)
@@ -3232,6 +3239,11 @@ func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin
 		},
 	}
 
+	if usage.CacheReadInputTokens > 0 {
+		if usageMap, ok := resp["usage"].(map[string]any); ok {
+			usageMap["cache_read_input_tokens"] = usage.CacheReadInputTokens
+		}
+	}
 	return resp, usage
 }
 
@@ -3257,10 +3269,10 @@ func extractGeminiUsage(data []byte) *ClaudeUsage {
 	if !usage.Exists() {
 		return nil
 	}
-	prompt := int(usage.Get("promptTokenCount").Int())
-	cand := int(usage.Get("candidatesTokenCount").Int())
-	cached := int(usage.Get("cachedContentTokenCount").Int())
-	thoughts := int(usage.Get("thoughtsTokenCount").Int())
+	prompt, promptPresent := geminiUsageCount(usage.Get("promptTokenCount"))
+	cand, candPresent := geminiUsageCount(usage.Get("candidatesTokenCount"))
+	cached, cachedPresent := geminiUsageCount(usage.Get("cachedContentTokenCount"))
+	thoughts, thoughtsPresent := geminiUsageCount(usage.Get("thoughtsTokenCount"))
 
 	// 从 candidatesTokensDetails 提取 IMAGE 模态 token 数
 	imageTokens := 0
@@ -3277,12 +3289,24 @@ func extractGeminiUsage(data []byte) *ClaudeUsage {
 
 	// 注意：Gemini 的 promptTokenCount 包含 cachedContentTokenCount，
 	// 但 Claude 的 input_tokens 不包含 cache_read_input_tokens，需要减去
-	return &ClaudeUsage{
-		InputTokens:          prompt - cached,
-		OutputTokens:         cand + thoughts,
-		CacheReadInputTokens: cached,
-		ImageOutputTokens:    imageTokens,
+	result := &ClaudeUsage{
+		InputTokens:                 max(prompt-cached, 0),
+		OutputTokens:                cand + thoughts,
+		CacheReadInputTokens:        cached,
+		ImageOutputTokens:           imageTokens,
+		InputTokensPresent:          promptPresent,
+		OutputTokensPresent:         candPresent || thoughtsPresent,
+		CacheReadInputTokensPresent: cachedPresent,
+		UsageIncomplete:             !promptPresent || !candPresent,
+		UsageInconsistent:           promptPresent && cachedPresent && cached > prompt,
 	}
+	if promptPresent {
+		result.RawPromptTokens = &prompt
+	}
+	if cachedPresent {
+		result.RawCacheReadTokens = &cached
+	}
+	return result
 }
 
 func asInt(v any) (int, bool) {
@@ -4069,4 +4093,37 @@ func (s *GeminiMessagesCompatService) extractImageInputSize(body []byte) string 
 	}
 
 	return ""
+}
+
+func geminiUsageCount(value gjson.Result) (int, bool) {
+	count, err := strconv.Atoi(value.Raw)
+	if value.Type != gjson.Number || err != nil || count < 0 {
+		return 0, false
+	}
+	return count, true
+}
+
+type geminiUsageAccumulator struct {
+	fields map[string]json.RawMessage
+}
+
+func (a *geminiUsageAccumulator) merge(data []byte) *ClaudeUsage {
+	metadata := gjson.GetBytes(data, "usageMetadata")
+	if !metadata.Exists() {
+		return nil
+	}
+	if a.fields == nil {
+		a.fields = make(map[string]json.RawMessage)
+	}
+	for _, field := range []string{"promptTokenCount", "cachedContentTokenCount", "candidatesTokenCount", "thoughtsTokenCount"} {
+		value := metadata.Get(field)
+		if _, present := geminiUsageCount(value); present {
+			a.fields[field] = json.RawMessage(value.Raw)
+		}
+	}
+	if details := metadata.Get("candidatesTokensDetails"); details.IsArray() {
+		a.fields["candidatesTokensDetails"] = json.RawMessage(details.Raw)
+	}
+	raw, _ := json.Marshal(map[string]any{"usageMetadata": a.fields})
+	return extractGeminiUsage(raw)
 }

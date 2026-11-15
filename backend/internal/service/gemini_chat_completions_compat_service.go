@@ -554,7 +554,7 @@ func geminiResponseToChatCompletions(
 	usageOverride *ClaudeUsage,
 ) (*apicompat.ChatCompletionsResponse, *ClaudeUsage, error) {
 	claudeRespMap, usage := convertGeminiToClaudeMessage(geminiResp, originalModel, rawData, true)
-	if usageOverride != nil && (usageOverride.InputTokens > 0 || usageOverride.OutputTokens > 0 || usageOverride.CacheReadInputTokens > 0) {
+	if usageOverride != nil {
 		usage = usageOverride
 		if usageMap, ok := claudeRespMap["usage"].(map[string]any); ok {
 			usageMap["input_tokens"] = usage.InputTokens
@@ -571,6 +571,9 @@ func geminiResponseToChatCompletions(
 	if err := json.Unmarshal(claudeBytes, &anthropicResp); err != nil {
 		return nil, nil, err
 	}
+	anthropicResp.Usage.InputTokensPresent = usage.InputTokensPresent
+	anthropicResp.Usage.OutputTokensPresent = usage.OutputTokensPresent
+	anthropicResp.Usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent
 	responsesResp := apicompat.AnthropicToResponsesResponse(&anthropicResp)
 	return apicompat.ResponsesToChatCompletions(responsesResp, originalModel), usage, nil
 }
@@ -614,6 +617,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	ccState.IncludeUsage = includeUsage
 
 	var usage ClaudeUsage
+	var usageAccumulator geminiUsageAccumulator
 	var firstTokenMs *int
 	firstChunk := true
 
@@ -728,7 +732,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 						if fr := extractGeminiFinishReason(geminiResp); fr != "" {
 							finishReason = fr
 						}
-						if u := extractGeminiUsage(rawBytes); u != nil {
+						if u := usageAccumulator.merge(rawBytes); u != nil {
 							usage = *u
 						}
 
@@ -881,9 +885,12 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 			StopReason: stopReason,
 		},
 		Usage: &apicompat.AnthropicUsage{
-			InputTokens:          usage.InputTokens,
-			OutputTokens:         usage.OutputTokens,
-			CacheReadInputTokens: usage.CacheReadInputTokens,
+			InputTokens:                 usage.InputTokens,
+			OutputTokens:                usage.OutputTokens,
+			CacheReadInputTokens:        usage.CacheReadInputTokens,
+			InputTokensPresent:          usage.InputTokensPresent,
+			OutputTokensPresent:         usage.OutputTokensPresent,
+			CacheReadInputTokensPresent: usage.CacheReadInputTokensPresent,
 		},
 	}) {
 		return &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}, nil

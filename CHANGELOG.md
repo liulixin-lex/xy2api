@@ -135,6 +135,7 @@
 - Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
 
 - Gemini Messages 兼容请求保留 JSON 输出格式与 schema 精度，不支持的格式约束会记录降级。
+- Gemini 缓存读取不再产生负输入用量，流中的缺失字段与明确修正值分别处理。
 
 - Gemini AI Studio 请求携带搜索工具时，输出 schema 中的大整数保持原值。
 
