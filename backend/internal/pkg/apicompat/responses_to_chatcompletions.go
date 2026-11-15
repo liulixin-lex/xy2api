@@ -55,7 +55,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 				Type: "function",
 				Function: ChatFunctionCall{
 					Name:      item.Name,
-					Arguments: item.Arguments,
+					Arguments: responsesToolArguments(item, resp.Status == "completed"),
 				},
 			})
 		case "reasoning":
@@ -495,6 +495,7 @@ func resToChatRecoverTerminalReasoning(resp *ResponsesResponse, state *Responses
 func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
 	recovered := resToChatRecoverTerminalReasoning(evt.Response, state)
 	recovered = append(recovered, resToChatRecoverTerminalTools(evt.Response, state)...)
+	recovered = append(recovered, resToChatValidateTools(evt.Response, state)...)
 	if state.err != nil {
 		return nil
 	}
@@ -901,6 +902,11 @@ func (a *BufferedResponseAccumulator) ProcessEvent(event *ResponsesStreamEvent) 
 			for i, item := range event.Response.Output {
 				a.snapshot(item, i, true, 3)
 			}
+			snapshot := *event.Response
+			snapshot.Output = a.BuildOutput()
+			if err := ValidateResponsesForChat(&snapshot); err != nil && a.err == nil {
+				a.err = err
+			}
 		}
 	case "response.output_text.delta", "response.output_text.done", "response.refusal.delta", "response.refusal.done", "response.content_part.added", "response.content_part.done", "response.reasoning_text.delta", "response.reasoning_text.done":
 		kind := "message"
@@ -1081,5 +1087,8 @@ func (a *BufferedResponseAccumulator) SupplementResponseOutput(resp *ResponsesRe
 	}
 	if a.HasContent() {
 		resp.Output = a.BuildOutput()
+	}
+	if err := ValidateResponsesForChat(resp); err != nil {
+		a.err = err
 	}
 }
