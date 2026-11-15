@@ -217,6 +217,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
+Responses 响应补齐保留托管工具项及 custom 工具的身份、命名空间与原始输入，再按目标协议投影。
+
 助手历史的明文 reasoning 与签名分别处理；只有目标能力已确认时才改为独立思考项，未确认的路径沿用已有历史表示。
 
 图片的 `image_url.detail` / `input_image.detail` 为合法 `auto`、`low`、`high` 时，转换为 Anthropic 会省略提示并记录，图片来源保留；非法值仍返回 400。质量与费用不保证等价。
