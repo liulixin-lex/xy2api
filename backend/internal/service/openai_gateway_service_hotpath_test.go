@@ -989,11 +989,11 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			wantValue: "max",
 		},
 		{
-			name:      "旧模型仍将 max 归一化为 xhigh",
+			name:      "显式 max 不因模型而折叠",
 			body:      []byte(`{"reasoning_effort":"max"}`),
 			model:     "gpt-5.5",
 			wantNil:   false,
-			wantValue: "xhigh",
+			wantValue: "max",
 		},
 		{
 			name:      "minimal 保留用于计费",
@@ -1002,11 +1002,10 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			wantValue: "minimal",
 		},
 		{
-			name:      "缺失字段时从模型后缀推导",
-			body:      []byte(`{"input":"hi"}`),
-			model:     "gpt-5-high",
-			wantNil:   false,
-			wantValue: "high",
+			name:    "缺失字段时不从模型后缀推导",
+			body:    []byte(`{"input":"hi"}`),
+			model:   "gpt-5-high",
+			wantNil: true,
 		},
 		{
 			name:    "未知后缀不返回",
