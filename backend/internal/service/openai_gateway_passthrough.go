@@ -3076,7 +3076,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
 		}
-		logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", terminalEventType, clientDisconnected)
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected, usageSource != "missing")
 
 		return resultWithUsage(), nil
 	}
@@ -3237,7 +3237,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if present {
 		usageSource = "upstream_json"
 	}
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", "json", false)
+	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -3335,7 +3335,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usageSource != "missing", terminalType, false)
+	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false, usageSource != "missing")
 
 	contentType := "application/json; charset=utf-8"
 	c.Writer.Header().Set("Content-Type", contentType)

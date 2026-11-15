@@ -534,7 +534,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if sawFailedEvent {
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
-		logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", terminalEventType, clientDisconnected)
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected, usageSource != "missing")
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
@@ -1648,7 +1648,11 @@ func (s *openAIMissingUsageLogSampler) sample(now time.Time) (logNow bool, total
 	}
 }
 
-func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usagePresent bool, terminalEvent string, clientDisconnected bool) {
+func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usage *OpenAIUsage, terminalEvent string, clientDisconnected bool, presence ...bool) {
+	usagePresent := openAIUsageHasTokens(usage)
+	if len(presence) > 0 {
+		usagePresent = presence[0]
+	}
 	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || usagePresent {
 		return
 	}
@@ -1971,7 +1975,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if present {
 		usageSource = "upstream_json"
 	}
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", "json", false)
+	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -2129,7 +2133,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usageSource != "missing", terminalType, false)
+	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false, usageSource != "missing")
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
 	contentType := "application/json; charset=utf-8"
