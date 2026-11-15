@@ -204,3 +204,5 @@ Gemini 的 prompt 计数包含缓存读取：未缓存输入按 `max(prompt - ca
 ### 停用与回滚
 
 依次关闭 `enabled`、等待或取消活动任务、停止服务，再回滚应用。导出相关表由迁移 `252_usage_export_tasks.sql` 追加创建，回滚时不需要删表。
+
+实际推理档位来自最终 HTTP 请求正文的显式字段，正常结果与带部分用量的失败结果使用同一口径。`max`、`xhigh`、`ultra` 原值保存，按实际档位查已配置倍率；缺字段、字段被删除或无法识别时 `reasoning_effort` 为 NULL、倍率为 1，不用 requested、模型后缀或 thinking.enabled 补值。

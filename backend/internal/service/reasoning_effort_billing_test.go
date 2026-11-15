@@ -19,7 +19,7 @@ func TestReasoningEffortBillingMultiplier(t *testing.T) {
 		want   float64
 	}{
 		{"none", 0.5}, {"minimal", 0.75}, {"low", 0.9}, {"medium", 1.25},
-		{"high", 1.5}, {"xhigh", 2}, {"max", 3}, {" Extra-High ", 2},
+		{"high", 1.5}, {"xhigh", 2}, {"max", 3}, {" Extra-High ", 1},
 		{" MAX ", 3}, {"", 1}, {"unknown", 1},
 	} {
 		t.Run(tc.effort, func(t *testing.T) {

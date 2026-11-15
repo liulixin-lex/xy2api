@@ -799,13 +799,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 			LongContextBillingEnabled: longContextBillingGate,
 		})
 	}
-	return s.billingService.calculateCostWithServiceTierPolicy(
-		billingModel,
-		tokens,
-		multiplier,
-		serviceTier,
-		longContextPricingEnabledForRequest(apiKey.Group, billingModel, longContextBillingGate),
-	)
+	return s.billingService.CalculateCostUnified(CostInput{
+		Purpose: "billing", Ctx: ctx, Model: billingModel, Group: apiKey.Group, Tokens: tokens, RateMultiplier: multiplier, PricingAt: pricingAt, ServiceTier: serviceTier, ReasoningEffort: reasoningEffort, LongContextBillingEnabled: longContextBillingGate,
+	})
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIImageCost(

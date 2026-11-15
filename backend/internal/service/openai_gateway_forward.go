@@ -1111,7 +1111,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if !bytes.Equal(collabBody, body) {
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	var reasoningEffort *string
 	defer func() {
 		if result != nil {
 			result.ReasoningEffort = reasoningEffort
