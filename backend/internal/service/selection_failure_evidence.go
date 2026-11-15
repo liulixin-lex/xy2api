@@ -166,7 +166,7 @@ func selectionErrorWithExhaustion(err error, exhaustion *SelectionExhaustion) er
 		return openAIErr
 	}
 	// Keep dedicated compact/profit/owner errors reachable through the chain.
-	return errors.Join(err, exhaustion)
+	return selectionExhaustionError{cause: err, exhaustion: exhaustion}
 }
 
 func (s *OpenAIGatewayService) withOpenAISelectionExhaustion(ctx context.Context, req OpenAIAccountScheduleRequest, err error) error {
@@ -254,3 +254,11 @@ func selectionDependencyFailed(ctx context.Context) bool {
 	evidence, _ := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence)
 	return evidence != nil && evidence.cause != nil
 }
+
+type selectionExhaustionError struct {
+	cause      error
+	exhaustion *SelectionExhaustion
+}
+
+func (e selectionExhaustionError) Error() string   { return e.cause.Error() }
+func (e selectionExhaustionError) Unwrap() []error { return []error{e.cause, e.exhaustion} }

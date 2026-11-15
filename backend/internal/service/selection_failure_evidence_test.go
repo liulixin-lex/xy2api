@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -228,4 +229,16 @@ func TestSelectionRetryNotBeforeAllPaths(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestReviewExhaustionKeepsOriginalMessage(t *testing.T) {
+	cause := fmt.Errorf("%w supporting model: example (pool=0)", ErrNoAvailableAccounts)
+	evidence := &SelectionExhaustion{Known: true, Reasons: map[SelectionReason]int{SelectionReasonNoMembers: 1}}
+	err := selectionErrorWithExhaustion(cause, evidence)
+	require.Equal(t, cause.Error(), err.Error())
+	require.ErrorIs(t, err, cause)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	snapshot, ok := SelectionExhaustionFromError(err)
+	require.True(t, ok)
+	require.Equal(t, evidence.Reasons, snapshot.Reasons)
 }
