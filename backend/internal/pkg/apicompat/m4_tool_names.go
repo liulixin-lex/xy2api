@@ -228,9 +228,6 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 	if err != nil {
 		return nil, err
 	}
-	if len(prepared.Tools) == 0 && string(prepared.ToolChoice) == `"none"` {
-		out.ToolChoice = json.RawMessage(`"none"`)
-	}
 	restoreBridgeChatHistory(out.Messages, restore)
 	if raw := normalizedRawJSON(req.User); len(raw) > 0 {
 		var user string

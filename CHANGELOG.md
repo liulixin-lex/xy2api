@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 上游的允许工具列表为空时，同时省略 tools 与 tool_choice，避免兼容上游拒绝孤立的工具选择字段。
+
 - Responses 转 Chat 时省略并记录 metadata 与非字符串 user，字符串 user 和 text.verbosity 继续发送。
 
 - Chat 上游嵌套数组形式的 thinking 保留为推理文本，未知类型的 content 片段忽略并记录，正文继续返回。

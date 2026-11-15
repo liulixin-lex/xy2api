@@ -1412,7 +1412,7 @@ func TestM4ToolChoiceSubset(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if len(chat.Tools) != want || (want == 0 && string(chat.ToolChoice) != `"none"`) {
+		if len(chat.Tools) != want || (want == 0 && len(chat.ToolChoice) != 0) {
 			t.Fatalf("Chat subset: %#v", chat)
 		}
 	}
