@@ -235,7 +235,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具 schema，根为 `allOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取并集；没有 `type` 的分支视为 object |
 | 工具 schema，根为 `anyOf`、`oneOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取交集；没有 `type` 的分支（如只写了 `required`）视为 object |
 | 工具 schema，根不是 object，或联合分支显式声明了非 object 类型 | 报错 | 400，`param` 指向 `tools[i]…parameters` |
-| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`；`allowed_tools` 按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
+| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`；API Key 桥将 `allowed_tools` 应用到实际声明子集，重复项去重，未知项忽略并记录，auto 空集转为 none；历史工具不会重新加入本轮声明。旧入口继续按 mode 转换。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
 | Chat 历史的 `tool_calls[].function.arguments` | 保留 | 原样保留上一轮参数，空字符串按 `{}` 处理；不因参数不是完整 JSON 而新增本地拒绝 |
 | `parallel_tool_calls` | 映射 | `false` 转为 `disable_parallel_tool_use: true` |
 | `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射 |

@@ -26,6 +26,13 @@ func ResponsesToAnthropicRequestWithOptions(req *ResponsesRequest, opts Conversi
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
+	if bridgeEnabled(opts.Bridge) {
+		var err error
+		req, err = prepareBridgeAnthropicRequest(req, opts)
+		if err != nil {
+			return nil, err
+		}
+	}
 	_, is55 := claude.Claude55(req.Model)
 	spec, ok := claude.Claude52(req.Model)
 	return responsesToAnthropicRequest(req, is55 || (ok && spec.PreserveSignedThinking), &opts)
@@ -33,7 +40,11 @@ func ResponsesToAnthropicRequestWithOptions(req *ResponsesRequest, opts Conversi
 
 func responsesToAnthropicRequest(req *ResponsesRequest, preserveThinking bool, opts *ConversionOptions) (*AnthropicRequest, error) {
 	out := &AnthropicRequest{CacheControl: req.CacheControl, Model: req.Model, Stream: req.Stream}
-	if err := applyAnthropicFieldPolicies(req, out); err != nil {
+	policyOpts := ConversionOptions{}
+	if opts != nil {
+		policyOpts = *opts
+	}
+	if err := applyAnthropicFieldPoliciesWithOptions(req, out, policyOpts); err != nil {
 		return nil, err
 	}
 	input := req.Input

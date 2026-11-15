@@ -1227,7 +1227,7 @@ func TestM4ToolHistoryRounds(t *testing.T) {
 			continue
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
-			req := &ResponsesRequest{Model: "probe", Input: fixture.Input}
+			req := &ResponsesRequest{Model: "probe", Stream: true, Input: fixture.Input}
 			chat, e := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
 			m4CheckError(t, e, fixture.ChatError)
 			if e == nil {
@@ -1360,5 +1360,70 @@ func TestM4UsagePresenceHandoffs(t *testing.T) {
 	usage := events[len(events)-1].Response.Usage
 	if usage.UsagePresenceKnown || usage.InputTokens != 5 || usage.OutputTokens != 0 || usage.TotalTokens != 5 {
 		t.Fatalf("E7/E8 stream usage: %#v", usage)
+	}
+}
+
+func TestM4ToolChoiceSubset(t *testing.T) {
+	for _, allow := range []string{`[{"type":"function","namespace":"ns","name":"f"},{"type":"function","namespace":"ns","name":"f"},{"type":"function","name":"missing"}]`, `[]`} {
+		req := &ResponsesRequest{Model: "claude-sonnet-4-6", Tools: []ResponsesTool{{Type: "namespace", Name: "ns", Tools: []ResponsesTool{{Type: "function", Name: "f", Parameters: json.RawMessage(`{"type":"object"}`)}}}, {Type: "function", Name: "excluded", Parameters: json.RawMessage(`false`)}}, ToolChoice: json.RawMessage(`{"type":"allowed_tools","mode":"auto","tools":` + allow + `}`), Input: json.RawMessage(`[{"type":"function_call","call_id":"call_old","name":"historical","arguments":"{}"},{"type":"function_call_output","call_id":"call_old","output":"kept"}]`)}
+		var notices []ConversionNotice
+		bridge := &BridgeOptions{Enabled: true}
+		out, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{Bridge: bridge, Record: func(n ConversionNotice) { notices = append(notices, n) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 1
+		if allow == "[]" {
+			want = 0
+		}
+		if len(out.Tools) != want {
+			t.Fatalf("tools=%#v", out.Tools)
+		}
+		if want == 1 {
+			if out.Tools[0].Name != bridge.ToolNames.Forward[ToolNameIdentity{Kind: "function", Namespace: "ns", Name: "f"}] || !reflect.DeepEqual(notices, []ConversionNotice{{Field: "tool_choice.tools[2]", Action: "omit"}}) {
+				t.Fatalf("selection: %#v / %#v", out.Tools, notices)
+			}
+		} else if string(out.ToolChoice) != `{"type":"none"}` {
+			t.Fatalf("empty choice=%s", out.ToolChoice)
+		}
+		raw, _ := json.Marshal(out.Messages)
+		if !strings.Contains(string(raw), "historical") || !strings.Contains(string(raw), "kept") {
+			t.Fatalf("history lost: %s", raw)
+		}
+		chat, e := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if len(chat.Tools) != want || (want == 0 && string(chat.ToolChoice) != `"none"`) {
+			t.Fatalf("Chat subset: %#v", chat)
+		}
+	}
+	req := &ResponsesRequest{Model: "claude-sonnet-4-6", Tools: []ResponsesTool{{Type: "namespace", Name: "ns", Tools: []ResponsesTool{{Type: "custom", Name: "exec"}}}}, ToolChoice: json.RawMessage(`{"type":"custom","namespace":"ns","name":"exec"}`), Input: json.RawMessage(`[{"type":"custom_tool_call","call_id":"call_x","namespace":"ns","name":"exec","input":"echo ok"},{"type":"custom_tool_call_output","call_id":"call_x","output":"done"}]`)}
+	bridge := &BridgeOptions{Enabled: true}
+	out, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{Bridge: bridge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := bridge.ToolNames.Forward[ToolNameIdentity{Kind: "custom", Namespace: "ns", Name: "exec"}]
+	if len(out.Tools) != 1 || out.Tools[0].Name != alias || !strings.Contains(string(out.ToolChoice), alias) {
+		t.Fatalf("custom choice: %#v", out)
+	}
+	raw, _ := json.Marshal(out.Messages)
+	if !strings.Contains(string(raw), "echo ok") || !strings.Contains(string(raw), alias) {
+		t.Fatalf("custom history: %s", raw)
+	}
+	// The private original Chat source remains a copied policy input after aliasing.
+	chatReq := &ChatCompletionsRequest{Model: "claude-sonnet-4-6", Tools: []ChatTool{{Type: "function", Function: &ChatFunction{Name: "工具", Parameters: json.RawMessage(`{"type":"object"}`)}}}, Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}}}
+	intermediate, err := ChatCompletionsToResponses(chatReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge = &BridgeOptions{Enabled: true}
+	out, err = ResponsesToAnthropicRequestWithOptions(intermediate, ConversionOptions{Bridge: bridge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Tools[0].Name == "工具" || chatReq.Tools[0].Function.Name != "工具" {
+		t.Fatal("Chat source alias/copy failed")
 	}
 }
