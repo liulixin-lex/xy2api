@@ -964,6 +964,8 @@ func TestM6ReviewPassthroughBudgetUsesLegacyEffort(t *testing.T) {
 		t.Run(fmt.Sprintf("headers=%t", headers), func(t *testing.T) {
 			body := []byte(`{"model":"gpt-5.4-xhigh","input":"hi","stream":true}`)
 			c := newOpenAIRejectedFieldTestContext(body)
+			ctx := WithOpenAIReasoningEffortPolicy(m1EffortContext(body), "low", nil, "")
+			c.Request = c.Request.WithContext(ctx)
 			a := newOpenAIRejectedFieldTestAccount()
 			a.Extra["openai_passthrough"] = true
 			up := &m6ReviewBudgetUpstream{delayHeaders: headers}
@@ -974,9 +976,10 @@ func TestM6ReviewPassthroughBudgetUsesLegacyEffort(t *testing.T) {
 			r, err := svc.Forward(c.Request.Context(), c, a, body)
 			require.NoError(t, err)
 			require.NotNil(t, r)
-			require.Nil(t, r.ReasoningEffort)
+			require.NotNil(t, r.ReasoningEffort)
+			require.Equal(t, "low", *r.ReasoningEffort)
 			require.Len(t, up.bodies, 1)
-			require.False(t, gjson.GetBytes(up.lastBody, "reasoning.effort").Exists())
+			require.Equal(t, "low", gjson.GetBytes(up.lastBody, "reasoning.effort").String())
 		})
 	}
 }
