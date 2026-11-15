@@ -5,6 +5,15 @@ package apicompat
 func AnthropicToResponsesResponseWithBridgeOptions(resp *AnthropicResponse, opts ConversionOptions) (*ResponsesResponse, error) {
 	out := AnthropicToResponsesResponse(resp)
 	if bridgeEnabled(opts.Bridge) {
+		out.Usage.UsagePresenceKnown = resp.Usage.InputTokensPresent || resp.Usage.OutputTokensPresent || resp.Usage.CacheReadInputTokensPresent || resp.Usage.CacheCreationInputTokensPresent
+		out.Usage.InputTokensPresent = resp.Usage.InputTokensPresent
+		out.Usage.OutputTokensPresent = resp.Usage.OutputTokensPresent
+		if resp.Usage.CacheReadInputTokensPresent {
+			out.Usage.CacheReadSource = "cache_read_input_tokens"
+		}
+		if resp.Usage.CacheCreationInputTokensPresent {
+			out.Usage.CacheWriteSource = "cache_creation_input_tokens"
+		}
 		var err error
 		out.Status, out.IncompleteDetails, err = bridgeResponsesTerminal("anthropic", AnthropicStopReasonString(resp.StopReason), bridgeAnthropicHasTools(resp.Content), false)
 		if err != nil {

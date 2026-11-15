@@ -1578,9 +1578,13 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 		return nil
 	}
 	out := &ResponsesUsage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
-		TotalTokens:  usage.TotalTokens,
+		UsagePresenceKnown:  usage.UsagePresenceKnown,
+		InputTokensPresent:  usage.PromptTokensPresent,
+		OutputTokensPresent: usage.CompletionTokensPresent,
+		TotalTokensPresent:  usage.TotalTokensPresent,
+		InputTokens:         usage.PromptTokens,
+		OutputTokens:        usage.CompletionTokens,
+		TotalTokens:         usage.TotalTokens,
 	}
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
@@ -1597,6 +1601,9 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 		} else {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
 		}
+	}
+	if usage.UsagePresenceKnown && usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokensPresent {
+		out.CacheReadSource = "prompt_tokens_details.cached_tokens"
 	}
 	return out
 }
