@@ -564,10 +564,6 @@ func TestM6FailureRecoveryHint(t *testing.T) {
 						} else {
 							failure = svc.newOpenAIStreamFailoverError(c, a, pass, "rid", payload, "temporary failure", resp.Header)
 						}
-						if stream && wrapped {
-							require.Nil(t, failure)
-							continue
-						}
 						require.NotNil(t, failure)
 						require.NotNil(t, failure.UpstreamRecoveryHint)
 						require.Equal(t, hint.NotBefore, failure.UpstreamRecoveryHint.NotBefore)
