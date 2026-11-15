@@ -264,6 +264,6 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 
 Fable 5.2 与 Mythos 5.2 使用已核对的规范型号：缺省为 adaptive/high，显式 effort 按原转换规则处理；不支持强制 `tool_choice`（required/具名工具）。带签名 thinking 历史由桥入口保留，未签名历史不因此升级为可信内容。
 
-启用桥选项的 Anthropic 转换按完整工具身份限制 `allowed_tools` 声明；重复项去重，未知项忽略并记录字段省略，auto 空集转换为 none。历史工具不会重新加入当前声明；旧入口继续采用原模式选择。函数工具的 `strict` true/false/缺省三态保留。
+启用桥选项的 Anthropic 转换按完整工具身份限制 `allowed_tools` 声明；重复项去重，未知项忽略并记录字段省略，auto 空集转换为 none。历史工具不会重新加入当前声明；旧入口继续采用原模式选择。函数工具的 `strict` true/false/缺省三态保留；Chat 转换不把缺省补成 false。
 
 显式标记为 Gemini 中间目标的请求保留推理意图和验证后的 JSON 格式：none 保留关闭意图，其他档位留给最终 Gemini 构造器处理，不提前施加 Claude 的思考预算或档位映射。真实 Anthropic 目标继续使用原预算与格式规则。
