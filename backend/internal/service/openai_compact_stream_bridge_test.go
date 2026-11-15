@@ -409,6 +409,9 @@ func TestReconstructResponseOutputFromSSE_MixedDoneAndCompactionAdded(t *testing
 	require.True(t, ok)
 	items := gjson.ParseBytes(outputJSON).Array()
 	require.Len(t, items, 2)
+	raw, found := collectRawResponsesOutputItemsFromSSE(bodyText)
+	require.True(t, found)
+	require.JSONEq(t, string(outputJSON), string(raw))
 	require.Equal(t, "cmp_mixed", items[0].Get("id").String())
 	require.Equal(t, "msg_1", items[1].Get("id").String())
 
