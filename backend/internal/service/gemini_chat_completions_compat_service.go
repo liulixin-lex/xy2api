@@ -329,9 +329,15 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		collectedBytes, _ := json.Marshal(collected)
 		chatResp, usageObj2, err := geminiResponseToChatCompletions(collected, originalModel, collectedBytes, usageObj, geminiCompatConversionOptions(ctx))
 		if err != nil {
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+			// Same as the direct JSON reader: write the specific error and keep the usage read.
+			writeGeminiCompatConversionError(c, PreOutputProtocolChat, err)
+			responseErr = err
+			if usageObj != nil && (usageObj.InputTokens > 0 || usageObj.OutputTokens > 0 || usageObj.CacheReadInputTokens > 0) {
+				usageObj2 = usageObj
+			}
+		} else {
+			c.JSON(http.StatusOK, chatResp)
 		}
-		c.JSON(http.StatusOK, chatResp)
 		usage = usageObj2
 	} else {
 		usageResp, err := s.handleChatCompletionsNonStreamingResponseFromGemini(c, resp, originalModel, account.Type == AccountTypeOAuth)
