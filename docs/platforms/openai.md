@@ -64,6 +64,8 @@ Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_to
 
 仅在已确认最终目标支持明文 reasoning 输入的转换路径中，助手历史思考单独承载为 `reasoning_text`，可见答案与工具调用保持分离；未确认能力的路径保留原有历史处理。
 
+非流式结果按 output item 和 content part 恢复正文与拒答：非空结束快照优先于 done，done 优先于 delta；缺项从已收内容补齐，重复快照不重复正文。内容补齐不代表上游成功结束。
+
 ## 客户端配置
 
 ### Codex CLI
