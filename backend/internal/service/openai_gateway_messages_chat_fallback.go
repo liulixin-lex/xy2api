@@ -230,10 +230,17 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	usage := scan.Usage
 
 	if scan.Err != nil {
+		writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
 		// Broken upstream read: skip finalization so no synthetic message_stop
 		// masks the truncation, and surface the error to flag usage incomplete
 		// (mirrors forwardResponsesViaRawChatCompletions).
 		return &OpenAIForwardResult{
+			ResponseFactsKnown: scan.ResponseFactsKnown,
+			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+			TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+			ResponseBodyKind: scan.ResponseBodyKind,
+			PartialFailure:   scan.Err != nil,
+
 			RequestID:                   requestID,
 			UpstreamHeaders:             resp.Header,
 			Usage:                       usage,
@@ -267,11 +274,20 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		}
 		c.Writer.Flush()
 	}
+	if !clientDisconnected {
+		ClaimProtocolTerminal(c)
+	}
 	if !scan.SawDone {
 		logCCStreamMissingDoneSentinel("openai messages chat fallback", requestID)
 	}
 
 	return &OpenAIForwardResult{
+		ResponseFactsKnown: scan.ResponseFactsKnown,
+		UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+		TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+		ResponseBodyKind: scan.ResponseBodyKind,
+		PartialFailure:   scan.Err != nil,
+
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,

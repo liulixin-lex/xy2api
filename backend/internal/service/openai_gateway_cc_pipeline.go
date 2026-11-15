@@ -16,7 +16,9 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -318,62 +320,89 @@ func (s *OpenAIGatewayService) scanCCStream(
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
-	var st ccStreamScanState
-
-	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
-	for scanner.Scan() {
-		line := scanner.Text()
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok {
-			continue
+	st := ccStreamScanState{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
+	var terminal openAIRawStreamTerminalState
+	var parser openAICompatSSEFrameParser
+	defer func() {
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, st.ResponseFactsKnown, st.UsagePresent, st.UsageSource, st.TerminalSeen, st.TerminalValid, st.ResponseBodyKind)
 		}
-		payload = strings.TrimSpace(payload)
-		if payload == "" {
-			continue
+	}()
+	processFrame := func(frame openAICompatSSEFrame) bool {
+		payload := strings.TrimSpace(frame.Data)
+		terminal.ObserveDataLine(payload)
+		if frame.EventType == "error" && gjson.Valid(payload) {
+			terminal.failurePayload = payload
+		}
+		st.TerminalSeen = terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != ""
+		st.TerminalValid = st.TerminalSeen && !terminal.sawMalformed
+		observeSchedPayload(c, []byte(payload))
+		if u := extractCCStreamUsage(payload); u != nil {
+			st.Usage = *u
+			st.UsagePresent = true
+			st.UsageSource = "upstream_sse_progressive"
+		}
+		if terminal.sawMalformed || terminal.failurePayload != "" {
+			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid or failed Chat Completions stream frame", SourceProtocol: "chat"}
+			return true
 		}
 		if payload == "[DONE]" {
-			observeSchedPayload(c, []byte(payload))
 			st.SawDone = true
-			break
+			return true
 		}
-		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
-		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
-		// 事件与无类型 body 报告实际处理档位）。
-		observeSchedPayload(c, []byte(payload))
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
-
-		if u := extractCCStreamUsage(payload); u != nil {
-			st.Usage = *u
-		}
-
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			logger.L().Warn(logPrefix+": failed to parse chat stream chunk",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-			continue
+			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"}
+			return true
 		}
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
 		}
 		emit(&chunk)
+		return false
 	}
-
-	if err := scanner.Err(); err != nil {
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
+	for scanner.Scan() {
+		if frame, complete := parser.AddLine(scanner.Text()); complete && processFrame(frame) {
+			break
+		}
+	}
+	if st.Err == nil && !st.SawDone {
+		if frame, complete := parser.Finish(); complete {
+			processFrame(frame)
+		}
+	}
+	if err := scanner.Err(); err != nil && st.Err == nil && !terminal.Terminated() {
 		noteSchedError(c, err)
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn(logPrefix+": stream read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
+			logger.L().Warn(logPrefix+": stream read error", zap.Error(err), zap.String("request_id", requestID))
 		}
 		st.Err = err
 	}
+	// The existing empty/role/meter-only answer remains eligible. An active
+	// generation needs finish, DONE, or a complete trailing meter and clean EOF.
+	if st.Err == nil && terminal.IsTruncated(true) {
+		st.Err = ErrOpenAIUpstreamStreamTruncated
+	}
+
 	return st
+}
+
+func writeCCStreamReadError(c *gin.Context, protocol string, err error) {
+	code, message := classifyOpenAIUpstreamStreamReadError(err)
+	var conversion *apicompat.UpstreamConversionError
+	if errors.As(err, &conversion) {
+		code, message = OpenAIUpstreamProtocolErrorCode, "Invalid upstream Chat Completions stream"
+	}
+	errType := "server_error"
+	if protocol == PreOutputProtocolAnthropic {
+		errType = "api_error"
+	}
+	WriteTargetProtocolError(c, protocol, http.StatusBadGateway, errType, code, "", message)
 }
 
 // logCCStreamMissingDoneSentinel 记录"上游未发 [DONE] 哨兵即结束"的 debug 日志。

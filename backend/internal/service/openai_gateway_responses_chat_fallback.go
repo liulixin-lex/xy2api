@@ -246,7 +246,14 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	})
 
 	if scan.Err != nil {
+		writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
 		return &OpenAIForwardResult{
+			ResponseFactsKnown: scan.ResponseFactsKnown,
+			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+			TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+			ResponseBodyKind: scan.ResponseBodyKind,
+			PartialFailure:   scan.Err != nil,
+
 			RequestID:                   requestID,
 			UpstreamHeaders:             resp.Header,
 			Usage:                       scan.Usage,
@@ -262,7 +269,14 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	if err := state.ValidateToolCallArguments(); err != nil {
+		writeCCStreamReadError(c, PreOutputProtocolResponses, err)
 		return &OpenAIForwardResult{
+			ResponseFactsKnown: scan.ResponseFactsKnown,
+			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+			TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+			ResponseBodyKind: scan.ResponseBodyKind,
+			PartialFailure:   true,
+
 			RequestID:                   requestID,
 			UpstreamHeaders:             resp.Header,
 			Usage:                       scan.Usage,
@@ -291,11 +305,20 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			c.Writer.Flush()
 		}
 	}
+	if !clientDisconnected {
+		ClaimProtocolTerminal(c)
+	}
 	if !scan.SawDone {
 		logCCStreamMissingDoneSentinel("openai responses chat fallback", requestID)
 	}
 
 	return &OpenAIForwardResult{
+		ResponseFactsKnown: scan.ResponseFactsKnown,
+		UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+		TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+		ResponseBodyKind: scan.ResponseBodyKind,
+		PartialFailure:   scan.Err != nil,
+
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       scan.Usage,
