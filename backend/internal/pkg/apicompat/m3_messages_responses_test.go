@@ -889,6 +889,7 @@ func TestM3ReviewR4StrictSchema(t *testing.T) {
 		name, schema string
 		strict       bool
 	}{
+		{"implicit object", `{"type":"object","properties":{"child":{"additionalProperties":true}},"required":["child"],"additionalProperties":false}`, false},
 		{"optional unit", `{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},"required":["city"],"additionalProperties":false}`, false},
 		{"all required", `{"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},"required":["city","unit"],"additionalProperties":false}`, true},
 		{"missing additionalProperties", `{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`, false},
