@@ -86,8 +86,9 @@ func applyAnthropicOutputControls(req *AnthropicRequest, out *ResponsesRequest) 
 	return nil
 }
 
-// NativeWireRequest preserves the client's exact output limit. Bridge-only
-// stops cannot cross this boundary.
+// NativeWireRequest applies the Responses minimum of 16 at the wire boundary.
+// Larger limits and the intermediate request stay unchanged. Bridge-only stops
+// cannot cross this boundary.
 func (r ResponsesRequest) NativeWireRequest() (ResponsesRequest, error) {
 	if stops, err := parseStopSequences(r.bridgeStop); err != nil {
 		return r, err
@@ -96,6 +97,10 @@ func (r ResponsesRequest) NativeWireRequest() (ResponsesRequest, error) {
 	}
 	if err := validateTokenLimit("max_output_tokens", r.MaxOutputTokens); err != nil {
 		return r, err
+	}
+	if r.MaxOutputTokens != nil && *r.MaxOutputTokens < 16 {
+		limit := 16
+		r.MaxOutputTokens = &limit
 	}
 	return r, nil
 }
