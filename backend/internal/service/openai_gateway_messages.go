@@ -773,7 +773,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
-		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false)
+		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false, facts.UsagePresent)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -1468,7 +1468,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				c.Writer.Flush()
 			}
 		}
-		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)
+		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected, facts.UsagePresent)
 		return resultWithUsage(), nil
 	}
 
