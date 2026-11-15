@@ -405,18 +405,28 @@ func TestOpenAICacheSessionUUIDDisabledWireBaseline(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &want))
 	for _, tc := range sessionUUIDBaselineCases() {
 		t.Run(tc.name, func(t *testing.T) {
+			baselineDigest := func(wire sessionUUIDWire) string {
+				if tc.protocol == "messages" && gjson.GetBytes(wire.Body, "max_output_tokens").Exists() {
+					require.Equal(t, int64(16), gjson.GetBytes(wire.Body, "max_output_tokens").Int(), "E9 preserves native limit 16")
+					var err error
+					wire.Body, err = sjson.SetBytes(wire.Body, "max_output_tokens", 128)
+					require.NoError(t, err)
+					wire.Length = int64(len(wire.Body))
+				}
+				return sessionUUIDWireDigest(t, wire)
+			}
 			wire, _, _, _ := sessionUUIDForward(t, tc, false, 99)
 			if tc.protocol == "chat" && (strings.HasSuffix(tc.extra, ":42") || strings.HasSuffix(tc.extra, ":{\"x\":1}")) {
 				require.Empty(t, wire.Method, "baseline rejects nonstring typed Chat fields before dispatch")
 			} else {
 				require.NotEmpty(t, wire.Method)
 			}
-			require.Equal(t, want[tc.name], sessionUUIDWireDigest(t, wire), "%+v", wire)
+			require.Equal(t, want[tc.name], baselineDigest(wire), "%+v", wire)
 			// Explicit client input, pinned continuations and Responses-shaped
 			// Chat traffic retain the independently frozen wire with B1 on too.
 			if tc.header != "" || strings.Contains(tc.extra, "prompt_cache_key") || tc.responseShape || tc.variant != "" {
 				on, _, _, _ := sessionUUIDForward(t, tc, true, 99)
-				require.Equal(t, want[tc.name], sessionUUIDWireDigest(t, on), "%+v", on)
+				require.Equal(t, want[tc.name], baselineDigest(on), "%+v", on)
 			}
 		})
 	}

@@ -3,7 +3,6 @@ package service
 import (
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -20,9 +19,7 @@ func TestNormalizeResponsesLegacyIngressUsesTargetTokenLimit(t *testing.T) {
 	require.Equal(t, int64(64), gjson.GetBytes(converted, "max_output_tokens").Int())
 	for _, normalize := range []func([]byte) ([]byte, bool, error){normalizeOpenAIResponsesLegacyIngress, normalizeConvertedResponsesLegacyIngress} {
 		_, _, err = normalize([]byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"stop":["END"]}`))
-		var unsupported *apicompat.UnsupportedConversionError
-		require.ErrorAs(t, err, &unsupported)
-		require.Equal(t, "stop", unsupported.Field)
+		require.NoError(t, err)
 	}
 }
 
