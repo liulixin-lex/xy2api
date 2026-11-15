@@ -91,11 +91,16 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 }
 
 func responsesStatusToChatFinishReason(status string, details *ResponsesIncompleteDetails, toolCalls []ChatToolCall, hasRefusal bool) string {
-	reason := ""
-	if details != nil {
-		reason = details.Reason
+	status, reason := responsesChatTerminal(status, details)
+	_, finish, _, err := ProjectTerminalWithMapping("responses", "chat", status, reason, len(toolCalls) > 0, hasRefusal)
+	if err != nil {
+		// This legacy projector cannot return an error. Validated callers reject
+		// explicit failures first; legacy callers retain their original enum.
+		if len(toolCalls) > 0 {
+			return "tool_calls"
+		}
+		return "stop"
 	}
-	_, finish, _ := ProjectTerminal("responses", "chat", status, reason, len(toolCalls) > 0, hasRefusal)
 	return finish
 }
 
@@ -106,6 +111,8 @@ func responsesStatusToChatFinishReason(status string, details *ResponsesIncomple
 // ResponsesEventToChatState tracks state for converting a sequence of Responses
 // SSE events into Chat Completions SSE chunks.
 type ResponsesEventToChatState struct {
+	// Record receives request-level conversion notices; nil preserves legacy use.
+	Record                 func(ConversionNotice)
 	visible                *BufferedResponseAccumulator
 	visibleSent            map[*bufferedOutputSlot]map[int]string
 	SawRefusal             bool
@@ -139,10 +146,10 @@ func NewResponsesEventToChatState() *ResponsesEventToChatState {
 	}
 }
 
-// ResponsesEventToChatChunks converts a single Responses SSE event into zero
-// or more Chat Completions chunks, updating state as it goes.
 func (state *ResponsesEventToChatState) Err() error { return state.err }
 
+// ResponsesEventToChatChunks converts a single Responses SSE event into zero
+// or more Chat Completions chunks, updating state as it goes.
 func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEventToChatState) []ChatCompletionsChunk {
 	if evt == nil || state.Finalized || state.err != nil {
 		return nil
@@ -544,10 +551,21 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		state.Usage = chatUsageFromResponsesUsage(evt.Usage)
 	}
 	resp := evt.Response
-	if resp == nil {
-		state.err = toolTrackingError("response", "missing terminal response")
-		return nil
+	terminal := ResponsesResponse{}
+	if resp != nil {
+		terminal = *resp
 	}
+	if terminal.Status == "" {
+		switch evt.Type {
+		case "response.incomplete":
+			terminal.Status = "incomplete"
+		case "response.failed":
+			terminal.Status = "failed"
+		default:
+			terminal.Status = "completed"
+		}
+	}
+	resp = &terminal
 	if resp.Usage != nil {
 		state.Usage = chatUsageFromResponsesUsage(resp.Usage)
 	}
@@ -591,14 +609,14 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	if state.err != nil {
 		return nil
 	}
-	reason := ""
-	if resp.IncompleteDetails != nil {
-		reason = resp.IncompleteDetails.Reason
-	}
-	_, finishReason, err := ProjectTerminal("responses", "chat", resp.Status, reason, state.SawToolCall, state.SawRefusal)
+	status, reason := responsesChatTerminal(resp.Status, resp.IncompleteDetails)
+	_, finishReason, mapped, err := ProjectTerminalWithMapping("responses", "chat", status, reason, state.SawToolCall, state.SawRefusal)
 	if err != nil {
 		state.err = err
 		return nil
+	}
+	if mapped && state.Record != nil {
+		state.Record(ConversionNotice{Field: "finish_reason", Action: "map"})
 	}
 	state.Finalized = true
 	finish := makeChatFinishChunk(state, finishReason)

@@ -6,6 +6,7 @@
 
 ### 参数与协议转换
 
+- Responses 合法结束事件缺少状态、done 未带 response 或 incomplete 未给原因时继续正常结束；未知原因保留正常结束并记录映射。
 - Responses 中转在结束事件重新生成输出项 ID 时，正文、思考与工具结果照常完成，不再因 ID 变化报错。
 - 缺少输出项标识的 Responses 文本增量归入当前项，非流式结果不再多出空消息。
 - Responses 流中的 reasoning_text 内容部件不再阻断后续正文与思考内容的恢复。

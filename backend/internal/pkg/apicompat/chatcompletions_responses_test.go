@@ -2146,7 +2146,7 @@ func TestTerminalProjectionJSONAndSSE(t *testing.T) {
 		status, reason, want string
 		invalid              bool
 	}{
-		{"completed", "", "tool_calls", false}, {"incomplete", "max_output_tokens", "length", false}, {"incomplete", "content_filter", "content_filter", false}, {"incomplete", "other", "", true}, {"failed", "", "", true}, {"future", "", "", true},
+		{"completed", "", "tool_calls", false}, {"incomplete", "max_output_tokens", "length", false}, {"incomplete", "content_filter", "content_filter", false}, {"incomplete", "other", "tool_calls", false}, {"failed", "", "", true}, {"future", "", "tool_calls", false},
 	} {
 		resp := &ResponsesResponse{Status: tc.status, Output: []ResponsesOutput{{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: `{}`}}}
 		if tc.reason != "" {

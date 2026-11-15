@@ -163,3 +163,59 @@ func TestReviewM2TerminalRegeneratedIDs(t *testing.T) {
 		require.Equal(t, "Last", out[1].Content[0].Text)
 	})
 }
+
+func TestReviewM2QualifiedTerminalDefaults(t *testing.T) {
+	for _, tc := range []struct{ event, status, reason string }{
+		{"response.completed", "", ""}, {"response.done", "", ""}, {"response.incomplete", "incomplete", ""},
+		{"response.completed", "incomplete", "max_tool_calls"}, {"response.done", "future", ""},
+	} {
+		for _, tools := range []bool{false, true} {
+			response := &ResponsesResponse{Status: tc.status}
+			if tc.reason != "" {
+				response.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+			}
+			want := "stop"
+			if tools {
+				response.Output = []ResponsesOutput{{Type: "function_call", ID: "tool", CallID: "call", Name: "f", Arguments: `{}`}}
+				want = "tool_calls"
+			}
+			var notices []ConversionNotice
+			opts := ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }}
+			require.NoError(t, ValidateResponsesForChatWithOptions(response, opts))
+			require.Equal(t, want, ResponsesToChatCompletions(response, "m").Choices[0].FinishReason)
+			expected := []ConversionNotice(nil)
+			if tc.status == "future" || tc.reason != "" {
+				expected = []ConversionNotice{{Field: "finish_reason", Action: "map"}}
+			}
+			require.Equal(t, expected, notices)
+			notices = nil
+			state := NewResponsesEventToChatState()
+			state.Record = opts.Record
+			event := &ResponsesStreamEvent{Type: tc.event, Response: response}
+			chunks := ResponsesEventToChatChunks(event, state)
+			require.NoError(t, state.Err())
+			require.Equal(t, want, *chunks[len(chunks)-1].Choices[0].FinishReason)
+			require.Empty(t, ResponsesEventToChatChunks(event, state))
+			require.Equal(t, expected, notices)
+			require.Equal(t, tc.status, response.Status, "terminal normalization must not mutate upstream input")
+		}
+	}
+	for _, tools := range []bool{false, true} {
+		state := NewResponsesEventToChatState()
+		state.IncludeUsage = true
+		want := "stop"
+		if tools {
+			ResponsesEventToChatChunks(reviewM2Event(t, `{"type":"response.output_item.done","output_index":0,"item":{"id":"t","type":"function_call","call_id":"c","name":"f","arguments":"{}"}}`), state)
+			want = "tool_calls"
+		}
+		chunks := ResponsesEventToChatChunks(reviewM2Event(t, `{"type":"response.done","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}`), state)
+		require.NoError(t, state.Err())
+		require.Equal(t, want, *chunks[len(chunks)-2].Choices[0].FinishReason)
+		require.Equal(t, 7, chunks[len(chunks)-1].Usage.TotalTokens)
+	}
+	state := NewResponsesEventToChatState()
+	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.failed"}, state))
+	require.Error(t, state.Err())
+	require.Equal(t, "stop", ResponsesToChatCompletions(&ResponsesResponse{Status: "failed"}, "m").Choices[0].FinishReason, "legacy projector must never emit an empty enum")
+	require.Error(t, ValidateResponsesForChat(&ResponsesResponse{Status: "failed"}))
+}
