@@ -492,7 +492,7 @@ func RestoreResponsesClientToolPayload(payload []byte, mapping ResponsesClientTo
 		return payload, false, err
 	}
 	rebuiltPayload := bytes.TrimSuffix(rebuilt.Bytes(), []byte("\n"))
-	if len(mapping.NamespaceTools) == 0 {
+	if bridgeEnabled(mapping.Bridge) || len(mapping.NamespaceTools) == 0 {
 		return rebuiltPayload, true, nil
 	}
 	restored, _, err := RestoreResponsesNamespaceCalls(rebuiltPayload, mapping.NamespaceTools)

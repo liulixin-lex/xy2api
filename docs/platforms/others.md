@@ -4,6 +4,8 @@
 
 ## 共同点
 
+Responses→Chat 转换桥保留 namespace 中的 custom 子工具，使用 `{"input":string}` 参数包装，并在响应中恢复原 namespace、名称和 custom 类型。
+
 Responses→Chat 转换桥对超长、含非 ASCII 字符或拍平后冲突的工具名使用可逆别名；声明、具名选择、历史与响应共用同一映射，历史独有工具不会重新加入当前声明。原生协议路径保持原命名。
 
 Responses 转换桥合并 `tools` 与输入中的 `additional_tools` 时，同类型、完整 namespace 路径和名称的工具保留先声明者；后续 schema 差异只记录省略，不拒绝请求。

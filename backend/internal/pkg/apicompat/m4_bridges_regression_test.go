@@ -262,3 +262,60 @@ func TestM4ToolNameRoundTrip(t *testing.T) {
 		t.Fatal("nondeterministic table")
 	}
 }
+
+func TestM4NamespaceCustomRoundTrip(t *testing.T) {
+	var req map[string]any
+	if err := json.Unmarshal([]byte(`{"model":"probe","tools":[{"type":"namespace","name":"mcp_tools","tools":[{"type":"custom","name":"exec","format":{"type":"text"}},{"type":"function","name":"exec","parameters":{"type":"object"}}]}],"tool_choice":{"type":"custom","namespace":"mcp_tools","name":"exec"},"input":[{"type":"custom_tool_call","call_id":"old","namespace":"retired","name":"old_exec","input":"old"},{"type":"custom_tool_call_output","call_id":"old","output":"ok"}]}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &BridgeOptions{Enabled: true}
+	mapping, _, err := AdaptResponsesClientToolsWithBridgeOptions(req, ConversionOptions{Bridge: bridge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := req["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("tools=%v", tools)
+	}
+	alias := bridge.ToolNames.Forward[ToolNameIdentity{Kind: "custom", Namespace: "mcp_tools", Name: "exec"}]
+	if tools[0].(map[string]any)["name"] != alias || tools[0].(map[string]any)["type"] != "function" {
+		t.Fatalf("custom not lowered: %v", tools)
+	}
+	history := req["input"].([]any)[0].(map[string]any)
+	if history["type"] != "function_call" || history["arguments"] != `{"input":"old"}` {
+		t.Fatalf("history=%v", history)
+	}
+	payload, _ := json.Marshal(map[string]any{"output": []any{map[string]any{"type": "function_call", "id": "fc_fixed", "call_id": "c", "name": alias, "arguments": `{"input":"echo ok"}`, "status": "completed"}}})
+	restored, _, err := RestoreResponsesClientToolPayload(payload, mapping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Output []ResponsesOutput `json:"output"`
+	}
+	if err := json.Unmarshal(restored, &response); err != nil {
+		t.Fatal(err)
+	}
+	item := response.Output[0]
+	if item.Type != "custom_tool_call" || item.Name != "exec" || item.Namespace != "mcp_tools" || item.Input != "echo ok" {
+		t.Fatalf("restored=%s", restored)
+	}
+	restorer := NewResponsesClientToolStreamRestorer(mapping)
+	var events []ResponsesStreamEvent
+	for _, event := range []ResponsesStreamEvent{
+		{Type: "response.output_item.added", OutputIndex: 0, Item: &ResponsesOutput{Type: "function_call", ID: "fc_fixed", CallID: "c", Name: alias}},
+		{Type: "response.function_call_arguments.delta", OutputIndex: 0, ItemID: "fc_fixed", Delta: `{"input":"echo ok"}`},
+		{Type: "response.function_call_arguments.done", OutputIndex: 0, ItemID: "fc_fixed", Arguments: `{"input":"echo ok"}`},
+		{Type: "response.output_item.done", OutputIndex: 0, Item: &ResponsesOutput{Type: "function_call", ID: "fc_fixed", CallID: "c", Name: alias, Arguments: `{"input":"echo ok"}`, Status: "completed"}},
+	} {
+		events = append(events, restorer.Restore(event)...)
+	}
+	for _, event := range events {
+		if event.Item != nil && (event.Item.Type != "custom_tool_call" || event.Item.Namespace != "mcp_tools" || event.Item.Name != "exec") {
+			t.Fatalf("event=%+v item=%+v", event, event.Item)
+		}
+		if event.Type == "response.custom_tool_call_input.done" && (event.Name != "exec" || event.Input != "echo ok") {
+			t.Fatalf("input done=%+v", event)
+		}
+	}
+}
