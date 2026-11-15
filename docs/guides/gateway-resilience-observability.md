@@ -189,5 +189,3 @@ Responses 拒参修复在既有上游错误事件中记录 `rejected_field` 与 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
 
 转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
-
-Responses 流内拒参修复与 HTTP 拒参使用同一 `rejected_field` / `resent` 口径：获准修复先保留事件引用，只有对应账号实际进入下一次发送才置 `resent=true`；构造失败、取消或未发送不算重发。
