@@ -39,9 +39,12 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 				}
 				classified := classifyUpstreamOutcome(resilience.Outcome{Source: source, StatusCode: 403, Body: body})
 				require.Equal(t, tc.policy, classified.ContentPolicy())
+				pure := resilience.Classify(resilience.Outcome{Source: source, StatusCode: 403, Body: body}, nil)
+				require.Equal(t, tc.policy, pure.ContentPolicy(), "the shared classifier reads the same active error")
 				require.Equal(t, tc.waf, isCloudflareBotBlockResponse(body))
 				if tc.waf {
 					require.Equal(t, resilience.CategoryTransient, classified.Category)
+					require.Equal(t, resilience.CategoryTransient, pure.Category)
 				}
 				repo := &rateLimitAccountRepoStub{}
 				counter := &openAI403CounterCacheStub{counts: []int64{1, 2, 3}}
@@ -74,6 +77,7 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 	for _, body := range []string{"error code: 1010", "<html>error code: 1010</html>"} {
 		t.Run(body, func(t *testing.T) {
 			require.Equal(t, resilience.CategoryTransient, classifyUpstreamHTTP(403, nil, []byte(body), "").Category)
+			require.Equal(t, resilience.CategoryTransient, resilience.Classify(resilience.Outcome{StatusCode: 403, Body: []byte(body)}, nil).Category)
 			require.True(t, isCloudflareBotBlockResponse([]byte(body)))
 			repo := &rateLimitAccountRepoStub{}
 			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

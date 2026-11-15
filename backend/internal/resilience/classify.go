@@ -443,6 +443,24 @@ func ClassifyWithSettings(o Outcome, settings *Settings) Result {
 	if settings != nil {
 		extra = settings.Failure.BalanceKeywordsExtra
 	}
+	return classify(o, extra, settings.DecisionV2On())
+}
+
+func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result {
+	switch o.Source {
+	case SourceClientCancel:
+		return Result{Category: CategoryClientCancel, Reason: "client_cancel"}
+	case SourceFirstOutputTimeout:
+		return Result{Category: CategoryFirstOutputTimeout, Reason: "first_output_timeout"}
+	case SourceStall:
+		return Result{Category: CategoryStall, Reason: "stall"}
+	case SourceNetwork:
+		if o.Err != nil && (errors.Is(o.Err, context.Canceled)) {
+			return Result{Category: CategoryClientCancel, Reason: "context_canceled"}
+		}
+		return Result{Category: CategoryTransient, Reason: networkReason(o.Err)}
+	}
+
 	if o.Source == SourceHTTP || o.Source == SourceStreamEvent {
 		if o.StatusCode == http.StatusForbidden && !json.Valid(o.Body) &&
 			strings.Contains(strings.ToLower(string(o.Body)), "error code: 1010") {
@@ -481,23 +499,6 @@ func ClassifyWithSettings(o Outcome, settings *Settings) Result {
 				}
 			}
 		}
-	}
-	return classify(o, extra, settings.DecisionV2On())
-}
-
-func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result {
-	switch o.Source {
-	case SourceClientCancel:
-		return Result{Category: CategoryClientCancel, Reason: "client_cancel"}
-	case SourceFirstOutputTimeout:
-		return Result{Category: CategoryFirstOutputTimeout, Reason: "first_output_timeout"}
-	case SourceStall:
-		return Result{Category: CategoryStall, Reason: "stall"}
-	case SourceNetwork:
-		if o.Err != nil && (errors.Is(o.Err, context.Canceled)) {
-			return Result{Category: CategoryClientCancel, Reason: "context_canceled"}
-		}
-		return Result{Category: CategoryTransient, Reason: networkReason(o.Err)}
 	}
 
 	code := strings.ToLower(strings.TrimSpace(o.Code))
