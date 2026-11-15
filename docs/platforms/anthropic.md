@@ -273,3 +273,5 @@ Fable 5.2 与 Mythos 5.2 使用已核对的规范型号：缺省为 adaptive/hig
 最近档位映射选中 none 时，仍通过目标的模式规则投影为关闭或 between_tools，并读取实际发出的 effort；不会把模式值 none 直接写入仅接受普通档位的 output_config。
 
 第三方 Anthropic 兼容模型只有 thinking 模式、没有显式 effort 时保留原正文，不补 output_config.effort。
+
+Claude 的 minimal 继续使用既有转换语义：Chat 转换为 adaptive/low，原生 Messages 的 adaptive/minimal 正文保持不变，不因 nearest 等距而切换到 none 的特殊模式。
