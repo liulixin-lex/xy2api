@@ -1708,6 +1708,9 @@ func (state *ChatCompletionsToResponsesStreamState) ValidateToolCallArguments() 
 	if state == nil {
 		return nil
 	}
+	if bridgeEnabled(state.Bridge) {
+		return validateBridgeStreamTools(state)
+	}
 	for idx, toolCall := range state.ToolCalls {
 		if toolCall == nil {
 			continue
@@ -1871,6 +1874,12 @@ func ChatCompletionsChunkToResponsesEvents(
 func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
 	if state == nil || state.CompletedSent || state.Err() != nil {
 		return nil
+	}
+	if bridgeEnabled(state.Bridge) {
+		if err := state.ValidateToolCallArguments(); err != nil {
+			state.bridgeErr = err
+			return nil
+		}
 	}
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)

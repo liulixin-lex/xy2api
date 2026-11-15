@@ -248,6 +248,8 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
 | `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
 
+上游生成的工具参数无法编码到目标协议时返回转换错误，不静默删除调用；该检查不新增请求历史闭合校验。
+
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 
 ```json

@@ -60,6 +60,11 @@ func applyBridgeBufferedParts(out *ResponsesResponse, resp *ChatCompletionsRespo
 }
 
 func ChatCompletionsResponseToAnthropicWithBridgeOptions(resp *ChatCompletionsResponse, model string, opts ConversionOptions) (*AnthropicResponse, error) {
+	if bridgeEnabled(opts.Bridge) {
+		if err := validateBridgeBufferedTools(resp, opts.Bridge, nil, false, true); err != nil {
+			return nil, err
+		}
+	}
 	out := ChatCompletionsResponseToAnthropic(resp, model)
 	if !bridgeEnabled(opts.Bridge) || resp == nil || len(resp.Choices) == 0 {
 		return out, nil

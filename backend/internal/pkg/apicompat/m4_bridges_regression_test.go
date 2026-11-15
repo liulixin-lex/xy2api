@@ -902,3 +902,37 @@ func TestM4ReasoningHistoryFallback(t *testing.T) {
 		t.Fatal("zero options changed")
 	}
 }
+
+func TestM4InvalidToolArguments(t *testing.T) {
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+	for _, args := range []string{`{broken`, `{"q":"unterminated`} {
+		resp := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{ToolCalls: []ChatToolCall{{ID: "c", Function: ChatFunctionCall{Name: "lookup", Arguments: args}}}}, FinishReason: "tool_calls"}}}
+		if _, err := ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts); err == nil {
+			t.Fatal("bad generated call silently omitted")
+		}
+		if _, err := ChatCompletionsResponseToAnthropicWithBridgeOptions(resp, "m", opts); err == nil {
+			t.Fatal("bad generated call sanitized")
+		}
+		state := NewChatCompletionsToResponsesStreamState("m")
+		state.Bridge = opts.Bridge
+		reason := "tool_calls"
+		ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: resp.Choices[0].Message.ToolCalls}, FinishReason: &reason}}}, state)
+		if events := FinalizeChatCompletionsResponsesStream(state); state.Err() == nil || len(events) != 0 {
+			t.Fatal("bad generated stream completed")
+		}
+	}
+	for _, tc := range []struct {
+		kind, args string
+		bad        bool
+	}{{"function", "{}", false}, {"function", "[]", false}, {"custom", "free text", false}, {"custom", "", false}, {"tool_search", `{"query":"q"}`, false}, {"tool_search", "[]", true}} {
+		if err := validateBridgeToolArguments(tc.kind, tc.args, false); (err != nil) != tc.bad {
+			t.Fatalf("%+v: %v", tc, err)
+		}
+	}
+	state := NewChatCompletionsToResponsesStreamState("m")
+	state.Bridge = opts.Bridge
+	ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ToolCalls: []ChatToolCall{{ID: "c", Function: ChatFunctionCall{Name: "lookup", Arguments: "{"}}}}}}}, state)
+	if len(FinalizeChatCompletionsResponsesStream(state)) != 0 || state.Err() == nil {
+		t.Fatal("EOF became successful empty arguments")
+	}
+}

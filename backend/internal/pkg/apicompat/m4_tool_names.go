@@ -215,6 +215,11 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 	if bridgeEnabled(opts.Bridge) {
 		customTools, functionTools, namespaceTools = bridgeChatNameIndexes(opts.Bridge.ToolNames)
 	}
+	if bridgeEnabled(opts.Bridge) {
+		if err := validateBridgeBufferedTools(resp, opts.Bridge, customTools, toolSearch, false); err != nil {
+			return nil, err
+		}
+	}
 	out := ChatCompletionsResponseToResponses(resp, model, customTools, functionTools, toolSearch, namespaceTools)
 	if bridgeEnabled(opts.Bridge) {
 		if err := applyBridgeBufferedParts(out, resp); err != nil {
