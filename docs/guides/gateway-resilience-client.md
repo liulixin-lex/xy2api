@@ -26,6 +26,8 @@
 
 补充说明：
 
+- 原样转发 Responses 遇到上游明确的工具历史配对 400 时，保留脱敏后的 type/code/param/message；请求只发送一次，不换号、不处罚账号。
+
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
 
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。

@@ -1156,15 +1156,18 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
 	// 脱敏后的上游消息，而不是抹成通用文案。
+	toolHistory := isToolHistoryUpstreamClientError(resp.StatusCode, body)
 	contextWindow := isOpenAIContextWindowError(upstreamMsg, body)
-	if contextWindow && upstreamMsg != "" {
+	if toolHistory {
+		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
+	} else if contextWindow && upstreamMsg != "" {
 		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
 	}
 
 	err := fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
-	if cyberHit || contextWindow || (isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError) {
+	if cyberHit || contextWindow || toolHistory || (isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError) {
 		return &OpenAIRequestRejectionError{err}
 	}
 	return err

@@ -169,3 +169,31 @@ func TestM6CompactFailureModel(t *testing.T) {
 		})
 	}
 }
+
+func TestM6PassthroughToolHistory400(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, message := range []string{"No tool call found for function call output with call_id call_wrong at input[1]", "No tool output found for function call call_missing at input[1]"} {
+		t.Run(message, func(t *testing.T) {
+			errorBody := `{"error":{"type":"invalid_request_error","code":"invalid_request_error","param":"input[1].call_id","message":"` + message + `"}}`
+			upstream := &httpUpstreamRecorder{resp: newOpenAIUpstreamErrorResponse(400, errorBody)}
+			repo := &openAIModelAvailabilityRepo{}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: repo, rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil)}
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Extra["openai_passthrough"] = true
+			c, w := newOpenAIUpstreamErrorTestContext(t)
+			_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"function_call_output","call_id":"call_wrong","output":"ok"}]}`))
+			require.Error(t, err)
+			var failure *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failure)
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, 400, w.Code)
+			require.Equal(t, "invalid_request_error", gjson.Get(w.Body.String(), "error.code").String())
+			require.Equal(t, "invalid_request_error", gjson.Get(w.Body.String(), "error.type").String())
+			require.Equal(t, "input[1].call_id", gjson.Get(w.Body.String(), "error.param").String())
+			require.Equal(t, message, gjson.Get(w.Body.String(), "error.message").String())
+			require.Zero(t, repo.setErrorCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Empty(t, repo.modelRateLimitCalls)
+		})
+	}
+}
