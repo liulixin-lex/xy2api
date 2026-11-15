@@ -196,6 +196,9 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 	if state.field == "" && effort == state.original {
 		return body, false, nil // Suffixes are requested metadata, not explicit wire fields.
 	}
+	if protocol == "anthropic" && claude.IsClaudeModel(model) && effort == "minimal" && state.field != "output_config.effort" {
+		effort = "low" // Converted Chat/Responses minimal already uses adaptive/low.
+	}
 	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none" && effort != "none")
 	if err != nil {
 		return body, false, err
