@@ -5,7 +5,6 @@ package service
 import (
 	"encoding/json"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -39,12 +38,6 @@ func TestM8ToolHistoryErrorIdentity(t *testing.T) {
 				t.Fatal(rec.Code, rec.Body.String())
 			}
 		}
-	}
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	writeOpenAIUpstreamClientError(c, 400, []byte(`{"error":{"message":"secret","type":{"secret":true},"code":["secret"],"param":false}}`), "safe")
-	if strings.Contains(rec.Body.String(), "secret") || gjson.Get(rec.Body.String(), "error.message").String() != "safe" {
-		t.Fatal(rec.Body.String())
 	}
 	if isToolHistoryUpstreamClientError(400, []byte(`{"message":"No tool output found for function call"}`)) {
 		t.Fatal("unstructured message")

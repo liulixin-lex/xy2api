@@ -28,8 +28,7 @@ const EdgeUpstreamStatusHeader = "X-XY-Upstream-Status"
 // on the server's writer, below any keepalive wrapper, so the count is safe
 // to read from the disconnect callback.
 type deliveryWriter struct {
-	terminal        targetProtocolErrorState
-	terminalContext *gin.Context
+	terminal targetProtocolErrorState
 	gin.ResponseWriter
 	written     atomic.Int64
 	writeFailed atomic.Bool
@@ -108,7 +107,7 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
-		w.terminal.observe(w.terminalContext, w.ResponseWriter.Header().Get("Content-Type"), data[:n])
+		w.terminal.observe(w.ResponseWriter.Header().Get("Content-Type"), data[:n])
 		w.observeStream(data[:n])
 		w.observeSemanticOutput(data[:n], at)
 		w.noteFirstOutput(len(bytes.TrimSpace(data[:n])) > 0)
@@ -125,7 +124,7 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
-		w.terminal.observe(w.terminalContext, w.ResponseWriter.Header().Get("Content-Type"), []byte(s[:n]))
+		w.terminal.observe(w.ResponseWriter.Header().Get("Content-Type"), []byte(s[:n]))
 	}
 	if n > 0 && w.stream.observing() {
 		w.observeStream([]byte(s[:n]))
@@ -209,7 +208,7 @@ func InstallDeliveryTracking(c *gin.Context, started time.Time) {
 	if st == nil {
 		return
 	}
-	w := &deliveryWriter{ResponseWriter: c.Writer, state: st, terminalContext: c}
+	w := &deliveryWriter{ResponseWriter: c.Writer, state: st}
 	c.Writer = w
 	c.Set(deliveryWriterKey, w)
 	st.InitDelivery(c.Request.Context(), started, w.deliveredBytes)

@@ -38,14 +38,21 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 // redactAgentIdentitySensitiveBody；这里不重复清洗，也不回落读取原始 body 的
 // message，避免绕开那两道脱敏。
 func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
-	errType, code, param, message := UpstreamClientErrorFields(body, upstreamMsg)
-	errorPayload := gin.H{"type": errType, "message": message}
-	if code != "" {
+	errorPayload := gin.H{"type": openAIUpstreamClientErrorFallbackType}
+	if errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String()); errType != "" {
+		errorPayload["type"] = errType
+	}
+	if code := strings.TrimSpace(extractUpstreamErrorCode(body)); code != "" {
 		errorPayload["code"] = code
 	}
-	if param != "" {
+	if param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String()); param != "" {
 		errorPayload["param"] = param
 	}
+	message := strings.TrimSpace(upstreamMsg)
+	if message == "" {
+		message = openAIUpstreamClientErrorFallbackMessage
+	}
+	errorPayload["message"] = message
 
 	writeOpenAICollaborationErrorJSON(c, statusCode, gin.H{"error": errorPayload})
 }
@@ -54,40 +61,6 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 // client error when the handler has exhausted all eligible accounts.
 func WriteOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
 	writeOpenAIUpstreamClientError(c, statusCode, body, upstreamMsg)
-}
-
-// UpstreamClientErrorFields projects safe scalar fields and the already-redacted
-// message. It never falls back to an unsanitized message in the upstream body.
-func UpstreamClientErrorFields(body []byte, upstreamMsg string) (errType, code, param, message string) {
-	errType = openAIUpstreamClientErrorFallbackType
-	if utf8.Valid(body) && gjson.ValidBytes(body) {
-		if v := gjson.GetBytes(body, "error.type"); v.Type == gjson.String && strings.TrimSpace(v.Str) != "" {
-			errType = strings.TrimSpace(v.Str)
-		}
-		candidates := []gjson.Result{gjson.GetBytes(body, "error.code"), openAITopLevelStreamError(body).Get("code")}
-		inner := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
-		if strings.HasPrefix(inner, "{") {
-			if last := strings.LastIndex(inner, "}"); last >= 0 && gjson.Valid(inner[:last+1]) {
-				candidates = append(candidates, gjson.Get(inner[:last+1], "error.code"))
-			}
-		}
-		for _, v := range candidates {
-			if v.Type == gjson.String || v.Type == gjson.Number {
-				if value := strings.TrimSpace(v.String()); value != "" {
-					code = value
-					break
-				}
-			}
-		}
-		if v := gjson.GetBytes(body, "error.param"); v.Type == gjson.String {
-			param = strings.TrimSpace(v.Str)
-		}
-	}
-	message = strings.TrimSpace(upstreamMsg)
-	if message == "" {
-		message = openAIUpstreamClientErrorFallbackMessage
-	}
-	return
 }
 
 // isToolHistoryUpstreamClientError recognizes only the established structured

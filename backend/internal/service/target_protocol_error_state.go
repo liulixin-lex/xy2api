@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gin-gonic/gin"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -22,8 +20,8 @@ type targetProtocolErrorState struct {
 	opened       bool
 }
 
-func (s *targetProtocolErrorState) observe(c *gin.Context, contentType string, data []byte) {
-	if c == nil || !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
+func (s *targetProtocolErrorState) observe(contentType string, data []byte) {
+	if !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
 		return
 	}
 	s.mu.Lock()
@@ -66,10 +64,6 @@ func (s *targetProtocolErrorState) observe(c *gin.Context, contentType string, d
 				s.usage = append(s.usage[:0], u.Raw...)
 				break
 			}
-		}
-		terminal := ClassifyOpenAIResponsesTerminal(event, payload)
-		if terminal.Seen && terminal.Valid {
-			c.Set(resilience.GinKeyProtocolTerminal, true)
 		}
 	}
 	if len(s.pending) > ssePendingLimit {
