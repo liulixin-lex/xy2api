@@ -92,6 +92,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	usageSource := "missing"
 	responsesObserved := false
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
+	typedBareErrorRecoverable := false
 	defer func() {
 		if !responsesObserved {
 			return
@@ -1078,12 +1079,20 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			responsesFrameBytes = 0
 		}()
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
-		if codexFailureTerminal && sawBareError && !sawResponseFailed && currentTerminal.Success && openAIResponsesTypedBareError(bareErrorPayload) {
+		if currentTerminal.Failure {
+			if !observedTerminal.Failure {
+				typedBareErrorRecoverable = currentTerminal.Valid && openAIResponsesTypedBareError([]byte(frame.Data))
+			} else if !currentTerminal.Valid || !openAIResponsesTypedBareError([]byte(frame.Data)) {
+				typedBareErrorRecoverable = false
+			}
+		}
+		if codexFailureTerminal && typedBareErrorRecoverable && sawBareError && !sawResponseFailed && currentTerminal.Success {
 			// Codex may report a provisional typed error before recovering.
 			sawBareError, sawFailedEvent, terminalFailurePending, suppressCurrentEvent = false, false, false, false
 			bareErrorPayload, bareErrorWrappedStatus, bareErrorAccountSideEffectsPending = nil, 0, false
 			failedMessage = ""
 			observedTerminal = currentTerminal
+			typedBareErrorRecoverable = false
 			resilience.StateFrom(ctx).SetUpstreamRecoveryHint(nil)
 		}
 		if !currentTerminal.Failure && openAIStreamDataStartsClientOutput(frame.Data, effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)) {
@@ -2349,7 +2358,7 @@ func forEachOpenAIResponsesFrame(body string, visit func(string, []byte)) {
 // A3's untyped error never takes the Codex provisional-error recovery path.
 func openAIResponsesTypedBareError(payload []byte) bool {
 	kind := gjson.GetBytes(payload, "type")
-	return kind.Type == gjson.String && kind.String() == "error"
+	return isOpenAIResponseJSONObject(payload) && kind.Type == gjson.String && kind.String() == "error"
 }
 
 func extractOpenAISSETerminalEvent(body string) (OpenAIResponsesTerminal, string, []byte) {
@@ -2358,7 +2367,7 @@ func extractOpenAISSETerminalEvent(body string) (OpenAIResponsesTerminal, string
 	var payload []byte
 	forEachOpenAIResponsesFrame(body, func(event string, data []byte) {
 		observed := ClassifyOpenAIResponsesTerminal(event, data)
-		if (!terminal.Failure || openAIResponsesTypedBareError(payload) && (observed.Success || observed.Failure)) && (observed.Seen || observed.Failure) {
+		if (!terminal.Failure || terminal.Valid && openAIResponsesTypedBareError(payload) && (observed.Success || observed.Failure)) && (observed.Seen || observed.Failure) {
 			terminal, rawEvent, payload = observed, event, append([]byte(nil), data...)
 		}
 	})

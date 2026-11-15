@@ -983,3 +983,29 @@ func TestM6ReviewPassthroughBudgetUsesLegacyEffort(t *testing.T) {
 		})
 	}
 }
+
+func TestM6ReviewOAuthRecoveryDoesNotUnlockPriorFailure(t *testing.T) {
+	typed := m6Frame(`{"type":"error","error":{"code":"transient","message":"retrying"}}`)
+	completed := m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":13,"output_tokens":5}}}`)
+	for _, failure := range []string{m6Frame(`{"error":{"code":503}}`) + typed, m6Frame(`{"type":"error","error":`)} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stream=%t/%s", stream, failure), func(t *testing.T) {
+				w := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(w)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+				a := newOpenAIRejectedFieldTestAccount()
+				a.Type = AccountTypeOAuth
+				resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + failure + completed))}
+				svc := &OpenAIGatewayService{cfg: &config.Config{}}
+				var err error
+				if stream {
+					_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, a, time.Now(), "m", "m")
+				} else {
+					_, err = svc.handleNonStreamingResponse(c.Request.Context(), resp, c, a, "m", "m")
+				}
+				require.Error(t, err)
+				require.NotContains(t, w.Body.String(), `"status":"completed"`)
+			})
+		}
+	}
+}
