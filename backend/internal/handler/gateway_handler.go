@@ -274,7 +274,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
+	inflightEstimate, estimateErr := tokenInflightEstimateForProtocol(reqModel, body, "anthropic")
+	if estimateErr != nil {
+		handleUnsupportedProtocolConversion(c, estimateErr, "messages", false)
+		return
+	}
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
 	if err != nil {
 		reqLog.Info("gateway.inflight_reservation_rejected", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)

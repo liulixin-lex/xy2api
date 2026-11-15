@@ -668,7 +668,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
+	inflightEstimate, estimateErr := tokenInflightEstimateForProtocol(reqModel, body, "responses")
+	if estimateErr != nil {
+		handleUnsupportedProtocolConversion(c, estimateErr, "responses", false)
+		return
+	}
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
 	if err != nil {
 		reqLog.Info("openai.inflight_reservation_rejected", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
@@ -1396,7 +1401,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 
 	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
-	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
+	inflightEstimate, estimateErr := tokenInflightEstimateForProtocol(reqModel, body, "anthropic")
+	if estimateErr != nil {
+		handleUnsupportedProtocolConversion(c, estimateErr, "messages", false)
+		return
+	}
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
 	if inflightErr != nil {
 		status, code, message, retryAfter := billingErrorDetails(inflightErr)
 		if retryAfter > 0 {
