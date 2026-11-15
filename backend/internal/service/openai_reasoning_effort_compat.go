@@ -170,7 +170,7 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 		}
 	}
 	supported, reliable := supportedInferenceEffortsForAccount(account, model)
-	if protocol == "responses" && !reliable && effort == "minimal" {
+	if protocol == "responses" && state.field != "" && !reliable && effort == "minimal" {
 		effort = "none" // Preserve the existing Responses compatibility normalization on reentry too.
 	}
 	if reliable && normalizeReasoningEffortMappingSource(effort) != "" {
