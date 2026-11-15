@@ -535,6 +535,55 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			submitForwardUsage := func(result *service.ForwardResult) {
+				if result == nil {
+					return
+				}
+				// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				requestPayloadHash := service.HashUsageRequestPayload(body)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+
+				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
+
+				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
+				// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
+				forceCacheBilling := fs.ForceCacheBilling
+				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+				sessionID := service.ExtractClientSessionID(c)
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+						Result:             result,
+						QuotaPlatform:      quotaPlatform,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Subscription:       subscription,
+						PricingAt:          pricingAt,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						SessionID:          sessionID,
+						RequestPayloadHash: requestPayloadHash,
+						ForceCacheBilling:  forceCacheBilling,
+						APIKeyService:      h.apiKeyService,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Any("group_id", apiKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+			}
+
 			if err != nil {
 				if account.Platform == service.PlatformGemini && handleUnsupportedProtocolConversion(c, err, "messages", streamStarted) {
 					return
@@ -562,6 +611,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 				}
+				submitForwardUsage(result)
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -598,62 +648,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
-			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-
-			stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
-			if result.ReasoningEffort == nil {
-				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
-			}
-			// 国产模型 thinking-enabled 默认 effort 填充：Kimi/GLM/MiniMax 这些不支持 effort 档位的
-			// passback-required 上游，仅要 thinking 启用且 OutputEffort 未明确传递时，在 usage_log 写 "high"
-			// 避免该字段长期为 NULL（详见 DefaultEffortForThinkingEnabled 文档）。
-			if result.ReasoningEffort == nil && parsedReq.ThinkingEnabled {
-				protocolModel := result.UpstreamModel
-				if protocolModel == "" {
-					protocolModel = result.Model
-				}
-				result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
-			}
-
-			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
-			forceCacheBilling := fs.ForceCacheBilling
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-			sessionID := service.ExtractClientSessionID(c)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					PricingAt:          pricingAt,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					SessionID:          sessionID,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
-				}); err != nil {
-					logger.L().With(
-						zap.String("component", "handler.gateway.messages"),
-						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
-						zap.String("model", reqModel),
-						zap.Int64("account_id", account.ID),
-					).Error("gateway.record_usage_failed", zap.Error(err))
-				}
-			})
+			submitForwardUsage(result)
 			return
 		}
 	}
@@ -1008,17 +1003,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort))
-				if result.ReasoningEffort == nil {
-					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
-				}
-				// 同上（重试路径中的对称填充）。详见非重试路径同名注释。
-				if result.ReasoningEffort == nil && attemptParsedReq.ThinkingEnabled {
-					protocolModel := result.UpstreamModel
-					if protocolModel == "" {
-						protocolModel = result.Model
-					}
-					result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
-				}
 
 				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 				// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
