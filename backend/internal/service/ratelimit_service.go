@@ -1127,15 +1127,15 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 	)
 
 	if s.openAI403CounterCache == nil {
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "counter_missing")
+		return false
 	}
 
 	count, err := s.openAI403CounterCache.IncrementOpenAI403Count(ctx, account.ID, openAI403CounterWindowMinutes)
 	if err != nil {
 		slog.Warn("openai_403_increment_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "counter_failed")
+		return false
 	}
 
 	if count >= openAI403DisableThreshold {
@@ -1146,12 +1146,12 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 
 	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
 	reason := fmt.Sprintf("%s (%d/%d): %s", reasonPrefix, count, openAI403DisableThreshold, msg)
-	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
 	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "persistence_failed")
+		return false
 	}
+	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
 
 	slog.Warn(
 		"openai_403_temp_unschedulable",
@@ -1161,6 +1161,12 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 		"threshold", openAI403DisableThreshold,
 	)
 	return true
+}
+
+func (s *RateLimitService) handle403InfrastructureFailure(account *Account, upstreamMsg, reason string) {
+	until := time.Now().Add(time.Duration(resilience.Current().Failure.TransientCooldownSeconds) * time.Second)
+	slog.Warn("openai_403_infrastructure_failure", "account_id", account.ID, "reason", reason, "upstream_message", upstreamMsg, "until", until)
+	s.notifyAccountSchedulingBlocked(account, until, "openai_403_infrastructure")
 }
 
 // isCloudflareBotBlockResponse reports Cloudflare's WAF bot-signature response

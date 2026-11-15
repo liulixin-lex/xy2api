@@ -27,6 +27,7 @@
 - 中转前面的 CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页、HTML 页面）按瞬时失败处理，即使文案提到 overloaded。
 - `failure.decision_v2` 开启时，只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded”按瞬时或限流处理，可以换到同一主机上的其他账号。余额等更强的证据优先。
 - 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`）不罚号、不换号，返回 400，运维记录标为业务限制，不计入 SLA。
+- 403 计数或持久化设施故障只触发 `failure.transient_cooldown_seconds` 的本地短时回避，不升级为坏凭据，也不清除已有硬暂停；正常计数达到阈值时的停用规则保持不变。
 - 一个上游响应只罚一次。池模式账号、管理员配置的自定义错误码与临时不可调度规则在韧性处理之前生效。
 
 ## 软罚与硬罚
