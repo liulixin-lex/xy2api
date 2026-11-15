@@ -495,6 +495,29 @@ func resToChatHandleVisibleEvent(evt *ResponsesStreamEvent, state *ResponsesEven
 		state.visible = NewBufferedResponseAccumulator()
 		state.visibleSent = map[*bufferedOutputSlot]map[int]string{}
 	}
+	// Some relays omit the delta's content index but supply one on done.
+	// Reconcile the sole delivered part instead of emitting it a second time.
+	if strings.HasSuffix(evt.Type, ".done") && evt.ContentIndex != 0 {
+		kind := "output_text"
+		if strings.HasPrefix(evt.Type, "response.refusal.") {
+			kind = "refusal"
+		}
+		if evt.Part != nil {
+			kind = evt.Part.Type
+		}
+		for _, slot := range state.visible.slots {
+			matches := evt.ItemID != "" && evt.ItemID == slot.item.ID || (evt.OutputIndexPresent || evt.OutputIndex != 0) && slot.index == evt.OutputIndex
+			if evt.ItemID == "" && !evt.OutputIndexPresent && evt.OutputIndex == 0 {
+				matches = slot == state.visible.current || len(state.visible.slots) == 1
+			}
+			if matches && len(slot.parts) == 1 && slot.parts[0].Type == kind && slot.parts[evt.ContentIndex].Type == "" && state.visibleSent[slot][0] != "" {
+				copy := *evt
+				copy.ContentIndex = 0
+				evt = &copy
+				break
+			}
+		}
+	}
 	state.visible.ProcessEvent(evt)
 	if state.visible.Err() != nil {
 		state.err = state.visible.Err()
@@ -525,8 +548,9 @@ func resToChatRecoverVisible(state *ResponsesEventToChatState) []ChatCompletions
 			}
 			sent := state.visibleSent[slot][i]
 			if !strings.HasPrefix(text, sent) {
-				state.err = toolTrackingError("content", "content snapshot conflicts with delivered prefix")
-				return nil
+				// Delivered text cannot be retracted. Keep the baseline output
+				// when done normalizes whitespace or otherwise replaces it.
+				continue
 			}
 			suffix := text[len(sent):]
 			state.visibleSent[slot][i] = text
@@ -596,9 +620,11 @@ func resToChatHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		state.visible = NewBufferedResponseAccumulator()
 		state.visibleSent = map[*bufferedOutputSlot]map[int]string{}
 	}
-	for i, item := range resp.Output {
-		if item.Type == "message" {
-			state.visible.snapshot(item, i, true, 3)
+	if !state.SawText && !state.SawRefusal {
+		for i, item := range resp.Output {
+			if item.Type == "message" {
+				state.visible.snapshot(item, i, true, 3)
+			}
 		}
 	}
 	if state.visible.Err() != nil {
