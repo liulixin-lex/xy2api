@@ -59,13 +59,10 @@ func TestScoped403DoesNotStrikeAccount(t *testing.T) {
 					require.Zero(t, repo.tempCalls)
 					require.Zero(t, repo.setErrorCalls)
 					require.Empty(t, blocker.accounts)
-				} else if tc.name == "invalid_key" {
-					require.Len(t, counter.counts, 3)
-					require.Equal(t, 1, repo.setErrorCalls)
-					require.Zero(t, repo.tempCalls)
 				} else {
 					require.Len(t, counter.counts, 2)
 					require.Equal(t, 1, repo.tempCalls)
+					require.Zero(t, repo.setErrorCalls)
 				}
 				if tc.policy {
 					failure := &UpstreamFailoverError{StatusCode: 403, ResponseBody: body}

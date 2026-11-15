@@ -1102,10 +1102,6 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 	if resilience.Current().FailureOn() && classified.ContentPolicy() {
 		return false
 	}
-	if classified.Category == resilience.CategoryAuth && (classified.Reason == "auth_code" || classified.Reason == "auth_type") {
-		s.handleAuthError(ctx, account, buildForbiddenErrorMessage("Access forbidden (403):", upstreamMsg, responseBody, "credentials rejected"))
-		return true
-	}
 	// 上游代理 / CDN 在请求到达 OpenAI API 之前就拦下时，回的是 HTML 403 页面而不是
 	// {"error":{...}} 结构化错误。这类响应描述的是「这条链路 / 这个端点被挡了」，
 	// 不构成账号凭据或权限失效的证据——例如无效的 /v1/responses 子路径（#5334）。
