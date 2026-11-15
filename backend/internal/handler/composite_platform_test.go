@@ -171,6 +171,7 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	mappingDenyCtx.Request = mappingDenyCtx.Request.WithContext(service.WithResolvedTargetPlatform(mappingDenyCtx.Request.Context(), service.PlatformOpenAI))
 	_, changed, err = applyOpenAIReasoningEffortPolicyForRequest(mappingDenyCtx, mappingDenyAPIKey, body)
 	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
 	_, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(mappingDenyCtx.Request.Context(), body)
 	require.Error(t, err)
 	require.False(t, changed)
@@ -236,6 +237,7 @@ func TestAnthropicReasoningEffortPolicyForConcreteAndCompositeTargets(t *testing
 	denyMax.Group.MaxReasoningEffortOverLimit = service.ReasoningEffortOverLimitDeny
 	_, changed, err = applyAnthropicReasoningEffortPolicyForRequest(concrete, denyMax, body)
 	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
 	_, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(concrete.Request.Context(), body)
 	require.Error(t, err)
 	require.False(t, changed)
