@@ -134,6 +134,18 @@ func TestSupplementResponseOutput_NoSyntheticMessageWithoutStreamText(t *testing
 }
 
 func TestBufferedDoneOnlyParts(t *testing.T) {
+	t.Run("anonymous text and refusal", func(t *testing.T) {
+		a := NewBufferedResponseAccumulator()
+		for _, event := range []ResponsesStreamEvent{{Type: "response.output_text.delta", Delta: "text"}, {Type: "response.refusal.delta", Delta: "no"}, {Type: "response.refusal.delta", Delta: " thanks"}, {Type: "response.refusal.done", Refusal: "no thanks"}} {
+			a.ProcessEvent(&event)
+		}
+		out := a.BuildOutput()
+		require.NoError(t, a.Err())
+		require.Len(t, out, 1)
+		require.Len(t, out[0].Content, 2)
+		require.Equal(t, "no thanks", out[0].Content[1].Refusal)
+	})
+
 	for _, terminal := range []string{"", "C"} {
 		a := NewBufferedResponseAccumulator()
 		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_text.delta", ItemID: "m", OutputIndexPresent: true, Delta: "A"})

@@ -1979,7 +1979,7 @@ func TestBufferedHostedAndCustomIdentity(t *testing.T) {
 	for _, partial := range []bool{false, true} {
 		resp := &ResponsesResponse{Status: "completed"}
 		if partial {
-			resp.Output = []ResponsesOutput{{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch", Input: "raw patch"}}
+			resp.Output = []ResponsesOutput{{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch"}}
 		}
 		a.SupplementResponseOutput(resp)
 		require.NoError(t, a.Err())
@@ -1987,6 +1987,9 @@ func TestBufferedHostedAndCustomIdentity(t *testing.T) {
 		require.Equal(t, hosted, resp.Output[0])
 		require.Equal(t, custom, resp.Output[1])
 		require.Equal(t, normal, resp.Output[2])
+		projected := ResponsesToChatCompletions(resp, "m")
+		require.Len(t, projected.Choices[0].Message.ToolCalls, 2)
+		require.Equal(t, "raw patch", projected.Choices[0].Message.ToolCalls[0].Function.Arguments)
 	}
 }
 

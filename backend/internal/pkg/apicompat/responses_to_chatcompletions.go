@@ -49,7 +49,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 					refusalText += part.Refusal
 				}
 			}
-		case "function_call":
+		case "function_call", "custom_tool_call":
 			toolCalls = append(toolCalls, ChatToolCall{
 				ID:   item.CallID,
 				Type: "function",
@@ -882,7 +882,21 @@ func (a *BufferedResponseAccumulator) part(slot *bufferedOutputSlot, index int, 
 			a.fail("content", "conflicting content part types")
 			return
 		}
-		index = len(slot.parts)
+		matched := -1
+		for candidateIndex, candidate := range slot.parts {
+			if candidate.Type == part.Type {
+				if matched >= 0 {
+					a.fail("content", "ambiguous unindexed content part")
+					return
+				}
+				matched = candidateIndex
+			}
+		}
+		if matched >= 0 {
+			index = matched
+		} else {
+			index = len(slot.parts)
+		}
 		old = slot.parts[index]
 	}
 	if delta {
@@ -944,7 +958,7 @@ func (a *BufferedResponseAccumulator) snapshot(item ResponsesOutput, index int, 
 		slot.item.Arguments = item.Arguments
 		slot.argsRank = rank
 	}
-	if item.Type == "custom_tool_call" && rank >= slot.argsRank {
+	if item.Type == "custom_tool_call" && (item.Input != "" || slot.item.Input == "") && rank >= slot.argsRank {
 		slot.item.Input = item.Input
 		slot.argsRank = rank
 	}
