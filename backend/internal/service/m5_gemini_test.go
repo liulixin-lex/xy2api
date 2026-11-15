@@ -485,13 +485,11 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 			usage := messages["usage"].(map[string]any)
 			require.Equal(t, tt.input, usage["input_tokens"])
 			require.Equal(t, tt.output, usage["output_tokens"])
-			if tt.cached > 0 {
-				require.Equal(t, tt.cached, usage["cache_read_input_tokens"])
-			}
+			require.NotContains(t, usage, "cache_read_input_tokens", "E8: cache reads stay internal")
 			chat, got, err := geminiResponseToChatCompletions(response, "gemini-2.5-flash", raw, nil)
 			require.NoError(t, err)
 			require.Equal(t, u, got)
-			require.Equal(t, tt.input+tt.cached, chat.Usage.PromptTokens)
+			require.Equal(t, tt.input, chat.Usage.PromptTokens)
 			require.Equal(t, tt.output, chat.Usage.CompletionTokens)
 		})
 	}
@@ -539,12 +537,57 @@ func TestM5CacheOnlyUsage(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, collected, result.usage)
 				if protocol == "messages" {
-					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"cache_read_input_tokens":%d`, wantCache))
+					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"usage":{"input_tokens":%d,"output_tokens":%d}`, wantInput, wantOutput))
+					require.NotContains(t, recorder.Body.String(), `"cache_read_input_tokens"`)
 				} else {
 					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"prompt_tokens":%d`, wantInput+wantCache))
 					require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"completion_tokens":%d`, wantOutput))
 				}
 			}
+		})
+	}
+}
+
+// TestM5ClientUsageBytes pins the client usage to the bytes sent before M5 (E8)
+// for a complete usageMetadata with an implicit cache hit.
+func TestM5ClientUsageBytes(t *testing.T) {
+	payload := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":7,"candidatesTokenCount":5}}`
+	for _, tt := range []struct {
+		protocol string
+		stream   bool
+		want     string
+	}{
+		{"messages", false, `{"input_tokens":3,"output_tokens":5}`},
+		{"messages", true, `{"input_tokens":3,"output_tokens":5}`},
+		{"chat", false, `{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}`},
+		{"chat", true, `{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":7}}`},
+	} {
+		t.Run(fmt.Sprintf("%s/stream=%t", tt.protocol, tt.stream), func(t *testing.T) {
+			response, contentType := payload, "application/json"
+			if tt.stream {
+				response, contentType = "data: "+payload+"\n\n", "text/event-stream"
+			}
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			var body []byte
+			var err error
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+tt.protocol, nil)
+			if tt.protocol == "chat" {
+				body = []byte(fmt.Sprintf(`{"model":"gemini-2.5-flash","stream":%t,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`, tt.stream))
+				_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, geminiSignalTestAccount(), body)
+			} else {
+				body = []byte(fmt.Sprintf(`{"model":"gemini-2.5-flash","stream":%t,"max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`, tt.stream))
+				_, err = svc.Forward(c.Request.Context(), c, geminiSignalTestAccount(), body)
+			}
+			require.NoError(t, err)
+			last := ""
+			for _, line := range strings.Split(recorder.Body.String(), "\n") {
+				line = strings.TrimPrefix(line, "data: ")
+				if usage := gjson.Get(line, "usage"); usage.Exists() && gjson.Get(line, "type").String() != "message_start" {
+					last = usage.Raw
+				}
+			}
+			require.Equal(t, tt.want, last)
 		})
 	}
 }
