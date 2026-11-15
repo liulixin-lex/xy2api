@@ -127,6 +127,8 @@ Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务�
 
 ## 送达与计费口径
 
+Grok API Key 的推理档位按实际发送的请求正文记录，正文未给档位时保持未知；输出后失败仍保留已读到的用量和该次实际档位。
+
 “已输出”与计费、换号共用同一个判据：客户端是否收到过语义内容。
 
 - 不算输出的事件：SSE 注释行、`ping`、`keepalive`，Anthropic `message_start` 与空的 text/thinking `content_block_start`，Responses 的 `response.created`、`response.in_progress`、`response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不带内容的 added 事件，只带角色的 Chat 分块，以及网关心跳与排队 ping。

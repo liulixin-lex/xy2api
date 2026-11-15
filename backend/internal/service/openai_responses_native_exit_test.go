@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -97,6 +98,46 @@ func TestM6NativeMixedDoneDelta(t *testing.T) {
 				require.Equal(t, 41, usage.InputTokens)
 				require.Equal(t, 7, usage.OutputTokens)
 				require.JSONEq(t, tc.expected, gjson.Get(w.Body.String(), "output").Raw, "pass=%t", pass)
+			}
+		})
+	}
+}
+
+func TestM6GrokActualAndPartialFailure(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			body := `{"model":"grok-high","input":"hello","stream":` + fmt.Sprint(partial) + `}`
+			upstreamBody := `{"id":"r1","output":[],"usage":{"input_tokens":13,"output_tokens":5}}`
+			contentType := "application/json"
+			if partial {
+				body = strings.TrimSuffix(body, "}") + `,"reasoning":{"effort":"high"}}`
+				contentType = "text/event-stream"
+				upstreamBody = m6Frame(`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"answer"}`) + m6Frame(`{"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"server_error","message":"failed after output"},"usage":{"input_tokens":13,"output_tokens":5}}}`)
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(upstreamBody))}}
+			svc := newOpenAIRejectedFieldTestService(upstream)
+			account := grokProtocolAPIKeyAccount(7104)
+			account.Credentials["model_mapping"] = map[string]any{"grok-high": "grok-4.7"}
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			result, err := svc.forwardGrokResponses(context.Background(), c, account, []byte(body), "grok-high", partial, time.Now())
+			if partial {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			require.Equal(t, partial, result.PartialFailure)
+			require.Equal(t, 13, result.Usage.InputTokens)
+			require.Equal(t, 5, result.Usage.OutputTokens)
+			if partial {
+				require.Equal(t, "high", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+				require.NotNil(t, result.ReasoningEffort)
+				require.Equal(t, "high", *result.ReasoningEffort)
+			} else {
+				require.False(t, gjson.GetBytes(upstream.lastBody, "reasoning.effort").Exists())
+				require.Nil(t, result.ReasoningEffort, "missing wire effort must not be inferred from the client alias")
 			}
 		})
 	}
