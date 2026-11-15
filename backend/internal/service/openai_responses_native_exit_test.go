@@ -748,8 +748,9 @@ func TestM6TerminalWriteClaim(t *testing.T) {
 		c.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil).WithContext(resilience.WithRequestState(context.Background(), st))
 		InstallDeliveryTracking(c, time.Now())
 		c.Header("Content-Type", "text/event-stream")
-		_, err := c.Writer.Write([]byte(": heartbeat\n\n"))
+		n, err := c.Writer.Write([]byte(": heartbeat\n\n"))
 		require.NoError(t, err)
+		require.True(t, NoteDeliveryHeartbeat(c, n))
 		writeOpenAICompactSSEFailureMessage(c, 502, "server_error", "failed")
 		var frames [][]byte
 		forEachOpenAIResponsesFrame(w.Body.String(), func(_ string, data []byte) { frames = append(frames, data) })
