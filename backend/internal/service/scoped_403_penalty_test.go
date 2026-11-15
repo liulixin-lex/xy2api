@@ -101,7 +101,7 @@ func TestReviewScopedPolicySkipsConfiguredCooldown(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
 			withResilienceSettings(t, nil)
-			repo := &modelNotFoundAccountRepoStub{}
+			repo := &reviewScopedRuleRepo{}
 			rates := &RateLimitService{accountRepo: repo}
 			gateway := &OpenAIGatewayService{rateLimitService: rates}
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
@@ -118,4 +118,14 @@ func TestReviewScopedPolicySkipsConfiguredCooldown(t *testing.T) {
 			require.Zero(t, repo.setErrorCalls)
 		})
 	}
+}
+
+type reviewScopedRuleRepo struct {
+	modelNotFoundAccountRepoStub
+	setErrorCalls int
+}
+
+func (r *reviewScopedRuleRepo) SetError(context.Context, int64, string) error {
+	r.setErrorCalls++
+	return nil
 }
