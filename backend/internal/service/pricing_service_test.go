@@ -1275,6 +1275,27 @@ func TestPricingRemoteHashAheadOfBody(t *testing.T) {
 }
 
 func TestPricingImportKeepsLastGoodRevision(t *testing.T) {
+	t.Run("cache_only_and_bundled_catalog", func(t *testing.T) {
+		bundled, err := os.ReadFile("../../resources/model-pricing/model_prices_and_context_window.json")
+		require.NoError(t, err)
+		dir := t.TempDir()
+		fallback := filepath.Join(dir, "fallback.json")
+		require.NoError(t, os.WriteFile(fallback, bundled, 0600))
+		svc := NewPricingService(&config.Config{Pricing: config.PricingConfig{FallbackFile: fallback}}, nil)
+		for _, body := range [][]byte{bundled, []byte(`{"gemini-3-pro-preview":{"cache_creation_input_token_cost":0.000001},"gpt-image-1":{"input_cost_per_token":0.000005,"output_cost_per_image_token":0.00004}}`)} {
+			data, _, err := svc.buildPricingData(body)
+			require.NoError(t, err)
+			baseline, err := (&PricingService{}).parsePricingData(bundled)
+			require.NoError(t, err)
+			require.Len(t, data, len(baseline))
+			require.Equal(t, baseline["gemini-3-pro-preview"], data["gemini-3-pro-preview"])
+			require.Equal(t, 5e-6, data["gpt-image-1"].InputCostPerToken)
+			require.Equal(t, 4e-5, data["gpt-image-1"].OutputCostPerImageToken)
+		}
+		_, _, err = svc.buildPricingData([]byte(`{"cache-only":{"cache_creation_input_token_cost":-1}}`))
+		require.Error(t, err)
+	})
+
 	cases := []struct {
 		name, layer, body string
 		valid             bool

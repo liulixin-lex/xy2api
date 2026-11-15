@@ -1809,7 +1809,7 @@ func validatePricingEntry(raw json.RawMessage, entry LiteLLMRawEntry) error {
 		}
 		priced = true
 	}
-	if !priced {
+	if !priced || entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil {
 		return nil
 	}
 	hasImagePrice := entry.OutputCostPerImage != nil || entry.OutputCostPerImageToken != nil
