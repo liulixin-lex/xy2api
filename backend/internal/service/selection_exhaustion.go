@@ -1,5 +1,7 @@
 package service
 
+import "errors"
+
 // SelectionReason names the first actual gate that rejected a candidate.
 type SelectionReason string
 
@@ -71,3 +73,12 @@ const (
 	SelectionReasonExcluded                   SelectionReason = "excluded"
 	SelectionReasonFailedChangeTarget         SelectionReason = "failed_change_target"
 )
+
+// SelectionExhaustionFromError gives handlers an independent scheduling snapshot.
+func SelectionExhaustionFromError(err error) (SelectionExhaustion, bool) {
+	var exhaustion *SelectionExhaustion
+	if !errors.As(err, &exhaustion) || exhaustion == nil {
+		return SelectionExhaustion{}, false
+	}
+	return *exhaustion.Snapshot(), true
+}

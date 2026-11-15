@@ -22,6 +22,17 @@ func TestFoundationSelectionExhaustion(t *testing.T) {
 	if !errors.As(err, &got) || !errors.As(err, &last) || last != cause {
 		t.Fatal(got, last)
 	}
+	from, ok := SelectionExhaustionFromError(err)
+	if !ok || !from.Known {
+		t.Fatal(from, ok)
+	}
+	from.Reasons[SelectionReasonQueueFull] = 7
+	if stats.Reasons[SelectionReasonQueueFull] != 2 {
+		t.Fatal("extractor reason alias")
+	}
+	if _, ok := SelectionExhaustionFromError(errors.New("other")); ok {
+		t.Fatal("unrelated error matched")
+	}
 	got.Reasons[SelectionReasonQueueFull] = 9
 	if stats.Reasons[SelectionReasonQueueFull] != 2 {
 		t.Fatal("reason alias")
