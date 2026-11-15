@@ -234,6 +234,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	usage := &OpenAIUsage{}
 	tailMetered := false
 	var finishResponsesFrame func()
+	var releaseFrameScan func()
+	responsesEOF := false
+	responsesFrameBytes := 0
 	responseCreatedAt := int64(0)
 	imageCounter := newOpenAIImageOutputCounter()
 	// xy2api resilience: image generation keeps the image stall threshold.
@@ -540,6 +543,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
 		if scanErr == nil {
 			return nil, nil, false
+		}
+		if finishResponsesFrame != nil {
+			finishResponsesFrame()
 		}
 		if errors.Is(scanErr, errOpenAIFirstOutputScannerLimit) && !firstOutputProgressObserved {
 			logger.LegacyPrintf("service.openai_gateway", "SSE token exceeded guarded first-output limit: account=%d limit=%d error=%v", account.ID, openAIFirstOutputStageMaxBytes+openAIFirstOutputScannerFramingAllowance, scanErr)
@@ -989,7 +995,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventShouldFlush = false
 				return
 			}
-			if !clientDisconnected {
+			if !clientDisconnected && !responsesEOF {
 				if _, err := writePendingString("\n"); err != nil {
 					handlePendingWriteError(err)
 				}
@@ -1023,9 +1029,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+			suffix := "\n"
+			if responsesEOF && line == "" {
+				suffix = ""
+			}
 			if _, err := writePendingString(line); err != nil {
 				handlePendingWriteError(err)
-			} else if _, err := writePendingString("\n"); err != nil {
+			} else if _, err := writePendingString(suffix); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				eventInProgress = line != ""
@@ -1048,8 +1058,22 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	var responsesParser openAICompatSSEFrameParser
-	processFrame := func(frame openAICompatSSEFrame) {
+	var frameExtras []string
+	var frameDataLine, frameEventLine string
+	frameDataCount := 0
+	processFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
+		defer func() {
+			frameDataLine, frameEventLine, frameDataCount = "", "", 0
+			frameExtras = nil
+			responsesFrameBytes = 0
+		}()
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		if !currentTerminal.Failure && openAIStreamDataStartsClientOutput(frame.Data, effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)) {
+			firstOutputScanGuard.Store(false)
+			if releaseFrameScan != nil {
+				releaseFrameScan()
+			}
+		}
 		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
 			noteOpenAIResponsesRecoveryHint(c, account, resp.Header, []byte(frame.Data), time.Now())
 		}
@@ -1062,28 +1086,62 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if currentTerminal.Failure && !currentTerminal.Valid {
 			pendingSSEEventType, pendingSSEEventLine = frame.EventType, ""
-			processResponseLine("data: "+frame.Data, true)
+			processResponseLine("data: "+frame.Data, queueDrained)
 			return
 		}
 		if frame.EventType != "" {
-			processResponseLine("event: "+frame.EventType, true)
+			processResponseLine(frameEventLine, queueDrained)
 		}
-		processResponseLine("data: "+compactOpenAIResponsesFrameData(frame.Data), true)
-		processResponseLine("", true)
+		for _, extra := range frameExtras {
+			processResponseLine(extra, queueDrained)
+		}
+		wireData := frameDataLine
+		if frameDataCount != 1 {
+			wireData = "data: " + compactOpenAIResponsesFrameData(frame.Data)
+		}
+		processResponseLine(wireData, queueDrained)
+		processResponseLine("", queueDrained)
 	}
 	processSSELine := func(line string, queueDrained bool) {
-		if strings.HasPrefix(line, ":") {
-			processResponseLine(line, queueDrained)
-			processResponseLine("", queueDrained)
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "data:") {
+			frameDataCount++
+			frameDataLine = line
+		}
+		if strings.HasPrefix(line, "event:") {
+			frameEventLine = line
+		}
+		responsesFrameBytes += len(line) + 1
+		if stageFirstOutput && !clientOutputStarted && responsesFrameBytes > openAIFirstOutputStageMaxBytes {
+			failure := s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, nil, "OpenAI first-output staging limit exceeded")
+			failure.SafeToFailoverAfterWrite = true
+			streamEarlyErr = failure
 			return
 		}
-		if frame, ok := responsesParser.AddLine(strings.TrimSuffix(line, "\r")); ok {
-			processFrame(frame)
+		if strings.HasPrefix(line, ":") && len(responsesParser.dataLines) == 0 && responsesParser.eventType == "" {
+			processResponseLine(line, queueDrained)
+			return
+		}
+		if frame, ok := responsesParser.AddLine(line); ok {
+			processFrame(frame, queueDrained)
+			return
+		}
+		if line == "" {
+			for _, extra := range frameExtras {
+				processResponseLine(extra, queueDrained)
+			}
+			frameExtras = nil
+			responsesFrameBytes = 0
+			processResponseLine("", queueDrained)
+		} else if !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") {
+			frameExtras = append(frameExtras, line)
 		}
 	}
 	finishResponsesFrame = func() {
 		if frame, ok := responsesParser.Finish(); ok {
-			processFrame(frame)
+			responsesEOF = true
+			processFrame(frame, true)
+			responsesEOF = false
 		}
 	}
 
@@ -1176,7 +1234,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				markEventProcessed(ev)
 				return result, err
 			}
+			releaseFrameScan = func() { markEventProcessed(ev); ev.processed = nil }
 			processSSELine(ev.line, len(events) == 0)
+			releaseFrameScan = nil
 			markEventProcessed(ev)
 			if keepalivePending && !eventInProgress {
 				keepalivePending = false
@@ -1268,7 +1328,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				keepaliveCh = nil
 				continue
 			}
-			if eventInProgress {
+			if eventInProgress || responsesFrameBytes > 0 {
 				keepalivePending = true
 				continue
 			}

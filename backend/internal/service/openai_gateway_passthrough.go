@@ -2398,6 +2398,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		return nil, errors.New("streaming not supported")
 	}
 
+	responsesEOF := false
 	usage := &OpenAIUsage{}
 	tailMetered := false
 	imageCounter := newOpenAIImageOutputCounter()
@@ -2941,8 +2942,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						"OpenAI first-output failure header staging failed: "+err.Error()))
 				}
 			}
+			wireLine := line + "\n"
+			if responsesEOF && line == "" {
+				wireLine = ""
+			}
 			if !clientOutputStarted && !lineStartsClientOutput {
-				if _, err := pendingStage.WriteString(line + "\n"); err != nil {
+				if _, err := pendingStage.WriteString(wireLine); err != nil {
 					message := "OpenAI first-output staging failed"
 					if errors.Is(err, errOpenAIFirstOutputStageLimit) {
 						message = "OpenAI first-output staging limit exceeded"
@@ -2974,7 +2979,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					return passthroughLineContinue
 				}
 			}
-			if _, err := fmt.Fprintln(w, line); err != nil {
+			if _, err := io.WriteString(w, wireLine); err != nil {
 				clientDisconnected = true
 				cancelSchedClient(c)
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -3007,7 +3012,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		return passthroughLineContinue
 	}
 	var responsesParser openAICompatSSEFrameParser
+	var frameExtras []string
+	var frameDataLine, frameEventLine string
+	frameDataCount := 0
 	processFrame := func(frame openAICompatSSEFrame) passthroughLineStep {
+		defer func() { frameDataLine, frameEventLine, frameDataCount = "", "", 0; frameExtras = nil }()
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
 		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
 			noteOpenAIResponsesRecoveryHint(c, account, resp.Header, []byte(frame.Data), time.Now())
@@ -3024,34 +3033,60 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return processResponseLine("data: " + frame.Data)
 		}
 		if frame.EventType != "" {
-			if step := processResponseLine("event: " + frame.EventType); step != passthroughLineContinue {
+			if step := processResponseLine(frameEventLine); step != passthroughLineContinue {
 				return step
 			}
 		}
-		if step := processResponseLine("data: " + compactOpenAIResponsesFrameData(frame.Data)); step != passthroughLineContinue {
+		for _, extra := range frameExtras {
+			if step := processResponseLine(extra); step != passthroughLineContinue {
+				return step
+			}
+		}
+		wireData := frameDataLine
+		if frameDataCount != 1 {
+			wireData = "data: " + compactOpenAIResponsesFrameData(frame.Data)
+		}
+		if step := processResponseLine(wireData); step != passthroughLineContinue {
 			return step
 		}
 		return processResponseLine("")
 	}
 	processLine := func(line string) passthroughLineStep {
-		if strings.HasPrefix(line, ":") {
-			if step := processResponseLine(line); step != passthroughLineContinue {
-				return step
-			}
-			return processResponseLine("")
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "data:") {
+			frameDataCount++
+			frameDataLine = line
 		}
-		if frame, ok := responsesParser.AddLine(strings.TrimSuffix(line, "\r")); ok {
+		if strings.HasPrefix(line, "event:") {
+			frameEventLine = line
+		}
+		if strings.HasPrefix(line, ":") && len(responsesParser.dataLines) == 0 && responsesParser.eventType == "" {
+			return processResponseLine(line)
+		}
+		if frame, ok := responsesParser.AddLine(line); ok {
 			return processFrame(frame)
+		}
+		if line == "" {
+			for _, extra := range frameExtras {
+				if step := processResponseLine(extra); step != passthroughLineContinue {
+					return step
+				}
+			}
+			frameExtras = nil
+			return processResponseLine("")
+		} else if !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") {
+			frameExtras = append(frameExtras, line)
 		}
 		return passthroughLineContinue
 	}
 
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
-		if scanErr == nil {
-			if frame, ok := responsesParser.Finish(); ok {
-				if processFrame(frame) == passthroughLineReturn {
-					return retResult, retErr
-				}
+		if frame, ok := responsesParser.Finish(); ok {
+			responsesEOF = true
+			step := processFrame(frame)
+			responsesEOF = false
+			if step == passthroughLineReturn {
+				return retResult, retErr
 			}
 		}
 		cleanEOF = scanErr == nil && ctx.Err() == nil
