@@ -416,14 +416,17 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 		if (fableCreditsRequired || fableLimited) && selectAnthropicExhaustedWindow(headers, time.Now()) == nil {
 			return false
 		}
-		if s.applyThirdParty429(ctx, account, headers, responseBody) {
-			return false
-		}
-		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
-			return false
-		}
-		if fableCreditsRequired || fableLimited {
-			return false
+		target, known := cooldownAttemptTarget(ctx, account)
+		relay := known && !cooldownTargetOfficial(account, target)
+		// Relay windows cannot override configured rules. handle429 applies the
+		// capped fallback only after the ordinary rule path has had its turn.
+		if !relay {
+			if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+				return false
+			}
+			if fableCreditsRequired || fableLimited {
+				return false
+			}
 		}
 	}
 
