@@ -37,9 +37,6 @@ func WithFinalReasoningEffortRequest(ctx context.Context, body []byte) context.C
 		return ctx
 	}
 	state := newFinalReasoningRequest(body)
-	if requested := RequestedReasoningEffortFromContext(ctx); requested != nil {
-		state.original = *requested
-	}
 	return context.WithValue(ctx, finalReasoningRequestKey{}, state)
 }
 
@@ -128,21 +125,18 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 	}
 	if state == nil {
 		state = newFinalReasoningRequest(body)
-		if requested := RequestedReasoningEffortFromContext(ctx); requested != nil {
-			state.original = *requested
-		}
 	}
 	if c != nil {
 		c.Set("xy_final_reasoning_request", state)
 	}
-	if state.original == "" {
+	if state.original == "" || (protocol == "anthropic" && state.field == "thinking.type" && !claude.IsClaudeModel(model)) {
 		return body, false, nil
 	}
 	if !state.policySet {
-		if ctx != nil {
+		if ctx != nil && state.field != "" {
 			state.policy, _ = ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
 		}
-		if c != nil && c.Request != nil && state.policy.maxEffort == "" && len(state.policy.mappings) == 0 {
+		if state.field != "" && c != nil && c.Request != nil && state.policy.maxEffort == "" && len(state.policy.mappings) == 0 {
 			state.policy, _ = c.Request.Context().Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
 		}
 		state.policy.mappings = append([]ReasoningEffortMapping(nil), state.policy.mappings...)
@@ -186,6 +180,9 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 		if err != nil {
 			return body, false, err
 		}
+	}
+	if state.field == "" && effort == state.original {
+		return body, false, nil // Suffixes are requested metadata, not explicit wire fields.
 	}
 	out, err := projectFinalReasoningEffort(body, model, protocol, effort, state.original != "none" && effort != "none")
 	if err != nil {
