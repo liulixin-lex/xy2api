@@ -119,7 +119,7 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
   border-radius: var(--radius-sm);
 }
 .iq__m {
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-small);
   line-height: var(--line-height-body);
   white-space: nowrap;
@@ -133,16 +133,23 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
   line-height: var(--line-height-body);
   white-space: nowrap;
 }
+/* The verdicts in their status colours at 500; paused is a neutral word (12.3). */
 .iq__v--smart,
+.iq__v--degraded,
 .iq__v--checking {
-  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+.iq__v--smart {
+  color: var(--color-status-ok-text);
 }
 .iq__v--degraded {
-  color: var(--color-status-back-text);
-  font-weight: var(--font-weight-regular);
+  color: var(--color-status-error-text);
+}
+.iq__v--checking {
+  color: var(--color-status-info-text);
 }
 .iq__v--paused {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 .iq__more {
   grid-column: 1 / -1;
@@ -150,11 +157,10 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
   font-size: var(--font-size-small);
   line-height: var(--line-height-small);
 }
-/* 9px, 2px from its word: "检测中" fits the compact column whole (7m-1). */
+/* 9px, 2px from its word: "检测中" fits the compact column whole (7m-1). In the word's colour (12.3). */
 .iq__spin {
   width: 9px;
   height: 9px;
-  color: var(--color-status-info);
   animation: spin 1.1s linear infinite;
 }
 .iq--off .iq__v,
