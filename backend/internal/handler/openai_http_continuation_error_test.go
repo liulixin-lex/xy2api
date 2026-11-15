@@ -57,7 +57,7 @@ func TestNativeHTTPContinuationErrorContract(t *testing.T) {
 		}
 	}
 	for _, store := range []string{"", `,"store":false`, `,"store":true`} {
-		for _, scenario := range []string{"other_user", "same_user_new_key", "missing_call_id", "named_output"} {
+		for _, scenario := range []string{"other_user", "missing_call_id", "named_output"} {
 			t.Run(scenario+store, func(t *testing.T) {
 				groupID := int64(2)
 				body := `{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_owned","input":"hello"` + store + `}`
@@ -129,6 +129,15 @@ func TestNativeHTTPContinuationRoutesLikeBaseline(t *testing.T) {
 		sentTo   int64
 		pointer  bool
 	}{
+		// (a) The response was bound through API key 101; the same user's key
+		// 202 continues it on a Responses API-key account.
+		{"same_user_new_key", []service.Account{apiKeyAccount(1, 0, nil)}, 1, true},
+		// The first candidate is OAuth, which cannot continue over HTTP; routing
+		// keeps searching and sends once to the API-key account.
+		{"mixed_pool", []service.Account{
+			{ID: 1, Name: "oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: 0, Concurrency: 1, Credentials: map[string]any{"access_token": "fixture-oauth-token"}},
+			apiKeyAccount(2, 1, nil),
+		}, 2, true},
 		// (b) API-key accounts whose upstream speaks Chat Completions convert the
 		// request; the pointer does not reach the upstream.
 		{"chat_protocol_api_key", []service.Account{apiKeyAccount(1, 0, map[string]any{"openai_responses_supported": false})}, 1, false},
