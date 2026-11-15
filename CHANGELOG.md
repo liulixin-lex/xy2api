@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- 显式启用 thinking 的慢思考请求继续享有原首包等待预算，计费实际档位仍只读出站字段。
+
 - Claude minimal 请求保留既有 adaptive 模式，不再被就近映射成关闭思考。
 
 - OAuth Terra 的 minimal 请求恢复为 none 后发送，不再被本地提前拒绝。

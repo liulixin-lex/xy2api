@@ -1124,9 +1124,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			result.ReasoningEffort = reasoningEffort
 		}
 	}()
+	// Timeouts retain the baseline effective preference; billing uses final wire only.
+	budgetEffort := ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, upstreamModel, billingModel, originalModel), body, upstreamModel)
 	reasoningEffortValue := ""
-	if reasoningEffort != nil {
-		reasoningEffortValue = *reasoningEffort
+	if budgetEffort != nil {
+		reasoningEffortValue = *budgetEffort
 	}
 
 	// xy2api resilience: web_search history on API-key relays.
