@@ -280,12 +280,12 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *t
 func TestCalculateCost_OpenAIGPT54LongContextMarkerRequiresActualCostIncrease(t *testing.T) {
 	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
 
-	cost, err := svc.calculateCostWithServiceTierPolicy(
+	cost, err := svc.calculateCostInternalWithPolicy(
 		"gpt-5.4-2026-03-05",
 		UsageTokens{InputTokens: 300000},
 		0,
 		"",
-		true,
+		nil, true,
 	)
 
 	require.NoError(t, err)
@@ -866,7 +866,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pricing := svc.getFallbackPricing(tt.model)
+			pricing, _ := svc.getFallbackPricing(tt.model)
 			if tt.expectNilPricing {
 				require.Nil(t, pricing)
 				return

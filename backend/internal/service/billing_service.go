@@ -1017,11 +1017,7 @@ func (s *BillingService) initFallbackPricing() {
 }
 
 // getFallbackPricing 根据模型系列获取回退价格
-func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
-	pricing, _ := s.getFallbackPricingWithKey(model)
-	return pricing
-}
-func (s *BillingService) getFallbackPricingWithKey(model string) (*ModelPricing, string) {
+func (s *BillingService) getFallbackPricing(model string) (*ModelPricing, string) {
 	modelLower := strings.ToLower(model)
 	if modelLower == "jev-latest" {
 		return s.fallbackPrices["jev-latest"], "jev-latest"
@@ -1409,7 +1405,7 @@ func (s *BillingService) getModelPricingAtWithSource(model string, pricingAt tim
 	}
 
 	// 2. 使用硬编码回退价格；查价本身不告警，最终入账才报告回退。
-	fallback, key := s.getFallbackPricingWithKey(model)
+	fallback, key := s.getFallbackPricing(model)
 	if fallback != nil {
 		return s.applyModelSpecificPricingPolicyEx(model, fallback, true, pricingAt), pricingSourceJSON(PricingProvenance{ModelKey: key, Source: "builtin", Match: "fallback", Revision: pricingContentRevision(fallback)}), nil
 	}
@@ -1830,16 +1826,6 @@ func (s *BillingService) CalculateCostWithServiceTier(model string, tokens Usage
 	return s.calculateCostInternal(model, tokens, rateMultiplier, serviceTier, nil)
 }
 
-func (s *BillingService) calculateCostWithServiceTierPolicy(
-	model string,
-	tokens UsageTokens,
-	rateMultiplier float64,
-	serviceTier string,
-	longContextBillingEnabled bool,
-) (*CostBreakdown, error) {
-	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, nil, longContextBillingEnabled)
-}
-
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
 	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, channelPricing, true)
 }
@@ -2223,7 +2209,7 @@ func (s *BillingService) CalculateImageCost(model string, imageSize string, imag
 	imageSize = NormalizeImageBillingTierOrDefault(imageSize)
 
 	// 获取单价
-	unitPrice, provenance := s.imageUnitPriceWithSource(model, imageSize, groupConfig)
+	unitPrice, provenance := s.getImageUnitPrice(model, imageSize, groupConfig)
 
 	// 计算总费用
 	totalCost := unitPrice * float64(imageCount)
@@ -2272,11 +2258,7 @@ func (s *BillingService) CalculateVideoCost(model string, resolution string, vid
 }
 
 // getImageUnitPrice 获取图片单价
-func (s *BillingService) getImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig) float64 {
-	unit, _ := s.imageUnitPriceWithSource(model, imageSize, groupConfig)
-	return unit
-}
-func (s *BillingService) imageUnitPriceWithSource(model string, imageSize string, groupConfig *ImagePriceConfig) (float64, PricingProvenance) {
+func (s *BillingService) getImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig) (float64, PricingProvenance) {
 	// 优先使用分组配置的价格
 	if groupConfig != nil {
 		switch imageSize {
