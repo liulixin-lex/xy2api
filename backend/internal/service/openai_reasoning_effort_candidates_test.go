@@ -25,16 +25,16 @@ func TestExtractOpenAIReasoningEffortFromBodyModelCandidates(t *testing.T) {
 		want       string // "" 表示期望 nil
 	}{
 		{
-			name:       "后缀推导回退到原始模型（OAuth 上游模型已剥后缀）",
+			name:       "缺少出站字段不从原始模型后缀推导",
 			body:       bodyWithoutEffort,
 			candidates: []string{"gpt-5.4", "gpt-5.4", "gpt-5.4-xhigh"},
-			want:       "xhigh",
+			want:       "",
 		},
 		{
-			name:       "GPT-5.6 后缀 max 经原始模型推导保留",
+			name:       "缺少出站字段不从 max 后缀推导",
 			body:       bodyWithoutEffort,
 			candidates: []string{"gpt-5.6-sol", "gpt-5.6-sol", "gpt-5.6-sol-max"},
-			want:       "max",
+			want:       "",
 		},
 		{
 			name:       "显式 max 用第一个非空候选（映射后模型）判定",
@@ -43,10 +43,10 @@ func TestExtractOpenAIReasoningEffortFromBodyModelCandidates(t *testing.T) {
 			want:       "max",
 		},
 		{
-			name:       "显式 max 非 5.6 首候选仍折叠为 xhigh",
+			name:       "显式 max 不因模型候选而折叠",
 			body:       bodyWithMax,
 			candidates: []string{"gpt-5.4", "sol"},
-			want:       "xhigh",
+			want:       "max",
 		},
 		{
 			name:       "所有候选均无后缀时返回 nil",
@@ -74,8 +74,7 @@ func TestExtractOpenAIReasoningEffortModelCandidates(t *testing.T) {
 
 	got := extractOpenAIReasoningEffort(reqBody, "gpt-5.3-codex", "gpt-5.3-codex-high")
 
-	require.NotNil(t, got)
-	require.Equal(t, "high", *got)
+	require.Nil(t, got)
 }
 
 // 回归：OAuth 账号请求后缀式模型（无显式 reasoning 字段）时，上游模型被

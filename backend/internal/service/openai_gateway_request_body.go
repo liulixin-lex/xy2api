@@ -1006,43 +1006,6 @@ func getOpenAIReasoningEffortFromReqBody(reqBody map[string]any, requestedModel 
 	return "", false
 }
 
-func deriveOpenAIReasoningEffortFromModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return ""
-	}
-
-	modelID := strings.TrimSpace(model)
-	if strings.Contains(modelID, "/") {
-		parts := strings.Split(modelID, "/")
-		modelID = parts[len(parts)-1]
-	}
-
-	parts := strings.FieldsFunc(strings.ToLower(modelID), func(r rune) bool {
-		switch r {
-		case '-', '_', ' ':
-			return true
-		default:
-			return false
-		}
-	})
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return normalizeOpenAIReasoningEffortForModel(parts[len(parts)-1], modelID)
-}
-
-// deriveOpenAIReasoningEffortFromModelCandidates 依次对每个候选模型做后缀推导，
-// 返回第一个非空结果。
-func deriveOpenAIReasoningEffortFromModelCandidates(models []string) string {
-	for _, model := range models {
-		if value := deriveOpenAIReasoningEffortFromModel(model); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 type openAIRequestView struct {
 	body               []byte
 	Model              string
@@ -1705,28 +1668,21 @@ func isOpenAICodexModel(model string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "codex")
 }
 
-// extractOpenAIReasoningEffortFromBody 按优先级传入模型候选（如 upstreamModel,
-// billingModel, originalModel）：显式 effort 的模型归一化（max 保留判定）用第一个
-// 非空候选；body 未携带 effort 时的模型后缀推导依次尝试每个候选——OAuth 的
-// normalizeCodexModel 会剥掉 upstreamModel 的 effort 后缀，只有原始模型名还留着。
+// extractOpenAIReasoningEffortFromBody reads only explicit final wire fields.
+// Model suffixes and request preferences are not evidence of actual effort.
 func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string) *string {
-	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if reasoningEffort == "" {
-		reasoningEffort = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
-	}
-	if reasoningEffort != "" {
-		normalized := normalizeOpenAIReasoningEffortForModel(reasoningEffort, firstNonEmpty(modelCandidates...))
-		if normalized == "" {
+	for _, path := range []string{"reasoning.effort", "reasoning_effort"} {
+		field := gjson.GetBytes(body, path)
+		if field.Type != gjson.String || strings.TrimSpace(field.String()) == "" {
+			continue
+		}
+		value := normalizeOpenAIReasoningEffortForModel(field.String(), firstNonEmpty(modelCandidates...))
+		if value == "" {
 			return nil
 		}
-		return &normalized
+		return &value
 	}
-
-	value := deriveOpenAIReasoningEffortFromModelCandidates(modelCandidates)
-	if value == "" {
-		return nil
-	}
-	return &value
+	return nil
 }
 
 func explicitRequestedReasoningEffortFromBody(body []byte) string {
@@ -2505,20 +2461,12 @@ func getOpenAIRequestBodyMap(_ *gin.Context, body []byte) (map[string]any, error
 	return reqBody, nil
 }
 
-// extractOpenAIReasoningEffort 的模型候选语义同 extractOpenAIReasoningEffortFromBody。
+// extractOpenAIReasoningEffort reads explicit final wire fields without inference.
 func extractOpenAIReasoningEffort(reqBody map[string]any, modelCandidates ...string) *string {
-	if value, present := getOpenAIReasoningEffortFromReqBody(reqBody, firstNonEmpty(modelCandidates...)); present {
-		if value == "" {
-			return nil
-		}
+	if value, present := getOpenAIReasoningEffortFromReqBody(reqBody, firstNonEmpty(modelCandidates...)); present && value != "" {
 		return &value
 	}
-
-	value := deriveOpenAIReasoningEffortFromModelCandidates(modelCandidates)
-	if value == "" {
-		return nil
-	}
-	return &value
+	return nil
 }
 
 func CanonicalRequestedReasoningEffortFromReqBody(reqBody map[string]any, modelCandidates ...string) *string {
@@ -2566,38 +2514,11 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 	}
 }
 
-func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "none") && openai.IsGPT6SolOrLunaModelSpelling(model) {
-		return "none"
-	}
-	if strings.EqualFold(strings.TrimSpace(raw), "max") && supportsOpenAIReasoningEffortMax(model) {
+func normalizeOpenAIReasoningEffortForModel(raw, _ string) string {
+	if strings.EqualFold(strings.TrimSpace(raw), "max") {
 		return "max"
 	}
 	return normalizeOpenAIReasoningEffort(raw)
-}
-
-// supportsOpenAIReasoningEffortMax reports model families whose upstream scale
-// has a distinct max level. Other models keep the legacy max -> xhigh behavior.
-func supportsOpenAIReasoningEffortMax(model string) bool {
-	if isOpenAIGPT6Model(model) || isOpenAIGPT56Model(model) {
-		return true
-	}
-
-	normalized := strings.ToLower(lastOpenAIModelSegment(model))
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	switch {
-	case strings.HasPrefix(normalized, "deepseek-v4"), strings.HasPrefix(normalized, "deepseek-flash"):
-		// deepseek-flash（= DeepSeek-V4.1-Flash）与 v4 系同为 low/high/max 档位。
-		return true
-	case strings.HasPrefix(normalized, "glm-"):
-		return true
-	case strings.HasPrefix(normalized, "kimi-"), strings.HasPrefix(normalized, "moonshot-"):
-		return true
-	case normalized == "k3" || strings.HasPrefix(normalized, "k3-"):
-		return true
-	default:
-		return false
-	}
 }
 
 // validateGPT61SolCompatRequest runs after model mapping, before conversion can

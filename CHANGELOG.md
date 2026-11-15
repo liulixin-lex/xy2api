@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- 推理实际档位保留出站 `max` 与 `xhigh` 的区别，缺少显式字段时不再从模型后缀推导。
+
 - Responses 上游拒绝硬输出上限时保留错误，不再删除 `max_output_tokens` 后重发。
 
 - GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
