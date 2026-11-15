@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
 	"github.com/liulixin-lex/xy2api/internal/pkg/googleapi"
@@ -618,7 +619,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 	return s.hydrateSelectedAccount(ctx, selected)
 }
 
-func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (_ *ForwardResult, retErr error) {
+func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *ForwardResult, retErr error) {
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -634,14 +635,36 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		return nil, fmt.Errorf("missing model")
 	}
 
+	var lastSentGeminiBody []byte
+	requestedEffort := gjson.GetBytes(body, "output_config.effort").String()
+	defer func() {
+		if result != nil && account.Type == AccountTypeAPIKey {
+			result.ReasoningEffort = extractGeminiReasoningEffortFromBody(lastSentGeminiBody)
+			if requestedEffort != "" {
+				result.RequestedReasoningEffort = &requestedEffort
+			}
+		}
+	}()
+
 	originalModel := req.Model
 	mappedModel := req.Model
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
 
-	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(body)
+	convertRequest := convertClaudeMessagesToGeminiGenerateContent
+	if account.Type == AccountTypeAPIKey {
+		opts := geminiCompatConversionOptions(ctx)
+		convertRequest = func(body []byte) ([]byte, error) {
+			return buildGeminiAPIKeyCompatRequest(body, mappedModel, opts)
+		}
+	}
+	geminiReq, err := convertRequest(body)
 	if err != nil {
+		var conversion *apicompat.UnsupportedConversionError
+		if errors.As(err, &conversion) {
+			return nil, err
+		}
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
@@ -689,6 +712,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
+			lastSentGeminiBody = restGeminiReq
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
 			return upstreamReq, "x-request-id", nil
 		}
@@ -891,7 +915,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					stageName = "thinking+tools"
 					signatureRetryStage = 2
 				}
-				retryGeminiReq, txErr := convertClaudeMessagesToGeminiGenerateContent(strippedClaudeBody)
+				retryGeminiReq, txErr := convertRequest(strippedClaudeBody)
 				if txErr == nil {
 					logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: detected signature-related 400, retrying with downgraded Claude blocks (%s)", account.ID, stageName)
 					geminiReq = retryGeminiReq
@@ -2313,6 +2337,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openBlockIndex := -1
 	openBlockType := ""
 	seenText := ""
+	seenThinking := ""
 	openToolIndex := -1
 	openToolID := ""
 	openToolName := ""
@@ -2384,28 +2409,34 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					seenToolJSON = ""
 				}
 
-				delta, newSeen := computeGeminiTextDelta(seenText, text)
-				seenText = newSeen
+				blockType, textField, deltaType := "text", "text", "text_delta"
+				seen := &seenText
+				if thought, _ := part["thought"].(bool); thought {
+					blockType, textField, deltaType = "thinking", "thinking", "thinking_delta"
+					seen = &seenThinking
+				}
+				delta, newSeen := computeGeminiTextDelta(*seen, text)
+				*seen = newSeen
 				if delta == "" {
 					continue
 				}
 
-				if openBlockType != "text" {
+				if openBlockType != blockType {
 					if openBlockIndex >= 0 {
 						writeSSE(c.Writer, "content_block_stop", map[string]any{
 							"type":  "content_block_stop",
 							"index": openBlockIndex,
 						})
 					}
-					openBlockType = "text"
+					openBlockType = blockType
 					openBlockIndex = nextBlockIndex
 					nextBlockIndex++
 					writeSSE(c.Writer, "content_block_start", map[string]any{
 						"type":  "content_block_start",
 						"index": openBlockIndex,
 						"content_block": map[string]any{
-							"type": "text",
-							"text": "",
+							"type":    blockType,
+							textField: "",
 						},
 					})
 				}
@@ -2418,8 +2449,8 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 					"type":  "content_block_delta",
 					"index": openBlockIndex,
 					"delta": map[string]any{
-						"type": "text_delta",
-						"text": delta,
+						"type":    deltaType,
+						textField: delta,
 					},
 				})
 				flusher.Flush()
@@ -3143,9 +3174,13 @@ func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin
 							continue
 						}
 						if text, ok := pm["text"].(string); ok && text != "" {
+							blockType, textField := "text", "text"
+							if thought, _ := pm["thought"].(bool); thought {
+								blockType, textField = "thinking", "thinking"
+							}
 							contentBlocks = append(contentBlocks, map[string]any{
-								"type": "text",
-								"text": text,
+								"type":    blockType,
+								textField: text,
 							})
 						}
 						if inlineData, ok := pm["inlineData"].(map[string]any); includeInlineData && ok {

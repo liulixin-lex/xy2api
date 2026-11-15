@@ -124,6 +124,15 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 开启了混合调度的 Antigravity 账号也会参与 Gemini 分组的调度，见 [Antigravity](antigravity.md)。排查上游问题时可短时开启 `gateway.gemini_debug_response_headers`（默认 `false`）记录上游响应头，排障后关闭。
 
+### 兼容入口参数
+
+
+
+- **思考控制**：没有显式意图时保留模型默认。优先级为 `disabled`/`none`、显式 effort、数值预算、单独的 `adaptive`；中间对象中的 adaptive 不覆盖 effort。Gemini 2.5 Flash 的 low/medium/high 分别映射为 1024/8192/24576，none 为 0；2.5 Pro 不能完全关闭，最低预算为 128。已确认接受 level 的型号采用最近的支持档位，不能保证原请求的思考强度或完全关闭；未知能力省略并记录。计费只读取最终实际发出的 `thinkingLevel`，预算与默认模式不推断收费档位。
+
+
+兼容入口将上游 `thought:true` 的文本放入 Messages 的 `thinking` 块或 Chat 的 `reasoning_content`，普通正文单独输出；JSON 与流式响应采用相同规则。
+
 ## 客户端配置
 
 ### Gemini CLI
