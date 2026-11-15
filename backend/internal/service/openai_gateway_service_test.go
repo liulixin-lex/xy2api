@@ -4067,10 +4067,11 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 	body := []byte(strings.Join([]string{
 		`data: {"type":"response.failed","error":{"message":"upstream rejected request"}}`,
 		`data: [DONE]`,
-	}, "\n"))
+	}, "\n\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.True(t, usage.ResponseFactsKnown)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Contains(t, rec.Body.String(), "upstream rejected request")

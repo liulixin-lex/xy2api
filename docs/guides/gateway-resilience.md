@@ -182,6 +182,8 @@ Responses 失败帧在脱敏和重建前保存上游原始恢复提示；后继 
 
 ### 流式开场与终止 `stream`
 
+完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。
+
 Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled；流式保留 `[DONE]` 和完整尾部计量后干净 EOF 的兼容收尾，后续新内容、读错或坏帧会使尾部计量失效，且兼容收尾不伪造终态事实。
 
 原生与透传 Responses 以完整 SSE 帧校验终态，不接受损坏的多行 JSON 或只有事件名的伪结束；已输出后的协议失败只写一次错误终态。
@@ -234,5 +236,3 @@ Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled
 - 兜底分组只支持标准（余额）分组；进入兜底的记忆按 API Key 而不是会话。
 - WebSocket 不挂连接级预算，建连首回合的换号次数按网关的账号切换上限；余额暂停的升档与复位在 WebSocket 路径上尚不生效（照常暂停）。
 - 输出后的失败补记只覆盖 HTTP，WebSocket 不补。
-
-完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -348,7 +349,7 @@ func TestM6UntypedError(t *testing.T) {
 
 func TestM6UsageEvidence(t *testing.T) {
 	terminal := func(usage string) string {
-		return m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]` + usage + `}}`)
+		return m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]}]` + usage + `}}`)
 	}
 	for _, pass := range []bool{false, true} {
 		for _, stream := range []bool{false, true} {
@@ -413,12 +414,12 @@ func TestM6UsageEvidence(t *testing.T) {
 					require.Equal(t, tc.seen, valid)
 					require.Equal(t, tc.kind, kind)
 					require.Equal(t, tc.input, usage.InputTokens)
-					trace, ok := st.ClaimGatewayRequest(false)
-					require.True(t, ok)
-					require.NotNil(t, trace.UsageObserved)
-					require.Equal(t, tc.present, *trace.UsageObserved)
-					require.Equal(t, tc.source, *trace.UsageSource)
-					require.Equal(t, tc.kind, *trace.ResponseBodyType)
+					trace := reflect.ValueOf(st).Elem().FieldByName("gatewayRecord").Elem()
+					// M8 freezes these facts into the public snapshot in its later commit.
+					require.False(t, trace.FieldByName("UsageObserved").IsNil())
+					require.Equal(t, tc.present, trace.FieldByName("UsageObserved").Elem().Bool())
+					require.Equal(t, tc.source, trace.FieldByName("UsageSource").Elem().String())
+					require.Equal(t, tc.kind, trace.FieldByName("ResponseBodyType").Elem().String())
 				})
 			}
 		}
@@ -435,11 +436,10 @@ func TestM6UsageEvidence(t *testing.T) {
 	r, err := (&OpenAIGatewayService{cfg: &config.Config{}}).handleNonStreamingResponse(ctx, &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("invalid"))}, c, a, "gpt-test", "gpt-test")
 	require.Error(t, err)
 	require.Nil(t, r)
-	trace, ok := st.ClaimGatewayRequest(false)
-	require.True(t, ok)
-	require.NotNil(t, trace.UsageObserved)
-	require.False(t, *trace.UsageObserved)
-	require.Equal(t, "", *trace.ResponseBodyType)
+	trace := reflect.ValueOf(st).Elem().FieldByName("gatewayRecord").Elem()
+	require.False(t, trace.FieldByName("UsageObserved").IsNil())
+	require.False(t, trace.FieldByName("UsageObserved").Elem().Bool())
+	require.Equal(t, "", trace.FieldByName("ResponseBodyType").Elem().String())
 }
 
 func TestM6NonstreamMissingTerminal(t *testing.T) {

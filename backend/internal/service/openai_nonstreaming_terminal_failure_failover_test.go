@@ -73,7 +73,8 @@ func TestNonStreamingSSEToJSON_CapacityFailedEventFailsOver(t *testing.T) {
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
@@ -98,7 +99,8 @@ func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.False(t, c.Writer.Written())
@@ -137,7 +139,8 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 			result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 				newNonStreamingFailoverAccount(), sseTerminalBody("response.failed", tc.data), "model", "model")
 
-			require.Nil(t, result)
+			require.NotNil(t, result)
+			require.True(t, result.ResponseFactsKnown)
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
@@ -163,7 +166,8 @@ func TestNonStreamingSSEToJSON_BareErrorEventUsesConservativeClassifier(t *testi
 		result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 			newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
 
-		require.Nil(t, result)
+		require.NotNil(t, result)
+		require.True(t, result.ResponseFactsKnown)
 		require.Error(t, err)
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr))
@@ -178,7 +182,8 @@ func TestNonStreamingSSEToJSON_BareErrorEventUsesConservativeClassifier(t *testi
 		result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 			newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
 
-		require.Nil(t, result)
+		require.NotNil(t, result)
+		require.True(t, result.ResponseFactsKnown)
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, err, &failoverErr)
 		require.False(t, c.Writer.Written())
@@ -194,7 +199,8 @@ func TestNonStreamingPassthroughSSEToJSON_CapacityFailedEventFailsOver(t *testin
 
 	result, err := svc.handlePassthroughSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
@@ -240,7 +246,8 @@ func TestNonStreamingSSEToJSON_CommittedResponseKeepsProtocolError(t *testing.T)
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
