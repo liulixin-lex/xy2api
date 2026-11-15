@@ -352,7 +352,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
 		}
 		body = policyBody
-		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
+		if err := validateGPT61FinalCompatRequest(body, validationModel); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
 			return nil, err
 		}

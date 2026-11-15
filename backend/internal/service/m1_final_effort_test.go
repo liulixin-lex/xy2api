@@ -217,3 +217,14 @@ func TestM1ReviewAPIKeyMinimal(t *testing.T) {
 		require.Equal(t, "none", *result.ReasoningEffort)
 	}
 }
+
+func TestM1ReviewOAuthTerraMinimal(t *testing.T) {
+	body := []byte(`{"model":"gpt-6.1-terra","stream":false,"input":"hello","instructions":"fixture","reasoning":{"effort":"minimal"}}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(ptDelta + ptCompleted))}}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fixture", "base_url": "https://compatible.invalid"}}
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), newOpenAIRejectedFieldTestContext(body), account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 1)
+	require.Equal(t, "none", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+}
