@@ -221,3 +221,5 @@ actual_cost = total_cost × 分组倍率
 如果以前通过提高分组倍率来代替 Fast 收费，开启分组强制 Fast 后要把倍率恢复为业务原值，避免重复加价。
 
 HTTP 请求先保存原始推理档位和分组规则；选定最终账号与模型后依次执行 mapping、cap/deny、模型最近档位映射。映射规则中的模型条件匹配最终模型。同一目标的修复或协议回落复用已完成的映射，换目标则从原始值重算；未指定档位不把转换默认值当成调用方输入。
+
+Messages 没有显式 output_config.effort 时，不对转换器生成的默认档位执行 cap、mapping 或 deny；OAuth 与 API Key 都保留默认行为。
