@@ -253,7 +253,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
-| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致 |
+| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat→Responses 保留的 `user`、`metadata` 不因此透传到 Anthropic 目标 |
 
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 
