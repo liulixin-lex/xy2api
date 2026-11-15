@@ -11,6 +11,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// Placeholder the terminal scrubber returns when shadow credentials are unknown.
+const openAIEncryptedCredentialsUnavailable = "[redacted: credentials unavailable]"
+
 // This is a terminal request error, never an account failover signal.
 type openAIEncryptedContentRejectionError struct{ Param, Message string }
 
@@ -146,11 +149,17 @@ func newOpenAIEncryptedContentRejection(ctx context.Context, c *gin.Context, acc
 		original, _ = value.([]byte)
 	}
 	ciphers := httpEncryptedCiphertexts(body, original)
+	// A shadow account's parent credentials need the attempt's repository;
+	// without it the scrubber withholds every upstream field.
+	var repo AccountRepository
+	if r := openAIRequestRepairFrom(c); r != nil {
+		repo = r.credentialRepo
+	}
 	// Project only error fields, using the existing credential scrubber before
 	// exposing details. The original payload is still used for item selection.
-	safe := redactOpenAITerminalOpsSensitiveBody(ctx, nil, account, payload)
+	safe := redactOpenAITerminalOpsSensitiveBody(ctx, repo, account, payload)
 	clean := func(text string) string {
-		text = string(redactOpenAITerminalOpsSensitiveBody(ctx, nil, account, []byte(text)))
+		text = string(redactOpenAITerminalOpsSensitiveBody(ctx, repo, account, []byte(text)))
 		for _, cipher := range ciphers {
 			text = strings.ReplaceAll(text, cipher, "[redacted]")
 		}
@@ -163,6 +172,11 @@ func newOpenAIEncryptedContentRejection(ctx context.Context, c *gin.Context, acc
 			locator = param
 		} else if id := httpEncryptedNamedItem(payload); id != "" {
 			locator = "item " + clean(id)
+		}
+		if strings.Contains(locator, openAIEncryptedCredentialsUnavailable) {
+			// Credentials could not be resolved: withhold the location rather
+			// than present the placeholder as an item to remove.
+			locator = ""
 		}
 	}
 	message := "The upstream rejected an encrypted item in the request. The gateway could not identify a single item to repair safely. Rebuild the request from complete readable history, or start a new conversation."

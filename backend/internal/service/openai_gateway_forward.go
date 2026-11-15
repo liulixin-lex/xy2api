@@ -1146,7 +1146,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
-	requestRepair.credentialVersion = credentialVersion
+	requestRepair.credentialVersion, requestRepair.credentialRepo = credentialVersion, s.accountRepo
 	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
 	for {

@@ -384,7 +384,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	upstreamAccepted := false
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.passthrough = true
-	requestRepair.credentialVersion = credentialVersion
+	requestRepair.credentialVersion, requestRepair.credentialRepo = credentialVersion, s.accountRepo
 	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
 	for {

@@ -22,6 +22,7 @@ type openAIRequestRepair struct {
 	accountID               int64
 	body                    []byte
 	credentialVersion       string
+	credentialRepo          AccountRepository // resolves shadow credentials for client error redaction
 	encryptedTried          bool
 	encryptedBulkTried      bool
 	passthrough             bool

@@ -202,3 +202,53 @@ func TestEncryptedContentTerminalRedactsRepairedCiphertext(t *testing.T) {
 		})
 	}
 }
+
+type encryptedShadowParentRepo struct {
+	AccountRepository
+	parent *Account
+}
+
+func (r encryptedShadowParentRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	if r.parent != nil && r.parent.ID == id {
+		return r.parent, nil
+	}
+	return nil, nil
+}
+
+// Blue review input: a shadow account keeps the upstream's safe location
+// while its parent's credentials stay redacted.
+func TestEncryptedContentTerminalShadowLocator(t *testing.T) {
+	parentID := int64(1)
+	parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "parent-fixture-access-token"}}
+	body := []byte(`{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"cipher-bad","summary":[]}]}`)
+	payload := []byte(`{"error":{"code":"invalid_encrypted_content","param":"input[0].encrypted_content","message":"Encrypted content could not be verified for item rs_bad (token parent-fixture-access-token)"}}`)
+	for _, tc := range []struct {
+		name     string
+		repo     AccountRepository
+		resolved bool
+	}{
+		{"parent_resolved", encryptedShadowParentRepo{parent: parent}, true},
+		{"parent_unavailable", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			account := webSearchReplayAccount(false)
+			account.ParentAccountID = &parentID
+			repair := armOpenAIRequestRepair(req.c, account, nil)
+			repair.credentialRepo = tc.repo
+			selected, _ := selectHTTPRejectedEncryptedItem(body, payload)
+			rejection := newOpenAIEncryptedContentRejection(req.ctx, req.c, account, body, payload, selected)
+			require.NotContains(t, rejection.Message, "parent-fixture-access-token")
+			require.NotContains(t, rejection.Message, "cipher-bad")
+			if tc.resolved {
+				require.Equal(t, "input[0].encrypted_content", rejection.Param)
+				require.Contains(t, rejection.Message, "The upstream rejected encrypted content at input[0].encrypted_content.")
+				require.Contains(t, rejection.Message, "rs_bad")
+				return
+			}
+			require.Empty(t, rejection.Param)
+			require.NotContains(t, rejection.Message, "at item [redacted")
+			require.Contains(t, rejection.Message, "could not identify a single item")
+		})
+	}
+}
