@@ -441,3 +441,73 @@ func TestM6UsageEvidence(t *testing.T) {
 	require.False(t, *trace.UsageObserved)
 	require.Equal(t, "", *trace.ResponseBodyType)
 }
+
+func TestM6NonstreamMissingTerminal(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, pass := range []bool{false, true} {
+		for _, edge := range []bool{false, true} {
+			for _, tc := range []struct {
+				name, body, code string
+				input            int
+			}{
+				{"empty", "", OpenAIUpstreamStreamTruncatedCode, 0},
+				{"created", m6Frame(`{"type":"response.created","response":{"id":"r1"}}`), OpenAIUpstreamStreamTruncatedCode, 0},
+				{"delta", m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`), OpenAIUpstreamStreamTruncatedCode, 0},
+				{"done_sentinel", m6Frame(`{"type":"response.output_text.done","text":"answer"}`) + m6Frame(`[DONE]`), OpenAIUpstreamStreamTruncatedCode, 0},
+				{"usage_only", m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`), OpenAIUpstreamStreamTruncatedCode, 13},
+				{"malformed", m6Frame(`{"type":"response.completed"}`), OpenAIUpstreamProtocolErrorCode, 0},
+				{"valid_missing_usage", m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}`), "", 0},
+			} {
+				t.Run(fmt.Sprintf("%s/pass=%t/edge=%t", tc.name, pass, edge), func(t *testing.T) {
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					st := resilience.NewRequestState()
+					if edge {
+						st.SetEdge("cf")
+					}
+					ctx := resilience.WithRequestState(context.Background(), st)
+					c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+					InstallDeliveryTracking(c, time.Now())
+					resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}, "Content-Length": {"99999"}}, Body: io.NopCloser(strings.NewReader(tc.body))}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}}
+					a := newOpenAIRejectedFieldTestAccount()
+					var err error
+					var usage *OpenAIUsage
+					if pass {
+						r, e := svc.handleNonStreamingResponsePassthrough(ctx, resp, c, a, "m", "m")
+						err = e
+						require.NotNil(t, r)
+						usage = r.usage
+						require.True(t, r.ResponseFactsKnown)
+					} else {
+						r, e := svc.handleNonStreamingResponse(ctx, resp, c, a, "m", "m")
+						err = e
+						require.NotNil(t, r)
+						usage = r.usage
+						require.True(t, r.ResponseFactsKnown)
+					}
+					require.Equal(t, tc.input, usage.InputTokens)
+					require.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+					require.NotEqual(t, "99999", w.Header().Get("Content-Length"))
+					if tc.code == "" {
+						require.NoError(t, err)
+						require.Equal(t, 200, w.Code)
+					} else {
+						require.Error(t, err)
+						want := 502
+						if edge {
+							want = 503
+							require.Equal(t, "502", w.Header().Get("X-XY-Upstream-Status"))
+						}
+						require.Equal(t, want, w.Code)
+						require.Equal(t, "server_error", gjson.Get(w.Body.String(), "error.type").String())
+						require.Equal(t, tc.code, gjson.Get(w.Body.String(), "error.code").String())
+						before := w.Body.String()
+						_ = svc.writeOpenAINonStreamingProtocolError(resp, c, "second", tc.code)
+						require.Equal(t, before, w.Body.String())
+					}
+				})
+			}
+		}
+	}
+}

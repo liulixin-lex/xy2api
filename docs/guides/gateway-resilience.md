@@ -211,6 +211,8 @@ Responses 按归一后的状态处理 done/completed/incomplete/failed/cancelled
 
 ## 不受开关控制的行为
 
+非流 Responses 聚合缺少合法终态时返回 JSON 协议错误，并保留已读用量；compact 心跳已经提交时，按 Responses created/failed 结束，终态只写一次。
+
 - Responses 终态的 UTF-8、JSON 与状态一致性校验始终执行，不能关闭开关后把坏帧视为成功。
 
 以下属于协议正确性修正，关闭总开关后仍然生效：

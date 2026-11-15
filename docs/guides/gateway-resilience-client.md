@@ -4,6 +4,8 @@
 
 ## 错误响应
 
+非流 Responses 收到 SSE 时必须包含合法 response 终态；缺终态返回 502 JSON 错误 `upstream_stream_truncated`，损坏帧返回 `upstream_protocol_error`。经 CDN 的 502 保持既有 503 映射。仅缺用量的完整终态仍正常返回。
+
 | 场景 | 响应 |
 |---|---|
 | 分组内没有可用账号 | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
