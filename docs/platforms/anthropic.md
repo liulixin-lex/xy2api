@@ -285,3 +285,5 @@ API Key 转换桥对最终协议无法表示的图片或文件 detail 提示省�
 工具历史按出现顺序匹配已完成的轮次，跨轮复用 call_id 时保留各轮自己的结果；缺结果、孤儿结果与同轮重复 ID 继续原有转换，不增加本地拒绝。历史工具不会补入本轮声明。
 
 客户端 tool_search 的调用参数在响应中保持 JSON 对象；tool_search 与 custom 调用保留各自的工具项 ID 前缀。
+
+图片 detail 仅接受 auto、low、high，API Key 请求省略并记录合法提示且保留图片；文件 detail 只接受 auto。非法值仍返回字段错误。

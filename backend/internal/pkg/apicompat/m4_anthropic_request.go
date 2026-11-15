@@ -10,16 +10,13 @@ func bridgeMediaToAnthropic(part ResponsesContentPart, opts *ConversionOptions, 
 	if opts == nil {
 		return responsesMediaToAnthropic(part)
 	}
-	if part.Detail != "" {
-		part.Detail = ""
-		if opts.Record != nil {
-			opts.Record(ConversionNotice{Field: field + ".detail", Action: "omit"})
-		}
-	}
-	block, err := responsesMediaToAnthropic(part)
+	block, err := responsesMediaToAnthropicWithOptions(part, *opts, field+".detail")
 	var unsupported *UnsupportedConversionError
 	if errors.As(err, &unsupported) {
-		return block, unsupportedConversion(field+strings.TrimPrefix(unsupported.Field, "content"), unsupported.Reason)
+		if strings.HasPrefix(unsupported.Field, "content") {
+			return block, unsupportedConversion(field+strings.TrimPrefix(unsupported.Field, "content"), unsupported.Reason)
+		}
+		return block, err
 	}
 	return block, err
 }
@@ -71,4 +68,25 @@ func prepareBridgeAnthropicRequest(req *ResponsesRequest, opts ConversionOptions
 		copyReq.anthropicChatSource = &source
 	}
 	return &copyReq, nil
+}
+
+func validateLegacyAnthropicDetails(input json.RawMessage) error {
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(input, &items) != nil {
+		return nil
+	}
+	for _, item := range items {
+		for _, field := range []string{"content", "output"} {
+			var parts []ResponsesContentPart
+			if json.Unmarshal(item[field], &parts) != nil {
+				continue
+			}
+			for _, part := range parts {
+				if (part.Type == "input_image" || part.Type == "input_file") && part.Detail != "" && part.Detail != "auto" {
+					return unsupportedConversion("content.detail", "Anthropic has no image/file detail equivalent")
+				}
+			}
+		}
+	}
+	return nil
 }

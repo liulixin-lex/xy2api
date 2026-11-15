@@ -16,6 +16,9 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
+	if err := validateLegacyAnthropicDetails(req.Input); err != nil {
+		return nil, err
+	}
 	_, is55 := claude.Claude55(req.Model)
 	return responsesToAnthropicRequest(req, is55, nil)
 }

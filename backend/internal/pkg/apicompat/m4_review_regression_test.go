@@ -370,3 +370,50 @@ func TestM4ReviewEmptyChatAllowedTools(t *testing.T) {
 		t.Fatalf("notice=%#v", notices)
 	}
 }
+
+func TestM4ReviewMediaDetailValidation(t *testing.T) {
+	for _, tc := range []struct {
+		kind, source, detail string
+		bad                  bool
+	}{
+		{"input_image", `"image_url":"https://example.test/a.png"`, "high", false},
+		{"input_image", `"image_url":"https://example.test/a.png"`, "low", false},
+		{"input_image", `"image_url":"https://example.test/a.png"`, "auto", false},
+		{"input_image", `"image_url":"https://example.test/a.png"`, "bogus", true},
+		{"input_file", `"file_url":"https://example.test/a.pdf"`, "high", true},
+		{"input_file", `"file_url":"https://example.test/a.pdf"`, "auto", false},
+	} {
+		req := &ResponsesRequest{Model: "m", Input: json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"` + tc.kind + `",` + tc.source + `,"detail":"` + tc.detail + `"}]}]`)}
+		var notices []ConversionNotice
+		out, err := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+		if (err != nil) != tc.bad {
+			t.Fatalf("%s/%s err=%v", tc.kind, tc.detail, err)
+		}
+		if tc.bad {
+			if !strings.Contains(err.Error(), "input[0].content[1].detail") || len(notices) != 0 {
+				t.Fatalf("invalid detail: %v %#v", err, notices)
+			}
+			continue
+		}
+		raw, _ := json.Marshal(out.Messages)
+		if !strings.Contains(string(raw), "https://example.test/") {
+			t.Fatalf("media lost: %s", raw)
+		}
+		want := 0
+		if tc.kind == "input_image" {
+			want = 1
+		}
+		if len(notices) != want {
+			t.Fatalf("notice=%#v", notices)
+		}
+		if want == 1 && notices[0] != (ConversionNotice{Field: "input[0].content[1].detail", Action: "omit"}) {
+			t.Fatalf("notice=%#v", notices)
+		}
+		if tc.detail != "auto" {
+			_, legacyErr := ResponsesToAnthropicRequest(req)
+			if legacyErr == nil || !strings.Contains(legacyErr.Error(), "content.detail") || !strings.Contains(legacyErr.Error(), "Anthropic has no image/file detail equivalent") {
+				t.Fatalf("legacy detail: %v", legacyErr)
+			}
+		}
+	}
+}

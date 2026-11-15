@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Anthropic API Key 请求仅省略合法图片 detail；非法枚举和文件非 auto detail 继续返回对应字段错误。
+
 - Chat 上游的允许工具列表为空时，同时省略 tools 与 tool_choice，避免兼容上游拒绝孤立的工具选择字段。
 
 - Responses 转 Chat 时省略并记录 metadata 与非字符串 user，字符串 user 和 text.verbosity 继续发送。
