@@ -152,6 +152,8 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 ### 请求关联字段
 
+Responses 请求同时记录用量是否存在、实际保留数值的来源、上游终态是否出现与是否合法，以及正文为 JSON 或 SSE；未观察路径为未知，已观察但没有用量为明确缺失，真实零值为存在。失败时已获得的部分用量与这些事实一并保留。
+
 `post_output_failure`、`session_rebind`、`last_resort`、`turn_cap`、`keepalive_committed`、`stall` 等事件另带以下字段：
 
 | 字段 | 含义 |

@@ -1389,9 +1389,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		searchCount := 0
 		var imageOutputSizes []string
 		var partialErr error
+		var responseFacts OpenAIForwardResult
 		upstreamAccepted := false
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, attemptStart, originalModel, upstreamModel, reasoningEffortValue)
+			if streamResult != nil {
+				responseFacts.ResponseFactsKnown = streamResult.ResponseFactsKnown
+				responseFacts.UsagePresent = streamResult.UsagePresent
+				responseFacts.UsageSource = streamResult.UsageSource
+				responseFacts.TerminalSeen = streamResult.TerminalSeen
+				responseFacts.TerminalValid = streamResult.TerminalValid
+				responseFacts.ResponseBodyKind = streamResult.ResponseBodyKind
+			}
 			if err != nil {
 				schedCapture.finish(nil, err)
 			}
@@ -1459,8 +1468,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
-				var failoverErr *UpstreamFailoverError
-				if streamResult == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr) {
+				if streamResult == nil {
 					return nil, err
 				}
 				// Keep metered usage after output without turning a failed attempt into success.
@@ -1475,6 +1483,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = streamResult.searchCount
 		} else {
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+			if nonStreamResult != nil {
+				responseFacts.ResponseFactsKnown = nonStreamResult.ResponseFactsKnown
+				responseFacts.UsagePresent = nonStreamResult.UsagePresent
+				responseFacts.UsageSource = nonStreamResult.UsageSource
+				responseFacts.TerminalSeen = nonStreamResult.TerminalSeen
+				responseFacts.TerminalValid = nonStreamResult.TerminalValid
+				responseFacts.ResponseBodyKind = nonStreamResult.ResponseBodyKind
+			}
 			if err != nil {
 				schedCapture.finish(nil, err)
 			}
@@ -1509,7 +1525,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						return nil, repairErr
 					}
 				}
-				return nil, err
+				if nonStreamResult == nil {
+					return nil, err
+				}
+				partialErr = err
 			}
 			upstreamAccepted = nonStreamResult.upstreamAccepted
 			usage = nonStreamResult.usage
@@ -1518,7 +1537,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
-		if upstreamAccepted {
+		if partialErr == nil && upstreamAccepted {
 			requestRepair.m3.succeeded(ctx)
 		}
 		if partialErr == nil {
@@ -1573,6 +1592,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.SearchCount = searchCount
 		}
 		stampOpenAIResponsesUpstreamEndpoint(c, forwardResult)
+		forwardResult.ResponseFactsKnown = responseFacts.ResponseFactsKnown
+		forwardResult.UsagePresent = responseFacts.UsagePresent
+		forwardResult.UsageSource = responseFacts.UsageSource
+		forwardResult.TerminalSeen = responseFacts.TerminalSeen
+		forwardResult.TerminalValid = responseFacts.TerminalValid
+		forwardResult.ResponseBodyKind = responseFacts.ResponseBodyKind
+
 		return forwardResult, partialErr
 	}
 }

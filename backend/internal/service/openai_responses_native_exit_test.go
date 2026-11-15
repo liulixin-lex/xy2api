@@ -132,6 +132,10 @@ func TestM6GrokActualAndPartialFailure(t *testing.T) {
 			}
 			require.NotNil(t, result)
 			require.Equal(t, partial, result.PartialFailure)
+			require.True(t, result.ResponseFactsKnown)
+			require.True(t, result.UsagePresent)
+			require.Equal(t, partial, result.TerminalSeen)
+			require.Equal(t, partial, result.TerminalValid)
 			require.Equal(t, 13, result.Usage.InputTokens)
 			require.Equal(t, 5, result.Usage.OutputTokens)
 			if partial {
@@ -340,4 +344,100 @@ func TestM6UntypedError(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
+}
+
+func TestM6UsageEvidence(t *testing.T) {
+	terminal := func(usage string) string {
+		return m6Frame(`{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]` + usage + `}}`)
+	}
+	for _, pass := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, tc := range []struct {
+				name, body, source, kind string
+				present, seen            bool
+				input                    int
+			}{
+				{"missing", `{"id":"r1","output":[]}`, "missing", "json", false, false, 0},
+				{"null", `{"id":"r1","usage":null}`, "missing", "json", false, false, 0},
+				{"empty", `{"id":"r1","usage":{}}`, "missing", "json", false, false, 0},
+				{"zero", `{"id":"r1","usage":{"input_tokens":0,"output_tokens":0}}`, "upstream_json", "json", true, false, 0},
+				{"sse_missing", terminal(""), "missing", "sse", false, true, 0},
+				{"sse_zero", terminal(`,"usage":{"input_tokens":0,"output_tokens":0}`), "upstream_sse_terminal", "sse", true, true, 0},
+				{"progressive", m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`) + terminal(""), "upstream_sse_progressive", "sse", true, true, 13},
+				{"zero_keeps_progressive", m6Frame(`{"type":"response.usage","usage":{"input_tokens":13,"output_tokens":5}}`) + terminal(`,"usage":{"input_tokens":0,"output_tokens":0}`), "upstream_sse_progressive", "sse", true, true, 13},
+			} {
+				if stream && tc.kind != "sse" {
+					continue
+				}
+				t.Run(fmt.Sprintf("%s/pass=%t/stream=%t", tc.name, pass, stream), func(t *testing.T) {
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					st := resilience.NewRequestState()
+					st.EnableGatewayRequest(time.Now())
+					a := newOpenAIRejectedFieldTestAccount()
+					st.NoteGatewaySend(a.ID)
+					ctx := resilience.WithRequestState(context.Background(), st)
+					c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+					resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body))}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}}
+					var known, present, seen, valid bool
+					var source, kind string
+					var usage *OpenAIUsage
+					if stream {
+						if pass {
+							r, e := svc.handleStreamingResponsePassthrough(ctx, resp, c, a, time.Now(), "gpt-test", "gpt-test")
+							require.NoError(t, e)
+							require.NotNil(t, r)
+							known, present, source, seen, valid, kind, usage = r.ResponseFactsKnown, r.UsagePresent, r.UsageSource, r.TerminalSeen, r.TerminalValid, r.ResponseBodyKind, r.usage
+						} else {
+							r, e := svc.handleStreamingResponse(ctx, resp, c, a, time.Now(), "gpt-test", "gpt-test")
+							require.NoError(t, e)
+							require.NotNil(t, r)
+							known, present, source, seen, valid, kind, usage = r.ResponseFactsKnown, r.UsagePresent, r.UsageSource, r.TerminalSeen, r.TerminalValid, r.ResponseBodyKind, r.usage
+						}
+					} else if pass {
+						r, e := svc.handleNonStreamingResponsePassthrough(ctx, resp, c, a, "gpt-test", "gpt-test")
+						require.NoError(t, e)
+						require.NotNil(t, r)
+						known, present, source, seen, valid, kind, usage = r.ResponseFactsKnown, r.UsagePresent, r.UsageSource, r.TerminalSeen, r.TerminalValid, r.ResponseBodyKind, r.usage
+					} else {
+						r, e := svc.handleNonStreamingResponse(ctx, resp, c, a, "gpt-test", "gpt-test")
+						require.NoError(t, e)
+						require.NotNil(t, r)
+						known, present, source, seen, valid, kind, usage = r.ResponseFactsKnown, r.UsagePresent, r.UsageSource, r.TerminalSeen, r.TerminalValid, r.ResponseBodyKind, r.usage
+					}
+					require.True(t, known)
+					require.Equal(t, tc.present, present)
+					require.Equal(t, tc.source, source)
+					require.Equal(t, tc.seen, seen)
+					require.Equal(t, tc.seen, valid)
+					require.Equal(t, tc.kind, kind)
+					require.Equal(t, tc.input, usage.InputTokens)
+					trace, ok := st.ClaimGatewayRequest(false)
+					require.True(t, ok)
+					require.NotNil(t, trace.UsageObserved)
+					require.Equal(t, tc.present, *trace.UsageObserved)
+					require.Equal(t, tc.source, *trace.UsageSource)
+					require.Equal(t, tc.kind, *trace.ResponseBodyType)
+				})
+			}
+		}
+	}
+	// A failure before a result exists must still leave authenticated body facts.
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	st := resilience.NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	a := newOpenAIRejectedFieldTestAccount()
+	st.NoteGatewaySend(a.ID)
+	ctx := resilience.WithRequestState(context.Background(), st)
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+	r, err := (&OpenAIGatewayService{cfg: &config.Config{}}).handleNonStreamingResponse(ctx, &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("invalid"))}, c, a, "gpt-test", "gpt-test")
+	require.Error(t, err)
+	require.Nil(t, r)
+	trace, ok := st.ClaimGatewayRequest(false)
+	require.True(t, ok)
+	require.NotNil(t, trace.UsageObserved)
+	require.False(t, *trace.UsageObserved)
+	require.Equal(t, "", *trace.ResponseBodyType)
 }

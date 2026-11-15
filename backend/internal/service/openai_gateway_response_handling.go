@@ -89,6 +89,16 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (schedResult *openaiStreamingResult, schedErr error) {
+	usageSource := "missing"
+	var currentTerminal, observedTerminal OpenAIResponsesTerminal
+	defer func() {
+		if schedResult != nil {
+			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
+			schedResult.TerminalSeen, schedResult.TerminalValid, schedResult.ResponseBodyKind = observedTerminal.Seen, observedTerminal.Valid, "sse"
+		}
+		noteOpenAIResponsesFacts(c, account, usageSource, observedTerminal, "sse")
+	}()
+
 	schedCapture := currentSchedAttempt(ctx)
 	defer func() {
 		if schedResult != nil {
@@ -222,7 +232,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	usage := &OpenAIUsage{}
-	var currentTerminal, observedTerminal OpenAIResponsesTerminal
 	tailMetered := false
 	var finishResponsesFrame func()
 	responseCreatedAt := int64(0)
@@ -525,7 +534,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if sawFailedEvent {
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
-		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected)
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", terminalEventType, clientDisconnected)
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
@@ -1041,6 +1050,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var responsesParser openAICompatSSEFrameParser
 	processFrame := func(frame openAICompatSSEFrame) {
 		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		if source := s.parseSSEUsageBytesWithType([]byte(frame.Data), currentTerminal.EventType, usage); source != "" {
+			usageSource = source
+		}
 		tailMetered = openAIResponsesTailUsageCandidate(tailMetered, frame.EventType, []byte(frame.Data), currentTerminal)
 		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
 			observedTerminal = currentTerminal
@@ -1527,28 +1539,49 @@ func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsag
 	s.parseSSEUsageBytesWithType(data, "", usage)
 }
 
-func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType string, usage *OpenAIUsage) {
-	if usage == nil || len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-		return
+func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType string, usage *OpenAIUsage) string {
+	if usage == nil || len(data) == 0 || !bytes.Contains(data, []byte(`"usage"`)) {
+		return ""
 	}
-	// Usage is absent from nearly every delta event. Avoid full JSON validation
-	// and four gjson path scans on that hot path while retaining progressive
-	// usage from compatible upstreams on any event type.
-	if !bytes.Contains(data, []byte(`"usage"`)) {
-		return
-	}
-	parsedUsage, ok := extractOpenAIUsageFromJSONBytes(data)
-	if !ok {
-		return
-	}
+	source := "upstream_sse_progressive"
 	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
+		source = "upstream_sse_terminal"
+	}
+	parsedUsage, present := openAIResponsesUsageEvidence(data, source)
+	if !present {
+		return ""
+	}
+	if source == "upstream_sse_terminal" {
 		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
-			return
+			return ""
 		}
 		*usage = parsedUsage
+		return source
+	}
+	retained := openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(usage)
+	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	if retained {
+		return source
+	}
+	return ""
+}
+
+func noteOpenAIResponsesFacts(c *gin.Context, account *Account, source string, terminal OpenAIResponsesTerminal, kind string) {
+	if c == nil || c.Request == nil || account == nil {
 		return
 	}
-	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, true, source != "missing", source, terminal.Seen, terminal.Valid, kind)
+}
+
+func (s *OpenAIGatewayService) openAIResponsesUsageFromBody(body string) (*OpenAIUsage, string) {
+	usage, source := &OpenAIUsage{}, "missing"
+	forEachOpenAIResponsesFrame(body, func(event string, data []byte) {
+		terminal := ClassifyOpenAIResponsesTerminal(event, data)
+		if observed := s.parseSSEUsageBytesWithType(data, terminal.EventType, usage); observed != "" {
+			source = observed
+		}
+	})
+	return usage, source
 }
 
 // Compatible Responses upstreams may report usage before the terminal event.
@@ -1615,8 +1648,8 @@ func (s *openAIMissingUsageLogSampler) sample(now time.Time) (logNow bool, total
 	}
 }
 
-func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usage *OpenAIUsage, terminalEvent string, clientDisconnected bool) {
-	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || openAIUsageHasTokens(usage) {
+func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usagePresent bool, terminalEvent string, clientDisconnected bool) {
+	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || usagePresent {
 		return
 	}
 	terminalEvent = strings.TrimSpace(terminalEvent)
@@ -1878,6 +1911,19 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (schedResult *openaiNonStreamingResult, schedErr error) {
+	bodyKind, usageSource := "", "missing"
+	observedBody := false
+	defer func() {
+		if !observedBody {
+			return
+		}
+		if schedResult != nil {
+			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
+			schedResult.ResponseBodyKind = bodyKind
+		}
+		noteOpenAIResponsesFacts(c, account, usageSource, OpenAIResponsesTerminal{}, bodyKind)
+	}()
+
 	schedCapture := currentSchedAttempt(ctx)
 	defer func() {
 		if schedResult != nil {
@@ -1889,6 +1935,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
 	}
+
+	observedBody = true
 
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -1905,6 +1953,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	bodyLooksLikeSSE := bodyHasSSEFraming(body)
 	if !isOpenAIResponseJSONObject(body) {
 		if bodyLooksLikeSSE || isEventStreamResponse(resp.Header) {
+			observedBody = false
 			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid non-streaming response")
@@ -1916,19 +1965,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	usageValue, usageOK := extractOpenAIUsageFromJSONBytes(body)
-	if !usageOK {
-		if bodyLooksLikeSSE {
-			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
-		}
-		if attempt := openAICollaborationAttempt(c); attempt != nil && attempt.applied {
-			attempt.restoreFailed = true
-			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
-		}
-		return nil, fmt.Errorf("parse response: invalid json response")
-	}
+	bodyKind = "json"
+	usageValue, present := openAIResponsesUsageEvidence(body, "upstream_json")
 	usage := &usageValue
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
+	if present {
+		usageSource = "upstream_json"
+	}
+	logOpenAISuccessMissingUsage(ctx, c, account, resp, usageSource != "missing", "json", false)
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -2000,8 +2043,19 @@ func bodyHasSSEFraming(body []byte) bool {
 	return false
 }
 
-func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (result *openaiNonStreamingResult, resultErr error) {
 	bodyText := string(body)
+	usage, usageSource := s.openAIResponsesUsageFromBody(bodyText)
+	terminal, terminalSSEEvent, terminalPayload := extractOpenAISSETerminalEvent(bodyText)
+	defer func() {
+		if result == nil {
+			result = &openaiNonStreamingResult{OpenAIUsage: usage, usage: usage}
+		}
+		result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = true, usageSource != "missing", usageSource
+		result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = terminal.Seen, terminal.Valid, "sse"
+		noteOpenAIResponsesFacts(c, account, usageSource, terminal, "sse")
+	}()
+
 	// Observe earlier markers before reconstructing the terminal response.
 	// Keep the raw frames for aggregation; only the final JSON is delivered.
 	var collabErr error
@@ -2015,7 +2069,6 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
 		}
 	}
-	terminal, terminalSSEEvent, terminalPayload := extractOpenAISSETerminalEvent(bodyText)
 	terminalType := terminal.EventType
 	observeSchedPayload(c, terminalPayload, terminalType)
 	if terminal.Failure {
@@ -2039,11 +2092,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 	finalResponse, ok := openAIResponsesTerminalResponse(terminal, terminalPayload)
 
-	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			*usage = parsedUsage
-		}
 		if outputJSON, reconstructed := mergeResponsesOutputFromSSE(finalResponse, bodyText); reconstructed {
 			if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
 				finalResponse = patched
@@ -2086,7 +2135,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
+	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usageSource != "missing", terminalType, false)
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
 	contentType := "application/json; charset=utf-8"

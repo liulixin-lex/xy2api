@@ -230,6 +230,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	s.updateGrokUsageFromResponse(stateCtx, account, resp.Header, resp.StatusCode)
 
 	var partialErr error
+	var responseFacts OpenAIForwardResult
 	var usage *OpenAIUsage
 	var firstTokenMs *int
 	responseID := ""
@@ -246,6 +247,14 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, clientToolMapping, maxLineSize)
 		}
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, upstreamModel)
+		if streamResult != nil {
+			responseFacts.ResponseFactsKnown = streamResult.ResponseFactsKnown
+			responseFacts.UsagePresent = streamResult.UsagePresent
+			responseFacts.UsageSource = streamResult.UsageSource
+			responseFacts.TerminalSeen = streamResult.TerminalSeen
+			responseFacts.TerminalValid = streamResult.TerminalValid
+			responseFacts.ResponseBodyKind = streamResult.ResponseBodyKind
+		}
 		if err != nil {
 			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil {
 				return nil, err
@@ -260,6 +269,14 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		imageOutputSizes = streamResult.imageOutputSizes
 	} else {
 		nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+		if nonStreamResult != nil {
+			responseFacts.ResponseFactsKnown = nonStreamResult.ResponseFactsKnown
+			responseFacts.UsagePresent = nonStreamResult.UsagePresent
+			responseFacts.UsageSource = nonStreamResult.UsageSource
+			responseFacts.TerminalSeen = nonStreamResult.TerminalSeen
+			responseFacts.TerminalValid = nonStreamResult.TerminalValid
+			responseFacts.ResponseBodyKind = nonStreamResult.ResponseBodyKind
+		}
 		if err != nil {
 			if account.Type != AccountTypeAPIKey || nonStreamResult == nil || nonStreamResult.usage == nil {
 				return nil, err
@@ -303,6 +320,13 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		result.ImageCount = imageCount
 		result.ImageOutputSizes = imageOutputSizes
 	}
+	result.ResponseFactsKnown = responseFacts.ResponseFactsKnown
+	result.UsagePresent = responseFacts.UsagePresent
+	result.UsageSource = responseFacts.UsageSource
+	result.TerminalSeen = responseFacts.TerminalSeen
+	result.TerminalValid = responseFacts.TerminalValid
+	result.ResponseBodyKind = responseFacts.ResponseBodyKind
+
 	return result, partialErr
 }
 
