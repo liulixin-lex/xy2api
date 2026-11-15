@@ -29,7 +29,7 @@ func AnthropicToResponsesResponseWithBridgeOptions(resp *AnthropicResponse, opts
 }
 
 func AnthropicEventToResponsesEventsWithBridgeOptions(event *AnthropicStreamEvent, state *AnthropicEventToResponsesState, opts ConversionOptions) []ResponsesStreamEvent {
-	if state == nil || event == nil {
+	if state == nil || event == nil || state.Err() != nil {
 		return nil
 	}
 	if !state.CreatedSent {
@@ -40,7 +40,7 @@ func AnthropicEventToResponsesEventsWithBridgeOptions(event *AnthropicStreamEven
 }
 
 func FinalizeAnthropicResponsesStreamWithBridgeOptions(state *AnthropicEventToResponsesState, opts ConversionOptions) []ResponsesStreamEvent {
-	if state == nil {
+	if state == nil || state.Err() != nil {
 		return nil
 	}
 	if !state.CreatedSent {

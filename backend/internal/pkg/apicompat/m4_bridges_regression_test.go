@@ -1095,6 +1095,21 @@ func TestM4TerminalReasonProjection(t *testing.T) {
 			}
 		})
 	}
+	t.Run("projection_error_latched", func(t *testing.T) {
+		st := NewAnthropicEventToResponsesState()
+		st.CreatedSent = true
+		st.Bridge = opts.Bridge
+		st.StopReason = "pause_turn"
+		AnthropicEventToResponsesEventsWithBridgeOptions(&AnthropicStreamEvent{Type: "message_stop"}, st, opts)
+		first := st.Err()
+		if first == nil {
+			t.Fatal("missing pause error")
+		}
+		st.StopReason = "end_turn"
+		if len(AnthropicEventToResponsesEventsWithBridgeOptions(&AnthropicStreamEvent{Type: "message_stop"}, st, opts)) != 0 || len(FinalizeAnthropicResponsesStreamWithBridgeOptions(st, opts)) != 0 || st.Err() != first {
+			t.Fatal("projection error did not remain terminal")
+		}
+	})
 	t.Run("refusal", func(t *testing.T) {
 		resp := &ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{Refusal: "declined"}, FinishReason: "stop"}}}
 		out, err := ChatCompletionsResponseToResponsesWithBridgeOptions(resp, "m", nil, nil, false, nil, opts)
