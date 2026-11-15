@@ -273,6 +273,7 @@ type responsesAnthropicTool struct {
 }
 
 type responsesAnthropicReasoning struct {
+	outputIndex   int
 	summary, raw  map[int]string
 	delivered     string
 	signature     string
@@ -870,9 +871,23 @@ func resToAnthReasoningOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnth
 	}
 	key := resToAnthItemKey(evt, state)
 	r := state.reasoning[key]
+	anonymous := fmt.Sprintf("output:%d", evt.OutputIndex)
+	if r == nil && key != anonymous && (state.itemIDs[evt.OutputIndex] == "" || state.itemIDs[evt.OutputIndex] == key) {
+		r = state.reasoning[anonymous]
+		if r != nil {
+			delete(state.reasoning, anonymous)
+			state.reasoning[key] = r
+		}
+	}
 	if r == nil {
-		r = &responsesAnthropicReasoning{summary: make(map[int]string), raw: make(map[int]string)}
+		r = &responsesAnthropicReasoning{outputIndex: evt.OutputIndex, summary: make(map[int]string), raw: make(map[int]string)}
 		state.reasoning[key] = r
+	}
+	if key != anonymous {
+		if state.itemIDs == nil {
+			state.itemIDs = make(map[int]string)
+		}
+		state.itemIDs[r.outputIndex] = key
 	}
 	return r
 }
@@ -893,6 +908,7 @@ func resToAnthJoinReasoning(parts map[int]string) string {
 func resToAnthOpenReasoning(r *responsesAnthropicReasoning, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	events := closeCurrentBlock(state)
 	idx := state.ContentBlockIndex
+	state.OutputIndexToBlockIdx[r.outputIndex] = idx
 	state.ContentBlockOpen = true
 	state.CurrentBlockType = "thinking"
 	state.activeReasoning = r

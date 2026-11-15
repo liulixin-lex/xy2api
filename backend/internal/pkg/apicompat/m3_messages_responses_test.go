@@ -741,3 +741,47 @@ func TestM3UnknownTerminalMappingNotices(t *testing.T) {
 		}
 	}
 }
+
+func TestM3ReviewR1DeferredReasoningIdentity(t *testing.T) {
+	st := NewResponsesEventToAnthropicState()
+	var events []AnthropicStreamEvent
+	feed := func(e *ResponsesStreamEvent) {
+		_, opened := st.OutputIndexToBlockIdx[e.OutputIndex]
+		if !opened && (e.Type == "response.reasoning_summary_text.delta" || e.Type == "response.reasoning_text.delta" || e.Type == "response.output_item.done" && e.Item != nil && e.Item.Type == "reasoning") {
+			events = append(events, ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: e.OutputIndex, Item: &ResponsesOutput{Type: "reasoning"}}, st)...)
+		}
+		events = append(events, ResponsesEventToAnthropicEvents(e, st)...)
+	}
+	for _, e := range []*ResponsesStreamEvent{
+		{Type: "response.reasoning_summary_part.added", ItemID: "rs_1", Part: &ResponsesContentPart{Type: "summary_text"}},
+		{Type: "response.reasoning_summary_text.delta", ItemID: "rs_1", Delta: "Think"},
+		{Type: "response.reasoning_summary_text.delta", ItemID: "rs_1", Delta: "ing"},
+		{Type: "response.reasoning_summary_text.done", ItemID: "rs_1", Text: "Thinking"},
+		{Type: "response.reasoning_summary_part.done", ItemID: "rs_1"},
+		{Type: "response.output_item.done", Item: &ResponsesOutput{Type: "reasoning", ID: "rs_1", EncryptedContent: "signature"}},
+		{Type: "response.output_text.done", OutputIndex: 1, Text: "answer"},
+		{Type: "response.completed", Response: &ResponsesResponse{Status: "completed"}},
+	} {
+		feed(e)
+	}
+	require.NoError(t, st.Err())
+	var thought string
+	starts, signatures := 0, 0
+	for _, e := range events {
+		if e.ContentBlock != nil && e.ContentBlock.Type == "thinking" {
+			starts++
+		}
+		if e.Delta != nil {
+			thought += e.Delta.Thinking
+			if e.Delta.Type == "signature_delta" {
+				signatures++
+				require.Equal(t, 0, *e.Index)
+			}
+		}
+	}
+	require.Equal(t, 1, starts)
+	require.Equal(t, "Thinking", thought)
+	require.Equal(t, 1, signatures)
+	require.Equal(t, "answer", collectAnthropicText(events))
+	requireAnthropicBlockLifecycle(t, events)
+}
