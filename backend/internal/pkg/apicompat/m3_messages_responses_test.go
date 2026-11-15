@@ -9,6 +9,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestM3TerraMax(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, effort, thinking, want string
+		invalid                             bool
+	}{
+		{name: "Terra max", model: "gpt-6.1-terra", effort: "max", want: "max"},
+		{name: "Terra suffix", model: "gpt-6.1-terra-high", effort: "max", want: "max"},
+		{name: "Terra compact", model: "gpt-6.1-terra-openai-compact", effort: "max", want: "max"},
+		{name: "Terra none", model: "gpt-6.1-terra", effort: "none", want: "none"},
+		{name: "disabled wins", model: "gpt-6.1-terra", effort: "max", thinking: "disabled", want: "none"},
+		{name: "disabled minimal", model: "gpt-6.1-terra", effort: "minimal", thinking: "disabled", want: "none"},
+		{name: "Terra minimal", model: "gpt-6.1-terra", effort: "minimal", invalid: true},
+		{name: "Sol max", model: "gpt-6.1-sol", effort: "max", want: "max"},
+		{name: "older Terra", model: "gpt-5.6-terra", effort: "max", want: "xhigh"},
+		{name: "other model", model: "gpt-5.2", effort: "max", want: "xhigh"},
+		{name: "unknown alias", model: "my-terra", effort: "max", want: "xhigh"},
+		{name: "unknown suffix", model: "gpt-6.1-terra-preview", effort: "max", want: "xhigh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &AnthropicRequest{
+				Model:        tc.model,
+				Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+				OutputConfig: &AnthropicOutputConfig{Effort: tc.effort},
+			}
+			if tc.thinking != "" {
+				req.Thinking = &AnthropicThinking{Type: tc.thinking}
+			}
+			out, err := AnthropicToResponsesWithOptions(req, ConversionOptions{})
+			if tc.invalid {
+				require.ErrorContains(t, err, "does not support reasoning effort")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, out.Reasoning.Effort)
+			if tc.want == "none" {
+				require.Empty(t, out.Reasoning.Summary)
+			}
+			legacy, err := AnthropicToResponses(req)
+			require.NoError(t, err)
+			require.Equal(t, out, legacy)
+		})
+	}
+}
+
+
 func TestM3ForeignReasoningEnvelope(t *testing.T) {
 	for _, tc := range []struct {
 		name, signature string
