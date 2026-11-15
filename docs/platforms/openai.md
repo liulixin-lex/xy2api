@@ -54,6 +54,8 @@ API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effo
 
 Chat 转 Responses 时，显式的正数输出上限原值保留，包括 1 至 127；不会自动提高到 128，也不会在拒参重放时删除硬输出上限。
 
+Chat 的 `response_format.json_schema` 转为 Responses `text.format` 时，缺省 `strict` 补为 `false`；显式 `true` 或 `false` 保持原值，schema 内容不改。
+
 ## 客户端配置
 
 ### Codex CLI
