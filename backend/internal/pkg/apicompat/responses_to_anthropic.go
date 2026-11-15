@@ -418,9 +418,9 @@ func resToAnthToolOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropic
 
 // resToAnthTerminalTool finds the streamed tool that a terminal output item
 // restates. Terminal output need not follow the streamed order, so its array
-// position is not an identity: an item matches by item ID, then by call ID,
-// then by order among the streamed tools not yet matched. Distinct known IDs
-// never match.
+// position is not an identity: an item matches by item ID, then by call ID
+// (some gateways mint new terminal item IDs), then by order among the streamed
+// tools not yet matched.
 func resToAnthTerminalTool(item *ResponsesOutput, matched map[*responsesAnthropicTool]bool, state *ResponsesEventToAnthropicState) *responsesAnthropicTool {
 	if tool := state.toolItems[item.ID]; item.ID != "" && tool != nil {
 		return tool
@@ -429,10 +429,9 @@ func resToAnthTerminalTool(item *ResponsesOutput, matched map[*responsesAnthropi
 		return nil
 	}
 	for _, tool := range state.toolOrder {
-		if matched[tool] || item.ID != "" && tool.itemID != "" || item.CallID != "" && item.CallID != tool.callID {
-			continue
+		if !matched[tool] && (item.CallID == "" || item.CallID == tool.callID) {
+			return tool
 		}
-		return tool
 	}
 	return nil
 }
@@ -1338,6 +1337,9 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 			}
 			if tool != nil {
 				matched[tool] = true
+				if tool.itemID != "" && item.ID != tool.itemID {
+					item.ID = "" // Matched by call ID or order; the minted ID is not an identity.
+				}
 				tool = resToAnthToolOf(&ResponsesStreamEvent{OutputIndex: tool.index, OutputIndexPresent: true, Item: &item}, state)
 				if tool == nil {
 					return nil
