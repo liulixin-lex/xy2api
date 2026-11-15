@@ -34,7 +34,7 @@ func canTryOpenAIQueueReselection(c *gin.Context, hardOwner bool) bool {
 		return false
 	}
 	budget := requestBudget(c.Request.Context())
-	return budget == nil || budget.AdmissionRemaining(time.Now(), false) > 0
+	return budget == nil || budget.CanAttempt(time.Now())
 }
 
 func deferOpenAIQueueRejection(c *gin.Context, status int, errType, code, message string) bool {

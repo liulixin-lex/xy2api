@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -67,7 +68,7 @@ func (repo *queueReselectionRepo) GetByID(_ context.Context, id int64) (*service
 }
 
 func TestQueueRejectionGetsOneFreeSlotReselection(t *testing.T) {
-	for _, mode := range []string{"queue_full", "wait_timeout", "all_full", "canceled", "deadline", "hard_owner", "once_only"} {
+	for _, mode := range []string{"queue_full", "wait_timeout", "all_full", "canceled", "deadline", "budget_expired", "budget_attempts", "hard_owner", "once_only"} {
 		t.Run(mode, func(t *testing.T) {
 			withHandlerResilience(t, nil)
 			cache := &queueReselectionCache{queueFull: mode != "wait_timeout", freeB: mode != "all_full", attempts: map[int64]int{}}
@@ -84,6 +85,21 @@ func TestQueueRejectionGetsOneFreeSlotReselection(t *testing.T) {
 				var expiredCancel context.CancelFunc
 				ctx, expiredCancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 				defer expiredCancel()
+			}
+			if mode == "budget_expired" || mode == "budget_attempts" {
+				state := resilience.NewRequestState()
+				start := time.Now()
+				if mode == "budget_expired" {
+					start = start.Add(-time.Hour)
+				}
+				budget := resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, start)
+				if mode == "budget_attempts" {
+					for i := 0; i < resilience.Current().Budget.MaxAttempts; i++ {
+						budget.RecordAttemptAt(time.Now())
+					}
+				}
+				state.SetBudget(budget)
+				ctx = resilience.WithRequestState(ctx, state)
 			}
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
