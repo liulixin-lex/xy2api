@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -208,8 +209,7 @@ func TestHandleErrorResponse_Deterministic400WithNonJSONBody(t *testing.T) {
 	require.NotEmpty(t, gjson.Get(body, "error.message").String())
 }
 
-// 作用域守卫：本次只放行 400。其余落到 default 的状态码必须维持原样，
-// 避免后续有人顺手把 404/422/5xx 一起改掉。
+// Preserve existing generic exits outside the narrow 400/408/409/422 set.
 func TestHandleErrorResponse_NonDeterministicStatusesKeepGeneric502(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -223,7 +223,7 @@ func TestHandleErrorResponse_NonDeterministicStatusesKeepGeneric502(t *testing.T
 		{"not_found", http.StatusNotFound, `{"error":{"message":"Unknown request URL"}}`,
 			http.StatusBadGateway, "upstream_error", "Upstream request failed"},
 		{"unprocessable", http.StatusUnprocessableEntity, `{"error":{"message":"Invalid schema for field messages"}}`,
-			http.StatusBadGateway, "upstream_error", "Upstream request failed"},
+			http.StatusUnprocessableEntity, "invalid_request_error", "Invalid schema for field messages"},
 		// 401/402/403 是网关运营方的凭据/账单问题，必须继续对客户端屏蔽上游账号状态。
 		// 403 的自由文本不能升级成 durable access-state typed failover；只有明确结构化 code 才可以。
 		{"unauthorized", http.StatusUnauthorized, `{"error":{"message":"Incorrect API key provided: sk-abc"}}`,
@@ -279,11 +279,13 @@ func TestHandleErrorResponse_PassthroughRuleStillWinsOver400Branch(t *testing.T)
 }
 
 func TestIsOpenAIDeterministicClientError(t *testing.T) {
-	require.True(t, isOpenAIDeterministicClientError(http.StatusBadRequest))
+	for _, status := range []int{400, 408, 409, 422} {
+		require.True(t, isOpenAIDeterministicClientError(status))
+	}
 	for _, status := range []int{
 		http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden,
 		http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusRequestEntityTooLarge,
-		http.StatusUnprocessableEntity, http.StatusTooManyRequests,
+		http.StatusTooManyRequests,
 		http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable,
 	} {
 		require.False(t, isOpenAIDeterministicClientError(status), "status %d", status)
@@ -356,4 +358,91 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 			require.NotContains(t, body, "secret123", "原始 body 里的敏感串不得泄漏")
 		})
 	}
+}
+
+func TestM8CompatStatusFieldsReachClient(t *testing.T) {
+	for _, status := range []int{408, 409, 422} {
+		for _, fields := range []bool{false, true} {
+			for _, path := range []string{"native", "chat", "anthropic", "chat_committed"} {
+				t.Run(fmt.Sprintf("%d/fields=%t/%s", status, fields, path), func(t *testing.T) {
+					c, rec := newOpenAIUpstreamErrorTestContext(t)
+					body := `{"error":{"message":"The request could not be processed"}}`
+					errType, code, param := "invalid_request_error", "conflict", ""
+					if status == 408 {
+						errType, code = "upstream_error", "request_timeout"
+					}
+					if status == 422 {
+						code = "unprocessable_entity"
+					}
+					if fields {
+						body = `{"error":{"type":"custom_request_error","code":"invalid_value","param":"input[0]","message":"The request could not be processed"}}`
+						errType, code, param = "custom_request_error", "invalid_value", "input[0]"
+					}
+					if path == "chat_committed" {
+						c.Header("Content-Type", "text/event-stream")
+						_, err := c.Writer.WriteString(": heartbeat\n\n")
+						require.NoError(t, err)
+						c.Writer.Flush()
+					}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}}
+					resp := newOpenAIUpstreamErrorResponse(status, body)
+					account := newOpenAIUpstreamErrorTestAccount()
+					var err error
+					if path == "native" {
+						_, err = svc.handleErrorResponse(context.Background(), resp, c, account, nil)
+					} else {
+						protocol := PreOutputProtocolChat
+						if path == "anthropic" {
+							protocol = PreOutputProtocolAnthropic
+						}
+						_, err = svc.handleCompatErrorResponseWithFields(resp, c, account, func(c *gin.Context, status int, typ, code, param, msg string) {
+							WriteTargetProtocolError(c, protocol, status, typ, code, param, msg)
+						}, false)
+					}
+					require.Error(t, err)
+					output := rec.Body.String()
+					if path == "chat_committed" {
+						require.Equal(t, 200, rec.Code)
+						require.Equal(t, 1, strings.Count(output, `"error":`))
+						require.False(t, WriteTargetProtocolError(c, PreOutputProtocolChat, status, errType, code, param, "second"))
+						line := strings.Split(strings.Split(output, "data: ")[1], "\n")[0]
+						output = line
+					} else {
+						require.Equal(t, status, rec.Code)
+					}
+					require.Equal(t, errType, gjson.Get(output, "error.type").String())
+					require.Equal(t, "The request could not be processed", gjson.Get(output, "error.message").String())
+					if path == "anthropic" {
+						require.Equal(t, "error", gjson.Get(output, "type").String())
+						require.False(t, gjson.Get(output, "error.code").Exists())
+						require.False(t, gjson.Get(output, "error.param").Exists())
+					} else {
+						require.Equal(t, code, gjson.Get(output, "error.code").String())
+						require.Equal(t, param, gjson.Get(output, "error.param").String())
+					}
+				})
+			}
+		}
+	}
+	t.Run("safe_scalar_fields", func(t *testing.T) {
+		typ, code, param, message := upstreamClientErrorFields(422, []byte(`{"error":{"type":{"secret":"x"},"code":["x"],"param":{"x":1},"message":"secret"}}`), "redacted")
+		require.Equal(t, "invalid_request_error", typ)
+		require.Equal(t, "unprocessable_entity", code)
+		require.Empty(t, param)
+		require.Equal(t, "redacted", message)
+	})
+	t.Run("rule_precedes_projection", func(t *testing.T) {
+		c, rec := newOpenAIUpstreamErrorTestContext(t)
+		rules := &ErrorPassthroughService{}
+		rules.setLocalCache([]*model.ErrorPassthroughRule{newNonFailoverPassthroughRule(422, "specific", 418, "rule message")})
+		BindErrorPassthroughService(c, rules)
+		svc := &OpenAIGatewayService{cfg: &config.Config{}}
+		_, err := svc.handleCompatErrorResponseWithFields(newOpenAIUpstreamErrorResponse(422, `{"error":{"message":"specific","code":"original"}}`), c, newOpenAIUpstreamErrorTestAccount(), func(c *gin.Context, status int, typ, code, param, msg string) {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, status, typ, code, param, msg)
+		}, false)
+		require.Error(t, err)
+		require.Equal(t, 418, rec.Code)
+		require.Equal(t, "rule message", gjson.Get(rec.Body.String(), "error.message").String())
+		require.False(t, gjson.Get(rec.Body.String(), "error.code").Exists())
+	})
 }
