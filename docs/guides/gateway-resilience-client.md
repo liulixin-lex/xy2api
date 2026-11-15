@@ -124,7 +124,7 @@ Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancell
 
 ## 请求修复与重放
 
-以下情况网关在本地修复请求后，在同一账号上重放，客户端不感知失败尝试。重放消耗本请求预算中的尝试次数，预算不足时不重放、原错误照常返回。
+以下情况网关在本地修复请求后，在同一账号上重放，客户端不感知失败尝试。重放消耗本请求预算中的尝试次数，预算不足时不重放；密文拒绝按下述专用错误返回，其他错误照常返回。
 
 | 上游拒绝 | 网关处理 |
 |---|---|
@@ -134,6 +134,8 @@ Responses 的 `response.done` 按其中的 `status` 处理：`failed`、`cancell
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 补上 web_search 工具声明后重放一次；成功后该账号 6 小时内同类请求直接补声明。仍失败时返回 502 并说明原因，不换号 |
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
+
+原生 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或修复一次仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
 Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务正文，网关优先把它调度到父线程的粘性账号（只有父线程的账号能解开），父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`。父账号不可用时普通选号。
 

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -13,15 +15,65 @@ type openAIEncryptedContentRejectionError struct{ Param, Message string }
 
 func (e *openAIEncryptedContentRejectionError) Error() string { return e.Message }
 
-func isHTTPReasoningEncryptedRejection(payload []byte, message string) bool {
+func openAIHTTPErrorProtocol(c *gin.Context) string {
+	if c != nil && c.Request != nil && c.Request.URL != nil {
+		switch {
+		case strings.HasSuffix(c.Request.URL.Path, "/chat/completions"):
+			return PreOutputProtocolChat
+		case strings.HasSuffix(c.Request.URL.Path, "/messages"):
+			return PreOutputProtocolAnthropic
+		}
+	}
+	return PreOutputProtocolResponses
+}
+
+func suppressHTTPStateRejectionRetry(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if c.Request != nil {
+		resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true, Source: "non_retryable"})
+	}
+	if c.Writer != nil && !c.Writer.Written() {
+		c.Header("Retry-After", "")
+		c.Header("x-should-retry", "false")
+	}
+}
+
+func writeOpenAIEncryptedContentRejection(c *gin.Context, protocol string, rejection *openAIEncryptedContentRejectionError) bool {
+	if rejection == nil {
+		return false
+	}
+	suppressHTTPStateRejectionRetry(c)
+	return WriteTargetProtocolError(c, protocol, http.StatusBadRequest, "invalid_request_error", "encrypted_content_rejected", rejection.Param, rejection.Message)
+}
+
+func isHTTPReasoningEncryptedRejection(body, payload []byte, message string) bool {
 	if !isOpenAIEncryptedContentRejectionPayload(payload) && !resilience.IsEncryptedContentRejection("", message) {
 		return false
 	}
 	// The nested M3 repair contract has its own state and budget. Do not turn
 	// those requests into top-level reasoning/compaction failures.
 	switch openAIStateRejection(payload, message).Family {
-	case resilience.StateConversationInvalid, resilience.StateFunctionOutput, resilience.StateAgentMessage, resilience.StateRelay:
+	case resilience.StateFunctionOutput, resilience.StateAgentMessage, resilience.StateRelay:
 		return false
+	case resilience.StateOtherEncrypted, resilience.StateConversationInvalid:
+		input := gjson.GetBytes(body, "input")
+		items := input.Array()
+		if input.IsObject() {
+			items = []gjson.Result{input}
+		}
+		for _, item := range items {
+			if openAIEncryptedLineageItemType(item.Get("type").String()) {
+				return true
+			}
+		}
+		// A generic wrapped rejection of an existing nested M3 request must
+		// retain its prior repair path, even without a named amsg_ locator.
+		if slots, _, err := openAIM3Slots(body); err == nil && len(slots) > 0 {
+			return false
+		}
+		return true
 	default:
 		return true
 	}

@@ -298,7 +298,8 @@ func TestForwardOpenAIRequestRepairDoesNotReplayUnrepairableOrExhausted(t *testi
 			}
 			require.Len(t, upstream.bodies, 1)
 			if failoverErr == nil {
-				require.Contains(t, req.rec.Body.String(), "response.failed")
+				require.Equal(t, http.StatusBadRequest, req.rec.Code)
+				require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
 				require.Contains(t, req.rec.Body.String(), tc.message)
 			}
 			repair := openAIRequestRepairFrom(req.c)
@@ -326,7 +327,8 @@ func TestForwardOpenAIRequestRepairHTTPAndInbandShareEncryptedRetry(t *testing.T
 	require.NotErrorAs(t, err, &failoverErr)
 	require.Len(t, upstream.bodies, 2)
 	require.True(t, openAIRequestRepairFrom(req.c).encryptedTried)
-	require.Contains(t, req.rec.Body.String(), "response.failed")
+	require.Equal(t, http.StatusBadRequest, req.rec.Code)
+	require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
 	require.Empty(t, req.session.failures)
 }
 

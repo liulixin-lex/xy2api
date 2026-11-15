@@ -1258,17 +1258,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				continue
 			}
+			encryptedErrorPayload := respBody
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			invalidEncryptedContentError := isOpenAIEncryptedContentRejectionPayload(respBody) || resilience.IsEncryptedContentRejection(upstreamCode, upstreamMsg)
-			if requestRepair != nil && !requestRepair.encryptedTried &&
-				(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&
-				invalidEncryptedContentError {
-				selected, repairErr := openAIEncryptedContentRepairBody(body, respBody)
-				if repairErr != nil {
-					return nil, fmt.Errorf("prepare invalid_encrypted_content retry body: %w", repairErr)
-				}
-				if selected.Changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+			if (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) && isHTTPReasoningEncryptedRejection(body, encryptedErrorPayload, upstreamMsg) {
+				selected, repairErr := openAIRequestEncryptedContentRepairBody(c, body, encryptedErrorPayload)
+				if requestRepair != nil && !requestRepair.encryptedTried && repairErr == nil && selected.Changed && ctx.Err() == nil && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
 					markEncryptedLineage(selected)
 					body, requestView, reqBody = selected.Body, newOpenAIRequestView(selected.Body), nil
 					requestRepair.encryptedTried = true
@@ -1277,6 +1272,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))
 					continue
 				}
+				rejection := newOpenAIEncryptedContentRejection(ctx, account, body, encryptedErrorPayload)
+				captureOpenAIStateRejection(c, account, encryptedErrorPayload, upstreamMsg, "native_http", false, body)
+				writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
+				return nil, &OpenAIRequestRejectionError{rejection}
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account, resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
