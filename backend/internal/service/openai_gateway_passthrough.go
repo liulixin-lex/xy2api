@@ -2404,6 +2404,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	var firstTokenMs *int
 	responseID := ""
 	responseCreatedAt := int64(0)
+	nextFailureSequence := int64(0)
 	ttftMode := s.openAITTFTMode(ctx)
 	clientDisconnected := false
 	sawDone := false
@@ -2536,7 +2537,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if !claimOpenAIResponsesTerminal(c) {
 			return
 		}
-		clientErrorPayload := openAIResponsesFailureSource(bareErrorPayload, usage, responseCreatedAt)
+		clientErrorPayload := openAIResponsesFailureSource(bareErrorPayload, usage, responseCreatedAt, nextFailureSequence)
 		if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientErrorPayload); changed {
 			clientErrorPayload = rewritten
 		}
@@ -2663,6 +2664,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		restoreFailureEventLine := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if sequence := gjson.GetBytes(dataBytes, "sequence_number"); sequence.Exists() && sequence.Int() >= nextFailureSequence {
+				nextFailureSequence = sequence.Int() + 1
+			}
 			if at := gjson.GetBytes(dataBytes, "response.created_at"); at.Exists() {
 				responseCreatedAt = at.Int()
 			}

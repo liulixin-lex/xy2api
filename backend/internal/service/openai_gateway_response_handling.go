@@ -500,7 +500,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected && claimOpenAIResponsesTerminal(c) {
 			applyAttemptResponseHeaders()
-			clientErrorPayload := openAIResponsesFailureSource(bareErrorPayload, usage, responseCreatedAt)
+			clientErrorPayload := openAIResponsesFailureSource(bareErrorPayload, usage, responseCreatedAt, nextFailureSequence)
 			if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientErrorPayload); changed {
 				clientErrorPayload = rewritten
 			}
@@ -884,7 +884,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				line = "data: " + data
 			}
 			if currentTerminal.Failure && currentTerminal.EventType == "error" && !codexFailureTerminal && strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String()) == "" {
-				frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, openAIResponsesFailureSource(dataBytes, usage, responseCreatedAt), failedMessage)
+				frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, openAIResponsesFailureSource(dataBytes, usage, responseCreatedAt, nextFailureSequence), failedMessage)
 				line = strings.TrimSuffix(frame, "\n\n")
 			}
 			// Replace model in response if needed.
@@ -2773,7 +2773,12 @@ func openAIResponsesFailureMetadata(usage *OpenAIUsage, createdAt int64) gin.H {
 	return metadata
 }
 
-func openAIResponsesFailureSource(payload []byte, usage *OpenAIUsage, createdAt int64) []byte {
+func openAIResponsesFailureSource(payload []byte, usage *OpenAIUsage, createdAt, nextSequence int64) []byte {
+	if !gjson.GetBytes(payload, "sequence_number").Exists() {
+		if patched, err := sjson.SetBytes(payload, "sequence_number", nextSequence); err == nil {
+			payload = patched
+		}
+	}
 	for key, value := range openAIResponsesFailureMetadata(usage, createdAt) {
 		if gjson.GetBytes(payload, "response."+key).Exists() || key == "usage" && gjson.GetBytes(payload, "usage").IsObject() {
 			continue
