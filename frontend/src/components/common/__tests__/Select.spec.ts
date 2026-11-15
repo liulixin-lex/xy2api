@@ -137,6 +137,36 @@ describe('Select dropdown viewport constraints', () => {
   })
 })
 
+describe('Select size sm (12.6)', () => {
+  it('marks only the sm trigger, filled once a value is chosen; md keeps its classes', async () => {
+    const options = [{ value: '', label: 'All' }, { value: 'a', label: 'A' }]
+    const md = mount(Select, { props: { modelValue: 'a', options } })
+    expect(md.get('button').classes()).toEqual(['select-trigger'])
+    md.unmount()
+
+    const sm = mount(Select, { props: { modelValue: '', options, size: 'sm' } })
+    expect(sm.get('button').classes()).toEqual(['select-trigger', 'select-trigger--sm'])
+    await sm.setProps({ modelValue: 'a' })
+    expect(sm.get('button').classes()).toEqual(['select-trigger', 'select-trigger--sm', 'select-trigger--filled'])
+    sm.unmount()
+  })
+
+  it('opens a panel at least as wide as the trigger and 168px, at most 320px', async () => {
+    setViewportWidth(1280)
+    mockTriggerRect(100, 96)
+    const narrow = await openSelect({ size: 'sm' })
+    expect(narrow?.classList.contains('select-dropdown-portal--sm')).toBe(true)
+    expect(narrow?.style.minWidth).toBe('168px')
+    expect(narrow?.style.maxWidth).toBe('320px')
+    unmountWrapper?.()
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
+
+    mockTriggerRect(100, 220)
+    expect((await openSelect({ size: 'sm' }))?.style.minWidth).toBe('220px')
+  })
+})
+
 describe('Select remote search', () => {
   const mountRemoteSelect = (props: Record<string, unknown> = {}) => {
     const wrapper = mount(Select, {
