@@ -198,13 +198,16 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Calculate cost
 	tokens := UsageTokens{
-		InputTokens:          actualInputTokens,
-		ImageInputTokens:     max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens: result.Usage.ImageCacheReadTokens,
-		OutputTokens:         result.Usage.OutputTokens,
-		CacheCreationTokens:  result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:      result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:    result.Usage.ImageOutputTokens,
+		InputTokens:                actualInputTokens,
+		ImageInputTokens:           max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:       result.Usage.ImageCacheReadTokens,
+		OutputTokens:               result.Usage.OutputTokens,
+		CacheCreationTokens:        result.Usage.CacheCreationInputTokens,
+		CacheCreationTokensPresent: result.Usage.CacheCreationInputTokensPresent,
+		CacheCreation5mTokens:      result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		CacheCreation5mTokensPresent: result.Usage.CacheCreation5mTokensPresent, CacheCreation1hTokensPresent: result.Usage.CacheCreation1hTokensPresent,
+		CacheReadTokens:   result.Usage.CacheReadInputTokens,
+		ImageOutputTokens: result.Usage.ImageOutputTokens,
 	}
 
 	// Get rate multiplier
@@ -409,16 +412,17 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
 		CacheCreationTokens:      result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:          result.Usage.CacheReadInputTokens,
-		ImageInputTokens:         result.Usage.ImageInputTokens,
-		ImageOutputTokens:        result.Usage.ImageOutputTokens,
-		ImageCount:               result.ImageCount,
-		ImageSize:                optionalTrimmedStringPtr(result.ImageSize),
-		ImageInputSize:           optionalTrimmedStringPtr(result.ImageInputSize),
-		ImageOutputSize:          optionalTrimmedStringPtr(result.ImageOutputSize),
-		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
-		ImageSizeBreakdown:       imageSizeBreakdown,
-		NativeCompactionV2:       input.NativeCompactionV2,
+		CacheCreation5mTokens:    result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		CacheReadTokens:    result.Usage.CacheReadInputTokens,
+		ImageInputTokens:   result.Usage.ImageInputTokens,
+		ImageOutputTokens:  result.Usage.ImageOutputTokens,
+		ImageCount:         result.ImageCount,
+		ImageSize:          optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:     optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:    optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:    optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown: imageSizeBreakdown,
+		NativeCompactionV2: input.NativeCompactionV2,
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {

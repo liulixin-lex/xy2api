@@ -1214,14 +1214,16 @@ func (s *GatewayService) calculateTokenCost(
 	pricingAt time.Time,
 ) *CostBreakdown {
 	tokens := UsageTokens{
-		InputTokens:                result.Usage.InputTokens,
-		OutputTokens:               result.Usage.OutputTokens,
-		CacheCreationTokens:        result.Usage.CacheCreationInputTokens,
-		CacheCreationTokensPresent: result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
-		CacheReadTokens:            result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens:      result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens:      result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:          result.Usage.ImageOutputTokens,
+		InputTokens:                  result.Usage.InputTokens,
+		OutputTokens:                 result.Usage.OutputTokens,
+		CacheCreationTokens:          result.Usage.CacheCreationInputTokens,
+		CacheCreationTokensPresent:   result.Usage.CacheCreationInputTokensPresent,
+		CacheReadTokens:              result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:        result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:        result.Usage.CacheCreation1hTokens,
+		CacheCreation5mTokensPresent: result.Usage.CacheCreation5mTokensPresent,
+		CacheCreation1hTokensPresent: result.Usage.CacheCreation1hTokensPresent,
+		ImageOutputTokens:            result.Usage.ImageOutputTokens,
 	}
 
 	var resolved *ResolvedPricing
