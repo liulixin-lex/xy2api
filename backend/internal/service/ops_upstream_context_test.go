@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -381,4 +382,41 @@ func TestOpsServiceGetErrorLogByIDNormalizesLegacyProxyAttribution(t *testing.T)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_mode"`)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_source"`)
 	require.NotContains(t, detail.UpstreamErrors, `"proxy_fallback"`)
+}
+
+func TestM8RejectedFieldResentBoundary(t *testing.T) {
+	c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+	RecordOpsUpstreamSendBoundary(ctx, 11)
+	event := appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: 11, UpstreamStatusCode: 400, RejectedField: " stop ", Message: "Unsupported parameter: stop"})
+	rejectedAt := st.OpsUpstreamEventSequence()
+	require.Same(t, event, opsUpstreamEventsForTest(t, c)[0])
+	require.Equal(t, "stop", event.RejectedField)
+	require.False(t, event.Resent)
+	prior, ok := st.OpsUpstreamSendBoundary(11)
+	require.True(t, ok)
+	require.Less(t, prior, rejectedAt)
+	raw, err := json.Marshal(event)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"resent":false`)
+	// A subsequent rejection is a distinct event, not a new alias of the first.
+	other := appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: 12, UpstreamStatusCode: 400, RejectedField: "temperature"})
+	RecordOpsUpstreamSendBoundary(ctx, 12)
+	boundary, _ := st.OpsUpstreamSendBoundary(11)
+	require.Less(t, boundary, rejectedAt)
+	require.False(t, event.Resent)
+	RecordOpsUpstreamSendBoundary(ctx, 11)
+	boundary, ok = st.OpsUpstreamSendBoundary(11)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, boundary, rejectedAt)
+	// The repair caller retains and marks this exact reference only after send.
+	event.Resent = true
+	require.True(t, opsUpstreamEventsForTest(t, c)[0].Resent)
+	require.False(t, other.Resent)
+	var decoded OpsUpstreamErrorEvent
+	raw, err = json.Marshal(other)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	require.False(t, decoded.Resent)
+	require.Equal(t, "temperature", decoded.RejectedField)
+	require.Nil(t, appendOpsUpstreamError(nil, OpsUpstreamErrorEvent{}))
 }

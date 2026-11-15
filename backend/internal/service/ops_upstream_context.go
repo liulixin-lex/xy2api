@@ -491,9 +491,9 @@ const (
 	opsProxyNameUnnamed = "proxy"
 )
 
-func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
+func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) *OpsUpstreamErrorEvent {
 	if c == nil {
-		return
+		return nil
 	}
 	if ev.AtUnixMs <= 0 {
 		ev.AtUnixMs = time.Now().UnixMilli()
@@ -509,6 +509,8 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.UpstreamURL = strings.TrimSpace(ev.UpstreamURL)
 	ev.Message = strings.TrimSpace(ev.Message)
 	ev.Detail = strings.TrimSpace(ev.Detail)
+	ev.RejectedField = strings.TrimSpace(ev.RejectedField)
+	ev.Resent = false
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
 	}
@@ -537,6 +539,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	}
 
 	checkSkipMonitoringForUpstreamEvent(c, &evCopy)
+	return &evCopy
 }
 
 // RecordOpsUpstreamSendBoundary records the current upstream-event sequence
