@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Anthropic 上游在允许 EOF 收尾的配置下省略 stop_reason 时，Responses 仍发送一次完整终态。
+
 - Chat 上游工具期发生长度截断或内容过滤时，Messages 响应保留排队正文与参数片段，并按原结束原因收尾。
 
 - Chat 上游省略 finish_reason、但以 DONE 或完整尾部用量正常结束时，完整工具调用继续正常交付。
