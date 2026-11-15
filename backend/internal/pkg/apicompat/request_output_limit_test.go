@@ -31,3 +31,25 @@ func TestEffectiveRequestMaxOutputTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectiveChatMaxOutputTokens(t *testing.T) {
+	one, thousand, zero := 1, 1000, 0
+	for _, tc := range []struct {
+		req   *ChatCompletionsRequest
+		want  int
+		field string
+		bad   bool
+	}{
+		{nil, 0, "", false},
+		{&ChatCompletionsRequest{}, 0, "", false},
+		{&ChatCompletionsRequest{MaxCompletionTokens: &one, MaxTokens: &thousand}, 1, "max_completion_tokens", false},
+		{&ChatCompletionsRequest{MaxTokens: &one, MaxOutputTokens: &thousand}, 1, "max_tokens", false},
+		{&ChatCompletionsRequest{MaxOutputTokens: &one}, 1, "max_output_tokens", false},
+		{&ChatCompletionsRequest{MaxCompletionTokens: &zero, MaxTokens: &thousand}, 0, "max_completion_tokens", true},
+	} {
+		n, field, err := EffectiveChatMaxOutputTokens(tc.req)
+		if (err != nil) != tc.bad || field != tc.field || n == nil && tc.want != 0 || n != nil && *n != tc.want {
+			t.Fatal(tc, n, field, err)
+		}
+	}
+}
