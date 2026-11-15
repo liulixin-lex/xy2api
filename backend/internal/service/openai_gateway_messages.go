@@ -804,6 +804,28 @@ type openAICompatBufferedReadError struct {
 func (e *openAICompatBufferedReadError) Error() string { return e.cause.Error() }
 func (e *openAICompatBufferedReadError) Unwrap() error { return e.cause }
 
+func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse {
+	if event == nil {
+		return nil
+	}
+	if event.Response != nil {
+		return event.Response
+	}
+	switch strings.TrimSpace(event.Type) {
+	case "response.failed", "error":
+		message := extractOpenAISSEErrorMessage(payload)
+		if message == "" {
+			message = "Upstream response failed"
+		}
+		return &apicompat.ResponsesResponse{
+			Status: "failed",
+			Error:  &apicompat.ResponsesError{Code: event.Code, Message: message},
+		}
+	default:
+		return nil
+	}
+}
+
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,
 	c *gin.Context,
@@ -925,7 +947,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			if event.Response.Usage == nil {
 				event.Response.Usage = event.Usage
 			}
-			return event.Response, nil
+			return openAICompatTerminalResponse(&event, []byte(payload)), nil
 		}
 		return nil, nil
 	}
