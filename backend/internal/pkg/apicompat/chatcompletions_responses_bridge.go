@@ -1958,6 +1958,9 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 	}
 	state.ReasoningOpen = true
 	state.ReasoningItemID = generateItemID()
+	if bridgeEnabled(state.Bridge) {
+		state.ReasoningItemID = generateReasoningItemID()
+	}
 	state.ReasoningIndex = state.allocOutputIndex()
 	return []ResponsesStreamEvent{
 		chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -2242,7 +2245,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	if state.Reasoning.Len() > 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   chatBridgeReasoningItemID(state),
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: state.Reasoning.String(),
@@ -2384,4 +2387,11 @@ func (state *ChatCompletionsToResponsesStreamState) Err() error {
 }
 func chatBridgeToolItemID(state *ChatCompletionsToResponsesStreamState, slot int) string {
 	return state.ToolItemIDs[slot]
+}
+
+func chatBridgeReasoningItemID(state *ChatCompletionsToResponsesStreamState) string {
+	if bridgeEnabled(state.Bridge) {
+		return state.ReasoningItemID
+	}
+	return generateItemID()
 }

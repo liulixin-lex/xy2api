@@ -205,6 +205,9 @@ func ChatCompletionsResponseToResponsesWithBridgeOptions(resp *ChatCompletionsRe
 	out := ChatCompletionsResponseToResponses(resp, model, customTools, functionTools, toolSearch, namespaceTools)
 	if bridgeEnabled(opts.Bridge) {
 		for i := range out.Output {
+			if out.Output[i].Type == "reasoning" {
+				out.Output[i].ID = generateReasoningItemID()
+			}
 			restoreBridgeOutputIdentity(&out.Output[i], opts.Bridge.ToolNames)
 		}
 	}

@@ -169,6 +169,8 @@ func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicC
 // AnthropicEventToResponsesState tracks state for converting a sequence of
 // Anthropic SSE events into Responses SSE events.
 type AnthropicEventToResponsesState struct {
+	bridgeErr error
+
 	Bridge         *BridgeOptions
 	CacheUsage     AnthropicUsage
 	ResponseID     string
@@ -332,6 +334,9 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 		events = append(events, closeCurrentResponsesItem(state)...)
 
 		state.CurrentItemID = generateItemID()
+		if bridgeEnabled(state.Bridge) {
+			state.CurrentItemID = generateReasoningItemID()
+		}
 		state.CurrentItemType = "reasoning"
 		state.CurrentThinking = *evt.ContentBlock
 		state.CurrentSummary = evt.ContentBlock.Thinking
@@ -754,4 +759,10 @@ func generateItemID() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return "item_" + hex.EncodeToString(b)
+}
+
+func generateReasoningItemID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "rs_" + hex.EncodeToString(b)
 }

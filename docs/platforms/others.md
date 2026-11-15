@@ -4,6 +4,8 @@
 
 ## 共同点
 
+转换桥合成的 Responses reasoning 项使用 `rs_` ID，流式宣布、增量、完成与最终响应复用同一身份。
+
 Chat 上游工具流转换为 Responses 时，function、custom 和 tool_search 项在 added、done 与最终响应中复用同一 item ID。
 
 Chat 上游工具流允许缺省或稀疏 `index`，按明确的 index、调用 ID 和可确定的位置绑定稳定槽位；歧义与非零 choice 返回转换错误。
