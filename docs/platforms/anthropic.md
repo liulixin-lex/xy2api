@@ -147,7 +147,7 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 兼容账号对 thinking 签名历史的处理与普通 API Key 账号完全相同。
 
-Messages 转 Responses 时，签名去除外侧空白后，跳过空值、`gAAAA` 前缀及 CC Switch 的 `ccswitch-openai-reasoning-v1:` 本地包装，不把它们作为供应商密文发送。普通签名和未知包装版本仍沿用原有处理，正文与工具历史不变。
+经 OpenAI 分组的 `/v1/messages` 转为 Responses 时，历史 thinking 签名的过滤见 [OpenAI](openai.md#claude-code-与-opencode)。
 
 | 情形 | 行为 |
 |---|---|
@@ -230,13 +230,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具历史 | 映射 | API Key 账号按轮次与出现顺序配对；后一轮复用同一 ID 时保留各轮自己的结果，历史工具不会补进本轮声明。缺结果、孤儿结果与同轮重复 ID 维持原有处理 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
-| Responses 结束原因与拒答 | 映射 | 自然完成为 end_turn，完整工具为 tool_use，长度截断为 max_tokens，过滤或正式 refusal 为 refusal；失败或取消返回上游协议错误；经 reader 认证的未列出非空结束原因沿原默认分支映射并记录 map 降级。正式 refusal 正文在 JSON 与流式中均作为 text 保留，只补未交付的后缀 |
-| Responses reasoning 响应 | 映射 | 非空 summary 优先，否则使用 reasoning_text；流式原文等到完成后再选择，同项不拼接两个载体，签名在 thinking 块关闭前交付 |
-| Responses 搜索响应来源 | 映射 | 只投影已完成搜索实际返回的 HTTP(S) 来源，URL 重复取首条；仅保留真实 title/content，open_page 使用真实 URL，缺来源为空列表，不编造搜索结果 |
-| Responses `custom_tool_call` 响应 | 映射 | JSON 与流式都生成 `tool_use`，自由文本以 `{"input":"原文"}` 包装，保留调用 ID、名称与空字符串 |
-| Responses 工具生成参数 | 校验 | 普通 function 必须是完整 JSON 对象；仅成功结束的空参数兼容为 `{}`。坏 JSON、数组、null 或标量不修补；显式加密参数没有 Messages tool input 表达方式，返回上游协议错误，不解密或伪造对象 |
-| function 的 `strict` | 映射 | Responses 与 Messages 两方向保留显式 true/false；Messages 转 Responses 未指定时仍为 false |
-| Anthropic `allowed_callers` 转 Responses | 省略并记录 | 未提供、null 或仅 direct 正常转换；其他字符串列表（含空列表、空名称）省略执行主体限制并记录，声明与 schema 保留，模型仍可直接提出函数调用；非数组或非字符串成员返回字段错误 |
+| function 的 `strict` | 映射 | Chat Completions 的 `tools[].function.strict`、旧版 `functions[].strict` 与 Responses 的 `tools[].strict` 为 `true` 或 `false` 时原样转为 Anthropic 工具的 `strict`，未指定时不发送 |
 | function 工具、Responses `custom` 工具（含 namespace 中的工具） | 映射 | 转为 Anthropic 工具；`parameters` 缺失、为 `null` 或为空数组 `[]`（PHP 客户端常见）时用空的 object schema。API Key 账号上：名称超过 Anthropic 长度限制、含 Anthropic 不接受的字符，或 namespace 展开后重名的工具，以短别名发往上游，响应中还原原名；`tools` 与 `additional_tools` 中类型、namespace 路径和名称都相同的工具只发送第一份，后续不同的 schema、`strict` 或 format 记录 `<字段路径>/omit` 降级 |
 | Anthropic 原生工具类型（`bash_20250124` 这类 `名称_YYYYMMDD`） | Responses 透传，Chat 丢弃 | Responses 按原定义转发；Chat Completions 中去掉 |
 | `web_search`、`web_search_preview`、`code_execution` | 映射（网关扩展） | 两个入口都支持；前两种转为 Anthropic `web_search_20250305` |
