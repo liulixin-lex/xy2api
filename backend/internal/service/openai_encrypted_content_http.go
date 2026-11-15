@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
@@ -31,21 +32,22 @@ type httpEncryptedRepairPlan struct {
 
 // planHTTPEncryptedContentRepair consumes the shared in-place budget only
 // when it returns true. The first rejection repairs the uniquely located
-// item. A further rejection that does not point at an item already cleared
-// shows more than one item failed, so the remaining top-level ciphertext is
-// cleared once, as the earlier whole-request repair did.
+// item; with several encrypted items and no usable location (E24) it clears
+// all top-level ciphertext once, as the earlier whole-request repair did. A
+// further rejection that does not point at an item already cleared shows
+// more than one item failed, so the remaining ciphertext is cleared once.
 func planHTTPEncryptedContentRepair(ctx context.Context, c *gin.Context, account *Account, r *openAIRequestRepair, body, payload []byte) (httpEncryptedRepairPlan, bool) {
 	selected, err := openAIRequestEncryptedContentRepairBody(c, body, payload)
 	plan := httpEncryptedRepairPlan{Selected: selected}
 	if err != nil || r == nil || account == nil || r.accountID != account.ID || r.encryptedBulkTried || ctx.Err() != nil {
 		return plan, false
 	}
-	if !r.encryptedTried {
-		if !selected.Changed {
-			return plan, false
-		}
+	if !r.encryptedTried && selected.Changed {
 		plan.Next, plan.Digests = selected.Body, []string{selected.Digest}
 	} else {
+		if !r.encryptedTried && !selected.Unlocated {
+			return plan, false
+		}
 		if selected.ItemIndex >= 0 && !selected.Changed {
 			return plan, false
 		}
@@ -61,10 +63,15 @@ func planHTTPEncryptedContentRepair(ctx context.Context, c *gin.Context, account
 	return plan, true
 }
 
-func (r *openAIRequestRepair) noteHTTPEncryptedRepair(plan httpEncryptedRepairPlan) {
-	if r != nil {
-		r.encryptedTried = true
-		r.encryptedBulkTried = r.encryptedBulkTried || plan.Bulk
+func (r *openAIRequestRepair) noteHTTPEncryptedRepair(ctx context.Context, plan httpEncryptedRepairPlan) {
+	if r == nil {
+		return
+	}
+	r.encryptedTried = true
+	if plan.Bulk {
+		r.encryptedBulkTried = true
+		// Clearing items the upstream did not name drops their context.
+		resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "input[].encrypted_content", Action: "omit"})
 	}
 }
 

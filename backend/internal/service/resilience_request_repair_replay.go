@@ -245,7 +245,7 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 		r.rejectedFieldSequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
 	}
 	if signal.kind == resilience.ReasonEncryptedContent {
-		r.noteHTTPEncryptedRepair(signal.encrypted)
+		r.noteHTTPEncryptedRepair(ctx, signal.encrypted)
 		r.rejectedFieldRetryState.remember(signal.next)
 		if lineage := s.beginOpenAIM3(c, r.body); lineage != nil {
 			s.markHTTPInvalidEncryptedContent(lineage.groupID, lineage.session, account.ID, r.credentialVersion, signal.encrypted.Digests)

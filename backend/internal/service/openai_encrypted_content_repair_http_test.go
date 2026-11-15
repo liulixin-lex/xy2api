@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -53,8 +55,8 @@ func TestHTTPEncryptedRepairSoleItemUnmappedLocator(t *testing.T) {
 		{"single_no_id", `{"model":"gpt-5.5","stream":true,"store":false,"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"user","content":"q"}]}`, named, true},
 		{"idless_compaction_named", `{"model":"gpt-5.5","stream":true,"input":[{"type":"compaction","encrypted_content":"gAAA"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","param":null,"message":"The encrypted content for item cmp_ag_compact_1 could not be verified. Reason: Encrypted content could not be decrypted or parsed."}}`, true},
 		{"sole_compaction_unlocated", `{"model":"gpt-5.5","stream":true,"input":[{"id":"cmp_stale","type":"compaction","encrypted_content":"gAAA"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"bad encrypted content"}}`, true},
-		// Several items without a usable location remain the accepted 400.
-		{"two_no_id", `{"model":"gpt-5.5","stream":true,"store":false,"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"assistant","content":"a"},{"type":"reasoning","summary":[],"encrypted_content":"cipher-B"},{"role":"user","content":"q"}]}`, named, false},
+		// Several items without a usable location: all are cleared once (E24).
+		{"two_no_id", `{"model":"gpt-5.5","stream":true,"store":false,"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"assistant","content":"a"},{"type":"reasoning","summary":[],"encrypted_content":"cipher-B"},{"role":"user","content":"q"}]}`, named, true},
 	} {
 		for _, status := range []int{http.StatusBadRequest, http.StatusBadGateway} {
 			t.Run(fmt.Sprintf("%s/%d", tc.name, status), func(t *testing.T) {
@@ -141,5 +143,34 @@ func TestHTTPEncryptedRepairMultipleRejectedItems(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// E24: several id-less encrypted reasoning items and an upstream 400 without
+// any location. Like the baseline, all top-level ciphertext is cleared once
+// within the same budget, the request succeeds and a degradation is recorded.
+func TestHTTPEncryptedRepairUnlocatedMultipleItems(t *testing.T) {
+	body := `{"model":"gpt-5.5","stream":true,"store":false,"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"assistant","content":"a"},{"type":"reasoning","summary":[],"encrypted_content":"cipher-B"},{"role":"user","content":"q"}]}`
+	rejection := `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","param":null,"message":"Encrypted content could not be verified."}}`
+	for _, pass := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", pass), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIUpstreamErrorResponse(http.StatusBadRequest, rejection),
+				webSearchSuccessStream("resp_ok"),
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(pass), []byte(body))
+			require.NoError(t, err)
+			require.Len(t, upstream.bodies, 2)
+			require.Equal(t, http.StatusOK, req.rec.Code)
+			require.NotContains(t, string(upstream.bodies[1]), "encrypted_content")
+			require.Len(t, gjson.GetBytes(upstream.bodies[1], "input").Array(), 4)
+			require.Equal(t, `"a"`, gjson.GetBytes(upstream.bodies[1], "input.1.content").Raw)
+			require.Equal(t, `"q"`, gjson.GetBytes(upstream.bodies[1], "input.3.content").Raw)
+			require.Contains(t, resilience.SnapshotConversionNotices(req.ctx), apicompat.ConversionNotice{Field: "input[].encrypted_content", Action: "omit"})
+			require.Empty(t, req.session.failures)
+		})
 	}
 }

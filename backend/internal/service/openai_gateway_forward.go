@@ -1273,7 +1273,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				if ok {
 					markEncryptedLineage(plan.Digests)
 					body, requestView, reqBody = plan.Next, newOpenAIRequestView(plan.Next), nil
-					requestRepair.noteHTTPEncryptedRepair(plan)
+					requestRepair.noteHTTPEncryptedRepair(ctx, plan)
 					rejectedFieldRetryState.remember(body)
 					logger.FromContext(ctx).Info("resilience.request_repair_replay",
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))

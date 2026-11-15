@@ -20,6 +20,8 @@ type httpRejectedEncryptedItem struct {
 	ItemIndex                int
 	ItemType, ItemID, Digest string
 	Changed                  bool
+	// Unlocated: several top-level encrypted items and no usable location.
+	Unlocated bool
 }
 
 var httpEncryptedIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))`)
@@ -116,6 +118,7 @@ func selectHTTPRejectedEncryptedItem(body, payload []byte) (httpRejectedEncrypte
 				continue
 			}
 			if selected >= 0 {
+				result.Unlocated = true
 				return result, nil
 			}
 			selected = i

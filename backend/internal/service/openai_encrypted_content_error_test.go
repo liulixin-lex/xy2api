@@ -71,7 +71,8 @@ func TestEncryptedContentAmbiguousRejectionContract(t *testing.T) {
 					}
 					upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIUpstreamErrorResponse(status, detail)}}
 					sends := 1
-					if mode == "twice" {
+					// Unlocated rejections first clear every item once (E24).
+					if mode == "twice" || mode == "ambiguous" {
 						upstream.responses = append(upstream.responses, newOpenAIUpstreamErrorResponse(status, detail))
 						sends = 2
 					}

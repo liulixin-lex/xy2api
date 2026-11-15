@@ -46,6 +46,11 @@ func TestHTTPEncryptedRepairUniqueItemStreams(t *testing.T) {
 						require.False(t, gjson.GetBytes(up.bodies[1], "input.0.encrypted_content").Exists())
 						require.Equal(t, "good-B", gjson.GetBytes(up.bodies[1], "input.1.encrypted_content").String())
 						require.Equal(t, "good-C", gjson.GetBytes(up.bodies[1], "input.2.encrypted_content").String())
+					} else if mode == "ambiguous" {
+						// No usable location: every item is cleared once (E24).
+						require.NoError(t, err)
+						require.Len(t, up.bodies, 2)
+						require.NotContains(t, string(up.bodies[1]), "encrypted_content")
 					} else {
 						var rejection *OpenAIRequestRejectionError
 						var failover *UpstreamFailoverError
