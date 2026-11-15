@@ -32,9 +32,16 @@ func beginGatewayRequestWithScope(c *gin.Context, key func() *service.APIKey, mo
 	return func() { finishUnbilledGatewayRequest(c, key(), model, stream, false, writer) }
 }
 
+// Excluded legacy WS turns retain their trace identity without acquiring a row.
+// Image and embedding scopes remain recordable even outside text statistics.
+func gatewayRequestHasRecordScope(st *resilience.RequestState) bool {
+	scope, exists := st.GatewayRequestScope()
+	return exists && (scope != "" || st.GatewayRequestEnabled())
+}
+
 func gatewayBillingContext(ctx context.Context) context.Context {
 	st := resilience.StateFrom(ctx)
-	if _, exists := st.GatewayRequestScope(); !exists {
+	if !gatewayRequestHasRecordScope(st) {
 		return ctx
 	}
 	meta, _ := st.ClaimGatewayRequest(true)
@@ -46,6 +53,9 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 		return
 	}
 	service.FinishSchedAttemptAtHandlerExit(c.Request.Context())
+	if !gatewayRequestHasRecordScope(resilience.StateFrom(c.Request.Context())) {
+		return
+	}
 	meta, write := resilience.StateFrom(c.Request.Context()).ClaimGatewayRequest(false)
 	if !write || meta == nil {
 		return
