@@ -2717,14 +2717,6 @@ func extractImageGenerationOutputFromSSEData(data []byte, seen map[string]struct
 	return json.RawMessage(item.Raw), true
 }
 
-func (s *OpenAIGatewayService) parseSSEUsageFromBody(body string) *OpenAIUsage {
-	usage := &OpenAIUsage{}
-	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
-		s.parseSSEUsageBytesWithType(data, eventType, usage)
-	})
-	return usage
-}
-
 func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel string) string {
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {

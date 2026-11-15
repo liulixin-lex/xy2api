@@ -4065,7 +4065,7 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.failed","error":{"message":"upstream rejected request"}}`,
+		`data: {"type":"response.failed","response":{"id":"r_failed","status":"failed"},"error":{"message":"upstream rejected request"}}`,
 		`data: [DONE]`,
 	}, "\n\n"))
 
