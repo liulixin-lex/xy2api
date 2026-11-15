@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"strings"
 	"time"
 )
@@ -23,6 +24,8 @@ type OpsSystemLog struct {
 }
 
 type OpsErrorLog struct {
+	ConversionNotices []apicompat.ConversionNotice `json:"degradations,omitempty"`
+
 	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 

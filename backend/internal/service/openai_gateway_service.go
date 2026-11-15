@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -248,6 +249,15 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	ResponseFactsKnown   bool
+	UsagePresent         bool
+	UsageSource          string
+	TerminalSeen         bool
+	TerminalValid        bool
+	ResponseBodyKind     string
+	UpstreamRecoveryHint *resilience.UpstreamRecoveryHint
+	ImageCountObserved   bool
+
 	CacheDiagnostic  *OpenAICacheDiagnostic `json:"-"`
 	RoutingSessionID string                 `json:"-"`
 	RequestID        string

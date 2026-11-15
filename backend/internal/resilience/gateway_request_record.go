@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,14 @@ const (
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
 // later websocket turn and client cancellation without consulting mutable state.
 type GatewayRequestMetadata struct {
+	RequestScope       GatewayRequestScope
+	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
+	UsageObserved      *bool
+	UsageSource        *string
+	TerminalEventSeen  *bool
+	TerminalEventValid *bool
+	ResponseBodyType   *string
+
 	RequestID                                         string
 	Result                                            int16
 	Switches                                          int16
@@ -30,6 +39,15 @@ type GatewayRequestMetadata struct {
 }
 
 type gatewayRequestTrace struct {
+	RequestScope       GatewayRequestScope
+	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
+	UsageObserved      *bool
+	UsageSource        *string
+	TerminalEventSeen  *bool
+	TerminalEventValid *bool
+	ResponseBodyType   *string
+	excluded           bool
+
 	started                    time.Time
 	sends                      int
 	lastAccount                int64
@@ -239,4 +257,57 @@ func GatewayRequestMetadataFromContext(ctx context.Context) *GatewayRequestMetad
 	}
 	meta, _ := ctx.Value(gatewayRequestMetadataKey{}).(*GatewayRequestMetadata)
 	return cloneGatewayRequest(meta)
+}
+
+// GatewayRequestScope separates request correlation from text statistics.
+type GatewayRequestScope string
+
+const (
+	GatewayRequestScopeText      GatewayRequestScope = "text"
+	GatewayRequestScopeImage     GatewayRequestScope = "image"
+	GatewayRequestScopeEmbedding GatewayRequestScope = "embedding"
+)
+
+func (s *RequestState) GatewayRequestScope() (GatewayRequestScope, bool) {
+	if s == nil {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gatewayRecord == nil {
+		return "", false
+	}
+	return s.gatewayRecord.RequestScope, true
+}
+
+// SetGatewayResponseFacts records only authenticated evidence for the current account.
+func (s *RequestState) SetGatewayResponseFacts(accountID int64, known, usagePresent bool, usageSource string, terminalSeen, terminalValid bool, bodyKind string) bool {
+	if s == nil || !known || accountID <= 0 {
+		return false
+	}
+	switch usageSource {
+	case "missing", "upstream_json", "upstream_sse_terminal", "upstream_sse_progressive":
+	default:
+		return false
+	}
+	if usagePresent == (usageSource == "missing") {
+		return false
+	}
+	switch bodyKind {
+	case "", "json", "sse":
+	default:
+		return false
+	}
+	if bodyKind != "sse" && (terminalSeen || terminalValid) || terminalValid && !terminalSeen {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.gatewayRecord
+	if r == nil || r.claimed || r.final != nil || r.lastAccount != accountID {
+		return false
+	}
+	r.UsageObserved, r.UsageSource = &usagePresent, &usageSource
+	r.TerminalEventSeen, r.TerminalEventValid, r.ResponseBodyType = &terminalSeen, &terminalValid, &bodyKind
+	return true
 }

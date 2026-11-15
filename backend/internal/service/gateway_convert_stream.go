@@ -103,6 +103,13 @@ type gatewayConvertStream struct {
 
 // gatewayConvertOutcome is the end of an attempt; noResult drops the usage.
 type gatewayConvertOutcome struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	err      error
 	noResult bool
 }

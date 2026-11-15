@@ -416,6 +416,9 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 // OpsUpstreamErrorEvent describes one upstream error attempt during a single gateway request.
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
+	RejectedField string `json:"rejected_field,omitempty"`
+	Resent        bool   `json:"resent"`
+
 	resilience.TimeoutDiagnostics
 	Source           string `json:"source,omitempty"`
 	AtUnixMs         int64  `json:"at_unix_ms,omitempty"`

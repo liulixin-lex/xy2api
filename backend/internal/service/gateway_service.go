@@ -621,6 +621,15 @@ type AudioUsage struct {
 }
 
 type ForwardResult struct {
+	ResponseFactsKnown   bool
+	UsagePresent         bool
+	UsageSource          string
+	TerminalSeen         bool
+	TerminalValid        bool
+	ResponseBodyKind     string
+	UpstreamRecoveryHint *resilience.UpstreamRecoveryHint
+	ImageCountObserved   bool
+
 	AnthropicCacheTTLPolicy  *string
 	AnthropicCacheTTLApplied *bool
 	ClaudeCacheFallback      *ClaudeCacheFallbackDecision

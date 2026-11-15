@@ -284,6 +284,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 
 // ccStreamScanState 是 scanCCStream 返回的读取状态快照。
 type ccStreamScanState struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	// Usage 为 include_usage chunk 中最近一次出现的用量（上游可能重复发送，
 	// 总是保留最新值）；终态事件中的用量由调用方在 finalize 阶段自行覆盖。
 	Usage OpenAIUsage
