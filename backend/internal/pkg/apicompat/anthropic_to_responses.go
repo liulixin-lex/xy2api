@@ -558,7 +558,8 @@ func anthropicSchemaSupportsResponsesStrict(raw json.RawMessage) bool {
 			}
 		}
 		properties, hasProperties := node["properties"]
-		if object || hasProperties {
+		_, hasAdditionalProperties := node["additionalProperties"]
+		if object || hasProperties || hasAdditionalProperties {
 			if additional, ok := node["additionalProperties"].(bool); !ok || additional {
 				return false
 			}
