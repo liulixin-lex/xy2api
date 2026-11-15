@@ -52,42 +52,34 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
 
-Chat 转 Responses 时，最终请求的输出上限下限为 16：显式的 1 至 15 提高到 16，16 及以上原值保留，不再提高到 128；中间协议转换保留原值。上游明确拒绝 `max_output_tokens` 时，沿用删除该字段后重放的处理。
+### Chat Completions 转 Responses
 
-Chat 的 `response_format.json_schema` 转为 Responses `text.format` 时，缺省 `strict` 补为 `false`；显式 `true` 或 `false` 保持原值，schema 内容不改。
+`/v1/chat/completions` 请求转换为 Responses 发往上游，响应再转换回 Chat Completions。下文的“返回错误”指：非流式返回错误 JSON；流式已经输出后写 `data: {"error":…}` 和 `data: [DONE]`，见 [网关韧性](../guides/gateway-resilience-client.md#已提交后的失败)。
 
-Chat 的合法 `stop` 字符串或数组在最终 Responses 请求中省略并记录；Responses 不支持停止序列边界，返回文本可能变长。中间转换保留 `stop`，输出上限 1 至 15 提高到 16 时记录 `max_output_tokens/map`。
-
-Chat 输出上限按 `max_completion_tokens` → `max_tokens` → `max_output_tokens` 取首个非 null 值，预留与转换使用相同顺序；选中值必须为正整数，落选的合法别名记录省略。
-
-Chat 的 `reasoning` 支持档位字符串或包含 `effort`、`summary` 的对象；非空 `reasoning_effort` 优先，显式摘要设置保留，只有档位而没有摘要时补 `auto`。未知扩展及此前忽略的数组、数字等形状仍按原方式忽略，不新增冲突报错。
-
-Chat 转 Responses 的参数承载规则如下；null 视为未提供，不透传未建模字段。
-
-| 参数 | 转换规则 |
+| 请求参数 | 处理 |
 |---|---|
-| `metadata`、`user` | 分别保留字符串表和字符串；类型不符时省略该字段并记录降级，不拒绝请求 |
-| `text.verbosity`、`verbosity` | 前者优先，落选的顶层别名记录省略 |
-| `response_format`、`text.format` | 沿用 Chat 的 `response_format` 优先级；缺省时采用 `text.format`，复用格式校验，落选项记录省略 |
-| `include` | 显式字符串数组保序去重，并保留转换所需的 `reasoning.encrypted_content`；类型不符时省略该字段并记录降级；`store` 固定为 false |
+| `max_completion_tokens`、`max_tokens`、`max_output_tokens` | 按这个顺序取第一个非 null 值；进行 Chat 协议转换时，选中值须为正整数，否则返回 400。其他同时填写的合法别名记录 `<字段>/omit` 降级。余额的在途预留按同一顺序估算，解析失败时沿用原估算方式，不因此拒绝请求。发往 Responses 时 1–15 提高到 16 并记录 `max_output_tokens/map`，16 及以上原值发送（`/v1/messages` 转 Responses 也一样） |
+| `stop` | 合法的字符串或数组省略，记录 `stop/omit` 降级。Responses 没有停止序列，返回文本可能更长；空字符串等非法值仍返回 400。发往 Anthropic 上游时照旧转为 `stop_sequences` |
+| `metadata`、`user` | 字符串表与字符串原样转发；类型不符时照旧省略该字段并记录 `<字段>/omit`，不报错；null 视为未提供 |
+| `text.verbosity`、`verbosity` | 转发；两者都有时用 `text.verbosity`，顶层别名记录 `verbosity/omit` 降级 |
+| `response_format`、`text.format` | 两者都有时用 `response_format`，`text.format` 记录 `text.format/omit` 降级；只有 `text.format` 时按 Responses 格式校验后使用，选中的格式非法则返回 400。Chat 的 `response_format.json_schema` 没写 `strict` 时按 `false` 发送，显式值原样保留 |
+| `include` | 字符串数组按原顺序去重后转发，并保留 `reasoning.encrypted_content`；类型不符时省略该字段并记录 `include/omit`，不报错 |
+| `reasoning` | 接受档位字符串，或含 `effort`、`summary` 的对象；同时有非空 `reasoning_effort` 时以后者为准。其他形状与未知子字段照旧忽略，不因解码新增报错。显式的 `summary` 保留；只给档位、没有 `summary` 时补 `auto`；只给 `summary` 时不补档位 |
+| 历史中的 `tool_calls[].function.arguments` | 原样保留，空字符串按 `{}` 处理；不会因为上一轮参数不是完整 JSON 而新增本地拒绝 |
 
-推理档位先按最终模型执行兼容映射，再交给转换器；GPT-6.1 Terra 保留 `none` 与显式输出上限，`minimal` 须先按目标能力映射。
+表外的其他未知字段不转发，`store` 固定为 false。GPT-6.1 Terra 按推理模型处理：最终档位为 `none` 时保留 `temperature`、`top_p`，其他档位不发送这两个参数。
 
-用量中未提供的计数仅在内部记录为缺失；对外 JSON 和流式用量保留原计数、字段及合计补和，未知来源也维持原输出。
+| 响应 | 处理 |
+|---|---|
+| `finish_reason` | 非流式与流式相同：明确的 `max_output_tokens` 截断为 `length`，内容过滤为 `content_filter`，两者优先于 `tool_calls`；有完整工具调用时为 `tool_calls`；拒答为 `stop`，正文放在 `message.refusal`（流式为 `delta.refusal`）。上游 `failed`、`cancelled` 返回错误；其他未列出的原因按正常结束处理。合法结束事件缺状态、`response.done` 没带 response、incomplete 未给原因时保持既有正常结束行为 |
+| `reasoning_content` | 逐项取非空的 summary，没有时取 `reasoning_text`，两者不拼接；流式中的原始推理文本在该项结束后才发出。`encrypted_content` 不会作为思考文本输出 |
+| 工具参数 | 上游生成的普通函数参数不是合法 JSON 时返回错误，不修补；成功结束而参数为空时按 `{}` 交付。custom 工具调用以 `function` 形式返回，`arguments` 为原始输入文本 |
+| 流式工具参数 | 只在 `function_call_arguments.done`、`output_item.done` 或结束事件里给出的参数也会发出，只补还没发出的部分；重复完成事件和结束后迟到的增量不会重复输出。流内事件之间的同一调用身份或参数前后矛盾时返回错误；结束事件重新生成 item ID 不会因此报错 |
+| 流式正文 | done 事件仅补充延长了已发正文的部分；修整、替换已发正文不会使流失败或重复输出。结束事件中的正文仅在此前未发出可见正文时补齐 |
 
-仅在已确认最终目标支持明文 reasoning 输入的转换路径中，助手历史思考单独承载为 `reasoning_text`，可见答案与工具调用保持分离；未确认能力的路径保留原有历史处理。
+上游以流式返回、网关拼成非流式结果时（Chat、Responses、Messages 的非流式请求都适用），正文与拒答按每个输出项的每段内容分别恢复：结束事件中的非空内容优先，其次是该段的 done 事件，最后是增量；同一段不会重复拼接。没有项标识的增量接到当前项，`reasoning_text` 内容部件不会阻断正文恢复。只在 done 事件中出现的网页搜索项会保留，custom 工具调用保留原类型。恢复出了正文不代表上游成功结束，没有有效结束事件时仍返回错误。
 
-非流式结果按 output item 和 content part 恢复正文与拒答：非空结束快照优先于 done，done 优先于 delta；缺项从已收内容补齐，重复快照不重复正文。内容补齐不代表上游成功结束。
-
-缓冲重建保留仅在 done 中出现的托管搜索项及其状态、动作；custom 工具保留类别、命名空间与原始 input，不改成普通 function 参数。
-
-Responses 工具项结构化重建保留 `encrypted_content` 与 `encrypted_function_args` 的原始片段及缺省、null、空值区别；不解密，Chat 标准格式没有对应的无损密文载体。
-
-Chat 流式工具参数可从 arguments.done、item.done 或结束快照补齐，只发送尚未交付的后缀；重复终值和关闭后的迟到增量不重复输出，身份或前缀冲突转为上游转换错误。
-
-Responses reasoning 输出逐项优先使用非空 `summary_text`，否则使用 `content.reasoning_text`；流式先缓存原文，到该项结束仍无摘要才发送原文，不读取密文或其他 part。
-
-JSON 与 SSE 使用相同结束原因规则：长度截断为 `length`、过滤为 `content_filter`，它们优先于工具停因；失败或取消走上游错误，未知非空原因按正常结束处理并记录 `finish_reason/map`；合法结束事件缺状态或 incomplete 未给原因时保持正常结束。拒答正文保留在 message.refusal / delta.refusal。新转换出口仅在调用方已认证终态后收尾。
+`/v1/responses` 的流式事件与非流式结果中，function_call 项原样保留上游的 `encrypted_content` 与 `encrypted_function_args`（缺省、null 与空值不混同），网关不解密；Chat Completions 没有对应字段，转为 Chat 时不携带。
 
 ## 客户端配置
 

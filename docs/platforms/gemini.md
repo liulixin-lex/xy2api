@@ -110,8 +110,6 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 ## 对外端点
 
-图片转换中无法表达的 `detail` 质量提示（`auto`、`low`、`high`）省略并记录，图片保留；非法值返回 400，质量与费用不保证等价。
-
 | 端点 | 说明 |
 |---|---|
 | `GET /v1beta/models`、`GET /v1beta/models/:model` | Gemini 原生模型列表 |
@@ -119,6 +117,8 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 | `POST /v1beta/models/{model}:streamGenerateContent?alt=sse` | Gemini 原生流式生成 |
 | `POST /v1/messages` | Anthropic Messages 格式，转换后转发到 Gemini |
 | `POST /v1/chat/completions` | Chat Completions 格式，转换后转发到 Gemini |
+
+`/v1/chat/completions` 中图片的 `image_url.detail` 为 `auto`、`low`、`high` 时，Gemini 没有对应参数，网关去掉该提示并记录降级，图片照常发送；其他值返回 400。质量与费用不保证与指定 `detail` 时相同。
 
 `/v1beta` 端点的密钥读取顺序为 `x-goog-api-key` 请求头、`Authorization: Bearer`、`x-api-key`，最后是查询参数 `key`（只在 `/v1beta` 与 `/antigravity/v1beta` 下接受）；查询参数 `api_key` 已弃用，会返回 400。
 

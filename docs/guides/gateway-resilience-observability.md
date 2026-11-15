@@ -187,3 +187,5 @@ Responses 拒参修复在既有上游错误事件中记录 `rejected_field` 与 
 3. 会话搬动看 `sched_quality.takeover`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发改绑的那条请求（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
+
+转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。

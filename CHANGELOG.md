@@ -6,18 +6,6 @@
 
 ### 参数与协议转换
 
-- Responses 流结束时正文被修整或输出项被重新编号，不再让已发出的正文重复输出或使请求失败。
-- Responses 合法结束事件缺少状态、done 未带 response 或 incomplete 未给原因时继续正常结束；未知原因保留正常结束并记录映射。
-- Responses 中转在结束事件重新生成输出项 ID 时，正文、思考与工具结果照常完成，不再因 ID 变化报错。
-- 缺少输出项标识的 Responses 文本增量归入当前项，非流式结果不再多出空消息。
-- Responses 流中的 reasoning_text 内容部件不再阻断后续正文与思考内容的恢复。
-- 输出上限无法按协议解析时，入口沿用原预留估算方式，不因估算错误拒绝请求。
-- Chat 的 metadata、user、include 类型不符时继续忽略该字段，并记录省略，不新增本地报错。
-- 客户端历史中的坏工具参数继续原样转发，参数解析失败后的会话仍可继续。
-- Chat 转 Responses 保留 metadata、user、文本详细程度和显式 include，GPT-6.1 Terra 使用最终模型的推理档位与输出上限。
-
-- Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
-
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
 - API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。
@@ -27,31 +15,35 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
-- Chat 转换响应的 JSON 与 SSE 统一保留截断、过滤和拒答语义，失败或未知结束原因不再输出正常完成。
+- Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符时照旧省略该字段并记录，不新增报错。
 
-- 完整工具参数的非法 JSON 会明确报错，custom 与密文原文保留，截断工具不再被宣告正常完成。
+- Chat 请求的 `reasoning` 写成字符串或对象时生效，`reasoning_effort` 仍优先；转 Responses 时显式 `summary` 不再被改成 `auto`，只给 summary 时不再丢失。
 
-- Responses 无思考摘要时可恢复 reasoning_text，双载体时优先摘要且不重复正文。
+- Chat 请求只填 `max_output_tokens` 时也会生效；同时填写多个输出上限时，在途预留与实际发送按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的顺序取值，估算解析失败时沿用原估算方式。
 
-- Chat 流式工具参数可从 item.done 和结束快照补齐，重复快照不再重复参数或完成帧。
-
-- Responses 工具项重建保留两类密文标记及 null、空值区别，避免在 done 快照中丢失。
-
-- 非流式响应重建保留 done-only 托管搜索结果及 custom 工具身份和原始输入。
-
-- 非流式回复可恢复只出现在 done 快照中的正文与拒答，多项多段内容不再拍平或重复拼接。
-
-- 已确认支持明文 reasoning 的转换路径将历史思考与可见答案分开，保留工具调用及缓存检查点。
-
-- Chat 同时填写多个输出上限时，在途预留与协议转换按相同优先级取值。
-
-- 图片携带合法 `detail` 提示时可转换为 Anthropic/Gemini，保留图片并记录提示省略，质量与费用不保证等价。
+- Chat 与 Messages 请求转 Responses 时，16 至 127 的输出上限不再被提高到 128，1 至 15 提高到 16。
 
 - 带合法 `stop` 的请求可转换为 Responses，省略停止序列并记录，停止边界不再生效。
 
 - Chat 的 JSON Schema 响应格式未指定 `strict` 时，转 Responses 默认发送 `false`。
 
-- Chat 转 Responses 的输出上限下限降为 16，1 至 15 提高到 16，16 及以上原值保留。
+- 图片携带合法 `detail` 提示时可转换为 Anthropic/Gemini，保留图片并记录提示省略，质量与费用不保证等价。
+
+- Responses 上游转 Chat 时，上游失败或取消返回错误；未知结束原因照旧正常结束，合法结束事件缺少状态或 incomplete 未给原因时也保持原有结束方式。
+
+- Responses 上游转 Chat 时，上游生成的普通工具参数不是合法 JSON 时返回错误，不交给客户端执行；客户端历史参数仍原样保留。
+
+- Responses 上游转 Chat 时，没有摘要的思考内容用 `reasoning_text` 输出，有摘要时只输出摘要；流式原始推理文本在该项结束后发出。
+
+- Responses 上游转 Chat 流式时，只在 `output_item.done` 或结束事件中给出的工具参数不再丢失，重复完成事件不再重复输出参数或结束帧。
+
+- Responses 流的结束事件重新生成 item ID、重新编号消息或修整已发正文时，不再因此报错或重复输出正文。
+
+- 上游以流式返回、网关拼成非流式结果时，只在 done 事件中给出的正文与拒答不再丢失；reasoning_text 内容部件和无项标识的增量也可恢复，同一段内容不重复拼接。
+
+- 上游以流式返回、网关拼成非流式结果时，只在 done 事件中出现的网页搜索项不再丢失，custom 工具调用保留原类型，转为 Chat 时仍以 `function` 返回。
+
+- `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
 ## [0.6.7] - 2026-11-15
 
