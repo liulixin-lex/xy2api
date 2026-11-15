@@ -52,3 +52,18 @@ func TestChatReasoningWithLegacyExtensionTypes(t *testing.T) {
 		require.Nil(t, req.MaxOutputTokens)
 	}
 }
+
+func TestM1ReviewUnknownReasoningConversion(t *testing.T) {
+	for _, raw := range []string{`"turbo"`, `{"effort":"turbo"}`, `{"effort":"auto"}`} {
+		var chat ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"reasoning":`+raw+`}`), &chat))
+		require.Empty(t, chat.ReasoningEffort)
+		responses, err := ChatCompletionsToResponses(&chat)
+		require.NoError(t, err)
+		_, err = ResponsesToAnthropicRequest(responses)
+		require.NoError(t, err)
+	}
+	got, err := decodeChatReasoning(json.RawMessage(`"high"`), "turbo")
+	require.NoError(t, err)
+	require.Equal(t, "turbo", got.Effort, "legacy validation must remain unchanged")
+}

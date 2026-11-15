@@ -48,6 +48,9 @@ func newFinalReasoningRequest(body []byte) *finalReasoningRequest {
 	for _, path := range []string{"reasoning_effort", "reasoning.effort", "reasoning", "output_config.effort"} {
 		field := gjson.GetBytes(body, path)
 		if field.Type == gjson.String && strings.TrimSpace(field.String()) != "" {
+			if (path == "reasoning" || path == "reasoning.effort") && gjson.GetBytes(body, "messages").Exists() && normalizeReasoningEffortMappingSource(field.String()) == "" {
+				continue // Unknown Chat extensions were ignored before S-08.
+			}
 			state.original, state.field = strings.TrimSpace(field.String()), path
 			break
 		}

@@ -147,6 +147,12 @@ func decodeChatReasoning(raw json.RawMessage, legacy string) (*ResponsesReasonin
 			_ = json.Unmarshal(fields["summary"], &result.Summary)
 		}
 	}
+	result.Effort = strings.ToLower(strings.TrimSpace(result.Effort))
+	switch result.Effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	default:
+		result.Effort = ""
+	}
 	if legacy != "" {
 		result.Effort = legacy
 	}
