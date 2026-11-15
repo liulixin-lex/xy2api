@@ -416,6 +416,27 @@ func resToAnthToolOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropic
 	return tool
 }
 
+// resToAnthTerminalTool finds the streamed tool that a terminal output item
+// restates. Terminal output need not follow the streamed order, so its array
+// position is not an identity: an item matches by item ID, then by call ID,
+// then by order among the streamed tools not yet matched. Distinct known IDs
+// never match.
+func resToAnthTerminalTool(item *ResponsesOutput, matched map[*responsesAnthropicTool]bool, state *ResponsesEventToAnthropicState) *responsesAnthropicTool {
+	if tool := state.toolItems[item.ID]; item.ID != "" && tool != nil {
+		return tool
+	}
+	if item.Type != "function_call" && item.Type != "custom_tool_call" {
+		return nil
+	}
+	for _, tool := range state.toolOrder {
+		if matched[tool] || item.ID != "" && tool.itemID != "" || item.CallID != "" && item.CallID != tool.callID {
+			continue
+		}
+		return tool
+	}
+	return nil
+}
+
 func resToAnthToolBlocksEvent(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) bool {
 	if state.activeTool == nil || state.activeTool.complete {
 		return false
@@ -1304,17 +1325,20 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	var events []AnthropicStreamEvent
 	state.successTerminal = evt.Response != nil && (evt.Response.Status == "completed" || unknownMapped)
 	if evt.Response != nil {
+		matched := make(map[*responsesAnthropicTool]bool)
 		for i, item := range evt.Response.Output {
-			tool := state.toolItems[item.ID]
-			if tool == nil && item.ID == "" && (item.Type == "function_call" || item.Type == "custom_tool_call") {
-				tool = state.tools[i]
-			}
-			if state.successTerminal && tool == nil && state.tools[i] == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
-				events = append(events, resToAnthHandleOutputItemDone(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
+			tool := resToAnthTerminalTool(&item, matched, state)
+			if state.successTerminal && tool == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
+				index := i
+				for state.tools[index] != nil {
+					index++
+				}
+				events = append(events, resToAnthHandleOutputItemDone(&ResponsesStreamEvent{OutputIndex: index, Item: &item}, state)...)
 				continue
 			}
 			if tool != nil {
-				tool = resToAnthToolOf(&ResponsesStreamEvent{OutputIndex: i, OutputIndexPresent: true, Item: &item}, state)
+				matched[tool] = true
+				tool = resToAnthToolOf(&ResponsesStreamEvent{OutputIndex: tool.index, OutputIndexPresent: true, Item: &item}, state)
 				if tool == nil {
 					return nil
 				}

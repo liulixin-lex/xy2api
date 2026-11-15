@@ -1109,7 +1109,7 @@ func TestM3ReviewB03TerminalMetadata(t *testing.T) {
 				output = append([]ResponsesOutput{{Type: "message", ID: "m"}}, output...)
 			}
 			events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: output}}, st)
-			if change == "same" {
+			if change == "same" || change == "index" {
 				require.NoError(t, st.Err())
 				require.Len(t, events, 2)
 			} else {
@@ -1131,6 +1131,98 @@ func TestM3ReviewB03TerminalMetadata(t *testing.T) {
 		require.NoError(t, st.Err())
 		require.Len(t, events, 2)
 	})
+}
+
+// Terminal output may list items in another order than the stream, omit
+// streamed items, or drop item IDs; a streamed tool is still delivered once.
+func TestM3ReviewTerminalToolOrder(t *testing.T) {
+	fc := func(id, call string) string {
+		idField := ""
+		if id != "" {
+			idField = `"id":"` + id + `",`
+		}
+		return `{` + idField + `"type":"function_call","status":"completed","arguments":"{\"command\":\"ls\"}","call_id":"` + call + `","name":"Bash"}`
+	}
+	tool := func(index int) []string {
+		oi := fmt.Sprint(index)
+		return []string{
+			`{"type":"response.output_item.added","output_index":` + oi + `,"item":{"id":"fc_1","type":"function_call","status":"in_progress","arguments":"","call_id":"call_1","name":"Bash"}}`,
+			`{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":` + oi + `,"delta":"{\"command\":"}`,
+			`{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":` + oi + `,"delta":"\"ls\"}"}`,
+			`{"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":` + oi + `,"arguments":"{\"command\":\"ls\"}"}`,
+			`{"type":"response.output_item.done","output_index":` + oi + `,"item":` + fc("fc_1", "call_1") + `}`,
+		}
+	}
+	msg := `{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Done.","annotations":[]}]}`
+	text := []string{
+		`{"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}`,
+		`{"type":"response.content_part.added","item_id":"msg_1","output_index":1,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Done"}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"."}`,
+		`{"type":"response.output_text.done","item_id":"msg_1","output_index":1,"content_index":0,"text":"Done."}`,
+		`{"type":"response.content_part.done","item_id":"msg_1","output_index":1,"content_index":0,"part":{"type":"output_text","text":"Done.","annotations":[]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":` + msg + `}`,
+	}
+	rs := `{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"gAAAAenc"}`
+	reasoning := []string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":` + rs + `}`,
+	}
+	completed := func(output ...string) string {
+		return `{"type":"response.completed","response":{"id":"resp_1","object":"response","created_at":1,"status":"completed","model":"gpt-5","output":[` + strings.Join(output, ",") + `],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}}`
+	}
+	join := func(parts ...[]string) []string {
+		var out []string
+		for _, part := range parts {
+			out = append(out, part...)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name   string
+		stream []string
+		calls  []string
+	}{
+		{"tool then text, terminal message first", join(tool(0), text, []string{completed(msg, fc("fc_1", "call_1"))}), []string{"call_1"}},
+		{"terminal omits reasoning", join(reasoning, tool(1), []string{completed(fc("fc_1", "call_1"))}), []string{"call_1"}},
+		{"terminal in order", join(reasoning, tool(1), []string{completed(rs, fc("fc_1", "call_1"))}), []string{"call_1"}},
+		{"terminal item without id", join(reasoning, tool(1), []string{completed(fc("", "call_1"))}), []string{"call_1"}},
+		{"new terminal tool listed first", join(tool(0), []string{completed(fc("fc_2", "call_2"), fc("fc_1", "call_1"))}), []string{"call_1", "call_2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			events := ResponsesEventToAnthropicEvents(responsesCreated(), st)
+			for _, payload := range tc.stream {
+				var evt ResponsesStreamEvent
+				require.NoError(t, json.Unmarshal([]byte(payload), &evt))
+				events = append(events, ResponsesEventToAnthropicEvents(&evt, st)...)
+			}
+			events = append(events, FinalizeResponsesAnthropicStream(st)...)
+			require.NoError(t, st.Err())
+			var calls []string
+			inputs := map[string]string{}
+			current, stop := "", ""
+			for _, e := range events {
+				if e.ContentBlock != nil && e.ContentBlock.Type == "tool_use" {
+					current = e.ContentBlock.ID
+					calls = append(calls, current)
+				}
+				if e.Delta != nil && e.Delta.Type == "input_json_delta" {
+					inputs[current] += e.Delta.PartialJSON
+				}
+				if e.Type == "message_delta" {
+					stop = e.Delta.StopReason
+				}
+			}
+			require.Equal(t, tc.calls, calls)
+			for _, call := range tc.calls {
+				require.JSONEq(t, `{"command":"ls"}`, inputs[call])
+			}
+			require.Equal(t, "tool_use", stop)
+			requireAnthropicBlockLifecycle(t, events)
+			require.Equal(t, "message_stop", events[len(events)-1].Type)
+		})
+	}
 }
 
 func TestM3ReviewEmptyErrorObject(t *testing.T) {
