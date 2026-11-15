@@ -85,7 +85,7 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 | `resilience.budget_exhausted`、`resilience.capacity_switch_exhausted` | 请求预算或容量换号额度耗尽 |
 | `resilience.stall`、`resilience.fast_fail`、`resilience.turn_cap`、`resilience.abuse_guard` | 对应能力触发 |
 | `resilience.post_output_failure` | 已输出后的上游失败，含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却 |
-| `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文 |
+| `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文；HTTP 续接细分为 `continuation_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`、`upstream_continuation_expired`，本地拒绝的 `stage=local`，尚未选中账号时不伪造账号字段 |
 | `resilience.collab_plaintext` | 协作消息明文化遇到冲突、异常计数或转换后被拒 |
 | `resilience.web_search_history_rejected` | 补 web_search 声明重放后仍失败 |
 | `resilience.wrapped_error_malformed` | 识别到形似中转包装帧但字段不一致的错误帧 |

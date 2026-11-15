@@ -33,6 +33,17 @@
 - Anthropic 协议（`/v1/messages`）下，网关自身的无号与瞬时失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
 - 关闭 `errors` 段后不加重试头、不做负缓存与回合封顶，上述错误形态回到原样（内容安全拒绝回到 502）。
 
+原生 Responses HTTP 的续接错误使用以下稳定字段，`error.type` 均为 `invalid_request_error`：
+
+| 场景 | HTTP / `error.code` | `error.param` / message |
+|---|---|---|
+| 响应归属不通过 | 400 / `previous_response_owner_mismatch` | `previous_response_id` / `previous_response_id is not available for this user` |
+| 目标协议不支持 HTTP 续接 | 400 / `http_continuation_unsupported` | `previous_response_id` / `The selected upstream does not support previous_response_id over HTTP; send complete input history` |
+| 既有工具输出校验发现缺 call_id | 400 / `tool_output_missing_call_id` | `input[i].call_id` / `input[i] (<type>) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null` |
+| 上游明确报告续接状态过期或不存在 | 410 / `upstream_continuation_expired` | `previous_response_id` / `The upstream continuation state is no longer available; send complete input history` |
+
+归属仍按用户校验，同一用户更换 API 密钥不改变归属；不新增工具历史闭合校验。API Key 本身不证明目标支持 HTTP 续接，无状态 DeepSeek/Kimi 目标不会静默删除 pointer 后发送。普通 404、409 与模糊 4xx 不强分为续接过期，`store` 缺省、false、true 保持原样。上述请求错误不罚号、不计会话失败；未提交时不带 `Retry-After` 并写 `x-should-retry: false`，已提交 SSE 保持原 HTTP 状态，按相同原因写一次协议错误终态。
+
 ## Retry-After 的取值
 
 - 估算方法：对本请求有资格的每个账号，取它仍有效的限制中最晚的结束时间（含按模型的冷却），再取各账号中最早的那个。

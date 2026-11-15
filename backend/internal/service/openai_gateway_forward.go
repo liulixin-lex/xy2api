@@ -1700,6 +1700,12 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
+	if account.UsesNativeCNResponses() && strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()) != "" {
+		rejection := NewHTTPContinuationUnsupportedError()
+		WriteHTTPContinuationError(c, account, rejection)
+		return nil, rejection
+	}
+
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现：强制 store=false、清除
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)

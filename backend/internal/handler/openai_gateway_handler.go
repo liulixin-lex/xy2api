@@ -576,7 +576,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if !owned {
 			reqLog.Warn("openai.request_validation_failed", zap.String("reason", "previous_response_owner_mismatch"))
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id is not available for this user")
+			service.WriteHTTPContinuationError(c, nil, service.NewHTTPContinuationOwnerMismatchError())
 			return
 		}
 	}
@@ -811,10 +811,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Int64("latency_ms", scheduleDecision.LatencyMs),
 		)
 		account := selection.Account
-		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
-			// The public Responses HTTP API supports previous_response_id on API-key
-			// accounts. OAuth/SetupToken upstreams do not, so keep searching instead
-			// of silently deleting continuation state from a mixed account pool.
+		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !h.gatewayService.SupportsOpenAIHTTPContinuation(c.Request.Context(), account, reqModel) {
+			// Keep searching until the selected protocol supports HTTP continuation;
+			// an API key alone does not prove the target can retain response state.
 			failedAccountIDs[account.ID] = struct{}{}
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
@@ -826,7 +825,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				Scope:            service.GatewayFailureScopeRequest,
 				Reason:           service.OpenAIHTTPContinuationUnsupportedReason,
 				ClientStatusCode: http.StatusBadRequest,
-				ClientMessage:    "previous_response_id requires an OpenAI API-key account for HTTP requests",
+				ClientMessage:    service.NewHTTPContinuationUnsupportedError().Message,
 			}
 			reqLog.Debug("openai.account_skipped_http_continuation_unsupported",
 				zap.Int64("account_id", account.ID),
@@ -1921,7 +1920,7 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 		reqLog.Warn("openai.request_validation_failed",
 			zap.String("reason", "function_call_output_missing_call_id"),
 		)
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("input[%d] (%s) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null", validation.BadItemIndex, strings.TrimSpace(validation.BadItem.Get("type").String())))
+		service.WriteHTTPContinuationError(c, nil, service.NewToolOutputMissingCallIDError(validation.BadItemIndex, validation.BadItem.Get("type").String()))
 		return false
 	}
 
