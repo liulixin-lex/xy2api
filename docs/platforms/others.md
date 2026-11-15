@@ -154,3 +154,5 @@ Embeddings、图片、视频、语音等端点对这些平台返回 `404 not_fou
 
 - [渠道监控](../guides/channel-monitor.md)支持 Kimi、智谱、DeepSeek、MiniMax 作为供应商（走 OpenAI 兼容 Chat 协议），不支持 OpenCode、Command Code、Cline。
 - 这些平台的模型是否支持某个协议、某个参数，以上游实际行为为准；切换到非默认协议前，请在目标账号上先用连接测试验证。
+
+转换桥的工具历史按轮次与出现顺序配对，后轮复用 ID 不再覆盖前轮结果；旧式同名工具 FIFO、交错消息与工具媒体归属保持兼容。

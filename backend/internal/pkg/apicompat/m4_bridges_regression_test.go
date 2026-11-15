@@ -1207,3 +1207,101 @@ func TestM4AnthropicMediaHandoffs(t *testing.T) {
 		t.Fatalf("zero options reasoning changed: %s / %s", a, b)
 	}
 }
+
+func TestM4ToolHistoryRounds(t *testing.T) {
+	var fixtures []struct {
+		Name                      string
+		Input                     json.RawMessage
+		Chat, Anthropic           json.RawMessage
+		ChatError, AnthropicError string
+	}
+	raw, err := os.ReadFile("testdata/m4-history-baseline.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(raw, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range fixtures {
+		if fixture.Name == "id_reused_across_rounds" || len(fixture.Input) == 0 || string(fixture.Input) == "null" {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			req := &ResponsesRequest{Model: "probe", Input: fixture.Input}
+			chat, e := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+			m4CheckError(t, e, fixture.ChatError)
+			if e == nil {
+				out, _ := json.Marshal(chat)
+				m4CheckJSONBytes(t, out, fixture.Chat)
+			}
+			anth, e := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{})
+			m4CheckError(t, e, fixture.AnthropicError)
+			if e == nil {
+				out, _ := json.Marshal(anth)
+				m4CheckJSONBytes(t, out, fixture.Anthropic)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, input string
+		want        []string
+	}{
+		{"two_rounds", `[{"type":"function_call","call_id":"call_same","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_same","output":"first"},{"role":"user","content":"next"},{"type":"function_call","call_id":"call_same","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_same","output":"second"}]`, []string{"first", "second"}},
+		{"interleaved", `[{"type":"function_call","call_id":"call_a","name":"f","arguments":"{}"},{"type":"function_call","call_id":"call_b","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_a","output":"A"},{"type":"function_call","call_id":"call_c","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_b","output":"B"},{"type":"function_call_output","call_id":"call_c","output":"C"}]`, []string{"A", "B", "C"}},
+		{"same_round", `[{"type":"function_call","call_id":"call_a","name":"f","arguments":"{}"},{"type":"function_call","call_id":"call_a","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_a","output":"first"},{"type":"function_call_output","call_id":"call_a","output":"second"}]`, []string{"second", "second"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &ResponsesRequest{Model: "probe", Input: json.RawMessage(tc.input)}
+			chat, e := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			var got []string
+			for _, m := range chat.Messages {
+				if m.Role == "tool" {
+					var text string
+					_ = json.Unmarshal(m.Content, &text)
+					got = append(got, text)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Chat results: %#v", got)
+			}
+			anth, e := ResponsesToAnthropicRequestWithOptions(req, ConversionOptions{})
+			if e != nil {
+				t.Fatal(e)
+			}
+			got = nil
+			for _, m := range anth.Messages {
+				for _, b := range parseContentBlocks(m.Content) {
+					if b.Type == "tool_result" {
+						var text string
+						_ = json.Unmarshal(b.Content, &text)
+						got = append(got, text)
+					}
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Anthropic results: %#v", got)
+			}
+			for _, out := range []any{chat, anth} {
+				raw, _ := json.Marshal(out)
+				if strings.Contains(string(raw), "call_m4_occurrence_") {
+					t.Fatalf("private key leaked: %s", raw)
+				}
+			}
+		})
+	}
+	t.Run("media_occurrence", func(t *testing.T) {
+		req := &ResponsesRequest{Model: "probe", Input: json.RawMessage(`[{"type":"function_call","call_id":"call_x","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_x","output":[{"type":"input_image","image_url":"https://example.test/first.png"}]},{"type":"function_call","call_id":"call_x","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_x","output":[{"type":"input_image","image_url":"https://example.test/second.png"}]}]`)}
+		out, e := ResponsesToChatCompletionsRequestWithOptions(req, &ResponsesToChatOptions{Bridge: &BridgeOptions{Enabled: true}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		raw, _ := json.Marshal(out)
+		text := string(raw)
+		if strings.Count(text, "first.png") != 1 || strings.Count(text, "second.png") != 1 || strings.Index(text, "first.png") > strings.Index(text, "second.png") || strings.Contains(text, "call_m4_occurrence") {
+			t.Fatalf("media pairing: %s", raw)
+		}
+	})
+}
