@@ -1015,3 +1015,51 @@ func TestM3ReviewB02IncompleteToolValues(t *testing.T) {
 		})
 	}
 }
+
+func TestM3ReviewB03TerminalMetadata(t *testing.T) {
+	for _, change := range []string{"same", "opaque", "call_id", "name", "kind", "index"} {
+		t.Run(change, func(t *testing.T) {
+			st := NewResponsesEventToAnthropicState()
+			item := ResponsesOutput{Type: "function_call", ID: "fc_a", CallID: "call_a", Name: "f"}
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &item}, st)
+			ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 0, item.ID, `{"x":1}`), st)
+			item.Arguments = `{"x":1}`
+			switch change {
+			case "opaque":
+				item.EncryptedFunctionArgs = json.RawMessage(`"cipher"`)
+			case "call_id":
+				item.CallID = "different"
+			case "name":
+				item.Name = "different"
+			case "kind":
+				item.Type = "custom_tool_call"
+				item.Input = "different"
+			}
+			output := []ResponsesOutput{item}
+			if change == "index" {
+				output = append([]ResponsesOutput{{Type: "message", ID: "m"}}, output...)
+			}
+			events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: output}}, st)
+			if change == "same" {
+				require.NoError(t, st.Err())
+				require.Len(t, events, 2)
+			} else {
+				require.Error(t, st.Err())
+				require.Empty(t, events)
+				require.Empty(t, FinalizeResponsesAnthropicStream(st))
+			}
+		})
+	}
+	t.Run("reused call ID stays independent", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		items := []ResponsesOutput{{Type: "function_call", ID: "a", CallID: "same", Name: "f"}, {Type: "function_call", ID: "b", CallID: "same", Name: "g"}}
+		for i := range items {
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, Item: &items[i]}, st)
+			ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", i, items[i].ID, `{}`), st)
+			items[i].Arguments = `{}`
+		}
+		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: items}}, st)
+		require.NoError(t, st.Err())
+		require.Len(t, events, 2)
+	})
+}

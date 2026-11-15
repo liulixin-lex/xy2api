@@ -1286,7 +1286,7 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	if evt.Response != nil {
 		for i, item := range evt.Response.Output {
 			tool := state.toolItems[item.ID]
-			if tool == nil && item.ID == "" {
+			if tool == nil && item.ID == "" && (item.Type == "function_call" || item.Type == "custom_tool_call") {
 				tool = state.tools[i]
 			}
 			if state.successTerminal && tool == nil && state.tools[i] == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
@@ -1294,6 +1294,14 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 				continue
 			}
 			if tool != nil {
+				tool = resToAnthToolOf(&ResponsesStreamEvent{OutputIndex: i, OutputIndexPresent: true, Item: &item}, state)
+				if tool == nil {
+					return nil
+				}
+				if tool.opaque {
+					state.err = resToAnthValidateArguments("function", tool.raw, true)
+					return nil
+				}
 				raw, present := item.Arguments, item.Arguments != ""
 				if tool.kind == "custom_tool_call" {
 					raw, present = item.Input, item.Input != "" || tool.raw == ""
