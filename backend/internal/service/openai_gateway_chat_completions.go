@@ -422,6 +422,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 retryChatResponsesWire:
 	requestRepair.setBody(body)
+	if requestRepair != nil && requestRepair.encryptedTried {
+		requestRepair.setBody(responsesBody)
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	cancelUpstream := func() {}
 	if clientStream {
@@ -504,9 +507,13 @@ retryChatResponsesWire:
 			closeAttempt()
 			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
-		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); repairErr == nil &&
+		repairBody := body
+		if requestRepair != nil && requestRepair.encryptedTried {
+			repairBody = responsesBody
+		}
+		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, repairBody, respBody); repairErr == nil &&
 			changed && rejectedFieldRetryState.Allow(retryBody) {
-			defer recordM7RejectedFieldReplay(ctx, c, account, resp, respBody, body, retryBody)()
+			defer recordM7RejectedFieldReplay(ctx, c, account, resp, respBody, repairBody, retryBody)()
 			closeAttempt()
 			logger.FromContext(ctx).Info("resilience.request_repair_replay",
 				zap.Int64("account_id", account.ID),
@@ -514,6 +521,10 @@ retryChatResponsesWire:
 				zap.String("form", "http"),
 				zap.String("path", "chat"),
 			)
+			if requestRepair != nil && requestRepair.encryptedTried {
+				responsesBody = retryBody
+				goto retryChatResponsesWire
+			}
 			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
 		if account.Type == AccountTypeAPIKey &&
@@ -549,7 +560,7 @@ retryChatResponsesWire:
 		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
-		if kind == resilience.ReasonEncryptedContent {
+		if kind == resilience.ReasonEncryptedContent || requestRepair != nil && requestRepair.encryptedTried {
 			responsesBody = next
 			goto retryChatResponsesWire
 		}

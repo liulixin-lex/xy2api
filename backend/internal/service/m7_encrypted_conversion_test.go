@@ -16,7 +16,10 @@ import (
 func TestM7EncryptedConversionRepair(t *testing.T) {
 	for _, target := range []string{"chat", "messages"} {
 		for _, stream := range []bool{false, true} {
-			for _, mode := range []string{"http_repair", "sse_repair", "ambiguous", "after_output", "rejected_again"} {
+			for _, mode := range []string{"http_repair", "sse_repair", "ambiguous", "after_output", "rejected_again", "encrypted_then_field"} {
+				if target == "messages" && mode == "encrypted_then_field" {
+					continue
+				}
 				if !stream && mode == "after_output" {
 					continue
 				}
@@ -24,7 +27,7 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 					withResilienceSettings(t, nil)
 					req := newWebSearchReplayRequest(t)
 					path := "/v1/chat/completions"
-					body := []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad-A","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good-B","summary":[]},{"role":"user","content":"hi"}]}`, stream))
+					body := []byte(fmt.Sprintf(`{"model":"gpt-5.5","top_p":0.7,"stream":%t,"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad-A","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good-B","summary":[]},{"role":"user","content":"hi"}]}`, stream))
 					if target == "messages" {
 						path = "/v1/messages"
 						body = []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":%t,"max_tokens":32,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"one","signature":"bad-A"},{"type":"thinking","thinking":"two","signature":"good-B"}]},{"role":"user","content":"hi"}]}`, stream))
@@ -39,7 +42,7 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 					}
 					errorBody := `{"error":{"type":"invalid_request_error","code":"invalid_encrypted_content"` + param + `,"message":"Encrypted content could not be verified"}}`
 					first := newOpenAIUpstreamErrorResponse(400, errorBody)
-					if mode != "http_repair" && mode != "rejected_again" {
+					if mode != "http_repair" && mode != "rejected_again" && mode != "encrypted_then_field" {
 						frames := "event: response.created\ndata: " + `{"type":"response.created","response":{"id":"resp_one","model":"gpt-5.5","status":"in_progress","output":[]}}` + "\n\n"
 						if mode == "after_output" {
 							frames += "event: response.output_text.delta\ndata: " + `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"hello"}` + "\n\n"
@@ -52,6 +55,9 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 						second = newOpenAIUpstreamErrorResponse(400, errorBody)
 					}
 					up := &httpUpstreamRecorder{responses: []*http.Response{first, second}}
+					if mode == "encrypted_then_field" {
+						up.responses = []*http.Response{first, newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"unsupported_parameter","param":"top_p","message":"Unsupported parameter: top_p"}}`), second}
+					}
 					svc := newOpenAIImageGenerationControlTestService(up)
 					svc.cfg.JWT.Secret = "fixture-secret"
 					var result *OpenAIForwardResult
@@ -61,9 +67,16 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 					} else {
 						result, err = svc.ForwardAsAnthropic(req.ctx, req.c, webSearchReplayAccount(false), body, "", "")
 					}
-					if mode == "http_repair" || mode == "sse_repair" {
+					if mode == "http_repair" || mode == "sse_repair" || mode == "encrypted_then_field" {
 						require.NoError(t, err)
-						require.Len(t, up.bodies, 2)
+						if mode == "encrypted_then_field" {
+							require.Len(t, up.bodies, 3)
+							require.NotContains(t, string(up.bodies[2]), "bad-A")
+							require.Contains(t, string(up.bodies[2]), "good-B")
+							require.False(t, gjson.GetBytes(up.bodies[2], "top_p").Exists())
+						} else {
+							require.Len(t, up.bodies, 2)
+						}
 						require.NotContains(t, string(up.bodies[1]), "bad-A")
 						require.Contains(t, string(up.bodies[1]), "good-B")
 						require.True(t, gjson.GetBytes(up.bodies[1], "input").Exists())
