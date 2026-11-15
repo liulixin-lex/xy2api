@@ -263,3 +263,5 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 - 提示词缓存的自动补断点、缓存 TTL 与计费规则见 [提示词缓存](../guides/caching.md)。
 
 Fable 5.2 与 Mythos 5.2 使用已核对的规范型号：缺省为 adaptive/high，显式 effort 按原转换规则处理；不支持强制 `tool_choice`（required/具名工具）。带签名 thinking 历史由桥入口保留，未签名历史不因此升级为可信内容。
+
+启用桥选项的 Anthropic 转换按完整工具身份限制 `allowed_tools` 声明；重复项去重，未知项忽略并记录字段省略，auto 空集转换为 none。历史工具不会重新加入当前声明；旧入口继续采用原模式选择。函数工具的 `strict` true/false/缺省三态保留。
