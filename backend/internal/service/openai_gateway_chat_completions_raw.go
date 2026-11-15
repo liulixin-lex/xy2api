@@ -547,8 +547,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, failure, message, clientOutputStarted)
 		MarkOpsStreamFailure(c, "upstream_error", openAIStreamFailedEventErrorCode(failure), message, openAIStreamFailureStatus(failure, message))
 		errType := gjson.GetBytes(failure, "error.type").String()
-		code := extractUpstreamErrorCode(failure)
-		param := gjson.GetBytes(failure, "error.param").String()
+		code := openAIStreamErrorField(failure, "code").String()
+		param := openAIStreamErrorField(failure, "param").String()
 		if errType == "" {
 			errType = "upstream_error"
 		}

@@ -683,6 +683,8 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload := outcome.payload
+		code := openAIStreamErrorField(payload, "code").String()
+		param := openAIStreamErrorField(payload, "param").String()
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
 			MarkOpsCyberPolicy(c, CyberPolicyMark{
 				Code:           code,
@@ -714,10 +716,10 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				errMsg = message
 			}
 			MarkResponseCommitted(c)
-			writeAnthropicError(c, status, errType, errMsg)
+			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, status, errType, code, param, errMsg)
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
+		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", code, param, message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
@@ -1263,8 +1265,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					MarkResponseCommitted(c)
 				}
 				if !clientDisconnected {
-					code := extractUpstreamErrorCode(payloadBytes)
-					param := gjson.GetBytes(payloadBytes, "error.param").String()
+					code := openAIStreamErrorField(payloadBytes, "code").String()
+					param := openAIStreamErrorField(payloadBytes, "param").String()
 					WriteTargetProtocolError(c, PreOutputProtocolAnthropic, errStatus, errType, code, param, errMsg)
 				}
 

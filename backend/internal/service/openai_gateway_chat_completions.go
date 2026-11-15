@@ -638,6 +638,8 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload := outcome.payload
+		code := openAIStreamErrorField(payload, "code").String()
+		param := openAIStreamErrorField(payload, "param").String()
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
 		// 标记供 handler 事后写风控/邮件/tokens=0 用量行。
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
@@ -671,10 +673,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 				errMsg = message
 			}
 			MarkResponseCommitted(c)
-			writeChatCompletionsError(c, status, errType, errMsg)
+			WriteTargetProtocolError(c, PreOutputProtocolChat, status, errType, code, param, errMsg)
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "upstream_error", code, param, message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
@@ -1065,8 +1067,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				MarkResponseCommitted(c)
 			}
 			if !clientDisconnected {
-				code := extractUpstreamErrorCode(payloadBytes)
-				param := gjson.GetBytes(payloadBytes, "error.param").String()
+				code := openAIStreamErrorField(payloadBytes, "code").String()
+				param := openAIStreamErrorField(payloadBytes, "param").String()
 				WriteTargetProtocolError(c, PreOutputProtocolChat, defaultStatus, defaultErrType, code, param, defaultMsg)
 			}
 
