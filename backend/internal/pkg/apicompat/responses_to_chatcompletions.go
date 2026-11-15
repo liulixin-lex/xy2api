@@ -743,8 +743,9 @@ type bufferedOutputSlot struct {
 // BufferedResponseAccumulator keeps independent output and content slots. It
 // restores content only; the reader still authenticates the upstream terminal.
 type BufferedResponseAccumulator struct {
-	slots []*bufferedOutputSlot
-	err   error
+	slots   []*bufferedOutputSlot
+	current *bufferedOutputSlot
+	err     error
 }
 
 func NewBufferedResponseAccumulator() *BufferedResponseAccumulator {
@@ -765,6 +766,9 @@ func bufferedIdentityConflict(left, right ResponsesOutput) bool {
 }
 
 func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, explicit, terminal bool) *bufferedOutputSlot {
+	if !terminal && !explicit && item.ID == "" && item.CallID == "" && a.current != nil && !bufferedIdentityConflict(a.current.item, item) {
+		return a.current
+	}
 	var found *bufferedOutputSlot
 	for _, candidate := range a.slots {
 		if (item.ID != "" && item.ID == candidate.item.ID) || (item.CallID != "" && item.CallID == candidate.item.CallID) {
@@ -944,6 +948,9 @@ func (a *BufferedResponseAccumulator) snapshot(item ResponsesOutput, index int, 
 	slot := a.slot(item, index, explicit, rank == 3)
 	if slot == nil {
 		return
+	}
+	if rank == 1 {
+		a.current = slot
 	}
 	if rank >= slot.rank {
 		slot.item = mergeBufferedItem(slot.item, item)

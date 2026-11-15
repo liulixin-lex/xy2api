@@ -51,3 +51,23 @@ func TestReviewM2ReasoningContentParts(t *testing.T) {
 	require.Equal(t, "Answer", answer)
 	require.Equal(t, "think", reasoning)
 }
+
+func TestReviewM2AnonymousDeltaUsesCurrentItem(t *testing.T) {
+	for _, index := range []int{0, 1} {
+		a := NewBufferedResponseAccumulator()
+		if index == 1 {
+			a.ProcessEvent(reviewM2Event(t, `{"type":"response.output_item.done","output_index":0,"item":{"id":"r","type":"reasoning","summary":[{"type":"summary_text","text":"think"}]}}`))
+		}
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: index, OutputIndexPresent: true, Item: &ResponsesOutput{ID: "msg_1", Type: "message", Content: []ResponsesContentPart{}}})
+		a.ProcessEvent(reviewM2Event(t, `{"type":"response.output_text.delta","delta":"hi"}`))
+		a.ProcessEvent(reviewM2Event(t, `{"type":"response.completed","response":{"status":"completed","output":[]}}`))
+		response := &ResponsesResponse{Status: "completed"}
+		a.SupplementResponseOutput(response)
+		require.NoError(t, a.Err())
+		require.Len(t, response.Output, index+1)
+		message := response.Output[index]
+		require.Equal(t, "msg_1", message.ID)
+		require.Len(t, message.Content, 1)
+		require.Equal(t, "hi", message.Content[0].Text)
+	}
+}
