@@ -7,6 +7,10 @@ import (
 )
 
 func TestM1AnthropicFieldOptions(t *testing.T) {
+	chat, err := anthropicPolicyRequest(t, "chat", `"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]`)
+	require.NoError(t, err)
+	require.Nil(t, chat.Tools[0].Strict)
+
 	for _, strict := range []*bool{nil, m1Bool(true), m1Bool(false)} {
 		req := &ResponsesRequest{Model: "claude-sonnet-4-6", Tools: []ResponsesTool{{Type: "function", Name: "a", Parameters: json.RawMessage(`{"type":"object"}`), Strict: strict}, {Type: "function", Name: "b", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: json.RawMessage(`{"type":"allowed_tools","mode":"auto","tools":[{"type":"function","name":"a"},{"type":"function","name":"a"},{"type":"function","name":"missing"}]}`)}
 		var out, legacy, zero AnthropicRequest

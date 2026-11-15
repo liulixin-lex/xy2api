@@ -79,7 +79,7 @@ func TestAnthropicPolicyMappedFields(t *testing.T) {
 				require.Len(t, r.Tools, 1)
 				wire, err := json.Marshal(r.Tools[0])
 				require.NoError(t, err)
-				require.NotContains(t, string(wire), "strict")
+				require.Contains(t, string(wire), `"strict":`+strict)
 				var choice map[string]any
 				require.NoError(t, json.Unmarshal(r.ToolChoice, &choice))
 				require.Equal(t, "tool", choice["type"])

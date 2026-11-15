@@ -299,6 +299,11 @@ func mapAnthropicToolsWithOptions(req *ResponsesRequest, out *AnthropicRequest, 
 		for i, tool := range source.Tools {
 			field := fmt.Sprintf("tools[%d]", i)
 			converted := convertChatToolsToResponses([]ChatTool{tool}, nil)
+			if tool.Function != nil {
+				for j := range converted {
+					converted[j].Strict = tool.Function.Strict
+				}
+			}
 			if tool.Type == "web_search_preview" {
 				converted = []ResponsesTool{{Type: "web_search_preview"}}
 			}
@@ -313,7 +318,11 @@ func mapAnthropicToolsWithOptions(req *ResponsesRequest, out *AnthropicRequest, 
 			paths = append(paths, field)
 		}
 		for i, f := range source.Functions {
-			tools = append(tools, convertChatToolsToResponses(nil, []ChatFunction{f})...)
+			converted := convertChatToolsToResponses(nil, []ChatFunction{f})
+			for j := range converted {
+				converted[j].Strict = f.Strict
+			}
+			tools = append(tools, converted...)
 			paths = append(paths, fmt.Sprintf("functions[%d]", i))
 		}
 	}
