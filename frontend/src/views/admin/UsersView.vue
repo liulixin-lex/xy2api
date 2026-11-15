@@ -294,7 +294,7 @@
                   {{ t('admin.users.disable') }}
                 </button>
                 <div class="my-1 border-t border-line-popover"></div>
-                <button type="button" role="menuitem" :class="[BULK_ITEM, '!text-status-error-text']" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
+                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
                   {{ t('common.delete') }}
                 </button>
               </div>
@@ -1538,6 +1538,8 @@ const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 const POPOVER_ITEM = 'flex w-full items-center justify-between px-4 py-2 text-left text-sm'
 const POPOVER_ITEM_TEXT = 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'
 const BULK_ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
+// The danger item (delete): the error text, on a light red under the pointer and keyboard focus (12.12-6).
+const BULK_DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
 // The bulk menu is a sub-layer like the row menu: Escape closes it and gives focus back to its button, a dialog it
 // opens closes it, a press outside closes it (handleClickOutside). It closes when the last row is unticked.
 const bulkMenuOpen = ref(false)

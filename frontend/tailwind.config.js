@@ -25,7 +25,8 @@ export default {
           selected: 'var(--color-bg-selected)',
           popover: 'var(--color-bg-popover)',
           'popover-hover': 'var(--color-bg-popover-hover)',
-          'popover-selected': 'var(--color-bg-popover-selected)'
+          'popover-selected': 'var(--color-bg-popover-selected)',
+          'popover-danger-hover': 'var(--color-bg-popover-danger-hover)'
         },
         line: {
           row: 'var(--color-line-row)',

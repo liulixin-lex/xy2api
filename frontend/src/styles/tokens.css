@@ -140,6 +140,8 @@
   --color-text-popover-selected: #0f766e;
   --radius-popover: 12px;
   --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  /* A menu's danger item (delete) under the pointer or keyboard focus, its error text unchanged: 5.91:1 (12.12-6) */
+  --color-bg-popover-danger-hover: #fef2f2;
 }
 
 .dark {
@@ -214,4 +216,6 @@
   --color-bg-popover-selected: rgb(19 78 74 / 0.2);
   --color-text-popover-selected: #5eead4;
   --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  /* The error colour #f87171 at 10% over the popover's #1e293b: the error text on it is 4.62:1 (12.12-6) */
+  --color-bg-popover-danger-hover: #343040;
 }

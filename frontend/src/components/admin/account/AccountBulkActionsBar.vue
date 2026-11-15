@@ -57,7 +57,7 @@
           <button type="button" role="menuitem" :class="ITEM" @click="pick('probe-upstream-billing')">{{ t('admin.accounts.bulkActions.probeUpstreamBilling') }}</button>
           <button type="button" role="menuitem" :class="ITEM" :disabled="iqBusy" :aria-busy="iqBusy" data-testid="bulk-iq-check" @click="pick('run-iq-check')">{{ t('admin.accounts.bulkActions.iqCheck') }}</button>
           <div class="my-1 border-t border-line-popover" />
-          <button type="button" role="menuitem" :class="ITEM" class="!text-red-600 dark:!text-red-400" @click="pick('delete')">{{ t('admin.accounts.bulkActions.delete') }}</button>
+          <button type="button" role="menuitem" :class="[ITEM, DANGER]" @click="pick('delete')">{{ t('admin.accounts.bulkActions.delete') }}</button>
         </div>
       </div>
     </Teleport>
@@ -106,6 +106,8 @@ const SCHED_ACTIONS = ['reset', 'exempt'] as const
 const LINK = 'text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200'
 const SEP = 'mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600'
 const ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
+// A danger item: the error text, on a light red under the pointer and keyboard focus instead of the grey (12.12-6).
+const DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
 
 const { t } = useI18n()
 const { width: viewportWidth } = useWindowSize()

@@ -83,7 +83,7 @@
             </button>
             <template v-if="canManage">
               <div :class="DIVIDER"></div>
-              <button :class="[ITEM, '!text-red-600 dark:!text-red-400']" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
+              <button :class="[ITEM, DANGER]" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
                 <Icon name="trash" size="sm" class="shrink-0 text-red-500 dark:text-red-400" />
                 {{ t('common.delete') }}
               </button>
@@ -159,6 +159,8 @@ watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePo
 useResizeObserver(menuRef, updatePosition)
 
 const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-200'
+// A danger item: the error text, on a light red under the pointer and keyboard focus instead of the grey (12.12-6).
+const DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
 const DIVIDER = 'my-1 border-t border-line-popover'
 
