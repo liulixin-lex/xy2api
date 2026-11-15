@@ -518,3 +518,72 @@ func TestM4ChatToolTerminalIdentityE14(t *testing.T) {
 		t.Fatalf("no-tool output changed: %s", raw)
 	}
 }
+
+func TestM4ReasoningIdentity(t *testing.T) {
+	opts := ConversionOptions{Bridge: &BridgeOptions{Enabled: true}}
+	chat, err := ChatCompletionsResponseToResponsesWithBridgeOptions(&ChatCompletionsResponse{Choices: []ChatChoice{{Message: ChatMessage{ReasoningContent: "THINK", Content: json.RawMessage(`"ANSWER"`)}, FinishReason: "stop"}}}, "m", nil, nil, false, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anth, err := AnthropicToResponsesResponseWithBridgeOptions(&AnthropicResponse{Content: []AnthropicContentBlock{{Type: "thinking", Thinking: "THINK"}}, StopReason: AnthropicStopReasonPtr("end_turn")}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, response := range []*ResponsesResponse{chat, anth} {
+		if !strings.HasPrefix(response.Output[0].ID, "rs_") {
+			t.Fatalf("ID=%s", response.Output[0].ID)
+		}
+	}
+	rs := NewChatCompletionsToResponsesStreamState("m")
+	rs.Bridge = opts.Bridge
+	text := "THINK"
+	answer := "ANSWER"
+	reason := "stop"
+	events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{ReasoningContent: &text}}}}, rs)
+	events = append(events, ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{Delta: ChatDelta{Content: &answer}, FinishReason: &reason}}}, rs)...)
+	events = append(events, FinalizeChatCompletionsResponsesStream(rs)...)
+	m4AssertReasoningIdentity(t, events)
+	state := NewAnthropicEventToResponsesState()
+	var ae []ResponsesStreamEvent
+	for _, event := range []*AnthropicStreamEvent{{Type: "message_start", Message: &AnthropicResponse{ID: "fixed", Model: "m"}}, {Type: "content_block_start", ContentBlock: &AnthropicContentBlock{Type: "thinking"}}, {Type: "content_block_delta", Delta: &AnthropicDelta{Type: "thinking_delta", Thinking: "THINK"}}, {Type: "content_block_stop"}, {Type: "message_delta", Delta: &AnthropicDelta{StopReason: "end_turn"}}, {Type: "message_stop"}} {
+		ae = append(ae, AnthropicEventToResponsesEventsWithBridgeOptions(event, state, opts)...)
+	}
+	m4AssertReasoningIdentity(t, ae)
+}
+
+func m4AssertReasoningIdentity(t *testing.T, events []ResponsesStreamEvent) {
+	t.Helper()
+	id := ""
+	index := -1
+	for _, e := range events {
+		if e.Item != nil && e.Item.Type == "reasoning" {
+			if id == "" {
+				id = e.Item.ID
+				index = e.OutputIndex
+			}
+			if e.Item.ID != id || e.OutputIndex != index {
+				t.Fatalf("item identity changed: %+v", e)
+			}
+		}
+		if strings.HasPrefix(e.Type, "response.reasoning_summary_") && (e.ItemID != id || e.OutputIndex != index) {
+			t.Fatalf("summary identity changed: %+v", e)
+		}
+		if e.Response != nil && e.Response.Status == "completed" {
+			found := false
+			for i, item := range e.Response.Output {
+				if item.Type == "reasoning" {
+					found = true
+					if item.ID != id || i != index {
+						t.Fatalf("terminal identity changed: %+v", item)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("terminal reasoning missing")
+			}
+		}
+	}
+	if !strings.HasPrefix(id, "rs_") {
+		t.Fatalf("ID=%s", id)
+	}
+}
