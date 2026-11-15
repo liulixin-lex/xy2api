@@ -219,3 +219,40 @@ func TestReviewM2QualifiedTerminalDefaults(t *testing.T) {
 	require.Equal(t, "stop", ResponsesToChatCompletions(&ResponsesResponse{Status: "failed"}, "m").Choices[0].FinishReason, "legacy projector must never emit an empty enum")
 	require.Error(t, ValidateResponsesForChat(&ResponsesResponse{Status: "failed"}))
 }
+
+func TestReviewM2VisibleSnapshotsDoNotRetractOrRepeat(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		events []string
+		want   string
+	}{
+		{"trimmed done", []string{`{"type":"response.output_text.delta","delta":"Hello "}`, `{"type":"response.output_text.done","content_index":0,"text":"Hello"}`}, "Hello "},
+		{"extended done", []string{`{"type":"response.output_text.delta","delta":"Hello "}`, `{"type":"response.output_text.done","text":"Hello world"}`}, "Hello world"},
+		{"done adds index", []string{`{"type":"response.output_text.delta","delta":"Hello"}`, `{"type":"response.output_text.done","content_index":1,"text":"Hello"}`}, "Hello"},
+		{"terminal renumbers message", []string{`{"type":"response.output_text.delta","output_index":1,"delta":"Hello"}`}, "Hello"},
+		{"terminal only", nil, "Hello"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := NewResponsesEventToChatState()
+			var text string
+			finishes := 0
+			events := append(append([]string(nil), tc.events...), `{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}]}}`)
+			for _, raw := range events {
+				for _, chunk := range ResponsesEventToChatChunks(reviewM2Event(t, raw), state) {
+					for _, choice := range chunk.Choices {
+						if choice.Delta.Content != nil {
+							text += *choice.Delta.Content
+						}
+						if choice.FinishReason != nil {
+							require.Equal(t, "stop", *choice.FinishReason)
+							finishes++
+						}
+					}
+				}
+			}
+			require.NoError(t, state.Err())
+			require.Equal(t, tc.want, text)
+			require.Equal(t, 1, finishes)
+		})
+	}
+}
