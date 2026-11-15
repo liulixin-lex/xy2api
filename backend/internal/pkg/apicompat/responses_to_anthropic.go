@@ -1277,18 +1277,22 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 	var events []AnthropicStreamEvent
 	if evt.Response != nil && (evt.Response.Status == "completed" || unknownMapped) {
 		state.successTerminal = true
-		terminalOnlyTools := len(state.toolOrder) == 0
 		for i, item := range evt.Response.Output {
-			if terminalOnlyTools && (item.Type == "function_call" || item.Type == "custom_tool_call") {
+			tool := state.toolItems[item.ID]
+			if tool == nil && item.ID == "" {
+				tool = state.tools[i]
+			}
+			if tool == nil && state.tools[i] == nil && (item.Type == "function_call" || item.Type == "custom_tool_call") {
 				events = append(events, resToAnthHandleOutputItemDone(&ResponsesStreamEvent{OutputIndex: i, Item: &item}, state)...)
 				continue
 			}
-			if tool := state.toolItems[item.ID]; tool != nil {
+			if tool != nil {
 				raw, present := item.Arguments, item.Arguments != ""
 				if tool.kind == "custom_tool_call" {
 					raw, present = item.Input, item.Input != "" || tool.raw == ""
 				}
 				resToAnthCompleteTool(tool, raw, present, state)
+				events = append(events, resToAnthEmitTool(tool, state)...)
 			}
 		}
 		if state.err != nil {
