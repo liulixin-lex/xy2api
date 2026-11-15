@@ -614,3 +614,40 @@ func TestM6FailureRecoveryHint(t *testing.T) {
 		})
 	}
 }
+
+func TestM6PassthroughFinalEffort(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			body := []byte(`{"model":"gpt-6.1-sol","input":"hi","stream":` + fmt.Sprint(partial) + `,"reasoning":{"effort":"low"}}`)
+			ctx := WithOpenAIReasoningEffortPolicy(m1EffortContext(body), "", []ReasoningEffortMapping{{From: "low", To: "medium", Model: "gpt-6.1-sol", MatchType: "exact"}, {From: "medium", To: "high"}}, "")
+			c := newOpenAIRejectedFieldTestContext(body)
+			c.Request = c.Request.WithContext(ctx)
+			a := newOpenAIRejectedFieldTestAccount()
+			a.Extra["openai_passthrough"] = true
+			payload := `{"id":"r1","output":[],"usage":{"input_tokens":13,"output_tokens":5}}`
+			ct := "application/json"
+			if partial {
+				ct = "text/event-stream"
+				payload = m6Frame(`{"type":"response.output_text.delta","delta":"answer"}`) + m6Frame(`{"type":"response.failed","response":{"id":"r1","status":"failed","error":{"type":"server_error","message":"late failure"},"usage":{"input_tokens":13,"output_tokens":5}}}`)
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(400, `{"error":{"code":"unsupported_parameter","param":"metadata","message":"Unsupported parameter: metadata"}}`), {StatusCode: 200, Header: http.Header{"Content-Type": {ct}}, Body: io.NopCloser(strings.NewReader(payload))}}}
+			body = []byte(strings.TrimSuffix(string(body), "}") + `,"metadata":{"tag":"fixture"}}`)
+			result, err := newOpenAIRejectedFieldTestService(upstream).Forward(ctx, c, a, body)
+			if partial {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			require.Equal(t, partial, result.PartialFailure)
+			require.Len(t, upstream.bodies, 2)
+			for _, wire := range upstream.bodies {
+				require.Equal(t, "medium", gjson.GetBytes(wire, "reasoning.effort").String())
+			}
+			require.NotNil(t, result.ReasoningEffort)
+			require.Equal(t, "medium", *result.ReasoningEffort)
+			require.Equal(t, "low", *RequestedReasoningEffortFromContext(ctx))
+			require.Equal(t, 13, result.Usage.InputTokens)
+		})
+	}
+}

@@ -395,6 +395,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if actualModel == "" {
 			actualModel = reqModel
 		}
+		if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, actualModel, "responses")
+			if policyErr != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			body = policyBody
+		}
 		SetOpsUpstreamModel(c, actualModel)
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, actualModel, reqStream, body, replayAttempt)
 		replayAttempt = true
@@ -418,6 +425,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			return nil, buildErr
 		}
+
+		reasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
 		upstreamStart := time.Now()
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
