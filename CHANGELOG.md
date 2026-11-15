@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Responses 上游拒绝硬输出上限时保留错误，不再删除 `max_output_tokens` 后重发。
+
 - GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
 
 - API Key 请求的显式 `none` 不再因第三方端点而被删除，Responses-shaped Chat 按实际端点保留参数。

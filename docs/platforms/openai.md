@@ -163,3 +163,5 @@ goals = true
 - **推理档位**：支持 `none`，`minimal` 按最近可用档位映射到 `none`；工具调用使用 Responses 接口。
 - **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
 - **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
+
+Responses 上游明确拒绝 `max_output_tokens` 时保留拒绝，不删除调用方的硬输出上限后重发。其他可选字段仍沿用既有拒参修复与请求预算。
