@@ -394,11 +394,19 @@ func TestM4ReviewMediaDetailValidation(t *testing.T) {
 		if (err != nil) != tc.bad {
 			t.Fatalf("%s/%s err=%v", tc.kind, tc.detail, err)
 		}
+		// The legacy entry shares M2's detail rule; only the error path differs.
+		_, legacyErr := ResponsesToAnthropicRequest(req)
 		if tc.bad {
 			if !strings.Contains(err.Error(), "input[0].content[1].detail") || len(notices) != 0 {
 				t.Fatalf("invalid detail: %v %#v", err, notices)
 			}
+			if legacyErr == nil || !strings.Contains(legacyErr.Error(), "content.detail") {
+				t.Fatalf("legacy invalid detail: %v", legacyErr)
+			}
 			continue
+		}
+		if legacyErr != nil {
+			t.Fatalf("legacy valid detail: %v", legacyErr)
 		}
 		raw, _ := json.Marshal(out.Messages)
 		if !strings.Contains(string(raw), "https://example.test/") {
@@ -413,12 +421,6 @@ func TestM4ReviewMediaDetailValidation(t *testing.T) {
 		}
 		if want == 1 && notices[0] != (ConversionNotice{Field: "input[0].content[1].detail", Action: "omit"}) {
 			t.Fatalf("notice=%#v", notices)
-		}
-		if tc.detail != "auto" {
-			_, legacyErr := ResponsesToAnthropicRequest(req)
-			if legacyErr == nil || !strings.Contains(legacyErr.Error(), "content.detail") || !strings.Contains(legacyErr.Error(), "Anthropic has no image/file detail equivalent") {
-				t.Fatalf("legacy detail: %v", legacyErr)
-			}
 		}
 	}
 }

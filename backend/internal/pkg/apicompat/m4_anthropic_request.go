@@ -69,24 +69,3 @@ func prepareBridgeAnthropicRequest(req *ResponsesRequest, opts ConversionOptions
 	}
 	return &copyReq, nil
 }
-
-func validateLegacyAnthropicDetails(input json.RawMessage) error {
-	var items []map[string]json.RawMessage
-	if json.Unmarshal(input, &items) != nil {
-		return nil
-	}
-	for _, item := range items {
-		for _, field := range []string{"content", "output"} {
-			var parts []ResponsesContentPart
-			if json.Unmarshal(item[field], &parts) != nil {
-				continue
-			}
-			for _, part := range parts {
-				if (part.Type == "input_image" || part.Type == "input_file") && part.Detail != "" && part.Detail != "auto" {
-					return unsupportedConversion("content.detail", "Anthropic has no image/file detail equivalent")
-				}
-			}
-		}
-	}
-	return nil
-}
