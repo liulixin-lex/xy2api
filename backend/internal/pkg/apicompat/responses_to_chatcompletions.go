@@ -153,6 +153,9 @@ func ResponsesEventToChatChunks(evt *ResponsesStreamEvent, state *ResponsesEvent
 	case "response.output_text.delta":
 		return resToChatHandleTextDelta(evt, state)
 	case "response.output_text.done", "response.refusal.done", "response.content_part.added", "response.content_part.done":
+		if evt.Part != nil && evt.Part.Type == "reasoning_text" {
+			return resToChatHandleReasoningDelta(evt, state)
+		}
 		return resToChatHandleVisibleEvent(evt, state)
 	case "response.refusal.delta":
 		return resToChatHandleRefusalDelta(evt, state)
@@ -1018,6 +1021,9 @@ func (a *BufferedResponseAccumulator) ProcessEvent(event *ResponsesStreamEvent) 
 				return
 			}
 			part = *event.Part
+			if part.Type == "reasoning_text" {
+				kind = "reasoning"
+			}
 			if event.Type == "response.content_part.added" {
 				rank = 1
 			}
