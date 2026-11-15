@@ -447,7 +447,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		var preDispatchErr *UpstreamFailoverError
 		if headerGuard != nil && headerGuard.stopHeaderWait() &&
-			!(errors.As(err, &preDispatchErr) && preDispatchErr.PreDispatchSelectionInvalidated) {
+			(!errors.As(err, &preDispatchErr) || !preDispatchErr.PreDispatchSelectionInvalidated) {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
