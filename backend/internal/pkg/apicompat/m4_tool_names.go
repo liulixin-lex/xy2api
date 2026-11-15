@@ -191,6 +191,23 @@ func responsesToChatBridgeRequest(req *ResponsesRequest, opts *ResponsesToChatOp
 	if err != nil {
 		return nil, err
 	}
+	selectionOpts := ConversionOptions{Bridge: opts.Bridge, Record: opts.Record}
+	if allowed := anthropicAllowedToolIdentities(prepared, prepared.Tools, selectionOpts); allowed != nil {
+		selected := make([]ResponsesTool, 0, len(prepared.Tools))
+		for _, tool := range prepared.Tools {
+			if allowed[anthropicToolIdentity(tool, selectionOpts)] {
+				selected = append(selected, tool)
+			}
+		}
+		prepared.Tools = selected
+		var choice struct {
+			Mode string `json:"mode"`
+		}
+		_ = json.Unmarshal(prepared.ToolChoice, &choice)
+		if len(selected) == 0 && (choice.Mode == "" || choice.Mode == "auto") {
+			prepared.ToolChoice = json.RawMessage(`"none"`)
+		}
+	}
 	prepared.Input, err = bridgeReasoningHistory(prepared.Input)
 	if err != nil {
 		return nil, err
