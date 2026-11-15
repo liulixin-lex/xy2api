@@ -261,3 +261,5 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 
 - Anthropic Claude 与 Antigravity Claude 不能在同一上下文中混用。如果 Antigravity 账号开启了混合调度，请用分组隔离，见 [Antigravity](antigravity.md)。
 - 提示词缓存的自动补断点、缓存 TTL 与计费规则见 [提示词缓存](../guides/caching.md)。
+
+Fable 5.2 与 Mythos 5.2 使用已核对的规范型号：缺省为 adaptive/high，显式 effort 按原转换规则处理；不支持强制 `tool_choice`（required/具名工具）。带签名 thinking 历史由桥入口保留，未签名历史不因此升级为可信内容。
