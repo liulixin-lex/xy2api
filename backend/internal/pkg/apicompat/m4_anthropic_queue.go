@@ -46,6 +46,10 @@ func consumeBridgeAnthropicChunk(chunk *ChatCompletionsChunk, state *ChatComplet
 		if choice.Delta.Content != nil {
 			appendText("text", *choice.Delta.Content)
 		}
+		if choice.Delta.Refusal != nil {
+			appendText("text", *choice.Delta.Refusal)
+			state.bridgeHasRefusal = true
+		}
 		for position, fragment := range choice.Delta.ToolCalls {
 			slot, err := ResolveChatToolSlot(choice.Index, position, fragment.Index, fragment.ID, &state.bridgeSlots)
 			if err != nil {

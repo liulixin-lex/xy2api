@@ -1768,6 +1768,11 @@ func ChatCompletionsChunkToResponsesEvents(
 			state.bridgeErr = bridgeConversionError("choices.index", fmt.Errorf("unsupported choice index %d", choice.Index))
 			return events
 		}
+		if bridgeEnabled(state.Bridge) && choice.Delta.Refusal != nil && *choice.Delta.Refusal != "" {
+			events = append(events, closeChatReasoningItem(state)...)
+			events = append(events, closeBridgeOriginalMessage(state)...)
+			events = append(events, appendBridgeChatPart(state, ChatOutputPart{Kind: "refusal", Text: *choice.Delta.Refusal})...)
+		}
 		// Reasoning is emitted as its own output item and must be opened
 		// (output_item.added + reasoning_summary_part.added) before the first
 		// delta, otherwise a strict client discards the delta. The leading
@@ -1881,6 +1886,19 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 			return nil
 		}
 	}
+	status := "completed"
+	var incompleteDetails *ResponsesIncompleteDetails
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("chat", state.FinishReason, len(state.ToolCalls) > 0 && state.FinishReason != "length", false)
+		if err != nil {
+			state.bridgeErr = err
+			return nil
+		}
+	} else if state.FinishReason == "length" {
+		status = "incomplete"
+		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+	}
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)
 	if bridgeEnabled(state.Bridge) {
@@ -1924,13 +1942,6 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	// that item; without them the call never completes and the session wedges.
 	// Mirrors cc-switch's finalize_tools.
 	events = append(events, closeChatToolItems(state)...)
-
-	status := "completed"
-	var incompleteDetails *ResponsesIncompleteDetails
-	if state.FinishReason == "length" {
-		status = "incomplete"
-		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
-	}
 
 	eventType := "response.completed"
 	if bridgeEnabled(state.Bridge) {

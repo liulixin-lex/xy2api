@@ -275,3 +275,5 @@ Responses 流式响应中的 thinking 摘要先宣布 part，再发送文本增�
 
 - Anthropic Claude 与 Antigravity Claude 不能在同一上下文中混用。如果 Antigravity 账号开启了混合调度，请用分组隔离，见 [Antigravity](antigravity.md)。
 - 提示词缓存的自动补断点、缓存 TTL 与计费规则见 [提示词缓存](../guides/caching.md)。
+
+Chat、Anthropic API Key 转换桥按同一停因表投影非流与流式终态：长度或上下文上限为 incomplete，过滤保留过滤原因，拒绝保留正文；无法表达的停因返回转换错误。Chat refusal 转为 Responses 的正式 refusal 分片，转为 Messages 时保留为正文。
