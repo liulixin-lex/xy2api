@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -1826,27 +1827,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		observer.ObserveOpenAI(body, strings.TrimSpace(gjson.GetBytes(body, "type").String()))
 	}
 
-	// Detect SSE responses for ALL account types via Content-Type header.
-	// Some OpenAI-compatible upstreams (including other XY2API-compatible relay instances)
-	// may return SSE even when stream=false was requested.
-	if isEventStreamResponse(resp.Header) {
-		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
-	}
-	// bodyLooksLikeSSE is a line-level heuristic: real SSE framing requires
-	// "data:"/"event:" field names at the very start of a physical line. A
-	// plain bytes.Contains scan would also match ordinary JSON responses
-	// whose string content merely echoes the literal text "data:" or
-	// "event:" (e.g. compact tool output), causing those JSON bodies to be
-	// misrouted into handleSSEToJSON and lose their usage accounting.
+	// A complete JSON object is authoritative even when the upstream labels it SSE.
 	bodyLooksLikeSSE := bodyHasSSEFraming(body)
-
-	// For OAuth accounts, also fall back to a body-content heuristic because
-	// the upstream may omit the Content-Type header while still sending SSE.
-	// This heuristic is NOT applied to API-key accounts to avoid false
-	// positives on JSON responses that coincidentally contain "data:" or
-	// "event:" in their text content.
-	if account.Type == AccountTypeOAuth && bodyLooksLikeSSE {
-		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+	if !isOpenAIResponseJSONObject(body) {
+		if bodyLooksLikeSSE || isEventStreamResponse(resp.Header) {
+			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+		}
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid non-streaming response")
 	}
 	if account != nil && account.IsGrok() && isOpenAIResponsesCompactPath(c) {
 		body, err = convertGrokResponseToOpenAICompact(body)
@@ -1895,12 +1882,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
-	contentType := "application/json"
-	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
-		if upstreamType := resp.Header.Get("Content-Type"); upstreamType != "" {
-			contentType = upstreamType
-		}
-	}
+	contentType := "application/json; charset=utf-8"
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
@@ -1915,6 +1899,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
 	}, nil
+}
+
+func isOpenAIResponseJSONObject(body []byte) bool {
+	return utf8.Valid(body) && json.Valid(body) && gjson.ParseBytes(body).IsObject()
 }
 
 func isEventStreamResponse(header http.Header) bool {
@@ -2035,6 +2023,8 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
 	}

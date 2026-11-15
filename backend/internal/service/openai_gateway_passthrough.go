@@ -3082,12 +3082,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		observer.ObserveOpenAI(body, strings.TrimSpace(gjson.GetBytes(body, "type").String()))
 	}
 
-	// Detect SSE responses from upstream and convert to JSON.
-	// Some upstreams (e.g. other XY2API-compatible relay instances) may return SSE even when
-	// stream=false was requested. Without this conversion the client would
-	// receive raw SSE text or a terminal event with empty output.
-	if isEventStreamResponse(resp.Header) {
-		return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+	if !isOpenAIResponseJSONObject(body) {
+		if bodyHasSSEFraming(body) || isEventStreamResponse(resp.Header) {
+			return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+		}
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid non-streaming response")
 	}
 
 	usage := &OpenAIUsage{}
@@ -3106,10 +3105,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json"
-	}
+	contentType := "application/json; charset=utf-8"
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
@@ -3206,6 +3204,8 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			contentType = "text/event-stream"
 		}
 	}
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
 	}
