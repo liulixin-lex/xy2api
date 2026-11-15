@@ -52,6 +52,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
 
+Chat 转 Responses 时，显式的正数输出上限原值保留，包括 1 至 127；不会自动提高到 128，也不会在拒参重放时删除硬输出上限。
+
 ## 客户端配置
 
 ### Codex CLI
