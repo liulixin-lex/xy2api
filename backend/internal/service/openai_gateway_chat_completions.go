@@ -64,6 +64,17 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
 	}
+	if account != nil && account.Type != AccountTypeAPIKey {
+		policyBody, _, err := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
+		if err != nil {
+			if IsReasoningEffortPolicyDenied(err) {
+				MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				writeChatCompletionsError(c, http.StatusForbidden, "permission_error", err.Error())
+			}
+			return nil, err
+		}
+		body = policyBody
+	}
 	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false, nil)
 }
 

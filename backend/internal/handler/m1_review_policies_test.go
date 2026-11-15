@@ -64,3 +64,34 @@ func TestM1ReviewMessagesDefaultPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestM1ReviewOAuthChatPolicy(t *testing.T) {
+	for _, mode := range []string{"mapping", "cap", "deny"} {
+		svc, account, c, up := m1ReviewPolicyFixture(t, service.AccountTypeOAuth)
+		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		key := &service.APIKey{Group: &service.Group{Platform: service.PlatformOpenAI}}
+		effort := "low"
+		switch mode {
+		case "mapping":
+			key.Group.ReasoningEffortMappings = []service.ReasoningEffortMapping{{From: "low", To: "medium"}, {From: "medium", To: "high"}}
+		case "cap":
+			effort = "max"
+			key.Group.MaxReasoningEffort = "medium"
+		case "deny":
+			key.Group.ReasoningEffortMappings = []service.ReasoningEffortMapping{{From: "low", To: "deny"}}
+		}
+		body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"` + effort + `"}`)
+		body, _, err := applyOpenAIReasoningEffortPolicyForRequest(c, key, body)
+		require.NoError(t, err)
+		_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, body, "", "")
+		if mode == "deny" {
+			require.True(t, service.IsReasoningEffortPolicyDenied(err))
+			require.Equal(t, http.StatusForbidden, c.Writer.Status())
+			require.Zero(t, up.calls)
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, 1, up.calls)
+			require.Equal(t, "medium", gjson.GetBytes(up.body, "reasoning.effort").String())
+		}
+	}
+}
