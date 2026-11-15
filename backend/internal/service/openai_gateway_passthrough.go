@@ -610,7 +610,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				// cannot be switched; return the usage read so far with the
 				// error so the handler bills it once (#5148). Failovers and a
 				// client that left before output keep a nil result.
-				if result != nil {
+				var failoverErr *UpstreamFailoverError
+				if result != nil && !errors.As(handleErr, &failoverErr) {
 					usage, firstTokenMs = result.usage, result.firstTokenMs
 					responseID = strings.TrimSpace(result.responseID)
 					imageCount, imageOutputSizes = result.imageCount, result.imageOutputSizes
@@ -674,7 +675,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
-				if result == nil {
+				var failoverErr *UpstreamFailoverError
+				if result == nil || errors.As(handleErr, &failoverErr) {
 					return nil, handleErr
 				}
 				partialErr = handleErr

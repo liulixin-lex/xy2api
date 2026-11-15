@@ -1468,7 +1468,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
-				if streamResult == nil {
+				var failoverErr *UpstreamFailoverError
+				if streamResult == nil || errors.As(err, &failoverErr) {
 					return nil, err
 				}
 				// Keep metered usage after output without turning a failed attempt into success.
@@ -1525,7 +1526,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						return nil, repairErr
 					}
 				}
-				if nonStreamResult == nil {
+				var failoverErr *UpstreamFailoverError
+				if nonStreamResult == nil || errors.As(err, &failoverErr) {
 					return nil, err
 				}
 				partialErr = err

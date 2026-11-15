@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -256,7 +257,8 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			responseFacts.ResponseBodyKind = streamResult.ResponseBodyKind
 		}
 		if err != nil {
-			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil {
+			var failoverErr *UpstreamFailoverError
+			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil || errors.As(err, &failoverErr) {
 				return nil, err
 			}
 			partialErr = err
@@ -278,7 +280,8 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			responseFacts.ResponseBodyKind = nonStreamResult.ResponseBodyKind
 		}
 		if err != nil {
-			if account.Type != AccountTypeAPIKey || nonStreamResult == nil || nonStreamResult.usage == nil {
+			var failoverErr *UpstreamFailoverError
+			if account.Type != AccountTypeAPIKey || nonStreamResult == nil || nonStreamResult.usage == nil || errors.As(err, &failoverErr) {
 				return nil, err
 			}
 			partialErr = err

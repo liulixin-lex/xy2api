@@ -890,3 +890,30 @@ func TestM6ReviewAdjacentDataLines(t *testing.T) {
 		}
 	}
 }
+
+func TestM6ReviewFailoverResultIsNil(t *testing.T) {
+	for _, pass := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("pass=%t/stream=%t", pass, stream), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.5","input":"hi","stream":` + fmt.Sprint(stream) + `}`)
+				a := newOpenAIRejectedFieldTestAccount()
+				a.Extra["openai_passthrough"] = pass
+				payload := m6Frame(`{"type":"response.failed","response":{"id":"r1","status":"failed","error":{"code":"server_is_overloaded","message":"overloaded"},"usage":{"input_tokens":1200,"output_tokens":0}}}`)
+				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(payload))}}
+				c := newOpenAIRejectedFieldTestContext(body)
+				st := resilience.NewRequestState()
+				st.EnableGatewayRequest(time.Now())
+				ctx := resilience.WithRequestState(c.Request.Context(), st)
+				c.Request = c.Request.WithContext(ctx)
+				r, err := newOpenAIRejectedFieldTestService(upstream).Forward(ctx, c, a, body)
+				var failure *UpstreamFailoverError
+				require.ErrorAs(t, err, &failure)
+				require.Nil(t, r)
+				require.False(t, c.Writer.Written())
+				trace := reflect.ValueOf(st).Elem().FieldByName("gatewayRecord").Elem()
+				require.True(t, trace.FieldByName("UsageObserved").Elem().Bool())
+				require.True(t, trace.FieldByName("TerminalEventValid").Elem().Bool())
+			})
+		}
+	}
+}
