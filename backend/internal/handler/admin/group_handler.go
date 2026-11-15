@@ -136,6 +136,7 @@ func (h *GroupHandler) rejectUnsupportedSimpleModeOperation(c *gin.Context, oper
 }
 
 type simpleModeGroupResponse struct {
+	Alias              string                          `json:"alias"`
 	SystemPromptConfig service.GroupSystemPromptConfig `json:"system_prompt_config"`
 	ID                 int64                           `json:"id"`
 	Name               string                          `json:"name"`
@@ -157,7 +158,7 @@ func groupForSimpleMode(group *service.Group) *simpleModeGroupResponse {
 	}
 	return &simpleModeGroupResponse{
 		SystemPromptConfig: group.SystemPromptConfig.Clone(),
-		ID:                 group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform,
+		ID:                 group.ID, Name: group.Name, Alias: group.Alias, Description: group.Description, Platform: group.Platform,
 		Status:             group.Status,
 		AccountCount:       group.AccountCount,
 		ActiveAccountCount: group.ActiveAccountCount, RateLimitedAccountCount: group.RateLimitedAccountCount,
@@ -169,7 +170,7 @@ func sanitizeCreateGroupRequestForSimpleMode(req *CreateGroupRequest) {
 	if req == nil {
 		return
 	}
-	allowed := CreateGroupRequest{Name: req.Name, Description: req.Description, Platform: req.Platform, SystemPromptConfig: req.SystemPromptConfig}
+	allowed := CreateGroupRequest{Name: req.Name, Alias: req.Alias, Description: req.Description, Platform: req.Platform, SystemPromptConfig: req.SystemPromptConfig}
 	allowed.RateMultiplier = 1
 	allowed.SubscriptionType = service.SubscriptionTypeStandard
 	*req = allowed
@@ -179,11 +180,12 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 	if req == nil {
 		return
 	}
-	*req = UpdateGroupRequest{Name: req.Name, Description: req.Description, SystemPromptConfig: req.SystemPromptConfig}
+	*req = UpdateGroupRequest{Name: req.Name, Alias: req.Alias, Description: req.Description, SystemPromptConfig: req.SystemPromptConfig}
 }
 
 // CreateGroupRequest represents create group request
 type CreateGroupRequest struct {
+	Alias                     string                          `json:"alias"`
 	Name                      string                          `json:"name" binding:"required"`
 	Description               string                          `json:"description"`
 	Platform                  string                          `json:"platform" binding:"omitempty,group_platform"`
@@ -263,6 +265,7 @@ type CreateGroupRequest struct {
 
 // UpdateGroupRequest represents update group request
 type UpdateGroupRequest struct {
+	Alias                     *string                          `json:"alias"`
 	Name                      string                           `json:"name"`
 	Description               *string                          `json:"description"`
 	Platform                  string                           `json:"platform" binding:"omitempty,group_platform"`
@@ -678,6 +681,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
 		Name:                            req.Name,
+		Alias:                           req.Alias,
 		Description:                     req.Description,
 		Platform:                        req.Platform,
 		RateMultiplier:                  req.RateMultiplier,
@@ -828,6 +832,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
 		Name:                            req.Name,
+		Alias:                           req.Alias,
 		Description:                     req.Description,
 		Platform:                        req.Platform,
 		RateMultiplier:                  req.RateMultiplier,

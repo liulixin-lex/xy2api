@@ -37,8 +37,9 @@ type RequestState struct {
 	prelude preludeTrace
 
 	// requestID is generated locally, independent of client correlation IDs.
-	requestID   string
-	firstOutput time.Time
+	requestID     string
+	gatewayRecord *gatewayRequestTrace
+	firstOutput   time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile
@@ -47,7 +48,6 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	schedTest            any
 	currentAttempt       AttemptMarker
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
@@ -99,6 +99,8 @@ type RequestState struct {
 	sessionGroupID int64
 	sessionHash    string
 	sessionRec     SessionRecorder
+	stickyChange   any // Service-owned pending binding change; completed by the send lifecycle.
+	selectionFlags schedSelectionFlags
 
 	// turn identifies the conversation for the failed-turn cap (design
 	// §9.7); turnFailed is set once the request counted as a failure.
@@ -359,6 +361,7 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 		s.opsUpstreamSendBoundaries = make(map[int64]uint64)
 	}
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
+	s.noteGatewaySendLocked(accountID)
 	s.mu.Unlock()
 }
 
@@ -517,22 +520,6 @@ func (s *RequestState) SchedSelection() (SchedSelection, bool) {
 	defer s.mu.Unlock()
 	return s.schedSelection, s.schedSelectionSet
 }
-func (s *RequestState) SetSchedTest(v any) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.schedTest = v
-	s.mu.Unlock()
-}
-func (s *RequestState) SchedTest() any {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.schedTest
-}
 func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
 	if s == nil {
 		return
@@ -590,6 +577,8 @@ func (s *RequestState) GatewayRequestID() string {
 	if s == nil {
 		return ""
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.requestID
 }
 

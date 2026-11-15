@@ -111,6 +111,14 @@ func (h *AccountHandler) ScopedAdminKeyAccounts(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	if path == base && c.Request.Method == "GET" {
+		ids, err := parseAccountListIDs(c)
+		if err != nil {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_ACCOUNT_IDS", err.Error()))
+			return
+		}
+		if ids != nil {
+			ctx = service.WithAccountIDsFilter(ctx, ids)
+		}
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		size, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 		if page < 1 {

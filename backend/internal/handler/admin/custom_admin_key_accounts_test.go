@@ -148,3 +148,55 @@ func TestScopedAdminBulkUpdateValidatesTargetsAndRedactsResults(t *testing.T) {
 		})
 	}
 }
+
+// Override only the scoped list method; reaching the ordinary list would panic.
+type scopedIDsAccountService struct {
+	scopedBulkAccountService
+	ids       []int64
+	principal *adminaccess.Principal
+	listCalls int
+}
+
+func (s *scopedIDsAccountService) ScopedAdminList(ctx context.Context, _ pagination.PaginationParams, _, _, _, _ string, _ int64) ([]service.Account, int64, error) {
+	s.ids, _ = service.AccountIDsFilter(ctx)
+	s.principal = adminaccess.FromContext(ctx)
+	s.listCalls++
+	return []service.Account{{ID: 7, Type: "oauth", GroupIDs: []int64{1, 2}, Credentials: map[string]any{"access_token": "SECRET"}}}, 1, nil
+}
+
+func TestScopedAdminAccountListIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		query  string
+		status int
+		ids    []int64
+	}{
+		{"ids=7,9&ids=7&lite=1", http.StatusOK, []int64{7, 9}},
+		{"ids=invalid", http.StatusBadRequest, nil},
+		{"ids=", http.StatusBadRequest, nil},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			svc := &scopedIDsAccountService{}
+			h := &AccountHandler{adminService: svc}
+			principal := &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{{Permissions: []string{"accounts.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}}}}}
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), principal))
+			})
+			r.Use(h.ScopedAdminKeyAccounts)
+			r.GET("/api/v1/admin/accounts", func(c *gin.Context) { t.Fatal("ordinary account list must not run") })
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?"+tc.query, nil))
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			if tc.status == http.StatusBadRequest {
+				require.Zero(t, svc.listCalls)
+				require.Contains(t, w.Body.String(), "INVALID_ACCOUNT_IDS")
+				return
+			}
+			require.Equal(t, tc.ids, svc.ids)
+			require.Same(t, principal, svc.principal)
+			require.NotContains(t, w.Body.String(), "SECRET")
+			require.Contains(t, w.Body.String(), `"group_ids":[1]`)
+		})
+	}
+}

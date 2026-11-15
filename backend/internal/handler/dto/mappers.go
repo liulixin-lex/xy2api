@@ -149,6 +149,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	}
 	out := &AdminGroup{
 		Group:                       groupFromServiceBase(g),
+		Alias:                       g.Alias,
 		SystemPromptConfig:          g.SystemPromptConfig.Clone(),
 		ForceOpenAIFast:             g.ForceOpenAIFast,
 		FreeOpenAIFast:              g.FreeOpenAIFast,
@@ -529,7 +530,6 @@ func AccountGroupFromService(ag *service.AccountGroup) *AccountGroup {
 	return &AccountGroup{
 		AccountID: ag.AccountID,
 		GroupID:   ag.GroupID,
-		Priority:  ag.Priority,
 		CreatedAt: ag.CreatedAt,
 		Account:   AccountFromServiceShallow(ag.Account),
 		Group:     GroupFromServiceShallow(ag.Group),

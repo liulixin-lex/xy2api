@@ -14,13 +14,14 @@ import (
 
 // memResilienceStore is an in-memory ResilienceStore for tests.
 type memResilienceStore struct {
-	mu      sync.Mutex
-	sf      map[string]map[int64]int64
-	avoid   map[string]map[int64]time.Time
-	stable  map[int64]time.Time
-	undeliv map[string]int64
-	ratios  map[string]float64
-	fbKeys  map[string]time.Time
+	mu           sync.Mutex
+	sf           map[string]map[int64]int64
+	avoid        map[string]map[int64]time.Time
+	avoidWritten map[string]map[int64]time.Time
+	stable       map[int64]time.Time
+	undeliv      map[string]int64
+	ratios       map[string]float64
+	fbKeys       map[string]time.Time
 }
 
 func newMemResilienceStore() *memResilienceStore {
@@ -55,15 +56,41 @@ func (m *memResilienceStore) SessionFailures(_ context.Context, g int64, h strin
 	}
 	return out, nil
 }
-func (m *memResilienceStore) AddSessionAvoid(_ context.Context, g int64, h string, a int64, ttl time.Duration) error {
+func (m *memResilienceStore) AddSessionAvoid(_ context.Context, g int64, h string, a int64, ttl time.Duration, resetAt ...time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := memSessionKey(g, h)
 	if m.avoid[k] == nil {
 		m.avoid[k] = map[int64]time.Time{}
 	}
-	m.avoid[k][a] = time.Now().Add(ttl)
+	now := time.Now()
+	if len(resetAt) > 0 && !resetAt[0].IsZero() && m.avoidWritten[k][a].Before(resetAt[0]) {
+		delete(m.avoid[k], a)
+	}
+	if until := now.Add(ttl); until.After(m.avoid[k][a]) {
+		m.avoid[k][a] = until
+	}
+	if m.avoidWritten == nil {
+		m.avoidWritten = map[string]map[int64]time.Time{}
+	}
+	if m.avoidWritten[k] == nil {
+		m.avoidWritten[k] = map[int64]time.Time{}
+	}
+	m.avoidWritten[k][a] = now
 	return nil
+}
+
+func (m *memResilienceStore) SessionAvoidWrittenAt(_ context.Context, g int64, h string) (map[int64]time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[int64]time.Time{}
+	k := memSessionKey(g, h)
+	for a, until := range m.avoid[k] {
+		if time.Now().Before(until) {
+			out[a] = m.avoidWritten[k][a]
+		}
+	}
+	return out, nil
 }
 func (m *memResilienceStore) SessionAvoid(_ context.Context, g int64, h string) (map[int64]struct{}, error) {
 	m.mu.Lock()

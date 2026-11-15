@@ -103,6 +103,11 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	GatewayRequestID *string
+	Result           *int16
+	Switches         *int16
+	Fallback         *bool
+	Takeover         *bool
 	resilience.RequestTiming
 	AnthropicCacheTTLPolicy  *string
 	AnthropicCacheTTLApplied *bool

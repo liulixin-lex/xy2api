@@ -185,6 +185,20 @@ func (r *mcpRouteSettingsRepo) SetMultiple(_ context.Context, values map[string]
 	return nil
 }
 
+func (r *mcpRouteSettingsRepo) Set(ctx context.Context, key, value string) error {
+	return r.SetMultiple(ctx, map[string]string{key: value})
+}
+
+func (r *mcpRouteSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := map[string]string{}
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
 func TestMCPDispatchRetainsBackendModeAndAdminCompliance(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{}}, &config.Config{})

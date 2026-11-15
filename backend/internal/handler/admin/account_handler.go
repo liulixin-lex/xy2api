@@ -252,7 +252,6 @@ type simpleModeGroupReference struct {
 type simpleModeAccountGroupReference struct {
 	AccountID int64                     `json:"account_id"`
 	GroupID   int64                     `json:"group_id"`
-	Priority  int                       `json:"priority"`
 	CreatedAt time.Time                 `json:"created_at"`
 	Group     *simpleModeGroupReference `json:"group,omitempty"`
 }
@@ -334,7 +333,7 @@ func (a AccountWithConcurrency) MarshalJSON() ([]byte, error) {
 			continue
 		}
 		accountGroups = append(accountGroups, simpleModeAccountGroupReference{
-			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID, Priority: accountGroup.Priority,
+			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID,
 			CreatedAt: accountGroup.CreatedAt, Group: simpleModeGroupReferenceFromDTO(accountGroup.Group),
 		})
 	}
@@ -452,6 +451,14 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
+	ids, err := parseAccountListIDs(c)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_ACCOUNT_IDS", err.Error()))
+		return
+	}
+	if ids != nil {
+		c.Request = c.Request.WithContext(service.WithAccountIDsFilter(c.Request.Context(), ids))
+	}
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
 	accountType := c.Query("type")
@@ -2014,6 +2021,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Type:                  item.Type,
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
+				ProbeEnabled:          item.ProbeEnabled,
 				ProxyID:               item.ProxyID,
 				Concurrency:           item.Concurrency,
 				Priority:              item.Priority,

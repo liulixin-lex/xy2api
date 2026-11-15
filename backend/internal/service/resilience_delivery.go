@@ -29,7 +29,8 @@ const EdgeUpstreamStatusHeader = "X-XY-Upstream-Status"
 // to read from the disconnect callback.
 type deliveryWriter struct {
 	gin.ResponseWriter
-	written atomic.Int64
+	written     atomic.Int64
+	writeFailed atomic.Bool
 
 	// Heartbeat sources registered by the request goroutine, so the probe
 	// never touches the (pooled) gin context.
@@ -99,6 +100,9 @@ func (w *deliveryWriter) semanticBytes() int64 {
 func (w *deliveryWriter) Write(data []byte) (int, error) {
 	at := time.Now()
 	n, err := w.ResponseWriter.Write(data)
+	if err != nil || n < len(data) {
+		w.writeFailed.Store(true)
+	}
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
@@ -112,6 +116,9 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 func (w *deliveryWriter) WriteString(s string) (int, error) {
 	at := time.Now()
 	n, err := w.ResponseWriter.WriteString(s)
+	if err != nil || n < len(s) {
+		w.writeFailed.Store(true)
+	}
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 && w.stream.observing() {
@@ -261,4 +268,10 @@ func ResponsesStreamUnopened(c *gin.Context) bool {
 // was detached from the client.
 func resilienceUpstreamContext(client, detached context.Context) context.Context {
 	return resilience.UpstreamContextOnDisconnect(client, detached)
+}
+
+// GatewayDeliveryFailed reports an actual failed downstream write.
+func GatewayDeliveryFailed(c *gin.Context) bool {
+	w := deliveryWriterFrom(c)
+	return w != nil && w.writeFailed.Load()
 }

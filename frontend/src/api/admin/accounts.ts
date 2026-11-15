@@ -32,7 +32,6 @@ import type {
   CheckMixedChannelResponse,
   UpstreamBillingProbeResult,
   UpstreamBillingProbeSettings,
-  UpstreamBillingRatesResponse,
   OllamaCloudUsageSettings,
   OllamaCloudUsageState,
   GrokMediaEligibilityMode,
@@ -40,7 +39,6 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
-import type { AccountRecentStatsBatch } from '@/types/schedQuality'
 
 /**
  * List all accounts with pagination
@@ -65,6 +63,8 @@ export async function list(
     lite?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    /** Only these accounts (comma separated, at most 1000), intersected with the other filters; still paginated. */
+    ids?: string
   },
   options?: {
     signal?: AbortSignal
@@ -114,108 +114,6 @@ export async function listIQResults(id: number, query: { model: string; page: nu
   const params = filter ? query : rest
   const { data } = await apiClient.get<IQRoundPage>(`/admin/accounts/${id}/iq-check/results`, { params, signal })
   return data
-}
-
-export interface AccountListWithEtagResult {
-  notModified: boolean
-  etag: string | null
-  data: PaginatedResponse<AccountListItem> | null
-}
-
-export interface AccountUpstreamBillingRatesWithEtagResult {
-  notModified: boolean
-  etag: string | null
-  data: UpstreamBillingRatesResponse | null
-}
-
-export async function getUpstreamBillingRatesWithEtag(
-  page: number = 1,
-  pageSize: number = 20,
-  filters?: {
-    platform?: string
-    type?: string
-    status?: string
-    group?: string
-    search?: string
-    privacy_mode?: string
-    iq_status?: string
-    sched_quality?: string
-    group_category?: string
-    sort_by?: string
-    sort_order?: 'asc' | 'desc'
-  },
-  options?: {
-    signal?: AbortSignal
-    etag?: string | null
-  }
-): Promise<AccountUpstreamBillingRatesWithEtagResult> {
-  const headers: Record<string, string> = {}
-  if (options?.etag) headers['If-None-Match'] = options.etag
-
-  const response = await apiClient.get<UpstreamBillingRatesResponse>('/admin/accounts/upstream-billing-rates', {
-    params: { page, page_size: pageSize, ...filters },
-    headers,
-    signal: options?.signal,
-    validateStatus: (status) => (status >= 200 && status < 300) || status === 304
-  })
-
-  const etagHeader = typeof response.headers?.etag === 'string' ? response.headers.etag : null
-  if (response.status === 304) return { notModified: true, etag: etagHeader, data: null }
-  return { notModified: false, etag: etagHeader, data: response.data }
-}
-
-export async function listWithEtag(
-  page: number = 1,
-  pageSize: number = 20,
-  filters?: {
-    platform?: string
-    type?: string
-    status?: string
-    group?: string
-    search?: string
-    privacy_mode?: string
-    iq_status?: string
-    sched_quality?: string
-    group_category?: string
-    lite?: string
-    sort_by?: string
-    sort_order?: 'asc' | 'desc'
-  },
-  options?: {
-    signal?: AbortSignal
-    etag?: string | null
-  }
-): Promise<AccountListWithEtagResult> {
-  const headers: Record<string, string> = {}
-  if (options?.etag) {
-    headers['If-None-Match'] = options.etag
-  }
-
-  const response = await apiClient.get<PaginatedResponse<AccountListItem>>('/admin/accounts', {
-    params: {
-      page,
-      page_size: pageSize,
-      ...filters
-    },
-    headers,
-    signal: options?.signal,
-    validateStatus: (status) => (status >= 200 && status < 300) || status === 304
-  })
-
-  const etagHeader = typeof response.headers?.etag === 'string' ? response.headers.etag : null
-  if (response.status === 304) {
-    return {
-      notModified: true,
-      etag: etagHeader,
-      data: null
-    }
-  }
-
-  return {
-    notModified: false,
-    etag: etagHeader,
-    data: response.data
-  }
 }
 
 /**
@@ -581,6 +479,7 @@ export async function bulkUpdate(
   long_context_inherited_count?: number
   results: Array<{ account_id: number; success: boolean; error?: string }>
   }> {
+  // A bulk update by filter carries the list filters in its body, the quality value as the list sends it.
   const payload = Array.isArray(accountIdsOrPayload)
     ? {
         account_ids: accountIdsOrPayload,
@@ -624,15 +523,6 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   return data
 }
 
-/** Recent status of up to 1000 accounts (contract delta C4); one item per account, by account id. */
-export async function getRecentStats(accountIds: number[], options?: { signal?: AbortSignal }): Promise<AccountRecentStatsBatch> {
-  const { data } = await apiClient.post<AccountRecentStatsBatch>(
-    '/admin/accounts/recent-stats/batch',
-    { account_ids: accountIds },
-    { signal: options?.signal }
-  )
-  return data
-}
 
 /** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/guides/upstream-balance.md。 */
 export type UpstreamBalanceState = 'ok' | 'unavailable' | 'not_applicable'
@@ -831,7 +721,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "normal" | "cooling" | "exempt" | "demote" (contract delta D2, clarification K24). */
+    /** normal | substandard | exempt | observing (the backend's own values). */
     sched_quality?: string
   }
   includeProxies?: boolean
@@ -841,7 +731,8 @@ export async function exportData(options?: {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
-    const { group_category, sched_quality } = options.filters
+    const { group_category } = options.filters
+    const { sched_quality } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -1240,8 +1131,6 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 
 export const accountsAPI = {
   list,
-  listWithEtag,
-  getUpstreamBillingRatesWithEtag,
   getById,
   create,
   duplicate,
@@ -1260,7 +1149,6 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
-  getRecentStats,
   getUpstreamBalances,
   clearRateLimit,
   resetAccountQuota,

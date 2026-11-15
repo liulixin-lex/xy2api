@@ -20,11 +20,6 @@ func TestSchedState(t *testing.T) {
 	if got, ok := s.SchedSelection(); !ok || got != want {
 		t.Fatalf("selection: %v %v", got, ok)
 	}
-	v := &struct{ X int }{1}
-	s.SetSchedTest(v)
-	if s.SchedTest() != v {
-		t.Fatal("test marker")
-	}
 	a, b := &schedTestMarker{1}, &schedTestMarker{2}
 	s.SetCurrentAttempt(a)
 	s.SetCurrentAttempt(b)

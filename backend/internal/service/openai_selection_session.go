@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -21,16 +20,18 @@ type selectionSession struct {
 	view       func() schedquality.View
 	now        func() time.Time
 	slots      selectionSessionSlots
-	cache      OpenAIStickyRebindCache
+	cache      OpenAIStickyVersionedCache
+	store      ResilienceStore
 	cacheKey   func(string) string
 	bindings   gatewaySessionBindingReader
 	marks      *fullMarks
 	bindingTTL time.Duration
 	recheck    func(context.Context, *Account) *Account
+	resetAt    func(int64) time.Time
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
-	if !selectionAuto(view, now) {
+	if !selectionLive(view, now) {
 		return false
 	}
 	idle, enabled := view.TakeoverIdle(groupID)
@@ -48,27 +49,57 @@ func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.
 }
 
 func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int64, model string, owner, target *Account, migrate bool, now time.Time) bool {
-	state := selectionState(view, groupID, target, model)
-	auto := selectionAuto(view, now)
-	if migrate {
-		return schedquality.StandingOf(state, auto, now) == schedquality.StandFront
+	if groupID > 0 && !openAIStickyAccountMatchesGroup(target, &groupID) {
+		return false
 	}
-	return target.Priority < owner.Priority && schedquality.CanTakeOver(state, auto, now) && !s.marks.Recently(target.ID, now)
+	state := selectionState(view, groupID, target, model)
+	auto := selectionAuto(view, groupID, now)
+	if migrate {
+		return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandBack && schedquality.StandingOf(state, auto, now) == schedquality.StandFront
+	}
+	return selectionLive(view, now) && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandFront && target.Priority < owner.Priority && schedquality.StandingOf(state, auto, now) == schedquality.StandFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
+	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
 		return nil
 	}
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil {
+		pending.mu.Lock()
+		blocked := pending.target != 0 && (!pending.done || pending.kind != "migrate")
+		pending.mu.Unlock()
+		if blocked {
+			return nil
+		}
+	}
 	key := s.cacheKey(sessionHash)
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == groupID && pending.session == strings.TrimSpace(sessionHash) {
+		key = pending.key
+	}
 	if key == "" {
 		return nil
 	}
 	now, view := s.now(), s.view()
-	migrate := schedquality.StandingOf(selectionState(view, groupID, owner, model), selectionAuto(view, now), now) == schedquality.StandBack
+	migrate := schedquality.StandingOf(selectionState(view, groupID, owner, model), selectionAuto(view, groupID, now), now) == schedquality.StandBack
 	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
 		return nil
 	}
+	expected, err := s.cache.GetSessionBinding(ctx, groupID, key)
+	if err != nil || expected.AccountID != owner.ID {
+		return nil
+	}
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.key == key {
+		expected.LegacyKey = pending.expected.LegacyKey
+	}
+	avoided, err := sessionAvoidAfterReset(ctx, s.store, groupID, strings.TrimSpace(sessionHash), s.resetAt)
+	if err != nil {
+		return nil
+	}
+	failedTargets, err := sessionAvoidAfterReset(ctx, s.store, groupID, stickyChangeAvoidSession(sessionHash), s.resetAt)
+	if err != nil {
+		return nil
+	}
+	avoided = mergeExcluded(avoided, failedTargets)
 	s.marks.observe(candidates, req.Loads, now)
 	type candidate struct {
 		account *Account
@@ -77,6 +108,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	ordered := make([]candidate, 0, len(candidates))
 	for _, account := range candidates {
 		if account == nil || account.ID == owner.ID || !s.candidateAllowed(view, groupID, model, owner, account, migrate, now) {
+			continue
+		}
+		if _, blocked := avoided[account.ID]; blocked {
 			continue
 		}
 		ordered = append(ordered, candidate{account, buildSelectionKey(view, groupID, model, account, req, now)})
@@ -109,9 +143,6 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			if slot != nil && slot.ReleaseFunc != nil {
 				slot.ReleaseFunc()
 			}
-			if migrate {
-				return nil
-			}
 			continue
 		}
 		latest := s.recheck(ctx, target)
@@ -126,27 +157,17 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		}
 		if !allowed || ctx.Err() != nil {
 			slot.ReleaseFunc()
-			if migrate {
-				return nil
-			}
-			continue
-		}
-		changed, err := s.cache.CompareAndSwapSessionAccountID(ctx, groupID, key, owner.ID, latest.ID, s.bindingTTL)
-		if err != nil || !changed {
-			slot.ReleaseFunc()
-			if migrate {
-				return nil
-			}
 			continue
 		}
 		kind := "takeover"
 		if migrate {
 			kind = "migrate"
 		}
-		slog.InfoContext(ctx, "sched_quality.takeover", "component", "sched_quality",
-			"kind", kind, "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
-			"group_id", groupID, "model", model, "from_account_id", owner.ID, "to_account_id", latest.ID)
-		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(owner.ID)
+		resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
+			groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model,
+			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache,
+			resetAt: s.resetAt,
+		})
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}
 	return nil

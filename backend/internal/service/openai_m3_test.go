@@ -819,8 +819,6 @@ func TestOpenAIM3AvoidancePreservesHealthAndRejectsFailedLastResort(t *testing.T
 	require.NoError(t, err)
 	require.Contains(t, avoided, account.ID)
 	require.True(t, state.Avoided(account.ID))
-	_, marked := svc.resilience.avoidingSessions.Load(sessionMarkKey(groupID, session))
-	require.True(t, marked)
 	require.NotContains(t, cache.bindings, key, "the failed owner is removed")
 	failures, err := store.SessionFailures(ctx, groupID, session)
 	require.NoError(t, err)

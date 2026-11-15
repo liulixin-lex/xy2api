@@ -20,6 +20,10 @@ type selectionRuntimeRepo struct {
 	lists int
 }
 
+func (r *selectionRuntimeRepo) ListByGroup(context.Context, int64) ([]Account, error) {
+	return append([]Account(nil), r.accounts...), nil
+}
+
 func (r *selectionRuntimeRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, group int64, platform string) ([]Account, error) {
 	r.lists++
 	return r.schedulerTestOpenAIAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, group, platform)
@@ -29,6 +33,7 @@ func (r *selectionRuntimeRepo) ListAllWithFilters(context.Context, string, strin
 }
 
 type selectionRuntimeCache struct {
+	store ResilienceStore
 	schedulerTestGatewayCache
 	remaining        time.Duration
 	ttlKeys, casKeys []string
@@ -39,13 +44,54 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, c.remaining, err
 }
-func (c *selectionRuntimeCache) CompareAndSwapSessionAccountID(_ context.Context, _ int64, key string, old, next int64, _ time.Duration) (bool, error) {
+func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration, _ ...string) (bool, error) {
 	c.casKeys = append(c.casKeys, key)
-	if c.sessionBindings[key] != old {
+	if c.sessionBindings[key] != expected.AccountID {
 		return false, nil
 	}
 	c.sessionBindings[key] = next
+	if expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
+		c.sessionBindings[expected.LegacyKey] = next
+	}
 	return true, nil
+}
+
+func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group int64, primary, legacy string, fallback bool) (StickySessionBinding, error) {
+	if c.sessionBindings[primary] == 0 && fallback {
+		c.sessionBindings[primary] = c.sessionBindings[legacy]
+	}
+	binding, err := c.GetSessionBinding(ctx, group, primary)
+	binding.LegacyKey = legacy
+	if c.sessionBindings[legacy] != 0 && binding.AccountID != 0 {
+		c.sessionBindings[legacy] = binding.AccountID
+	}
+	return binding, err
+}
+
+func (c *selectionRuntimeCache) SyncSessionBindingAlias(_ context.Context, _ int64, primary, legacy string, owner int64, _ time.Duration, create bool) error {
+	current := c.sessionBindings[primary]
+	if current > 0 && (owner == 0 || current == owner) && (create || c.sessionBindings[legacy] != 0) {
+		c.sessionBindings[legacy] = current
+	}
+	return nil
+}
+
+func (c *selectionRuntimeCache) DeleteSessionBindingAliases(_ context.Context, _ int64, primary, legacy string, owner int64) (bool, error) {
+	current := c.sessionBindings[primary]
+	if current == 0 {
+		current = c.sessionBindings[legacy]
+	}
+	if owner != 0 && current != owner {
+		return false, nil
+	}
+	delete(c.sessionBindings, primary)
+	delete(c.sessionBindings, legacy)
+	return current != 0, nil
+}
+
+func (c *selectionRuntimeCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
+	id, err := c.GetSessionAccountID(ctx, group, key)
+	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }
 
 type selectionRuntimeLoads struct {
@@ -84,7 +130,8 @@ func newSelectionRuntimeFixture(t *testing.T, accounts ...Account) *selectionRun
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
 	cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = true
 	f.loads = &selectionRuntimeLoads{schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquiredIDs: &f.attempts, releasedIDs: &f.releases}}
-	f.svc = &OpenAIGatewayService{cfg: cfg, cache: f.cache, accountRepo: f.repo, concurrencyService: NewConcurrencyService(f.loads)}
+	f.svc = &OpenAIGatewayService{cfg: cfg, cache: f.cache, accountRepo: f.repo, resilience: NewResilienceService(nil, newMemResilienceStore()), concurrencyService: NewConcurrencyService(f.loads)}
+	f.cache.store = f.svc.resilience.store
 	now := time.Now()
 	f.view = selectionTestView(now)
 	board := NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view })
@@ -97,6 +144,7 @@ func (f *selectionRuntimeFixture) selectNow(t *testing.T, ctx context.Context, s
 	result, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", session, "m", excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
 	t.Cleanup(func() {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
@@ -111,7 +159,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 			a, b, c, d := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 2), selectionFixtureAccount(4, 3)
 			a.RateMultiplier, b.RateMultiplier, c.RateMultiplier, d.RateMultiplier = floatPtr(0), floatPtr(.8), floatPtr(.2), floatPtr(0)
 			f := newSelectionRuntimeFixture(t, a, b, c, d)
-			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true}
 			f.loads.acquireResults = map[int64]bool{1: true, 2: false, 3: false, 4: false}
 			f.loads.loadMap = map[int64]*AccountLoadInfo{3: {LoadRate: 90}, 2: {LoadRate: 0}, 4: {LoadRate: 0}}
 			if unavailable {
@@ -136,7 +184,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 	t.Run("all back still selects", func(t *testing.T) {
 		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 		for _, id := range []int64{1, 2} {
-			f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+			f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{Failing: true}
 		}
 		require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID)
 	})
@@ -159,24 +207,17 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 					f.cache.remaining = f.svc.openAIStickyBindingTTL(ptrInt64Selection(7)) - 2*time.Minute
 				}
 				if mode == "migration" {
-					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Failing: true}
 				}
 				result := f.selectNow(t, ctx, "session", nil)
+				require.Equal(t, int64(1), result.Account.ID)
+				require.Equal(t, int64(1), f.cache.sessionBindings[key])
+				require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
 				if legacy {
-					require.Equal(t, int64(10), result.Account.ID)
-					require.Equal(t, int64(10), f.cache.sessionBindings[key])
-					require.Zero(t, f.cache.sessionBindings["openai:session"])
-					if mode != "idle" {
-						require.Equal(t, []int64{1, 10}, f.attempts)
-						require.Equal(t, []int64{1}, f.releases)
-					}
-				} else {
-					require.Equal(t, int64(1), result.Account.ID)
-					require.Equal(t, int64(1), f.cache.sessionBindings[key])
-					require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
+					require.EqualValues(t, 1, f.cache.sessionBindings["openai:session"])
 				}
-				for _, key := range append(f.cache.ttlKeys, f.cache.casKeys...) {
-					require.Equal(t, "openai:session", key)
+				for _, actualKey := range append(f.cache.ttlKeys, f.cache.casKeys...) {
+					require.Equal(t, "openai:session", actualKey, "all requests use the canonical primary binding")
 				}
 			})
 		}
@@ -206,7 +247,7 @@ func TestOpenAISelectionRuntimeCandidatePoolAndLatestView(t *testing.T) {
 		f.cache.sessionBindings["openai:session"] = 10
 		f.loads.after = func(id int64) {
 			if id == 1 {
-				f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+				f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true}
 			}
 		}
 		require.Equal(t, int64(10), f.selectNow(t, context.Background(), "session", nil).Account.ID)
@@ -251,4 +292,11 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 			})
 		})
 	}
+}
+
+func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
+	if c.sessionBindings[key] != expected.AccountID {
+		return false, nil
+	}
+	return true, c.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
 }

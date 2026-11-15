@@ -172,6 +172,9 @@ const DataTableStub = {
       <div v-if="data.length" data-test="capacity-cell">
         <slot name="cell-capacity" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="billing-cell">
+        <slot name="cell-billing_type" :row="data[0]" />
+      </div>
     </div>
   `,
 }
@@ -230,7 +233,7 @@ const columnKeys = (wrapper: ReturnType<typeof mount>) =>
   wrapper.get('[data-test="columns"]').text().split(',').filter(Boolean)
 
 const openColumnSettings = async (wrapper: ReturnType<typeof mount>) => {
-  await wrapper.get('button[title="Column Settings"]').trigger('click')
+  await wrapper.get('button[aria-label="Column Settings"]').trigger('click')
 }
 
 const clickColumnToggle = async (wrapper: ReturnType<typeof mount>, label: string) => {
@@ -452,6 +455,59 @@ describe('admin GroupsView column settings', () => {
     expect(text).toContain('Total$9.75')
     expect(text.indexOf('Today')).toBeLessThan(text.indexOf('Yesterday'))
     expect(text.indexOf('Yesterday')).toBeLessThan(text.indexOf('Total'))
+  })
+
+  it('writes large amounts in three significant digits, never cut, the exact one in the tip (7o-4)', async () => {
+    getUsageSummary.mockResolvedValue([
+      { group_id: 1, today_cost: 30135.12, yesterday_cost: 2.5, total_cost: 1234567 },
+    ])
+
+    const wrapper = await mountView()
+    const text = wrapper.get('[data-test="usage-cell"]').text()
+    expect(text).toContain('Today$30.1K')
+    expect(text).toContain('Total$1.23M')
+
+    document.body.appendChild(wrapper.element)
+    vi.useFakeTimers()
+    const today = wrapper.findAll('[data-test="usage-cell"] span').find((span) => span.text() === '$30.1K')!
+    today.element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    expect(document.getElementById('sq-tip')!.textContent).toBe('$30,135.12')
+    today.element.dispatchEvent(new Event('mouseleave'))
+    vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('writes subscription limits one to a line in three significant digits, the exact one in the tip (7r-2)', async () => {
+    listGroups.mockResolvedValue({
+      items: [createGroup({ subscription_type: 'subscription', daily_limit_usd: 100, weekly_limit_usd: 500, monthly_limit_usd: 2000 })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getUsageSummary.mockResolvedValue([
+      { group_id: 1, today_cost: 12.5, yesterday_cost: 0, total_cost: 1234567 },
+    ])
+
+    const wrapper = await mountView()
+    const lines = wrapper.findAll('[data-test="group-limits"] > div').map((line) => line.text().replace(/\s+/g, ''))
+    expect(lines).toEqual([
+      '$12.50/$100.00/admin.groups.limitDay',
+      '$500.00/admin.groups.limitWeek',
+      '$2.00K/admin.groups.limitMonth',
+      'Total$1.23M',
+    ])
+
+    document.body.appendChild(wrapper.element)
+    vi.useFakeTimers()
+    const monthly = wrapper.findAll('[data-test="billing-cell"] span').find((span) => span.text() === '$2.00K')!
+    monthly.element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    expect(document.getElementById('sq-tip')!.textContent).toBe('$2,000.00')
+    monthly.element.dispatchEvent(new Event('mouseleave'))
+    vi.useRealTimers()
+    wrapper.unmount()
   })
 
   it('passes the group concurrency from the capacity summary to the badge', async () => {

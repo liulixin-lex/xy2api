@@ -21,13 +21,13 @@ describe('admin platform filters', () => {
 
   it('uses the concrete platform catalog wherever concrete platforms are selected', () => {
     for (const path of [
-      'src/components/admin/account/AccountTableFilters.vue',
+      'src/components/admin/account/table/AccountsToolbar.vue',
       'src/components/admin/ErrorPassthroughRulesModal.vue',
       'src/views/admin/ops/components/OpsDashboardHeader.vue'
     ]) {
       const source = readSource(path)
       expect(source).toContain("import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'")
-      expect(source).toMatch(/platformOptions\s*=.*CONCRETE_PLATFORM_OPTIONS|pOpts.*\.\.\.CONCRETE_PLATFORM_OPTIONS/s)
+      expect(source).toMatch(/platformOptions\s*=.*CONCRETE_PLATFORM_OPTIONS|pOpts.*\.\.\.CONCRETE_PLATFORM_OPTIONS|platform: CONCRETE_PLATFORM_OPTIONS\.map/s)
     }
   })
 })

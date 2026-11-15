@@ -29,7 +29,9 @@ export default defineComponent({
     selectionLabel: { type: String, default: '' },
     clickable: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
-    cellSlots: { type: Object as PropType<Slots>, required: true }
+    cellSlots: { type: Object as PropType<Slots>, required: true },
+    /** Called in this row's render: only rows whose classes change re-render. */
+    rowClass: { type: Function as PropType<(row: any, index: number) => unknown>, default: undefined }
   },
   emits: {
     toggle: (_row: any, _index: number, _checked: boolean) => true,
@@ -54,7 +56,7 @@ export default defineComponent({
             h('input', {
               type: 'checkbox',
               class:
-                'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800',
+                'h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500',
               checked: props.selected,
               disabled: props.selectionDisabled,
               'aria-label': props.selectionLabel,
@@ -73,7 +75,7 @@ export default defineComponent({
             {
               key: column.key,
               class: [
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                'whitespace-nowrap py-4 text-sm text-fg-primary',
                 props.paddingClass,
                 props.stickyClasses[colIndex],
                 column.class
@@ -87,11 +89,12 @@ export default defineComponent({
         'tr',
         {
           class: [
-            'table-row-border hover:bg-gray-50 dark:hover:bg-dark-800',
+            'table-row-border hover:bg-surface-hover',
             {
               'cursor-pointer': props.clickable,
-              'bg-primary-50/40 dark:bg-primary-900/10': props.selectable && props.selected
-            }
+              'is-selected': props.selectable && props.selected
+            },
+            props.rowClass?.(props.row, props.index)
           ],
           onClick: () => {
             if (props.clickable) emit('rowClick', props.row)

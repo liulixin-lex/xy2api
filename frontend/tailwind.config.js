@@ -9,6 +9,64 @@ export default {
   theme: {
     extend: {
       colors: {
+        // 语义色：取值在 src/styles/tokens.css（亮色在 :root，暗色在 .dark），组件只用这些名字，不再直接写色值。
+        // 写在 primary 之前，让同一属性上的 primary 状态色（如选中行的底色）排在后面、照常生效。
+        surface: {
+          DEFAULT: 'var(--color-bg-surface)',
+          page: 'var(--color-bg-page)',
+          header: 'var(--color-bg-header)',
+          hover: 'var(--color-bg-row-hover)',
+          raised: 'var(--color-bg-raised)',
+          control: 'var(--color-bg-control)',
+          'control-hover': 'var(--color-bg-control-hover)',
+          pill: 'var(--color-bg-pill)',
+          'pill-hover': 'var(--color-bg-pill-hover)',
+          target: 'var(--color-bg-target)',
+          selected: 'var(--color-bg-selected)',
+          popover: 'var(--color-bg-popover)',
+          'popover-hover': 'var(--color-bg-popover-hover)',
+          'popover-selected': 'var(--color-bg-popover-selected)',
+          'popover-danger-hover': 'var(--color-bg-popover-danger-hover)'
+        },
+        line: {
+          row: 'var(--color-line-row)',
+          strong: 'var(--color-line-strong)',
+          control: 'var(--color-line-control)',
+          popover: 'var(--color-line-popover)'
+        },
+        fg: {
+          primary: 'var(--color-text-primary)',
+          secondary: 'var(--color-text-secondary)',
+          muted: 'var(--color-text-muted)',
+          'muted-on-pill': 'var(--color-text-muted-on-pill)',
+          'popover-selected': 'var(--color-text-popover-selected)'
+        },
+        status: {
+          ok: 'var(--color-status-ok)',
+          back: 'var(--color-status-back)',
+          exempt: 'var(--color-status-exempt)',
+          observe: 'var(--color-status-observe)',
+          stopped: 'var(--color-status-stopped)',
+          error: 'var(--color-status-error)',
+          info: 'var(--color-status-info)',
+          'ok-text': 'var(--color-status-ok-text)',
+          'back-text': 'var(--color-status-back-text)',
+          'exempt-text': 'var(--color-status-exempt-text)',
+          'error-text': 'var(--color-status-error-text)',
+          'info-text': 'var(--color-status-info-text)'
+        },
+        switch: {
+          on: 'var(--color-switch-on)',
+          'on-hover': 'var(--color-switch-on-hover)',
+          off: 'var(--color-switch-off)',
+          thumb: 'var(--color-switch-thumb)',
+          'thumb-off': 'var(--color-switch-thumb-off)'
+        },
+        tooltip: {
+          bg: 'var(--color-tooltip-bg)',
+          text: 'var(--color-tooltip-text)',
+          muted: 'var(--color-tooltip-muted)'
+        },
         // 主色调 - Teal/Cyan 青色系
         primary: {
           50: '#f0fdfa',
@@ -69,6 +127,9 @@ export default {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
       },
       boxShadow: {
+        popover: 'var(--shadow-popover)',
+        dropdown: 'var(--shadow-dropdown)',
+        panel: 'var(--shadow-panel)',
         glass: '0 8px 32px rgba(0, 0, 0, 0.08)',
         'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.06)',
         glow: '0 0 20px rgba(20, 184, 166, 0.25)',
@@ -130,7 +191,8 @@ export default {
         xs: '2px'
       },
       borderRadius: {
-        '4xl': '2rem'
+        '4xl': '2rem',
+        popover: 'var(--radius-popover)'
       }
     }
   },

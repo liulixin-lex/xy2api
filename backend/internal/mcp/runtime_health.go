@@ -25,7 +25,7 @@ func (r *runtimeReader) health(ctx context.Context, q *readerQuery, accounts []m
 	if r.summaries == nil {
 		return ErrUnavailable
 	}
-	summary, err := r.summaries.Summary(ctx, ids, "")
+	summary, err := r.summaries.Summary(ctx, ids)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,11 @@ func (r *runtimeReader) health(ctx context.Context, q *readerQuery, accounts []m
 		a["failure"] = health.Error
 		a["first_output"] = health.TTFO
 		a["cache"] = health.Cache
-		a["model"] = health.Model
+		a["status"] = health.Status
+		a["stop"] = health.Stop
+		a["reset_at"] = health.ResetAt
+		a["substandard"] = health.Substandard
+		a["exemptions"] = health.Exemptions
 		a["generated_at"] = summary.At
 		a["stale"] = summary.Stale
 		balance := map[string]any{"status": "snapshot_missing", "credential_match": "unverified"}

@@ -75,14 +75,14 @@
 - **做什么**：把每次上游失败归为一类（余额不足、鉴权、限流、容量降载、瞬时失败、首输出超时、停滞、模型不可用、客户端错误等，完整列表见 [罚则与选号](gateway-resilience-routing.md#失败分类)），据此决定是否换号、是否罚号、罚多久。瞬时失败（502、503、超时、传输错误）让账号进入短冷却；CDN 或代理写出的 5xx 错误页按瞬时失败处理。同一账号 60 秒内输出后失败 3 次，也进入同样的短冷却（池模式账号除外）。
 - **主要字段**：`transient_cooldown_seconds` 默认 30；上游带 `Retry-After` 时按它冷却，封顶 `retry_after_cap_seconds`（默认 120）；`balance_keywords_extra` 追加余额不足的识别文案；`decision_v2` 默认开，只把真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化的 overloaded）算作容量降载，“服务繁忙”“排队过多”“并发超限”一类按瞬时或限流处理，可以换到同一主机的其他账号。
 - **何时关闭**：一般不关闭。关闭 `decision_v2` 回到较粗的旧分类规则，同时“仅流式账号学习”只学习、不在本请求换号。
-- **计费与客户端**：分类本身不改变计费。分类结果写进运维错误记录的 `resilience_category`。[分组质量门槛](group-quality-gate.md)的错误维用同一套分类规则，但不看韧性开关：同一个失败，开关开或关结论都一样。
+- **计费与客户端**：分类本身不改变计费。分类结果写进运维错误记录的 `resilience_category`。[分组质量门槛](group-quality-gate.md)的报错线用同一套分类规则，但不看韧性开关：同一个失败，开关开或关结论都一样。
 - **观测**：`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.unclassified`（只按状态码归类的 4xx 文案采样，可据此补充 `balance_keywords_extra`）。
 
 ### 会话失败改绑 `session`
 
 - **做什么**：同一会话在同一账号上 10 分钟内连续失败 2 次后改绑，并在 10 分钟内避开该账号。OpenAI 账号另有“输出后首次失败即改绑”（`post_output_rebind`）：已开始输出后的流内失败、读流出错或缺终态第一次发生就改绑。客户端错误、内容安全拒绝、客户端断开与计划内的首输出截止不计入。
 - **主要字段**：`streak_threshold` 2、`streak_window_seconds` 600、`avoid_seconds` 600、`post_output_rebind` true。
-- **何时关闭**：只想观察失败、不想让会话离开原账号时关闭。关闭 `session.enabled` 会同时停用输出后首次失败改绑与 Claude 判慢迁出；OpenAI 分组的后排迁出与接管不受它影响（见 [调度](scheduling.md#openai-会话的去留)）。
+- **何时关闭**：只想观察失败、不想让会话离开原账号时关闭。关闭 `session.enabled` 会同时停用输出后首次失败改绑与 Claude 判慢迁出；OpenAI 分组的不达标换号与接管不受它影响（见 [调度](scheduling.md#openai-会话的去留)）。
 - **计费与客户端**：不影响计费。改绑会让会话换到新账号，上游提示缓存需要重新建立。
 - **观测**：计数 `session_rebind`；日志 `resilience.session_rebind`（原因 `resil_failure_streak`、`post_output_first_failure`、`terminal_rejection_streak`）。
 
@@ -95,7 +95,7 @@
 - **前提**：需要 `gateway.scheduling.load_batch_enabled`（默认 true）；会话迁出还需要“会话失败改绑”开启。
 - **观测**：`anthropic_account_latency_hold_started`、`anthropic_account_latency_sticky_migrated`、`anthropic_account_latency_sticky_kept`。
 
-OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字维与急性保护处理。
+OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字线与快速通道处理。
 
 ### 同站断流暂停 `same_site_hold`
 
@@ -126,7 +126,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **单次尝试截止**：OpenAI 流式文本请求按推理强度取首输出截止 `first_output_timeout_seconds`（default 20 / high 25 / xhigh 30 / max 30 秒，热尝试），冷尝试与大请求体另有下限；`model_overrides` 按模型覆盖。Anthropic 与 Antigravity 的首事件截止为 90 秒，Gemini 文本请求非最后候选的尝试截止为 60 秒。最后候选只受剩余预算约束。规则见 [罚则与选号](gateway-resilience-routing.md#首输出截止)。
 - **同号重试**：每个账号在一个请求内最多同号重试 `same_account_retry_max` 次（默认 1）；余额、鉴权、模型不可用不在同一账号上重试；容量降载只换号一次且只换到其他上游主机。
 - **截止锚点 `budget_start`**：`arrival`（默认）从请求到达算起；`body_eof` 在上传请求体用了至少 1 秒时，从请求体收完算起，仍不晚于到达后 290 秒。适合大请求体、上传慢的客户端，只影响新请求。
-- **截断归因 `budget_cut_attribution`**：一次尝试的截止被剩余预算压短、没给满档位时称为“预算截断”。`off` 不判定；`observe`（默认）只记录（指标 `budget_cut_fot` 等）；`enforce` 时这类截断在 OpenAI 的[质量状态](group-quality-gate.md)里不算首输出超时，不计入首字维与急性保护。
+- **截断归因 `budget_cut_attribution`**：一次尝试的截止被剩余预算压短、没给满档位时称为“预算截断”。`off` 不判定；`observe`（默认）只记录（指标 `budget_cut_fot` 等）；`enforce` 时这类截断在 OpenAI 的[质量状态](group-quality-gate.md)里不算首输出超时、不进首字线与快速通道，按报错计。
 - **何时关闭**：只在需要完全回到无截止、无预算的原有重试逻辑时关闭；想放宽时优先调大档位或预算总时长。
 - **计费与客户端**：失败的尝试不向用户计费。预算耗尽时按入站协议返回错误或写终止帧，见 [客户端可见的行为](gateway-resilience-client.md)。
 - **观测**：计数 `first_output_timeout`、`budget_exhausted`；日志 `resilience.budget_exhausted`、`resilience.capacity_switch_exhausted`、`resilience.budget_timeout_plan`。
@@ -218,7 +218,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ## 限制与注意事项
 
-- 会话失败与回避、末位兜底索引、计数项、Claude 判慢状态与模型级冷却都保存在进程内：多实例部署时各实例分别维护，重启后清零。蓝绿切换的短暂重叠期共用 Redis 是支持的，长期多活需要评估这些进程内状态的影响。
+- 会话避让保存在 Redis，包含连续失败的软避让与 OpenAI 换号失败的 2 分钟目标排除，多实例共享；手动恢复后忽略此前的避让。末位兜底索引、计数项、Claude 判慢状态和模型级冷却仍按实例维护。
 - 兜底判断、末位兜底与无号 `Retry-After` 读取 2 秒的分组快照；网关自身施加的冷却会立即刷新快照，其他来源（上游限流、管理员改动、其他实例）最多 2 秒后可见。
 - 未送达表固定保留 30 天，每 6 小时清理一次；滥用保护只在上游返回用量时按成本计费。
 - 兜底分组只支持标准（余额）分组；进入兜底的记忆按 API Key 而不是会话。

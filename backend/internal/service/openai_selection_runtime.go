@@ -28,7 +28,7 @@ func (s *OpenAIGatewayService) selectionNow() time.Time {
 }
 
 func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) selectionRequest {
-	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, SessionHash: req.SessionHash, Loads: loads, Recent: s.recentSessionSuccess(), OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, Loads: loads, OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
 }
 
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {
@@ -131,16 +131,20 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
-	cache, ok := s.cache.(OpenAIStickyRebindCache)
-	if !ok {
+	cache, ok := s.cache.(OpenAIStickyVersionedCache)
+	if !ok || s.resilience == nil {
 		return nil
 	}
 	now, view := s.selectionNow(), s.selectionView()
 	gid := derefGroupID(req.GroupID)
-	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, now), now) == schedquality.StandBack
+	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandBack
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID)}
-	if !migrate && !session.takeoverReady(ctx, view, gid, s.openAISessionCacheKey(req.SessionHash), owner.ID, now) {
+	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt}
+	bindingKey := s.openAISessionCacheKey(req.SessionHash)
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
+		bindingKey = pending.key
+	}
+	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now) {
 		return nil
 	}
 	accounts, err := members()
@@ -154,7 +158,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		if a.Platform != req.Platform || req.RequestedModel != "" && !a.IsModelSupported(req.RequestedModel) {
 			continue
 		}
-		if a.ID != owner.ID && a.Priority < owner.Priority && schedquality.CanTakeOver(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, now), now) && !s.selectionFullMarks.Recently(a.ID, now) {
+		if a.ID != owner.ID && a.Priority < owner.Priority && (schedquality.StandingOf(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandFront) && !s.selectionFullMarks.Recently(a.ID, now) {
 			possible = true
 			break
 		}
@@ -182,7 +186,6 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	selection := session.selectOwner(ctx, gid, req.SessionHash, req.RequestedModel, owner, candidates, s.selectionRequest(ctx, req, loads))
 	if selection != nil {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("quality_migration")
-		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 	}
 	return selection
 }

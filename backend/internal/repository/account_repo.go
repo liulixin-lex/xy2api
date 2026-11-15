@@ -240,6 +240,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
+	service.InitializeNewAccountProbeDefault(account)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -305,7 +306,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	return nil
 }
 
-// CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
+// CreateWithAccountGroups atomically persists an account, its group memberships,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
 	if account == nil {
@@ -336,16 +337,12 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 	if len(groups) > 0 {
-		builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
 		for i := range groups {
 			groups[i].AccountID = account.ID
-			builders = append(builders, txClient.AccountGroup.Create().
-				SetAccountID(account.ID).
-				SetGroupID(groups[i].GroupID).
-				SetPriority(groups[i].Priority),
-			)
 		}
-		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+		if _, err := txClient.ExecContext(ctx,
+			`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
+			account.ID, pq.Array(groupIDs)); err != nil {
 			return err
 		}
 	}
@@ -1305,6 +1302,9 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
+	if ids, enabled := service.AccountIDsFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	if filter, enabled := service.SchedQualityAccountFilter(ctx); enabled {
 		if !filter.Exclude {
 			q = q.Where(dbaccount.IDIn(filter.IDs...))
@@ -2092,7 +2092,7 @@ func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID int64, priority int) error {
+func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID int64) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return err
@@ -2105,11 +2105,8 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 	if err := lockLiveGroups(ctx, client, []int64{groupID}); err != nil {
 		return err
 	}
-	_, err = client.AccountGroup.Create().
-		SetAccountID(accountID).
-		SetGroupID(groupID).
-		SetPriority(priority).
-		Save(ctx)
+	_, err = client.ExecContext(ctx,
+		`INSERT INTO account_groups (account_id, group_id, created_at) VALUES ($1, $2, NOW())`, accountID, groupID)
 	if err != nil {
 		return err
 	}
@@ -2199,16 +2196,9 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return nil
 	}
 
-	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
-	for i, groupID := range groupIDs {
-		builders = append(builders, txClient.AccountGroup.Create().
-			SetAccountID(accountID).
-			SetGroupID(groupID).
-			SetPriority(i+1),
-		)
-	}
-
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+	if _, err := txClient.ExecContext(ctx,
+		`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
+		accountID, pq.Array(groupIDs)); err != nil {
 		return err
 	}
 
@@ -2326,7 +2316,7 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
 			AND (a.overload_until IS NULL OR a.overload_until <= $3)
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= $3)
-		ORDER BY ag.group_id ASC, ag.priority ASC, a.priority ASC, a.id ASC
+		ORDER BY ag.group_id ASC, a.priority ASC, a.id ASC
 	`, pq.Array(groupIDs), service.StatusActive, time.Now())
 	if err != nil {
 		return nil, err
@@ -3814,9 +3804,10 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 	}
 
 	groups, err := q.
+		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
 		Order(
-			dbaccountgroup.ByPriority(),
 			dbaccountgroup.ByAccountField(dbaccount.FieldPriority),
+			dbaccountgroup.ByAccountID(),
 		).
 		WithAccount().
 		All(ctx)
@@ -3963,8 +3954,9 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			end = len(accountIDs)
 		}
 		entries, err := r.client.AccountGroup.Query().
+			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
 			Where(dbaccountgroup.AccountIDIn(accountIDs[start:end]...)).
-			Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByPriority()).
+			Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByGroupID()).
 			All(ctx)
 		if err != nil {
 			return nil, nil, nil, err
@@ -3983,7 +3975,6 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			agSvc := service.AccountGroup{
 				AccountID: ag.AccountID,
 				GroupID:   ag.GroupID,
-				Priority:  ag.Priority,
 				CreatedAt: ag.CreatedAt,
 				Group:     groupSvc,
 			}

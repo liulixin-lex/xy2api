@@ -1,4 +1,13 @@
 export default {
+  adminTitle: 'Management MCP (OAuth)',
+  adminDescription: 'Let AI assistants connect through browser OAuth consent. Saved changes take effect immediately without restarting.',
+  adminEnabled: 'Enable management MCP',
+  adminURLHint: 'Use a publicly reachable HTTPS URL with the exact path /api/v1/mcp. Loopback HTTP is allowed for local development. Once saved, these settings override deployment configuration.',
+  adminDisableHint: 'Disabling blocks calls and token refresh. Grants are retained; unexpired grants can work again when the same URL is re-enabled.',
+  adminAnalysis: 'Choose platform management and read-only access during consent to analyze platform usage, costs, users, groups and operations. Write access requires separate consent and two-factor verification. View and revoke your applications on the MCP connections page.',
+  adminLoadFailed: 'Could not load management MCP settings. Please retry.',
+  adminSaveFailed: 'Could not save management MCP settings.',
+  adminSaved: 'Management MCP settings saved',
   title: 'MCP Connection',
   description: 'Connect an AI assistant with OAuth and manage its access to your account.',
   connectionTitle: 'Connect your AI assistant',

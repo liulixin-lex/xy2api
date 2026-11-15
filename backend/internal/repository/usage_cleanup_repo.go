@@ -282,7 +282,35 @@ func (r *usageCleanupRepository) MarkTaskFailed(ctx context.Context, taskID int6
 	return err
 }
 
+// DeleteUsageLogsBatch shares one batch budget across financial and unbilled
+// rows. Only financial deletions invalidate the financial group rollups.
 func (r *usageCleanupRepository) DeleteUsageLogsBatch(ctx context.Context, filters service.UsageCleanupFilters, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("cleanup batch limit must be positive")
+	}
+	deleted, err := r.deleteBilledUsageLogsBatch(ctx, filters, limit)
+	if err != nil || deleted >= int64(limit) || filters.BillingType != nil {
+		return deleted, err
+	}
+	requestType := filters.RequestType
+	filters.RequestType = nil
+	where, args := buildUsageCleanupWhere(filters)
+	if requestType != nil {
+		args = append(args, *requestType)
+		where += fmt.Sprintf(" AND request_type = $%d", len(args))
+	}
+	args = append(args, int64(limit)-deleted)
+	result, err := r.sql.ExecContext(ctx, fmt.Sprintf(`WITH target AS (
+ SELECT id FROM gateway_unbilled_requests WHERE %s ORDER BY created_at,id LIMIT $%d
+ ) DELETE FROM gateway_unbilled_requests WHERE id IN (SELECT id FROM target)`, where, len(args)), args...)
+	if err != nil {
+		return deleted, err
+	}
+	n, err := result.RowsAffected()
+	return deleted + n, err
+}
+
+func (r *usageCleanupRepository) deleteBilledUsageLogsBatch(ctx context.Context, filters service.UsageCleanupFilters, limit int) (int64, error) {
 	if filters.StartTime.IsZero() || filters.EndTime.IsZero() {
 		return 0, fmt.Errorf("cleanup filters missing time range")
 	}

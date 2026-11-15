@@ -40,6 +40,7 @@ func (Group) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		field.String("alias").Default(""),
 		field.String("description").
 			Optional().
 			Nillable().

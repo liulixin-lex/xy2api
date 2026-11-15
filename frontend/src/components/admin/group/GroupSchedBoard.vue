@@ -20,18 +20,18 @@
         :searchable="false"
         :aria-label="t('admin.schedQuality.aria.model')"
         class="sq-select-sm w-[150px]"
-        @update:model-value="(value) => (requested = String(value))"
+        @update:model-value="(value) => setSchedBoardModel(String(value))"
       />
     </template>
 
-    <div v-if="!data && !poll.error.value" data-sq-board-loading>
+    <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
     </div>
     <div v-else-if="!data" class="flex items-center gap-3" data-sq-board-failed>
       <span class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
-      <button type="button" class="btn btn-secondary btn-sm" @click="poll.refresh()">{{ t('admin.schedQuality.action.retry') }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="retry(SCHED_BOARD_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
     </div>
-    <p v-else-if="!data.accounts.length" class="sq-text-3 text-sm">{{ t('admin.schedQuality.state.nodata') }}</p>
+    <p v-else-if="!data.rows.length" class="sq-text-3 text-sm">{{ t('admin.schedQuality.state.nodata') }}</p>
     <div v-else class="-mx-3 overflow-x-auto">
       <table class="sq-table" data-sq-board-table>
         <thead>
@@ -47,62 +47,33 @@
         </thead>
         <tbody>
           <tr
-            v-for="(row, index) in data.accounts"
+            v-for="(row, index) in data.rows"
             :key="row.account_id"
-            :class="{ 'sq-weak': !row.eligible, 'sq-split': !row.eligible && index > 0 && data.accounts[index - 1].eligible }"
+            :class="{ 'sq-weak': stopped(row), 'sq-split': stopped(row) && index > 0 && !stopped(data.rows[index - 1]) }"
             :data-sq-board-row="row.account_id"
           >
-            <td class="sq-r sq-num sq-text-3">{{ row.eligible ? row.rank : '—' }}</td>
+            <td class="sq-r sq-num sq-text-3">{{ stopped(row) ? '—' : row.rank }}</td>
             <td>
               <button
                 v-if="canViewAccounts"
                 type="button"
                 class="sq-link sq-focus"
                 :data-sq-trigger="`account:${row.account_id}`"
-                @click="openSchedDrawer({ id: row.account_id, name: row.name }, { model: row.evidence_model || null })"
+                :data-quality-opener="qualityOpenerKey(row.account_id)"
+                @click="openSchedDrawer({ id: row.account_id, name: row.name }, { model: data.model || null })"
               >{{ row.name }}</button>
               <template v-else>{{ row.name }}</template>
             </td>
             <td>
-              <span class="inline-flex items-center gap-1.5">
-                <span :class="stateOf(row).cls" data-sq-state>{{ stateOf(row).text }}</span>
-                <span
-                  v-if="noTakeover(row)"
-                  v-tip="t('admin.schedQuality.tip.noTakeover')"
-                  role="img"
-                  tabindex="0"
-                  :aria-label="t('admin.schedQuality.tip.noTakeover')"
-                  class="sq-icon-mark sq-focus inline-flex"
-                  data-sq-no-takeover
-                >
-                  <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M2.5 4.5h7.5M8 2.5l2 2-2 2M11.5 9.5H4M6 7.5l-2 2 2 2M2 12L12 2" />
-                  </svg>
-                </span>
-              </span>
+              <span :class="stateOf(row).cls" data-sq-state>{{ stateOf(row).text }}</span>
             </td>
             <td class="sq-r sq-num">{{ row.priority }}</td>
             <td class="sq-r sq-num">{{ row.rate.toFixed(3) }}</td>
-            <td class="sq-r sq-num">
-              <span class="inline-flex items-center gap-1.5">
-                <span
-                  v-if="row.recently_full_seconds > 0"
-                  v-tip="t('admin.schedQuality.tip.recentlyFull')"
-                  role="img"
-                  tabindex="0"
-                  :aria-label="t('admin.schedQuality.tip.recentlyFull')"
-                  class="sq-full sq-focus"
-                />
-                {{ row.in_flight }} / {{ row.concurrency }}
-              </span>
-            </td>
+            <td class="sq-r sq-num">{{ row.in_flight }} / {{ row.concurrency }}</td>
             <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
-              <span
-                v-tip="t('admin.schedQuality.tip.samples', { n: row[dim].n })"
-                tabindex="0"
-                :aria-label="valueLabel(row, dim)"
-                :class="['sq-focus', valueClass(row, dim)]"
-              >{{ valueText(row, dim) }}</span>
+              <!-- The backend names the failing dimensions of a row at the back; it sends no numbers for the board. -->
+              <span v-if="failing(row, dim)" role="img" :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t('admin.schedQuality.aria.fail')}`" class="sq-shape sq-shape--fail" />
+              <span v-else tabindex="0" :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t('admin.schedQuality.aria.nodata')}`" class="sq-focus sq-text-3">{{ DASH }}</span>
             </td>
           </tr>
         </tbody>
@@ -117,100 +88,50 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
-import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedBoardAccount, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
-import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
-import { closeSchedBoard, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import type { BackendDim, BackendOrderRow } from '@/api/admin/schedQualityTypes'
+import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
+import { useLiveClock } from '@/composables/useLiveClock'
+import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import {
-  DASH, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, known, rejectName, SCHED_DIMS, SCHED_STATES, SCHED_VERDICTS, verdictClass,
-  type SchedDim
-} from '@/utils/schedQualityFormat'
-import { vTip } from '@/utils/tip'
+import { DASH, fmtCountdown, rejectName, SCHED_DIMS, secondsUntil } from '@/utils/schedQualityFormat'
 
-// Group board (design spec C): the group's accounts in the API's selection order (never re-sorted here), refreshed
-// every 5 s while open. Accounts held back by hard admission come last in the secondary colour with their reason.
+// Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
+// re-sorted here), fetched every 5 s by the host page's live table while open (useSchedLayerData). Accounts that take
+// no part (layer stopped) come last in the secondary colour; a row at the back (layer below) counts down to its end
+// and marks its failing dimensions.
 const { t, te } = useI18n()
-const { board, changed } = useSchedLayers()
+const { board } = useSchedLayers()
+const { board: boardData, boardKey, retry } = useSchedLayerData()
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
-const now = useSchedQualityClock()
+const now = useLiveClock()
 const shellRef = ref<{ holdFocus: () => () => void } | null>(null)
 
-// The model asked for: the opener's, then whatever is picked here; the API answers with the model it used.
-const requested = ref<string | null>(null)
-watch(() => [board.groupId, board.raise] as const, () => { requested.value = board.model }, { immediate: true })
-
-const poll = useSchedQualityPoll(
-  () => (board.groupId === null ? null : `${board.groupId}:${requested.value ?? ''}`),
-  (signal) => schedQualityAPI.groupBoard(board.groupId!, requested.value ?? undefined, { signal })
-)
-const data = computed(() => poll.data.value)
-watch(() => board.raise, () => { if (board.groupId !== null) void poll.refresh() })
-watch(changed, () => { if (board.groupId !== null) void poll.refresh() })
+// The data of the group and model asked for (the opener's model, then whatever is picked here; the API answers with
+// the model it used).
+const data = computed(() => (boardData.key !== null && boardData.key === boardKey() ? boardData.data : null))
+const failed = computed(() => boardData.failedKey !== null && boardData.failedKey === boardKey())
 
 let restoreFocus: (() => void) | null = null
-watch(() => poll.data.value, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
-watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
+watch(() => boardData.data, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
+watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
 const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
 
-// Takeover setting of the group, for the "no takeover" mark.
-const takeover = ref<SchedTakeoverIdleSeconds | null>(null)
-watch(() => board.groupId, async (id) => {
-  takeover.value = null
-  if (id === null) return
-  try {
-    const policy = await schedQualityAPI.getGroupPolicy(id)
-    if (board.groupId === id) takeover.value = policy.policy.takeover_idle_seconds
-  } catch {
-    // Without the policy the mark stays hidden.
-  }
-}, { immediate: true })
+const stopped = (row: BackendOrderRow) => row.layer === 'stopped'
+const failing = (row: BackendOrderRow, dim: BackendDim) => !stopped(row) && row.dims.includes(dim)
 
-function stateOf(row: SchedBoardAccount): { text: string; cls: string } {
-  if (!row.eligible) {
-    const word = rejectName(row.reject, t, te)
-    const left = secondsUntil(row.reject_until, now.value)
+function stateOf(row: BackendOrderRow): { text: string; cls: string } {
+  const left = secondsUntil(row.until, now.value)
+  if (stopped(row)) {
+    const word = rejectName('not_schedulable', t, te)
     return { text: left ? `${word} ${fmtCountdown(left)}` : word, cls: '' }
   }
-  if (row.override?.mode === 'demote') return { text: t('admin.schedQuality.state.demoted'), cls: 'sq-text' }
-  if (row.override?.mode === 'exempt') return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
-  if (!known(row.state, SCHED_STATES)) return { text: t('admin.schedQuality.unknown'), cls: 'sq-text-3' }
-  if (row.state === 'cooling') {
-    if (row.testing) return { text: t('admin.schedQuality.state.testing'), cls: 'sq-test' }
-    const left = secondsUntil(row.until, now.value)
+  if (row.exempt) return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
+  if (row.layer === 'below') {
     const word = t('admin.schedQuality.state.cooling')
-    return { text: !row.waiting_test && left ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool' }
+    return { text: left ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool' }
   }
   return { text: t('admin.schedQuality.state.normal'), cls: 'sq-text' }
-}
-
-function noTakeover(row: SchedBoardAccount) {
-  const value = data.value
-  return !!value && row.eligible && row.standing === 'front' && !row.can_take_over &&
-    takeover.value !== null && takeover.value >= 0 && value.global_enabled && !value.stale
-}
-
-function valueText(row: SchedBoardAccount, dim: SchedDim) {
-  if (dim === 'ttfo') return fmtTtfo(row.ttfo.p90_ms, row.ttfo.p90_timeout, t)
-  return dim === 'error' ? fmtErrorRate(row.error.rate) : fmtCacheRatio(row.cache.ratio)
-}
-
-// An unknown verdict leaves the number uncoloured and is read out as the fallback word.
-function valueClass(row: SchedBoardAccount, dim: SchedDim) {
-  if (valueText(row, dim) === DASH) return 'sq-text-3'
-  if (!row.eligible) return ''
-  const verdict = known(row.verdicts[dim], SCHED_VERDICTS)
-  return verdict && verdict !== 'nodata' ? verdictClass(verdict) : 'sq-text'
-}
-
-function valueLabel(row: SchedBoardAccount, dim: SchedDim) {
-  const name = t(`admin.schedQuality.dim.${dim}`)
-  const text = valueText(row, dim)
-  const verdict = known(row.verdicts[dim], SCHED_VERDICTS)
-  if (text === DASH) return `${name} ${t('admin.schedQuality.aria.nodata')}`
-  if (!row.eligible || verdict === 'nodata') return `${name} ${text}`
-  return t('admin.schedQuality.aria.cell', { dim: name, value: text, verdict: t(verdict ? `admin.schedQuality.aria.${verdict}` : 'admin.schedQuality.unknown') })
 }
 </script>

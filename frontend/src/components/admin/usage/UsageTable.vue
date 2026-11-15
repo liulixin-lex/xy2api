@@ -16,10 +16,15 @@
         {{ ipGeoBatchLoading ? t('usage.ipGeo.batchFetching') : t('usage.ipGeo.batchFetch') }}
       </button>
     </div>
+    <!-- Right above the table, under the IP lookup bar: the usage page's "N new records" anchor. -->
+    <slot name="above-table" />
     <div class="overflow-auto">
       <DataTable
+        ref="tableRef"
         :columns="columns"
         :data="data"
+        :row-key="rowKey"
+        :row-class="rowClass"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
@@ -49,7 +54,12 @@
         </template>
 
         <template #cell-account="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <span class="block text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数 -->
+          <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="mt-0.5 flex flex-wrap gap-x-1.5 text-xs" data-testid="usage-request-marks">
+            <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
+            <span v-if="(row.switches ?? 0) > 0" class="text-gray-500 dark:text-gray-400">{{ t('admin.usage.switches', { n: row.switches }) }}</span>
+          </span>
         </template>
 
         <template #cell-model="{ row }">
@@ -156,8 +166,10 @@
         </template>
 
         <template #cell-tokens="{ row }">
+          <!-- 无账单请求未观测到用量：不编造 0 -->
+          <span v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-if="isImageUsage(row)" class="flex items-center gap-1.5">
+          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -205,8 +217,9 @@
                 </div>
               </div>
             </div>
-            <!-- Token Detail Tooltip -->
+            <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
             <div
+              v-if="!isUnbilled(row)"
               class="group relative"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
@@ -219,7 +232,11 @@
         </template>
 
         <template #cell-cost="{ row }">
-          <div class="text-sm">
+          <!-- 无账单请求没有费用：显示 —，失败 / 取消的标上结果 -->
+          <div v-if="isUnbilled(row) && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500" data-testid="usage-unbilled">
+            —<span v-if="unbilledWord(row)" class="ml-1.5 text-xs">{{ unbilledWord(row) }}</span>
+          </div>
+          <div v-else class="text-sm">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
@@ -628,6 +645,8 @@ interface Props {
   showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** Passed to DataTable's rowClass (a stable function from the page's setup). */
+  rowClass?: (row: AdminUsageLog, index: number) => unknown
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -654,6 +673,22 @@ const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
+
+// 后端 0.6.5 起，管理端列表把没有账单的请求（多为失败或取消）和 usage 行排在一起。这些行来自另一张表：
+// id 自成序列，没有费用，常常也没有 Token 数。行键带上来源；费用与 Token 显示 —，不编造 0。
+const tableRef = ref<InstanceType<typeof DataTable> | null>(null)
+/**
+ * The list's first row is in view (below the sticky page header, spec 8.5a) and the table has not been scrolled inside
+ * itself: new rows may come in at the top (the live engine's log mode follows the server only then).
+ */
+const isAtTop = () => tableRef.value?.isAtTop() ?? true
+const scrollToTop = () => tableRef.value?.scrollToTop()
+defineExpose({ isAtTop, scrollToTop })
+
+const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
+const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
+const unbilledWord = (row: AdminUsageLog) =>
+  row.result === 3 ? t('admin.usage.resultFailed') : row.result === 4 ? t('admin.usage.resultCanceled') : ''
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 

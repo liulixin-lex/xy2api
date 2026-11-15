@@ -21,7 +21,7 @@ type runtimeReader struct {
 		Snapshot() *service.SchedQualitySnapshot
 	}
 	summaries interface {
-		Summary(context.Context, []int64, string) (service.SchedAdminSummary, error)
+		Summary(context.Context, []int64) (service.SchedAdminSummary, error)
 	}
 }
 
@@ -208,7 +208,8 @@ func (r *runtimeReader) qualityState(ctx context.Context, q *readerQuery) error 
 		row     service.SchedGroupRow
 	}
 	rows := []qualityRow{}
-	for account, groupRows := range snap.GroupRows {
+	for account := range snap.Members {
+		groupRows := snap.RowsForAccount(account)
 		if in.AccountID > 0 && account != in.AccountID {
 			continue
 		}
@@ -234,15 +235,13 @@ func (r *runtimeReader) qualityState(ctx context.Context, q *readerQuery) error 
 	})
 	stale := q.result.GeneratedAt.Sub(snap.At) > schedquality.ViewMaxAge
 	for _, item := range rows[:min(len(rows), q.limit)] {
-		state := item.row.View
-		summary := item.row.Summary
-		row := map[string]any{"group_id": item.row.GroupID, "account_id": item.account, "model": item.row.Model,
-			"state": state.State.String(), "reason": state.Reason, "level": state.Level, "since": state.Since, "until": state.Until,
-			"ttfo":         map[string]any{"n": summary.Speed.N, "sessions": summary.Speed.Sessions, "timeouts": summary.Speed.Timeouts, "p90_ms": summary.Speed.P90Ms, "p90_timeout": summary.Speed.P90Timeout, "fail_bound_ms": summary.Speed.FailBoundMs, "fail_bound_timeout": summary.Speed.FailBoundTimeout},
-			"error":        map[string]any{"n": summary.Error.N, "sessions": summary.Error.Sessions, "bad": summary.Error.Bad, "rate": summary.Error.Rate, "lcb": summary.Error.LCB},
-			"cache":        map[string]any{"turns": summary.Cache.Turns, "sessions": summary.Cache.Sessions, "ratio": summary.Cache.Ratio},
-			"generated_at": snap.At, "stale": stale, "global_enabled": snap.GlobalEnabled,
-			"policy_version": snap.Policies[item.row.GroupID].Version}
+		override, _ := item.row.View.EffectiveOverride(q.result.GeneratedAt)
+		detail := service.SchedAdminGroupModel(item.row, override.Mode == schedquality.OverrideExempt)
+		row := map[string]any{"group_id": item.row.GroupID, "account_id": item.account, "model": detail.Model,
+			"failing": detail.Failing, "dims": detail.Dims, "level": detail.Level, "since": detail.Since, "until": detail.Until, "other_group_ids": detail.OtherGroupIDs, "exempt": detail.Exempt,
+			"ttfo": detail.TTFO, "error": detail.Error, "cache": detail.Cache,
+			"generated_at": snap.At, "stale": stale, "global_enabled": snap.GlobalEnabled, "policy_version": snap.Policies[item.row.GroupID].Version}
+
 		if in.IncludePolicies {
 			p := snap.Policies[item.row.GroupID].Policy
 			row["policy"] = service.SchedAdminPolicyPolicy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}

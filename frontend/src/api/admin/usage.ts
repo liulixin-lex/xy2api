@@ -24,7 +24,16 @@ export interface AdminUsageStatsResponse {
   endpoints?: EndpointStat[]
   upstream_endpoints?: EndpointStat[]
   endpoint_paths?: EndpointStat[]
+  // 后端 0.6.5 起管理端统计按请求层计：total_requests 含没有账单的失败 / 取消请求，下列为按结果的拆分。
+  success?: number
+  rescued?: number
+  failed?: number
+  ttfo_p50_ms?: number | null
+  cache_ratio?: number | null
 }
+
+/** 请求结果（后端 0.6.5）：1 成功，2 已救回，3 失败，4 已取消。仅管理端列表与统计接受。 */
+export type UsageRequestResult = 1 | 2 | 3 | 4
 
 export interface SimpleUser {
   id: number
@@ -85,6 +94,8 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   exact_total?: boolean
   billing_mode?: string
   upstream_model_mismatch?: boolean
+  /** 按请求结果筛选（列表与统计） */
+  result?: UsageRequestResult | null
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   // 错误请求 tab 专属筛选(仅传给错误列表接口;共用同一 filters 对象)
@@ -126,6 +137,7 @@ export async function getStats(params: {
   stream?: boolean
   native_compaction_v2?: boolean | null
   upstream_model_mismatch?: boolean
+  result?: UsageRequestResult | null
   period?: string
   start_date?: string
   end_date?: string

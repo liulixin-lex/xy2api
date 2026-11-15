@@ -2284,7 +2284,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if schedResult != nil {
 			schedCapture.noteUsage(schedResult.usage)
 		}
-		schedCapture.finish(nil, schedErr)
+		schedCapture.noteError(schedErr)
 	}()
 	failureModel := firstNonEmpty(mappedModel, canonicalOpenAIAccountSchedulingModel(account, originalModel))
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
@@ -3050,7 +3050,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		if schedResult != nil {
 			schedCapture.noteUsage(schedResult.usage)
 		}
-		schedCapture.finish(nil, schedErr)
+		schedCapture.noteError(schedErr)
 	}()
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {

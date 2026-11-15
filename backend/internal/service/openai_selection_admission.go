@@ -2,119 +2,10 @@ package service
 
 import (
 	"context"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
-
-// SchedTestAdmission is implemented by the OpenAI service. It deliberately
-// uses the same request admission functions as the scheduler; the only
-// difference is that the request has no group, session, or capacity.
-var _ SchedTestAdmission = (*OpenAIGatewayService)(nil)
-
-func (s *OpenAIGatewayService) TestRequestModel(ctx context.Context, account *Account, evidenceModel string) (string, bool, string) {
-	model := openAIRequestModelForEvidence(account, evidenceModel)
-	if model == "" {
-		return "", false, "no_model"
-	}
-	// A test has no group, even if its caller carries a group profit gate.
-	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, (*openAIProfitControlGate)(nil))
-	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
-		return "", false, "account_scheduling_threshold"
-	}
-	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: model}
-	if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, PlatformOpenAI, model, false, "", s); reason != "" {
-		return "", false, reason
-	}
-	if ok, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !ok {
-		return "", false, reason
-	}
-	return model, true, ""
-}
-
-// schedTestAdmissionBlockedBy diagnoses the existing rejection using only the
-// loaded account. Keep the ordering in sync with Account.IsSchedulable.
-func schedTestAdmissionBlockedBy(account *Account, evidenceModel, reason string, now time.Time) string {
-	if account == nil {
-		return "other"
-	}
-	switch reason {
-	case "no_model", "account_model_not_owned", "model_not_supported", "model_rate_limited":
-		return "model"
-	case "account_scheduling_threshold":
-		return "quota"
-	case "not_schedulable":
-		switch {
-		case !account.IsActive():
-			if account.Status == StatusError {
-				return "other"
-			}
-			return "disabled"
-		case !account.Schedulable:
-			return "disabled"
-		case account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt):
-			return "disabled"
-		case account.OverloadUntil != nil && now.Before(*account.OverloadUntil):
-			return "overloaded"
-		case account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt):
-			return "rate_limited"
-		case account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil):
-			switch {
-			case strings.HasPrefix(account.TempUnschedulableReason, "balance:"):
-				return "balance"
-			case strings.HasPrefix(account.TempUnschedulableReason, "auth:"),
-				strings.HasPrefix(account.TempUnschedulableReason, "OAuth 401:"),
-				strings.HasPrefix(account.TempUnschedulableReason, "Authentication failed (401):"):
-				return "auth"
-			case IsAccountSchedulingThresholdReason(account.TempUnschedulableReason):
-				return "quota"
-			default:
-				return "paused"
-			}
-		case account.IsAPIKeyOrBedrock() && account.IsQuotaExceeded():
-			return "quota"
-		}
-	case "runtime_blocked":
-		model := openAIRequestModelForEvidence(account, evidenceModel)
-		if iqGateBlocksRequest(account, model, false, "") {
-			return "model"
-		}
-		// The shared runtime reason does not identify ticket vs transient
-		// failures; do not repeat ticket lookups just to classify the log.
-		return "paused"
-	case "proxy_stream_quarantined":
-		return "paused"
-	}
-	if strings.HasPrefix(reason, "quota_auto_pause") || strings.HasPrefix(reason, "quota_auto_reset_pending_") || strings.HasPrefix(reason, "quota_auto_reset_credit_check_") {
-		return "quota"
-	}
-	return "other"
-}
-
-// openAIRequestModelForEvidence reverses model mapping without checking admission.
-func openAIRequestModelForEvidence(account *Account, evidenceModel string) string {
-	evidenceModel = strings.TrimSpace(evidenceModel)
-	if account == nil || evidenceModel == "" {
-		return ""
-	}
-	models := []string{evidenceModel}
-	for model := range account.GetModelMapping() {
-		if strings.TrimSpace(model) != "" && !strings.ContainsAny(model, "*?") && model != evidenceModel {
-			models = append(models, model)
-		}
-	}
-	sort.Strings(models[1:])
-	for _, model := range models {
-		if OpenAIAttemptModel(account, model) != evidenceModel || !account.IsModelSupported(model) {
-			continue
-		}
-		return model
-	}
-	return ""
-}
 
 // Keep the scheduler's view dependency explicit for W0 wiring. A nil view is
 // equivalent to a disabled quality system and therefore leaves accounts front.
@@ -242,3 +133,6 @@ func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Cont
 
 	return true, ""
 }
+
+func (emptySelectionView) GroupEnabled(int64) bool { return false }
+func (emptySelectionView) ResetAt(int64) time.Time { return time.Time{} }

@@ -5,27 +5,24 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
-  listWithEtag,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn()
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -105,7 +102,7 @@ function mountView() {
         Pagination: true,
         ConfirmDialog: true,
         AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-        AccountTableFilters: {
+        AccountsToolbar: {
           props: ['groups'],
           template: '<div data-test="account-filters" :data-group-count="groups.length"></div>'
         },
@@ -140,7 +137,6 @@ describe('admin AccountsView usage windows hint', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
-    listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
@@ -151,11 +147,6 @@ describe('admin AccountsView usage windows hint', () => {
       page: 1,
       page_size: 20,
       pages: 0
-    })
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
     })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
@@ -173,19 +164,20 @@ describe('admin AccountsView usage windows hint', () => {
   })
 
   it('shows the capacity, scheduling and usage windows headers as plain names (ui-proposal 6.1 #12)', async () => {
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     const wrapper = mountView()
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="plain-header"]').map(header => header.text())).toEqual([
-      'admin.accounts.columns.capacity',
       'admin.accounts.columns.schedulable',
+      'admin.accounts.columns.capacity',
       'admin.accounts.columns.usageWindows'
     ])
     expect(wrapper.findAll('[data-test="plain-header"] [data-test="usage-windows-hint"]')).toHaveLength(0)
   })
 
   it('keeps Ollama Cloud in the single usage column and ignores legacy column preferences', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['ollama_cloud_usage']))
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['ollama_cloud_usage']))
     const wrapper = mountView()
     await flushPromises()
 
@@ -194,16 +186,20 @@ describe('admin AccountsView usage windows hint', () => {
     expect(columns.some(column => column.key === 'ollama_cloud_usage')).toBe(false)
   })
 
-  it('renders the upstream billing trust warning next to the declared-rate column', async () => {
+  it('labels the rate column short; its tip has the full name and the trust warning, with no info icon (7e-8)', async () => {
     const wrapper = mountView()
     await flushPromises()
+    document.body.appendChild(wrapper.element)
 
     const header = wrapper.find('[data-test="upstream-billing-header"]')
     expect(header.exists()).toBe(true)
-    expect(header.text()).toContain('admin.accounts.columns.upstreamBillingRate')
-    expect(wrapper.findAll('[data-test="usage-windows-hint"]').some(node =>
-      node.text() === 'admin.accounts.upstreamBilling.trustWarning'
-    )).toBe(true)
+    expect(header.text()).toBe('admin.accounts.columns.upstreamBillingRate')
+    expect(header.find('[data-test="usage-windows-hint"]').exists()).toBe(false)
+    vi.useFakeTimers()
+    header.get('[data-test="upstream-rate-head"]').element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    vi.useRealTimers()
+    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.columns.upstreamBillingRateFull\nadmin.accounts.upstreamBilling.trustWarning')
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; sortable: boolean }>
     expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
   })

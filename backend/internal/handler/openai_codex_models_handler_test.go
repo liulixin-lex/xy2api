@@ -143,12 +143,12 @@ func (codexModelsSelectionView) GlobalEnabled() bool                      { retu
 func (codexModelsSelectionView) TakeoverIdle(int64) (time.Duration, bool) { return 0, false }
 func (v codexModelsSelectionView) StateOf(_ int64, accountID int64, _ string) schedquality.StateView {
 	if accountID == 11 {
-		return schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: v.manual}}
+		return schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: v.manual}}
 	}
 	return schedquality.StateView{}
 }
 
-func TestCodexModelsSelectionUsesManualOverridesOnly(t *testing.T) {
+func TestCodexModelsSelectionTreatsAllQualityStatesAsNormal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	groupID := int64(7)
 	accounts := []service.Account{
@@ -160,8 +160,7 @@ func TestCodexModelsSelectionUsesManualOverridesOnly(t *testing.T) {
 		manual schedquality.Override
 		want   int64
 	}{
-		{"automatic_cooling_ignored", schedquality.OverrideNone, 11},
-		{"manual_demote_applies", schedquality.OverrideDemote, 22},
+		{"automatic_failing_ignored", schedquality.OverrideNone, 11},
 		{"manual_exempt_applies", schedquality.OverrideExempt, 11},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1075,3 +1074,6 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 		})
 	}
 }
+
+func (codexModelsSelectionView) GroupEnabled(int64) bool { return true }
+func (codexModelsSelectionView) ResetAt(int64) time.Time { return time.Time{} }

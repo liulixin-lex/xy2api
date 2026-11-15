@@ -46,6 +46,7 @@
 
         <!-- Tab: Security — Admin API Key -->
         <div v-show="activeTab === 'security'" class="space-y-6">
+          <ManagementMCPSettings />
           <AdminAccessKeysSettings />
           <!-- 已有全权密钥只提供轮换和删除入口。 -->
           <details v-if="adminApiKeyExists" class="card">
@@ -5078,10 +5079,6 @@
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-enabled">{{ t("admin.schedQuality.settings.enabled") }}</label>
                 <Toggle id="sched-quality-enabled" v-model="form.sched_quality_enabled" data-testid="sched-quality-enabled" />
               </div>
-              <div class="flex min-h-[52px] items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-test-enabled">{{ t("admin.schedQuality.settings.tests") }}</label>
-                <Toggle id="sched-quality-test-enabled" v-model="form.sched_quality_test_enabled" data-testid="sched-quality-test-enabled" />
-              </div>
               <div class="flex min-h-[52px] items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="openai-oauth-scheduling-rate-multiplier">{{ t("admin.schedQuality.settings.oauthRate") }}</label>
                 <div class="flex items-center gap-2">
@@ -9087,6 +9084,7 @@ import {
   stepUpBlockReason,
 } from "@/composables/useStepUp";
 import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeysSettings.vue";
+import ManagementMCPSettings from "@/components/admin/settings/ManagementMCPSettings.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
@@ -9791,7 +9789,6 @@ type SettingsForm = Omit<
   force_email_on_third_party_signup: boolean;
   openai_oauth_scheduling_rate_multiplier: number | "" | null;
   sched_quality_enabled: boolean;
-  sched_quality_test_enabled: boolean;
   // 充值赠送阶梯编辑态：允许留空的行，提交时清洗为 RechargeBonusTier[]
   payment_recharge_bonus_tiers: RechargeBonusTierDraft[];
   payment_recharge_bonus_mode: RechargeBonusMode;
@@ -10035,7 +10032,6 @@ const form = reactive<SettingsForm>({
   allow_ungrouped_key_scheduling: false,
   openai_oauth_scheduling_rate_multiplier: 1,
   sched_quality_enabled: true,
-  sched_quality_test_enabled: true,
   // Gateway forwarding behavior
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
@@ -11688,7 +11684,6 @@ async function saveSettings() {
       openai_oauth_scheduling_rate_multiplier:
         oauthSchedulingRate === "" ? null : oauthSchedulingRate,
       sched_quality_enabled: form.sched_quality_enabled,
-      sched_quality_test_enabled: form.sched_quality_test_enabled,
       // 余额、订阅到期与账号限额通知
       balance_low_notify_enabled: form.balance_low_notify_enabled,
       balance_low_notify_threshold:

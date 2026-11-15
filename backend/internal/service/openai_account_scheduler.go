@@ -214,6 +214,12 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
+	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
+	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
+		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
+	}
 	state := resilience.StateFrom(ctx)
 	state.ResetStickyBypassReason()
 	if guard := openAIRejectionScope(ctx).selectionPreservesBinding; guard != nil {
@@ -256,6 +262,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			slog.Info("openai.sticky_bypass", fields...)
 		}
 	}()
+	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
 	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact

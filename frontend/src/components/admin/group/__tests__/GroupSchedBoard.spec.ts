@@ -1,13 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedBoard, SchedBoardAccount } from '@/types/schedQuality'
-import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
-import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
+import type { BackendOrder, BackendOrderRow } from '@/api/admin/schedQualityTypes'
+import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
 import GroupSchedBoard from '../GroupSchedBoard.vue'
-import { closeSchedBoard, markSchedChanged, openSchedBoard, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, markSchedChanged, openSchedBoard, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
+import { withSchedHost } from '@/components/admin/account/quality/__tests__/schedLayerHost'
 
-const api = vi.hoisted(() => ({ groupBoard: vi.fn(), getGroupPolicy: vi.fn() }))
+const api = vi.hoisted(() => ({ groupBoard: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 const perms = vi.hoisted(() => ({ granted: [] as string[] }))
 vi.mock('@/composables/useAdminPermission', async () => {
@@ -24,23 +24,26 @@ vi.mock('vue-i18n', async () => ({
 
 enableAutoUnmount(afterEach)
 
-const base = (boardFixture as SchedBoard).accounts[0]
-const account = (id: number, patch: Partial<SchedBoardAccount>): SchedBoardAccount => ({ ...structuredClone(base), account_id: id, name: `acc-${id}`, ...patch })
+const base = (orderFixture as BackendOrder).rows[0]
+const row = (id: number, patch: Partial<BackendOrderRow>): BackendOrderRow => ({ ...structuredClone(base), account_id: id, name: `acc-${id}`, ...patch })
 
-function board(): SchedBoard {
+// The backend's selection order: normal first, then at the back (below), then accounts that take no part (stopped).
+function board(): BackendOrder {
   return {
-    ...(structuredClone(boardFixture) as SchedBoard),
-    accounts: [
-      account(7, { rank: 1, can_take_over: false }),
-      account(3, { rank: 2, state: 'cooling', until: new Date(Date.now() + 90_000).toISOString(), standing: 'back', verdicts: { ttfo: 'fail', error: 'pass', cache: 'marginal' } }),
-      account(5, { rank: 3, override: { mode: 'demote', all_groups: true, expires_at: null, reason: '' }, recently_full_seconds: 12 }),
-      account(9, { rank: 0, eligible: false, reject: 'rate_limit', reject_until: new Date(Date.now() + 130_000).toISOString(), verdicts: { ttfo: 'fail', error: 'fail', cache: 'fail' } }),
-      account(1, { rank: 0, eligible: false, reject: 'brand_new' })
+    ...(structuredClone(orderFixture) as BackendOrder),
+    rows: [
+      row(7, { rank: 1 }),
+      row(5, { rank: 2, exempt: true }),
+      row(3, { rank: 3, layer: 'below', dims: ['ttfo', 'cache'], until: new Date(Date.now() + 90_000).toISOString() }),
+      row(9, { rank: 4, layer: 'stopped', dims: ['error'], until: new Date(Date.now() + 130_000).toISOString() }),
+      row(1, { rank: 5, layer: 'stopped' })
     ]
   }
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-board-row]'))
+// The board inside a page whose live table fetches its data (the groups page).
+const Board = withSchedHost(GroupSchedBoard)
 
 beforeEach(() => {
   document.body.innerHTML = ''
@@ -48,84 +51,85 @@ beforeEach(() => {
   perms.granted = ['accounts:view', 'groups:view']
   document.documentElement.dataset.motion = 'reduced'
   api.groupBoard.mockReset().mockResolvedValue(board())
-  api.getGroupPolicy.mockReset().mockResolvedValue(policyFixture)
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
+describe('GroupSchedBoard data from the page\'s live table (7f-1)', () => {
+  it('asks nothing while closed, at once on opening and on another model, and drops the previous model\'s late answer', async () => {
+    mount(Board, { attachTo: document.body })
+    await flushPromises()
+    expect(api.groupBoard).not.toHaveBeenCalled()
+
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await flushPromises()
+    expect(api.groupBoard).toHaveBeenCalledTimes(1)
+
+    let late!: (value: BackendOrder) => void
+    api.groupBoard.mockReturnValueOnce(new Promise((resolve) => { late = resolve }))
+    setSchedBoardModel('gpt-6-astra')
+    await flushPromises()
+    expect(api.groupBoard).toHaveBeenLastCalledWith(53, 'gpt-6-astra', expect.anything())
+    // The answer for the model picked before is not shown under the new one.
+    setSchedBoardModel('gpt-6.1-sol')
+    await flushPromises()
+    late({ ...board(), rows: [row(42, { rank: 1 })] })
+    await flushPromises()
+    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '5', '3', '9', '1'])
+  })
+})
+
 describe('GroupSchedBoard', () => {
   it('renders the accounts in the order the API gives, never re-sorted', async () => {
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
     await flushPromises()
     expect(api.groupBoard).toHaveBeenCalledWith(53, 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '3', '5', '9', '1'])
+    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '5', '3', '9', '1'])
     expect(rows().map((tr) => tr.querySelector('td')!.textContent)).toEqual(['1', '2', '3', '—', '—'])
   })
 
-  it('shows weak rows for hard admission with their reason, a countdown when it has an end, and the fallback word', async () => {
-    mount(GroupSchedBoard, { attachTo: document.body })
+  it('shows stopped rows weak at the end with a countdown, a row at the back with its countdown and failing dimensions', async () => {
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
-    const [first, cooling, demoted, limited, unknown] = rows()
-    expect(limited.classList.contains('sq-weak')).toBe(true)
-    expect(limited.classList.contains('sq-split')).toBe(true)
-    expect(limited.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.reject\.rate_limit 2:(09|10)$/)
-    // Numbers of weak rows are not coloured by verdict.
-    expect(limited.querySelectorAll('[class*="sq-v-"]')).toHaveLength(0)
-    expect(unknown.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.unknown')
-    expect(unknown.classList.contains('sq-split')).toBe(false)
+    const [normal, exempt, back, stopped, stoppedNoEnd] = rows()
+    expect(normal.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.normal')
+    expect(exempt.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.exempted')
+    expect(back.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.state\.cooling 1:(29|30)$/)
+    expect(Array.from(back.querySelectorAll('td:nth-last-child(-n+3) > span'), (el) => el.classList.contains('sq-shape--fail'))).toEqual([true, false, true])
 
-    expect(cooling.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.state\.cooling 1:(29|30)$/)
-    expect(Array.from(cooling.querySelectorAll('td:nth-last-child(-n+3) span')).map((el) => el.className)).toEqual([
-      'sq-focus sq-v-fail', 'sq-focus sq-v-pass', 'sq-focus sq-v-marginal'
-    ])
-    expect(demoted.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.demoted')
-    expect(demoted.querySelector('.sq-full')).not.toBeNull()
-    // No-takeover mark: front, eligible, cannot take over, the group takes over, view live.
-    expect(first.querySelector('[data-sq-no-takeover]')).not.toBeNull()
-    expect(cooling.querySelector('[data-sq-no-takeover]')).toBeNull()
+    expect(stopped.classList.contains('sq-weak')).toBe(true)
+    expect(stopped.classList.contains('sq-split')).toBe(true)
+    expect(stopped.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.reject\.not_schedulable 2:(09|10)$/)
+    // A stopped row marks no dimension.
+    expect(stopped.querySelectorAll('.sq-shape')).toHaveLength(0)
+    expect(stoppedNoEnd.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.reject.not_schedulable')
+    expect(stoppedNoEnd.classList.contains('sq-split')).toBe(false)
   })
 
-  it('opens the account drawer on the evidence model of the row from an account link (K27)', async () => {
-    const b = board()
-    b.accounts[1].evidence_model = 'upstream-a'
-    api.groupBoard.mockResolvedValue(b)
-    mount(GroupSchedBoard, { attachTo: document.body })
+  it('opens the account panel on the board\'s model from an account link', async () => {
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'alias-a')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-trigger="account:3"]')!.click()
     const { drawer } = useSchedLayers()
-    expect([drawer.accountId, drawer.model]).toEqual([3, 'upstream-a'])
+    expect([drawer.accountId, drawer.model]).toEqual([3, 'gpt-6.1-sol'])
   })
 
   it('shows account names as text without accounts:view', async () => {
     perms.granted = ['groups:view']
-    mount(GroupSchedBoard, { attachTo: document.body })
+    mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
     expect(document.querySelector('[data-sq-trigger^="account:"]')).toBeNull()
     expect(rows()[0].querySelectorAll('td')[1].textContent!.trim()).toBe('acc-7')
   })
 
-  it('shows an unknown state as the fallback word and an unknown verdict uncoloured', async () => {
-    const b = board()
-    Object.assign(b.accounts[0], { state: 'future' })
-    b.accounts[1].verdicts.ttfo = 'future' as never
-    api.groupBoard.mockResolvedValue(b)
-    mount(GroupSchedBoard, { attachTo: document.body })
-    openSchedBoard({ id: 53, name: '晨星组' })
-    await flushPromises()
-    const state = rows()[0].querySelector('[data-sq-state]')!
-    expect([state.textContent, state.className]).toEqual(['admin.schedQuality.unknown', 'sq-text-3'])
-    const ttfo = rows()[1].querySelector('td:nth-last-child(3) span')!
-    expect(ttfo.className).toBe('sq-focus sq-text')
-    expect(ttfo.getAttribute('aria-label')).toContain('admin.schedQuality.unknown')
-  })
-
   for (const theme of ['light', 'dark']) {
     it(`keeps the open model menu through a refresh: arrows still move, Escape closes only the menu (${theme})`, async () => {
       document.documentElement.classList.toggle('dark', theme === 'dark')
-      mount(GroupSchedBoard, { attachTo: document.body })
+      mount(Board, { attachTo: document.body })
+      await flushPromises()
       openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
       await flushPromises()
       const trigger = document.querySelector<HTMLButtonElement>('[data-base-dialog] .modal-header button[aria-haspopup]')!

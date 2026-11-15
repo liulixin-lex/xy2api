@@ -2,86 +2,95 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
-        >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
+        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create. -->
+        <TableToolbar compact>
+          <template #status>
+            <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
+          </template>
+          <template #search>
+            <label class="table-toolbar__search-box">
+              <span class="sr-only">{{ t("admin.groups.searchGroups") }}</span>
+              <Icon name="search" size="sm" class="table-toolbar__search-icon" />
               <input
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
+                class="table-toolbar__input"
                 @input="handleSearch"
               />
-            </div>
+            </label>
+          </template>
+          <template #filters>
             <Select
               v-model="filters.platform"
+              size="sm"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
-              @change="loadGroups"
+              class="table-toolbar__filter"
+              @change="applyGroupFilters"
             />
             <Select
               v-model="filters.status"
+              size="sm"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
-              @change="loadGroups"
+              class="table-toolbar__filter"
+              @change="applyGroupFilters"
             />
             <Select
               v-if="!authStore.isSimpleMode"
               v-model="filters.is_exclusive"
+              size="sm"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
-              @change="loadGroups"
+              class="table-toolbar__filter"
+              @change="applyGroupFilters"
             />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="loadGroups" />
-          </div>
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="table-toolbar__filter" @change="applyGroupFilters" />
+          </template>
 
-          <!-- Right: actions -->
-          <div
-            class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
-          >
+          <template #actions>
             <button
-              @click="loadGroups"
+              type="button"
+              @click="reloadGroups"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon
                 name="refresh"
-                size="md"
+                size="sm"
                 :class="loading ? 'animate-spin' : ''"
               />
             </button>
             <div class="relative" ref="columnDropdownRef">
               <button
+                type="button"
                 @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary"
-                :title="t('admin.groups.columnSettings')"
+                class="table-toolbar__icon-btn table-toolbar__icon"
+                :aria-label="t('admin.groups.columnSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                v-tip="t('admin.groups.columnSettings')"
               >
-                <Icon name="grid" size="md" class="mr-2" />
-                <span class="hidden md:inline">{{
-                  t("admin.groups.columnSettings")
-                }}</span>
+                <!-- The columns icon of the other pages' column settings: "grid" is the category manager's (7r-7). -->
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
               </button>
               <div
                 v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
+                <!-- A multi-select list: a shown column is told by its brand check alone, without the selected background
+                     or text colour (12.6-5). -->
                 <button
                   v-for="col in toggleableColumns"
                   :key="col.key"
+                  type="button"
                   @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300"
                 >
                   <span>{{ col.label }}</span>
                   <Icon
@@ -94,43 +103,52 @@
                 </button>
               </div>
             </div>
-            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
+            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
               v-if="!authStore.isSimpleMode && canManage"
+              type="button"
               @click="openSortModal"
-              class="btn btn-secondary"
-              :title="t('admin.groups.sortOrder')"
+              class="table-toolbar__btn table-toolbar__btn--secondary"
+              :aria-label="t('admin.groups.sortOrder')"
+              v-tip="t('admin.groups.sortOrder')"
             >
-              <Icon name="arrowsUpDown" size="md" class="mr-2" />
-              {{ t("admin.groups.sortOrder") }}
+              <Icon name="arrowsUpDown" size="sm" />
+              <span class="table-toolbar__label table-toolbar__label--wide">{{ t("admin.groups.sortOrder") }}</span>
             </button>
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
             <button
               v-if="canManage"
+              type="button"
               @click="openCreateModal"
-              class="btn btn-primary"
+              class="table-toolbar__btn table-toolbar__btn--primary"
               data-tour="groups-create-btn"
             >
-              <Icon name="plus" size="md" class="mr-2" />
+              <Icon name="plus" size="sm" />
               {{ t("admin.groups.createGroup") }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
+        <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
+          ref="groupsTableRef"
+          class="dense-cells"
           :columns="columns"
           :data="groups"
           :loading="loading"
+          :row-class="groupRowClass"
           :server-side-sort="true"
           default-sort-key="sort_order"
           default-sort-order="asc"
           @sort="handleSort"
         >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              value
-            }}</span>
+          <template #cell-name="{ row, value }">
+            <span class="inline-flex items-center gap-2">
+              <GroupAliasPill :group="row" />
+              <span class="font-medium text-fg-primary">{{ value }}</span>
+            </span>
           </template>
 
           <template #cell-id="{ value }">
@@ -139,69 +157,37 @@
             >
           </template>
 
+          <!-- Platform and billing type as plain text, the way the accounts page's name column names the platform. -->
           <template #cell-platform="{ value }">
-            <span
-              :class="[
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                value === 'anthropic'
-                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                  : value === 'openai'
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : value === 'antigravity'
-                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                      : value === 'grok'
-                        ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                        : value === 'kimi'
-                          ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
-                          : value === 'zhipu'
-                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-                            : value === 'deepseek'
-                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-                              : value === 'minimax'
-                                ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                              : value === 'opencode_go'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-              ]"
-            >
-              <PlatformIcon :platform="value" size="xs" />
-              {{ t("admin.groups.platforms." + value, platformLabel(value)) }}
-            </span>
+            {{ t("admin.groups.platforms." + value, platformLabel(value)) }}
           </template>
 
           <template #cell-billing_type="{ row }">
             <div class="space-y-1">
-              <!-- Type Badge -->
-              <span
-                :class="[
-                  'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                  row.subscription_type === 'subscription'
-                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-                ]"
-              >
+              <div>
                 {{
                   row.subscription_type === "subscription"
                     ? t("admin.groups.subscription.subscription")
                     : t("admin.groups.subscription.standard")
                 }}
-              </span>
-              <!-- Subscription Limits - compact single line -->
+              </div>
+              <!-- Subscription limits one to a line, amounts on the three-significant-digit rule with the exact one in the
+                   tip: the widest line is "$999.99 / $999.99/日", so the column never passes about 145px (7r-2). -->
               <div
                 v-if="row.subscription_type === 'subscription'"
-                class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400"
+                class="space-y-0.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400"
+                data-test="group-limits"
               >
-                <div
+                <template
                   v-if="
                     row.daily_limit_usd ||
                     row.weekly_limit_usd ||
                     row.monthly_limit_usd
                   "
-                  class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                 >
-                  <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
+                  <div v-if="row.daily_limit_usd">
                     <span
-                      v-if="usageLoading"
+                      v-if="!row.usage_summary"
                       class="font-medium text-gray-400 dark:text-gray-500"
                       >—</span
                     >
@@ -209,55 +195,39 @@
                       v-else
                       :class="
                         getQuotaUsageClass(
-                          usageMap.get(row.id)?.today_cost ?? 0,
+                          row.usage_summary.today_cost,
                           row.daily_limit_usd
                         )
                       "
-                      >{{
-                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
-                      }}</span
+                      v-tip="exactMoneyTip(row.usage_summary.today_cost)"
+                      >{{ formatCompactMoney(row.usage_summary.today_cost) }}</span
                     >
                     <span class="text-gray-400 dark:text-gray-500">
-                      / {{ formatUsd(row.daily_limit_usd) }}/{{
+                      / <span v-tip="exactMoneyTip(row.daily_limit_usd)">{{ formatCompactMoney(row.daily_limit_usd) }}</span>/{{
                         t("admin.groups.limitDay")
                       }}</span
                     >
-                  </span>
-                  <span
-                    v-if="
-                      row.daily_limit_usd &&
-                      (row.weekly_limit_usd || row.monthly_limit_usd)
-                    "
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.weekly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.weekly_limit_usd) }}/{{
+                  </div>
+                  <div v-if="row.weekly_limit_usd">
+                    <span v-tip="exactMoneyTip(row.weekly_limit_usd)">{{ formatCompactMoney(row.weekly_limit_usd) }}</span>/{{
                       t("admin.groups.limitWeek")
-                    }}</span
-                  >
-                  <span
-                    v-if="row.weekly_limit_usd && row.monthly_limit_usd"
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.monthly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.monthly_limit_usd) }}/{{
+                    }}
+                  </div>
+                  <div v-if="row.monthly_limit_usd">
+                    <span v-tip="exactMoneyTip(row.monthly_limit_usd)">{{ formatCompactMoney(row.monthly_limit_usd) }}</span>/{{
                       t("admin.groups.limitMonth")
-                    }}</span
-                  >
-                </div>
-                <span v-else class="text-gray-400 dark:text-gray-500">{{
+                    }}
+                  </div>
+                </template>
+                <div v-else class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.subscription.noLimit")
-                }}</span>
+                }}</div>
                 <div class="text-gray-400 dark:text-gray-500">
                   {{ t("admin.groups.usageTotal") }}
-                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    >{{
-                      usageLoading
-                        ? "—"
-                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
-                    }}</span
+                  <span
+                    class="ml-1 font-medium text-gray-600 dark:text-gray-300"
+                    v-tip="exactMoneyTip(row.usage_summary?.total_cost)"
+                    >{{ formatCompactMoney(row.usage_summary?.total_cost) }}</span
                   >
                 </div>
               </div>
@@ -330,61 +300,52 @@
 
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
-              v-if="capacityMap.get(row.id)"
-              :concurrency-used="capacityMap.get(row.id)!.concurrencyUsed"
-              :concurrency-max="capacityMap.get(row.id)!.concurrencyMax"
-              :concurrency-group-used="capacityMap.get(row.id)!.concurrencyGroupUsed"
-              :sessions-used="capacityMap.get(row.id)!.sessionsUsed"
-              :sessions-max="capacityMap.get(row.id)!.sessionsMax"
-              :rpm-used="capacityMap.get(row.id)!.rpmUsed"
-              :rpm-max="capacityMap.get(row.id)!.rpmMax"
+              v-if="row.capacity"
+              :concurrency-used="row.capacity.concurrencyUsed"
+              :concurrency-max="row.capacity.concurrencyMax"
+              :concurrency-group-used="row.capacity.concurrencyGroupUsed"
+              :sessions-used="row.capacity.sessionsUsed"
+              :sessions-max="row.capacity.sessionsMax"
+              :rpm-used="row.capacity.rpmUsed"
+              :rpm-max="row.capacity.rpmMax"
             />
             <span v-else class="text-xs text-gray-400">—</span>
           </template>
 
+          <!-- Amounts on the accounts page's three-significant-digit rule, the exact one in the tip (7o-4). -->
           <template #cell-usage="{ row }">
-            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
+            <div v-if="!row.usage_summary" class="text-xs text-gray-400">—</div>
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageToday")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.today_cost ?? 0)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.today_cost)">{{
+                  formatCompactMoney(row.usage_summary.today_cost)
+                }}</span>
               </div>
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageYesterday")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.yesterday_cost ?? 0)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.yesterday_cost)">{{
+                  formatCompactMoney(row.usage_summary.yesterday_cost)
+                }}</span>
               </div>
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageTotal")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.total_cost ?? 0)
-                  }}</span
-                >
+                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300" v-tip="exactMoneyTip(row.usage_summary.total_cost)">{{
+                  formatCompactMoney(row.usage_summary.total_cost)
+                }}</span>
               </div>
             </div>
           </template>
 
           <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active' ? 'badge-success' : 'badge-danger',
-              ]"
-            >
+            <span class="inline-flex items-center gap-1.5 whitespace-nowrap" :class="{ 'status-text-normal': value === 'active' }">
+              <StatusDot :tone="value === 'active' ? 'ok' : 'off'" />
               {{ t("admin.accounts.status." + value) }}
             </span>
           </template>
@@ -488,9 +449,9 @@
 
       <template #pagination>
         <Pagination
-          v-if="pagination.total > 0"
+          v-if="groupsTotal > 0"
           :page="pagination.page"
-          :total="pagination.total"
+          :total="groupsTotal"
           :page-size="pagination.page_size"
           @update:page="handlePageChange"
           @update:pageSize="handlePageSizeChange"
@@ -521,6 +482,7 @@
             data-tour="group-form-name"
           />
         </div>
+        <GroupAliasField ref="createAliasFieldRef" v-model="createForm.alias" :name="createForm.name" />
         <div>
           <label class="input-label">{{
             t("admin.groups.form.description")
@@ -2186,6 +2148,7 @@
             data-tour="edit-group-form-name"
           />
         </div>
+        <GroupAliasField ref="editAliasFieldRef" v-model="editForm.alias" :name="editForm.name" />
         <div>
           <label class="input-label">{{
             t("admin.groups.form.description")
@@ -4384,7 +4347,7 @@
       :show="showRateMultipliersModal"
       :group="rateMultipliersGroup"
       @close="showRateMultipliersModal = false"
-      @success="loadGroups"
+      @success="reloadGroups"
     />
 
     <!-- Group RPM Overrides Modal -->
@@ -4392,7 +4355,7 @@
       :show="showRPMOverridesModal"
       :group="rpmOverridesGroup"
       @close="showRPMOverridesModal = false"
-      @success="loadGroups"
+      @success="reloadGroups"
     />
     <SchedQualityLayers />
   </AppLayout>
@@ -4425,6 +4388,11 @@ import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
+import LiveStatusIndicator from "@/components/common/LiveStatusIndicator.vue";
+import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
+import StatusDot from "@/components/common/StatusDot.vue";
+import GroupAliasPill from "@/components/common/GroupAliasPill.vue";
+import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
@@ -4434,6 +4402,8 @@ import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
+import { vTip } from "@/utils/tip";
+import { exactMoneyTip, formatCompactMoney } from "@/utils/compactNumber";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
@@ -4444,11 +4414,15 @@ import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyFiel
 import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
 import { openSchedBoard } from "@/composables/useSchedLayers";
 import schedQualityAPI from "@/api/admin/schedQuality";
-import type { SchedPolicy } from "@/types/schedQuality";
+import type { BackendPolicy } from "@/api/admin/schedQualityTypes";
+import { useLiveTable } from "@/composables/useLiveTable";
+import { useSchedLayerTasks } from "@/composables/useSchedLayerData";
+import { groupUsageOrDefault, withAccountCounts, type GroupUsageSummary } from "./liveRowDefaults";
 import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
+import TableToolbar from "@/components/layout/TableToolbar.vue";
 import GroupCategoryManagerButton from "@/components/admin/group/GroupCategoryManagerButton.vue";
 import GroupCategoryTags from "@/components/admin/group/GroupCategoryTags.vue";
 import GroupCategoryField from "@/components/admin/group/GroupCategoryField.vue";
@@ -4469,7 +4443,8 @@ import {
 import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
-import { extractApiErrorMessage } from "@/utils/apiError";
+import { extractApiErrorCode, extractApiErrorMessage } from "@/utils/apiError";
+import { groupAliasFits } from "@/utils/groupAlias";
 import { useAdminAccessStore } from "@/stores/adminAccess";
 import { useAdminPermission } from "@/composables/useAdminPermission";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
@@ -4676,7 +4651,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "id", label: t("admin.groups.columns.id"), sortable: true },
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
     { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true },
-    { key: "status", label: t("admin.groups.columns.status"), sortable: true },
+    { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
   if (authStore.isSimpleMode) return basic;
@@ -4788,40 +4763,21 @@ const toggleColumn = (key: string) => {
   }
   saveColumnsToStorage();
 
+  // A source skips a hidden column; once it is shown again, that source runs now.
   if (wasHidden && (key === "usage" || key === "billing_type")) {
-    loadUsageSummary();
+    void liveGroups.refresh("usage");
   }
   if (wasHidden && key === "capacity") {
-    loadCapacitySummary();
+    void liveGroups.refresh("capacity");
   }
   if (wasHidden && key === "sched_gate") {
-    void loadSchedGates();
+    void liveGroups.refresh("schedGates");
   }
 };
 
-// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
-const schedGates = reactive(new Map<number, SchedPolicy | null>());
-let schedGateSeq = 0;
-const loadSchedGates = async () => {
-  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
-  const seq = ++schedGateSeq;
-  const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
-  let next = 0;
-  const worker = async () => {
-    while (next < ids.length) {
-      const id = ids[next++];
-      try {
-        const record = await schedQualityAPI.getGroupPolicy(id);
-        if (seq === schedGateSeq) schedGates.set(id, record.policy);
-      } catch {
-        if (seq === schedGateSeq) schedGates.set(id, null);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
-};
-const schedGateText = (group: AdminGroup) => {
-  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
+// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。每次加载后逐组读取（并发 4），不参与定时更新。
+const schedGateText = (group: LiveGroup) => {
+  const policy = group.platform === "openai" ? group.sched_policy : null;
   return policy?.enabled ? policyShort(policy, t) : "";
 };
 
@@ -5046,30 +5002,21 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
   }));
 });
 
-const groups = ref<AdminGroup[]>([]);
-const loading = ref(false);
-type GroupUsageSummary = {
-  today_cost: number;
-  yesterday_cost: number;
-  total_cost: number;
+type GroupCapacity = {
+  concurrencyUsed: number;
+  concurrencyMax: number;
+  concurrencyGroupUsed: number;
+  sessionsUsed: number;
+  sessionsMax: number;
+  rpmUsed: number;
+  rpmMax: number;
 };
-
-const usageMap = ref<Map<number, GroupUsageSummary>>(new Map());
-const usageLoading = ref(false);
-const capacityMap = ref<
-  Map<
-    number,
-    {
-      concurrencyUsed: number;
-      concurrencyMax: number;
-      concurrencyGroupUsed: number;
-      sessionsUsed: number;
-      sessionsMax: number;
-      rpmUsed: number;
-      rpmMax: number;
-    }
-  >
->(new Map());
+/** A list row plus the partial sources' fields (null: the source has nothing for the group). */
+type LiveGroup = AdminGroup & {
+  usage_summary?: GroupUsageSummary;
+  capacity?: GroupCapacity | null;
+  sched_policy?: BackendPolicy | null;
+};
 const searchQuery = ref("");
 const filters = reactive({
   platform: "",
@@ -5080,15 +5027,122 @@ const filters = reactive({
 const pagination = reactive({
   page: 1,
   page_size: getPersistedPageSize(),
-  total: 0,
-  pages: 0,
 });
 const sortState = reactive({
   sort_by: "sort_order",
   sort_order: "asc" as "asc" | "desc",
 });
 
-let abortController: AbortController | null = null;
+// The list is a live table (spec 8.5): the account counts come from the page fetched again with the same query every
+// 10 s, which also counts groups that appeared or went (liveGroups.pending: the changes pill, taken in by
+// liveGroups.applyPending). The 10 s re-fetch of the current page is also the membership check: under a fast-changing
+// server-side sort a group may drift off the current page between two checks, and it shows dimmed until the next
+// active load. Capacity (5 s) and costs (30 s) are partial sources from the summary endpoints with explicit defaults;
+// the scheduling gates run after each load and on refresh only.
+const groupListFilters = () => ({
+  platform: (filters.platform as GroupPlatform) || undefined,
+  status: filters.status as any,
+  is_exclusive: !authStore.isSimpleMode && filters.is_exclusive
+    ? filters.is_exclusive === "true"
+    : undefined,
+  search: searchQuery.value.trim() || undefined,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order,
+  group_category: filters.group_category || undefined,
+});
+// The quality panel's and the group board's data come with the table's beat (spec 7f-1).
+const schedLayers = useSchedLayerTasks();
+const liveGroups = useLiveTable<LiveGroup>({
+  getId: (group) => group.id,
+  fetchPage: async (signal) => {
+    const page = await adminAPI.groups.list(pagination.page, pagination.page_size, groupListFilters(), { signal });
+    return { ...page, items: page.items.map(withAccountCounts) };
+  },
+  membershipIntervalMs: 10_000,
+  matches: (group) => !filters.status || group.status === filters.status,
+  sources: [
+    {
+      name: "capacity",
+      intervalMs: 5000,
+      fetch: async (ids) => {
+        if (!hasVisibleCapacityColumn.value) return [];
+        const data = await adminAPI.groups.getCapacitySummary();
+        const byGroup = new Map(data.map((item) => [item.group_id, {
+          concurrencyUsed: item.concurrency_used,
+          concurrencyMax: item.concurrency_max,
+          concurrencyGroupUsed: item.concurrency_group_used,
+          sessionsUsed: item.sessions_used,
+          sessionsMax: item.sessions_max,
+          rpmUsed: item.rpm_used,
+          rpmMax: item.rpm_max,
+        }]));
+        return ids.map((id) => [id, { capacity: byGroup.get(Number(id)) ?? null }] as const);
+      },
+    },
+    {
+      name: "usage",
+      intervalMs: 30_000,
+      fetch: async (ids) => {
+        if (!hasVisibleUsageSummaryConsumer.value) return [];
+        const data = await adminAPI.groups.getUsageSummary();
+        const byGroup = new Map(data.map((item) => [item.group_id, item]));
+        return ids.map((id) => [id, { usage_summary: groupUsageOrDefault(byGroup.get(Number(id))) }] as const);
+      },
+    },
+    {
+      name: "schedGates",
+      intervalMs: 0,
+      fetch: async (ids, signal) => {
+        if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return [];
+        const policies = new Map<number, BackendPolicy | null>();
+        const openai = ids.map(Number).filter((id) => liveGroups.record(id)?.platform === "openai");
+        let next = 0;
+        const worker = async () => {
+          while (next < openai.length && !signal.aborted) {
+            const id = openai[next++];
+            try {
+              policies.set(id, (await schedQualityAPI.getGroupPolicy(id)).policy);
+            } catch {
+              policies.set(id, null);
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, openai.length) }, worker));
+        return ids.map((id) => [id, { sched_policy: policies.get(Number(id)) ?? null }] as const);
+      },
+    },
+  ],
+  // GroupCategoryTags read the shared category list once when they mount; rows now stay mounted across loads, so the
+  // list is loaded here after each load (a no-op once it has loaded). The store never throws: a failed load fails the
+  // task, so the engine retries it 3, 6, 12, 30 s later (spec 8.5a).
+  tasks: [{
+    name: "categories",
+    intervalMs: 0,
+    run: async () => {
+      if (authStore.isSimpleMode || !isColumnVisible("category")) return;
+      await groupCategories.ensureLoaded();
+      if (groupCategories.loadState === "failed") throw new Error("Failed to load group categories");
+    },
+  }, ...schedLayers.tasks],
+});
+schedLayers.bind(liveGroups);
+const { rows: groups, loading, total: groupsTotal, pending, status: liveStatus } = liveGroups;
+const changesText = (n: string) => t("common.pendingChanges.changes", { n });
+const groupsTableRef = ref<InstanceType<typeof DataTable> | null>(null);
+const groupRowClass = (row: LiveGroup) =>
+  liveGroups.transitioning.value || liveGroups.isDimmed(row.id) ? "opacity-60" : undefined;
+const showLoadError = (error: unknown) => {
+  appStore.showError(t("admin.groups.failedToLoad"));
+  console.error("Error loading groups:", error);
+};
+/** A silent reload: rows stay on screen and are replaced in place. */
+const reloadGroups = () => liveGroups.reload().catch(showLoadError);
+const applyPending = () => liveGroups.applyPending().catch(showLoadError);
+/** A filter or search change: back to the first row, then reload. */
+const applyGroupFilters = () => {
+  groupsTableRef.value?.scrollToTop?.();
+  return reloadGroups();
+};
 
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
@@ -5160,6 +5214,8 @@ const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | nul
 const createSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 const editSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 const createCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
+const createAliasFieldRef = ref<InstanceType<typeof GroupAliasField> | null>(null);
+const editAliasFieldRef = ref<InstanceType<typeof GroupAliasField> | null>(null);
 const editCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
 
 // 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
@@ -5221,6 +5277,7 @@ const submitEditAllowlistCustomEntry = () => {
 
 const createForm = reactive({
   name: "",
+  alias: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -5589,6 +5646,7 @@ const convertApiFormatToRoutingRules = async (
 
 const editForm = reactive({
   name: "",
+  alias: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -5884,70 +5942,6 @@ const cancelUnsupportedLive = () => {
   pendingLiveForm.value = null;
 };
 
-const loadGroups = async () => {
-  if (abortController) {
-    abortController.abort();
-  }
-  const currentController = new AbortController();
-  abortController = currentController;
-  const { signal } = currentController;
-  loading.value = true;
-  try {
-    const response = await adminAPI.groups.list(
-      pagination.page,
-      pagination.page_size,
-      {
-        platform: (filters.platform as GroupPlatform) || undefined,
-        status: filters.status as any,
-        is_exclusive: !authStore.isSimpleMode && filters.is_exclusive
-          ? filters.is_exclusive === "true"
-          : undefined,
-        search: searchQuery.value.trim() || undefined,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order,
-        group_category: filters.group_category || undefined,
-      },
-      { signal },
-    );
-    if (signal.aborted) return;
-    groups.value = response.items;
-    pagination.total = response.total;
-    pagination.pages = response.pages;
-    if (hasVisibleUsageSummaryConsumer.value) {
-      loadUsageSummary();
-    } else {
-      usageLoading.value = false;
-    }
-    if (hasVisibleCapacityColumn.value) {
-      loadCapacitySummary();
-    }
-    void loadSchedGates();
-  } catch (error: any) {
-    if (
-      signal.aborted ||
-      error?.name === "AbortError" ||
-      error?.code === "ERR_CANCELED"
-    ) {
-      return;
-    }
-    appStore.showError(t("admin.groups.failedToLoad"));
-    console.error("Error loading groups:", error);
-  } finally {
-    if (abortController === currentController && !signal.aborted) {
-      loading.value = false;
-    }
-  }
-};
-
-const formatCost = (cost: number): string => {
-  if (cost >= 1000) return cost.toFixed(0);
-  if (cost >= 100) return cost.toFixed(1);
-  return cost.toFixed(2);
-};
-
-const formatUsd = (cost: number | null | undefined): string =>
-  `$${formatCost(cost ?? 0)}`;
-
 const getQuotaUsageClass = (
   used: number,
   limit: number | null | undefined,
@@ -5965,90 +5959,31 @@ const getQuotaUsageClass = (
   return "font-medium text-gray-700 dark:text-gray-300";
 };
 
-const loadUsageSummary = async () => {
-  if (!hasVisibleUsageSummaryConsumer.value) {
-    usageLoading.value = false;
-    return;
-  }
-  usageLoading.value = true;
-  try {
-    const data = await adminAPI.groups.getUsageSummary();
-    const map = new Map<number, GroupUsageSummary>();
-    for (const item of data) {
-      map.set(item.group_id, {
-        today_cost: item.today_cost,
-        yesterday_cost: item.yesterday_cost,
-        total_cost: item.total_cost,
-      });
-    }
-    usageMap.value = map;
-  } catch (error) {
-    console.error("Error loading group usage summary:", error);
-  } finally {
-    usageLoading.value = false;
-  }
-};
-
-const loadCapacitySummary = async () => {
-  if (!hasVisibleCapacityColumn.value) {
-    return;
-  }
-  try {
-    const data = await adminAPI.groups.getCapacitySummary();
-    const map = new Map<
-      number,
-      {
-        concurrencyUsed: number;
-        concurrencyMax: number;
-        concurrencyGroupUsed: number;
-        sessionsUsed: number;
-        sessionsMax: number;
-        rpmUsed: number;
-        rpmMax: number;
-      }
-    >();
-    for (const item of data) {
-      map.set(item.group_id, {
-        concurrencyUsed: item.concurrency_used,
-        concurrencyMax: item.concurrency_max,
-        concurrencyGroupUsed: item.concurrency_group_used,
-        sessionsUsed: item.sessions_used,
-        sessionsMax: item.sessions_max,
-        rpmUsed: item.rpm_used,
-        rpmMax: item.rpm_max,
-      });
-    }
-    capacityMap.value = map;
-  } catch (error) {
-    console.error("Error loading group capacity summary:", error);
-  }
-};
-
 let searchTimeout: ReturnType<typeof setTimeout>;
 const handleSearch = () => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => {
     pagination.page = 1;
-    loadGroups();
+    void applyGroupFilters();
   }, 300);
 };
 
 const handlePageChange = (page: number) => {
   pagination.page = page;
-  loadGroups();
+  void reloadGroups();
 };
 
 const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize;
   pagination.page = 1;
-  loadGroups();
+  void reloadGroups();
 };
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key;
   sortState.sort_order = order;
   pagination.page = 1;
-  loadGroups();
+  void reloadGroups();
 };
 
 const openCreateModal = () => {
@@ -6065,6 +6000,7 @@ const closeCreateModal = () => {
   });
   clearAllAccountSearchState();
   createForm.name = "";
+  createForm.alias = "";
   createForm.description = "";
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
@@ -6209,6 +6145,10 @@ const handleCreateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  if (!groupAliasFits(createForm.alias)) {
+    createAliasFieldRef.value?.focus(); // the alias field shows why
+    return;
+  }
   if (
     supportsReasoningEffortPolicyPlatform(createForm.platform) &&
     createReasoningEffortPolicyRef.value &&
@@ -6348,6 +6288,7 @@ const handleCreateGroup = async () => {
     const payload = authStore.isSimpleMode
       ? {
           name: createForm.name,
+          alias: createForm.alias,
           description: createForm.description,
           platform: createForm.platform,
           system_prompt_config: createForm.system_prompt_config,
@@ -6358,15 +6299,14 @@ const handleCreateGroup = async () => {
     // XY2API：分类没保存时只提示“分组已保存，分类未保存”，免得被当成创建失败
     if ((await createCategoryFieldRef.value?.save(created.id)) !== false) appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
-    loadGroups();
+    void reloadGroups();
     // Only advance tour if active, on submit step, and creation succeeded
     if (onboardingStore.isCurrentStep('[data-tour="group-form-submit"]')) {
       onboardingStore.nextStep(500);
     }
   } catch (error: any) {
-    appStore.showError(
-      extractApiErrorMessage(error, t("admin.groups.failedToCreate")),
-    );
+    if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") createAliasFieldRef.value?.showServerError();
+    else appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToCreate")));
     console.error("Error creating group:", error);
     // Don't advance tour on error
   } finally {
@@ -6377,6 +6317,7 @@ const handleCreateGroup = async () => {
 const handleEdit = async (group: AdminGroup) => {
   editingGroup.value = group;
   editForm.name = group.name;
+  editForm.alias = group.alias || "";
   editForm.description = group.description || "";
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
@@ -6557,6 +6498,10 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  if (!groupAliasFits(editForm.alias)) {
+    editAliasFieldRef.value?.focus(); // the alias field shows why
+    return;
+  }
   if (
     supportsReasoningEffortPolicyPlatform(editForm.platform) &&
     editReasoningEffortPolicyRef.value &&
@@ -6725,6 +6670,7 @@ const handleUpdateGroup = async () => {
     const requestData = authStore.isSimpleMode
       ? {
           name: editForm.name,
+          alias: editForm.alias,
           description: editForm.description,
           system_prompt_config: editForm.system_prompt_config,
         }
@@ -6750,14 +6696,13 @@ const handleUpdateGroup = async () => {
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
     // 质量门槛单独保存；没保存成功（冲突、失败）时对话框保留，再次保存时分组没改就不重复提交。
     const policySaved = (await editSchedPolicyRef.value?.save()) !== false;
-    loadGroups();
+    void reloadGroups();
     if (!policySaved) return;
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
   } catch (error: any) {
-    appStore.showError(
-      extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),
-    );
+    if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") editAliasFieldRef.value?.showServerError();
+    else appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToUpdate")));
     console.error("Error updating group:", error);
   } finally {
     submitting.value = false;
@@ -6810,7 +6755,7 @@ const handleDuplicate = async (group: AdminGroup) => {
     appStore.showSuccess(
       t("admin.groups.duplicateSuccess", { name: duplicate.name }),
     );
-    await loadGroups();
+    await reloadGroups();
   } catch (error: unknown) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.duplicateFailed")),
@@ -7011,11 +6956,12 @@ const confirmDelete = async () => {
   if (!deletingGroup.value) return;
 
   try {
-    await adminAPI.groups.delete(deletingGroup.value.id);
+    const deletedId = deletingGroup.value.id;
+    await adminAPI.groups.delete(deletedId);
     appStore.showSuccess(t("admin.groups.groupDeleted"));
     showDeleteDialog.value = false;
     deletingGroup.value = null;
-    loadGroups();
+    liveGroups.remove(deletedId);
   } catch (error: any) {
     // 没有“加减余额”权限时只能删除没有账号的分组（409 GROUP_NOT_EMPTY）；
     // 其他情况（如超级管理员在简易模式下）保持原来的提示
@@ -7243,7 +7189,7 @@ const saveSortOrder = async () => {
     await adminAPI.groups.updateSortOrder(updates);
     appStore.showSuccess(t("admin.groups.sortOrderUpdated"));
     closeSortModal();
-    loadGroups();
+    void reloadGroups();
   } catch (error: any) {
     appStore.showError(
       error.response?.data?.detail || t("admin.groups.failedToUpdateSortOrder"),
@@ -7255,7 +7201,7 @@ const saveSortOrder = async () => {
 };
 
 onMounted(() => {
-  loadGroups();
+  void reloadGroups();
   if (!authStore.isSimpleMode) {
     void loadLiveCapability();
     loadModelAllowlistCandidates("create", 0, createForm.platform);
@@ -7269,3 +7215,13 @@ onUnmounted(() => {
   clearAllAccountSearchState();
 });
 </script>
+
+<style scoped>
+/* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
+   beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
+.dense-cells :deep(thead th),
+.dense-cells :deep(tbody td) {
+  padding-right: var(--cell-pad-x);
+  padding-left: var(--cell-pad-x);
+}
+</style>

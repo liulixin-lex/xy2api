@@ -6,7 +6,10 @@ export default {
     empty: '暂无操作日志',
     loadFailed: '加载操作日志失败',
     filters: {
-      all: '全部',
+      allMethods: '全部请求方法',
+      allAuthMethods: '全部认证方式',
+      allResults: '全部结果',
+      allTime: '全部时间',
       q: '关键字',
       qPlaceholder: '路径 / 动作 / 操作者邮箱',
       actorEmail: '操作者邮箱',

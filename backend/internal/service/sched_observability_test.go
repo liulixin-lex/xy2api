@@ -69,7 +69,7 @@ func TestSchedObsSummaryWindows(t *testing.T) {
 		require.Equal(t, []map[string]any{{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(2), "cycles_failed": float64(1), "cycle_ms_max": float64(5000),
-			"tests": float64(0), "tests_aborted": float64(0), "cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0),
 		}}, schedObsLogRecords(t, output))
 
 		output.Reset()
@@ -78,9 +78,9 @@ func TestSchedObsSummaryWindows(t *testing.T) {
 		require.Equal(t, []map[string]any{{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(0), "cycles_failed": float64(0), "cycle_ms_max": float64(0),
-			"tests": float64(0), "tests_aborted": float64(0), "cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0),
 		}}, schedObsLogRecords(t, output))
-		s.Count("tests", 1)
+		s.Count("cooled", 1)
 		s.Stop()
 		require.True(t, stopped.Load())
 		require.Len(t, schedObsLogRecords(t, output), 1, "Stop does not flush a partial window")
@@ -98,8 +98,6 @@ func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 		var workers sync.WaitGroup
 		for range 32 {
 			workers.Go(func() {
-				s.Count("tests", 2)
-				s.Count("tests_aborted", 1)
 				s.Count("cooled", 3)
 				s.Count("released", 4)
 				s.Cycle(6*time.Second, true)
@@ -116,7 +114,7 @@ func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 		require.Equal(t, map[string]any{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(33), "cycles_failed": float64(32), "cycle_ms_max": float64(6000),
-			"tests": float64(64), "tests_aborted": float64(32), "cooled": float64(96), "released": float64(128),
+			"cooled": float64(96), "released": float64(128),
 		}, records[1])
 
 		output.Reset()
@@ -132,7 +130,7 @@ func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 		require.Equal(t, map[string]any{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(2), "cycles_failed": float64(0), "cycle_ms_max": float64(8000),
-			"tests": float64(0), "tests_aborted": float64(0), "cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0),
 		}, records[1])
 	})
 }
@@ -145,7 +143,7 @@ func TestSchedObsContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.Start(ctx)
 		defer s.Stop()
-		s.Count("tests", 1)
+		s.Count("cooled", 1)
 		cancel()
 		synctest.Wait()
 		require.True(t, stopped.Load())
@@ -172,7 +170,7 @@ func TestSchedObsBlockedLoggingDoesNotBlockCounters(t *testing.T) {
 				output := captureSchedObsLogs(t)
 				base := slog.Default()
 				s := NewSchedObservabilityService()
-				s.Count("tests", 1)
+				s.Count("cooled", 1)
 				resume := make(chan struct{})
 				unblock := sync.OnceFunc(func() { close(resume) })
 				defer unblock()
@@ -190,7 +188,7 @@ func TestSchedObsBlockedLoggingDoesNotBlockCounters(t *testing.T) {
 				<-handler.entered
 				counted := make(chan struct{})
 				go func() {
-					s.Count("tests", 1)
+					s.Count("cooled", 1)
 					s.Cycle(time.Second, false)
 					close(counted)
 				}()
@@ -207,11 +205,11 @@ func TestSchedObsBlockedLoggingDoesNotBlockCounters(t *testing.T) {
 				records := schedObsLogRecords(t, output)
 				require.Len(t, records, 2)
 				require.Equal(t, "sched_quality."+event, records[0]["msg"])
-				wantTests, wantCycles := float64(1), float64(1)
+				wantCooled, wantCycles := float64(1), float64(1)
 				if event == "cycle" {
-					wantTests, wantCycles = 2, 2
+					wantCooled, wantCycles = 2, 2
 				}
-				require.Equal(t, wantTests, records[1]["tests"])
+				require.Equal(t, wantCooled, records[1]["cooled"])
 				require.Equal(t, wantCycles, records[1]["cycles"])
 			})
 		})

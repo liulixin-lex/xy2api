@@ -96,6 +96,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 	}
 	builder := client.Group.Create().
 		SetName(groupIn.Name).
+		SetAlias(groupIn.Alias).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
@@ -225,8 +226,8 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	}
 	result, err := txClient.ExecContext(
 		ctx,
-		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
-		 SELECT ag.account_id, $2, ag.priority, NOW()
+		`INSERT INTO account_groups (account_id, group_id, created_at)
+		 SELECT ag.account_id, $2, NOW()
 		 FROM account_groups ag
 		 JOIN accounts a ON a.id = ag.account_id
 		 WHERE ag.group_id = $1
@@ -289,6 +290,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	}
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
+		SetAlias(groupIn.Alias).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
 		SetRateMultiplier(groupIn.RateMultiplier).
@@ -1110,8 +1112,8 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
 	_, err = exec.ExecContext(
 		ctx,
-		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
-		 SELECT unnest($1::bigint[]), $2, 50, NOW()
+		`INSERT INTO account_groups (account_id, group_id, created_at)
+		 SELECT unnest($1::bigint[]), $2, NOW()
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
 		pq.Array(accountIDs),
 		groupID,

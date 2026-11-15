@@ -11,8 +11,6 @@ vi.mock('@/api/admin/schedQuality', () => ({
 
 const {
   listAccounts,
-  listWithEtag,
-  getUpstreamBillingRatesWithEtag,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -23,8 +21,6 @@ const {
   showSuccess
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
-  getUpstreamBillingRatesWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -36,15 +32,13 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
-      getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -138,8 +132,6 @@ describe('admin AccountsView bulk edit scope', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
-    listWithEtag.mockReset()
-    getUpstreamBillingRatesWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
@@ -155,16 +147,6 @@ describe('admin AccountsView bulk edit scope', () => {
       page: 1,
       page_size: 20,
       pages: 0
-    })
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
-    })
-    getUpstreamBillingRatesWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
     })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
@@ -222,7 +204,7 @@ describe('admin AccountsView bulk edit scope', () => {
   })
 
   it('renders the created_at column once the saved column settings show it', async () => {
-    localStorage.setItem('account-hidden-columns', '[]')
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     listAccounts.mockResolvedValue({
       items: [
         {

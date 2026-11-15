@@ -44,7 +44,7 @@
 | `internal/handler/` | HTTP 处理器：网关、用户端、`admin/` 管理端、`dto/` 传输对象 |
 | `internal/service/` | 业务逻辑：网关转发、账号调度、计费与定价、运维监控、支付、插件宿主等 |
 | `internal/repository/` | 数据访问：Ent 与原生 SQL 查询、Redis 缓存、上游 HTTP 客户端、迁移执行器 |
-| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与全部常量（请求档、统计、结论、冷却、主动测试判定） |
+| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与常量（证据级联、三条线、快速通道、阶梯、续轮） |
 | `internal/pkg/` | 通用工具包，以及各上游协议的适配代码（`claude`、`openai`、`gemini`、`antigravity`、`xai`、`apicompat`、`tlsfingerprint` 等） |
 | `internal/resilience/` | 网关韧性规则：上游失败分类、请求预算、惩罚与余额暂停、首包前保活。纯函数，不做 I/O |
 | `internal/payment/` | 支付渠道抽象、注册与负载均衡 |

@@ -40,7 +40,7 @@ func (r *captureRecorder) Begin(in service.SchedAttemptStart) service.SchedAttem
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, in)
-	return &captureAttempt{owner: r, in: in, sample: schedquality.AttemptSample{AccountID: in.AccountID, Model: in.Model, Stream: in.Stream, Warm: in.StickyWarm, RequestID: in.RequestID}}
+	return &captureAttempt{owner: r, in: in, sample: schedquality.AttemptSample{AccountID: in.AccountID, Model: in.Model, Stream: in.Stream, RequestID: in.RequestID}}
 }
 func (*captureRecorder) SetObserver(func(schedquality.AttemptSample)) {}
 func (*captureRecorder) Flush(context.Context) error                  { return nil }
@@ -56,10 +56,6 @@ func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.Sch
 		a.sample.PromptTokens = &u.PromptTokens
 		a.sample.CacheReadTokens = &u.CacheReadTokens
 	}
-	if a.in.Test != nil {
-		a.in.Test.Sink(a.sample)
-		return
-	}
 	a.owner.mu.Lock()
 	a.owner.samples = append(a.owner.samples, a.sample)
 	a.owner.mu.Unlock()
@@ -67,12 +63,9 @@ func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.Sch
 		a.owner.finished <- a.sample
 	}
 }
-func (a *captureAttempt) FinishOK(u *service.SchedAttemptUsage) {
-	a.finish(schedquality.OutcomeOK, "", u)
+func (a *captureAttempt) Finish(in service.SchedAttemptFinish) {
+	a.finish(in.Outcome, in.Detail, in.Usage)
 }
-func (a *captureAttempt) FinishFault(d string)        { a.finish(schedquality.OutcomeAccountFault, d, nil) }
-func (a *captureAttempt) FinishOther(d string)        { a.finish(schedquality.OutcomeOther, d, nil) }
-func (a *captureAttempt) FinishTimeout(time.Duration) { a.finish(schedquality.OutcomeTimeout, "", nil) }
 
 type captureUpstream struct {
 	service.HTTPUpstream
@@ -81,14 +74,17 @@ type captureUpstream struct {
 	reply  func(int, *http.Request, []byte) (*http.Response, error)
 }
 
-func (u *captureUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *captureUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err
 	}
 	u.calls++
 	u.bodies = append(u.bodies, body)
-	return u.reply(u.calls, req, body)
+	service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
+	resp, err := u.reply(u.calls, req, body)
+	service.RecordGatewayHTTPAttemptResult(req.Context(), resp, err)
+	return resp, err
 }
 func captureResponse(status int, body string, sse bool) *http.Response {
 	typ := "application/json"
@@ -108,6 +104,8 @@ func captureTerminalSSE() string {
 }
 
 type captureOptions struct {
+	noRecorder  bool
+	usage       service.UsageLogRepository
 	requestDone chan struct{}
 	ops         *service.OpsService
 	repo        service.AccountRepository
@@ -153,14 +151,19 @@ func captureFixture(t *testing.T, account service.Account, up service.HTTPUpstre
 	if opt.configure != nil {
 		opt.configure(cfg)
 	}
-	usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 32)}
+	var usage service.UsageLogRepository = &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 32)}
+	if opt.usage != nil {
+		usage = opt.usage
+	}
 	gw := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, opt.cache, cfg, nil, opt.slots, service.NewBillingService(cfg, nil), nil, billing, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 	recorder := &captureRecorder{finished: make(chan schedquality.AttemptSample, 32)}
-	gw.SetSchedAttemptRecorder(recorder)
+	if !opt.noRecorder {
+		gw.SetSchedAttemptRecorder(recorder)
+	}
 	cache := &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }, acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil }}
 	h := &OpenAIGatewayHandler{gatewayService: gw, cfg: cfg, billingCacheService: billing, apiKeyService: &service.APIKeyService{}, concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 0)}
 	groupID := int64(4201)
-	key := &service.APIKey{ID: 1801, GroupID: &groupID, User: &service.User{ID: 1701, Status: service.StatusActive}}
+	key := &service.APIKey{ID: 1801, UserID: 1701, GroupID: &groupID, User: &service.User{ID: 1701, Status: service.StatusActive}}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), key)
@@ -248,7 +251,7 @@ func TestSchedCaptureA6RepairAndFallback(t *testing.T) {
 			require.Equal(t, 200, resp.Code, resp.Body.String())
 			require.Equal(t, 2, up.calls)
 			require.Len(t, rec.samples, 2)
-			want := schedquality.OutcomeOther
+			want := schedquality.OutcomeAccountFault
 			if fallback {
 				want = schedquality.OutcomeAccountFault
 			}
@@ -276,7 +279,7 @@ func TestSchedCaptureA9A13ClassificationSwitches(t *testing.T) {
 					for _, sample := range rec.samples {
 						want := schedquality.OutcomeAccountFault
 						if rate {
-							want = schedquality.OutcomeOther
+							want = schedquality.OutcomeAccountFault
 						}
 						require.Equal(t, want, sample.Outcome, sample.Detail)
 					}
@@ -329,7 +332,8 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 				}))
 				defer upstream.Close()
 				requestDone := make(chan struct{})
-				_, rec, router := captureFixture(t, service.Account{Credentials: map[string]any{"api_key": "key", "base_url": upstream.URL}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true, "openai_apikey_responses_websockets_v2_mode": mode}}, &compositeWSHTTPUpstream{}, captureOptions{requestDone: requestDone})
+				requests := &requestRecordRepo{}
+				_, rec, router := captureFixture(t, service.Account{Credentials: map[string]any{"api_key": "key", "base_url": upstream.URL}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true, "openai_apikey_responses_websockets_v2_mode": mode}}, &compositeWSHTTPUpstream{}, captureOptions{requestDone: requestDone, usage: requests})
 				server := httptest.NewServer(router)
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -357,7 +361,7 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 				require.NotNil(t, samples[0].TTFOMs)
 				want := schedquality.OutcomeAccountFault
 				if rate {
-					want = schedquality.OutcomeOther
+					want = schedquality.OutcomeAccountFault
 				}
 				require.Equal(t, want, samples[1].Outcome, samples[1].Detail)
 				_ = conn.CloseNow()
@@ -365,6 +369,19 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 				case <-requestDone:
 				case <-ctx.Done():
 					t.Fatal("websocket handler did not exit")
+				}
+				require.Len(t, requests.bills, 1+btoi(rate))
+				require.Len(t, requests.unbilled, 1-btoi(rate))
+				require.EqualValues(t, 1, *requests.bills[0].Result)
+				require.Equal(t, rec.starts[0].RequestID, *requests.bills[0].GatewayRequestID)
+				if rate {
+					require.EqualValues(t, 3, *requests.bills[1].Result)
+					require.Equal(t, rec.starts[1].RequestID, *requests.bills[1].GatewayRequestID)
+					require.NotEqual(t, *requests.bills[0].GatewayRequestID, *requests.bills[1].GatewayRequestID)
+				} else {
+					require.NotEqual(t, *requests.bills[0].GatewayRequestID, requests.unbilled[0].RequestID)
+					require.Equal(t, rec.starts[1].RequestID, requests.unbilled[0].RequestID)
+					require.EqualValues(t, 0, requests.unbilled[0].Switches)
 				}
 				require.Len(t, rec.starts, 2)
 				require.Len(t, rec.samples, 2)
@@ -432,9 +449,8 @@ func TestSchedCaptureA15BorrowedRepairStaysCold(t *testing.T) {
 	require.Len(t, rec.samples, 2)
 	for _, row := range rec.samples {
 		require.Equal(t, int64(2), row.AccountID)
-		require.False(t, row.Warm)
 	}
-	require.Equal(t, schedquality.OutcomeOther, rec.samples[0].Outcome)
+	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
 	require.Equal(t, schedquality.OutcomeOK, rec.samples[1].Outcome)
 	require.Zero(t, cache.writes, "borrow must preserve the sticky owner")
 }
@@ -528,7 +544,6 @@ func TestSchedCaptureA8WebSocketHTTPBridge(t *testing.T) {
 			require.Equal(t, schedquality.OutcomeOK, row.Outcome, row.Detail)
 			require.NotNil(t, row.TTFOMs)
 			require.Equal(t, 100000, *row.PromptTokens)
-			require.Equal(t, turn > 0, row.Warm)
 		case <-ctx.Done():
 			t.Fatal("missing bridge sample")
 		}
@@ -583,4 +598,11 @@ func TestSchedCaptureStreamStallDetail(t *testing.T) {
 			require.Equal(t, string(resilience.CategoryStall), rec.samples[0].Detail)
 		})
 	}
+}
+
+func btoi(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

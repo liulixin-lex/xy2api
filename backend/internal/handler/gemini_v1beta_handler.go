@@ -406,6 +406,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	defer inflightRelease()
 
+	if action == "generateContent" || action == "streamGenerateContent" {
+		defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, stream, h.gatewayService)()
+	}
+
 	// 3) select account (sticky session based on request body)
 	// 优先使用 Gemini CLI 的会话标识（privileged-user-id + tmp 目录哈希）
 	sessionHash := extractGeminiCLISessionHash(c, body)
@@ -680,6 +684,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
 		}
+		recordGatewayForwardUsage(c, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

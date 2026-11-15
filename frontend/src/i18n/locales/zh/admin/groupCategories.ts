@@ -26,7 +26,6 @@ export default {
     groupSavedCategoriesFailed: '分组已保存，但分类没有保存：{message}',
     groupCopiedCategoriesFailed: '分组已复制，但分类没有复制：{message}',
     tabsLabel: '按分类筛选',
-    editAccountGroups: '编辑分组 · {name}',
-    editAccountGroupsAria: '编辑账号 {name} 的分组'
+    editAccountGroups: '编辑分组 · {name}'
   }
 }

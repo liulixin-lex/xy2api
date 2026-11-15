@@ -557,7 +557,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = strconv.FormatFloat(*rate, 'f', -1, 64)
 	}
 	updates[SettingKeySchedQualityEnabled] = strconv.FormatBool(settings.SchedQualityEnabled)
-	updates[SettingKeySchedQualityTestEnabled] = strconv.FormatBool(settings.SchedQualityTestEnabled)
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
@@ -761,7 +760,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,
 		openAISessionUUID:                settings.EnableOpenAISessionUUID,
 		schedQualityEnabled:              settings.SchedQualityEnabled,
-		schedQualityTestEnabled:          settings.SchedQualityTestEnabled,
 		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 	})
 	s.antigravityUAVersionSF.Forget("antigravity_user_agent_version")

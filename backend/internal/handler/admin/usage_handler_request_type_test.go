@@ -15,15 +15,16 @@ import (
 
 type adminUsageRepoCapture struct {
 	service.UsageLogRepository
+	service.AdminUsageRequestRepository
 	listParams   pagination.PaginationParams
 	listFilters  usagestats.UsageLogFilters
 	statsFilters usagestats.UsageLogFilters
 }
 
-func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+func (s *adminUsageRepoCapture) ListAdminRequests(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.AdminUsageRecord, *pagination.PaginationResult, error) {
 	s.listParams = params
 	s.listFilters = filters
-	return []service.UsageLog{}, &pagination.PaginationResult{
+	return []service.AdminUsageRecord{}, &pagination.PaginationResult{
 		Total:    0,
 		Page:     params.Page,
 		PageSize: params.PageSize,
@@ -31,9 +32,9 @@ func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagi
 	}, nil
 }
 
-func (s *adminUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
+func (s *adminUsageRepoCapture) AdminRequestStats(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.AdminRequestStats, error) {
 	s.statsFilters = filters
-	return &usagestats.UsageStats{}, nil
+	return &usagestats.AdminRequestStats{}, nil
 }
 
 func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine {

@@ -530,9 +530,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.SchedQualityEnabled != after.SchedQualityEnabled {
 		changed = append(changed, service.SettingKeySchedQualityEnabled)
 	}
-	if before.SchedQualityTestEnabled != after.SchedQualityTestEnabled {
-		changed = append(changed, service.SettingKeySchedQualityTestEnabled)
-	}
+
 	// 余额、订阅到期与账号限额通知
 	if before.BalanceLowNotifyEnabled != after.BalanceLowNotifyEnabled {
 		changed = append(changed, "balance_low_notify_enabled")

@@ -3,17 +3,33 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
-import type { SchedAccountSummary } from '@/types/schedQuality'
-import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
+import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import { closeSchedDrawer, openSchedDrawer } from '@/composables/useSchedLayers'
 
 // "Recover state" on the account list (contract delta F; acceptance scenarios 37–41).
 
-const { listAccounts, getById, sched, toast } = vi.hoisted(() => ({
+/** The quality panel's detail (backend 0.6.5) of an account with one substandard model, so 恢复 is enabled. */
+const panelDetail = (id: number) => ({
+  account: { id, name: `acc-${id}`, priority: 1, rate: 1, concurrency: 5, in_flight: 0 },
+  at: '', stale: false, global_enabled: true, status: 'normal', stop: null, reset_at: null,
+  groups: [{
+    group_id: 53, name: '晨星组', exemption: null,
+    policy: { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0, takeover_idle_seconds: 0 },
+    by_model: [{
+      model: 'gpt-6.1-sol', failing: true, dims: ['ttfo'], level: 1, since: null, until: null, other_group_ids: [], exempt: false,
+      ttfo: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'fail', bad: 9 },
+      error: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', bad: 0 },
+      cache: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', ratio: 0.8 }
+    }]
+  }],
+  auto_states: [], exemptions: []
+})
+
+const { listAccounts, getById, sched, backendSummary, toast } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() },
+  sched: { reset: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() },
+  backendSummary: vi.fn(),
   toast: { showError: vi.fn(), showSuccess: vi.fn(), showInfo: vi.fn(), showWarning: vi.fn() }
 }))
 const perms = await vi.hoisted(async () => {
@@ -21,18 +37,17 @@ const perms = await vi.hoisted(async () => {
   return reactive({ manage: true })
 })
 
-vi.mock('@/api/admin/schedQuality', () => ({ default: sched }))
+vi.mock('@/api/admin/schedQuality', () => ({ default: sched, backendSummary }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
       getById,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
       getTempUnschedulableStatus: vi.fn().mockResolvedValue({ active: false }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -96,20 +111,32 @@ const TempUnschedStub = defineComponent({
   }
 })
 
-// Turns on the "cooling" quality filter the way the filter bar does.
+// Turns on the "back of queue" quality filter the way the toolbar does.
 const FiltersStub = defineComponent({
-  props: ['filters'],
-  emits: ['update:filters', 'change'],
+  props: ['filters', 'pause'],
+  emits: ['change'],
   setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'cooling' }); emit('change') } })
+    return () => [
+      h('button', { 'data-test': 'filter-cooling', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) }),
+      h('button', { 'data-test': 'pause-table', onClick: () => props.pause() })
+    ]
   }
 })
 
 const account = (id: number, patch: Record<string, unknown> = {}) =>
   ({ id, name: `acc-${id}`, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [53], ...patch })
-const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
-const summaryOf = (id: number, cooling: number): SchedAccountSummary =>
-  ({ ...structuredClone(base), account_id: id, groups: { total: 1, normal: 1 - cooling, cooling, nodata: 0 }, cooling: cooling ? base.cooling : [] })
+// The backend's own summary: `cooling` substandard models in group 53.
+const summaryOf = (id: number, cooling: number): BackendAccountSummary => ({
+  account_id: id,
+  status: 'normal',
+  reset_at: null,
+  stop: null,
+  ttfo: { n: 30, short: false, red: cooling > 0, p50_ms: 2800 },
+  error: { n: 100, short: false, red: false, rate: 0 },
+  cache: { n: 40, short: false, red: false, ratio: 0.9 },
+  substandard: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }] : [],
+  exemptions: []
+})
 
 // 1 error, 2 only a cooling group, 3 normal, 4 scheduling switched off (not something a recovery clears).
 const ROWS = [account(1, { status: 'error' }), account(2), account(3), account(4, { schedulable: false })]
@@ -125,7 +152,7 @@ function mountView() {
         DataTable: DataTableStub,
         AccountStatusIndicator: true,
         AccountTableActions: true,
-        AccountTableFilters: FiltersStub,
+        AccountsToolbar: FiltersStub,
         AccountBulkActionsBar: BulkBarStub,
         TempUnschedStatusModal: TempUnschedStub,
         Pagination: true,
@@ -147,12 +174,14 @@ function mountView() {
   })
 }
 
-type View = { openMenu: (a: unknown, e: unknown) => void; handleShowTempUnsched: (a: unknown) => void; load: () => Promise<void>; accounts: Array<{ id: number; name: string }> }
+type View = { openMenu: (a: unknown, e: unknown) => void; handleShowTempUnsched: (a: unknown) => void; reload: () => Promise<void>; rows: Array<{ id: number; name: string }> }
 const vm = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as unknown as View
 async function openMenuFor(wrapper: ReturnType<typeof mountView>, id: number) {
-  vm(wrapper).openMenu(vm(wrapper).accounts.find((a) => a.id === id), { currentTarget: document.body })
+  vm(wrapper).openMenu(vm(wrapper).rows.find((a) => a.id === id), { currentTarget: document.body })
   await flushPromises()
 }
+/** The live table's rows refresh: every row on the page, by id (the active load sends no ids). */
+const rowReads = () => listAccounts.mock.calls.filter(([, , params]) => typeof params?.ids === 'string').map(([, , params]) => params.ids)
 const recoverItem = () => document.querySelector<HTMLElement>('[data-test="menu-recover-state"]')
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>('[data-test="row"]')).map((el) => Number(el.dataset.id))
 const deferred = <T = unknown>() => {
@@ -168,9 +197,15 @@ beforeEach(() => {
   perms.manage = true
   document.documentElement.dataset.motion = 'reduced'
   Object.values(toast).forEach((fn) => fn.mockReset())
-  listAccounts.mockReset().mockResolvedValue({ items: ROWS, total: 4, page: 1, page_size: 20, pages: 1 })
-  getById.mockReset().mockImplementation(async (id: number) => ({ ...ROWS.find((a) => a.id === id), status: 'active' }))
-  sched.summary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 1), summaryOf(3, 0), summaryOf(4, 0)] })
+  // The page load answers ROWS; a rows read (by id) answers the accounts as a recovery leaves them.
+  listAccounts.mockReset().mockImplementation(async (_page: number, _size: number, params?: { ids?: string }) => {
+    if (!params?.ids) return { items: ROWS, total: 4, page: 1, page_size: 20, pages: 1 }
+    const ids = params.ids.split(',').map(Number)
+    const items = ROWS.filter((a) => ids.includes(a.id)).map((a) => ({ ...a, status: 'active' }))
+    return { items, total: items.length, page: 1, page_size: ids.length, pages: 1 }
+  })
+  getById.mockReset()
+  backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 1), summaryOf(3, 0), summaryOf(4, 0)] })
   sched.reset.mockReset().mockResolvedValue(clean)
   sched.accountDetail.mockReset().mockReturnValue(new Promise(() => {}))
 })
@@ -194,7 +229,7 @@ describe('AccountsView — recover state', () => {
     const wrapper = mountView()
     await flushPromises()
     // Managers load the summary whatever columns are shown.
-    expect(sched.summary).toHaveBeenCalled()
+    expect(backendSummary).toHaveBeenCalled()
     const offered: number[] = []
     for (const id of [2, 3]) {
       await openMenuFor(wrapper, id)
@@ -209,7 +244,7 @@ describe('AccountsView — recover state', () => {
     sched.reset.mockReturnValueOnce(answer.promise)
     const wrapper = mountView()
     await flushPromises()
-    const summaries = sched.summary.mock.calls.length
+    const summaries = backendSummary.mock.calls.length
 
     await openMenuFor(wrapper, 1)
     recoverItem()!.click()
@@ -223,7 +258,7 @@ describe('AccountsView — recover state', () => {
     expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
     recoverItem()!.click()
     // The temporary-pause dialog of the same account shares the lock.
-    vm(wrapper).handleShowTempUnsched(vm(wrapper).accounts[0])
+    vm(wrapper).handleShowTempUnsched(vm(wrapper).rows[0])
     await flushPromises()
     expect(document.querySelector<HTMLButtonElement>('[data-test="temp-recover"]')!.disabled).toBe(true)
     expect(sched.reset).toHaveBeenCalledTimes(1)
@@ -232,8 +267,10 @@ describe('AccountsView — recover state', () => {
     await flushPromises()
     expect(toast.showSuccess.mock.calls).toEqual([['admin.schedQuality.recover.ok:{"name":"acc-1"}']])
     expect(toast.showError).not.toHaveBeenCalled()
-    expect(getById).toHaveBeenCalledWith(1)
-    expect(sched.summary.mock.calls.length).toBeGreaterThan(summaries)
+    // The page's rows are read again through the live table, never getById (7d-9).
+    expect(rowReads()).toEqual(['1,2,3,4'])
+    expect(getById).not.toHaveBeenCalled()
+    expect(backendSummary.mock.calls.length).toBeGreaterThan(summaries)
     // The row holds the account read back, never the reset result, and the menu no longer offers recovery.
     await openMenuFor(wrapper, 1)
     expect(recoverItem()).toBeNull()
@@ -255,17 +292,18 @@ describe('AccountsView — recover state', () => {
     await flushPromises()
     expect(toast.showError.mock.calls).toEqual([
       ['admin.schedQuality.recover.failed:{"name":"acc-1"}'],
-      ['admin.schedQuality.recover.failed:{"name":"acc-2"}']
+      // A request error carries the backend's reason.
+      [`admin.accounts.failedWithReason:${JSON.stringify({ action: 'admin.schedQuality.recover.failed:{"name":"acc-2"}', reason: 'down' })}`]
     ])
     expect(toast.showSuccess).not.toHaveBeenCalled()
-    expect(getById.mock.calls.map(([id]) => id)).toEqual([1, 2])
+    expect(rowReads()).toHaveLength(2)
     wrapper.unmount()
   })
 
   it('runs from the temporary-pause dialog at once and closes it after the refresh (scenario 38)', async () => {
     const wrapper = mountView()
     await flushPromises()
-    vm(wrapper).handleShowTempUnsched(vm(wrapper).accounts[0])
+    vm(wrapper).handleShowTempUnsched(vm(wrapper).rows[0])
     await flushPromises()
     document.querySelector<HTMLElement>('[data-test="temp-recover"]')!.click()
     await flushPromises()
@@ -282,13 +320,12 @@ describe('AccountsView — recover state', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     await flushPromises()
     listAccounts.mockResolvedValue({ items: [ROWS[0]], total: 1, page: 1, page_size: 20, pages: 1 })
-    getById.mockResolvedValue({ ...ROWS[1], status: 'active' })
     const loads = listAccounts.mock.calls.length
     await openMenuFor(wrapper, 2)
     recoverItem()!.click()
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBeGreaterThan(loads)
-    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'cooling' })
+    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'substandard' })
     expect(rowIds()).toEqual([1])
     wrapper.unmount()
   })
@@ -334,7 +371,7 @@ describe('AccountsView — recover state', () => {
     expect(wrapper.findComponent(BulkBarStub).exists()).toBe(false)
     await openMenuFor(wrapper, 1)
     expect(recoverItem()).toBeNull()
-    vm(wrapper).handleShowTempUnsched(vm(wrapper).accounts[0])
+    vm(wrapper).handleShowTempUnsched(vm(wrapper).rows[0])
     await flushPromises()
     expect(sched.reset).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -346,11 +383,11 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     const wrapper = mountView()
     await flushPromises()
     const summary = deferred()
-    sched.summary.mockReturnValueOnce(summary.promise)
+    backendSummary.mockReturnValueOnce(summary.promise)
     await openMenuFor(wrapper, 2)
     recoverItem()!.click()
     await flushPromises()
-    expect(getById).toHaveBeenCalledWith(2)
+    expect(rowReads()).toHaveLength(1)
     await openMenuFor(wrapper, 2)
     expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
     recoverItem()!.click()
@@ -365,56 +402,55 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     wrapper.unmount()
   })
 
-  it('refreshes the summary at once when recovering from the open drawer, and holds the lock for it (P1-1)', async () => {
-    const detail = structuredClone(detailFixture)
-    detail.account = { ...detail.account, id: 2, name: 'acc-2' }
-    sched.accountDetail.mockResolvedValue(detail)
+  it('refreshes the summary at once when recovering from the open panel, and holds the lock for it (P1-1)', async () => {
+    sched.accountDetail.mockResolvedValue(panelDetail(2))
     const wrapper = mountView()
     await flushPromises()
     openSchedDrawer({ id: 2, name: 'acc-2' })
     await flushPromises()
-    const before = sched.summary.mock.calls.length
+    const before = backendSummary.mock.calls.length
     const summary = deferred()
-    sched.summary.mockReturnValueOnce(summary.promise)
-    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-reset"]')!.click()
+    backendSummary.mockReturnValueOnce(summary.promise)
+    document.querySelector<HTMLElement>('[data-qp-trigger="reset"]')!.click()
     await flushPromises()
     expect(sched.reset).toHaveBeenCalledWith(2)
-    expect(getById).toHaveBeenCalledWith(2)
-    expect(sched.summary.mock.calls.length).toBe(before + 1)
-    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('true')
+    expect(rowReads()).toHaveLength(1)
+    expect(backendSummary.mock.calls.length).toBe(before + 1)
+    expect(document.querySelector('[data-qp-trigger="reset"]')!.getAttribute('aria-busy')).toBe('true')
     summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(2, 0)] })
     await flushPromises()
-    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('false')
+    expect(document.querySelector('[data-qp-trigger="reset"]')!.getAttribute('aria-busy')).toBe('false')
     wrapper.unmount()
   })
 
-  it('drops a late row read when a newer list load landed meanwhile (P0-2)', async () => {
+  it('drops the recovery row read when a newer list load landed meanwhile: the live table orders it (P0-2, 7d-9)', async () => {
     const wrapper = mountView()
     await flushPromises()
     const stale = deferred()
-    getById.mockReturnValueOnce(stale.promise)
+    // The next list request is the recovery's rows read.
+    listAccounts.mockReturnValueOnce(stale.promise)
     await openMenuFor(wrapper, 1)
     recoverItem()!.click()
     await flushPromises()
-    expect(getById).toHaveBeenCalledWith(1)
+    expect(rowReads()).toEqual(['1,2,3,4'])
     listAccounts.mockResolvedValue({ items: ROWS.map((a) => (a.id === 1 ? { ...a, name: 'newer row', status: 'error' } : a)), total: 4, page: 1, page_size: 20, pages: 1 })
-    await vm(wrapper).load()
-    expect(vm(wrapper).accounts[0].name).toBe('newer row')
-    stale.resolve({ ...ROWS[0], name: 'older row', status: 'active' })
+    await vm(wrapper).reload()
+    expect(vm(wrapper).rows[0].name).toBe('newer row')
+    stale.resolve({ items: [{ ...ROWS[0], name: 'older row', status: 'active' }], total: 1, page: 1, page_size: 4, pages: 1 })
     await flushPromises()
-    expect(vm(wrapper).accounts[0].name).toBe('newer row')
+    expect(vm(wrapper).rows[0].name).toBe('newer row')
     wrapper.unmount()
   })
 
-  it('keeps the batch accounts locked until the list and the summary reload are in (P0-1)', async () => {
+  it('keeps the batch accounts locked until the rows read is in (P0-1)', async () => {
     const wrapper = mountView()
     await flushPromises()
     document.querySelector<HTMLInputElement>('[data-test="row"] input')!.click()
     await flushPromises()
     await wrapper.get('[data-test="select-page"]').trigger('click')
-    const summary = deferred()
-    // Every summary refresh from here on (closing the confirmation, the list reload, the recovery's own) waits.
-    sched.summary.mockReturnValue(summary.promise)
+    const list = deferred()
+    // The rows read after the batch waits.
+    listAccounts.mockReturnValue(list.promise)
     await wrapper.get('[data-test="bulk-sched-reset"]').trigger('click')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
@@ -424,9 +460,37 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     await openMenuFor(wrapper, 1)
     expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
 
-    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [] })
+    list.resolve({ items: ROWS.map((a) => ({ ...a, status: 'active' })), total: 4, page: 1, page_size: 20, pages: 1 })
     await flushPromises()
+    expect(rowReads()).toHaveLength(1)
     expect(wrapper.findComponent(BulkBarStub).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('under the quality filter holds the lock until the summary after the reload is in, not just the reload (7d-8)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    const summary = deferred()
+    backendSummary.mockReturnValueOnce(summary.promise)
+    const loads = listAccounts.mock.calls.length
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    // The reload is in (row 2 still on it), the summary after it is not: the row still reads "cooling", and stays locked.
+    expect(listAccounts.mock.calls.length).toBe(loads + 1)
+    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'substandard' })
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
+
+    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 0), summaryOf(3, 0), summaryOf(4, 0)] })
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushPromises()
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()).toBeNull()
     wrapper.unmount()
   })
 })
@@ -444,11 +508,44 @@ describe('AccountsView — one summary request per recovery refresh', () => {
     recoverItem()!.click()
     await flushPromises()
     const lists = listAccounts.mock.calls.length
-    const summaries = sched.summary.mock.calls.length
+    const summaries = backendSummary.mock.calls.length
     answer.resolve(clean)
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBe(lists + 1)
-    expect(sched.summary.mock.calls.length).toBe(summaries + 1)
+    expect(backendSummary.mock.calls.length).toBe(summaries + 1)
+    wrapper.unmount()
+  })
+
+  it('lets go of the recovery lock as soon as the summary after it fails, with no timer (7g-2)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    backendSummary.mockRejectedValue(new Error('down'))
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledWith(2)
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).not.toBe('true')
+    wrapper.unmount()
+  })
+
+  // 7l-1: the summary the lock waits for is the one markSchedChanged() asks for by name; asked during the reload, it
+  // runs once the load is over, paused or not.
+  it('lets go of the recovery lock under the quality filter while the table is paused (7l-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    await wrapper.get('[data-test="pause-table"]').trigger('click')
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).not.toBe('true')
     wrapper.unmount()
   })
 
@@ -465,10 +562,10 @@ describe('AccountsView — one summary request per recovery refresh', () => {
     document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
     await flushPromises()
     expect(sched.reset).toHaveBeenCalledTimes(4)
-    const summaries = sched.summary.mock.calls.length
+    const summaries = backendSummary.mock.calls.length
     answer.resolve(clean)
     await flushPromises()
-    expect(sched.summary.mock.calls.length).toBe(summaries + 1)
+    expect(backendSummary.mock.calls.length).toBe(summaries + 1)
     wrapper.unmount()
   })
 })

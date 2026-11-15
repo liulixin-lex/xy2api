@@ -1224,8 +1224,9 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 	isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, parsed.ErrorType, parsed.Code, parsed.Message, status)
 
 	entry := &service.OpsInsertErrorLogInput{
-		RequestID:       requestID,
-		ClientRequestID: clientRequestID,
+		RequestID:        requestID,
+		GatewayRequestID: resilience.StateFrom(c.Request.Context()).GatewayRequestID(),
+		ClientRequestID:  clientRequestID,
 
 		AccountID: accountID,
 		Platform:  platform,
@@ -1391,6 +1392,7 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 			entry.RequestID, _ = c.Request.Context().Value(ctxkey.RequestID).(string)
 		}
 	}
+	entry.GatewayRequestID = resilience.StateFrom(c.Request.Context()).GatewayRequestID()
 	entry.RequestID = strings.TrimSpace(entry.RequestID)
 	if entry.RequestID == "" {
 		entry.RequestID = c.Writer.Header().Get("X-Request-Id")
@@ -1544,8 +1546,9 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 	}
 
 	entry := &service.OpsInsertErrorLogInput{
-		RequestID:       requestID,
-		ClientRequestID: clientRequestID,
+		RequestID:        requestID,
+		GatewayRequestID: resilience.StateFrom(c.Request.Context()).GatewayRequestID(),
+		ClientRequestID:  clientRequestID,
 
 		AccountID: accountID,
 		Platform:  platform,
@@ -1639,6 +1642,7 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 	if entry == nil {
 		return
 	}
+	entry.GatewayRequestID = streamErr.GatewayRequestID
 	if streamErr.AccountID > 0 {
 		accountID := streamErr.AccountID
 		entry.AccountID = &accountID

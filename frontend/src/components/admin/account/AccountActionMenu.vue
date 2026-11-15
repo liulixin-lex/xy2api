@@ -5,7 +5,7 @@
       <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
-        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover shadow-dropdown"
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >
@@ -45,6 +45,11 @@
               {{ t('admin.accounts.viewStats') }}
             </button>
             <div v-if="hasAccountActions" :class="DIVIDER"></div>
+            <!-- The groups editor from any device (spec 4.3): touch screens open the quality panel from a pill. -->
+            <button v-if="canPlace" :class="ITEM" data-test="menu-edit-groups" @click="$emit('edit-groups', account); $emit('close')">
+              <Icon name="grid" size="sm" :class="ICON" />
+              {{ t('admin.accounts.editGroups') }}
+            </button>
             <button v-if="canDuplicate && canPlace" :class="ITEM" @click="$emit('duplicate', account); $emit('close')">
               <Icon name="copy" size="sm" :class="ICON" />
               {{ t('admin.accounts.duplicateAccount') }}
@@ -78,7 +83,7 @@
             </button>
             <template v-if="canManage">
               <div :class="DIVIDER"></div>
-              <button :class="[ITEM, '!text-red-600 dark:!text-red-400']" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
+              <button :class="[ITEM, DANGER]" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
                 <Icon name="trash" size="sm" class="shrink-0 text-red-500 dark:text-red-400" />
                 {{ t('common.delete') }}
               </button>
@@ -109,7 +114,7 @@ const props = defineProps<{
   /** Its recovery is still running; the item stays first but does nothing. */
   recovering?: boolean
 }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'edit-groups', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')
@@ -118,12 +123,17 @@ const canPlace = canManage
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()
 const viewportPadding = 8
-const menuPosition = ref({ top: viewportPadding, left: viewportPadding })
+/**
+ * The page header's bottom, its 1px border included: the menu never covers it and scrolls inside when taller than the
+ * room under it (7q-10).
+ */
+const HEADER = 65
+const menuPosition = ref({ top: HEADER, left: viewportPadding })
 const menuStyle = computed(() => ({
   top: `${menuPosition.value.top}px`,
   left: `${menuPosition.value.left}px`,
   maxWidth: `${Math.max(0, viewportWidth.value - viewportPadding * 2)}px`,
-  maxHeight: `${Math.max(0, viewportHeight.value - viewportPadding * 2)}px`
+  maxHeight: `${Math.max(0, viewportHeight.value - HEADER - viewportPadding)}px`
 }))
 
 const updatePosition = () => {
@@ -140,7 +150,7 @@ const updatePosition = () => {
     ? anchor.left + anchor.width / 2 - width / 2
     : anchor.right - width
 
-  menuPosition.value.top = Math.max(viewportPadding, Math.min(top, maxTop))
+  menuPosition.value.top = Math.max(HEADER, Math.min(top, maxTop))
   menuPosition.value.left = Math.max(viewportPadding, Math.min(left, viewportWidth.value - width - viewportPadding))
 }
 
@@ -148,9 +158,11 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
-const ITEM = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-200'
+// A danger item: the error text, on a light red under the pointer and keyboard focus instead of the grey (12.12-6).
+const DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
-const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
+const DIVIDER = 'my-1 border-t border-line-popover'
 
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
@@ -172,14 +184,8 @@ const hasQuotaLimit = computed(() => {
   )
 })
 // 第二组（账号操作）有任一项时才画分隔线。
-const hasAccountActions = computed(() =>
-  (canDuplicate.value && canPlace.value) ||
-  canRenewCredentials.value ||
-  (auth.isAdmin && isOpenAIOAuthParent.value) ||
-  (isOpenAIOAuthParent.value && canPlace.value) ||
-  (canManage.value && supportsPrivacy.value) ||
-  (canManage.value && hasQuotaLimit.value)
-)
+// "Edit groups" shows to every manager; the other account actions add to it.
+const hasAccountActions = computed(() => canPlace.value || canRenewCredentials.value || (auth.isAdmin && isOpenAIOAuthParent.value))
 
 function onRecover() {
   if (!props.recovering) emit('recover-state', props.account)
@@ -191,3 +197,12 @@ function onRecover() {
 const rootRef = ref<HTMLElement | null>(null)
 const layer = useOverlayLayer(() => props.show && !!props.anchorRect, { root: rootRef, modal: false, floor: 9998, onEscape: () => emit('close') })
 </script>
+
+<style scoped>
+/* Touch: every item 40px high (7n-3). Stacked with no gap, they cannot reach out unseen without covering each other. */
+@media (pointer: coarse) {
+  .amenu-item {
+    min-height: 40px;
+  }
+}
+</style>

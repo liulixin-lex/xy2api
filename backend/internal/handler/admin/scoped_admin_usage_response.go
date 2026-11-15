@@ -3,7 +3,6 @@ package admin
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
-	"github.com/liulixin-lex/xy2api/internal/pkg/adminaccess"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -79,19 +78,4 @@ func scopedAdminUsageLogResponse(record *service.UsageLog) gin.H {
 		"account_rate_multiplier":      usage.AccountRateMultiplier,
 		"account_stats_cost":           usage.AccountStatsCost,
 	}
-}
-
-func adminUsageLogResponses(c *gin.Context, records []service.UsageLog) any {
-	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
-		out := make([]gin.H, 0, len(records))
-		for i := range records {
-			out = append(out, scopedAdminUsageLogResponse(&records[i]))
-		}
-		return out
-	}
-	out := make([]dto.AdminUsageLog, 0, len(records))
-	for i := range records {
-		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
-	}
-	return out
 }

@@ -145,6 +145,12 @@
           <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
         </div>
 
+        <!-- Request result filter (usage only; backend 0.6.5 request ledger: list and stats) -->
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('admin.usage.result') }}</label>
+          <Select v-model="filters.result" :options="resultOptions" @change="emitChange" />
+        </div>
+
         <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
           <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
@@ -178,6 +184,8 @@
 
       <!-- Right: actions -->
       <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+        <!-- The page's live indicator, next to the refresh button -->
+        <slot name="status" />
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
           {{ t('common.refresh') }}
         </button>
@@ -295,6 +303,15 @@ const billingTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingTypes') },
   { value: 0, label: t('admin.usage.billingTypeBalance') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
+])
+
+// 请求结果（后端 0.6.5 请求层）：1 成功，2 已救回，3 失败，4 已取消
+const resultOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allResults') },
+  { value: 1, label: t('admin.usage.resultSuccess') },
+  { value: 2, label: t('admin.usage.resultRescued') },
+  { value: 3, label: t('admin.usage.resultFailed') },
+  { value: 4, label: t('admin.usage.resultCanceled') }
 ])
 
 // 错误类型对应后端 phase 参数(与错误表"类型"徽章同语义)

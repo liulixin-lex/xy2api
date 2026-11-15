@@ -90,6 +90,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useHeldResult } from '@/composables/useHeldResult'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import type { OpenAIReferralEligibility } from '@/types/openaiReferrals'
@@ -98,8 +99,12 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 
 const props = defineProps<{ account: Account }>()
 const { t } = useI18n()
-const eligibility = ref<OpenAIReferralEligibility | null>(props.account.extra?.codex_referral_snapshot ?? null)
 const show = ref(false)
+// The row's snapshot, unless a query answered since: that answer stands until the snapshot changes, and for as long
+// as the dialog is open.
+const snapshotEligibility = computed<OpenAIReferralEligibility | null>(() => props.account.extra?.codex_referral_snapshot ?? null)
+const queried = useHeldResult<OpenAIReferralEligibility | null>(() => snapshotEligibility.value, { keep: () => show.value })
+const eligibility = computed(() => (queried.current.value ? queried.current.value.value : snapshotEligibility.value))
 const loading = ref(false)
 const sending = ref(false)
 const fresh = ref(false)
@@ -156,7 +161,7 @@ async function refresh() {
   try {
     const result = await refreshOpenAIReferrals(props.account.id)
     if (current !== generation) return
-    eligibility.value = result.eligibility
+    queried.hold(result.eligibility)
     fresh.value = result.eligibility !== null
     if (!result.cache_persisted) warning.value = t('admin.accounts.openaiReferral.cacheFailed')
   } catch (err) {
@@ -192,7 +197,7 @@ async function sendInvite() {
     })
     if (current !== generation) return
     if (!result.sent) throw { code: 'OPENAI_REFERRAL_SEND_UNKNOWN' }
-    eligibility.value = result.eligibility
+    queried.hold(result.eligibility)
     fresh.value = !result.refresh_failed && result.eligibility !== null
     sentEmail.value = result.email
     email.value = ''
@@ -211,7 +216,7 @@ async function sendInvite() {
 watch(email, () => { confirmed.value = false })
 watch(() => props.account.id, () => {
   generation++
-  eligibility.value = props.account.extra?.codex_referral_snapshot ?? null
+  queried.clear()
   show.value = false
   fresh.value = false
   loading.value = false

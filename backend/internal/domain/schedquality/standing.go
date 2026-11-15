@@ -12,27 +12,14 @@ func (v StateView) EffectiveOverride(now time.Time) (ref OverrideRef, allGroups 
 	return OverrideRef{}, false
 }
 
-// StandingOf: auto = GlobalEnabled() && now-At() <= ViewMaxAge.
+// StandingOf applies placement after the caller checks global/group enablement and view freshness.
 func StandingOf(v StateView, auto bool, now time.Time) Standing {
 	ref, _ := v.EffectiveOverride(now)
-	if ref.Mode == OverrideDemote {
-		return StandBack
-	}
 	if ref.Mode == OverrideExempt {
 		return StandFront
 	}
-	if auto && v.State == StateCooling {
+	if auto && v.Failing {
 		return StandBack
 	}
 	return StandFront
-}
-
-// CanTakeOver is the quality part of the takeover conditions (section 8): auto is true, front standing, and not "unverified"
-// (State == StateNormal && Reason == "unverified" && now-Since < LevelDecayAfter); an exempt override skips the last check.
-func CanTakeOver(v StateView, auto bool, now time.Time) bool {
-	if !auto || StandingOf(v, auto, now) != StandFront {
-		return false
-	}
-	ref, _ := v.EffectiveOverride(now)
-	return ref.Mode == OverrideExempt || v.State != StateNormal || v.Reason != ReasonUnverified || now.Sub(v.Since) >= LevelDecayAfter
 }

@@ -50,6 +50,7 @@ var OperatorGroupPriceFields = []string{
 }
 var OperatorGroupFreeFields = []string{
 	"Name",
+	"Alias",
 	"Description",
 	"IsExclusive",
 	"ShowExclusiveBadge",
@@ -81,6 +82,7 @@ var operatorGroupJSONNames = map[string]string{
 	"AudioTTSPricePerMillionChars":    "audio_tts_price_per_million_chars",
 	"AudioSTTPricePerHour":            "audio_stt_price_per_hour",
 	"Name":                            "name",
+	"Alias":                           "alias",
 	"Description":                     "description",
 	"Platform":                        "platform",
 	"RateMultiplier":                  "rate_multiplier",

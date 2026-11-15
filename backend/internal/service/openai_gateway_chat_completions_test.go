@@ -13,11 +13,34 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type chatOutcomeRecorder struct{ outcomes []schedquality.Outcome }
+
+func (r *chatOutcomeRecorder) Begin(SchedAttemptStart) SchedAttempt {
+	return &chatOutcomeAttempt{recorder: r}
+}
+func (*chatOutcomeRecorder) SetObserver(func(schedquality.AttemptSample)) {}
+func (*chatOutcomeRecorder) Flush(context.Context) error                  { return nil }
+
+type chatOutcomeAttempt struct {
+	recorder *chatOutcomeRecorder
+	done     bool
+}
+
+func (*chatOutcomeAttempt) MarkFirstOutput(time.Time) {}
+func (a *chatOutcomeAttempt) Finish(in SchedAttemptFinish) {
+	if a.done {
+		panic("duplicate chat outcome finish")
+	}
+	a.done = true
+	a.recorder.outcomes = append(a.recorder.outcomes, in.Outcome)
+}
 
 type openAIChatFailingWriter struct {
 	gin.ResponseWriter
@@ -630,7 +653,10 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"` + strings.Repeat("large prompt ", 6000) + `"}],"stream":true}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	state := resilience.NewRequestState()
+	state.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "gpt-5.5"})
+	ctx := resilience.WithRequestState(context.Background(), state)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(ctx)
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	upstreamBody := strings.Join([]string{
@@ -646,7 +672,8 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
 	}}
 
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	recorder := &chatOutcomeRecorder{}
+	svc := &OpenAIGatewayService{httpUpstream: upstream, schedAttemptRecorder: recorder}
 	account := &Account{
 		ID:          1,
 		Name:        "openai-oauth",
@@ -659,7 +686,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 		},
 	}
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
+	_, err := svc.ForwardAsChatCompletions(ctx, c, account, body, "", "gpt-5.5")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	require.NotNil(t, GetOpsCyberPolicy(c), "cyber mark must be set")
@@ -667,6 +694,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 	require.Contains(t, respBody, `"error"`)
 	require.Contains(t, respBody, `"cyber_policy"`)
 	require.Contains(t, respBody, "data: [DONE]")
+	require.Equal(t, []schedquality.Outcome{schedquality.OutcomeAccountFault}, recorder.outcomes, "an upstream refusal is a failed attempt, not a client cancel")
 }
 
 func TestForwardAsChatCompletions_StreamsUsageWithoutClientStreamOptions(t *testing.T) {

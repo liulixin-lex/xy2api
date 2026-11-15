@@ -1,29 +1,33 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
-    <template v-if="loading">
-      <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
-        <div class="space-y-3">
-          <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
-            <div class="h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
-            <div class="h-4 w-32 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
-          </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
-            <div class="h-8 w-full animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
+    <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
+         column (and the select column before it), and at its right any column marked `cardHeadEnd`; the other columns
+         follow as label-over-value pairs in two columns, the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
+         column's cell, by its key, the way the table does. -->
+    <template v-if="showSkeleton">
+      <div v-for="i in 5" :key="i" class="table-card">
+        <div class="table-card__head">
+          <div class="h-4 w-40 animate-pulse rounded bg-surface-pill"></div>
+        </div>
+        <div class="table-card__fields">
+          <div v-for="column in cardFields" :key="column.key" class="table-card__field">
+            <div class="h-3 w-16 animate-pulse rounded bg-surface-pill"></div>
+            <div class="h-4 w-24 animate-pulse rounded bg-surface-pill"></div>
           </div>
         </div>
       </div>
     </template>
 
     <template v-else-if="!data || data.length === 0">
-      <div class="rounded-lg border border-gray-200 bg-white p-12 text-center dark:border-dark-700 dark:bg-dark-900">
+      <div class="table-cards__full rounded-lg border border-line-strong bg-surface p-12 text-center">
         <slot name="empty">
           <div class="flex flex-col items-center">
             <Icon
               name="inbox"
               size="xl"
-              class="mb-4 h-12 w-12 text-gray-400 dark:text-dark-500"
+              class="mb-4 h-12 w-12 text-fg-muted"
             />
-            <p class="text-lg font-medium text-gray-900 dark:text-gray-100">
+            <p class="text-lg font-medium text-fg-primary">
               {{ t('empty.noData') }}
             </p>
           </div>
@@ -32,10 +36,10 @@
     </template>
 
     <template v-else>
-      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="flex flex-wrap items-center justify-end gap-2 px-1">
+      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="table-cards__full flex flex-wrap items-center justify-end gap-2 px-1">
         <!-- 手机端没有表头，排序放到卡片上方 -->
         <div v-if="mobileSortColumns.length || pageSorts.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
-          <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-gray-600 dark:text-gray-300">
+          <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-fg-secondary">
             {{ t('common.sortBy') }}
           </label>
           <select
@@ -52,20 +56,20 @@
           <button
             v-if="pageSort || sortKey"
             type="button"
-            class="btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
+            class="table-cards__sort-order btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
             :aria-label="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             :title="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             data-test="mobile-sort-order"
-            @click="pageSort ? emit('pageSort', pageSort.key) : handleSort(sortKey)"
+            @click="pageSort ? choosePageSort(pageSort.key) : handleSort(sortKey)"
           >
             <Icon :name="mobileSortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
           </button>
         </div>
         <slot name="mobile-sort-extra" />
-        <label v-if="selectable" class="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+        <label v-if="selectable" class="flex items-center gap-2 text-sm font-medium text-fg-secondary">
           <input
             type="checkbox"
-            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+            class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
             :checked="allVisibleSelected"
             :indeterminate="someVisibleSelected"
             :disabled="visibleRowKeys.length === 0"
@@ -78,18 +82,20 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
-        class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
-        :class="{
-          'cursor-pointer': clickableRows,
-          'border-primary-300 bg-primary-50/40 dark:border-primary-700 dark:bg-primary-900/10': selectable && isRowSelected(row, index)
-        }"
+        class="table-card"
+        :class="[
+          { 'is-selected': selectable && isRowSelected(row, index), 'cursor-pointer': clickableRows },
+          rowClass?.(row, index)
+        ]"
         @click="clickableRows && emit('rowClick', row)"
       >
-        <div class="space-y-3">
-          <div v-if="selectable" class="flex justify-end">
+        <slot v-if="$slots.card" name="card" :row="row" :index="index" :cell="CardCell" />
+        <template v-else>
+          <div class="table-card__head">
             <input
+              v-if="selectable"
               type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+              class="mt-0.5 h-4 w-4 flex-none rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
               :checked="isRowSelected(row, index)"
               :disabled="!isRowSelectable(row)"
               :aria-label="getRowSelectionLabel(row, index)"
@@ -97,28 +103,45 @@
               @click.stop
               @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
             />
-          </div>
-          <div
-            v-for="column in dataColumns"
-            :key="column.key"
-            :data-field="column.key"
-            class="flex min-w-0 items-start justify-between gap-4"
-          >
-            <span class="flex-shrink-0 whitespace-nowrap text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
-              {{ column.label }}
-            </span>
-            <div class="min-w-0 max-w-full text-right text-sm text-gray-900 dark:text-gray-100">
+            <div
+              v-for="column in cardHead"
+              :key="column.key"
+              :data-field="column.key"
+              class="table-card__title"
+              :class="{ 'table-card__title--select': column.key === 'select' }"
+            >
+              <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+              </slot>
+            </div>
+            <div v-for="column in cardHeadEnd" :key="column.key" :data-field="column.key" class="table-card__end">
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
             </div>
           </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
+          <dl v-if="cardFields.length" class="table-card__fields">
+            <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field" :class="{ 'col-span-full': column.cardFullRow }">
+              <dt class="table-card__label">{{ column.label }}</dt>
+              <dd class="table-card__value">
+                <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                  {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+                </slot>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="hasActionsColumn" class="table-card__foot">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
-        </div>
+        </template>
       </div>
     </template>
+
+    <!-- Reload with rows on screen: a thin bar on the top edge of the list; it takes no layout space and the cards stay
+         usable. Last in the list, so nothing before the first card changes when it comes and goes. -->
+    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
   </div>
 
   <div
@@ -129,9 +152,14 @@
       'actions-expanded': actionsExpanded,
       'is-scrollable': isScrollable
     }"
+    :aria-busy="loading ? 'true' : undefined"
   >
+    <!-- Reload with rows on screen: a thin bar on the top edge of the table; it takes no layout space. -->
+    <div v-if="refreshing" class="table-progress table-progress--table" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
     <table class="w-full min-w-max">
-      <thead class="table-header bg-gray-50 dark:bg-dark-800">
+      <thead class="table-header bg-surface-header">
         <tr v-for="(headerRow, rowIndex) in headerRows" :key="rowIndex">
           <th
             v-if="selectable && rowIndex === 0"
@@ -141,7 +169,7 @@
           >
             <input
               type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+              class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
               :indeterminate="someVisibleSelected"
               :disabled="visibleRowKeys.length === 0"
@@ -155,7 +183,7 @@
               v-if="cell.kind === 'group'"
               scope="colgroup"
               :colspan="cell.span"
-              :class="['sticky-header-cell pb-1 pt-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+              :class="['sticky-header-cell pb-1 pt-3 text-center text-xs font-medium uppercase tracking-wider text-fg-secondary', getAdaptivePaddingClass()]"
             >
               <slot :name="`header-group-${cell.group}`" :group="cell.group" />
             </th>
@@ -165,10 +193,10 @@
               :rowspan="cell.rowspan"
               :aria-sort="cell.column.ariaSort ?? (cell.column.sortable ? getColumnAriaSort(cell.column.key) : undefined)"
               :class="[
-                'sticky-header-cell text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
+                'sticky-header-cell text-left text-xs font-medium uppercase tracking-wider text-fg-secondary',
                 headerRows.length > 1 && cell.rowspan === 1 ? 'pb-3 pt-1' : 'py-3',
                 getAdaptivePaddingClass(),
-                { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': cell.column.sortable },
+                { 'cursor-pointer hover:bg-surface-control-hover': cell.column.sortable },
                 getStickyColumnClass(cell.column, cell.index),
                 cell.column.class,
                 cell.column.headerClass
@@ -186,7 +214,8 @@
                 </slot>
                 <span
                   v-if="cell.column.sortable"
-                  class="inline-flex h-5 w-4 flex-col items-center justify-center"
+                  class="sort-indicator inline-flex h-5 w-4 flex-col items-center justify-center"
+                  :class="{ 'is-sorted': sortKey === cell.column.key }"
                   aria-hidden="true"
                 >
                   <svg
@@ -211,15 +240,15 @@
           </template>
         </tr>
       </thead>
-      <tbody class="table-body bg-white dark:bg-dark-900">
-        <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i" class="table-row-border">
+      <tbody class="table-body bg-surface">
+        <!-- Loading skeleton: only while there is nothing to show yet -->
+        <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
           <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
-            <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+            <div class="mx-auto h-4 w-4 animate-pulse rounded bg-surface-pill"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
             <div class="animate-pulse">
-              <div class="h-4 w-3/4 rounded bg-gray-200 dark:bg-dark-700"></div>
+              <div class="h-4 w-3/4 rounded bg-surface-pill"></div>
             </div>
           </td>
         </tr>
@@ -228,16 +257,16 @@
         <tr v-else-if="!data || data.length === 0" class="table-row-border">
           <td
             :colspan="tableColumnCount"
-            :class="['py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+            :class="['py-12 text-center text-fg-secondary', getAdaptivePaddingClass()]"
           >
             <slot name="empty">
               <div class="flex flex-col items-center">
                 <Icon
                   name="inbox"
                   size="xl"
-                  class="mb-4 h-12 w-12 text-gray-400 dark:text-dark-500"
+                  class="mb-4 h-12 w-12 text-fg-muted"
                 />
-                <p class="text-lg font-medium text-gray-900 dark:text-gray-100">
+                <p class="text-lg font-medium text-fg-primary">
                   {{ t('empty.noData') }}
                 </p>
               </div>
@@ -270,6 +299,7 @@
             :clickable="clickableRows"
             :expanded="actionsExpanded"
             :cell-slots="$slots"
+            :row-class="rowClass"
             @toggle="toggleRowSelection"
             @row-click="onRowClick"
           />
@@ -285,7 +315,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, type ComponentPublicInstance } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, useSlots, type ComponentPublicInstance, type FunctionalComponent } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
@@ -294,7 +324,8 @@ import DataTableRow from './DataTableRow'
 
 const { t } = useI18n()
 
-const desktopViewportQuery = '(min-width: 768px)'
+// Cards below 1024px, as the shared page layout and the changes pill switch there too (spec 8.6, prototype).
+const desktopViewportQuery = '(min-width: 1024px)'
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
 )
@@ -309,6 +340,7 @@ const emit = defineEmits<{
 
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
+const mobileRootRef = ref<HTMLElement | null>(null)
 const isScrollable = ref(false)
 const actionsColumnNeedsExpanding = ref(false)
 
@@ -410,11 +442,18 @@ const attachDesktopTableTracking = () => {
   checkScrollable()
   checkActionsColumnWidth()
   if (tableWrapperRef.value && typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => {
+    const wrapper = tableWrapperRef.value
+    resizeObserver = new ResizeObserver((entries) => {
       checkScrollable()
-      checkActionsColumnWidth()
+      // Only the wrapper's own size changes the room of the actions column; a change of the table alone just
+      // re-checks the sideways scroll (spec 7g-4).
+      if (entries.some((entry) => entry.target === wrapper)) checkActionsColumnWidth()
     })
-    resizeObserver.observe(tableWrapperRef.value)
+    resizeObserver.observe(wrapper)
+    // The table too: a page may narrow its columns after the wrapper's resize (the accounts page recomputes its column
+    // widths from the new width), and only the table's own size change tells that it no longer scrolls sideways.
+    const table = wrapper.querySelector(':scope > table')
+    if (table) resizeObserver.observe(table)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {
@@ -504,6 +543,13 @@ interface Props {
   pageSort?: { key: string; order: 'asc' | 'desc' } | null
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /**
+   * Extra classes for a desktop row and a mobile card (for example dimming a row that is transitioning or no longer
+   * matches the filter). A desktop row calls it in its own render, so only rows whose answer changes re-render. Pass a
+   * stable function defined once in setup: an inline arrow in the template is a new function on every render of the
+   * parent and re-renders every row.
+   */
+  rowClass?: (row: any, index: number) => unknown
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -518,6 +564,12 @@ const props = withDefaults(defineProps<Props>(), {
   pageSorts: () => [],
   pageSort: null
 })
+
+// A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
+// skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
+const hasRows = computed(() => (props.data?.length ?? 0) > 0)
+const showSkeleton = computed(() => props.loading && !hasRows.value)
+const refreshing = computed(() => props.loading && hasRows.value)
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -593,7 +645,7 @@ const applySortState = (state: PersistedSortState | null) => {
 const getSortIndicatorClass = (key: string, order: 'asc' | 'desc') => {
   return sortKey.value === key && sortOrder.value === order
     ? 'text-primary-600 dark:text-primary-400'
-    : 'text-gray-300 transition-colors dark:text-dark-500'
+    : 'text-fg-muted opacity-50 transition-colors'
 }
 
 const getColumnAriaSort = (key: string) => {
@@ -670,11 +722,32 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const slots = useSlots()
+/**
+ * One column's cell for a row as the table draws it (its #cell-<key> slot, else the value), the column named by its
+ * key: for a page's own card, `<component :is="cell" column="usage" :row="row" />`.
+ */
+const CardCell: FunctionalComponent<{ column: string; row: any }> = ({ column: key, row }) => {
+  const column = props.columns.find((item) => item.key === key)!
+  const slot = slots[`cell-${column.key}`]
+  if (slot) return slot({ row, value: row[column.key], expanded: actionsExpanded.value })
+  return String((column.formatter ? column.formatter(row[column.key], row) : row[column.key]) ?? '')
+}
+CardCell.props = ['column', 'row']
+/** A card's head: the leading column, with the page's own select column before it when it has one. */
+const cardHead = computed(() => dataColumns.value.slice(0, hasSelectColumn.value ? 2 : 1))
+const cardHeadEnd = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => column.cardHeadEnd))
+const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => !column.cardHeadEnd))
 const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
 const mobileSortSelectId = `data-table-sort-${useId()}`
+// A sort picked here is the table's own sort change: back to the first row (the parent re-orders its page).
+const choosePageSort = (key: string) => {
+  scrollToTop()
+  emit('pageSort', key)
+}
 const onMobileSortChange = (key: string) => {
   if (props.pageSorts.some((option) => option.key === key)) {
-    emit('pageSort', key)
+    choosePageSort(key)
     return
   }
   if (props.pageSort) emit('pageSort', '')
@@ -741,6 +814,7 @@ watch(actionsExpanded, async () => {
 })
 
 const handleSort = (key: string) => {
+  scrollToTop()
   let newOrder: 'asc' | 'desc' = 'asc'
   if (sortKey.value === key) {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
@@ -918,9 +992,68 @@ const hasSameRowIdentitySet = (
   return [...currentKeys].every(key => previousKeys.has(key))
 }
 
+/**
+ * What the list is seen through: the nearest ancestor that scrolls it (a dialog or drawer body; one that cannot
+ * scroll, such as an overflow-hidden card, does not count) or a fixed overlay, else the document. Its `top` is the
+ * first visible line: the ancestor's top, or under the sticky page header for the document (the list's
+ * scroll-margin-top: --table-sticky-top, 4rem by default).
+ */
+const viewOf = (el: HTMLElement) => {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    const scrolls = /auto|scroll|overlay/.test(style.overflowY) && node.scrollHeight > node.clientHeight
+    if (scrolls || style.position === 'fixed') return { parent: node, top: () => node.getBoundingClientRect().top }
+  }
+  const header = parseFloat(getComputedStyle(el).scrollMarginTop) || 0
+  return { parent: null, top: () => header }
+}
+
+/**
+ * Back to the first row: the desktop table scrolls its own wrapper (and the virtualizer) to the top; when the list's
+ * top has scrolled above the first visible line, it is brought back to it. A list that is already in view does not
+ * move.
+ */
+function scrollToTop() {
+  const wrapper = tableWrapperRef.value
+  if (wrapper) {
+    if (shouldVirtualize.value) rowVirtualizer.value.scrollToOffset(0)
+    wrapper.scrollTop = 0
+  }
+  const list = wrapper ?? mobileRootRef.value
+  if (!list) return
+  const view = viewOf(list)
+  const delta = list.getBoundingClientRect().top - view.top()
+  if (delta >= 0) return
+  if (view.parent) view.parent.scrollTop += delta
+  else window.scrollBy(0, delta)
+}
+
+/**
+ * Whether the first row is in view: the table's own scroll is at the top and the list's top is not above the first
+ * visible line (below the sticky page header when the document scrolls). A live log follows new rows only then.
+ */
+function isAtTop() {
+  const wrapper = tableWrapperRef.value
+  if (wrapper && wrapper.scrollTop > 0) return false
+  const list = wrapper ?? mobileRootRef.value
+  if (!list) return true
+  return list.getBoundingClientRect().top >= viewOf(list).top() - 1 // a scroll that stopped on a fraction still counts
+}
+
+// A new batch that shares no row with the old one is another page, filter or sort: start it from the top. A reload
+// after a row action keeps most rows, and a passive update keeps all of them, so neither scrolls. Rows without a
+// stable key cannot be compared across reloads and never scroll on their own.
+const isStableKey = (key: RowIdentityToken) => typeof key === 'string' || typeof key === 'number'
+const sharesNoRow = (current: RowIdentityToken[], previous: RowIdentityToken[]) => {
+  if (!current.length || !previous.length || ![...current, ...previous].every(isStableKey)) return false
+  const previousKeys = new Set(previous)
+  return !current.some((key) => previousKeys.has(key))
+}
+
 watch(
   rowIdentityKeys,
   (current, previous) => {
+    if (sharesNoRow(current, previous)) scrollToTop()
     if (hasSameRowIdentitySet(current, previous)) return
 
     // The virtualizer owns caches across option updates. A new page/filter result
@@ -1043,6 +1176,8 @@ watch(
 )
 
 defineExpose({
+  scrollToTop,
+  isAtTop,
   virtualizer: rowVirtualizer,
   shouldVirtualize,
   sortedData,
@@ -1054,6 +1189,7 @@ defineExpose({
 <style scoped>
 /* 表格横向滚动 */
 .table-wrapper {
+  scroll-margin-top: var(--table-sticky-top, 4rem);
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
   overflow-x: auto;
@@ -1063,16 +1199,12 @@ defineExpose({
   isolation: isolate;
 }
 
-/* 表头容器，确保在滚动时覆盖表体内容 */
+/* 表头容器，确保在滚动时覆盖表体内容。颜色全部来自 styles/tokens.css 的语义变量 */
 .table-wrapper .table-header {
   position: sticky;
   top: 0;
   z-index: 200;
-  background-color: rgb(249 250 251);
-}
-
-.dark .table-wrapper .table-header {
-  background-color: rgb(31 41 55);
+  background-color: var(--color-bg-header);
 }
 
 /* 表体保持在表头下方 */
@@ -1084,13 +1216,13 @@ defineExpose({
 /* 行分隔线挂在每一行自身上，table/tbody 祖先上不放 divide-y / space-y：
    Tailwind v3 的这两类工具编译为 `X > :not([hidden]) ~ :not([hidden])`，祖先命中后
    Chromium 会在每次插入/移除行时重算整个 tbody 子树（数千节点），虚拟滚动每帧都触发。
-   首行上边框同时充当表头分隔线，视觉与原 divide-y 一致。 */
+   首行上边框同时充当表头分隔线，用较强的线色。 */
 .table-wrapper :deep(.table-row-border) {
-  border-top: 1px solid theme('colors.gray.200');
+  border-top: 1px solid var(--color-line-row);
 }
 
-.dark .table-wrapper :deep(.table-row-border) {
-  border-top-color: theme('colors.dark.700');
+.table-wrapper :deep(tbody > .table-row-border:first-child) {
+  border-top-color: var(--color-line-strong);
 }
 
 /* 所有表头单元格固定在顶部 */
@@ -1098,11 +1230,7 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 210; /* 必须高于所有表体内容 */
-  background-color: rgb(249 250 251);
-}
-
-.dark .sticky-header-cell {
-  background-color: rgb(31 41 55);
+  background-color: var(--color-bg-header);
 }
 
 /* Sticky 列基础样式（表体单元格由 DataTableRow 渲染，需 :deep 才能命中） */
@@ -1138,89 +1266,180 @@ defineExpose({
 
 /* 表体 sticky 列背景 */
 .table-wrapper :deep(tbody .sticky-col) {
-  background-color: white;
-}
-
-.dark .table-wrapper :deep(tbody .sticky-col) {
-  background-color: rgb(17 24 39);
+  background-color: var(--color-bg-surface);
 }
 
 /* hover 状态保持 */
 .table-wrapper :deep(tbody tr:hover .sticky-col) {
-  background-color: rgb(249 250 251);
+  background-color: var(--color-bg-row-hover);
 }
 
-.dark .table-wrapper :deep(tbody tr:hover .sticky-col) {
-  background-color: rgb(31 41 55);
+/* A ticked row (the table's own check boxes, or a page's row class "is-selected"): the selected background over the
+   whole row, frozen cells included; under the pointer a step deeper, still apart from a hovered row (12.1-3). */
+.table-wrapper :deep(tbody tr.is-selected),
+.table-wrapper :deep(tbody tr.is-selected .sticky-col) {
+  background-color: var(--color-bg-selected);
+}
+.table-wrapper :deep(tbody tr.is-selected:hover),
+.table-wrapper :deep(tbody tr.is-selected:hover .sticky-col) {
+  background-color: var(--color-bg-selected-hover);
 }
 
-/* 阴影只在可滚动时显示 */
-/* 单列固定右侧阴影 */
-.is-scrollable :deep(.sticky-col-left::after) {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 10px;
-  transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
-  pointer-events: none;
-}
-
-/* 双列固定：只在第二列显示阴影 */
-.is-scrollable :deep(.sticky-col-left-second::after) {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 10px;
-  transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
-  pointer-events: none;
-}
-
-/* 操作列左侧阴影 */
-.is-scrollable :deep(.sticky-col-right::before) {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 10px;
-  transform: translateX(-100%);
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.08), transparent);
-  pointer-events: none;
-}
-
-/* 暗色模式阴影：深色底上 0.2 几乎看不见，被固定列盖住的内容会像被截断 */
-.dark .is-scrollable :deep(.sticky-col-left::after),
-.dark .is-scrollable :deep(.sticky-col-left-second::after) {
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent);
-}
-
-.dark .is-scrollable :deep(.sticky-col-right::before) {
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.45), transparent);
-}
-
-/* 可横向滚动时，固定列靠滚动区一侧加 1px 分隔线，表头与表体连成一条，表明内容在下面、可以滚动 */
+/* 固定列的分隔线只在确实可以横向滚动时显示（规格 7b）：靠滚动区一侧 1px，表头与表体连成一条 */
 .is-scrollable :deep(.sticky-col-left),
 .is-scrollable :deep(.sticky-col-left-second) {
-  box-shadow: inset -1px 0 0 theme('colors.gray.200');
+  box-shadow: inset -1px 0 0 var(--color-line-strong);
 }
 
 .is-scrollable :deep(.sticky-col-right) {
-  box-shadow: inset 1px 0 0 theme('colors.gray.200');
+  box-shadow: inset 1px 0 0 var(--color-line-strong);
 }
-
-.dark .is-scrollable :deep(.sticky-col-left),
-.dark .is-scrollable :deep(.sticky-col-left-second) {
-  box-shadow: inset -1px 0 0 theme('colors.dark.700');
+/* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout
+   space and needs no script; on the cards it sits on the list's top edge and does not follow the page scroll. */
+.table-progress {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: hidden;
+  height: 2px;
 }
-
-.dark .is-scrollable :deep(.sticky-col-right) {
-  box-shadow: inset 1px 0 0 theme('colors.dark.700');
+/* Desktop: the wrapper is the scroll container at 1024px and up; sticky keeps the bar on the visible top edge and
+   across the visible width after scrolling either way. Its negative margin cancels its height. */
+.table-progress--table {
+  position: sticky;
+  top: 0;
+  left: 0;
+  margin-bottom: -2px;
+  z-index: 230; /* above the sticky header cells */
+}
+/* The page header the document scrolls under (--table-sticky-top, 4rem by default): scrollToTop() stops below it. */
+.table-cards {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  scroll-margin-top: var(--table-sticky-top, 4rem);
+}
+@media (min-width: 768px) {
+  .table-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.table-cards__full {
+  grid-column: 1 / -1;
+}
+.table-card {
+  min-width: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+.table-card.is-selected {
+  border-color: theme('colors.primary.400');
+  background: var(--color-bg-selected);
+}
+.table-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.table-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+}
+/* A page's own select column takes only its own width, the leading column right after it: the head does not split in
+   two (a utility class would lose to the rule above). */
+.table-card__title--select {
+  flex: none;
+}
+.table-card__end {
+  flex: none;
+  max-width: 50%;
+  min-width: 0;
+  color: var(--color-text-primary);
+}
+/* Label over value, two to a row; long text wraps. A value never clips: menus and tips that open from a cell would be
+   cut at its edge (7j-1). */
+.table-card__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-line-row);
+}
+.table-card__field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 2px;
+}
+.table-card__label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+.table-card__value {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+}
+.table-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-line-row);
+}
+.table-progress--cards {
+  z-index: 10;
+  margin: 0 !important; /* not part of the card stack's spacing */
+  border-radius: 9999px;
+}
+.table-progress__bar {
+  height: 100%;
+  width: 100%;
+  background: theme('colors.primary.500');
+  transform-origin: left center;
+  animation: table-progress-slide 1.1s linear infinite;
+}
+.dark .table-progress__bar {
+  background: theme('colors.primary.400');
+}
+/* With reduced motion the animation is cut short and the bar rests as a full-width line. */
+@keyframes table-progress-slide {
+  from {
+    transform: translateX(-100%) scaleX(0.35);
+  }
+  to {
+    transform: translateX(100%) scaleX(0.35);
+  }
+}
+/* Touch: the sort direction button (36px, 34px inside its border, which an absolute area does not count) reaches 40px
+   each way with an area sized on 40px, its look unchanged (7n-3, 7q-8). The area grows down and to the sides, never
+   up: the button can sit at the top edge of a clipping container (the accounts table), which would cut 2px off it.
+   From the top of the inside of the border it reaches 40px down, 5px past the button into the 8px gap above the first
+   card; sideways 2px past each edge, into the 8px gaps of its row. */
+@media (pointer: coarse) {
+  .table-cards__sort-order {
+    position: relative;
+  }
+  .table-cards__sort-order::after {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: max(100%, 40px);
+    height: max(100%, 40px);
+    transform: translateX(-50%);
+    content: '';
+  }
 }
 </style>
 

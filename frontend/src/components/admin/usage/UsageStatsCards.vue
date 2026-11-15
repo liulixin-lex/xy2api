@@ -7,7 +7,11 @@
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalRequests') }}</p>
         <p class="text-xl font-bold">{{ stats?.total_requests?.toLocaleString() || '0' }}</p>
-        <p class="text-xs text-gray-400">{{ t('usage.inSelectedRange') }}</p>
+        <!-- 管理端（后端 0.6.5 请求层）带结果拆分；用户端没有这些字段，仍显示范围说明 -->
+        <p v-if="outcomes" class="text-xs text-gray-500" data-testid="usage-request-outcomes">
+          {{ t('admin.usage.requestOutcomes', outcomes) }}
+        </p>
+        <p v-else class="text-xs text-gray-400">{{ t('usage.inSelectedRange') }}</p>
       </div>
     </div>
     <div class="card p-4 flex items-center gap-3">
@@ -109,6 +113,16 @@ const { t } = useI18n()
 const totalAccountCost = computed(() => {
   const stats = props.stats as (AdminUsageStatsResponse & { total_account_cost?: number }) | null
   return stats?.total_account_cost ?? null
+})
+// Success / rescued / failed counts of the admin request stats; absent on the user page and older backends.
+const outcomes = computed(() => {
+  const stats = props.stats as (AdminUsageStatsResponse | null)
+  if (!stats || typeof stats.success !== 'number') return null
+  return {
+    success: stats.success.toLocaleString(),
+    rescued: (stats.rescued ?? 0).toLocaleString(),
+    failed: (stats.failed ?? 0).toLocaleString()
+  }
 })
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)

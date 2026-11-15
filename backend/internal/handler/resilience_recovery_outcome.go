@@ -17,9 +17,12 @@ func recordForwardRecovery(c *gin.Context, err error, disconnected, completed bo
 		return
 	}
 	ctx := c.Request.Context()
+	st := resilience.StateFrom(ctx)
+	canceled := disconnected || st.ClientCanceled()
+	st.CompleteGatewayForward(err == nil && completed && !disconnected && !service.GatewayDeliveryFailed(c), canceled)
 	outcome := "upstream_failure"
 	switch {
-	case disconnected || ctx.Err() != nil:
+	case disconnected || resilience.StateFrom(ctx).ClientCanceled():
 		outcome = "client_cancel"
 	case err == nil && completed:
 		outcome = "completed"

@@ -14,9 +14,9 @@ func TestSchedAdminDTOExamples(t *testing.T) {
 		"account_summary":      &SchedAdminSummary{},
 		"account_summary_item": &SchedAdminAccountSummary{},
 		"account_detail":       &SchedAdminAccountDetail{},
-		"reset":                &SchedAdminReset{}, "test": &SchedAdminTest{},
-		"clear_auto_state": &SchedAdminClearAutoState{}, "attention": &SchedAdminAttention{},
-		"policy": &SchedAdminPolicy{}, "board": &SchedAdminBoard{},
+		"reset":                &SchedAdminReset{},
+		"clear_auto_state":     &SchedAdminClearAutoState{}, "attention": &SchedAdminAttention{},
+		"policy": &SchedAdminPolicy{}, "order": &SchedAdminOrder{},
 	}
 	for name, dst := range cases {
 		t.Run(name, func(t *testing.T) {

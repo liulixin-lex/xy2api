@@ -131,7 +131,7 @@ func TestCreateAccountDropsManagedUpstreamBillingProbeState(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.NotContains(t, created.Extra, UpstreamBillingProbeEnabledExtraKey)
+	require.Equal(t, true, created.Extra[UpstreamBillingProbeEnabledExtraKey])
 	require.NotContains(t, created.Extra, UpstreamBillingRateSyncEnabledExtraKey)
 	require.NotContains(t, created.Extra, UpstreamBillingProbeExtraKey)
 }

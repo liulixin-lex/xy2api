@@ -1,4 +1,24 @@
-import type { Group } from '@/types'
+import type { Group, GroupPlatform } from '@/types'
+
+/**
+ * Groups an account of `platform` can be placed in: the same platform or a composite group (which takes any concrete
+ * platform); an antigravity account with mixed scheduling also takes anthropic and gemini groups. Simple mode hides
+ * composite groups. Without a platform every group is eligible. Shared by the group selector and the group picker.
+ */
+export function eligibleGroupsFor<T extends Pick<Group, 'platform'>>(
+  groups: T[],
+  platform: GroupPlatform | string | undefined,
+  options: { mixedScheduling?: boolean; simpleMode?: boolean } = {}
+): T[] {
+  let result = options.simpleMode ? groups.filter((group) => group.platform !== 'composite') : groups
+  if (!platform) return result
+  if (platform === 'antigravity' && options.mixedScheduling) {
+    result = result.filter((group) => ['antigravity', 'anthropic', 'gemini', 'composite'].includes(group.platform))
+  } else {
+    result = result.filter((group) => group.platform === platform || group.platform === 'composite')
+  }
+  return result
+}
 
 interface AccountGroupsLike {
   group_ids?: number[] | null

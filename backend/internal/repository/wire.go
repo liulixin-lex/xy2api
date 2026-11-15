@@ -85,7 +85,6 @@ func ProvideStateReadyAccountRepository(client *ent.Client, db *sql.DB, cache se
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewSchedAttemptRepository,
-	NewSchedTestRepository,
 	NewSchedQualityRepository,
 	NewSchedAdminAccountRepository,
 	NewUsageExportEngine,
@@ -97,7 +96,6 @@ var ProviderSet = wire.NewSet(
 	NewCompositeModelRouteRepository,
 	ProvideStateReadyAccountRepository,
 	NewAdminAccountRepository,
-	NewAccountRecentStatsRepository,
 	NewScheduledTestPlanRepository,   // 定时测试计划仓储
 	NewScheduledTestResultRepository, // 定时测试结果仓储
 	NewProxyRepository,

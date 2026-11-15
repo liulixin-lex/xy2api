@@ -123,7 +123,6 @@ func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 			} else {
 				// Historical avoidance may coexist with a retained cache owner.
 				require.NoError(t, store.AddSessionAvoid(ctx, groupID, session, accounts[0].ID, time.Minute))
-				svc.resilience.avoidingSessions.Store(sessionMarkKey(groupID, session), time.Now().Add(time.Minute))
 				require.Contains(t, svc.resilience.sessionAvoid(ctx, &groupID, session), accounts[0].ID)
 			}
 			require.True(t, state.Avoided(accounts[0].ID))

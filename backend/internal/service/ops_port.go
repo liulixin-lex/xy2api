@@ -62,8 +62,9 @@ type OpsRepository interface {
 }
 
 type OpsInsertErrorLogInput struct {
-	RequestID       string
-	ClientRequestID string
+	GatewayRequestID string
+	RequestID        string
+	ClientRequestID  string
 
 	UserID    *int64
 	APIKeyID  *int64

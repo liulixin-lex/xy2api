@@ -1,5 +1,23 @@
 export default {
   common: {
+    liveStatus: {
+      live: '实时',
+      paused: '已暂停',
+      stale: '数据已过时',
+      liveTip: '实时更新中',
+      pausedTip: '实时更新已暂停',
+      staleTip: '数据已过时，正在重试',
+      clickToPause: '点击暂停',
+      clickToResume: '点击继续',
+      liveLabel: '实时更新：开启，点击暂停',
+      pausedLabel: '实时更新：已暂停，点击继续',
+      staleLabel: '数据已过时，正在重试，点击暂停'
+    },
+    pendingChanges: {
+      changes: '有 {n} 条变动',
+      tip: '行顺序在两次主动操作之间保持不变',
+      merge: '点击合入'
+    },
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',

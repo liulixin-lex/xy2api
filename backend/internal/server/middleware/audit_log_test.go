@@ -279,3 +279,43 @@ func TestAuditRecordsEveryMCPOAuthReadWithGrant(t *testing.T) {
 	require.Equal(t, "grant-1", logs[0].Extra["mcp_grant_id"])
 	require.Equal(t, "admin_list_users", logs[0].Extra["mcp_tool"])
 }
+
+func TestAuditSkipsOnlyReadOnlyBatchPosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	for _, path := range []string{
+		"/api/v1/admin/accounts/today-stats/batch",
+		"/api/v1/admin/accounts/usage/batch",
+		"/api/v1/admin/dashboard/users-usage",
+	} {
+		router.POST(path, func(c *gin.Context) {
+			var body map[string]any
+			require.NoError(t, c.ShouldBindJSON(&body))
+			require.Equal(t, float64(1), body["marker"])
+			c.Status(http.StatusOK)
+		})
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"marker":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		require.Equal(t, http.StatusOK, res.Code)
+	}
+	// Nearby reads and mutations stay audited; the exclusions are exact method+path.
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/admin/accounts"},
+		{http.MethodPost, "/api/v1/admin/dashboard/api-keys-usage"},
+		{http.MethodPut, "/api/v1/admin/accounts/usage/batch"},
+	} {
+		router.Handle(route.method, route.path, func(c *gin.Context) { c.Status(http.StatusOK) })
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(route.method, route.path, nil))
+	}
+	auditService.Stop()
+	require.Len(t, repository.logs, 3)
+	for _, entry := range repository.logs {
+		require.NotContains(t, auditReadOnlyPosts, entry.Method+" "+entry.Path)
+	}
+}

@@ -7,6 +7,12 @@ import { useAdminAccessStore } from '@/stores/adminAccess'
 import { useAuthStore } from '@/stores/auth'
 import UsersView from '../UsersView.vue'
 
+/** A bulk action, from the toolbar's bulk menu (12.9-5), opened first when it is closed. */
+const bulkItem = async (wrapper: ReturnType<typeof mount>, test: string) => {
+  if (!wrapper.find('[data-test="bulk-menu"]').exists()) await wrapper.get('[data-test="bulk-actions"]').trigger('click')
+  return wrapper.get(`[data-test="${test}"]`)
+}
+
 const api = vi.hoisted(() => ({
   list: vi.fn(),
   getPlatformQuotas: vi.fn(),
@@ -231,7 +237,7 @@ describe('UsersView row actions by role', () => {
 
     await wrapper.get('[data-test="select-page"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
-    await wrapper.get('[data-test="bulk-disable-users"]').trigger('click')
+    await (await bulkItem(wrapper, 'bulk-disable-users')).trigger('click')
     await wrapper.get('[data-test="confirm-dialog"]').trigger('click')
     await flushPromises()
     expect(api.batchUpdateStatus).toHaveBeenCalledWith({ user_ids: [42], status: 'disabled' })

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"slices"
 )
 
 type schedQualityAccountFilterKey struct{}
@@ -22,23 +21,19 @@ func SchedQualityAccountFilter(ctx context.Context) (SchedQualityFilter, bool) {
 }
 
 func ValidSchedQualityFilter(quality string) bool {
-	return quality == "" || quality == "cooling" || quality == "normal" || quality == "exempt" || quality == "demote"
+	return quality == "" || quality == "substandard" || quality == "normal" || quality == "exempt" || quality == "observing"
 }
 
-func (a SchedAdminAttention) Filter(quality string) SchedQualityFilter {
+func (a SchedAdminAttention) Filter(quality string, normal []int64) SchedQualityFilter {
 	switch quality {
-	case "cooling":
-		return SchedQualityFilter{IDs: a.Cooling}
+	case "substandard":
+		return SchedQualityFilter{IDs: a.Substandard}
 	case "exempt":
 		return SchedQualityFilter{IDs: a.Exempt}
-	case "demote":
-		return SchedQualityFilter{IDs: a.Demote}
+	case "observing":
+		return SchedQualityFilter{IDs: a.Observing}
 	case "normal":
-		ids := append([]int64{}, a.Cooling...)
-		ids = append(ids, a.Exempt...)
-		ids = append(ids, a.Demote...)
-		slices.Sort(ids)
-		return SchedQualityFilter{IDs: slices.Compact(ids), Exclude: true}
+		return SchedQualityFilter{IDs: append([]int64{}, normal...)}
 	}
 	return SchedQualityFilter{}
 }

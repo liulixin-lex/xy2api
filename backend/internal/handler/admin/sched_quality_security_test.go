@@ -23,7 +23,7 @@ func schedAdminSecurityOperator(perms operatoraccess.Permissions) gin.HandlerFun
 }
 
 func TestSchedQualityOverrideReasonAddressPermissions(t *testing.T) {
-	entry, found := operatoraccess.Lookup(operatoraccess.Key("GET", "/api/v1/admin/sched-quality/groups/:id/board"))
+	entry, found := operatoraccess.Lookup(operatoraccess.Key("GET", "/api/v1/admin/sched-quality/groups/:id/order"))
 	require.True(t, found)
 	require.Equal(t, operatoraccess.ModuleGroups, entry.Module)
 	require.Equal(t, operatoraccess.LevelView, entry.Level)
@@ -34,33 +34,33 @@ func TestSchedQualityOverrideReasonAddressPermissions(t *testing.T) {
 		paths []string
 		want  string
 	}{
-		{"groups_only", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleGroups: operatoraccess.LevelView}}, []string{"/groups/1/board?model=m"}, "maintenance [upstream] and [upstream] done"},
-		{"without_address", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView, operatoraccess.ModuleGroups: operatoraccess.LevelView}}, []string{"/groups/1/board?model=m", "/accounts/1"}, "maintenance [upstream] and [upstream] done"},
-		{"with_address", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView, operatoraccess.ModuleGroups: operatoraccess.LevelView}, Flags: map[operatoraccess.Flag]bool{operatoraccess.FlagAccountsUpstreamAddress: true}}, []string{"/groups/1/board?model=m", "/accounts/1"}, "maintenance https://***@relay.example/private and socks5://***@other.example:1080/path done"},
+		{"accounts_only", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView}}, []string{"/accounts/1"}, "maintenance [upstream] and [upstream] done"},
+		{"without_address", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView, operatoraccess.ModuleGroups: operatoraccess.LevelView}}, []string{"/accounts/1"}, "maintenance [upstream] and [upstream] done"},
+		{"with_address", operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView, operatoraccess.ModuleGroups: operatoraccess.LevelView}, Flags: map[operatoraccess.Flag]bool{operatoraccess.FlagAccountsUpstreamAddress: true}}, []string{"/accounts/1"}, "maintenance https://***@relay.example/private and socks5://***@other.example:1080/path done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, engine, _ := schedAdminHandlerFixture()
 			reason := "maintenance https://proxy-user:proxy-secret@relay.example/private and socks5://second-user:second-secret@other.example:1080/path done"
 			engine.p.GroupRows[1] = []service.SchedGroupRow{{GroupID: 1, Model: "m"}}
-			engine.p.Overrides = []service.SchedOverride{{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: reason}}
+			engine.p.Overrides = []service.SchedOverride{{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideExempt, Reason: reason}}
 			r := schedAdminHandlerRouter(h, schedAdminSecurityOperator(tc.perms), middleware.AdminPermission())
 			for _, path := range tc.paths {
 				w := schedAdminHandlerRequest(r, "GET", path, "")
 				require.Equal(t, 200, w.Code, w.Body.String())
 				var result struct {
 					Data struct {
-						Accounts []struct{ Override *service.SchedAdminOverride }
-						Groups   []struct{ Override *service.SchedAdminOverride }
+						Accounts []struct{ Exemption *service.SchedAdminExemption }
+						Groups   []struct{ Exemption *service.SchedAdminExemption }
 					}
 				}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 				if len(result.Data.Accounts) > 0 {
-					require.NotNil(t, result.Data.Accounts[0].Override)
-					require.Equal(t, tc.want, result.Data.Accounts[0].Override.Reason)
+					require.NotNil(t, result.Data.Accounts[0].Exemption)
+					require.Equal(t, tc.want, result.Data.Accounts[0].Exemption.Reason)
 				} else {
 					require.Len(t, result.Data.Groups, 1)
-					require.NotNil(t, result.Data.Groups[0].Override)
-					require.Equal(t, tc.want, result.Data.Groups[0].Override.Reason)
+					require.NotNil(t, result.Data.Groups[0].Exemption)
+					require.Equal(t, tc.want, result.Data.Groups[0].Exemption.Reason)
 				}
 			}
 			require.Equal(t, reason, engine.p.Overrides[0].Reason)
@@ -76,7 +76,7 @@ func TestSchedQualityOverrideAuditRepositoryReceivesNoURLCredentials(t *testing.
 	t.Cleanup(audit.Stop)
 	perms := operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelManage}}
 	r := schedAdminHandlerRouter(h, schedAdminSecurityOperator(perms), gin.HandlerFunc(middleware.NewAuditLogMiddleware(audit)), middleware.AdminPermission())
-	w := schedAdminHandlerRequest(r, "PUT", "/accounts/1/override", `{"group_id":1,"mode":"demote","expires_at":null,"reason":"maintenance https://proxy-user:proxy-secret@relay.example/private and socks5://second-user:second-secret@other.example:1080/path done"}`)
+	w := schedAdminHandlerRequest(r, "PUT", "/accounts/1/override", `{"group_id":1,"mode":"exempt","expires_at":null,"reason":"maintenance https://proxy-user:proxy-secret@relay.example/private and socks5://second-user:second-secret@other.example:1080/path done"}`)
 	require.Equal(t, 200, w.Code, w.Body.String())
 	audit.Stop()
 	require.Len(t, repo.rows, 1)

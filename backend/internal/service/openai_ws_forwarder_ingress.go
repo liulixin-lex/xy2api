@@ -14,6 +14,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -498,7 +499,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
 		message = restoreCodexToolNamesFromContext(c, message)
-		return clientConn.Write(writeCtx, coderws.MessageText, message)
+		err := clientConn.Write(writeCtx, coderws.MessageText, message)
+		if err == nil {
+			noteGatewayWSOutput(ctx, message)
+		}
+		return err
 	}
 
 	readClientMessage := func() ([]byte, error) {
@@ -990,6 +995,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 		}
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
+		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(

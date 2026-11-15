@@ -44,7 +44,7 @@ type AdminService interface {
 	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error)
 	CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error)
 	// DuplicateGroup creates an inactive independent copy of a group's configuration
-	// and account bindings while preserving each binding's priority.
+	// and account bindings.
 	DuplicateGroup(ctx context.Context, id int64, actorScope, operationKey string) (*Group, error)
 	// RecoverDuplicateGroup returns a previously committed copy for an ambiguous retry.
 	// It never creates a group.
@@ -231,6 +231,7 @@ type AdminBoundAuthIdentityChannel struct {
 }
 
 type CreateGroupInput struct {
+	Alias                     string
 	Name                      string
 	Description               string
 	Platform                  string
@@ -317,6 +318,7 @@ type CreateGroupInput struct {
 }
 
 type UpdateGroupInput struct {
+	Alias                     *string
 	Name                      string
 	Description               *string
 	Platform                  string

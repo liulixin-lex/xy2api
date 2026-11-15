@@ -51,6 +51,9 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		}
 		q.Where(dbaccount.Or(matches...))
 	}
+	if ids, enabled := service.AccountIDsFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -181,7 +184,7 @@ func (r *accountRepository) ScopedAdminCommitted(ctx context.Context, id int64, 
 	r.syncSchedulerAccountSnapshot(ctx, id)
 }
 
-// scopedAdminBindGroups 只增删变化的关联，保留现有关联的优先级和创建时间。
+// scopedAdminBindGroups 只增删变化的关联，保留现有关联和创建时间。
 // 调用者已在受限事务内验权并合并不可操作的分组，不得回退到全量重建。
 func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
 	if dbent.TxFromContext(ctx) == nil {
@@ -214,7 +217,7 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 		}
 	}
 	for _, id := range added {
-		if _, err := r.client.AccountGroup.Create().SetAccountID(accountID).SetGroupID(id).SetPriority(slices.Index(groupIDs, id) + 1).Save(ctx); err != nil {
+		if _, err := r.client.ExecContext(ctx, `INSERT INTO account_groups (account_id, group_id, created_at) VALUES ($1, $2, NOW())`, accountID, id); err != nil {
 			return err
 		}
 	}

@@ -141,7 +141,6 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 	resilienceSvc *service.ResilienceService,
 	schedQuality *service.SchedQualityEngineService,
-	schedTests *service.SchedTestRunnerService,
 	schedAttempts *service.SchedAttemptRecorderService,
 	schedObs *service.SchedObservabilityService,
 	imageTasks *service.ImageTaskService,
@@ -152,9 +151,6 @@ func provideCleanup(
 	return func() {
 		if schedQuality != nil {
 			schedQuality.Stop()
-		}
-		if schedTests != nil {
-			schedTests.Stop()
 		}
 		if schedAttempts != nil {
 			schedAttempts.Stop()

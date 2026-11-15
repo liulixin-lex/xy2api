@@ -4,10 +4,10 @@ import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import { backendSummary } from '@/api/admin/schedQuality'
 
 const {
   listAccounts,
-  listWithEtag,
   getById,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
@@ -21,7 +21,6 @@ const {
   showInfo
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getById: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -36,15 +35,14 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
       getById,
-      listWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -122,7 +120,7 @@ function mountView(stubActionMenu = true) {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
-        AccountTableActions: { emits: ['refresh'], template: '<div><button data-test="refresh-accounts" @click="$emit(\'refresh\')">Refresh</button><slot name="after" /></div>' },
+        AccountsToolbar: { emits: ['refresh'], template: '<div><button data-test="refresh-accounts" @click="$emit(\'refresh\')">Refresh</button><slot name="more-actions" /></div>' },
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
         Pagination: true,
@@ -182,7 +180,6 @@ describe('admin AccountsView lite account list', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
-    listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
@@ -219,25 +216,32 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
-  it('locks each pending account independently against rapid and interleaved clicks', async () => {
-    listAccounts.mockResolvedValue({ items: [listRow, { ...listRow, id: 43, name: 'second' }], total: 2, page: 1, page_size: 20, pages: 1 })
-    const pending = new Map<number, (value: unknown) => void>()
-    setSchedulable.mockImplementation(id => new Promise(resolve => pending.set(id, resolve)))
+  it('asks for the quality summary at once after a scheduling change, not after a failed one (7i-9)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const asked = vi.mocked(backendSummary).mock.calls.length
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click'); await flushPromises()
+    expect(vi.mocked(backendSummary).mock.calls.length).toBe(asked + 1)
+    setSchedulable.mockRejectedValueOnce(new Error('temporary failure'))
+    await toggle.trigger('click'); await flushPromises()
+    expect(vi.mocked(backendSummary).mock.calls.length).toBe(asked + 1)
+    wrapper.unmount()
+  })
+
+  it('lets the latest click win: a second click while the first is pending sends the new value, and the older answer is not written', async () => {
+    const pending: Array<(value: unknown) => void> = []
+    setSchedulable.mockImplementation(() => new Promise(resolve => pending.push(resolve)))
     const wrapper = mountView(); await flushPromises()
-    const toggles = wrapper.findAll('button[role="switch"]')
-    const firstClick = toggles[0].trigger('click')
-    const duplicateClick = toggles[0].trigger('click')
-    await Promise.all([firstClick, duplicateClick])
-    await toggles[1].trigger('click')
-    await toggles[0].trigger('click')
-    expect(setSchedulable).toHaveBeenCalledTimes(2)
-    expect(toggles[0].attributes('aria-busy')).toBe('true')
-    expect(toggles[1].attributes('disabled')).toBeDefined()
-    pending.get(42)!({ id: 42, schedulable: false }); await flushPromises()
-    expect(toggles[0].attributes('disabled')).toBeUndefined()
-    expect(toggles[1].attributes('disabled')).toBeDefined()
-    pending.get(43)!({ id: 43, schedulable: false }); await flushPromises()
-    expect(toggles.every(toggle => toggle.attributes('aria-checked') === 'false')).toBe(true)
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click')
+    await toggle.trigger('click')
+    expect(setSchedulable.mock.calls).toEqual([[42, false], [42, true]])
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    pending[0]({ id: 42, schedulable: false }); await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    pending[1]({ id: 42, schedulable: true }); await flushPromises()
+    expect(toggle.attributes('aria-checked')).toBe('true')
     wrapper.unmount()
   })
 
@@ -248,7 +252,7 @@ describe('admin AccountsView lite account list', () => {
     await toggle.trigger('click'); await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
     expect(toggle.attributes('disabled')).toBeUndefined()
-    expect(showError).toHaveBeenCalledWith('admin.accounts.failedToToggleSchedulable')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     await toggle.trigger('click'); await flushPromises()
     expect(setSchedulable).toHaveBeenCalledTimes(2)
     expect(toggle.attributes('aria-checked')).toBe('false')
@@ -281,23 +285,21 @@ describe('admin AccountsView lite account list', () => {
     expect(toggle.attributes('aria-checked')).toBe('false')
     rejectToggle(new Error('temporary failure')); await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('true')
-    expect(showError).toHaveBeenCalledWith('admin.accounts.failedToToggleSchedulable')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     wrapper.unmount()
   })
 
-  it('ignores an automatic list response that started before a completed account toggle', async () => {
+  it('ignores a row refresh that was asked for before a completed account toggle', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
-    let resolveList!: (value: unknown) => void
-    listWithEtag.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve }))
     const wrapper = mountView(); await flushPromises()
-    await vi.advanceTimersByTimeAsync(6000)
-    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    let resolveRows!: (value: unknown) => void
+    listAccounts.mockReturnValueOnce(new Promise(resolve => { resolveRows = resolve }))
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 1, expect.objectContaining({ ids: '42' }), expect.anything())
     const toggle = wrapper.get('button[role="switch"]')
     await toggle.trigger('click'); await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('false')
-    resolveList({ notModified: false, etag: 'stale-before-toggle', data: { items: [listRow], total: 1, pages: 1 } })
+    resolveRows({ items: [listRow], total: 1, page: 1, page_size: 1, pages: 1 })
     await flushPromises()
     expect(toggle.attributes('aria-checked')).toBe('false')
     wrapper.unmount()
@@ -333,96 +335,43 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
-  it.each(['focus', 'visibilitychange'])('reads shared scheduling state and account cost on %s', async eventName => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    const wrapper = mountView(); await flushPromises()
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
-    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.035 }], total: 1, page: 1, page_size: 20, pages: 1 })
-    getBatchTodayStats.mockClear()
-    const target = eventName === 'focus' ? window : document
-    target.dispatchEvent(new Event(eventName)); await flushPromises()
-    expect(listAccounts).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
-    expect(getBatchTodayStats).not.toHaveBeenCalled()
-    expect(setSchedulable).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-
-  it('catches a focus refresh failure, keeps the rendered data and permits a later refresh', async () => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const now = vi.spyOn(Date, 'now')
-    const wrapper = mountView(); await flushPromises()
-    const failure = new Error('focus list unavailable')
-    listAccounts.mockRejectedValueOnce(failure)
-    now.mockReturnValue(20000)
-    window.dispatchEvent(new Event('focus')); await flushPromises()
-    expect(logError).toHaveBeenCalledWith('Failed to refresh accounts after returning to the page:', failure)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
-    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, schedulable: false, rate_multiplier: 0.3 }], total: 1, page: 1, page_size: 20, pages: 1 })
-    now.mockReturnValue(22000)
-    window.dispatchEvent(new Event('focus')); await flushPromises()
-    expect(listAccounts).toHaveBeenCalledTimes(3)
-    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.30x')
-    wrapper.unmount()
-  })
-
-  it('updates a rate-only change from an automatic ETag refresh', async () => {
+  it('updates a rate-only change from the 3-second row refresh', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
-    listWithEtag.mockResolvedValueOnce({ notModified: false, etag: 'changed-cost', data: { items: [{ ...listRow, rate_multiplier: 0.035 }], total: 1, pages: 1 } })
     const wrapper = mountView(); await flushPromises()
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
-    await vi.advanceTimersByTimeAsync(6000); await flushPromises()
-    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, rate_multiplier: 0.035 }], total: 1, page: 1, page_size: 1, pages: 1 })
+    await vi.advanceTimersByTimeAsync(3000); await flushPromises()
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
     expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
     wrapper.unmount()
   })
 
-  it('redraws a row when only its group concurrency changes on an automatic ETag refresh', async () => {
+  it('redraws a row when only its group concurrency changes on the 3-second row refresh', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
     const groupRow = { ...listRow, current_concurrency: 2 }
-    listAccounts.mockResolvedValue({ items: [{ ...groupRow, current_group_concurrency: 1 }], total: 1, page: 1, page_size: 20, pages: 1 })
-    listWithEtag.mockResolvedValueOnce({ notModified: false, etag: 'group-busy', data: { items: [{ ...groupRow, current_group_concurrency: 2 }], total: 1, pages: 1 } })
+    listAccounts.mockResolvedValueOnce({ items: [{ ...groupRow, current_group_concurrency: 1 }], total: 1, page: 1, page_size: 20, pages: 1 })
     const wrapper = mountView(); await flushPromises()
     expect(wrapper.get('[data-test="account-group-concurrency"]').text()).toBe('1')
-    await vi.advanceTimersByTimeAsync(6000); await flushPromises()
-    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    listAccounts.mockResolvedValueOnce({ items: [{ ...groupRow, current_group_concurrency: 2 }], total: 1, page: 1, page_size: 1, pages: 1 })
+    await vi.advanceTimersByTimeAsync(3000); await flushPromises()
     expect(wrapper.get('[data-test="account-group-concurrency"]').text()).toBe('2')
     wrapper.unmount()
   })
 
-  it('prevents bulk and single-account scheduling writes from racing on selected accounts', async () => {
+  it('flips the selected switches at once on a bulk change and rolls back the ones that failed', async () => {
     listAccounts.mockResolvedValue({ items: [listRow, { ...listRow, id: 43, name: 'second' }], total: 2, page: 1, page_size: 20, pages: 1 })
-    let finishSingle!: (value: unknown) => void
     let finishBulk!: (value: unknown) => void
-    setSchedulable.mockReturnValueOnce(new Promise(resolve => { finishSingle = resolve }))
     bulkUpdate.mockReturnValueOnce(new Promise(resolve => { finishBulk = resolve }))
     const wrapper = mountView(); await flushPromises()
     for (const checkbox of wrapper.findAll('[data-test="select-account"] input')) await checkbox.setValue(true)
     const bar = wrapper.findComponent({ name: 'AccountBulkActionsBar' })
     const toggles = wrapper.findAll('button[role="switch"]')
-    await toggles[0].trigger('click')
     bar.vm.$emit('toggle-schedulable', false); await flushPromises()
-    expect(bulkUpdate).not.toHaveBeenCalled()
-    finishSingle({ id: 42, schedulable: false }); await flushPromises()
-    bar.vm.$emit('toggle-schedulable', true); await flushPromises()
-    bar.vm.$emit('toggle-schedulable', false)
-    await toggles[1].trigger('click')
-    expect(bulkUpdate).toHaveBeenCalledTimes(1)
-    expect(bulkUpdate).toHaveBeenCalledWith([42, 43], { schedulable: true })
-    expect(setSchedulable).toHaveBeenCalledTimes(1)
-    expect(toggles.every(toggle => toggle.attributes('disabled') !== undefined)).toBe(true)
-    finishBulk({ success: 2, failed: 0 }); await flushPromises()
-    expect(toggles.every(toggle => toggle.attributes('aria-checked') === 'true')).toBe(true)
-    expect(toggles.every(toggle => toggle.attributes('disabled') === undefined)).toBe(true)
+    expect(bulkUpdate).toHaveBeenCalledWith([42, 43], { schedulable: false })
+    expect(toggles.map(toggle => toggle.attributes('aria-checked'))).toEqual(['false', 'false'])
+    finishBulk({ success: 1, failed: 1, success_ids: [42], failed_ids: [43] }); await flushPromises()
+    expect(toggles.map(toggle => toggle.attributes('aria-checked'))).toEqual(['false', 'true'])
+    expect(showError).toHaveBeenCalledWith('admin.accounts.bulkSchedulablePartial')
     wrapper.unmount()
   })
 
@@ -439,15 +388,15 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
-  it('maps group_ids through the group catalog for the table cell', async () => {
+  it('maps group_ids through the group catalog for the groups pills', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('[data-test="account-groups"]').text()).toBe('codex')
+    expect(wrapper.findAll('[data-test="group-pill-text"]').map(pill => pill.text())).toEqual(['cod'])
     wrapper.unmount()
   })
 
-  it('keeps the action menu open during internal scrolling but closes it on table scrolling', async () => {
+  it('keeps the action menu open during internal scrolling and a scroll that leaves its button in place, closes it on table scrolling', async () => {
     const wrapper = mountView(false)
     await flushPromises()
 
@@ -461,27 +410,31 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(true)
 
+    // The list scrolling back by the room the bulk bar leaves: the rows, and the menu's button, stay put (7i-5).
+    wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(true)
+
+    wrapper.get('[data-test="row-more"]').element.getBoundingClientRect = () => ({ top: -40, left: 0 }) as DOMRect
     wrapper.getComponent(DataTableStub).element.dispatchEvent(new Event('scroll'))
     await flushPromises()
     expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(false)
     wrapper.unmount()
   })
 
-  it('keeps lite=1 on automatic ETag refreshes', async () => {
+  it('keeps lite=1 on the 3-second row refresh, which asks by id', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
     const wrapper = mountView()
     await flushPromises()
 
-    await vi.advanceTimersByTimeAsync(6000)
+    await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    expect(listWithEtag).toHaveBeenCalledWith(
+    expect(listAccounts).toHaveBeenLastCalledWith(
       1,
-      20,
-      expect.objectContaining({ lite: '1' }),
-      expect.objectContaining({ etag: null })
+      1,
+      expect.objectContaining({ lite: '1', ids: '42' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     wrapper.unmount()
   })
@@ -549,7 +502,7 @@ describe('admin AccountsView lite account list', () => {
     await wrapper.get('[data-test="row-edit"]').trigger('click')
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('detail failed')
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     // 编辑弹窗按需挂载：从未打开时不渲染，打开过则内容为空
     const editModal = wrapper.find('[data-test="edit-account"]')
     expect(editModal.exists() ? editModal.text() : '').toBe('')

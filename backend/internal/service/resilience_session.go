@@ -629,8 +629,7 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 	if avoid <= 0 {
 		avoid = 10 * time.Minute
 	}
-	_ = s.resilience.store.AddSessionAvoid(ctx, groupID, sessionHash, accountID, avoid)
-	s.resilience.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
+	_ = s.resilience.store.AddSessionAvoid(ctx, groupID, sessionHash, accountID, avoid, s.resilience.sessionAccountResetAt(accountID))
 	_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, sessionHash, accountID)
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 }
@@ -666,8 +665,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 		_ = rec.deleteIfOwner(stateCtx, groupID, sessionHash, accountID)
 	}
 	avoid := time.Duration(cfg.Session.AvoidSeconds) * time.Second
-	_ = rec.r.store.AddSessionAvoid(stateCtx, groupID, sessionHash, accountID, avoid)
-	rec.r.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
+	_ = rec.r.store.AddSessionAvoid(stateCtx, groupID, sessionHash, accountID, avoid, rec.r.sessionAccountResetAt(accountID))
 	// The request that hit the streak must not keep or restore the binding.
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
@@ -729,7 +727,7 @@ func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
 func (r *ResilienceService) sweepSessionMarks(now time.Time) {
 	r.postOutput.sweep(now)
 	r.lastResortGroups.sweep(now)
-	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
+	for _, m := range []*sync.Map{&r.failingSessions} {
 		m.Range(func(k, v any) bool {
 			if until, ok := v.(time.Time); !ok || now.After(until) {
 				m.Delete(k)
@@ -789,17 +787,42 @@ func (r *ResilienceService) sessionAvoid(ctx context.Context, groupID *int64, se
 	if r == nil || r.store == nil || sessionHash == "" || !resilience.Current().SessionOn() {
 		return nil
 	}
-	// Only sessions that hit a failure streak on this instance carry avoid
-	// entries worth a Redis read; every other request skips it.
-	if !r.sessionMayAvoid(derefGroupID(groupID), sessionHash) {
-		return nil
-	}
-	avoid, err := r.store.SessionAvoid(ctx, derefGroupID(groupID), sessionHash)
+	// A different instance may have recorded a failure. Local marks cannot
+	// establish that the shared avoidance set is empty.
+	avoid, err := sessionAvoidAfterReset(ctx, r.store, derefGroupID(groupID), sessionHash, r.sessionResetAt)
 	if err != nil || len(avoid) == 0 {
 		return nil
 	}
 	resilience.StateFrom(ctx).SetAvoided(avoid)
 	return avoid
+}
+
+// An administrative reset clears earlier facts, irrespective of a later TTL
+// setting change. Legacy entries without write metadata survive only while the
+// account has never been reset (contract 5.6).
+func sessionAvoidAfterReset(ctx context.Context, store ResilienceStore, groupID int64, session string, resetAt func(int64) time.Time) (map[int64]struct{}, error) {
+	records, err := store.SessionAvoidWrittenAt(ctx, groupID, session)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]struct{}, len(records))
+	for id, written := range records {
+		if resetAt != nil {
+			reset := resetAt(id)
+			if !reset.IsZero() && (written.IsZero() || written.Before(reset)) {
+				continue
+			}
+		}
+		out[id] = struct{}{}
+	}
+	return out, nil
+}
+
+func (r *ResilienceService) sessionAccountResetAt(accountID int64) time.Time {
+	if r == nil || r.sessionResetAt == nil {
+		return time.Time{}
+	}
+	return r.sessionResetAt(accountID)
 }
 
 // mergeExcluded returns base plus extra without modifying either.
@@ -815,17 +838,4 @@ func mergeExcluded(base, extra map[int64]struct{}) map[int64]struct{} {
 		out[k] = struct{}{}
 	}
 	return out
-}
-
-func (r *ResilienceService) sessionMayAvoid(groupID int64, sessionHash string) bool {
-	key := sessionMarkKey(groupID, sessionHash)
-	v, ok := r.avoidingSessions.Load(key)
-	if !ok {
-		return false
-	}
-	if until, _ := v.(time.Time); time.Now().After(until) {
-		r.avoidingSessions.Delete(key)
-		return false
-	}
-	return true
 }

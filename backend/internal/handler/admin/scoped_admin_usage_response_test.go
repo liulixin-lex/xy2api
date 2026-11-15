@@ -18,7 +18,17 @@ import (
 
 type scopedUsageResponseRepo struct {
 	service.UsageLogRepository
+	service.AdminUsageRequestRepository
 	records []service.UsageLog
+}
+
+func (r *scopedUsageResponseRepo) ListAdminRequests(context.Context, pagination.PaginationParams, usagestats.UsageLogFilters) ([]service.AdminUsageRecord, *pagination.PaginationResult, error) {
+	rows := make([]service.AdminUsageRecord, len(r.records))
+	for i := range r.records {
+		l := &r.records[i]
+		rows[i] = service.AdminUsageRecord{Log: *l, Source: "usage", InputTokens: &l.InputTokens, OutputTokens: &l.OutputTokens, CacheReadTokens: &l.CacheReadTokens, CacheCreationTokens: &l.CacheCreationTokens}
+	}
+	return rows, &pagination.PaginationResult{Total: int64(len(rows))}, nil
 }
 
 func (r *scopedUsageResponseRepo) ListWithFilters(context.Context, pagination.PaginationParams, usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {

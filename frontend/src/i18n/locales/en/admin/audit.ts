@@ -6,7 +6,10 @@ export default {
     empty: 'No audit logs yet',
     loadFailed: 'Failed to load audit logs',
     filters: {
-      all: 'All',
+      allMethods: 'All methods',
+      allAuthMethods: 'All auth methods',
+      allResults: 'All results',
+      allTime: 'All time',
       q: 'Keyword',
       qPlaceholder: 'Path / action / actor email',
       actorEmail: 'Actor Email',

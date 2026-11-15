@@ -145,6 +145,7 @@ func OpsClientBusinessLimitedReason(c *gin.Context) string {
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
 type OpsStreamError struct {
+	GatewayRequestID string
 	// ErrType 是写入 SSE 帧的对客错误类型（如 rate_limit_error / upstream_error / api_error）。
 	ErrType string
 	// Code 是可选的稳定错误分类；用于既保留通用 OpenAI error.type，又向客户端和 Ops
@@ -251,6 +252,9 @@ func MarkOpsStreamErrorValue(c *gin.Context, streamErr OpsStreamError) {
 func markOpsStreamError(c *gin.Context, streamErr OpsStreamError) {
 	if c == nil {
 		return
+	}
+	if c.Request != nil {
+		streamErr.GatewayRequestID = resilience.StateFrom(c.Request.Context()).GatewayRequestID()
 	}
 	streamErr.ErrType = strings.TrimSpace(streamErr.ErrType)
 	streamErr.Code = strings.TrimSpace(streamErr.Code)
@@ -488,11 +492,6 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if c == nil {
 		return
 	}
-	isTest := c.Request != nil && schedTestRequest(c.Request.Context())
-	if isTest {
-		ev.Source = "sched_test"
-		ev.SkipMonitoring = true
-	}
 	if ev.AtUnixMs <= 0 {
 		ev.AtUnixMs = time.Now().UnixMilli()
 	}
@@ -516,7 +515,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if ev.StateFamily == "" && ev.UpstreamResponseBody != "" {
 		ev.StateFamily = string(openAIStateRejection([]byte(ev.UpstreamResponseBody), ev.Message).Family)
 	}
-	if c.Request != nil && !isTest {
+	if c.Request != nil {
 		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)
 	}
 

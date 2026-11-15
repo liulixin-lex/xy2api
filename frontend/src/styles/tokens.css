@@ -1,0 +1,221 @@
+/*
+ * Semantic design tokens (ported from the approved prototype's tokens.css). Dark is the primary design; light uses
+ * the same names with its own values. Light values live on :root and dark values on .dark, matching the app's
+ * class-based dark mode. Tailwind maps the colours under theme.extend.colors (surface-*, line-*, fg-*, status-*,
+ * switch-*, tooltip-*), so components use the semantic names and never write colour values.
+ *
+ * The app's brand teal (Tailwind `primary`) and fonts stay as they are; the prototype's brand tokens are not ported.
+ * Motion tokens already live in motion.css.
+ */
+:root {
+  /* Surfaces */
+  --color-bg-page: #f3f5f8;
+  --color-bg-surface: #ffffff;
+  --color-bg-header: #f1f4f8;
+  --color-bg-row-hover: #eef2f7;
+  --color-bg-raised: #ffffff;
+  --color-bg-control: #ffffff;
+  --color-bg-control-hover: #f3f5f8;
+  --color-bg-pill: #e9edf3;
+  --color-bg-pill-hover: #dde3eb;
+  --color-bg-target: #e9f6f4;
+  --color-bg-selected: #e6f6f3;
+  --color-bg-seg: #edf0f4;
+  --color-bg-seg-active: #ffffff;
+
+  /* Lines */
+  --color-line-row: #e6eaf0;
+  --color-line-strong: #d3d9e2;
+  --color-line-control: #cdd4de;
+
+  /* Text, three levels */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-muted: #5f6b7d;
+  --color-text-muted-on-pill: #5f6b7d;
+
+  /* Switches (scheduling and IQ checks): the brand teal (primary-500) in both themes (12.2) */
+  --color-switch-on: #14b8a6;
+  --color-switch-off: #858f9f;
+  --color-switch-thumb: #ffffff;
+  --color-switch-thumb-off: #ffffff;
+
+  /* Status fills (dots) */
+  --color-status-ok: #059669;
+  --color-status-back: #d97706;
+  --color-status-exempt: #7c3aed;
+  --color-status-observe: #7d8798;
+  --color-status-stopped: #4a5363;
+  --color-status-error: #dc2626;
+  --color-status-info: #2563eb;
+
+  /* Status text */
+  --color-status-ok-text: #047857;
+  --color-status-back-text: #ab4f09;
+  --color-status-exempt-text: #6d28d9;
+  --color-status-error-text: #b91c1c;
+  --color-status-info-text: #1d4ed8;
+
+  /* Second round (spec 12): a ticked row under the pointer, still told apart from a hovered or a ticked one */
+  --color-bg-selected-hover: #d9f0eb;
+  /* A switch that is on, under the pointer (primary-600) */
+  --color-switch-on-hover: #0d9488;
+  /* Capacity fills by use (12.4): background and text. Light yellow text is a step darker than the spec's #a16207,
+     which is 4.42:1 on its fill. */
+  --color-cap-green-bg: #d1fae5;
+  --color-cap-green-text: #047857;
+  --color-cap-yellow-bg: #fef3c7;
+  --color-cap-yellow-text: #9e6007;
+  --color-cap-orange-bg: #ffedd5;
+  --color-cap-orange-text: #c2410c;
+  --color-cap-red-bg: #fee2e2;
+  --color-cap-red-text: #b91c1c;
+  /* The quality panel's pass and fail marks: a filled circle with a white glyph, the same in both themes (12.8) */
+  --color-mark-pass: #16a34a;
+  --color-mark-fail: #dc2626;
+  --color-mark-glyph: #ffffff;
+
+  /* Tooltips */
+  --color-tooltip-bg: #111827;
+  --color-tooltip-text: #f3f5f8;
+  --color-tooltip-muted: #b3bdcb;
+
+  /* Shadows, only for floating layers */
+  --shadow-popover: 0 8px 24px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  --shadow-panel: -8px 0 24px rgba(15, 23, 42, 0.08);
+
+  /* Type scale */
+  --font-size-title: 16px;
+  --line-height-title: 24px;
+  --font-size-name: 14px;
+  --line-height-name: 20px;
+  --font-size-body: 13px;
+  --line-height-body: 18px;
+  --font-size-small: 12px;
+  --line-height-small: 16px;
+  --font-size-micro: 11px;
+  --line-height-micro: 14px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* Spacing and radii */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  /* Dense table sizes (the accounts page) */
+  --row-height: 78px;
+  --header-height: 40px;
+  --control-height: 32px;
+  --cell-pad-x: 12px;
+  --pill-width: 50px;
+  --pill-height: 20px;
+  --pill-dot-zone: 18px;
+  --pill-gap-x: 4px;
+  --pill-gap-y: 3px;
+  --dot-size: 7px;
+  --switch-width: 28px;
+  --switch-height: 16px;
+  /* Floating layers of the accounts page */
+  --sidebar-width: 460px;
+  --popover-width: 280px;
+  --motion-panel: 240ms;
+
+  /* Popover material (spec 12.6): the shared Select's panel, for every dropdown-like layer; shadow --shadow-dropdown
+     (the Select panel's own, below; --shadow-popover stays for tips and the other layers) */
+  --color-bg-popover: #ffffff;
+  --color-line-popover: #e5e7eb;
+  --color-bg-popover-hover: #f9fafb;
+  --color-bg-popover-selected: #f0fdfa;
+  --color-text-popover-selected: #0f766e;
+  --radius-popover: 12px;
+  --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  /* A menu's danger item (delete) under the pointer or keyboard focus, its error text unchanged: 5.91:1 (12.12-6) */
+  --color-bg-popover-danger-hover: #fef2f2;
+}
+
+.dark {
+  --color-bg-page: #0b111d;
+  --color-bg-surface: #0f1626;
+  --color-bg-header: #18223a;
+  --color-bg-row-hover: #19243a;
+  --color-bg-raised: #131b2c;
+  --color-bg-control: #0f1626;
+  --color-bg-control-hover: #172034;
+  --color-bg-pill: #212c42;
+  --color-bg-pill-hover: #283350;
+  --color-bg-target: #12262d;
+  --color-bg-selected: #11272f;
+  --color-bg-seg: #0f1626;
+  --color-bg-seg-active: #253048;
+
+  --color-line-row: #1e293d;
+  --color-line-strong: #2c3850;
+  --color-line-control: #2e3a52;
+
+  --color-text-primary: #eef2f7;
+  --color-text-secondary: #aab5c5;
+  --color-text-muted: #8b96a7;
+  --color-text-muted-on-pill: oklch(0.665 0.032 260);
+
+  --color-switch-on: #14b8a6;
+  --color-switch-off: #46526a;
+  --color-switch-thumb: #ffffff;
+  --color-switch-thumb-off: #c7d0dc;
+
+  --color-status-ok: #34d399;
+  --color-status-back: #fbbf24;
+  --color-status-exempt: #a78bfa;
+  --color-status-observe: oklch(0.6 0.025 260);
+  --color-status-stopped: oklch(0.72 0.03 260);
+  --color-status-error: #f87171;
+  --color-status-info: #60a5fa;
+
+  --color-status-ok-text: #34d399;
+  --color-status-back-text: #fbbf24;
+  --color-status-exempt-text: #c4b5fd;
+  --color-status-error-text: #f87171;
+  --color-status-info-text: #60a5fa;
+
+  --color-bg-selected-hover: #163039;
+  --color-switch-on-hover: #0d9488;
+  /* Dark red text is a step lighter than the spec's #f87171, which is 4.45:1 on its fill over a hovered row. */
+  --color-cap-green-bg: rgb(52 211 153 / 0.14);
+  --color-cap-green-text: #34d399;
+  --color-cap-yellow-bg: rgb(250 204 21 / 0.14);
+  --color-cap-yellow-text: #facc15;
+  --color-cap-orange-bg: rgb(251 146 60 / 0.16);
+  --color-cap-orange-text: #fb923c;
+  --color-cap-red-bg: rgb(248 113 113 / 0.16);
+  --color-cap-red-text: #f98686;
+  --color-mark-pass: #16a34a;
+  --color-mark-fail: #dc2626;
+  --color-mark-glyph: #ffffff;
+
+  --color-tooltip-bg: #222c40;
+  --color-tooltip-text: #e3e8ef;
+  --color-tooltip-muted: #9aa6b8;
+
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  --shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.28);
+
+  /* Popover material (spec 12.6) */
+  --color-bg-popover: #1e293b;
+  --color-line-popover: #334155;
+  --color-bg-popover-hover: #334155;
+  --color-bg-popover-selected: rgb(19 78 74 / 0.2);
+  --color-text-popover-selected: #5eead4;
+  --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  /* The error colour #f87171 at 10% over the popover's #1e293b: the error text on it is 4.62:1 (12.12-6) */
+  --color-bg-popover-danger-hover: #343040;
+}

@@ -26,7 +26,10 @@ const NOW = Date.parse('2026-11-12T12:00:00Z')
 const at = (ms: number) => new Date(NOW + ms).toISOString()
 const row = (patch: Partial<RecoverableRow> = {}): RecoverableRow =>
   ({ status: 'active', rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null, extra: {}, capability_learned: null, ...patch })
-const summary = (cooling: number) => ({ groups: { total: 2, normal: 2 - cooling, cooling, nodata: 0 } })
+// The backend's own summary: `cooling` substandard models (the account is at the back of those groups).
+const summary = (cooling: number) => ({
+  substandard: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', dims: ['ttfo' as const], until: '', other_group: false, exempt: false, effective: true }))
+})
 
 describe('canRecover (contract delta F1, scenario 37)', () => {
   it('is off for a normal account and for states a recovery cannot clear', () => {
@@ -35,8 +38,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
     expect(canRecover(row({ status: 'inactive' }), summary(0), NOW)).toBe(false)
     expect(canRecover({ ...row(), schedulable: false, quota_used: 10, quota_limit: 10 } as RecoverableRow, summary(0), NOW)).toBe(false)
     expect(canRecover(row({ extra: { model_rate_limits: { 'iq:gpt-6-astra': { rate_limited_at: at(-1000), rate_limit_reset_at: at(3_600_000) } } } }), summary(0), NOW)).toBe(false)
-    // Overrides alone (no cooling group).
-    expect(canRecover(row(), { ...summary(0), overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }] } as never, NOW)).toBe(false)
+    // Exemptions alone (no substandard model).
+    expect(canRecover(row(), { ...summary(0), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(false)
   })
 
   it('is on for an error status, an unexpired account limit, a non-IQ model limit, a stream-only mark or a cooling group', () => {
@@ -49,8 +52,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
       'gpt-6.1-sol': { rate_limited_at: at(-1000), rate_limit_reset_at: at(60_000) }
     } } }), undefined, NOW)).toBe(true)
     expect(canRecover(row({ capability_learned: [{ protocol: 'responses', mode: 'stream_only', expires_at: at(60_000) }] }), undefined, NOW)).toBe(true)
-    // A cooling group counts even when an override hides it from the groups column.
-    expect(canRecover(row(), { ...summary(1), overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }] } as never, NOW)).toBe(true)
+    // A substandard model counts even when an exemption covers its group.
+    expect(canRecover(row(), { ...summary(1), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(true)
   })
 
   it('counts an end time equal to now as ended, and a missing or invalid one as none', () => {
@@ -88,7 +91,8 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     ['everything cleared', async () => clean, 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
     ['only kept items (nothing cleared)', async () => ({ reset_at: 'x', cleared: [], preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }], failed: [] }), 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
     ['a failed item in a 200 answer', async () => ({ ...clean, failed: [{ key: 'rate_limit', kind: 'rate_limit', error: 'x' }] }), 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}'],
-    ['a request error', async () => { throw new Error('down') }, 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}']
+    // A request error carries the backend's reason after the action's words (spec 7e-13).
+    ['a request error', async () => { throw { status: 500, message: 'down' } }, 'showError', 'admin.accounts.failedWithReason:{"action":"admin.schedQuality.recover.failed:{\\"name\\":\\"acc-1\\"}","reason":"down"}']
   ] as const)('gives exactly one toast for %s, then refreshes', async (_name, answer, kind, text) => {
     api.reset.mockImplementation(answer)
     const { recovery } = withRecovery()
@@ -100,7 +104,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     expect(toast[kind].mock.calls).toEqual([[text]])
     expect(toast[kind === 'showSuccess' ? 'showError' : 'showSuccess']).not.toHaveBeenCalled()
     expect(refresh).toHaveBeenCalledTimes(1)
-    // The open drawer and board refresh too.
+    // The open panel and board refresh too.
     expect(changed.value).toBe(before + 1)
   })
 
@@ -109,7 +113,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     api.reset.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     let refreshed!: () => void
     const { recovery } = withRecovery()
-    // Another entry (the drawer, the temporary-pause dialog) on another component shares the lock.
+    // Another entry (the quality panel, the temporary-pause dialog) on another component shares the lock.
     const other = withRecovery().recovery
     const first = recovery.recover({ id: 1, name: 'acc-1' }, () => new Promise<void>((resolve) => { refreshed = resolve }))
     expect(isRecovering(1)).toBe(true)
@@ -127,7 +131,7 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
   it('holds the lock until the reload of an open layer is in, for a single and a batch recovery (R2-RT-FB P0-1)', async () => {
     api.reset.mockResolvedValue(clean)
     const reloads: Array<() => void> = []
-    // An open drawer reloads on every change and hands the reload over, as SchedAccountDrawer does.
+    // An open panel reloads on every change and hands the reload over, as the quality panel does.
     const stop = watch(useSchedLayers().changed, () => trackSchedReload(new Promise<void>((resolve) => reloads.push(resolve))))
     try {
       const { recovery } = withRecovery()

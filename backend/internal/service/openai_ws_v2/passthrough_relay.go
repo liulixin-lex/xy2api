@@ -55,6 +55,7 @@ type RelayResult struct {
 }
 
 type RelayTurnResult struct {
+	ClientWriteError      error
 	RequestModel          string
 	ResponseModel         string
 	ResponseModelConflict bool
@@ -615,7 +616,6 @@ func runUpstreamToClient(
 				openAIWSRelayDiscardActiveTurnTiming(state)
 			}
 		}
-		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			if droppedFrames != nil {
 				droppedFrames.Add(1)
@@ -628,6 +628,7 @@ func runUpstreamToClient(
 				WroteDownstream: wroteDownstream,
 			})
 			if observedEvent.terminal {
+				emitTurnComplete(onTurnComplete, state, observedEvent, io.ErrClosedPipe)
 				exitCh <- relayExitSignal{
 					stage:           "drain_terminal",
 					graceful:        true,
@@ -642,6 +643,7 @@ func runUpstreamToClient(
 			beforeClientWrite(msgType, payload)
 		}
 		writeErr := writeClient(msgType, payload)
+		emitTurnComplete(onTurnComplete, state, observedEvent, writeErr)
 		if afterClientWrite != nil {
 			afterClientWrite(msgType, payload, writeErr)
 		}
@@ -888,6 +890,7 @@ func emitTurnComplete(
 	onTurnComplete func(turn RelayTurnResult),
 	state *relayState,
 	observed observedUpstreamEvent,
+	writeErrors ...error,
 ) {
 	if onTurnComplete == nil || !observed.terminal {
 		return
@@ -900,7 +903,12 @@ func emitTurnComplete(
 	if state != nil {
 		requestModel = state.currentRequestModel()
 	}
+	var writeErr error
+	if len(writeErrors) > 0 {
+		writeErr = writeErrors[0]
+	}
 	onTurnComplete(RelayTurnResult{
+		ClientWriteError:      writeErr,
 		RequestModel:          requestModel,
 		ResponseModel:         observed.responseModel,
 		ResponseModelConflict: observed.responseConflict,

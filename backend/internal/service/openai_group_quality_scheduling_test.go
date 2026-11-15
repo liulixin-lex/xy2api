@@ -136,7 +136,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 		svc, _, view := env(false, false)
 		gid := int64(groupID)
 		view.Enabled = true
-		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{Failing: true}
 		svc.openaiWSStateStore = NewOpenAIWSStateStore(&stubGatewayCache{})
 		require.NoError(t, svc.openaiWSStateStore.BindResponseAccount(context.Background(), groupID, "resp_previous", 1, time.Hour))
 		selection, err := svc.SelectAccountByPreviousResponseID(context.Background(), &gid, "resp_previous", "gpt-test", nil, false)
@@ -155,7 +155,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 		parentID := "22222222-2222-4222-8222-222222222222"
 		cache.sessionBindings["openai:"+DeriveSessionHashFromSeed(parentID)] = 1
 		view.Enabled = true
-		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{Failing: true}
 		ctx := guardianAffinityTestContext(t, codexAutoReviewModel, "guardian", parentID, "")
 		selection, decision, err := svc.SelectAccountWithScheduler(ctx, &gid, "", "guardian-child-session", codexAutoReviewModel, nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
@@ -549,7 +549,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 			loads = append(loads, 80, 95)
 		}
 		for _, load := range loads {
-			cases = append(cases, testCase{"quality borrow uses affinity before load/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
+			cases = append(cases, testCase{"quality borrow uses load after rate/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
 				svc, _, conc := qualityBorrowEnv(path)
 				settings := &selectionSettingRepoStub{values: map[string]string{}}
 				svc.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, svc.cfg)}
@@ -566,9 +566,8 @@ func TestOpenAIQualitySelection(t *testing.T) {
 				moreExpensive.Priority = 0
 				repo.accounts = append(repo.accounts, recent, moreExpensive)
 				svc.accountRepo = repo
-				conc.loadRates = map[int64]int{1: 0, 2: 0, 3: load, 4: 0, 5: 0}
+				conc.loadRates = map[int64]int{1: 0, 2: load, 3: load, 4: 0, 5: 0}
 				session := "quality-recent-success-session"
-				svc.recentSessionSuccess().record(openAIRecentSessionKey{groupID, session, "gpt-test"}, 3, time.Now())
 				q := &openAIQualityRequest{scope: "quality-borrow-recent", group: groupID, apiID: 93, session: session, model: "gpt-test", loaded: true,
 					state: OpenAIQualityState{Generation: 1, Owner: 1, Binding: 1}}
 				ctx := context.WithValue(withOpenAIQualityRouting(context.Background()), openAIQualityContextKey{}, q)
@@ -577,7 +576,11 @@ func TestOpenAIQualitySelection(t *testing.T) {
 					OpenAIUpstreamTransportAny, "", "", false, PlatformOpenAI, false, true)
 				require.NoError(t, err)
 				require.NotNil(t, selection)
-				require.Equal(t, int64(3), selection.Account.ID, "affinity precedes non-full load within equal standing, priority and rate")
+				want := int64(4)
+				if path == "no load batch" {
+					want = 2
+				}
+				require.Equal(t, want, selection.Account.ID, "known lower load wins; without load data the stable ID tie-break applies")
 				require.True(t, selection.StickyCapacitySpillover)
 				selection.ReleaseFunc()
 			}})
@@ -586,7 +589,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 	cases = append(cases, testCase{"last resort retains profit and hard gates", func(t *testing.T) {
 		svc, _, view := env(false, false)
 		view.Enabled = true
-		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{Failing: true}
 		gid := int64(groupID)
 		ctx := svc.withOpenAISelectionContext(withResilienceLastResortGate(context.Background()), &gid)
 		acc := profitControlWSAccount(1, 0.8, time.Now())

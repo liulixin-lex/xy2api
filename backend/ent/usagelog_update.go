@@ -88,6 +88,120 @@ func (_u *UsageLogUpdate) SetNillableRequestID(v *string) *UsageLogUpdate {
 	return _u
 }
 
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (_u *UsageLogUpdate) SetGatewayRequestID(v string) *UsageLogUpdate {
+	_u.mutation.SetGatewayRequestID(v)
+	return _u
+}
+
+// SetNillableGatewayRequestID sets the "gateway_request_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableGatewayRequestID(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetGatewayRequestID(*v)
+	}
+	return _u
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (_u *UsageLogUpdate) ClearGatewayRequestID() *UsageLogUpdate {
+	_u.mutation.ClearGatewayRequestID()
+	return _u
+}
+
+// SetResult sets the "result" field.
+func (_u *UsageLogUpdate) SetResult(v int16) *UsageLogUpdate {
+	_u.mutation.ResetResult()
+	_u.mutation.SetResult(v)
+	return _u
+}
+
+// SetNillableResult sets the "result" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableResult(v *int16) *UsageLogUpdate {
+	if v != nil {
+		_u.SetResult(*v)
+	}
+	return _u
+}
+
+// AddResult adds value to the "result" field.
+func (_u *UsageLogUpdate) AddResult(v int16) *UsageLogUpdate {
+	_u.mutation.AddResult(v)
+	return _u
+}
+
+// ClearResult clears the value of the "result" field.
+func (_u *UsageLogUpdate) ClearResult() *UsageLogUpdate {
+	_u.mutation.ClearResult()
+	return _u
+}
+
+// SetSwitches sets the "switches" field.
+func (_u *UsageLogUpdate) SetSwitches(v int16) *UsageLogUpdate {
+	_u.mutation.ResetSwitches()
+	_u.mutation.SetSwitches(v)
+	return _u
+}
+
+// SetNillableSwitches sets the "switches" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableSwitches(v *int16) *UsageLogUpdate {
+	if v != nil {
+		_u.SetSwitches(*v)
+	}
+	return _u
+}
+
+// AddSwitches adds value to the "switches" field.
+func (_u *UsageLogUpdate) AddSwitches(v int16) *UsageLogUpdate {
+	_u.mutation.AddSwitches(v)
+	return _u
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (_u *UsageLogUpdate) ClearSwitches() *UsageLogUpdate {
+	_u.mutation.ClearSwitches()
+	return _u
+}
+
+// SetFallback sets the "fallback" field.
+func (_u *UsageLogUpdate) SetFallback(v bool) *UsageLogUpdate {
+	_u.mutation.SetFallback(v)
+	return _u
+}
+
+// SetNillableFallback sets the "fallback" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableFallback(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetFallback(*v)
+	}
+	return _u
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (_u *UsageLogUpdate) ClearFallback() *UsageLogUpdate {
+	_u.mutation.ClearFallback()
+	return _u
+}
+
+// SetTakeover sets the "takeover" field.
+func (_u *UsageLogUpdate) SetTakeover(v bool) *UsageLogUpdate {
+	_u.mutation.SetTakeover(v)
+	return _u
+}
+
+// SetNillableTakeover sets the "takeover" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTakeover(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTakeover(*v)
+	}
+	return _u
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (_u *UsageLogUpdate) ClearTakeover() *UsageLogUpdate {
+	_u.mutation.ClearTakeover()
+	return _u
+}
+
 // SetModel sets the "model" field.
 func (_u *UsageLogUpdate) SetModel(v string) *UsageLogUpdate {
 	_u.mutation.SetModel(v)
@@ -1681,6 +1795,42 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.GatewayRequestID(); ok {
+		_spec.SetField(usagelog.FieldGatewayRequestID, field.TypeString, value)
+	}
+	if _u.mutation.GatewayRequestIDCleared() {
+		_spec.ClearField(usagelog.FieldGatewayRequestID, field.TypeString)
+	}
+	if value, ok := _u.mutation.Result(); ok {
+		_spec.SetField(usagelog.FieldResult, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedResult(); ok {
+		_spec.AddField(usagelog.FieldResult, field.TypeInt16, value)
+	}
+	if _u.mutation.ResultCleared() {
+		_spec.ClearField(usagelog.FieldResult, field.TypeInt16)
+	}
+	if value, ok := _u.mutation.Switches(); ok {
+		_spec.SetField(usagelog.FieldSwitches, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedSwitches(); ok {
+		_spec.AddField(usagelog.FieldSwitches, field.TypeInt16, value)
+	}
+	if _u.mutation.SwitchesCleared() {
+		_spec.ClearField(usagelog.FieldSwitches, field.TypeInt16)
+	}
+	if value, ok := _u.mutation.Fallback(); ok {
+		_spec.SetField(usagelog.FieldFallback, field.TypeBool, value)
+	}
+	if _u.mutation.FallbackCleared() {
+		_spec.ClearField(usagelog.FieldFallback, field.TypeBool)
+	}
+	if value, ok := _u.mutation.Takeover(); ok {
+		_spec.SetField(usagelog.FieldTakeover, field.TypeBool, value)
+	}
+	if _u.mutation.TakeoverCleared() {
+		_spec.ClearField(usagelog.FieldTakeover, field.TypeBool)
+	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
@@ -2316,6 +2466,120 @@ func (_u *UsageLogUpdateOne) SetNillableRequestID(v *string) *UsageLogUpdateOne 
 	if v != nil {
 		_u.SetRequestID(*v)
 	}
+	return _u
+}
+
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (_u *UsageLogUpdateOne) SetGatewayRequestID(v string) *UsageLogUpdateOne {
+	_u.mutation.SetGatewayRequestID(v)
+	return _u
+}
+
+// SetNillableGatewayRequestID sets the "gateway_request_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableGatewayRequestID(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetGatewayRequestID(*v)
+	}
+	return _u
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (_u *UsageLogUpdateOne) ClearGatewayRequestID() *UsageLogUpdateOne {
+	_u.mutation.ClearGatewayRequestID()
+	return _u
+}
+
+// SetResult sets the "result" field.
+func (_u *UsageLogUpdateOne) SetResult(v int16) *UsageLogUpdateOne {
+	_u.mutation.ResetResult()
+	_u.mutation.SetResult(v)
+	return _u
+}
+
+// SetNillableResult sets the "result" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableResult(v *int16) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetResult(*v)
+	}
+	return _u
+}
+
+// AddResult adds value to the "result" field.
+func (_u *UsageLogUpdateOne) AddResult(v int16) *UsageLogUpdateOne {
+	_u.mutation.AddResult(v)
+	return _u
+}
+
+// ClearResult clears the value of the "result" field.
+func (_u *UsageLogUpdateOne) ClearResult() *UsageLogUpdateOne {
+	_u.mutation.ClearResult()
+	return _u
+}
+
+// SetSwitches sets the "switches" field.
+func (_u *UsageLogUpdateOne) SetSwitches(v int16) *UsageLogUpdateOne {
+	_u.mutation.ResetSwitches()
+	_u.mutation.SetSwitches(v)
+	return _u
+}
+
+// SetNillableSwitches sets the "switches" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableSwitches(v *int16) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetSwitches(*v)
+	}
+	return _u
+}
+
+// AddSwitches adds value to the "switches" field.
+func (_u *UsageLogUpdateOne) AddSwitches(v int16) *UsageLogUpdateOne {
+	_u.mutation.AddSwitches(v)
+	return _u
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (_u *UsageLogUpdateOne) ClearSwitches() *UsageLogUpdateOne {
+	_u.mutation.ClearSwitches()
+	return _u
+}
+
+// SetFallback sets the "fallback" field.
+func (_u *UsageLogUpdateOne) SetFallback(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetFallback(v)
+	return _u
+}
+
+// SetNillableFallback sets the "fallback" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableFallback(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetFallback(*v)
+	}
+	return _u
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (_u *UsageLogUpdateOne) ClearFallback() *UsageLogUpdateOne {
+	_u.mutation.ClearFallback()
+	return _u
+}
+
+// SetTakeover sets the "takeover" field.
+func (_u *UsageLogUpdateOne) SetTakeover(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetTakeover(v)
+	return _u
+}
+
+// SetNillableTakeover sets the "takeover" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTakeover(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTakeover(*v)
+	}
+	return _u
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (_u *UsageLogUpdateOne) ClearTakeover() *UsageLogUpdateOne {
+	_u.mutation.ClearTakeover()
 	return _u
 }
 
@@ -3941,6 +4205,42 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.RequestID(); ok {
 		_spec.SetField(usagelog.FieldRequestID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.GatewayRequestID(); ok {
+		_spec.SetField(usagelog.FieldGatewayRequestID, field.TypeString, value)
+	}
+	if _u.mutation.GatewayRequestIDCleared() {
+		_spec.ClearField(usagelog.FieldGatewayRequestID, field.TypeString)
+	}
+	if value, ok := _u.mutation.Result(); ok {
+		_spec.SetField(usagelog.FieldResult, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedResult(); ok {
+		_spec.AddField(usagelog.FieldResult, field.TypeInt16, value)
+	}
+	if _u.mutation.ResultCleared() {
+		_spec.ClearField(usagelog.FieldResult, field.TypeInt16)
+	}
+	if value, ok := _u.mutation.Switches(); ok {
+		_spec.SetField(usagelog.FieldSwitches, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedSwitches(); ok {
+		_spec.AddField(usagelog.FieldSwitches, field.TypeInt16, value)
+	}
+	if _u.mutation.SwitchesCleared() {
+		_spec.ClearField(usagelog.FieldSwitches, field.TypeInt16)
+	}
+	if value, ok := _u.mutation.Fallback(); ok {
+		_spec.SetField(usagelog.FieldFallback, field.TypeBool, value)
+	}
+	if _u.mutation.FallbackCleared() {
+		_spec.ClearField(usagelog.FieldFallback, field.TypeBool)
+	}
+	if value, ok := _u.mutation.Takeover(); ok {
+		_spec.SetField(usagelog.FieldTakeover, field.TypeBool, value)
+	}
+	if _u.mutation.TakeoverCleared() {
+		_spec.ClearField(usagelog.FieldTakeover, field.TypeBool)
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)

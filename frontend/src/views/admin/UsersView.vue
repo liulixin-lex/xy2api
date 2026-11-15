@@ -1,31 +1,33 @@
 <template>
   <AppLayout>
     <TablePageLayout>
-      <!-- Single Row: Search, Filters, and Actions -->
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Active Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- Search Box -->
-            <div class="relative w-full md:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
+        <!-- The compact toolbar (12.9): live, refresh, filter and column settings, a rule, then attributes, the bulk
+             menu and create. -->
+        <TableToolbar compact>
+          <template #status>
+            <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
+          </template>
+          <template #search>
+            <label class="table-toolbar__search-box">
+              <span class="sr-only">{{ t('admin.users.searchUsers') }}</span>
+              <Icon name="search" size="sm" class="table-toolbar__search-icon" />
               <input
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10"
+                class="table-toolbar__input"
                 @input="handleSearch"
               />
-            </div>
+            </label>
+          </template>
 
+          <template #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
+            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter">
               <Select
                 v-model="filters.role"
+                size="sm"
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
                   { value: 'admin', label: t('admin.users.admin') },
@@ -37,9 +39,10 @@
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
+            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter">
               <Select
                 v-model="filters.status"
+                size="sm"
                 :options="[
                   { value: '', label: t('admin.users.allStatus') },
                   { value: 'active', label: t('common.active') },
@@ -50,9 +53,10 @@
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
+            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter">
               <Select
                 v-model="filters.group"
+                size="sm"
                 :options="groupFilterOptions"
                 searchable
                 creatable
@@ -63,9 +67,10 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter">
               <Select
                 v-model="filters.apiKeyGroup"
+                size="sm"
                 :options="apiKeyGroupFilterOptions"
                 searchable
                 :search-placeholder="t('admin.users.searchApiKeyGroups')"
@@ -77,7 +82,7 @@
             <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-full sm:w-36"
+                class="relative table-toolbar__filter"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input
@@ -86,7 +91,7 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
                 <!-- Number type: number input -->
                 <input
@@ -96,13 +101,14 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
                 <!-- Select/Multi-select type -->
                 <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
                   <div class="w-full">
                     <Select
                       :model-value="value"
+                      size="sm"
                       :options="[
                         { value: '', label: getAttributeDefinitionName(Number(attrId)) },
                         ...(getAttributeDefinition(Number(attrId))?.options || [])
@@ -118,190 +124,200 @@
                   @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
                   @keyup.enter="applyFilter"
                   :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
+                  class="table-toolbar__input table-toolbar__input--plain"
                 />
               </div>
             </template>
-          </div>
+          </template>
 
-          <!-- Right: Actions and Settings -->
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <!-- Mobile: Secondary buttons (icon only) -->
-            <div class="flex items-center gap-2 md:contents">
-              <!-- Refresh Button -->
+          <template #actions>
+            <button
+              type="button"
+              @click="refreshUsers"
+              :disabled="loading"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
+            >
+              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <!-- Filter Settings Dropdown -->
+            <div class="relative" ref="filterDropdownRef">
               <button
-                @click="loadUsers"
-                :disabled="loading"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('common.refresh')"
+                type="button"
+                @click="showFilterDropdown = !showFilterDropdown"
+                class="table-toolbar__icon-btn table-toolbar__icon"
+                :aria-label="t('admin.users.filterSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showFilterDropdown ? 'true' : 'false'"
+                v-tip="t('admin.users.filterSettings')"
               >
-                <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+                <Icon name="filter" size="sm" />
               </button>
-              <!-- Filter Settings Dropdown -->
-              <div class="relative" ref="filterDropdownRef">
+              <div
+                v-if="showFilterDropdown"
+                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+              >
+                <!-- Built-in filters -->
                 <button
-                  @click="showFilterDropdown = !showFilterDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.filterSettings')"
+                  v-for="filter in builtInFilters"
+                  :key="filter.key"
+                  type="button"
+                  @click="toggleBuiltInFilter(filter.key)"
+                  :class="[POPOVER_ITEM, POPOVER_ITEM_TEXT]"
                 >
-                  <Icon name="filter" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
+                  <span>{{ filter.name }}</span>
+                  <Icon
+                    v-if="visibleFilters.has(filter.key)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
                 </button>
-                <!-- Dropdown menu -->
+                <!-- Divider if custom attributes exist -->
                 <div
-                  v-if="showFilterDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <!-- Built-in filters -->
-                  <button
-                    v-for="filter in builtInFilters"
-                    :key="filter.key"
-                    @click="toggleBuiltInFilter(filter.key)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ filter.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(filter.key)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                  <!-- Divider if custom attributes exist -->
-                  <div
-                    v-if="filterableAttributes.length > 0"
-                    class="my-1 border-t border-gray-100 dark:border-dark-700"
-                  ></div>
-                  <!-- Custom attribute filters -->
-                  <button
-                    v-for="attr in filterableAttributes"
-                    :key="attr.id"
-                    @click="toggleAttributeFilter(attr)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ attr.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(`attr_${attr.id}`)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-              </div>
-              <!-- Column Settings Dropdown -->
-              <div class="relative" ref="columnDropdownRef">
+                  v-if="filterableAttributes.length > 0"
+                  class="my-1 border-t border-line-popover"
+                ></div>
+                <!-- Custom attribute filters -->
                 <button
-                  @click="showColumnDropdown = !showColumnDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.columnSettings')"
+                  v-for="attr in filterableAttributes"
+                  :key="attr.id"
+                  type="button"
+                  @click="toggleAttributeFilter(attr)"
+                  :class="[POPOVER_ITEM, POPOVER_ITEM_TEXT]"
                 >
-                  <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+                  <span>{{ attr.name }}</span>
+                  <Icon
+                    v-if="visibleFilters.has(`attr_${attr.id}`)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
                 </button>
-                <!-- Dropdown menu -->
-                <div
-                  v-if="showColumnDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <button
-                    v-for="col in toggleableColumns"
-                    :key="col.key"
-                    :disabled="isForcedVisibleColumn(col.key)"
-                    @click="toggleColumn(col.key)"
-                    :class="[
-                      'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
-                      isForcedVisibleColumn(col.key)
-                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
-                    ]"
-                    :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
-                  >
-                    <span>{{ col.label }}</span>
-                    <Icon
-                      v-if="isColumnVisible(col.key)"
-                      name="check"
-                      size="sm"
-                      :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
               </div>
-              <!-- Attributes Config Button -->
+            </div>
+            <!-- Column Settings Dropdown -->
+            <div class="relative" ref="columnDropdownRef">
               <button
-                v-if="canManage"
-                @click="showAttributesModal = true"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.attributes.configButton')"
+                type="button"
+                @click="showColumnDropdown = !showColumnDropdown"
+                class="table-toolbar__icon-btn table-toolbar__icon"
+                :aria-label="t('admin.users.columnSettings')"
+                aria-haspopup="true"
+                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                v-tip="t('admin.users.columnSettings')"
               >
-                <Icon name="cog" size="sm" class="md:mr-1.5" />
-                <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
               </button>
+              <div
+                v-if="showColumnDropdown"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+              >
+                <button
+                  v-for="col in toggleableColumns"
+                  :key="col.key"
+                  type="button"
+                  :disabled="isForcedVisibleColumn(col.key)"
+                  @click="toggleColumn(col.key)"
+                  :class="[
+                    POPOVER_ITEM,
+                    isForcedVisibleColumn(col.key)
+                      ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                      : POPOVER_ITEM_TEXT
+                  ]"
+                  :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
+                >
+                  <span>{{ col.label }}</span>
+                  <Icon
+                    v-if="isColumnVisible(col.key)"
+                    name="check"
+                    size="sm"
+                    :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
+            </div>
+            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
+            <button
+              v-if="canManage"
+              type="button"
+              @click="showAttributesModal = true"
+              class="table-toolbar__btn table-toolbar__btn--secondary"
+              :aria-label="t('admin.users.attributes.configButton')"
+              v-tip="t('admin.users.attributes.configButton')"
+            >
+              <Icon name="cog" size="sm" />
+              <span class="table-toolbar__label table-toolbar__label--wide">{{ t('admin.users.attributes.configButton') }}</span>
+            </button>
+
+            <!-- The four bulk actions in one menu (12.9-5), disabled until a row is ticked, the count on the button in a
+                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. -->
+            <div v-if="canManage" ref="bulkRootRef" class="relative">
+              <button
+                ref="bulkButtonRef"
+                type="button"
+                class="table-toolbar__btn table-toolbar__btn--secondary users-bulk"
+                data-test="bulk-actions"
+                :disabled="selectedCount === 0"
+                aria-haspopup="menu"
+                :aria-expanded="bulkMenuOpen ? 'true' : 'false'"
+                :aria-label="t('admin.users.bulkActions')"
+                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : t('admin.users.bulkActions')"
+                @click="bulkMenuOpen = !bulkMenuOpen"
+              >
+                <Icon name="users" size="sm" />
+                <span class="table-toolbar__label">{{ t('admin.users.bulkActions') }}</span>
+                <span class="users-bulk__count" :class="{ 'is-empty': selectedCount === 0 }" data-test="bulk-count">{{ selectedCount || '' }}</span>
+                <Icon name="chevronDown" size="xs" class="users-bulk__chevron" />
+              </button>
+              <div
+                v-if="bulkMenuOpen"
+                ref="bulkMenuRef"
+                role="menu"
+                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                :style="{ zIndex: bulkMenuLayer.zIndex.value }"
+                data-test="bulk-menu"
+              >
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" @click="bulkMenuOpen = false; showBulkEditModal = true">
+                  {{ t('admin.users.bulkLimits.label') }}
+                </button>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
+                  {{ t('admin.users.enable') }}
+                </button>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
+                  {{ t('admin.users.disable') }}
+                </button>
+                <div class="my-1 border-t border-line-popover"></div>
+                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
+                  {{ t('common.delete') }}
+                </button>
+              </div>
             </div>
 
-            <button
-              v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
-              data-test="bulk-edit-limits"
-              @click="showBulkEditModal = true"
-            >
-              <Icon name="users" size="md" class="mr-2" />
-              {{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}
-            </button>
-
-            <button
-              v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
-              data-test="bulk-disable-users"
-              :disabled="bulkStatusUpdating"
-              @click="openBulkStatus('disabled')"
-            >
-              <Icon name="ban" size="md" class="mr-2" />
-              {{ t('admin.users.bulkStatus.disableAction', { count: selectedCount }) }}
-            </button>
-
-            <button
-              v-if="canManage && selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
-              data-test="bulk-enable-users"
-              :disabled="bulkStatusUpdating"
-              @click="openBulkStatus('active')"
-            >
-              <Icon name="checkCircle" size="md" class="mr-2" />
-              {{ t('admin.users.bulkStatus.enableAction', { count: selectedCount }) }}
-            </button>
-
-            <button
-              v-if="canManage && selectedCount > 0"
-              class="btn btn-danger flex-1 md:flex-initial"
-              data-test="bulk-delete-users"
-              :disabled="bulkDeleting"
-              @click="bulkDeleteIds = [...selectedIds]"
-            >
-              <Icon name="trash" size="md" class="mr-2" />
-              {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
-            </button>
-
-            <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
-              <Icon name="plus" size="md" class="mr-2" />
+            <button v-if="canManage" type="button" @click="showCreateModal = true" class="table-toolbar__btn table-toolbar__btn--primary">
+              <Icon name="plus" size="sm" />
               {{ t('admin.users.createUser') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <!-- Users Table -->
       <template #table>
+        <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
+          ref="usersTableRef"
+          class="dense-cells"
           :columns="columns"
-          :data="sortedUsers"
+          :data="users"
           :loading="loading"
+          :row-class="userRowClass"
           row-key="id"
           selectable
           :selected-keys="selectedIds"
@@ -315,16 +331,18 @@
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
+          <!-- One line: a long address ends in "…", in a narrow card's head and past 240px in the wide table, where it would
+               widen the table (7r-7); hovered or tapped, the tip has it whole (7o-5). -->
           <template #cell-email="{ value }">
-            <div class="flex items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2">
               <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
+                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
               >
                 <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
                   {{ value.charAt(0).toUpperCase() }}
                 </span>
               </div>
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white lg:max-w-60" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
             </div>
           </template>
 
@@ -354,9 +372,9 @@
             <div class="max-w-xs">
               <span
                 class="block truncate text-sm text-gray-700 dark:text-gray-300"
-                :title="getAttributeValue(row.id, def.id)"
+                :title="getAttributeValue(row, def.id)"
               >
-                {{ getAttributeValue(row.id, def.id) }}
+                {{ getAttributeValue(row, def.id) }}
               </span>
             </div>
           </template>
@@ -492,7 +510,7 @@
               :disabled="!canReadRow(row)"
               @click="handlePlatformQuota(row)"
             >
-              <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
+              <UserPlatformQuotaCell :quotas="row.platform_quotas" />
             </button>
           </template>
 
@@ -579,26 +597,26 @@
 
           <template #cell-usage="{ row }">
             <PlatformUsageBreakdown
-              :today="usageStats[row.id]?.today_actual_cost ?? 0"
-              :total="usageStats[row.id]?.total_actual_cost ?? 0"
-              :by-platform="usageStats[row.id]?.by_platform"
+              :today="row.usage_stats?.today_actual_cost ?? 0"
+              :total="row.usage_stats?.total_actual_cost ?? 0"
+              :by-platform="row.usage_stats?.by_platform"
             />
           </template>
 
           <template #cell-usage_anthropic="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'anthropic')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'anthropic')" />
           </template>
 
           <template #cell-usage_openai="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'openai')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'openai')" />
           </template>
 
           <template #cell-usage_gemini="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'gemini')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'gemini')" />
           </template>
 
           <template #cell-usage_antigravity="{ row }">
-            <PlatformCostCell :usage="getPlatformUsage(row.id, 'antigravity')" />
+            <PlatformCostCell :usage="getPlatformUsage(row, 'antigravity')" />
           </template>
 
           <template #cell-concurrency="{ row }">
@@ -609,17 +627,10 @@
           </template>
 
           <template #cell-status="{ value }">
-            <div class="flex items-center gap-1.5">
-              <span
-                :class="[
-                  'inline-block h-2 w-2 rounded-full',
-                  value === 'active' ? 'bg-green-500' : 'bg-red-500'
-                ]"
-              ></span>
-              <span class="text-sm text-gray-700 dark:text-gray-300">
-                {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
-              </span>
-            </div>
+            <span class="inline-flex items-center gap-1.5 whitespace-nowrap" :class="{ 'status-text-normal': value === 'active' }">
+              <StatusDot :tone="value === 'active' ? 'ok' : 'off'" />
+              {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
+            </span>
           </template>
 
           <template #cell-created_at="{ value }">
@@ -693,9 +704,9 @@
       <!-- Pagination -->
       <template #pagination>
       <Pagination
-        v-if="pagination.total > 0"
+        v-if="usersTotal > 0"
         :page="pagination.page"
-        :total="pagination.total"
+        :total="usersTotal"
         :page-size="pagination.page_size"
         @update:page="handlePageChange"
         @update:pageSize="handlePageSizeChange"
@@ -814,8 +825,8 @@
       @confirm="confirmBulkStatus"
       @cancel="closeBulkStatus"
     />
-    <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="loadUsers" />
-    <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="loadUsers" />
+    <UserCreateModal :show="showCreateModal" @close="showCreateModal = false" @success="reloadUsers" />
+    <UserEditModal :show="showEditModal" :user="editingUser" @close="closeEditModal" @success="reloadUsers" />
     <BulkEditUserModal
       :show="showBulkEditModal"
       :selected-ids="selectedIds"
@@ -826,19 +837,19 @@
       :show="showPlatformQuotaModal"
       :user="platformQuotaUser"
       @close="closePlatformQuotaModal"
-      @success="loadUsers"
+      @success="reloadUsers"
     />
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
-    <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
-    <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
+    <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="reloadUsers" />
+    <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="reloadUsers" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
-    <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
+    <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="reloadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -849,17 +860,24 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
+import { showTipNow, vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
+import { useLiveTable, type LivePatches } from '@/composables/useLiveTable'
+import { userUsageOrDefault } from './liveRowDefaults'
 import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
+import StatusDot from '@/components/common/StatusDot.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -907,8 +925,8 @@ const attributeColumns = computed<Column[]>(() =>
 )
 
 // Get formatted attribute value for display in table
-const getAttributeValue = (userId: number, attrId: number): string => {
-  const userAttrs = userAttributeValues.value[userId]
+const getAttributeValue = (row: LiveUser, attrId: number): string => {
+  const userAttrs = row.attribute_values
   if (!userAttrs) return '-'
   const value = userAttrs[attrId]
   if (!value) return '-'
@@ -960,7 +978,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'usage_gemini', label: t('admin.users.columns.usageGemini'), sortable: false },
   { key: 'usage_antigravity', label: t('admin.users.columns.usageAntigravity'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
-  { key: 'status', label: t('admin.users.columns.status'), sortable: true },
+  { key: 'status', label: t('admin.users.columns.status'), sortable: true, cardHeadEnd: true },
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
@@ -1059,11 +1077,12 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
-  if (wasHidden && (key === 'usage' || key.startsWith('usage_') || key.startsWith('attr_') || key === 'balance_platform_quota')) {
-    refreshCurrentPageSecondaryData()
-  }
+  // A source skips a hidden column; once it is shown again, that source runs now.
+  if (wasHidden && (key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
+  if (wasHidden && key.startsWith('attr_')) void liveUsers.refresh('attributes')
+  if (wasHidden && key === 'balance_platform_quota') void liveUsers.refresh('quotas')
   if (key === 'subscriptions') {
-    loadUsers()
+    void reloadUsers()
   }
   if (wasHidden && key === 'groups') {
     loadAllGroups()
@@ -1101,8 +1120,6 @@ const columns = computed<Column[]>(() =>
   )
 )
 
-const users = ref<AdminUser[]>([])
-const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
 const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' } => {
@@ -1274,11 +1291,8 @@ const saveFiltersToStorage = () => {
 const getAttributeDefinition = (attrId: number): UserAttributeDefinition | undefined => {
   return attributeDefinitions.value.find(d => d.id === attrId)
 }
-const usageStats = ref<Record<string, BatchUserUsageStats>>({})
-const platformQuotaStats = ref<Record<number, PlatformQuotaItem[]>>({})
-
-const getPlatformUsage = (userId: number, platform: string) =>
-  usageStats.value[userId]?.by_platform?.find((p) => p.platform === platform)
+const getPlatformUsage = (row: LiveUser, platform: string) =>
+  row.usage_stats?.by_platform?.find((p) => p.platform === platform)
 
 // 用量列前端排序：DataTable 工作在 server-side-sort 模式，所有 sortable
 // 字段都会触发后端查询，而用量列数据是异步批量拉取后再合并到当前页，
@@ -1345,8 +1359,8 @@ const toggleUsageSortMenu = (key: string) => {
   openUsageSortMenu.value = openUsageSortMenu.value === key ? null : key
 }
 
-const getUsageValue = (userId: number, key: string, metric: UsageMetric): number => {
-  const stats = usageStats.value[userId]
+const getUsageValue = (row: LiveUser, key: string, metric: UsageMetric): number => {
+  const stats = row.usage_stats
   if (!stats) return 0
   const platform = USAGE_COLUMN_PLATFORMS[key]
   if (platform === null) {
@@ -1357,39 +1371,22 @@ const getUsageValue = (userId: number, key: string, metric: UsageMetric): number
   return metric === 'today' ? p.today_actual_cost ?? 0 : p.total_actual_cost ?? 0
 }
 
-// 在 server-side 排序结果之上叠加用量列的本地排序；无 usageSort 时直接透传原数组。
-// 稳定排序：等值按原 index 保序，避免拉取新用量数据时表行抖动。
-const sortedUsers = computed(() => {
-  const s = usageSort.value
-  if (!s) return users.value
-  return [...users.value]
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const av = getUsageValue(a.row.id, s.key, s.metric)
-      const bv = getUsageValue(b.row.id, s.key, s.metric)
-      if (av !== bv) return s.order === 'asc' ? av - bv : bv - av
-      return a.index - b.index
-    })
-    .map((x) => x.row)
-})
+// The current-page usage sort is the live engine's local sort: it runs when the user picks it, on every later page
+// and once more when a new page's usage lands; passive updates never re-order (spec 8.4a). Rows whose usage has not
+// arrived count as 0; equal values keep the server's order.
+const usageComparator = (s: NonNullable<UsageSortState>) => (a: LiveUser, b: LiveUser) => {
+  const av = getUsageValue(a, s.key, s.metric)
+  const bv = getUsageValue(b, s.key, s.metric)
+  return s.order === 'asc' ? av - bv : bv - av
+}
 
-const {
-  selectedIds,
-  selectedCount,
-  setSelectedIds,
-  clear: clearSelection,
-  removeMany: removeSelectedIds
-} = useTableSelection<AdminUser>({
-  rows: sortedUsers,
-  getId: (user) => user.id
-})
 
 const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
   const ids = keys.filter((key): key is number => typeof key === 'number')
   // Operators never select rows they cannot act on (admins, operators, themselves),
   // so bulk actions never send a target the backend refuses.
   setSelectedIds(isSuperAdmin.value ? ids : ids.filter((id) => {
-    const row = sortedUsers.value.find((user) => user.id === id)
+    const row = users.value.find((user) => user.id === id)
     return !row || canActOn(row)
   }))
 }
@@ -1399,12 +1396,9 @@ const getUserSelectionLabel = (user: AdminUser) =>
 
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])
-const userAttributeValues = ref<Record<number, Record<number, string>>>({})
 const pagination = reactive({
   page: 1,
-  page_size: getPersistedPageSize(),
-  total: 0,
-  pages: 0
+  page_size: getPersistedPageSize()
 })
 
 const showCreateModal = ref(false)
@@ -1434,96 +1428,158 @@ const closePlatformQuotaModal = () => {
   showPlatformQuotaModal.value = false
   platformQuotaUser.value = null
 }
-let abortController: AbortController | null = null
-let secondaryDataSeq = 0
-
-const loadUsersSecondaryData = async (
-  userIds: number[],
-  signal?: AbortSignal,
-  expectedSeq?: number
-) => {
-  if (userIds.length === 0) return
-
-  const tasks: Promise<void>[] = []
-
-  if (hasVisibleUsageColumn.value) {
-    tasks.push(
-      (async () => {
-        try {
-          const usageResponse = await adminAPI.dashboard.getBatchUsersUsage(userIds)
-          if (signal?.aborted) return
-          if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-          usageStats.value = usageResponse.stats
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load usage stats:', e)
-        }
-      })()
-    )
+// The list is a live table (spec 8.5): balance, current concurrency and last activity come from the page fetched again
+// with the same query every 10 s, which also counts rows that appeared or went (liveUsers.pending: the changes pill,
+// taken in by liveUsers.applyPending). Usage is a 30 s partial source; platform quotas (one request per user) and
+// attribute values run after each load and on refresh only. The 10 s re-fetch of the current page is also the
+// membership check: under a fast-changing server-side sort a row may drift off the current page between two checks,
+// and it shows dimmed until the next active load.
+type LiveUser = AdminUser & {
+  usage_stats?: BatchUserUsageStats
+  platform_quotas?: PlatformQuotaItem[]
+  attribute_values?: Record<number, string>
+}
+const userListFilters = () => {
+  const attrFilters: Record<number, string> = {}
+  for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
+    if (value) attrFilters[Number(attrId)] = value
   }
-
-  const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
-  const attributeUserIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
-  if (attributeUserIds.length > 0 && attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
-    tasks.push(
-      (async () => {
-        try {
-          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
-          if (signal?.aborted) return
-          if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-          userAttributeValues.value = attrResponse.attributes
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load user attribute values:', e)
-        }
-      })()
-    )
-  }
-
-  if (hasVisiblePlatformQuotaColumn.value) {
-    tasks.push(
-      (async () => {
-        try {
-          // 无批量端点：对当前页用户逐个拉取，分块并发（每批 6），批间检查中止条件，避免大 pageSize 时请求洪峰
-          // 普通管理员只拉取自己能查看的用户（不含管理员、其他普通管理员和自己）
-          const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
-          const quotaIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
-          const CHUNK = 6
-          for (let i = 0; i < quotaIds.length; i += CHUNK) {
-            if (signal?.aborted) return
-            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const chunk = quotaIds.slice(i, i + CHUNK)
-            const results = await Promise.allSettled(
-              chunk.map((id) => adminAPI.users.getPlatformQuotas(id))
-            )
-            if (signal?.aborted) return
-            if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const merged = { ...platformQuotaStats.value }
-            results.forEach((r, idx) => {
-              if (r.status === 'fulfilled') {
-                merged[chunk[idx]] = r.value.platform_quotas || []
-              }
-            })
-            platformQuotaStats.value = merged
-          }
-        } catch (e) {
-          if (signal?.aborted) return
-          console.error('Failed to load platform quotas:', e)
-        }
-      })()
-    )
-  }
-
-  if (tasks.length > 0) {
-    await Promise.allSettled(tasks)
+  return {
+    role: filters.role as any,
+    status: filters.status as any,
+    search: searchQuery.value || undefined,
+    group_name: filters.group || undefined,
+    api_key_group_id: filters.apiKeyGroup ?? undefined,
+    attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
+    // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
+    include_subscriptions: true,
+    sort_by: sortState.sort_by,
+    sort_order: sortState.sort_order
   }
 }
+// Operators only read the users they may view (not admins, other operators or themselves).
+const readableIds = (ids: number[]) => {
+  if (isSuperAdmin.value) return ids
+  const readable = new Set(users.value.filter(canReadRow).map((user) => user.id))
+  return ids.filter((id) => readable.has(id))
+}
+/** Page count as the server reports it, for keeping a page change in range. */
+let serverPages = 0
+const liveUsers = useLiveTable<LiveUser>({
+  getId: (user) => user.id,
+  fetchPage: async (signal) => {
+    const page = await adminAPI.users.list(pagination.page, pagination.page_size, userListFilters(), { signal })
+    serverPages = page.pages
+    return page
+  },
+  membershipIntervalMs: 10_000,
+  // A row whose status or role no longer matches the filter stays in place, dimmed.
+  matches: (user) => (!filters.status || user.status === filters.status) && (!filters.role || user.role === filters.role),
+  sources: [
+    {
+      name: 'usage',
+      intervalMs: 30_000,
+      fetch: async (ids) => {
+        if (!hasVisibleUsageColumn.value) return []
+        const userIds = ids.map(Number)
+        const { stats } = await adminAPI.dashboard.getBatchUsersUsage(userIds)
+        return userIds.map((id) => [id, { usage_stats: userUsageOrDefault(id, stats?.[id]) }] as const)
+      }
+    },
+    {
+      name: 'quotas',
+      intervalMs: 0,
+      fetch: async (ids, signal) => {
+        if (!hasVisiblePlatformQuotaColumn.value) return []
+        // 无批量端点：逐个拉取，分块并发（每批 6），批间检查中止，避免大 pageSize 时请求洪峰
+        const quotaIds = readableIds(ids.map(Number))
+        const patches: Array<readonly [number, Partial<LiveUser>]> = []
+        const CHUNK = 6
+        for (let i = 0; i < quotaIds.length && !signal.aborted; i += CHUNK) {
+          const chunk = quotaIds.slice(i, i + CHUNK)
+          const results = await Promise.allSettled(chunk.map((id) => adminAPI.users.getPlatformQuotas(id)))
+          results.forEach((r, idx) => {
+            if (r.status === 'fulfilled') patches.push([chunk[idx], { platform_quotas: r.value.platform_quotas || [] }])
+          })
+        }
+        return patches
+      }
+    },
+    {
+      name: 'attributes',
+      intervalMs: 0,
+      fetch: async (ids): Promise<LivePatches<LiveUser>> => {
+        if (attributeDefinitions.value.length === 0 || !hasVisibleAttributeColumns.value) return []
+        const attributeUserIds = readableIds(ids.map(Number))
+        if (attributeUserIds.length === 0) return []
+        const response = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
+        const values = response.attributes ?? {}
+        return attributeUserIds.map((id) => [id, { attribute_values: values[id] ?? {} }] as const)
+      }
+    }
+  ]
+})
+const { rows: users, loading, total: usersTotal, pending, status: liveStatus } = liveUsers
+const changesText = (n: string) => t('common.pendingChanges.changes', { n })
+const {
+  selectedIds,
+  selectedCount,
+  setSelectedIds,
+  clear: clearSelection,
+  removeMany: removeSelectedIds
+} = useTableSelection<AdminUser>({
+  rows: users,
+  getId: (user) => user.id
+})
+const usersTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 
-const refreshCurrentPageSecondaryData = () => {
-  const userIds = users.value.map((u) => u.id)
-  if (userIds.length === 0) return
-  const seq = ++secondaryDataSeq
-  void loadUsersSecondaryData(userIds, undefined, seq)
+// The toolbar's dropdown rows in the popover material (12.6). Filter and column settings are multi-select lists: a
+// ticked row is told by its brand check alone, without the selected background or text colour (12.6-5).
+const POPOVER_ITEM = 'flex w-full items-center justify-between px-4 py-2 text-left text-sm'
+const POPOVER_ITEM_TEXT = 'text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300'
+const BULK_ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200'
+// The danger item (delete): the error text, on a light red under the pointer and keyboard focus (12.12-6).
+const BULK_DANGER = '!text-status-error-text hover:!bg-surface-popover-danger-hover focus-visible:!bg-surface-popover-danger-hover'
+// The bulk menu is a sub-layer like the row menu: Escape closes it and gives focus back to its button, a dialog it
+// opens closes it, a press outside closes it (handleClickOutside). It closes when the last row is unticked.
+const bulkMenuOpen = ref(false)
+const bulkRootRef = ref<HTMLElement | null>(null)
+const bulkButtonRef = ref<HTMLButtonElement | null>(null)
+const bulkMenuRef = ref<HTMLElement | null>(null)
+const bulkMenuLayer = useOverlayLayer(bulkMenuOpen, {
+  root: bulkMenuRef,
+  modal: false,
+  floor: 9999,
+  onEscape: () => {
+    bulkMenuOpen.value = false
+    bulkButtonRef.value?.focus({ preventScroll: true })
+  },
+  onCovered: () => { bulkMenuOpen.value = false }
+})
+watch(selectedCount, (count) => {
+  if (count === 0) bulkMenuOpen.value = false
+})
+const userRowClass = (row: LiveUser) =>
+  liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
+watch(usageSort, (sort, previous) => {
+  // A usage sort the user picks starts from the first row (spec 8.4a); the first run applies the stored one.
+  if (previous !== undefined) usersTableRef.value?.scrollToTop?.()
+  liveUsers.sortBy(sort ? usageComparator(sort) : null)
+}, { immediate: true })
+
+const showLoadError = (error: any) => {
+  appStore.showError(error?.response?.data?.detail || error?.message || t('admin.users.failedToLoad'))
+  console.error('Error loading users:', error)
+}
+/** A silent reload: the rows stay on screen and are replaced in place. */
+const reloadUsers = () => liveUsers.reload().catch(showLoadError)
+const applyPending = () => liveUsers.applyPending().catch(showLoadError)
+/** The manual refresh button. */
+const refreshUsers = () => reloadUsers()
+/** A filter or search change: back to the first row, then reload. */
+const applyUserFilters = () => {
+  usersTableRef.value?.scrollToTop()
+  return reloadUsers()
 }
 
 // Action Menu State
@@ -1606,6 +1662,9 @@ const handleClickOutside = (event: MouseEvent) => {
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
     showColumnDropdown.value = false
   }
+  if (bulkRootRef.value && !bulkRootRef.value.contains(target)) {
+    bulkMenuOpen.value = false
+  }
   // Close usage sort dropdown when clicking outside any usage-sort-trigger
   if (openUsageSortMenu.value !== null && !target.closest('.usage-sort-trigger')) {
     openUsageSortMenu.value = null
@@ -1660,78 +1719,12 @@ const loadAttributeDefinitions = async () => {
 const handleAttributesModalClose = async () => {
   showAttributesModal.value = false
   await loadAttributeDefinitions()
-  loadUsers()
-}
-
-const loadUsers = async () => {
-  abortController?.abort()
-  const currentAbortController = new AbortController()
-  abortController = currentAbortController
-  const { signal } = currentAbortController
-  loading.value = true
-  try {
-    // Build attribute filters from active filters
-    const attrFilters: Record<number, string> = {}
-    for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
-      if (value) {
-        attrFilters[Number(attrId)] = value
-      }
-    }
-
-    const response = await adminAPI.users.list(
-      pagination.page,
-      pagination.page_size,
-      {
-        role: filters.role as any,
-        status: filters.status as any,
-        search: searchQuery.value || undefined,
-        group_name: filters.group || undefined,
-        api_key_group_id: filters.apiKeyGroup ?? undefined,
-        attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
-        // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
-        include_subscriptions: true,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order
-      },
-      { signal }
-    )
-    if (signal.aborted) {
-      return
-    }
-    users.value = response.items
-    pagination.total = response.total
-    pagination.pages = response.pages
-    usageStats.value = {}
-    userAttributeValues.value = {}
-    platformQuotaStats.value = {}
-
-    // Defer heavy secondary data so table can render first.
-    if (response.items.length > 0) {
-      const userIds = response.items.map((u) => u.id)
-      const seq = ++secondaryDataSeq
-      window.setTimeout(() => {
-        if (signal.aborted || seq !== secondaryDataSeq) return
-        void loadUsersSecondaryData(userIds, signal, seq)
-      }, 50)
-    }
-  } catch (error: any) {
-    const errorInfo = error as { name?: string; code?: string }
-    if (errorInfo?.name === 'AbortError' || errorInfo?.name === 'CanceledError' || errorInfo?.code === 'ERR_CANCELED') {
-      return
-    }
-    const message = error.response?.data?.detail || error.message || t('admin.users.failedToLoad')
-    appStore.showError(message)
-    console.error('Error loading users:', error)
-  } finally {
-    if (abortController === currentAbortController) {
-      loading.value = false
-    }
-  }
+  void reloadUsers()
 }
 
 const handleBulkLimitsSuccess = async () => {
   clearSelection()
-  await loadUsers()
+  await reloadUsers()
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -1739,21 +1732,21 @@ const handleSearch = () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
     pagination.page = 1
-    loadUsers()
+    void applyUserFilters()
   }, 300)
 }
 
 const handlePageChange = (page: number) => {
   // 确保页码在有效范围内
-  const validPage = Math.max(1, Math.min(page, pagination.pages || 1))
+  const validPage = Math.max(1, Math.min(page, serverPages || 1))
   pagination.page = validPage
-  loadUsers()
+  void reloadUsers()
 }
 
 const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize
   pagination.page = 1
-  loadUsers()
+  void reloadUsers()
 }
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
@@ -1761,7 +1754,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
-  loadUsers()
+  void reloadUsers()
 }
 
 // Filter helpers
@@ -1785,7 +1778,7 @@ const toggleBuiltInFilter = (key: string) => {
   }
   saveFiltersToStorage()
   pagination.page = 1
-  loadUsers()
+  void applyUserFilters()
 }
 
 // Toggle a custom attribute filter
@@ -1800,7 +1793,7 @@ const toggleAttributeFilter = (attr: UserAttributeDefinition) => {
   }
   saveFiltersToStorage()
   pagination.page = 1
-  loadUsers()
+  void applyUserFilters()
 }
 
 const updateAttributeFilter = (attrId: number, value: string) => {
@@ -1810,7 +1803,7 @@ const updateAttributeFilter = (attrId: number, value: string) => {
 // Apply filter and save to localStorage
 const applyFilter = () => {
   saveFiltersToStorage()
-  loadUsers()
+  void applyUserFilters()
 }
 
 const handleEdit = (user: AdminUser) => {
@@ -1826,21 +1819,16 @@ const closeEditModal = () => {
 const handleToggleStatus = async (user: AdminUser) => {
   const newStatus = user.status === 'active' ? 'disabled' : 'active'
   try {
-    const updated = await adminAPI.users.toggleStatus(user.id, newStatus)
+    // The row shows the new status at once and the field is locked: no list answer sent before the change lands
+    // writes it; a failure rolls it back.
+    await liveUsers.edit(user.id, 'status', newStatus, async () => {
+      const updated = await adminAPI.users.toggleStatus(user.id, newStatus)
+      // 更新接口的响应不含 current_concurrency、subscriptions 等列表专属字段，只回写状态相关字段。
+      return { status: updated.status, updated_at: updated.updated_at }
+    })
     appStore.showSuccess(
       newStatus === 'active' ? t('admin.users.userEnabled') : t('admin.users.userDisabled')
     )
-    if (loading.value) {
-      // 与本次更新并发的列表请求可能读到更新前的状态，重新拉取保证一致。
-      loadUsers()
-      return
-    }
-    // 更新接口的响应不含 current_concurrency、subscriptions 等列表专属字段，只回写状态相关字段。
-    const row = users.value.find((u) => u.id === user.id)
-    if (row) {
-      row.status = updated.status
-      row.updated_at = updated.updated_at
-    }
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToToggle'))
     console.error('Error toggling user status:', error)
@@ -1888,11 +1876,13 @@ const handleDelete = (user: AdminUser) => {
 const confirmDelete = async () => {
   if (!deletingUser.value) return
   try {
-    await adminAPI.users.delete(deletingUser.value.id)
+    const deletedId = deletingUser.value.id
+    await adminAPI.users.delete(deletedId)
     appStore.showSuccess(t('common.success'))
     showDeleteDialog.value = false
     deletingUser.value = null
-    loadUsers()
+    liveUsers.remove(deletedId)
+    removeSelectedIds([deletedId])
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToDelete'))
     console.error('Error deleting user:', error)
@@ -1908,6 +1898,7 @@ const confirmBulkDelete = async () => {
     try {
       await adminAPI.users.delete(id)
       deletedIds.push(id)
+      liveUsers.remove(id) // off the page at once; the reload below follows
     } catch (error) {
       console.error('Error deleting user:', error)
     }
@@ -1919,7 +1910,7 @@ const confirmBulkDelete = async () => {
   }
   const failed = ids.length - deletedIds.length
   if (failed > 0) appStore.showError(t('admin.users.bulkDelete.failed', { count: failed }))
-  await loadUsers()
+  await reloadUsers()
   bulkDeleting.value = false
 }
 
@@ -1955,7 +1946,7 @@ const confirmBulkStatus = async () => {
     )
     if (skipped > 0) appStore.showInfo(t('admin.users.bulkStatus.skipped', { count: skipped }))
     clearSelection()
-    await loadUsers()
+    await reloadUsers()
   } catch (error) {
     // 失败时保留选中，便于直接重试。
     appStore.showError(extractApiErrorMessage(error, t('admin.users.bulkStatus.failed')))
@@ -2016,7 +2007,7 @@ onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
   loadSavedColumns()
-  loadUsers()
+  void reloadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
   }
@@ -2031,6 +2022,49 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('scroll', handleScroll, true)
   clearTimeout(searchTimeout)
-  abortController?.abort()
 })
 </script>
+
+<style scoped>
+/* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
+   beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
+.dense-cells :deep(thead th),
+.dense-cells :deep(tbody td) {
+  padding-right: var(--cell-pad-x);
+  padding-left: var(--cell-pad-x);
+}
+/* The bulk menu's button (12.9-5): the count in a slot as wide as three digits, empty until a row is ticked, so the
+   button keeps its width; below 1024px a badge on the corner of the 40px square, the chevron gone. */
+.users-bulk {
+  position: relative;
+}
+.users-bulk__count {
+  min-width: 30px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-pill-hover);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+}
+.users-bulk__count.is-empty {
+  visibility: hidden;
+}
+@media (max-width: 1023px) {
+  .users-bulk__count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    background: theme('colors.primary.500');
+    color: #fff;
+  }
+  .users-bulk__count.is-empty,
+  .users-bulk__chevron {
+    display: none;
+  }
+}
+</style>

@@ -65,7 +65,6 @@ type cachedGatewayForwardingSettings struct {
 	clientDatelineNormalization      bool
 	openAISessionUUID                bool
 	schedQualityEnabled              bool
-	schedQualityTestEnabled          bool
 	expiresAt                        int64 // unix nano
 }
 
@@ -1008,7 +1007,6 @@ type gatewayForwardingSettingsResult struct {
 	clientDatelineNormalization                            bool
 	openAISessionUUID                                      bool
 	schedQualityEnabled                                    bool
-	schedQualityTestEnabled                                bool
 	claudeOAuthSystemPrompt, claudeOAuthSystemPromptBlocks string
 }
 
@@ -1027,7 +1025,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				clientDatelineNormalization:      cached.clientDatelineNormalization,
 				openAISessionUUID:                cached.openAISessionUUID,
 				schedQualityEnabled:              cached.schedQualityEnabled,
-				schedQualityTestEnabled:          cached.schedQualityTestEnabled,
 			}
 		}
 	}
@@ -1046,7 +1043,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 					clientDatelineNormalization:      cached.clientDatelineNormalization,
 					openAISessionUUID:                cached.openAISessionUUID,
 					schedQualityEnabled:              cached.schedQualityEnabled,
-					schedQualityTestEnabled:          cached.schedQualityTestEnabled,
 				}, nil
 			}
 		}
@@ -1064,7 +1060,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			SettingKeyEnableClientDatelineNormalization,
 			SettingKeyEnableOpenAISessionUUID,
 			SettingKeySchedQualityEnabled,
-			SettingKeySchedQualityTestEnabled,
 		})
 		if err != nil {
 			slog.Warn("failed to get gateway forwarding settings", "error", err)
@@ -1078,10 +1073,9 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 				clientDatelineNormalization:      true,
 				openAISessionUUID:                true,
 				schedQualityEnabled:              true,
-				schedQualityTestEnabled:          true,
 				expiresAt:                        time.Now().Add(gatewayForwardingErrorTTL).UnixNano(),
 			})
-			return gatewayForwardingSettingsResult{openAITTFTMode: OpenAITTFTModeSemantic, fp: true, claudeOAuthSystemPromptInjection: true, anthropicCacheTTLDefault: "5m", clientDatelineNormalization: true, openAISessionUUID: true, schedQualityEnabled: true, schedQualityTestEnabled: true}, nil
+			return gatewayForwardingSettingsResult{openAITTFTMode: OpenAITTFTModeSemantic, fp: true, claudeOAuthSystemPromptInjection: true, anthropicCacheTTLDefault: "5m", clientDatelineNormalization: true, openAISessionUUID: true, schedQualityEnabled: true}, nil
 		}
 		ttftMode := normalizeOpenAITTFTMode(values[SettingKeyOpenAITTFTMode])
 		fp := true
@@ -1117,7 +1111,6 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			clientDatelineNormalization:      clientDatelineNormalization,
 			openAISessionUUID:                openAISessionUUID,
 			schedQualityEnabled:              schedQualitySettingEnabled(values[SettingKeySchedQualityEnabled]),
-			schedQualityTestEnabled:          schedQualitySettingEnabled(values[SettingKeySchedQualityTestEnabled]),
 			expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
 		})
 		return gatewayForwardingSettingsResult{
@@ -1132,13 +1125,12 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 			clientDatelineNormalization:      clientDatelineNormalization,
 			openAISessionUUID:                openAISessionUUID,
 			schedQualityEnabled:              schedQualitySettingEnabled(values[SettingKeySchedQualityEnabled]),
-			schedQualityTestEnabled:          schedQualitySettingEnabled(values[SettingKeySchedQualityTestEnabled]),
 		}, nil
 	})
 	if r, ok := val.(gatewayForwardingSettingsResult); ok {
 		return r
 	}
-	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true, openAISessionUUID: true, schedQualityEnabled: true, schedQualityTestEnabled: true}
+	return gatewayForwardingSettingsResult{fp: true, claudeOAuthSystemPromptInjection: true, clientDatelineNormalization: true, openAISessionUUID: true, schedQualityEnabled: true}
 }
 
 // GetOpenAITTFTMode 返回 Responses first_token_ms 的统计口径。

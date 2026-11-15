@@ -71,6 +71,7 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 	var hooksMu sync.Mutex
 	var callbacks []string
 	afterTurnCalls := 0
+	completedTurns := make(chan int, 2)
 	hooks := &OpenAIWSIngressHooks{
 		BeforeRequest: func(int, []byte, string) error {
 			hooksMu.Lock()
@@ -84,10 +85,13 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 			hooksMu.Unlock()
 			return nil
 		},
-		AfterTurn: func(int, *OpenAIForwardResult, error) {
+		AfterTurn: func(turn int, result *OpenAIForwardResult, _ error) {
 			hooksMu.Lock()
 			afterTurnCalls++
 			hooksMu.Unlock()
+			if result != nil {
+				completedTurns <- turn
+			}
 		},
 	}
 
@@ -116,6 +120,17 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 	event, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+
+	// Receiving a frame can precede the writer returning and invoking AfterTurn.
+	// Wait for the actual callbacks without moving the production delivery boundary.
+	for _, turn := range []int{1, 2} {
+		select {
+		case got := <-completedTurns:
+			require.Equal(t, turn, got)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("AfterTurn(%d) did not complete", turn)
+		}
+	}
 
 	hooksMu.Lock()
 	gotCallbacks := append([]string(nil), callbacks...)

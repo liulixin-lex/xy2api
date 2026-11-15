@@ -44,21 +44,24 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	now := time.Now()
 	future := now.Add(time.Hour)
 	a, b, c, d, e := selectionTestAccount(1, 1), selectionTestAccount(2, 2), selectionTestAccount(3, 3), selectionTestAccount(4, 4), selectionTestAccount(5, 4)
+	a.Name, b.Name = "account-one", "account-two"
+	a.LastUsedAt = &now
 	c.Status = "disabled"
 	d.RateLimitResetAt = &future
 	e.Type = AccountTypeOAuth
 	repo := &selectionBoardRepo{accounts: []Account{*e, *d, *c, *b, *a}}
 	view := selectionTestView(now)
-	view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+	view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}, Until: future}
+	view.States[fakeSchedViewKey{7, 5, "m"}] = schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionTTFO}, Until: future, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}
 	loads := map[int64]*AccountLoadInfo{1: {LoadRate: 10, CurrentConcurrency: 1}, 2: {LoadRate: 100, CurrentConcurrency: 5}}
 	events := []string{}
 	binding := &selectionBindingFake{owner: 10, events: &events}
 	s := &OpenAIGatewayService{cache: &selectionBoardBindings{selectionBindingFake: binding}, accountRepo: repo, concurrencyService: &ConcurrencyService{cache: &selectionBoardLoads{loads: loads}}}
 	board := NewOpenAISelectionBoard(s, func() schedquality.View { return view })
 	board.now = func() time.Time { return now }
-	board.marks.Mark(5, now.Add(-30*time.Second))
+	s.selectionFullMarks.Mark(5, now.Add(-30*time.Second))
 	before := map[int64]time.Time{}
-	for k, v := range board.marks.at {
+	for k, v := range s.selectionFullMarks.at {
 		before[k] = v
 	}
 	rows, err := board.Board(context.Background(), 7, "m")
@@ -71,15 +74,21 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Equal(t, []int64{2, 5, 1, 3, 4}, ids)
 	require.Equal(t, 5, rows[0].Concurrency)
 	require.Equal(t, 5, rows[0].InFlight)
-	require.False(t, rows[0].CanTakeOver, "a currently full snapshot must not offer takeover or write a mark")
-	require.False(t, rows[3].Eligible)
-	require.Equal(t, "not_schedulable", rows[3].Reject)
-	require.Nil(t, rows[3].RejectUntil)
-	require.Equal(t, &future, rows[4].RejectUntil)
-	require.Zero(t, rows[4].Rank)
-	require.Equal(t, 30, rows[1].RecentlyFullSeconds)
-	require.False(t, rows[1].CanTakeOver)
-	require.Equal(t, before, board.marks.at, "a full load snapshot must not mark an account from Board")
+	require.Equal(t, "account-two", rows[0].Name)
+	require.Equal(t, "normal", rows[0].Layer)
+	require.Equal(t, 100, rows[0].LoadRate)
+	require.Equal(t, "normal", rows[1].Layer)
+	require.True(t, rows[1].Exempt)
+	require.Equal(t, []schedquality.Dimension{schedquality.DimensionTTFO}, rows[1].Dims, "an exemption changes ordering without hiding internal evidence")
+	require.Equal(t, "below", rows[2].Layer)
+	require.Equal(t, []schedquality.Dimension{schedquality.DimensionError}, rows[2].Dims)
+	require.Equal(t, &future, rows[2].Until)
+	require.Equal(t, &now, rows[2].LastUsedAt)
+	require.Equal(t, "stopped", rows[3].Layer)
+	require.Equal(t, &future, rows[4].Until)
+	require.Nil(t, rows[3].Until)
+	require.Equal(t, 5, rows[4].Rank)
+	require.Equal(t, before, s.selectionFullMarks.at, "a full load snapshot must not mark an account from Board")
 	// W1 exercises exactly the admission/comparator seam; W2 connects the same
 	// attempt order to the public selection entry (D11 end-to-end).
 	checker := s
@@ -109,81 +118,6 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Empty(t, events)
 }
 
-func TestSchedBoardRecentlyFullExpires(t *testing.T) {
-	now := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
-	view := selectionTestView(now)
-	s := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}}
-	board := NewOpenAISelectionBoard(s, func() schedquality.View { return view })
-	board.marks.Mark(1, now)
-	for _, tc := range []struct {
-		name    string
-		elapsed time.Duration
-		seconds int
-	}{
-		{"same_second", 0, 0},
-		{"before_expiry", schedquality.TakeoverFullCooloff - time.Second, int(schedquality.TakeoverFullCooloff/time.Second) - 1},
-		{"at_expiry", schedquality.TakeoverFullCooloff, 0},
-		{"after_expiry", schedquality.TakeoverFullCooloff + time.Second, 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			at := now.Add(tc.elapsed)
-			view.ViewAt = at
-			board.now = func() time.Time { return at }
-			rows, err := board.Board(context.Background(), 7, "m")
-			require.NoError(t, err)
-			require.Len(t, rows, 1)
-			require.Equal(t, tc.seconds, rows[0].RecentlyFullSeconds)
-			require.Equal(t, tc.elapsed >= schedquality.TakeoverFullCooloff, rows[0].CanTakeOver)
-			require.Equal(t, now, board.marks.last(1), "board reads must not mutate full marks")
-		})
-	}
-}
-
-func TestSchedBoardTakeoverEligibility(t *testing.T) {
-	cases := []struct {
-		name  string
-		setup func(*fakeSchedView, *Account, *OpenAISelectionBoard)
-	}{
-		{"group_off", func(v *fakeSchedView, a *Account, b *OpenAISelectionBoard) { v.Takeovers[7] = fakeSchedTakeover{} }},
-		{"hard_rejected", func(v *fakeSchedView, a *Account, b *OpenAISelectionBoard) { a.Schedulable = false }},
-		{"unverified", func(v *fakeSchedView, a *Account, b *OpenAISelectionBoard) {
-			v.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: v.ViewAt}
-		}},
-		{"full_mark", func(v *fakeSchedView, a *Account, b *OpenAISelectionBoard) { b.marks.Mark(1, v.ViewAt) }},
-		{"stale", func(v *fakeSchedView, a *Account, b *OpenAISelectionBoard) {
-			v.ViewAt = v.ViewAt.Add(-61 * time.Second)
-		}},
-	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			now := time.Now()
-			v := selectionTestView(now)
-			a := selectionTestAccount(1, 1)
-			repo := &selectionBoardRepo{}
-			s := &OpenAIGatewayService{accountRepo: repo}
-			b := NewOpenAISelectionBoard(s, func() schedquality.View { return v })
-			b.now = func() time.Time { return now }
-			tt.setup(v, a, b)
-			repo.accounts = []Account{*a}
-			rows, err := b.Board(context.Background(), 7, "m")
-			require.NoError(t, err)
-			require.Len(t, rows, 1)
-			require.False(t, rows[0].CanTakeOver)
-			require.Equal(t, 5, rows[0].Concurrency)
-		})
-	}
-	t.Run("eligible_and_load_unavailable", func(t *testing.T) {
-		now := time.Now()
-		v := selectionTestView(now)
-		s := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}, concurrencyService: &ConcurrencyService{cache: &selectionBoardLoads{err: errors.New("load down")}}}
-		b := NewOpenAISelectionBoard(s, func() schedquality.View { return v })
-		rows, err := b.Board(context.Background(), 7, "m")
-		require.NoError(t, err)
-		require.True(t, rows[0].CanTakeOver)
-		require.Equal(t, 1, rows[0].Rank)
-	})
-}
-
 func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 	now := time.Now()
 	until := now.Add(time.Hour)
@@ -208,12 +142,12 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 			b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 			rows, err := b.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
-			require.False(t, rows[0].Eligible)
+			require.Equal(t, "stopped", rows[0].Layer)
 			if kind == "iq" {
-				require.Nil(t, rows[0].RejectUntil)
+				require.Nil(t, rows[0].Until)
 			} else {
-				require.NotNil(t, rows[0].RejectUntil)
-				require.True(t, rows[0].RejectUntil.After(now))
+				require.NotNil(t, rows[0].Until)
+				require.True(t, rows[0].Until.After(now))
 			}
 		})
 	}
@@ -222,7 +156,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 		b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 		rows, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
 		require.NoError(t, err)
-		require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, rows[0].Reject)
+		require.Equal(t, "stopped", rows[0].Layer)
 	})
 }
 
@@ -251,21 +185,18 @@ func TestSchedBoardSchedulingThresholdReadOnly(t *testing.T) {
 			rows, err := board.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
-			require.Equal(t, !tt.paused, rows[0].Eligible)
+			require.Equal(t, tt.paused, rows[0].Layer == "stopped")
 			if tt.paused {
-				require.Equal(t, "account_scheduling_threshold", rows[0].Reject)
-				require.Zero(t, rows[0].Rank)
-				require.False(t, rows[0].CanTakeOver)
+				require.Equal(t, 1, rows[0].Rank)
 				decision := EvaluateAccountSchedulingThreshold(a, s.settingService.GetAccountSchedulingThresholds(context.Background()), now)
-				require.Equal(t, decision.Until, rows[0].RejectUntil)
+				require.Equal(t, decision.Until, rows[0].Until)
 			} else {
-				require.Empty(t, rows[0].Reject)
-				require.Nil(t, rows[0].RejectUntil)
+				require.Nil(t, rows[0].Until)
 			}
 			require.Zero(t, writes.tempCalls)
 			require.Equal(t, before, *a)
 			require.Equal(t, before, repo.accounts[0])
-			require.Empty(t, board.marks.at)
+			require.Empty(t, s.selectionFullMarks.at)
 		})
 	}
 }
@@ -289,16 +220,10 @@ func TestSchedBoardUpstreamChannelRestriction(t *testing.T) {
 	require.Len(t, rows, 2)
 	require.Equal(t, allowed.ID, rows[0].AccountID)
 	require.Equal(t, 1, rows[0].Rank)
-	require.True(t, rows[0].Eligible)
+	require.Equal(t, "normal", rows[0].Layer)
 	require.Equal(t, blocked.ID, rows[1].AccountID)
-	require.Equal(t, "channel_upstream_restricted", rows[1].Reject)
-	require.False(t, rows[1].Eligible)
-	require.Zero(t, rows[1].Rank)
-	require.False(t, rows[1].CanTakeOver)
-	model, ok, reason := s.TestRequestModel(ctx, blocked, "blocked")
-	require.True(t, ok, "test admission has no group and must not inherit a channel restriction")
-	require.Equal(t, "m", model)
-	require.Empty(t, reason)
+	require.Equal(t, "stopped", rows[1].Layer)
+	require.Equal(t, 2, rows[1].Rank)
 }
 
 func TestSchedBoardRejectUntilInjectedClock(t *testing.T) {

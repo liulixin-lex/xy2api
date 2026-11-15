@@ -1,13 +1,16 @@
 <template>
   <button
     type="button"
-    class="btn btn-secondary"
+    class="table-toolbar__btn table-toolbar__btn--secondary"
     data-test="group-category-manage"
-    :title="t('admin.groupCategories.manage')"
+    :aria-label="t('admin.groupCategories.manage')"
+    v-tip="t('admin.groupCategories.manage')"
     @click="openManager"
   >
-    <Icon name="grid" size="md" class="mr-2" />
-    {{ t('admin.groupCategories.manage') }}
+    <Icon name="grid" size="sm" />
+    <!-- A secondary action of the compact groups toolbar (12.9): its icon alone under the toolbar's widest row, and
+         below 1024px (7o-3). -->
+    <span class="table-toolbar__label table-toolbar__label--wide">{{ t('admin.groupCategories.manage') }}</span>
   </button>
 
   <!-- 管理分类：改动先进草稿，点“保存”一次提交，“取消”全部放弃 -->
@@ -121,6 +124,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import { useAppStore } from '@/stores/app'
 import { useGroupCategoriesStore } from '@/stores/groupCategories'
 import { useLazyMount } from '@/composables/useLazyMount'
