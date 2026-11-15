@@ -131,3 +131,36 @@ func TestM4ReviewDiscoveredToolNames(t *testing.T) {
 		})
 	}
 }
+
+func TestM4ReviewAuthenticatedChatFinish(t *testing.T) {
+	for _, tailUsage := range []bool{false, true} {
+		st := NewChatCompletionsToResponsesStreamState("m")
+		st.Bridge = &BridgeOptions{Enabled: true}
+		ast := NewChatCompletionsToAnthropicStreamState("m")
+		ast.Bridge = st.Bridge
+		raw := []byte(`{"id":"c","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}`)
+		ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw, st)
+		ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(raw, ast)
+		if tailUsage {
+			tail := []byte(`{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
+			ChatCompletionsChunkToResponsesEventsWithBridgeOptions(tail, st)
+			ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(tail, ast)
+		}
+		// The reader calls finalize only after DONE or authenticated clean EOF.
+		events := FinalizeChatCompletionsResponsesStream(st)
+		ae := FinalizeChatCompletionsAnthropicStream(ast)
+		if st.Err() != nil || ast.Err() != nil || len(events) == 0 || len(ae) < 2 {
+			t.Fatalf("finish errors: %v / %v", st.Err(), ast.Err())
+		}
+		if events[len(events)-1].Type != "response.completed" || ae[len(ae)-2].Delta.StopReason != "tool_use" || ae[len(ae)-1].Type != "message_stop" {
+			t.Fatal("authenticated finish did not complete")
+		}
+		output := events[len(events)-1].Response.Output
+		if len(output) != 1 || output[0].Arguments != `{"a":1}` {
+			t.Fatalf("arguments=%#v", output)
+		}
+		if tailUsage && events[len(events)-1].Response.Usage.TotalTokens != 7 {
+			t.Fatal("tail usage lost")
+		}
+	}
+}
