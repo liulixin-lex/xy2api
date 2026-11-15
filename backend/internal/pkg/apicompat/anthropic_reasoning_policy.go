@@ -27,6 +27,12 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	}
 	if effort == "none" && claude.SupportsDisabledThinking(req.Model) {
 		out.Thinking = &AnthropicThinking{Type: "disabled"}
+		if spec, ok := claude.Claude55(req.Model); ok && spec.DisabledThinkingMaxEffort != "" {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = "low"
+		}
 		return nil
 	}
 	if spec, ok := claude.Claude55(req.Model); ok {
