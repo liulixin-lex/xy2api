@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/requestmodel"
 	"github.com/stretchr/testify/require"
@@ -117,5 +118,42 @@ func TestInferenceDuplicateTopLevelModel(t *testing.T) {
 		start := time.Now()
 		allocs := testing.AllocsPerRun(10, func() { require.NoError(t, requestmodel.ValidateUniqueTopLevelModel(body)) })
 		t.Logf("scan bytes=%d allocations=%.0f elapsed=%s (11 runs)", len(body), allocs, time.Since(start))
+	}
+}
+
+func TestInferenceValidationPreservesCompressedRouteLimits(t *testing.T) {
+	decoded := []byte(`{"model":"fixture","input":"` + strings.Repeat("x", 4096) + `"}`)
+	for _, encoding := range []string{"gzip", "zstd"} {
+		t.Run(encoding, func(t *testing.T) {
+			var wire bytes.Buffer
+			if encoding == "gzip" {
+				w := gzip.NewWriter(&wire)
+				_, err := w.Write(decoded)
+				require.NoError(t, err)
+				require.NoError(t, w.Close())
+			} else {
+				w, err := zstd.NewWriter(&wire)
+				require.NoError(t, err)
+				_, err = w.Write(decoded)
+				require.NoError(t, err)
+				require.NoError(t, w.Close())
+			}
+			require.Less(t, wire.Len(), 1024)
+			r := gin.New()
+			r.Use(RequestBodyLimit(1<<20), InferenceBodyValidation(1<<20))
+			r.POST("/v1/embeddings", RequestBodyLimit(1024), func(c *gin.Context) {
+				require.Equal(t, encoding, c.GetHeader("Content-Encoding"))
+				require.EqualValues(t, wire.Len(), c.Request.ContentLength)
+				raw, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+				require.NoError(t, err)
+				require.Equal(t, decoded, raw)
+				c.Status(200)
+			})
+			req := httptest.NewRequest("POST", "/v1/embeddings", bytes.NewReader(wire.Bytes()))
+			req.Header.Set("Content-Encoding", encoding)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			require.Equal(t, 200, rec.Code)
+		})
 	}
 }

@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"strings"
@@ -13,7 +15,11 @@ import (
 
 // InferenceBodyValidation runs after authentication and before routing rewrites.
 // Only the scan view is normalized: downstream readers retain the original bytes.
-func InferenceBodyValidation(maxBodyBytes int64) gin.HandlerFunc {
+func InferenceBodyValidation(maxBodyBytes int64, onReadError ...func(*gin.Context, error)) gin.HandlerFunc {
+	readError := inferenceBodyReadError
+	if len(onReadError) > 0 && onReadError[0] != nil {
+		readError = onReadError[0]
+	}
 	return func(c *gin.Context) {
 		if c.Request == nil || c.Request.Method != http.MethodPost || !inferenceJSONBodyPath(c.Request.URL.Path) {
 			c.Next()
@@ -24,9 +30,14 @@ func InferenceBodyValidation(maxBodyBytes int64) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
+		// Scan a decoded copy but replay the exact wire bytes and headers. Later
+		// route limits must continue measuring compressed upload bytes.
+		var wire bytes.Buffer
+		scanRequest := c.Request.Clone(c.Request.Context())
+		scanRequest.Body = io.NopCloser(io.TeeReader(c.Request.Body, &wire))
+		body, err := httputil.ReadRequestBodyWithPrealloc(scanRequest)
 		if err != nil {
-			inferenceBodyReadError(c, err)
+			readError(c, err)
 			return
 		}
 		if inferenceResponsesBodyPath(c.Request.URL.Path) {
@@ -35,10 +46,10 @@ func InferenceBodyValidation(maxBodyBytes int64) gin.HandlerFunc {
 				return
 			}
 		}
-		requestmodel.ResetRequestBody(c.Request, body)
+		c.Request.Body = io.NopCloser(bytes.NewReader(wire.Bytes()))
 		view, err := httputil.NormalizeLenientJSONRequestBody(body, maxBodyBytes)
 		if err != nil {
-			inferenceBodyReadError(c, err)
+			readError(c, err)
 			return
 		}
 		if err := requestmodel.ValidateUniqueTopLevelModel(view); err != nil {
