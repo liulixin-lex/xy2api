@@ -70,6 +70,10 @@
   --color-cap-orange-text: #c2410c;
   --color-cap-red-bg: #fee2e2;
   --color-cap-red-text: #b91c1c;
+  /* The quality panel's pass and fail marks: a filled circle with a white glyph, the same in both themes (12.8) */
+  --color-mark-pass: #16a34a;
+  --color-mark-fail: #dc2626;
+  --color-mark-glyph: #ffffff;
 
   /* Tooltips */
   --color-tooltip-bg: #111827;
@@ -182,6 +186,9 @@
   --color-cap-orange-text: #fb923c;
   --color-cap-red-bg: rgb(248 113 113 / 0.16);
   --color-cap-red-text: #f98686;
+  --color-mark-pass: #16a34a;
+  --color-mark-fail: #dc2626;
+  --color-mark-glyph: #ffffff;
 
   --color-tooltip-bg: #222c40;
   --color-tooltip-text: #e3e8ef;

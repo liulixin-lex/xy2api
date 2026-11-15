@@ -37,8 +37,8 @@
           :data-qp-mark="mark.dim"
         >
           <span class="mk__l" aria-hidden="true">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
-          <Icon v-if="mark.mark === 'pass'" name="check" size="xs" :stroke-width="2.4" />
-          <Icon v-else-if="mark.mark === 'fail'" name="x" size="xs" :stroke-width="2.4" />
+          <Icon v-if="mark.mark === 'pass'" name="check" size="xs" :stroke-width="3" />
+          <Icon v-else-if="mark.mark === 'fail'" name="x" size="xs" :stroke-width="3" />
           <span v-else class="mk__dash" aria-hidden="true" />
         </span>
       </span>
@@ -201,11 +201,21 @@ const rows = computed(() =>
   outline: 2px solid theme('colors.primary.500');
   outline-offset: -2px;
 }
-.mk--pass {
-  color: var(--color-status-ok);
+/* Pass and fail: a 16px filled circle, green or red, with a white check or cross drawn in its middle 10px (12.8). */
+.mk--pass svg,
+.mk--fail svg {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  padding: 3px;
+  border-radius: 50%;
+  color: var(--color-mark-glyph);
 }
-.mk--fail {
-  color: var(--color-status-back);
+.mk--pass svg {
+  background: var(--color-mark-pass);
+}
+.mk--fail svg {
+  background: var(--color-mark-fail);
 }
 .mk--short {
   color: var(--color-text-muted);
