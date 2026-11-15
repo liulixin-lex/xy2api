@@ -15,7 +15,7 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
-- Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符时照旧省略该字段并记录，不新增报错。
+- Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
 
 - Chat 请求的 `reasoning` 写成字符串或对象时生效，`reasoning_effort` 仍优先；转 Responses 时显式 `summary` 不再被改成 `auto`，只给 summary 时不再丢失。
 

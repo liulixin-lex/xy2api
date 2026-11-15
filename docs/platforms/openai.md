@@ -62,7 +62,7 @@ API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effo
 | `stop` | 合法的字符串或数组省略，记录 `stop/omit` 降级。Responses 没有停止序列，返回文本可能更长；空字符串等非法值仍返回 400。发往 Anthropic 上游时照旧转为 `stop_sequences` |
 | `metadata`、`user` | 字符串表与字符串原样转发；类型不符时照旧省略该字段并记录 `<字段>/omit`，不报错；null 视为未提供 |
 | `text.verbosity`、`verbosity` | 转发；两者都有时用 `text.verbosity`，顶层别名记录 `verbosity/omit` 降级 |
-| `response_format`、`text.format` | 两者都有时用 `response_format`，`text.format` 记录 `text.format/omit` 降级；只有 `text.format` 时按 Responses 格式校验后使用，选中的格式非法则返回 400。Chat 的 `response_format.json_schema` 没写 `strict` 时按 `false` 发送，显式值原样保留 |
+| `response_format`、`text.format` | 两者都有时用 `response_format`，`text.format` 记录 `text.format/omit` 降级；只有 `text.format` 时按 Responses 格式校验后使用，格式非法时照旧省略并记录 `text.format/omit`，不报错；`response_format` 非法仍返回 400。Chat 的 `response_format.json_schema` 没写 `strict` 时按 `false` 发送，显式值原样保留 |
 | `include` | 字符串数组按原顺序去重后转发，并保留 `reasoning.encrypted_content`；类型不符时省略该字段并记录 `include/omit`，不报错 |
 | `reasoning` | 接受档位字符串，或含 `effort`、`summary` 的对象；同时有非空 `reasoning_effort` 时以后者为准。其他形状与未知子字段照旧忽略，不因解码新增报错。显式的 `summary` 保留；只给档位、没有 `summary` 时补 `auto`；只给 `summary` 时不补档位 |
 | 历史中的 `tool_calls[].function.arguments` | 原样保留，空字符串按 `{}` 处理；不会因为上一轮参数不是完整 JSON 而新增本地拒绝 |

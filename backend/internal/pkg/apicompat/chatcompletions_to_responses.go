@@ -200,10 +200,13 @@ func applyChatResponsesFields(req *ChatCompletionsRequest, out *ResponsesRequest
 	verbosity := req.Verbosity
 	if req.Text != nil {
 		if len(format) == 0 {
-			if err := validateResponseFormat(req.Text.Format, false); err != nil {
-				return err
+			// The baseline Chat DTO ignored text; an invalid format alone is
+			// omitted instead of rejecting a request that used to succeed.
+			if validateResponseFormat(req.Text.Format, false) == nil {
+				format = normalizedRawJSON(req.Text.Format)
+			} else {
+				omit("text.format")
 			}
-			format = normalizedRawJSON(req.Text.Format)
 		} else if len(normalizedRawJSON(req.Text.Format)) > 0 && opts.Record != nil {
 			opts.Record(ConversionNotice{Field: "text.format", Action: "omit"})
 		}
