@@ -496,6 +496,13 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-tags:empty {
     display: none;
   }
+  /* The row scrolls on its own, so the direct filters take their content's width (96–160px): a name such as "质量状态"
+     shows whole, a long chosen value ends in an ellipsis at 160px. */
+  .tb-filters .tb-sel {
+    width: auto;
+    min-width: 96px;
+    max-width: 160px;
+  }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
   .tb-filters {
