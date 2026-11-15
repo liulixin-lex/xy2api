@@ -161,11 +161,17 @@ Chat 上游以 `length` 结束时，转换出口保留文本、用量及标为 `
 | 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
 | 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生与原样转发的 Responses 在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时：请求顶层只有一项带密文的 reasoning 或 compaction 就修复该项；有多项时清理全部顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次，并在请求级 `degradations` 中记录 `input[].encrypted_content/omit`。位置冲突、重复 ID 或越界时不做猜测性清理 |
+
+| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生、透传 Responses 及 Chat/Messages 转 Responses 出口在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。没有位置时，仅在请求恰好只有一个 reasoning 且没有 compaction/compaction_summary 时清理该 reasoning 的密文；位置冲突、重复 ID 或越界时不做猜测性清理 |
+
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 补上 web_search 工具声明后重放一次；成功后该账号 6 小时内同类请求直接补声明。仍失败时返回 502 并说明原因，不换号 |
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
 
 原生与原样转发的 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、重复 ID、越界、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
+
+原生、透传 Responses 及 Chat/Messages 转 Responses 出口明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或修复一次仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
+
 
 网关会记住被上游拒绝后去掉的密文项，下次请求中唯一命中同一项时，在第一次发送前就去掉它。这份记录按会话、账号、上游地址和本次实际使用的凭据分开保存：换账号、换 API Key、换实例、重启或记录过期后都不沿用，第一次发送保留原文；旧版本按会话保存的记录不再读取。即使没有记录，本次被明确拒绝后仍按上面的规则修复。
 

@@ -92,6 +92,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if c != nil {
+		c.Set(m7ResponsesWireBodyKey, nil)
+		defer c.Set(m7ResponsesWireBodyKey, nil)
 		c.Set(openAIStateRejectionBodyKey, body)
 		defer c.Set(openAIStateRejectionBodyKey, nil)
 	}
@@ -415,6 +417,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 6. Build upstream request
+	if m7EncryptedRepairEligible(account) && requestRepair != nil {
+		requestRepair.credentialVersion = s.UpstreamCredentialVersion(account, token)
+	}
+retryChatResponsesWire:
+	requestRepair.setBody(body)
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	cancelUpstream := func() {}
 	if clientStream {
@@ -436,6 +443,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
+	if err := bindM7ResponsesWireBody(c, account, upstreamReq); err != nil {
+		return nil, err
+	}
 	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
 	defer func() {
 		if schedResult != nil {
@@ -453,6 +463,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
+	noteOpenAIRequestRepairResent(ctx, c, account)
 	if firstEvent.expired() {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -480,6 +491,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		schedCapture.finishHTTP(resp, respBody)
+		if rejection := s.handleM7EncryptedFailure(ctx, c, account, respBody, resp.StatusCode, false, false); rejection != nil {
+			if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, rejection); ok {
+				responsesBody = next
+				closeAttempt()
+				ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+				goto retryChatResponsesWire
+			}
+			return nil, rejection
+		}
+
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -528,16 +549,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if result != nil {
 		schedCapture.noteUsage(&result.Usage)
 	}
-	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
-		if value, exists := c.Get("xy_m7_field_replay_completion"); exists {
-			if done, ok := value.(func()); ok {
-				defer done()
-			}
-			c.Set("xy_m7_field_replay_completion", nil)
-		}
+	if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, handleErr); ok {
 		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		if kind == resilience.ReasonEncryptedContent {
+			responsesBody = next
+			goto retryChatResponsesWire
+		}
 		return s.forwardAsChatCompletions(ctx, c, account, next, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
@@ -1033,6 +1052,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if terminal.Failure {
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
+			if rejection := s.handleM7EncryptedFailure(c.Request.Context(), c, account, payloadBytes, terminal.WrappedStatus, openAIStreamClientOutputStarted(c, clientOutputStarted), true); rejection != nil {
+				streamNonFailoverErr = rejection
+				return true
+			}
+
 			if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
 				// cyber_policy 致命且不可重试：不 failover。下发标准 error chunk +
 				// [DONE]，让程序化客户端可感知并停止重试（F4）；标记供 handler 事后
@@ -1070,10 +1094,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				repair := openAIRequestRepairFrom(c)
 				if !malformed && (!wrapped || status == http.StatusBadRequest) && repair != nil && repair.accountID == account.ID {
 					if signal := newOpenAIRejectedFieldRepairSignal(c.Request.Context(), repair, payloadBytes); signal != nil {
-						if repairSignal, ok := signal.(*openAIRequestRepairSignal); ok {
-							failed := &http.Response{StatusCode: http.StatusBadRequest, Header: resp.Header}
-							c.Set("xy_m7_field_replay_completion", recordM7RejectedFieldReplay(c.Request.Context(), c, account, failed, openAIRequestRepairErrorObject(payloadBytes), repair.body, repairSignal.next))
-						}
 						streamNonFailoverErr = signal
 						return true
 					}

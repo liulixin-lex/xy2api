@@ -38,6 +38,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(forwardResult, forwardErr) }()
 	if c != nil {
+		c.Set(m7ResponsesWireBodyKey, nil)
+		defer c.Set(m7ResponsesWireBodyKey, nil)
 		c.Set(openAIStateRejectionBodyKey, body)
 		defer c.Set(openAIStateRejectionBodyKey, nil)
 	}
@@ -378,6 +380,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
+	var requestRepair *openAIRequestRepair
+	if m7EncryptedRepairEligible(account) {
+		requestRepair = armOpenAIRequestRepair(c, account, openAIResponsesRejectedFieldRetryStateForRequest(c, responsesBody))
+		if requestRepair != nil {
+			requestRepair.credentialVersion = s.UpstreamCredentialVersion(account, token)
+		}
+	}
+retryMessagesResponsesWire:
+	requestRepair.setBody(responsesBody)
 	// 6. Build upstream request
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
 		// Messages 兼容桥即使 body 未带 todo-guard/prompt_cache_key 标记（如映射到非
@@ -460,8 +471,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
+		if err := bindM7ResponsesWireBody(c, account, upstreamReq); err != nil {
+			return nil, err
+		}
 		actualReasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
+		noteOpenAIRequestRepairResent(ctx, c, account)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -510,6 +525,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		schedCapture.finishHTTP(resp, respBody)
+		if rejection := s.handleM7EncryptedFailure(ctx, c, account, respBody, resp.StatusCode, false, false); rejection != nil {
+			if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, rejection); ok {
+				responsesBody = next
+				ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+				goto retryMessagesResponsesWire
+			}
+			return nil, rejection
+		}
+
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -583,6 +607,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	if result != nil {
 		schedCapture.noteUsage(&result.Usage)
+	}
+
+	if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, handleErr); ok && kind == resilience.ReasonEncryptedContent {
+		schedCapture.finish(result, handleErr)
+		responsesBody = next
+		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		goto retryMessagesResponsesWire
 	}
 
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，
@@ -944,6 +975,11 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			outcomes[0].payload = []byte(frame.Data)
 		}
 		if terminal.Failure {
+			if terminal.Valid {
+				if rejection := s.handleM7EncryptedFailure(c.Request.Context(), c, account, []byte(frame.Data), terminal.WrappedStatus, false, true); rejection != nil {
+					return nil, rejection
+				}
+			}
 			if !terminal.Valid {
 				return nil, &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}
 			}
@@ -1269,6 +1305,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					return true
 				}
 				message := extractOpenAISSEErrorMessage(payloadBytes)
+				if rejection := s.handleM7EncryptedFailure(c.Request.Context(), c, account, payloadBytes, terminal.WrappedStatus, openAIStreamClientOutputStarted(c, clientOutputStarted), true); rejection != nil {
+					streamNonFailoverErr = rejection
+					return true
+				}
+
 				// Once Anthropic output has started, switching accounts would splice
 				// two model streams together. Surface a proper Anthropic error event
 				// instead of returning a failover error that the handler cannot retry.
