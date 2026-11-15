@@ -86,6 +86,30 @@ func applyAnthropicOutputControls(req *AnthropicRequest, out *ResponsesRequest) 
 	return nil
 }
 
+// PrepareNativeResponsesRequest prepares a copy at the final Responses wire
+// boundary. Intermediate conversions retain their stops and exact token limit.
+func PrepareNativeResponsesRequest(req ResponsesRequest, opts ConversionOptions) (ResponsesRequest, error) {
+	stops, err := parseStopSequences(req.bridgeStop)
+	if err != nil {
+		return req, err
+	}
+	out := req
+	out.bridgeStop = nil
+	out, err = out.NativeWireRequest()
+	if err != nil {
+		return req, err
+	}
+	if opts.Record != nil {
+		if len(stops) > 0 {
+			opts.Record(ConversionNotice{Field: "stop", Action: "omit"})
+		}
+		if req.MaxOutputTokens != nil && *req.MaxOutputTokens < 16 {
+			opts.Record(ConversionNotice{Field: "max_output_tokens", Action: "map"})
+		}
+	}
+	return out, nil
+}
+
 // NativeWireRequest applies the Responses minimum of 16 at the wire boundary.
 // Larger limits and the intermediate request stay unchanged. Bridge-only stops
 // cannot cross this boundary.
