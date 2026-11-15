@@ -458,21 +458,21 @@ func TestOpenAIResponseFlush_WrappedError400FailsOverBeforeOutput(t *testing.T) 
 	require.Empty(t, flushes)
 }
 
-func TestOpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal(t *testing.T) {
+func TestOpenAIResponseFlush_BareErrorFollowedByCompletedRetainsFailure(t *testing.T) {
 	body := "data: {\"type\":\"error\",\"error\":{\"code\":\"transient\",\"message\":\"retrying\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}}\n\n"
 	recorder := newOpenAIResponseFlushRecorder()
 
 	result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(body)), config.GatewayConfig{})
 
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 7, result.usage.InputTokens)
 	require.Equal(t, 3, result.usage.OutputTokens)
 	gotBody, _ := recorder.snapshot()
 	require.NotContains(t, gotBody, `"type":"error"`)
-	require.NotContains(t, gotBody, `"type":"response.failed"`)
-	require.Contains(t, gotBody, `"type":"response.completed"`)
+	require.Contains(t, gotBody, `"type":"response.failed"`)
+	require.NotContains(t, gotBody, `"type":"response.completed"`)
 }
 
 func TestOpenAIResponseFlush_CompatibleAPIKeyDoesNotUseCodexBareErrorSynthesis(t *testing.T) {
@@ -489,7 +489,7 @@ func TestOpenAIResponseFlush_CompatibleAPIKeyDoesNotUseCodexBareErrorSynthesis(t
 	require.NotContains(t, gotBody, `"type":"response.failed"`)
 }
 
-func TestOpenAIResponseFlush_RecentBareErrorAllowsCompletedBeforeIdleTimeout(t *testing.T) {
+func TestOpenAIResponseFlush_RecentBareErrorKeepsFailureBeforeIdleTimeout(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer func() { _ = writer.Close() }()
 	recorder := newOpenAIResponseFlushRecorder()
@@ -505,13 +505,13 @@ func TestOpenAIResponseFlush_RecentBareErrorAllowsCompletedBeforeIdleTimeout(t *
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
-	require.NoError(t, <-errCh)
+	require.Error(t, <-errCh)
 	result := <-resultCh
 	require.NotNil(t, result)
 	require.Equal(t, 5, result.usage.InputTokens)
 	gotBody, _ := recorder.snapshot()
-	require.Contains(t, gotBody, `"type":"response.completed"`)
-	require.NotContains(t, gotBody, `"type":"response.failed"`)
+	require.NotContains(t, gotBody, `"type":"response.completed"`)
+	require.Contains(t, gotBody, `"type":"response.failed"`)
 }
 
 func TestOpenAIResponseFlush_BareErrorTimeoutSynthesizesFailed(t *testing.T) {
