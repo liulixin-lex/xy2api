@@ -2,14 +2,17 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -2592,4 +2595,50 @@ func addPostOutputOpsFactForHandlerTest(c *gin.Context, category resilience.Cate
 		AccountID: 626, Platform: "openai", AccountName: "test-account", ProxyName: "direct/no_proxy",
 		AtUnixMs: 1790000000123, Reason: reason, Category: category, Message: "upstream stream broke after output",
 	})
+}
+
+func TestM8OpsConversionNotices(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		frozen, empty bool
+	}{
+		{"live", false, false}, {"frozen", true, false}, {"frozen_empty", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.EnableGatewayRequest(time.Now())
+			ctx := resilience.WithRequestState(context.Background(), st)
+			notice := apicompat.ConversionNotice{Field: "stop", Action: "omit"}
+			if !tc.empty {
+				resilience.RecordConversionNotices(ctx, notice)
+			}
+			want := resilience.SnapshotConversionNotices(ctx)
+			if tc.frozen {
+				meta, _ := st.ClaimGatewayRequest(false)
+				// Frozen financial context must win over a different live turn's notices.
+				live := resilience.NewRequestState()
+				ctx = resilience.WithRequestState(ctx, live)
+				resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "later", Action: "map"})
+				ctx = resilience.WithGatewayRequestMetadata(ctx, meta)
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			for _, apply := range []func(*gin.Context, *service.OpsInsertErrorLogInput){applyOpsUpstreamFieldsFromContext, applyOpsConversionNoticesFromContext} {
+				entry := &service.OpsInsertErrorLogInput{}
+				apply(c, entry)
+				require.Equal(t, want, entry.ConversionNotices)
+				body, err := json.Marshal(entry.ConversionNotices)
+				require.NoError(t, err)
+				expected, err := json.Marshal(want)
+				require.NoError(t, err)
+				require.JSONEq(t, string(expected), string(body))
+				if len(entry.ConversionNotices) > 0 {
+					entry.ConversionNotices[0].Field = "mutated"
+					again := &service.OpsInsertErrorLogInput{}
+					apply(c, again)
+					require.Equal(t, want, again.ConversionNotices)
+				}
+			}
+		})
+	}
 }
