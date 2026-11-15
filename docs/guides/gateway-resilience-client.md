@@ -55,6 +55,7 @@
 
 ## 流式请求的失败结束方式
 
+非流式 Chat 与 Responses 由 Anthropic 流拼装时，必须收到完整 `message_stop` 或有效 `message_delta.stop_reason` 才返回成功。结束前断流、读取失败或明确错误返回 502，并保留已观察的用量；有效结束后的连接关闭和缺少尾部用量不改变成功结果。
 
 ### 已提交后的失败
 
