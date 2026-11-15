@@ -22,7 +22,11 @@ func geminiCompatConversionOptions(ctx context.Context) apicompat.ConversionOpti
 }
 
 func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts apicompat.ConversionOptions) ([]byte, error) {
-	body, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
+	history, err := prepareGeminiMessagesToolHistory(claudeBody)
+	if err != nil {
+		return nil, err
+	}
+	body, err := convertClaudeMessagesToGeminiGenerateContent(history)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +72,9 @@ func buildGeminiAPIKeyCompatRequest(claudeBody []byte, mappedModel string, opts 
 	return applyGeminiCompatResponseFormat(claudeBody, body, capabilities, opts)
 }
 
+// GeminiCompatCapabilities is local to the API-key compatibility builder.
+// Only identified model families are listed; a future version number is not
+// evidence that it accepts the same thinking or structured-output parameters.
 type GeminiCompatCapabilities struct {
 	ThinkingLevels                          []string
 	Budget, Dynamic, JSONMIME, JSONSchema   bool
@@ -290,6 +297,8 @@ func applyGeminiCompatToolChoice(claudeBody, body []byte, opts apicompat.Convers
 	return sjson.SetBytes(body, "toolConfig.functionCallingConfig", calling)
 }
 
+// pruneGeminiEmptyEnums returns the omitted keyword paths for the request's
+// conversion notices. It only visits schema positions, never instance data.
 func pruneGeminiEmptyEnums(schema map[string]any, path string) []string {
 	var omitted []string
 	remove := func(keyword string) {
