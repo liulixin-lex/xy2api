@@ -597,7 +597,7 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsCompaction(t *testin
 			{
 				StatusCode: http.StatusBadRequest,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","param":"input[0].encrypted_content","message":"bad encrypted content for item cmp_stale"}}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"bad encrypted content"}}`)),
 			},
 			{
 				StatusCode: http.StatusOK,

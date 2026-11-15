@@ -49,6 +49,7 @@ func selectHTTPRejectedEncryptedItem(body, payload []byte) (httpRejectedEncrypte
 		return result, nil
 	}
 	selected, located := -1, false
+	var unmatched []string
 	selectIndex := func(index int) bool {
 		located = true
 		if index < 0 || index >= len(items) || (selected >= 0 && index != selected) {
@@ -66,6 +67,13 @@ func selectHTTPRejectedEncryptedItem(body, payload []byte) (httpRejectedEncrypte
 				}
 				index = i
 			}
+		}
+		if index < 0 {
+			// The provider can name an id decoded from ciphertext that the
+			// request item does not carry. That is missing evidence, not a
+			// conflicting location.
+			unmatched = append(unmatched, id)
+			return true
 		}
 		return selectIndex(index)
 	}
@@ -101,27 +109,50 @@ func selectHTTPRejectedEncryptedItem(body, payload []byte) (httpRejectedEncrypte
 		}
 	}
 	if !located {
+		// Without a usable location only the sole top-level encrypted item can
+		// be the rejected one.
 		for i, item := range items {
-			switch item.Get("type").String() {
-			case "compaction", "compaction_summary":
-				return result, nil
-			case "reasoning":
-				if selected >= 0 {
-					return result, nil
-				}
-				selected = i
+			if !httpEncryptedRepairCandidate(item) {
+				continue
 			}
+			if selected >= 0 {
+				return result, nil
+			}
+			selected = i
 		}
 	}
 	if selected < 0 {
 		return result, nil
 	}
 	item := items[selected]
+	for _, name := range unmatched {
+		if !httpEncryptedItemNameMatchesType(name, item.Get("type").String()) {
+			return result, nil
+		}
+	}
 	id := item.Get("id").String()
 	if id != "" && !selectID(id) {
 		return result, nil
 	}
 	return repairHTTPEncryptedItem(body, input, item, selected)
+}
+
+func httpEncryptedRepairCandidate(item gjson.Result) bool {
+	encrypted := item.Get("encrypted_content")
+	return openAIEncryptedLineageItemType(item.Get("type").String()) && encrypted.Type == gjson.String && encrypted.String() != ""
+}
+
+// An unmapped name still has to agree with the item kind it would repair.
+func httpEncryptedItemNameMatchesType(name, kind string) bool {
+	name, kind = strings.ToLower(name), strings.TrimSpace(kind)
+	switch {
+	case strings.HasPrefix(name, "rs_"):
+		return kind == "reasoning"
+	case strings.HasPrefix(name, "cmp_"):
+		return kind == "compaction" || kind == "compaction_summary"
+	default:
+		return false
+	}
 }
 
 func repairHTTPEncryptedItem(body []byte, input, item gjson.Result, selected int) (httpRejectedEncryptedItem, error) {

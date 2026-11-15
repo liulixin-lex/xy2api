@@ -237,8 +237,13 @@ func TestHTTPEncryptedRepairUniqueItem(t *testing.T) {
 		{"compaction_id", multi, `"message":"for item cmp_good"`, 2, true},
 		{"wrong_type", `{"input":[{"type":"message","id":"rs_bad","encrypted_content":"bad"}]}`, `"message":"for item rs_bad"`, -1, false},
 		{"nested_function_output", single, `"message":"encrypted function output content could not be decrypted"`, -1, false},
-		{"id_substring", single, `"message":"for item rs_bad_extra"`, -1, false},
-		{"plaintext_reasoning_counts", `{"input":[{"type":"reasoning","encrypted_content":"a"},{"type":"reasoning","summary":[]}]}`, `"message":"Encrypted content could not be verified"`, -1, false},
+		{"id_substring", multi, `"message":"for item rs_bad_extra"`, -1, false},
+		{"plaintext_reasoning_is_not_a_candidate", `{"input":[{"type":"reasoning","encrypted_content":"a"},{"type":"reasoning","summary":[]}]}`, `"message":"Encrypted content could not be verified"`, 0, true},
+		{"unmapped_name_sole_reasoning", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"user","content":"q"}]}`, `"param":null,"message":"The encrypted content for item rs_0db2ab9550c3ef08 could not be verified."`, 0, true},
+		{"unmapped_name_sole_compaction", `{"input":[{"type":"compaction","encrypted_content":"gAAA"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`, `"message":"The encrypted content for item cmp_ag_compact_1 could not be verified."`, 0, true},
+		{"sole_compaction_without_locator", `{"input":[{"id":"cmp_stale","type":"compaction","encrypted_content":"gAAA"}]}`, `"message":"bad encrypted content"`, 0, true},
+		{"unmapped_name_multiple_items", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"type":"reasoning","summary":[],"encrypted_content":"cipher-B"}]}`, `"message":"The encrypted content for item rs_0db2ab9550c3ef08 could not be verified."`, -1, false},
+		{"unmapped_name_other_kind", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"}]}`, `"message":"The encrypted content for item cmp_ag_compact_1 could not be verified."`, -1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(tc.body)
