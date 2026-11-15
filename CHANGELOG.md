@@ -6,6 +6,8 @@
 
 ### 参数与协议转换
 
+- Chat 上游省略 finish_reason、但以 DONE 或完整尾部用量正常结束时，完整工具调用继续正常交付。
+
 - tool_search 发现的 namespace 与长名工具转为 Chat、Anthropic 时不再重复声明或丢失原工具身份。
 
 - Anthropic 上游转 Responses 时，tool_search 参数保持 JSON 对象，custom 与 tool_search 工具项保留对应 ID 前缀。

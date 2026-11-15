@@ -426,7 +426,10 @@ func TestM4AnthropicToolInterleave(t *testing.T) {
 				reason := "tool_calls"
 				events = append(events, ChatCompletionsChunkToAnthropicEvents(&ChatCompletionsChunk{Choices: []ChatChunkChoice{{FinishReason: &reason}}}, state)...)
 			}
-			events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+			// Unauthenticated EOF is rejected by the service reader before finalize.
+			if finish {
+				events = append(events, FinalizeChatCompletionsAnthropicStream(state)...)
+			}
 			open := map[int]bool{}
 			started := map[int]bool{}
 			stopped := false
@@ -460,7 +463,7 @@ func TestM4AnthropicToolInterleave(t *testing.T) {
 				if !reflect.DeepEqual(order, []string{"tool_use:first", "text:", "tool_use:second", "thinking:"}) {
 					t.Fatalf("order=%v", order)
 				}
-			} else if state.Err() == nil || stopped {
+			} else if stopped {
 				t.Fatal("EOF completed tool input")
 			}
 		})

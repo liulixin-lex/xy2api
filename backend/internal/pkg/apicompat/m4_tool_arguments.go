@@ -65,9 +65,6 @@ func validateBridgeStreamTools(state *ChatCompletionsToResponsesStreamState) err
 	if len(state.ToolCalls) == 0 || state.FinishReason == "length" {
 		return nil
 	}
-	if state.FinishReason == "" {
-		return &UpstreamConversionError{Field: "finish_reason", Reason: "tool arguments have no complete finish", SourceProtocol: "chat"}
-	}
 	for _, call := range state.ToolCalls {
 		if call == nil {
 			continue
