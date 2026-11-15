@@ -997,7 +997,8 @@ func resToAnthRecoverReasoning(evt *ResponsesStreamEvent, state *ResponsesEventT
 			rawItem := *evt.Item
 			rawItem.Summary = nil // A late summary cannot hide the selected raw carrier.
 			final := ResponsesOutputReasoningText(rawItem)
-			if !strings.HasPrefix(final, resToAnthJoinReasoning(r.raw)) || !strings.HasPrefix(final, r.delivered) {
+			// An empty snapshot carries no value, as on the open-block path.
+			if final != "" && (!strings.HasPrefix(final, resToAnthJoinReasoning(r.raw)) || !strings.HasPrefix(final, r.delivered)) {
 				state.fail("reasoning", "reasoning completion disagrees with its deltas")
 			}
 			break
