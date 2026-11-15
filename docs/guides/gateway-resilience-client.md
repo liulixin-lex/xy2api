@@ -98,6 +98,8 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
 
+raw Chat 接受有效 finish_reason、`[DONE]`，也兼容最后正文之后完整输入/输出用量帧接正常 EOF（显式零有效）。只有早期、部分或空用量不能证明生成完成；之后新增内容、坏帧或完成前读错仍按截断处理。兼容尾部计量成功保留原计数，但内部不会记成见过上游结束事件；已确认结束只是缺用量时仍正常返回。
+
 ### `response.failed` 的重试时间
 
 `errors.failed_frame_retry_after` 开启时（默认），合成的 `response.failed` 在 `error.headers.retry-after` 中给出重试时间（Codex 从这里读取），正文 “try again in Ns” 的 N 与之相同：
@@ -157,6 +159,8 @@ Anthropic 原生 Messages 与协议转换的上游 ping、注释只表示传输�
 Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务正文，网关优先把它调度到父线程的粘性账号（只有父线程的账号能解开），父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`。父账号不可用时普通选号。
 
 ## 送达与计费口径
+
+raw Chat 的完整尾部计量后正常 EOF 仍是成功响应，内部保留已观察用量并区分真实结束事件；缺用量本身不把完整响应改为失败。
 
 “已输出”与计费、换号共用同一个判据：客户端是否收到过语义内容。
 

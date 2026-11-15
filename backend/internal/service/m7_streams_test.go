@@ -5,6 +5,7 @@ package service
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -237,4 +238,75 @@ func TestM7AnthropicPingDoesNotExtendProgress(t *testing.T) {
 		require.Equal(t, 4, strings.Count(rec.Body.String(), "hello"))
 		require.Contains(t, rec.Body.String(), `"output_tokens":0`)
 	})
+}
+
+func TestM7RawUsageIsNotTerminal(t *testing.T) {
+	withResilienceSettings(t, nil)
+	content := `{"choices":[{"delta":{"content":"hello"}}]}`
+	meter := `{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":6,"total_tokens":17}}`
+	zero := `{"choices":[],"usage":{"input_tokens":0,"output_tokens":0}}`
+	partial := `{"choices":[],"usage":{"prompt_tokens":11}}`
+	finish := `{"choices":[{"delta":{},"finish_reason":"stop"}]}`
+	for _, tc := range []struct {
+		name                       string
+		payloads                   []string
+		readError                  bool
+		wantError, terminal, usage bool
+	}{
+		{"complete_tail", []string{content, meter}, false, false, false, true},
+		{"zero_tail", []string{content, zero}, false, false, false, true},
+		{"meter_only", []string{meter}, false, false, false, true},
+		{"partial_empty_answer", []string{partial}, false, false, false, true},
+		{"role_only", []string{`{"choices":[{"delta":{"role":"assistant"}}]}`}, false, false, false, false},
+		{"partial_tail", []string{content, partial}, false, true, false, true},
+		{"empty_tail", []string{content, `{"choices":[],"usage":{}}`}, false, true, false, false},
+		{"early_meter", []string{meter, content}, false, true, false, true},
+		{"content_after_tail", []string{content, meter, content}, false, true, false, true},
+		{"broken_tail", []string{content, meter, `{"choices":`}, false, true, false, true},
+		{"read_error_after_meter", []string{content, meter}, true, true, false, true},
+		{"finish_only", []string{content, finish}, false, false, true, false},
+		{"done_only", []string{content, "[DONE]"}, false, false, true, false},
+		{"read_error_after_finish", []string{content, finish}, true, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var terminal openAIRawStreamTerminalState
+			for _, payload := range tc.payloads {
+				terminal.ObserveDataLine(payload)
+			}
+			require.Equal(t, tc.terminal, terminal.Terminated())
+			if !tc.readError {
+				require.Equal(t, tc.wantError, terminal.IsTruncated(true))
+			}
+			var body strings.Builder
+			for _, payload := range tc.payloads {
+				body.WriteString("data: " + payload + "\n\n")
+			}
+			wire := strings.TrimSuffix(body.String(), "\n")
+			reader := io.NopCloser(strings.NewReader(wire))
+			if tc.readError {
+				reader = &openAIChatStreamReadErrorCloser{payload: []byte(wire), err: errors.New("fixture read failure")}
+			}
+			c, _ := compatStreamContext("/v1/chat/completions", "")
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: reader}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+			result, err := svc.streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "fixture", "fixture", "fixture", nil, nil, time.Now(), 1)
+			if tc.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			require.True(t, result.ResponseFactsKnown)
+			require.Equal(t, tc.usage, result.UsagePresent)
+			require.Equal(t, tc.terminal, result.TerminalSeen)
+			require.Equal(t, tc.terminal, result.TerminalValid)
+			require.Equal(t, tc.wantError, result.PartialFailure)
+			require.Equal(t, "sse", result.ResponseBodyKind)
+			if tc.name == "complete_tail" || tc.name == "read_error_after_meter" {
+				require.Equal(t, 11, result.Usage.InputTokens)
+				require.Equal(t, 6, result.Usage.OutputTokens)
+				require.Equal(t, "upstream_sse_progressive", result.UsageSource)
+			}
+		})
+	}
 }

@@ -886,6 +886,13 @@ func TestForwardAsRawChatCompletions_MissingDoneWithUsageStillSucceeds(t *testin
 	require.NotNil(t, result)
 	require.Equal(t, 11, result.Usage.InputTokens)
 	require.Equal(t, 6, result.Usage.OutputTokens)
+	require.True(t, result.ResponseFactsKnown)
+	require.True(t, result.UsagePresent)
+	require.False(t, result.TerminalSeen)
+	require.False(t, result.TerminalValid)
+	require.False(t, result.PartialFailure)
+	require.Equal(t, "upstream_sse_progressive", result.UsageSource)
+
 }
 
 // 边界：缺 [DONE] 与 usage，但末帧带 finish_reason —— 生成正常结束，同样不判截断。
@@ -1016,7 +1023,7 @@ func TestOpenAIRawStreamTerminalState(t *testing.T) {
 			name:           "usage chunk",
 			payloads:       []string{`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`},
 			clientStarted:  true,
-			wantTerminated: true,
+			wantTerminated: false,
 		},
 		{
 			name:           "finish reason",

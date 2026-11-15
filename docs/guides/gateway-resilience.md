@@ -185,6 +185,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
   - `native_prelude_whitelist`：原生 Responses 把 `response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不含内容的 added 事件也算作开场。
+  - raw Chat 将真实 finish/DONE 与完整尾部计量分开记录：内容后完整输入/输出计量接正常 EOF 仍成功（零有效），早期/部分/空用量不掩盖未结束生成，坏帧和结束前读错仍失败；兼容成功不补造上游终态。
   - `strict_terminal`：明确识别失败终态，例如 raw Chat 透传中 `error` 后跟 `[DONE]` 判为失败；输出后断流、读错或停滞时按协议写失败终态，不再合成成功结束；启用 Responses 透传的首输出截止与停滞检测。
 - Anthropic 的完整业务帧推进读取期限，ping 或注释不代替业务进展；流结束和用量读取不受本地下游心跳影响。
 - **何时关闭**：只在某个客户端依赖开场事件的写出时机时，关闭对应的子开关。

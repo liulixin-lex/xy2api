@@ -389,49 +389,110 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		refusalDetector.ObserveSSELine(line)
-		if payload, ok := extractOpenAISSEDataLine(line); ok {
-			trimmedPayload := strings.TrimSpace(payload)
-			terminal.ObserveDataLine(trimmedPayload)
-			observeSchedPayload(c, []byte(trimmedPayload))
+	usagePresent := false
+	partialFailure := false
+	defer func() {
+		bodyKind := ""
+		if terminal.sawDataLine {
+			bodyKind = "sse"
+		}
+		source := "missing"
+		if usagePresent {
+			source = "upstream_sse_progressive"
+		}
+		resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, true, usagePresent, source,
+			terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != "", !terminal.sawMalformed && (terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != ""), bodyKind)
+	}()
+	processFrame := func(frame openAICompatSSEFrame, lines []string) error {
+		payload := strings.TrimSpace(frame.Data)
+		if payload != "" {
+			terminal.ObserveDataLine(payload)
+			if frame.EventType == "error" && gjson.Valid(payload) {
+				terminal.failurePayload = payload
+			}
+			observeSchedPayload(c, []byte(payload))
+			if u := extractCCStreamUsage(payload); u != nil {
+				usage = *u
+				usagePresent = true
+			}
 			if terminal.failurePayload != "" && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
 				failure := []byte(terminal.failurePayload)
-				if resilience.ClassifyStreamEvent("chat", "", failure).Retryable {
-					return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, true, requestID, failure, extractOpenAISSEErrorMessage(failure), upstreamModel, resp.Header)
+				if resilience.ClassifyStreamEvent("chat", frame.EventType, failure).Retryable {
+					return s.newOpenAIStreamFailoverErrorWithModel(c, account, true, requestID, failure, extractOpenAISSEErrorMessage(failure), upstreamModel, resp.Header)
 				}
 			}
-			if trimmedPayload != "[DONE]" {
+			if payload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
-				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
-				if u := extractCCStreamUsage(payload); u != nil {
-					usage = *u
-				}
-				if firstTokenMs == nil && !usageOnlyChunk {
+				if firstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) {
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
 				}
 			}
 		}
-		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
-		line = stripEmptyChatToolCallIdentityFromSSELine(line)
-
-		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
-		writeLine(line)
-		if line == "" {
-			if !clientDisconnected && clientOutputStarted {
-				c.Writer.Flush()
-			}
-			continue
+		for _, line := range lines {
+			refusalDetector.ObserveSSELine(line)
+			line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
+			line = stripEmptyChatToolCallIdentityFromSSELine(line)
+			writeLine(s.replaceModelInSSELine(line, upstreamModel, originalModel))
 		}
 		if !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
+		return nil
+	}
+	var parser openAICompatSSEFrameParser
+	var frameLines []string
+	frameBytes := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, ":") && !terminal.sawDataLine && !clientOutputStarted {
+			writeLine(line)
+			continue
+		}
+		if len(frameLines) == 0 && line != "" && !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") && !strings.HasPrefix(line, ":") && !strings.HasPrefix(line, "id:") && !strings.HasPrefix(line, "retry:") {
+			writeLine(line)
+			continue
+		}
+		frameLines = append(frameLines, line)
+		frameBytes += len(line) + 1
+		if frameBytes > openAIFirstOutputStageMaxBytes {
+			terminal.sawMalformed = true
+			break
+		}
+		frame, complete := parser.AddLine(line)
+		if !complete && line != "" {
+			continue
+		}
+		if err := processFrame(frame, frameLines); err != nil {
+			return nil, err
+		}
+		frameLines = nil
+		frameBytes = 0
+		if terminal.sawDone {
+			break
+		}
+	}
+	if len(frameLines) > 0 && !terminal.sawMalformed {
+		frame, _ := parser.Finish()
+		if err := processFrame(frame, frameLines); err != nil {
+			return nil, err
+		}
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
+		source, bodyKind := "missing", ""
+		if usagePresent {
+			source = "upstream_sse_progressive"
+		}
+		if terminal.sawDataLine {
+			bodyKind = "sse"
+		}
 		return &OpenAIForwardResult{
+			ResponseFactsKnown: true,
+			UsagePresent:       usagePresent, UsageSource: source, ResponseBodyKind: bodyKind,
+			TerminalSeen:                  terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != "",
+			TerminalValid:                 !terminal.sawMalformed && (terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != ""),
+			PartialFailure:                partialFailure,
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
 			Usage:                         usage,
@@ -465,6 +526,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		errors.Is(scanErr, context.DeadlineExceeded)
 
 	if terminal.failurePayload != "" && !clientAborted {
+		partialFailure = true
 		failure := []byte(terminal.failurePayload)
 		message := extractOpenAISSEErrorMessage(failure)
 		message = s.recordOpenAIStreamUpstreamError(c, account, true, requestID, "stream_failed", failure, message)
@@ -480,7 +542,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。
-	if !clientAborted && terminal.IsTruncated(clientOutputStarted) {
+	if !clientAborted && (terminal.IsTruncated(clientOutputStarted) || scanErr != nil && !terminal.Terminated()) {
+		partialFailure = true
 		cause := scanErr
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
@@ -500,6 +563,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		// 已写出语义字节：无法再 failover，改为带类型的上游错误。handler 会据此
 		// 补发 SSE error 帧并把本次请求计入 SLA 失败。
 		recordOpenAIRawStreamTruncation(c, account, requestID, cause, "http_error")
+		code, message := classifyOpenAIUpstreamStreamReadError(cause)
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "upstream_error", code, "", message)
 		resilienceStreamBrokenAfterOutput(c.Request.Context(), s.rateLimitService, account, resp, scanErr, true)
 		return resultWithUsage(), newOpenAIUpstreamStreamReadError(cause)
 	}
@@ -556,12 +621,8 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 // CC 协议中 usage 仅出现在末尾 chunk（且仅当 include_usage 生效时），
 // 但上游可能在多个 chunk 中重复——总是用最新值。
 func extractCCStreamUsage(payload string) *OpenAIUsage {
-	usageResult := gjson.Get(payload, "usage")
-	if !usageResult.Exists() || !usageResult.IsObject() {
-		return nil
-	}
-	u, ok := openAIUsageFromGJSON(usageResult)
-	if !ok {
+	u, present := openAIResponsesUsageEvidence([]byte(payload), "upstream_sse_progressive")
+	if !present {
 		return nil
 	}
 	return &u

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -14,80 +15,88 @@ import (
 // openAIRawStreamTruncatedUpstreamMessage 是 raw CC 直转路径上游截断的 ops 消息。
 const openAIRawStreamTruncatedUpstreamMessage = "Upstream Chat Completions stream ended before any terminal chunk"
 
-// openAIRawStreamTerminalState 记录 raw Chat Completions SSE 流是否收到过
-// **终止信号**。
-//
-// 背景：CC 直转路径把上游 SSE 原样透传，此前只要 HTTP 状态是 200 就按成功收尾——
-// 上游中途断流（Cloudflare edge reset、后端 worker 掉线）会被伪装成
-// `HTTP 200 + usage 0/0`：客户端拿到半截回答，网关既不报错也不计入 SLA，
-// Ops 侧完全不可见。
-//
-// 三种终止信号任一出现即认为上游"讲完了"，只是尾巴可能丢失，不作截断处理：
-//
-//   - [DONE]        —— OpenAI CC 协议标准哨兵
-//   - usage chunk   —— include_usage 生效时的末尾用量帧（网关强制打开）
-//   - finish_reason —— 生成正常结束（stop/length/tool_calls/...）
-//
-// 只认 [DONE] 会误伤那些跑完最后一帧就直接 EOF 的兼容上游；只认 usage 会误伤
-// 不支持 include_usage 的上游。三者取并集，把误判压到"上游确实在生成中途被切断"。
+// openAIRawStreamTerminalState separates actual finish/DONE from the compatible
+// complete trailing meter. Only new generation reopens a meter-closed answer.
 type openAIRawStreamTerminalState struct {
-	// sawDataLine 表示上游至少发过一行 `data:`，即响应确实是 SSE 语义流。
-	// 非 SSE 响应体（上游对 stream 请求返回裸 JSON）不参与截断判定，保持既有透传行为。
-	strict          bool
-	failurePayload  string
-	sawDataLine     bool
-	sawDone         bool
-	sawUsage        bool
-	sawFinishReason bool
+	strict                   bool
+	failurePayload           string
+	sawDataLine              bool
+	sawDone                  bool
+	sawUsage                 bool
+	sawFinishReason          bool
+	sawMalformed             bool
+	sawUnfinishedGeneration  bool
+	sawCompleteTrailingUsage bool
 }
 
-// ObserveDataLine 从单行 SSE `data:` 载荷中提取终止信号。payload 需已 TrimSpace。
+// ObserveDataLine accepts the complete data payload of an SSE frame.
 func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	if t == nil {
 		return
 	}
 	t.sawDataLine = true
-	if t.strict && gjson.Valid(payload) {
-		root := gjson.Parse(payload)
-		if resilience.ChatErrorField(root) || root.Get("type").String() == "error" {
-			if t.failurePayload == "" {
-				t.failurePayload = payload
-			}
-			return
-		}
-	}
 	if payload == "[DONE]" {
 		t.sawDone = true
 		return
 	}
-	if usage := gjson.Get(payload, "usage"); usage.Exists() && usage.IsObject() {
-		t.sawUsage = true
-	}
-	if t.sawFinishReason {
+	if !gjson.Valid(payload) || !gjson.Parse(payload).IsObject() {
+		t.sawMalformed = true
 		return
 	}
-	for _, choice := range gjson.Get(payload, "choices").Array() {
-		// finish_reason 为 null 时 String() 返回空串，不算终止。
-		if strings.TrimSpace(choice.Get("finish_reason").String()) != "" {
+	root := gjson.Parse(payload)
+	if resilience.ChatErrorField(root) || root.Get("type").String() == "error" {
+		if t.failurePayload == "" {
+			t.failurePayload = payload
+		}
+		return
+	}
+	choices := root.Get("choices")
+	for _, choice := range choices.Array() {
+		delta := choice.Get("delta")
+		generation := len(delta.Get("tool_calls").Array()) > 0 || delta.Get("function_call").IsObject()
+		for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal"} {
+			v := delta.Get(field)
+			generation = generation || v.Type == gjson.String && v.Str != "" || v.IsArray() && len(v.Array()) > 0
+		}
+		if generation {
+			t.sawUnfinishedGeneration = true
+			t.sawCompleteTrailingUsage = false
+		}
+		finish := choice.Get("finish_reason")
+		if finish.Type == gjson.Null || !finish.Exists() || finish.String() == "" {
+			continue
+		}
+		switch finish.String() {
+		case "stop", "length", "tool_calls", "function_call", "content_filter":
 			t.sawFinishReason = true
-			return
+		default:
+			t.sawMalformed = true
 		}
 	}
+	counts := apicompat.ParseOpenAIUsageCounts(root.Get("usage"))
+	_, present := openAIResponsesUsageEvidence([]byte(payload), "upstream_sse_progressive")
+	t.sawUsage = t.sawUsage || present
+	if choices.IsArray() && len(choices.Array()) == 0 && counts.InputTokensPresent && counts.OutputTokensPresent {
+		t.sawCompleteTrailingUsage = true
+		t.sawUnfinishedGeneration = false
+	}
 }
 
-// Terminated 表示上游给出过终止信号。
 func (t *openAIRawStreamTerminalState) Terminated() bool {
-	return t != nil && t.failurePayload == "" && (t.sawDone || t.sawUsage || t.sawFinishReason)
+	return t != nil && t.failurePayload == "" && !t.sawMalformed && (t.sawDone || t.sawFinishReason)
 }
 
-// IsTruncated 判定上游是否在任何终止信号之前结束。clientOutputStarted 用于放行
-// 非 SSE 响应体：那类响应本就没有 data: 行，既有行为是原样透传，不在本次判定范围内；
-// 但"一个字节都没收到"的空 200 依然算截断。
 func (t *openAIRawStreamTerminalState) IsTruncated(clientOutputStarted bool) bool {
-	if t == nil || t.Terminated() {
+	if t == nil {
 		return false
 	}
-	return t.sawDataLine || !clientOutputStarted
+	if t.failurePayload != "" || t.sawMalformed {
+		return true
+	}
+	if t.Terminated() || t.sawCompleteTrailingUsage {
+		return false
+	}
+	return t.sawUnfinishedGeneration || !t.sawDataLine && !clientOutputStarted
 }
 
 // newOpenAIRawStreamTruncatedFailoverError 处理"上游截断且尚未向客户端写出任何
