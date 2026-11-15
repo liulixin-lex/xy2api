@@ -509,7 +509,8 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	if ProtocolTerminalClaimed(c) {
 		return false
 	}
-	if c.Request != nil && c.Request.Context().Err() != nil || GatewayDeliveryFailed(c) {
+	if c.Request != nil && c.Request.Context().Err() != nil &&
+		!(errors.Is(c.Request.Context().Err(), context.DeadlineExceeded) && status == http.StatusRequestTimeout && errType == "invalid_request_error" && code == "request_upload_timeout") || GatewayDeliveryFailed(c) {
 		return false
 	}
 	written := c.Writer.Written()

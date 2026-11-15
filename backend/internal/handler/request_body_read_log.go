@@ -9,13 +9,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"go.uber.org/zap"
 )
 
 // logRequestBodyReadFailure records a bounded, payload-free reason for a body
 // read failure. Operators get enough information to distinguish upload timeouts,
-// compression failures and a
-// disconnected/truncated upload without logging request content.
+// compression failures and a disconnected/truncated upload without logging request content.
 func logRequestBodyReadFailure(reqLog *zap.Logger, req *http.Request, err error) {
 	if reqLog == nil || err == nil {
 		return
@@ -109,4 +110,19 @@ func requestBodyReadFailureResponse(req *http.Request, err error) (status int, e
 		return http.StatusRequestTimeout, errType, "request_upload_timeout", "Timed out reading request body"
 	}
 	return http.StatusBadRequest, errType, "", "Failed to read request body"
+}
+
+func writeRequestBodyReadFailure(c *gin.Context, reqLog *zap.Logger, err error, protocol string) {
+	logRequestBodyReadFailure(reqLog, c.Request, err)
+	status, errType, code, message := requestBodyReadFailureResponse(c.Request, err)
+	if errors.Is(c.Request.Context().Err(), context.Canceled) {
+		status = statusClientClosedRequest
+	}
+	if status == statusClientClosedRequest {
+		if !service.StopOpenAICompactSSEKeepaliveCommitted(c) && !c.Writer.Written() {
+			c.Status(statusClientClosedRequest)
+		}
+		return
+	}
+	service.WriteTargetProtocolError(c, protocol, status, errType, code, "", message)
 }

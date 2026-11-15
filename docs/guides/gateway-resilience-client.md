@@ -6,6 +6,7 @@
 
 | 场景 | 响应 |
 |---|---|
+| 入站请求体上传超时 | 408 `invalid_request_error`，消息 `Timed out reading request body`；OpenAI 协议 code 为 `request_upload_timeout`。不调用上游；真正取消或断连只记 499，不补写响应 |
 | 分组内没有可用账号 | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
 | 非流式请求，但组内账号都只接受流式 | 503，消息为 `No available account in this group supports non-streaming requests; retry with "stream": true`，带 `x-should-retry: false`，不带 `Retry-After` |
 | 配置原因导致无号（如渠道定价不含该模型） | 503，`Retry-After: 60`，`x-should-retry: false` |

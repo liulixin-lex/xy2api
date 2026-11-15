@@ -13,7 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	middleware "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type uploadReadNetError struct{ timeout bool }
@@ -67,6 +70,71 @@ func TestM8UploadTimeoutResponse(t *testing.T) {
 			}
 		})
 	}
+	t.Run("seven_ingress_paths", func(t *testing.T) {
+		upstream := &openAIResponsesFailoverCancelUpstream{}
+		openai := newOpenAIResponsesFailoverTestHandler(t, upstream)
+		gateway := newGatewayConvertUsageHandler(t, &gwUsageLogRepo{}, upstream, 0)
+		for _, endpoint := range []struct {
+			name, path string
+			anthropic  bool
+			call       func(*gin.Context)
+		}{
+			{"openai_responses", "/v1/responses", false, openai.Responses},
+			{"openai_chat", "/v1/chat/completions", false, openai.ChatCompletions},
+			{"openai_messages", "/v1/messages", true, openai.Messages},
+			{"gateway_responses", "/v1/responses", false, gateway.Responses},
+			{"gateway_chat", "/v1/chat/completions", false, gateway.ChatCompletions},
+			{"gateway_messages", "/v1/messages", true, gateway.Messages},
+			{"count_tokens", "/v1/messages/count_tokens", true, gateway.CountTokens},
+		} {
+			for _, failure := range []struct {
+				name     string
+				err      error
+				status   int
+				deadline bool
+			}{
+				{"timeout", uploadReadNetError{timeout: true}, 408, false},
+				{"deadline", context.DeadlineExceeded, 408, true},
+				{"transport", uploadReadNetError{}, 400, false},
+				{"max_bytes", &http.MaxBytesError{Limit: 10}, 413, false},
+				{"truncated", io.ErrUnexpectedEOF, 400, false},
+				{"cancel", context.Canceled, 499, false},
+			} {
+				t.Run(endpoint.name+"/"+failure.name, func(t *testing.T) {
+					ctx := context.Background()
+					if failure.deadline {
+						var cancel context.CancelFunc
+						ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+						defer cancel()
+					}
+					c, rec := newOpenAIResponsesFailoverTestContext(t, ctx)
+					key, _ := middleware.GetAPIKeyFromContext(c)
+					key.Group.AllowMessagesDispatch = true
+					c.Request.URL.Path = endpoint.path
+					c.Request.Body = io.NopCloser(gwUsageReadError{err: failure.err})
+					endpoint.call(c)
+					require.Empty(t, upstream.calls(), "failed upload must never call upstream")
+					require.Equal(t, failure.status, c.Writer.Status())
+					if failure.status == 499 {
+						require.Empty(t, rec.Body.String())
+						require.False(t, c.Writer.Written())
+						return
+					}
+					require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+					if failure.status == 408 {
+						require.Equal(t, "Timed out reading request body", gjson.Get(rec.Body.String(), "error.message").String())
+						if !endpoint.anthropic {
+							require.Equal(t, "request_upload_timeout", gjson.Get(rec.Body.String(), "error.code").String())
+						}
+					}
+					if endpoint.anthropic {
+						require.Equal(t, "error", gjson.Get(rec.Body.String(), "type").String())
+					}
+				})
+			}
+		}
+	})
+
 }
 
 func TestLogRequestBodyReadFailureClassifiesWithoutPayload(t *testing.T) {
