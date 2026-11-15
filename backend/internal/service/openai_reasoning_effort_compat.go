@@ -19,12 +19,15 @@ import (
 
 type finalReasoningRequestKey struct{}
 type finalReasoningRequest struct {
-	original, field string
-	policy          openAIReasoningEffortPolicy
-	policySet       bool
-	accountID       int64
-	model, applied  string
-	appliedSet      bool
+	original, field  string
+	policy           openAIReasoningEffortPolicy
+	policySet        bool
+	accountID        int64
+	model, applied   string
+	appliedSet       bool
+	noneOmitted      bool
+	omittedAccountID int64
+	omittedModel     string
 }
 
 // WithFinalReasoningEffortRequest freezes the inbound intention, including its
@@ -131,6 +134,9 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 	}
 	if c != nil {
 		c.Set("xy_final_reasoning_request", state)
+	}
+	if state.noneOmitted && state.omittedAccountID == account.ID && state.omittedModel == model {
+		return body, false, nil
 	}
 	if state.original == "" || (protocol == "anthropic" && state.field == "thinking.type" && !claude.IsClaudeModel(model)) {
 		return body, false, nil

@@ -175,3 +175,5 @@ GPT-6.1 Sol 的 API Key 原生 HTTP 请求先把 none/minimal 映射为 low 再�
 模型后缀只记录请求意图，不单独触发分组映射或注入正文；只有最终模型的可靠能力限制确实要求调整时才投影该值。
 
 OAuth 的原生 Responses Terra minimal 请求仍先归一为 none 再发出；Terra 的新增校验只用于已完成最终归一的正文。
+
+第三方 API Key 的显式 reasoning.effort:none 首次原样发出。上游以 400 且 param 为 reasoning.effort 或 reasoning 明确拒绝时，使用既有修复预算删除后重发一次并记录 omit；同账号、同模型的重发不会补回 none，换目标重新计算。

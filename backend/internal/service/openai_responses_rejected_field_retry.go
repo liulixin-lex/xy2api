@@ -126,6 +126,56 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 	s.seenBodyHashes[sha256.Sum256(body)] = struct{}{}
 }
 
+// E21 is restricted to third-party API-key Responses requests and explicit none.
+// Existing callers retain their prior repair contract until they opt into this account-aware entry.
+func normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account *Account, statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
+	if account != nil && account.Type == AccountTypeAPIKey && statusCode == http.StatusBadRequest {
+		baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+		param := strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String())
+		effort := gjson.GetBytes(body, "reasoning.effort")
+		if baseURL != "" && !isOfficialOpenAIModelsBaseURL(baseURL) && (param == "reasoning.effort" || param == "reasoning") && effort.Type == gjson.String && strings.EqualFold(strings.TrimSpace(effort.String()), "none") {
+			next, err := sjson.DeleteBytes(body, param)
+			if err != nil {
+				return nil, "", false, err
+			}
+			if alias := gjson.GetBytes(next, "reasoning_effort"); alias.Type == gjson.String && strings.EqualFold(strings.TrimSpace(alias.String()), "none") {
+				next, err = sjson.DeleteBytes(next, "reasoning_effort")
+				if err != nil {
+					return nil, "", false, err
+				}
+			}
+			if reasoning := gjson.GetBytes(next, "reasoning"); reasoning.IsObject() && len(reasoning.Map()) == 0 {
+				next, err = sjson.DeleteBytes(next, "reasoning")
+				if err != nil {
+					return nil, "", false, err
+				}
+			}
+			return next, "reasoning.effort none parameter rejection", true, nil
+		}
+	}
+	return normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode, body, responseBody)
+}
+
+// Call only after the existing retry budget approves the omission.
+func recordOpenAIRejectedReasoningOmission(ctx context.Context, c *gin.Context, account *Account, model string, before, after []byte) {
+	if account == nil || !strings.EqualFold(gjson.GetBytes(before, "reasoning.effort").String(), "none") || gjson.GetBytes(after, "reasoning.effort").Exists() {
+		return
+	}
+	var state *finalReasoningRequest
+	if ctx != nil {
+		state, _ = ctx.Value(finalReasoningRequestKey{}).(*finalReasoningRequest)
+	}
+	if c != nil {
+		if value, ok := c.Get("xy_final_reasoning_request"); ok {
+			state, _ = value.(*finalReasoningRequest)
+		}
+	}
+	if state != nil {
+		state.noneOmitted, state.omittedAccountID, state.omittedModel = true, account.ID, model
+	}
+	resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "reasoning.effort", Action: "omit"})
+}
+
 func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
@@ -267,7 +317,7 @@ func openAIResponsesRejectedFieldForRecord(statusCode int, responseBody []byte) 
 		param = messageParam
 	}
 	switch param {
-	case "max_output_tokens", "truncation", "top_p", "metadata", "temperature", "frequency_penalty", "presence_penalty", "prompt_cache_breakpoint", "input", "tools", "model", "reasoning.effort", "reasoning_effort":
+	case "max_output_tokens", "truncation", "top_p", "metadata", "temperature", "frequency_penalty", "presence_penalty", "prompt_cache_breakpoint", "input", "tools", "model", "reasoning", "reasoning.effort", "reasoning_effort":
 		return param
 	}
 	for _, pattern := range []*regexp.Regexp{
