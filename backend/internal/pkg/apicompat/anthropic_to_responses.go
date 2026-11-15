@@ -13,6 +13,12 @@ import (
 // Chat Completions intermediary round-trip (e.g. thinking, cache_control,
 // structured system prompts).
 func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
+	return AnthropicToResponsesWithOptions(req, ConversionOptions{})
+}
+
+// AnthropicToResponsesWithOptions converts Messages with an optional notice sink.
+// Zero options preserve the behavior of AnthropicToResponses.
+func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptions) (*ResponsesRequest, error) {
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
@@ -63,7 +69,10 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	}
 
 	if len(req.Tools) > 0 {
-		out.Tools = convertAnthropicToolsToResponses(req.Tools)
+		out.Tools, err = convertAnthropicToolsToResponses(req.Tools, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// An explicit thinking disable takes precedence over output_config.effort.
@@ -478,9 +487,27 @@ func mapAnthropicEffortToResponses(effort string) string {
 // convertAnthropicToolsToResponses maps Anthropic tool definitions to
 // Responses API tools. Server-side tools like web_search are mapped to their
 // OpenAI equivalents; regular tools become function tools.
-func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
+func convertAnthropicToolsToResponses(tools []AnthropicTool, opts ConversionOptions) ([]ResponsesTool, error) {
 	var out []ResponsesTool
-	for _, t := range tools {
+	for i, t := range tools {
+		if raw := normalizedRawJSON(t.AllowedCallers); len(raw) > 0 {
+			field := fmt.Sprintf("tools[%d].allowed_callers", i)
+			var callers []json.RawMessage
+			if json.Unmarshal(raw, &callers) != nil {
+				return nil, unsupportedConversion(field, "expected an array of strings")
+			}
+			omit := len(callers) == 0
+			for _, caller := range callers {
+				var name string
+				if len(caller) == 0 || caller[0] != '"' || json.Unmarshal(caller, &name) != nil {
+					return nil, unsupportedConversion(field, "expected an array of strings")
+				}
+				omit = omit || name != "direct"
+			}
+			if omit && opts.Record != nil {
+				opts.Record(ConversionNotice{Field: field, Action: "omit"})
+			}
+		}
 		// Anthropic server tools like "web_search_20250305" → OpenAI {"type":"web_search"}
 		if strings.HasPrefix(t.Type, "web_search") {
 			out = append(out, ResponsesTool{Type: "web_search"})
@@ -491,10 +518,10 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  normalizeToolParameters(t.InputSchema),
-			Strict:      boolPtr(false),
+			Strict:      defaultStrictFalse(t.Strict),
 		})
 	}
-	return out
+	return out, nil
 }
 
 func boolPtr(v bool) *bool {

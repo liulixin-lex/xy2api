@@ -81,3 +81,48 @@ func TestM3TopLevelCacheControlBoundary(t *testing.T) {
 	require.Equal(t, "global", req.CacheControl.Scope)
 	require.JSONEq(t, `true`, string(req.CacheControl.Extra["future_flag"]))
 }
+
+func TestM3ToolConstraints(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields            string
+		strict, notice, invalid bool
+	}{
+		{name: "default"}, {name: "true", fields: `,"strict":true`, strict: true}, {name: "false", fields: `,"strict":false`},
+		{name: "null", fields: `,"allowed_callers":null`}, {name: "direct", fields: `,"allowed_callers":["direct"]`},
+		{name: "executor", fields: `,"allowed_callers":["code_execution_20250825"]`, notice: true},
+		{name: "mixed", fields: `,"allowed_callers":["direct","executor"]`, notice: true},
+		{name: "empty", fields: `,"allowed_callers":[]`, notice: true}, {name: "empty name", fields: `,"allowed_callers":[""]`, notice: true},
+		{name: "string", fields: `,"allowed_callers":"direct"`, invalid: true}, {name: "number", fields: `,"allowed_callers":[1]`, invalid: true},
+		{name: "null member", fields: `,"allowed_callers":[null]`, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req AnthropicRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"f","input_schema":{"type":"object","properties":{"optional":{"type":"string"}}}`+tc.fields+`}],"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`), &req))
+			var notices []ConversionNotice
+			out, err := AnthropicToResponsesWithOptions(&req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+			if tc.invalid {
+				var bad *UnsupportedConversionError
+				require.ErrorAs(t, err, &bad)
+				require.Equal(t, "tools[0].allowed_callers", bad.Field)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, out.Tools, 1)
+			require.NotNil(t, out.Tools[0].Strict)
+			require.Equal(t, tc.strict, *out.Tools[0].Strict)
+			require.JSONEq(t, string(req.Tools[0].InputSchema), string(out.Tools[0].Parameters))
+			require.False(t, *out.ParallelToolCalls)
+			if tc.notice {
+				require.Equal(t, []ConversionNotice{{Field: "tools[0].allowed_callers", Action: "omit"}}, notices)
+			} else {
+				require.Empty(t, notices)
+			}
+			legacy, err := AnthropicToResponses(&req)
+			require.NoError(t, err)
+			require.Equal(t, legacy, out)
+			zero, err := AnthropicToResponsesWithOptions(&req, ConversionOptions{})
+			require.NoError(t, err)
+			require.Equal(t, legacy, zero)
+		})
+	}
+}
