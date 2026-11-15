@@ -24,6 +24,8 @@ const (
 	FieldDeletedAt = "deleted_at"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldAlias holds the string denoting the alias field in the database.
+	FieldAlias = "alias"
 	// FieldDescription holds the string denoting the description field in the database.
 	FieldDescription = "description"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
@@ -237,6 +239,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldDeletedAt,
 	FieldName,
+	FieldAlias,
 	FieldDescription,
 	FieldRateMultiplier,
 	FieldPeakRateEnabled,
@@ -341,6 +344,8 @@ var (
 	UpdateDefaultUpdatedAt func() time.Time
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultAlias holds the default value on creation for the "alias" field.
+	DefaultAlias string
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
 	// DefaultPeakRateEnabled holds the default value on creation for the "peak_rate_enabled" field.
@@ -485,6 +490,11 @@ func ByDeletedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByAlias orders the results by the alias field.
+func ByAlias(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAlias, opts...).ToFunc()
 }
 
 // ByDescription orders the results by the description field.

@@ -23,55 +23,70 @@ import (
 )
 
 func TestScopedAdminAccountListScopesCountAndPageInSQL(t *testing.T) {
-	var countScope string
-	matcher := sqlmock.QueryMatcherFunc(func(expected, actual string) error {
-		if !strings.Contains(actual, `"type"`) || !strings.Contains(actual, `"account_groups"`) || !strings.Contains(actual, " OR ") {
-			return fmt.Errorf("查询缺少完整规则: %s", actual)
-		}
-		where := actual[strings.Index(actual, " WHERE "):]
-		if i := strings.Index(where, " ORDER BY "); i >= 0 {
-			where = where[:i]
-		}
-		if i := strings.Index(where, " LIMIT "); i >= 0 {
-			where = where[:i]
-		}
-		if expected == "count" {
-			countScope = where
-		} else {
-			if where != countScope {
-				return fmt.Errorf("分页和统计范围不同")
+	for _, ids := range [][]int64{nil, {7, 9}} {
+		t.Run(fmt.Sprint(ids), func(t *testing.T) {
+			var countScope string
+			matcher := sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+				if !strings.Contains(actual, `"type"`) || !strings.Contains(actual, `"account_groups"`) || !strings.Contains(actual, " OR ") {
+					return fmt.Errorf("查询缺少完整规则: %s", actual)
+				}
+				if ids != nil && !strings.Contains(actual, `AND "accounts"."id" IN ($5, $6)`) {
+					return fmt.Errorf("requested IDs did not intersect the authorization scope: %s", actual)
+				}
+				where := actual[strings.Index(actual, " WHERE "):]
+				if i := strings.Index(where, " ORDER BY "); i >= 0 {
+					where = where[:i]
+				}
+				if i := strings.Index(where, " LIMIT "); i >= 0 {
+					where = where[:i]
+				}
+				if expected == "count" {
+					countScope = where
+				} else {
+					if where != countScope {
+						return fmt.Errorf("分页和统计范围不同")
+					}
+					// 允许模型映射子字段投影，禁止读取完整 credentials。
+					projected := strings.ReplaceAll(actual, `"accounts"."credentials"->'model_mapping' AS model_mapping`, "model_mapping")
+					if strings.Contains(projected, `"credentials"`) || strings.Contains(projected, `"extra"`) {
+						return fmt.Errorf("读取了敏感字段")
+					}
+				}
+				return nil
+			})
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
+			if err != nil {
+				t.Fatal(err)
 			}
-			// 允许模型映射子字段投影，禁止读取完整 credentials。
-			projected := strings.ReplaceAll(actual, `"accounts"."credentials"->'model_mapping' AS model_mapping`, "model_mapping")
-			if strings.Contains(projected, `"credentials"`) || strings.Contains(projected, `"extra"`) {
-				return fmt.Errorf("读取了敏感字段")
+			defer db.Close()
+			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+			defer client.Close()
+			repo := newAccountRepositoryWithSQL(client, db, nil)
+			count := mock.ExpectQuery("count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			page := mock.ExpectQuery("page").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			if ids != nil {
+				count.WithArgs("oauth", int64(1), "apikey", int64(2), int64(7), int64(9))
+				page.WithArgs("oauth", int64(1), "apikey", int64(2), int64(7), int64(9))
 			}
-		}
-		return nil
-	})
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(matcher))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
-	defer client.Close()
-	repo := newAccountRepositoryWithSQL(client, db, nil)
-	mock.ExpectQuery("count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("page").WillReturnRows(sqlmock.NewRows([]string{"id"}))
-	principal := &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{
-		{Permissions: []string{"accounts.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}},
-		{Permissions: []string{"accounts.read"}, GroupIDs: []int64{2}, AccountTypes: []string{"apikey"}},
-	}}}
-	_, total, err := repo.ScopedAdminList(adminaccess.WithPrincipal(context.Background(), principal), pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 0 {
-		t.Fatal(total)
-	}
-	if err = mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+			principal := &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{
+				{Permissions: []string{"accounts.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}},
+				{Permissions: []string{"accounts.read"}, GroupIDs: []int64{2}, AccountTypes: []string{"apikey"}},
+			}}}
+			ctx := adminaccess.WithPrincipal(context.Background(), principal)
+			if ids != nil {
+				ctx = service.WithAccountIDsFilter(ctx, ids)
+			}
+			_, total, err := repo.ScopedAdminList(ctx, pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "", "", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if total != 0 {
+				t.Fatal(total)
+			}
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

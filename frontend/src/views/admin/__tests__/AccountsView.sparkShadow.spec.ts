@@ -5,13 +5,11 @@ import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
 
 // 外审 F2:AccountActionMenu emit 'create-spark-shadow',但 AccountsView 此前未监听,
 // 导致按钮点击无效。本测试通过真实组件引用 emit 该事件,断言父页面接线调用 API。
 const {
   listAccounts,
-  listWithEtag,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups,
@@ -21,7 +19,6 @@ const {
   showError
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
@@ -32,13 +29,13 @@ const {
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats,
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
@@ -80,8 +77,7 @@ const mountView = () =>
         DataTable: true,
         Pagination: true,
         ConfirmDialog: true,
-        AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-        AccountTableFilters: { template: '<div></div>' },
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         AccountActionMenu: true,
         ImportDataModal: true,
@@ -90,6 +86,7 @@ const mountView = () =>
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -97,6 +94,7 @@ const mountView = () =>
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
+        AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
         AccountUsageCell: true,
@@ -108,11 +106,10 @@ const mountView = () =>
 describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
       fn.mockReset()
     }
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
-    listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
@@ -164,7 +161,8 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     wrapper.findComponent(AccountActionMenu).vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('duplicate failed')
+    // The action's words with the backend's reason (spec 7e-13).
+    expect(showError).toHaveBeenCalledWith('admin.accounts.failedWithReason')
     consoleError.mockRestore()
     wrapper.unmount()
   })
@@ -230,8 +228,7 @@ const mountViewWithRow = () =>
         },
         Pagination: true,
         ConfirmDialog: true,
-        AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-        AccountTableFilters: { template: '<div></div>' },
+        AccountsToolbar: true,
         AccountBulkActionsBar: true,
         AccountActionMenu: true,
         ImportDataModal: true,
@@ -240,6 +237,7 @@ const mountViewWithRow = () =>
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -247,6 +245,7 @@ const mountViewWithRow = () =>
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
+        AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
         AccountUsageCell: true,
@@ -258,10 +257,9 @@ const mountViewWithRow = () =>
 describe('admin AccountsView — 账号行展示', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
       fn.mockReset()
     }
-    listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
@@ -293,8 +291,10 @@ describe('admin AccountsView — 账号行展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    // 1. email 单元格通过 OR 兜底渲染 parent_email
-    expect(wrapper.text()).toContain('parent@example.com')
+    // 1. 名称单元格的悬停提示通过 OR 兜底带上 parent_email 和母账号 ChatGPT ID（第二行是「平台 · 类型」）
+    const title = wrapper.get('[data-test="account-name"]').element.closest('.account-name')!.getAttribute('title')
+    expect(title).toContain('parent@example.com')
+    expect(title).toContain('chatgpt-abc123')
 
     // 2. PlatformTypeBadge 收到 parent_plan_type 和 parent_privacy_mode
     const badge = wrapper.findComponent(PlatformTypeBadge)
@@ -331,16 +331,8 @@ describe('admin AccountsView — 账号行展示', () => {
       target: '_blank',
       rel: 'noopener noreferrer',
     })
-    expect(link.classes()).toEqual(expect.arrayContaining([
-      'border-dotted',
-      'text-gray-900',
-      'dark:text-white',
-    ]))
-    expect(link.classes()).not.toContain('text-primary-600')
-    const tooltip = wrapper.findComponent(HelpTooltip)
-    expect(tooltip.props('content')).toBe('https://relay.example.com')
-    expect(tooltip.props('widthClass')).toBe('w-max max-w-sm break-all')
-    expect(tooltip.classes()).toEqual(expect.arrayContaining(['self-start']))
+    expect(link.classes()).toContain('account-name__link')
+    expect(link.element.closest('.account-name')!.getAttribute('title')).toContain('https://relay.example.com')
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 
@@ -544,11 +536,8 @@ describe('admin AccountsView — 账号行展示', () => {
     wrapper.unmount()
   })
 
-  it('replaces a Grok row when auto refresh returns a changed canonical usage snapshot', async () => {
+  it('updates a Grok row in place when the 3-second row refresh brings a changed usage snapshot', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
-
     const initialAccount = {
       id: 213,
       name: 'refresh-tier',
@@ -560,21 +549,18 @@ describe('admin AccountsView — 账号行展示', () => {
       ...initialAccount,
       extra: { grok_usage_snapshot: { subscription_tier: 'SuperGrok', status_code: 200 } },
     }
-    listAccounts.mockResolvedValue({ items: [initialAccount], total: 1, page: 1, page_size: 20, pages: 1 })
-    listWithEtag.mockResolvedValueOnce({
-      notModified: false,
-      etag: 'grok-snapshot-2',
-      data: { items: [refreshedAccount], total: 1, page: 1, page_size: 20, pages: 1 },
-    })
+    listAccounts
+      .mockResolvedValueOnce({ items: [initialAccount], total: 1, page: 1, page_size: 20, pages: 1 })
+      .mockResolvedValue({ items: [refreshedAccount], total: 1, page: 1, page_size: 1, pages: 1 })
 
     const wrapper = mountViewWithRow()
     await flushPromises()
     expect(wrapper.findComponent(PlatformTypeBadge).props('planType')).toBe('Free')
 
-    await vi.advanceTimersByTimeAsync(6000)
+    await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    expect(listWithEtag).toHaveBeenCalledTimes(1)
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 1, expect.objectContaining({ ids: '213', lite: '1' }), expect.anything())
     expect(wrapper.findComponent(PlatformTypeBadge).props('planType')).toBe('SuperGrok')
     wrapper.unmount()
   })

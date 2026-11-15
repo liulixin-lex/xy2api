@@ -79,7 +79,9 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			if !schedAdminMember(a, r.GroupID) || !r.View.Failing {
 				continue
 			}
-			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: schedAdminExemption(out.Exemptions, r.GroupID) != nil})
+			exempt := schedAdminExemption(out.Exemptions, r.GroupID) != nil
+			effective := schedAdminBelow(p, a.ID, r.GroupID, exempt, schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled))
+			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: exempt, Effective: effective})
 			for _, d := range r.View.Dims {
 				switch string(d) {
 				case "ttfo":
@@ -132,8 +134,14 @@ func schedAdminStop(states []SchedAutoState) *SchedAdminStop {
 	}
 	return nil
 }
-func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention, error) {
-	out := SchedAdminAttention{Substandard: []int64{}, Exempt: []int64{}, Observing: []int64{}}
+
+type schedAdminAttentionResult struct {
+	attention SchedAdminAttention
+	normal    []int64
+}
+
+func (s *SchedAdminService) attention(ctx context.Context) (schedAdminAttentionResult, error) {
+	out := schedAdminAttentionResult{attention: SchedAdminAttention{Substandard: []int64{}, Exempt: []int64{}, Observing: []int64{}}, normal: []int64{}}
 	ids, err := s.d.Accounts.SchedAdminAccountIDs(ctx)
 	if err != nil {
 		return out, err
@@ -146,32 +154,59 @@ func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention,
 			return out, err
 		}
 		for _, a := range accounts {
+			if a == nil {
+				continue
+			}
 			x, err := s.accountSummary(ctx, p, a, now)
 			if err != nil {
 				return out, err
 			}
 			if x.Status == "observing" {
-				out.Observing = append(out.Observing, a.ID)
+				out.attention.Observing = append(out.attention.Observing, a.ID)
 			}
 			if len(x.Exemptions) > 0 {
-				out.Exempt = append(out.Exempt, a.ID)
+				out.attention.Exempt = append(out.attention.Exempt, a.ID)
 			}
-			for _, r := range x.Substandard {
-				enabled := schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled)
-				if x.Stop == nil && schedAdminBelow(p, a.ID, r.GroupID, r.Exempt, enabled) {
-					out.Substandard = append(out.Substandard, a.ID)
-					break
-				}
+			below := x.Stop == nil && schedAdminHasEffectiveSubstandard(x)
+			if below {
+				out.attention.Substandard = append(out.attention.Substandard, a.ID)
+			}
+			if a.Platform == PlatformOpenAI && x.Status == "normal" && len(x.Exemptions) == 0 && !below {
+				out.normal = append(out.normal, a.ID)
 			}
 		}
 	}
-	slices.Sort(out.Substandard)
-	slices.Sort(out.Exempt)
-	slices.Sort(out.Observing)
-	out.Substandard = slices.Compact(out.Substandard)
-	out.Exempt = slices.Compact(out.Exempt)
-	out.Observing = slices.Compact(out.Observing)
+	slices.Sort(out.attention.Substandard)
+	slices.Sort(out.attention.Exempt)
+	slices.Sort(out.attention.Observing)
+	slices.Sort(out.normal)
+	out.attention.Substandard = slices.Compact(out.attention.Substandard)
+	out.attention.Exempt = slices.Compact(out.attention.Exempt)
+	out.attention.Observing = slices.Compact(out.attention.Observing)
+	out.normal = slices.Compact(out.normal)
 	return out, nil
+}
+
+func schedAdminHasEffectiveSubstandard(summary SchedAdminAccountSummary) bool {
+	for _, r := range summary.Substandard {
+		if r.Effective {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention, error) {
+	out, err := s.attention(ctx)
+	return out.attention, err
+}
+
+func (s *SchedAdminService) AccountFilter(ctx context.Context, quality string) (SchedQualityFilter, error) {
+	out, err := s.attention(ctx)
+	if err != nil {
+		return SchedQualityFilter{}, err
+	}
+	return out.attention.Filter(quality, out.normal), nil
 }
 func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAccountDetail, error) {
 	out := SchedAdminAccountDetail{Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}

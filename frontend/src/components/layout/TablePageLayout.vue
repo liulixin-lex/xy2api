@@ -47,7 +47,15 @@ onUnmounted(() => {
 /* 桌面端：Flexbox 布局 */
 .table-page-layout {
   @apply flex flex-col gap-6;
-  height: calc(100vh - 64px - 4rem); /* 减去 header + lg:p-8 的上下padding */
+}
+
+/* 从 1024px 起页面定高（视口减去页头与 lg:p-8 的上下内边距），表格在容器内滚动、表头吸顶。
+   页头按实际高度计：64px 的一行加 1px 下边框共 65px，少算 1px 会让整页出现竖向滚动条、占掉表格宽度（7q-3）。
+   1024 以下不定高：页面自然滚动，顶栏始终吸顶（7n-2） */
+@media (min-width: 1024px) {
+  .table-page-layout {
+    height: calc(100vh - 65px - 4rem);
+  }
 }
 
 .layout-section-fixed {
@@ -58,9 +66,10 @@ onUnmounted(() => {
   @apply flex-1 min-h-0 flex flex-col;
 }
 
-/* 表格滚动容器 - 增强版表体滚动方案 */
+/* 表格滚动容器 - 增强版表体滚动方案。颜色来自 styles/tokens.css 的语义变量，与 DataTable 一致。
+   relative：「有 N 条变动」提示（PendingChangesPill）在宽屏以它为定位框，落在表头带内 */
 .table-scroll-container {
-  @apply flex flex-col overflow-hidden h-full bg-white dark:bg-dark-800 rounded-2xl border border-gray-200 dark:border-dark-700 shadow-sm;
+  @apply relative flex flex-col overflow-hidden h-full bg-surface rounded-2xl border border-line-strong shadow-sm;
 }
 
 .table-scroll-container :deep(.table-wrapper) {
@@ -76,7 +85,7 @@ onUnmounted(() => {
 }
 
 .table-scroll-container :deep(thead) {
-  @apply bg-gray-50 dark:bg-dark-800;
+  @apply bg-surface-header;
 }
 
 .table-scroll-container :deep(tbody) {
@@ -84,14 +93,18 @@ onUnmounted(() => {
 }
 
 .table-scroll-container :deep(th) {
-  @apply px-5 py-4 text-left text-sm font-medium text-gray-600 dark:text-dark-300 border-b border-gray-200 dark:border-dark-700;
+  @apply px-5 py-4 text-left text-sm font-medium text-fg-secondary border-b border-line-strong;
 }
 
 .table-scroll-container :deep(td) {
-  @apply px-5 py-4 text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-dark-800;
+  @apply px-5 py-4 text-sm text-fg-primary border-b border-line-row;
 }
 
-/* 移动端：恢复正常滚动 */
+/* 移动端：恢复正常滚动；各区之间按原型收紧到 12px */
+.table-page-layout.mobile-mode {
+  @apply gap-3;
+}
+
 .table-page-layout.mobile-mode .table-scroll-container {
   @apply h-auto overflow-visible border-none shadow-none bg-transparent;
 }

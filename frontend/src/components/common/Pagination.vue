@@ -2,28 +2,42 @@
   <div
     class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:px-6"
   >
-    <div class="flex flex-1 items-center justify-between sm:hidden">
-      <!-- Mobile pagination -->
-      <button
-        @click="goToPage(page - 1)"
-        :disabled="page === 1"
-        class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
-      >
-        {{ t('pagination.previous') }}
-      </button>
-      <span class="text-sm text-gray-700 dark:text-gray-300">
-        {{ t('pagination.pageOf', { page, total: totalPages }) }}
-      </span>
-      <button
-        @click="goToPage(page + 1)"
-        :disabled="page === totalPages"
-        class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
-      >
-        {{ t('pagination.next') }}
-      </button>
+    <!-- Below 1024px (spec 8.6): page size, then previous, page / pages and next on one row -->
+    <div class="flex min-w-0 flex-1 items-center justify-between gap-3 lg:hidden" data-test="pagination-compact">
+      <div v-if="showPageSizeSelector" class="page-size-select w-20">
+        <Select
+          :model-value="pageSize"
+          :options="pageSizeSelectOptions"
+          :aria-label="t('pagination.perPage')"
+          @update:model-value="handlePageSizeChange"
+        />
+      </div>
+      <div class="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-dark-700"
+          :disabled="page === 1"
+          :aria-label="t('pagination.previous')"
+          @click="goToPage(page - 1)"
+        >
+          <Icon name="chevronLeft" size="md" />
+        </button>
+        <span class="whitespace-nowrap px-1 text-sm text-gray-700 dark:text-gray-300">
+          {{ t('pagination.pageOf', { page, total: totalPages }) }}
+        </span>
+        <button
+          type="button"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-dark-700"
+          :disabled="page === totalPages"
+          :aria-label="t('pagination.next')"
+          @click="goToPage(page + 1)"
+        >
+          <Icon name="chevronRight" size="md" />
+        </button>
+      </div>
     </div>
 
-    <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+    <div class="hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
       <!-- Desktop pagination info -->
       <div class="flex items-center space-x-4">
         <p class="text-sm text-gray-700 dark:text-gray-300">

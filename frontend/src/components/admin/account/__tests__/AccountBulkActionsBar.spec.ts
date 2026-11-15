@@ -40,6 +40,7 @@ describe('AccountBulkActionsBar', () => {
     expect(wrapper.emitted('select-all-results')).toHaveLength(1)
   })
 
+  // 后排 and 测试 went with backend 0.6.5 (no demote override, no small tests).
   it('groups the actions as 恢复 豁免 | 启用调度 停止调度 | 编辑 更多, without 批量更新', () => {
     const wrapper = mountBar()
     const actions = wrapper.findAll('[data-test="bulk-actions"] > *').map(el => (el.element.tagName === 'SPAN' ? '|' : el.text()))
@@ -71,12 +72,14 @@ describe('AccountBulkActionsBar', () => {
     }
   })
 
-  it('greys only 恢复 while a recovery runs, and every quality action while a quality batch runs', async () => {
+  it('greys only 恢复 while a recovery runs, and both quality actions while a quality batch runs', async () => {
     const wrapper = mountBar({ recoverBusy: true })
     const disabled = () => ['reset', 'exempt'].map(action => wrapper.get(`[data-test="bulk-sched-${action}"]`).attributes('disabled') !== undefined)
     expect(disabled()).toEqual([true, false])
     expect(wrapper.get('[data-test="bulk-sched-reset"]').attributes('aria-busy')).toBe('true')
     await wrapper.setProps({ recoverBusy: false, schedBusy: true })
     expect(disabled()).toEqual([true, true])
+    expect(wrapper.find('[data-test="bulk-sched-demote"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="bulk-sched-test"]').exists()).toBe(false)
   })
 })

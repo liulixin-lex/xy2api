@@ -42,6 +42,7 @@ type SchedAdminSubstandard struct {
 	Until      string                   `json:"until"`
 	OtherGroup bool                     `json:"other_group"`
 	Exempt     bool                     `json:"exempt"`
+	Effective  bool                     `json:"effective"`
 }
 type SchedAdminAccountSummary struct {
 	AccountID   int64                         `json:"account_id"`

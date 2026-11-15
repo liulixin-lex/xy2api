@@ -1,4 +1,4 @@
-import { Comment, Fragment, defineComponent, h, isVNode, ref, toDisplayString, type PropType, type Slots, type VNode, type VNodeArrayChildren } from 'vue'
+import { Comment, Fragment, defineComponent, h, isVNode, toDisplayString, type PropType, type Slots, type VNode, type VNodeArrayChildren } from 'vue'
 import type { Column } from './types'
 
 // 与 Vue renderSlot 的回退规则一致：插槽只渲染出注释/空片段时显示默认内容。
@@ -14,12 +14,9 @@ const hasRenderableContent = (nodes: VNodeArrayChildren): boolean =>
  * 桌面表格的单行。拆成独立组件后，DataTable 因虚拟滚动重渲染时，
  * props 未变的行直接跳过，只有新进入窗口的行才执行单元格插槽；
  * 插槽内读取的响应式数据由本行自己的渲染副作用追踪，数据变化时仍按行更新。
- * 插槽 `row-detail` 有内容时，在本行下面多渲染一行通栏。虚拟滚动只测量主行（`rowEl`），所以有详情行时父组件传
- * `hasDetails`，表格改为全量渲染。
  */
 export default defineComponent({
   name: 'DataTableRow',
-  inheritAttrs: false,
   props: {
     row: { type: null as unknown as PropType<any>, required: true },
     index: { type: Number, required: true },
@@ -32,15 +29,15 @@ export default defineComponent({
     selectionLabel: { type: String, default: '' },
     clickable: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
-    cellSlots: { type: Object as PropType<Slots>, required: true }
+    cellSlots: { type: Object as PropType<Slots>, required: true },
+    /** Called in this row's render: only rows whose classes change re-render. */
+    rowClass: { type: Function as PropType<(row: any, index: number) => unknown>, default: undefined }
   },
   emits: {
     toggle: (_row: any, _index: number, _checked: boolean) => true,
     rowClick: (_row: any) => true
   },
-  setup(props, { emit, attrs, expose }) {
-    const rowEl = ref<HTMLElement | null>(null)
-    expose({ rowEl })
+  setup(props, { emit }) {
     const renderCell = (column: Column) => {
       const value = props.row[column.key]
       const slot = props.cellSlots[`cell-${column.key}`]
@@ -59,7 +56,7 @@ export default defineComponent({
             h('input', {
               type: 'checkbox',
               class:
-                'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800',
+                'h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500',
               checked: props.selected,
               disabled: props.selectionDisabled,
               'aria-label': props.selectionLabel,
@@ -78,7 +75,7 @@ export default defineComponent({
             {
               key: column.key,
               class: [
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                'whitespace-nowrap py-4 text-sm text-fg-primary',
                 props.paddingClass,
                 props.stickyClasses[colIndex],
                 column.class
@@ -88,17 +85,16 @@ export default defineComponent({
           )
         )
       })
-      const row = h(
+      return h(
         'tr',
         {
-          ...attrs,
-          ref: rowEl,
           class: [
-            'table-row-border hover:bg-gray-50 dark:hover:bg-dark-800',
+            'table-row-border hover:bg-surface-hover',
             {
               'cursor-pointer': props.clickable,
               'bg-primary-50/40 dark:bg-primary-900/10': props.selectable && props.selected
-            }
+            },
+            props.rowClass?.(props.row, props.index)
           ],
           onClick: () => {
             if (props.clickable) emit('rowClick', props.row)
@@ -106,14 +102,6 @@ export default defineComponent({
         },
         cells
       )
-      const detail = props.cellSlots['row-detail']?.({ row: props.row })
-      if (!detail || !hasRenderableContent(detail)) return row
-      return h(Fragment, [
-        row,
-        h('tr', { class: 'table-row-border', 'data-row-detail': '' }, [
-          h('td', { colspan: cells.length, class: 'p-0' }, detail)
-        ])
-      ])
     }
   }
 })

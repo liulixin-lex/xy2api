@@ -11,7 +11,19 @@
       >
         <div class="py-1">
           <template v-if="account">
-            <!-- 检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色（恢复在行内） -->
+            <!-- 恢复状态只在恢复解得了某个状态时出现，排第一；其后检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色 -->
+            <template v-if="canManage && recoverable">
+              <button
+                :class="[ITEM, 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50']"
+                :aria-disabled="recovering || undefined"
+                data-test="menu-recover-state"
+                @click="onRecover"
+              >
+                <Icon name="sync" size="sm" :class="ICON" />
+                {{ t('admin.accounts.recoverState') }}
+              </button>
+              <div :class="DIVIDER"></div>
+            </template>
             <button v-if="canManage" :class="ITEM" @click="$emit('test', account); $emit('close')">
               <Icon name="play" size="sm" :class="ICON" />
               {{ t('admin.accounts.testConnection') }}
@@ -33,6 +45,11 @@
               {{ t('admin.accounts.viewStats') }}
             </button>
             <div v-if="hasAccountActions" :class="DIVIDER"></div>
+            <!-- The groups editor from any device (spec 4.3): touch screens open the quality panel from a pill. -->
+            <button v-if="canPlace" :class="ITEM" data-test="menu-edit-groups" @click="$emit('edit-groups', account); $emit('close')">
+              <Icon name="grid" size="sm" :class="ICON" />
+              {{ t('admin.accounts.editGroups') }}
+            </button>
             <button v-if="canDuplicate && canPlace" :class="ITEM" @click="$emit('duplicate', account); $emit('close')">
               <Icon name="copy" size="sm" :class="ICON" />
               {{ t('admin.accounts.duplicateAccount') }}
@@ -92,8 +109,12 @@ const props = defineProps<{
   show: boolean
   account: Account | null
   anchorRect: DOMRect | null
+  /** A recovery can clear something on this account (contract delta F1). */
+  recoverable?: boolean
+  /** Its recovery is still running; the item stays first but does nothing. */
+  recovering?: boolean
 }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'edit-groups', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')
@@ -102,12 +123,17 @@ const canPlace = canManage
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()
 const viewportPadding = 8
-const menuPosition = ref({ top: viewportPadding, left: viewportPadding })
+/**
+ * The page header's bottom, its 1px border included: the menu never covers it and scrolls inside when taller than the
+ * room under it (7q-10).
+ */
+const HEADER = 65
+const menuPosition = ref({ top: HEADER, left: viewportPadding })
 const menuStyle = computed(() => ({
   top: `${menuPosition.value.top}px`,
   left: `${menuPosition.value.left}px`,
   maxWidth: `${Math.max(0, viewportWidth.value - viewportPadding * 2)}px`,
-  maxHeight: `${Math.max(0, viewportHeight.value - viewportPadding * 2)}px`
+  maxHeight: `${Math.max(0, viewportHeight.value - HEADER - viewportPadding)}px`
 }))
 
 const updatePosition = () => {
@@ -124,7 +150,7 @@ const updatePosition = () => {
     ? anchor.left + anchor.width / 2 - width / 2
     : anchor.right - width
 
-  menuPosition.value.top = Math.max(viewportPadding, Math.min(top, maxTop))
+  menuPosition.value.top = Math.max(HEADER, Math.min(top, maxTop))
   menuPosition.value.left = Math.max(viewportPadding, Math.min(left, viewportWidth.value - width - viewportPadding))
 }
 
@@ -132,7 +158,7 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
-const ITEM = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ITEM = 'amenu-item flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
 const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
 const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
 
@@ -156,17 +182,25 @@ const hasQuotaLimit = computed(() => {
   )
 })
 // 第二组（账号操作）有任一项时才画分隔线。
-const hasAccountActions = computed(() =>
-  (canDuplicate.value && canPlace.value) ||
-  canRenewCredentials.value ||
-  (auth.isAdmin && isOpenAIOAuthParent.value) ||
-  (isOpenAIOAuthParent.value && canPlace.value) ||
-  (canManage.value && supportsPrivacy.value) ||
-  (canManage.value && hasQuotaLimit.value)
-)
+// "Edit groups" shows to every manager; the other account actions add to it.
+const hasAccountActions = computed(() => canPlace.value || canRenewCredentials.value || (auth.isAdmin && isOpenAIOAuthParent.value))
+
+function onRecover() {
+  if (!props.recovering) emit('recover-state', props.account)
+  emit('close')
+}
 
 // A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
 // below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
 const rootRef = ref<HTMLElement | null>(null)
 const layer = useOverlayLayer(() => props.show && !!props.anchorRect, { root: rootRef, modal: false, floor: 9998, onEscape: () => emit('close') })
 </script>
+
+<style scoped>
+/* Touch: every item 40px high (7n-3). Stacked with no gap, they cannot reach out unseen without covering each other. */
+@media (pointer: coarse) {
+  .amenu-item {
+    min-height: 40px;
+  }
+}
+</style>

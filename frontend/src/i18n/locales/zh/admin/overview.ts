@@ -509,6 +509,7 @@ export default {
     users: {
       title: '用户管理',
       description: '管理用户账户和权限',
+      liveDetail: '余额与并发 10 秒、用量 30 秒',
       createUser: '创建用户',
       bulkDelete: {
         action: '批量删除（{count}）',
@@ -531,6 +532,7 @@ export default {
       },
       bulkLimits: {
         action: '批量设置限制（{count}）',
+        label: '设置限制',
         title: '批量设置用户限制',
         selectedCount: '已选择 {count} 个用户',
         selectionLimit: '一次最多选择 {max} 个用户。',
@@ -871,6 +873,16 @@ export default {
 
     // Groups Management
     groups: {
+      liveDetail: '容量 5 秒、账号数 10 秒、费用 30 秒',
+      alias: {
+        label: '别名',
+        optional: '选填',
+        preview: '预览',
+        auto: '自动',
+        hint: '留空则自动取名称的前 2 个汉字；没有汉字时取前 3 个英数字符',
+        tooLong: '超出长度：最多 2 个汉字或 3 个英数字符（汉字算 1，其他字符算 2/3）',
+        invalid: '别名无效：最多 2 个汉字或 3 个英数字符，且不能含控制字符'
+      },
       showExclusiveBadge: '向用户显示专属标识',
       systemPrompt: {
         title: '系统提示词',
@@ -889,6 +901,7 @@ export default {
         duplicateModel: '模型 {model} 已有配置，请合并后保存'
       },
       title: '分组管理',
+      description: '管理 API 密钥分组和费率配置',
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',

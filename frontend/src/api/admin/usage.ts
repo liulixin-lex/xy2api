@@ -21,16 +21,19 @@ export interface AdminUsageStatsResponse {
   total_actual_cost: number
   total_account_cost: number
   average_duration_ms: number
-  // Request results and user-side numbers of the same filter (sched-v2 contract §6.1).
+  endpoints?: EndpointStat[]
+  upstream_endpoints?: EndpointStat[]
+  endpoint_paths?: EndpointStat[]
+  // 后端 0.6.5 起管理端统计按请求层计：total_requests 含没有账单的失败 / 取消请求，下列为按结果的拆分。
   success?: number
   rescued?: number
   failed?: number
   ttfo_p50_ms?: number | null
   cache_ratio?: number | null
-  endpoints?: EndpointStat[]
-  upstream_endpoints?: EndpointStat[]
-  endpoint_paths?: EndpointStat[]
 }
+
+/** 请求结果（后端 0.6.5）：1 成功，2 已救回，3 失败，4 已取消。仅管理端列表与统计接受。 */
+export type UsageRequestResult = 1 | 2 | 3 | 4
 
 export interface SimpleUser {
   id: number
@@ -91,8 +94,8 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   exact_total?: boolean
   billing_mode?: string
   upstream_model_mismatch?: boolean
-  /** UsageResult. */
-  result?: number | null
+  /** 按请求结果筛选（列表与统计） */
+  result?: UsageRequestResult | null
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   // 错误请求 tab 专属筛选(仅传给错误列表接口;共用同一 filters 对象)
@@ -119,24 +122,6 @@ export async function list(
   return data
 }
 
-/** One upstream attempt of a request (contract §3, §6.1); outcome 1 OK, 2 first-output timeout, 3 failed, 5 canceled. */
-export interface UsageAttempt {
-  attempt_id: string
-  account_id: number
-  account_name: string | null
-  started_at: string
-  ttfo_ms: number | null
-  duration_ms: number | null
-  outcome: 1 | 2 | 3 | 5
-  error_class: string | null
-}
-
-/** The attempts of one request, oldest first; `at` is the request time, to hit the index. */
-export async function listAttempts(gatewayRequestId: string, at: string): Promise<UsageAttempt[]> {
-  const { data } = await apiClient.get<UsageAttempt[]>('/admin/usage/attempts', { params: { gateway_request_id: gatewayRequestId, at } })
-  return data
-}
-
 /**
  * Get usage statistics with optional filters (admin only)
  * @param params - Query parameters for filtering
@@ -152,7 +137,7 @@ export async function getStats(params: {
   stream?: boolean
   native_compaction_v2?: boolean | null
   upstream_model_mismatch?: boolean
-  result?: number | null
+  result?: UsageRequestResult | null
   period?: string
   start_date?: string
   end_date?: string
@@ -237,7 +222,6 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 export const adminUsageAPI = {
   list,
   getStats,
-  listAttempts,
   searchUsers,
   searchApiKeys,
   listCleanupTasks,

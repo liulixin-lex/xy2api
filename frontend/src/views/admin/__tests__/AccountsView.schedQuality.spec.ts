@@ -6,33 +6,32 @@ import { getActivePinia } from 'pinia'
 import AccountsView from '../AccountsView.vue'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId, AdminLevel } from '@/types/adminAccess'
-import type { SchedAccountSummary } from '@/types/schedQuality'
-import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import { closeSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
+import { closeSchedDrawer, markSchedChanged, useSchedLayers } from '@/composables/useSchedLayers'
 
-const { listAccounts, getById, sched } = vi.hoisted(() => ({
+const { listAccounts, getById, backendSummary, sched } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), setOverride: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
+  backendSummary: vi.fn(),
+  sched: { reset: vi.fn(), setOverride: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
 }))
 
-vi.mock('@/api/admin/schedQuality', () => ({ default: sched }))
+vi.mock('@/api/admin/schedQuality', () => ({ default: sched, backendSummary }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag: vi.fn(),
       getById,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
-      getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
+      getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
-      batchRefresh: vi.fn(),
-      toggleSchedulable: vi.fn()
+      batchRefresh: vi.fn()
     },
     proxies: { getAll: vi.fn().mockResolvedValue([]) },
-    groups: { getAll: vi.fn().mockResolvedValue([{ id: 53, name: '晨星组', platform: 'openai' }]) }
+    groups: { getAll: vi.fn().mockResolvedValue([{ id: 53, name: '晨星组', platform: 'openai', sort_order: 1 }]) }
   }
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn(), showInfo: vi.fn() }) }))
@@ -45,7 +44,7 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-// Renders rows in the order given, with the groups, membership and actions cells.
+// Renders rows in the order given, with the recent status, groups and actions cells.
 const DataTableStub = defineComponent({
   props: ['columns', 'data'],
   setup(props, { slots }) {
@@ -54,26 +53,11 @@ const DataTableStub = defineComponent({
       ...(props.data as Array<{ id: number }>).map((row) =>
         h('div', { 'data-test': 'row', 'data-id': row.id }, [
           slots['cell-select']?.({ row }),
-          h('span', { 'data-test': 'groups' }, slots['cell-sq_groups']?.({ row })),
-          h('span', { 'data-test': 'membership' }, slots['cell-groups']?.({ row })),
+          h('span', { 'data-test': 'recent' }, slots['cell-sq_recent']?.({ row })),
+          h('span', { 'data-test': 'groups' }, slots['cell-groups']?.({ row })),
           h('span', { 'data-test': 'actions' }, slots['cell-actions']?.({ row }))
         ]))
     ])
-  }
-})
-
-const RouterLinkStub = defineComponent({
-  name: 'RouterLink',
-  props: ['to'],
-  setup(props, { slots }) {
-    return () => h('a', { href: `${props.to.path}?account_id=${props.to.query.account_id}` }, slots.default?.())
-  }
-})
-
-const PaginationStub = defineComponent({
-  emits: ['update:page'],
-  setup(_, { emit }) {
-    return () => h('button', { 'data-test': 'next-page', onClick: () => emit('update:page', 2) })
   }
 })
 
@@ -94,22 +78,36 @@ const BulkBarStub = defineComponent({
   }
 })
 
-// Turns on the "substandard" filter the way the real filter bar does.
-const FiltersStub = defineComponent({
+// Turns on the "back of queue" quality filter the way the toolbar does; renders the more-actions slot.
+const ToolbarStub = defineComponent({
   props: ['filters'],
-  emits: ['update:filters', 'change'],
-  setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-substandard', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'substandard' }); emit('change') } })
+  emits: ['change'],
+  setup(props, { emit, slots }) {
+    return () => h('div', [
+      h('button', { 'data-test': 'filter-substandard', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) }),
+      slots['more-actions']?.()
+    ])
   }
 })
 
 const account = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [53] })
-const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
-const summaries = (): SchedAccountSummary[] => [
-  { ...structuredClone(base), account_id: 1 },
-  { ...structuredClone(base), account_id: 2, ttfo: { p50_ms: 9100, n: 140, short: false, red: false }, substandard: [] },
-  { ...structuredClone(base), account_id: 3, ttfo: { p50_ms: null, n: 90, short: false, red: false }, substandard: [] },
-  { ...structuredClone(base), account_id: 4, ttfo: { p50_ms: null, n: 0, short: true, red: false }, substandard: [] }
+const summaryOf = (id: number, patch: Partial<BackendAccountSummary> = {}): BackendAccountSummary => ({
+  account_id: id,
+  status: 'normal',
+  reset_at: null,
+  stop: null,
+  ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
+  error: { n: 100, short: false, red: false, rate: 0 },
+  cache: { n: 40, short: false, red: false, ratio: 0.9 },
+  substandard: [],
+  exemptions: [],
+  ...patch
+})
+const summaries = () => [
+  summaryOf(1, { substandard: [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }], ttfo: { n: 30, short: false, red: true, p50_ms: 9100 } }),
+  summaryOf(2),
+  summaryOf(3, { status: 'observing' }),
+  summaryOf(4, { stop: { source: 'manual', reason: 'manual_off', until: null } })
 ]
 
 function mountView(stubs: Record<string, unknown> = {}) {
@@ -117,15 +115,13 @@ function mountView(stubs: Record<string, unknown> = {}) {
     attachTo: document.body,
     global: {
       stubs: {
-        RouterLink: RouterLinkStub,
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
         AccountActionMenu: true,
-        AccountTableActions: true,
-        AccountTableFilters: FiltersStub,
+        AccountsToolbar: ToolbarStub,
         AccountBulkActionsBar: BulkBarStub,
-        Pagination: PaginationStub,
+        Pagination: true,
         ConfirmDialog: true,
         ImportDataModal: true,
         ReAuthAccountModal: true,
@@ -133,12 +129,14 @@ function mountView(stubs: Record<string, unknown> = {}) {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
         EditAccountModal: true,
         BulkEditAccountModal: true,
         Icon: true,
+        Teleport: true,
         ...stubs
       }
     }
@@ -166,90 +164,100 @@ beforeEach(() => {
   closeSchedDrawer()
   document.documentElement.dataset.motion = 'reduced'
   listAccounts.mockReset().mockResolvedValue({ items: [account(1, 'acc-sol'), account(2, 'acc-astra'), account(3, 'acc-slow'), account(4, 'acc-empty')], total: 4, page: 1, page_size: 20, pages: 1 })
-  sched.summary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: summaries() })
+  backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: summaries() })
   sched.accountDetail.mockReset().mockReturnValue(new Promise(() => {}))
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
 describe('AccountsView quality columns', () => {
-  it('loads the summary without a model and opens the drawer on a capsule\'s own group', async () => {
+  it('reads the backend\'s own summary for the page and opens the quality panel on a pill\'s group and its substandard model', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(sched.summary).toHaveBeenCalledWith([1, 2, 3, 4], expect.anything())
+    expect(backendSummary).toHaveBeenCalledWith([1, 2, 3, 4], expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    // Dots by the spec's order: back, ok, observing, stopped (the shared hollow ring).
+    const tone = (id: number) => rowCell(id, 'groups').querySelector('.status-dot')!.className
+    expect([tone(1), tone(2), tone(3), tone(4)]).toEqual([
+      'status-dot status-dot--back', 'status-dot status-dot--ok', 'status-dot status-dot--observe', 'status-dot status-dot--off'
+    ])
+    // The recent values are the whole account's: a red mark (one group and model) does not colour them (7k-2).
+    expect(rowCell(1, 'recent').querySelector('[data-dim="ttfo"]')!.className).toBe('recent__v')
+
+    rowCell(1, 'groups').querySelector<HTMLElement>('[data-test="group-pill-dot"]')!.click()
+    await flushPromises()
     const { drawer } = useSchedLayers()
-    rowCell(1, 'groups').querySelector<HTMLElement>('.sq-capsule')!.click()
-    expect([drawer.accountId, drawer.model, drawer.groupId]).toEqual([1, 'gpt-6.1-sol', 53])
+    expect([drawer.accountId, drawer.groupId, drawer.model]).toEqual([1, 53, 'gpt-6.1-sol'])
     wrapper.unmount()
   })
 
-  it('loads the summary for every reader, even with the groups column hidden: the status column comes from it', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups']))
+  it('asks for the summary for managers even with the quality columns hidden; a viewer asks once a quality column is shown', async () => {
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['groups', 'sq_recent']))
+    const manager = mountView()
+    await flushPromises()
+    expect(backendSummary).toHaveBeenCalled()
+    manager.unmount()
+
+    backendSummary.mockClear()
     seedOperator({ accounts: 'view' })
     const viewer = mountView()
     await flushPromises()
-    expect(sched.summary).toHaveBeenCalledTimes(1)
+    expect(backendSummary).not.toHaveBeenCalled()
+    ;(viewer.vm as unknown as { toggleColumn: (key: string) => void }).toggleColumn('sq_recent')
+    await flushPromises()
+    expect(backendSummary).toHaveBeenCalledTimes(1)
     viewer.unmount()
   })
 
   // Scenario 36: a read-only viewer gets no write entry.
   it('gives a view-only operator no write entries', async () => {
-    const tools = { AccountTableActions: { template: '<div><slot name="after" /></div>' }, Teleport: true }
     seedOperator({ accounts: 'view' })
-    const viewer = mountView(tools)
+    const viewer = mountView()
     await flushPromises()
     expect(viewer.find('[data-test="row-edit"]').exists()).toBe(false)
     expect(viewer.find('[data-test="row-more"]').exists()).toBe(true)
-    await viewer.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    await viewer.get('[data-test="account-tools"]').trigger('click')
     expect(viewer.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(false)
-    // Membership is plain badges for a viewer: no button, no edit name, no Tab stop (red team FA-2).
-    const membership = rowCell(1, 'membership').querySelector<HTMLElement>('[data-testid="account-groups-cell"]')!
-    expect(membership.textContent).toContain('晨星组')
-    expect([membership.tagName, membership.getAttribute('aria-label'), membership.tabIndex]).toEqual(['SPAN', null, -1])
-    expect(rowCell(1, 'membership').querySelector('button')).toBeNull()
+    // The pills' text zone (edit groups) is inert for a viewer; the dot still opens the quality panel.
+    expect(rowCell(1, 'groups').querySelector<HTMLButtonElement>('[data-test="group-pill-text"]')!.disabled).toBe(true)
     viewer.unmount()
 
-    seedOperator({ accounts: 'manage' })
-    const manager = mountView(tools)
+    seedOperator({ accounts: 'manage', usage: 'view' })
+    const manager = mountView()
     await flushPromises()
     expect(manager.find('[data-test="row-edit"]').exists()).toBe(true)
-    await manager.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    await manager.get('[data-test="account-tools"]').trigger('click')
     expect(manager.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(true)
-    expect(rowCell(1, 'membership').querySelector('button[data-testid="account-groups-cell"]')!.getAttribute('aria-label')).toBe('admin.groupCategories.editAccountGroupsAria:{"name":"acc-sol"}')
+    expect(rowCell(1, 'groups').querySelector<HTMLButtonElement>('[data-test="group-pill-text"]')!.disabled).toBe(false)
     manager.unmount()
   })
 
-  // Contract delta D2: under a quality filter, closing the drawer reloads the list; otherwise only the summary.
-  it('reloads the list when the drawer closes while a quality filter is on', async () => {
+  // The live table dims rows that left the filter; a quality change (an exemption in the panel, a recovery, a batch)
+  // asks for the summary at once, never the list. Closing the panel asks for nothing.
+  it('asks for the summary again after a quality change, without loading the list', async () => {
     const wrapper = mountView()
     await flushPromises()
-    rowCell(1, 'groups').querySelector<HTMLElement>('.sq-capsule')!.click()
+    await wrapper.get('[data-test="filter-substandard"]').trigger('click')
+    await flushPromises()
+    rowCell(1, 'groups').querySelector<HTMLElement>('[data-test="group-pill-dot"]')!.click()
     await flushPromises()
     listAccounts.mockClear()
-    sched.summary.mockClear()
+    backendSummary.mockClear()
     closeSchedDrawer()
+    await flushPromises()
+    expect(backendSummary).not.toHaveBeenCalled()
+    await markSchedChanged()
     await flushPromises()
     expect(listAccounts).not.toHaveBeenCalled()
-    expect(sched.summary).toHaveBeenCalledTimes(1)
-
-    await wrapper.findComponent(FiltersStub).trigger('click')
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    await flushPromises()
-    rowCell(1, 'groups').querySelector<HTMLElement>('.sq-capsule')!.click()
-    await flushPromises()
-    listAccounts.mockClear()
-    closeSchedDrawer()
-    await flushPromises()
-    expect(listAccounts).toHaveBeenCalledTimes(1)
-    expect(listAccounts.mock.calls[0][2]).toMatchObject({ sched_quality: 'substandard' })
+    expect(backendSummary).toHaveBeenCalledTimes(1)
+    expect(backendSummary.mock.calls[0][0]).toEqual([1, 2, 3, 4])
     wrapper.unmount()
   })
 
+  // Backend 0.6.5 keeps one batch quality action besides 恢复: 豁免 (the batch test and 后排 are gone).
   it('opens no new quality batch until the closed one has its late answers in', async () => {
     const many = Array.from({ length: 6 }, (_, i) => account(i + 1, `acc-${i + 1}`))
     listAccounts.mockResolvedValue({ items: many, total: 6, page: 1, page_size: 20, pages: 1 })
     const pending: Array<() => void> = []
     sched.setOverride.mockReset().mockImplementation(() => new Promise<void>((resolve) => pending.push(resolve)))
-    sched.reset.mockReset().mockImplementation(async (account_id: number) => ({ account_id, reset_at: null, cleared: [], kept: [], failed: [] }))
     const wrapper = mountView()
     await flushPromises()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
@@ -264,31 +272,30 @@ describe('AccountsView quality columns', () => {
     // Close the results with four answers outstanding, then try a new batch at once.
     document.querySelector('[data-sq-batch-results]')!.closest('.modal-content')!.querySelector<HTMLElement>('.modal-footer .btn-secondary')!.click()
     await flushPromises()
-    expect(bar('[data-test="bulk-sched-reset"]').attributes('disabled')).toBeDefined()
-    ;(bar('[data-test="bulk-sched-reset"]').element as HTMLButtonElement).disabled = false
-    await bar('[data-test="bulk-sched-reset"]').trigger('click')
+    expect(bar('[data-test="bulk-sched-exempt"]').attributes('disabled')).toBeDefined()
+    ;(bar('[data-test="bulk-sched-exempt"]').element as HTMLButtonElement).disabled = false
+    await bar('[data-test="bulk-sched-exempt"]').trigger('click')
     await flushPromises()
-    const resetConfirm = () => document.querySelector<HTMLElement>('[data-sq-batch-confirm]')
-    expect(resetConfirm()).toBeNull()
+    expect(document.querySelector('[data-sq-popover] .btn-primary')).toBeNull()
 
     pending.forEach((answer) => answer())
     await flushPromises()
     expect(sched.setOverride).toHaveBeenCalledTimes(4)
-    expect(bar('[data-test="bulk-sched-reset"]').attributes('disabled')).toBeUndefined()
-    await bar('[data-test="bulk-sched-reset"]').trigger('click')
+    expect(bar('[data-test="bulk-sched-exempt"]').attributes('disabled')).toBeUndefined()
+    sched.setOverride.mockImplementation(() => Promise.resolve())
+    await bar('[data-test="bulk-sched-exempt"]').trigger('click')
     await flushPromises()
-    resetConfirm()!.click()
+    document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()
-    expect(sched.reset.mock.calls.map(([id]) => id).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6])
-    expect(sched.setOverride).toHaveBeenCalledTimes(4)
+    expect(sched.setOverride.mock.calls.slice(4).map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(sched.setOverride.mock.calls.every(([, request]) => request.mode === 'exempt')).toBe(true)
     wrapper.unmount()
   })
 
-  it('keeps the substandard filter in the secondary account queries: select all results and edit by filter', async () => {
+  it('keeps the quality filter in the secondary account queries: select all results and edit by filter (K24)', async () => {
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.findComponent(FiltersStub).trigger('click')
-    await new Promise((resolve) => setTimeout(resolve, 400))
+    await wrapper.get('[data-test="filter-substandard"]').trigger('click')
     await flushPromises()
     listAccounts.mockClear()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
@@ -298,8 +305,9 @@ describe('AccountsView quality columns', () => {
     // 批量更新 (edit by filter) is in the toolbar's 更多操作.
     await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
-    expect(listAccounts.mock.calls.length).toBeGreaterThanOrEqual(2)
-    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'substandard' })
+    const queries = listAccounts.mock.calls.filter(([, , filters]) => !(filters as { ids?: string }).ids)
+    expect(queries.length).toBeGreaterThanOrEqual(2)
+    for (const [, , filters] of queries) expect(filters).toMatchObject({ sched_quality: 'substandard' })
     wrapper.unmount()
   })
 })

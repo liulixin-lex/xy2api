@@ -1,7 +1,6 @@
 export default {
   "title": "Exports",
   "retention": "Files are available for 24 hours. Generation continues when you leave this page.",
-  "retentionShort": "Kept 24 h",
   "waiting": "Waiting before trying again. Your export continues in the background.",
   "rows": "{count} rows",
   "snapshot": "Data snapshot: {time}",

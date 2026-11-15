@@ -509,6 +509,7 @@ export default {
     users: {
       title: 'User Management',
       description: 'Manage users and their permissions',
+      liveDetail: 'balance and concurrency every 10 s, usage every 30 s',
       createUser: 'Create User',
       bulkDelete: {
         action: 'Delete selected ({count})',
@@ -531,6 +532,7 @@ export default {
       },
       bulkLimits: {
         action: 'Set limits ({count})',
+        label: 'Set limits',
         title: 'Set user limits',
         selectedCount: '{count} users selected',
         selectionLimit: 'Select no more than {max} users at a time.',
@@ -874,6 +876,16 @@ export default {
 
     // Groups
     groups: {
+      liveDetail: 'capacity every 5 s, account counts every 10 s, costs every 30 s',
+      alias: {
+        label: 'Alias',
+        optional: 'optional',
+        preview: 'Preview',
+        auto: 'auto',
+        hint: 'Left empty, it takes the first 2 Chinese characters of the name, or else its first 3 letters and digits',
+        tooLong: 'Too long: at most 2 Chinese characters or 3 letters and digits (a Chinese character counts 1, others 2/3)',
+        invalid: 'Invalid alias: at most 2 Chinese characters or 3 letters and digits, no control characters'
+      },
       showExclusiveBadge: 'Show exclusive badge to users',
       systemPrompt: {
         title: 'System prompts',
@@ -892,6 +904,7 @@ export default {
         duplicateModel: 'Model {model} already has a configuration. Merge its entries before saving.'
       },
       title: 'Group Management',
+      description: 'Manage API key groups and rate multipliers',
       searchGroups: 'Search groups...',
       createGroup: 'Create Group',
       editGroup: 'Edit Group',

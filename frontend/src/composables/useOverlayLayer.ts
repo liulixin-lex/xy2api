@@ -1,5 +1,5 @@
-import { nextTick, onUnmounted, ref, toValue, watch, type Ref, type WatchSource } from 'vue'
-import { closeOverlay, holdFocus, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
+import { nextTick, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter, type Ref, type WatchSource } from 'vue'
+import { closeOverlay, holdFocus, insideLayerAbove, isTopOverlay, openOverlay, setOverlayModal, syncOverlays, trapTab } from '@/utils/overlayStack'
 
 interface OverlayLayerOptions {
   /** Outermost element of the layer (made inert while a modal layer is above it). */
@@ -11,9 +11,10 @@ interface OverlayLayerOptions {
    * it. false: a sub-layer, i.e. a menu or popover opened from the page or from another layer (a Select menu in a
    * dialog). The layer it belongs to stays usable and keeps its focus rules, but while the sub-layer is open it is
    * the top layer: re-renders below do not pull focus out of it and Escape closes it first. It never moves focus by
-   * itself.
+   * itself. A getter switches the open layer between the two (the quality panel is modal only while it takes the
+   * whole screen).
    */
-  modal?: boolean
+  modal?: MaybeRefOrGetter<boolean>
   /** Lowest z-index (for a sub-layer: its own z-index). The layer is always drawn above those opened before it. */
   floor?: number
   /** Modal only: element that takes focus once the layer has rendered. Defaults to the panel. */
@@ -30,8 +31,8 @@ interface OverlayLayerOptions {
  * layer closes, focus goes back to the layer below unless the user has already moved it somewhere else.
  */
 export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLayerOptions) {
-  const token = Symbol(options.modal === false ? 'sub-layer' : 'modal')
-  const modal = options.modal !== false
+  const token = Symbol('layer')
+  const isModal = () => toValue(options.modal) !== false
   const zIndex = ref<number>()
   const panel = () => options.panel?.value ?? options.root.value
 
@@ -46,19 +47,20 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
     closeOverlay(token)
   }
 
+  // A sub-layer closes when a modal layer opens above it.
+  const covered = () => { if (toValue(show)) (options.onCovered ?? options.onEscape)?.() }
+
   watch(
-    show,
-    async (open) => {
+    [() => toValue(show), isModal],
+    async ([open, modal], previous) => {
       if (!open) return detach()
-      zIndex.value = openOverlay(token, {
-        floor: options.floor,
-        modal,
-        root: () => options.root.value,
-        panel,
-        // A sub-layer closes when a modal layer opens above it.
-        onCovered: modal ? undefined : () => { if (toValue(show)) (options.onCovered ?? options.onEscape)?.() }
-      })
-      document.addEventListener('keydown', onKeydown)
+      // Only the modal flag changed (the panel crossing 1024px): the layer keeps its place in the stack, under a
+      // dialog or popover opened above it (7p-2).
+      const switched = previous?.[0] === true && setOverlayModal(token, modal, modal ? undefined : covered)
+      if (!switched) {
+        zIndex.value = openOverlay(token, { floor: options.floor, modal, root: () => options.root.value, panel, onCovered: modal ? undefined : covered })
+        document.addEventListener('keydown', onKeydown)
+      }
       await nextTick()
       if (!isTopOverlay(token)) return
       syncOverlays()
@@ -78,6 +80,8 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
      * function once it has rendered. Focus goes back to that element, else to the one with the same data-*, else
      * to the panel. Does nothing unless this layer is on top (a layer opened above in the meantime keeps focus).
      */
-    holdFocus: () => holdFocus(token)
+    holdFocus: () => holdFocus(token),
+    /** Whether `el` lies in a layer opened above this one (a popover or dialog it opened): not "outside" it. */
+    insideAbove: (el: Element) => insideLayerAbove(token, el)
   }
 }

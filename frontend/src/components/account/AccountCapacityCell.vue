@@ -1,47 +1,41 @@
 <template>
-  <!-- One badge per 18px line, like the other multi-line cells of the account list (ui-proposal 6.2). -->
-  <div class="grid auto-rows-[18px] items-center">
-    <!-- 并发槽位 -->
-    <CapacityBadge :color-class="concurrencyClass" :tooltip="concurrencyTooltip" :current="currentConcurrency" :max="account.concurrency" :extra="account.current_group_concurrency">
-      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-      </svg>
-    </CapacityBadge>
-
-    <!-- 5h窗口费用限制 -->
-    <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="'$' + formatCost(currentWindowCost)" :max="'$' + formatCost(account.window_cost_limit)">
-      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    </CapacityBadge>
-
-    <!-- 会话数量限制 -->
-    <CapacityBadge v-if="showSessionLimit" :color-class="sessionLimitClass" :tooltip="sessionLimitTooltip" :current="activeSessions" :max="account.max_sessions!">
-      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-      </svg>
-    </CapacityBadge>
-
-    <!-- RPM 限制 -->
-    <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="account.base_rpm!" :suffix="rpmStrategyTag">
-      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-      </svg>
-    </CapacityBadge>
-
-    <!-- API Key 账号配额限制 -->
-    <QuotaBadge v-if="showDailyQuota" :used="account.quota_daily_used ?? 0" :limit="account.quota_daily_limit!" label="D" />
-    <QuotaBadge v-if="showWeeklyQuota" :used="account.quota_weekly_used ?? 0" :limit="account.quota_weekly_limit!" label="W" />
-    <QuotaBadge v-if="showTotalQuota" :used="account.quota_used ?? 0" :limit="account.quota_limit!" />
+  <!-- Neutral chips (prototype, 7e-14): one per limit, 15px lines when there are several. -->
+  <div class="cap" :class="{ 'cap--multi': lines.length > 1 }" data-test="account-capacity">
+    <span
+      v-for="line in lines"
+      :key="line.key"
+      class="cap__chip"
+      :class="{ 'cap__chip--zero': line.used === 0 && !line.full, 'cap__chip--full': line.full }"
+      :data-cap="line.key"
+      v-tip="() => tipOf(line)"
+    >
+      <span v-if="lines.length > 1" class="cap__l">{{ line.label }}</span>
+      <span :ref="(el) => { values[line.key] = el as HTMLElement | null }" class="cap__v">{{ line.current }} / {{ line.max }}</span>
+      <template v-if="line.group != null">
+        <span class="cap__v">/</span>
+        <span class="cap__group" data-test="capacity-group-current">{{ line.group }}</span>
+      </template>
+      <span v-if="line.suffix" class="cap__suffix">{{ line.suffix }}</span>
+    </span>
   </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * Capacity column (spec 4.1, prototype): what is in use against each limit the account has. The lines and their tips
+ * are the old badges' ones: concurrency always (with this group's share when the list is filtered to a group); for
+ * Anthropic OAuth / setup-token the 5h window cost, sessions and RPM when limited; for API key and Bedrock the
+ * daily, weekly and total quota when set. The look is the prototype's: a neutral chip with the UI font's tabular
+ * digits, no icons (a short label names each line when there are several), greyed while nothing is in use, amber only
+ * when the limit is reached. Money drops whole ".00" so a line fits the column, and from $1,000 takes the three-digit
+ * abbreviation ($1.23K); the tip has the exact amounts. A value that still does not fit ends in an ellipsis, never cut
+ * off unmarked (7i-1), and its tip then carries the whole value.
+ */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
-import CapacityBadge from '@/components/account/CapacityBadge.vue'
-import QuotaBadge from '@/components/account/QuotaBadge.vue'
+import { formatCompactMoney } from '@/utils/compactNumber'
+import { vTip } from '@/utils/tip'
 
 const props = defineProps<{
   account: Account
@@ -49,150 +43,195 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// ====== 并发 ======
-const currentConcurrency = computed(() => props.account.current_concurrency || 0)
-
-const concurrencyClass = computed(() => {
-  const current = currentConcurrency.value
-  const max = props.account.concurrency
-  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  if (current > 0) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-  return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-})
-
-// 只有列表筛选了具体分组时，后端才返回分组并发
-const concurrencyTooltip = computed(() => {
-  const group = props.account.current_group_concurrency
-  if (group == null) return undefined
-  return t('admin.accounts.capacity.concurrencyGroup', { current: currentConcurrency.value, max: props.account.concurrency, group })
-})
-
-// ====== 窗口费用 ======
-const isAnthropicOAuthOrSetupToken = computed(() =>
-  props.account.platform === 'anthropic' &&
-  (props.account.type === 'oauth' || props.account.type === 'setup-token')
-)
-
-const showWindowCost = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
-  props.account.window_cost_limit != null &&
-  props.account.window_cost_limit > 0
-)
-
-const currentWindowCost = computed(() => props.account.current_window_cost ?? 0)
-
-const windowCostClass = computed(() => {
-  if (!showWindowCost.value) return ''
-  const current = currentWindowCost.value
-  const limit = props.account.window_cost_limit || 0
-  const reserve = props.account.window_cost_sticky_reserve || 10
-  if (current >= limit + reserve) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  if (current >= limit) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-  if (current >= limit * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-})
-
-const windowCostTooltip = computed(() => {
-  if (!showWindowCost.value) return ''
-  const current = currentWindowCost.value
-  const limit = props.account.window_cost_limit || 0
-  const reserve = props.account.window_cost_sticky_reserve || 10
-  if (current >= limit + reserve) return t('admin.accounts.capacity.windowCost.blocked')
-  if (current >= limit) return t('admin.accounts.capacity.windowCost.stickyOnly')
-  return t('admin.accounts.capacity.windowCost.normal')
-})
-
-// ====== 会话限制 ======
-const showSessionLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
-  props.account.max_sessions != null &&
-  props.account.max_sessions > 0
-)
-
-const activeSessions = computed(() => props.account.active_sessions ?? 0)
-
-const sessionLimitClass = computed(() => {
-  if (!showSessionLimit.value) return ''
-  const current = activeSessions.value
-  const max = props.account.max_sessions || 0
-  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  if (current >= max * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-})
-
-const sessionLimitTooltip = computed(() => {
-  if (!showSessionLimit.value) return ''
-  const current = activeSessions.value
-  const max = props.account.max_sessions || 0
-  const idle = props.account.session_idle_timeout_minutes || 5
-  if (current >= max) return t('admin.accounts.capacity.sessions.full', { idle })
-  return t('admin.accounts.capacity.sessions.normal', { idle })
-})
-
-// ====== RPM ======
-const showRpmLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
-  props.account.base_rpm != null &&
-  props.account.base_rpm > 0
-)
-
-const currentRPM = computed(() => props.account.current_rpm ?? 0)
-const rpmStrategy = computed(() => props.account.rpm_strategy || 'tiered')
-const rpmStrategyTag = computed(() => rpmStrategy.value === 'sticky_exempt' ? '[S]' : '[T]')
-
-const rpmBuffer = computed(() => {
-  const base = props.account.base_rpm || 0
-  return props.account.rpm_sticky_buffer ?? (base > 0 ? Math.max(1, Math.floor(base / 5)) : 0)
-})
-
-const rpmClass = computed(() => {
-  if (!showRpmLimit.value) return ''
-  const current = currentRPM.value
-  const base = props.account.base_rpm ?? 0
-  const buffer = rpmBuffer.value
-  if (rpmStrategy.value === 'tiered') {
-    if (current >= base + buffer) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-    if (current >= base) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-  } else {
-    if (current >= base) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-  }
-  if (current >= base * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-})
-
-const rpmTooltip = computed(() => {
-  if (!showRpmLimit.value) return ''
-  const current = currentRPM.value
-  const base = props.account.base_rpm ?? 0
-  const buffer = rpmBuffer.value
-  if (rpmStrategy.value === 'tiered') {
-    if (current >= base + buffer) return t('admin.accounts.capacity.rpm.tieredBlocked', { buffer })
-    if (current >= base) return t('admin.accounts.capacity.rpm.tieredStickyOnly', { buffer })
-    if (current >= base * 0.8) return t('admin.accounts.capacity.rpm.tieredWarning')
-    return t('admin.accounts.capacity.rpm.tieredNormal')
-  } else {
-    if (current >= base) return t('admin.accounts.capacity.rpm.stickyExemptOver')
-    if (current >= base * 0.8) return t('admin.accounts.capacity.rpm.stickyExemptWarning')
-    return t('admin.accounts.capacity.rpm.stickyExemptNormal')
-  }
-})
-
-// 格式化费用显示
-const formatCost = (value: number | null | undefined) => {
-  if (value === null || value === undefined) return '0'
-  return value.toFixed(2)
+interface CapLine {
+  key: string
+  label: string
+  current: string | number
+  max: string | number
+  used: number
+  full: boolean
+  tip: string
+  group?: number | null
+  suffix?: string
 }
 
-// ====== 配额 ======
-const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')
+const exactMoney = (value: number | null | undefined) => `$${(value ?? 0).toFixed(2)}`
+/** $4.20, $30 (a whole amount without ".00"); from $1,000 $1.23K, $12.3K … */
+const shortMoney = (value: number | null | undefined) => {
+  const cents = Math.round((value ?? 0) * 100)
+  if (cents >= 100_000) return formatCompactMoney(value)
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`
+}
+const withAmounts = (tip: string, used: number, limit: number) => [tip, `${exactMoney(used)} / ${exactMoney(limit)}`].filter(Boolean).join('\n')
 
-const showDailyQuota = computed(() =>
-  isQuotaEligible.value && props.account.quota_daily_limit != null && props.account.quota_daily_limit > 0
+const isAnthropicOAuthOrSetupToken = computed(() =>
+  props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 )
-const showWeeklyQuota = computed(() =>
-  isQuotaEligible.value && props.account.quota_weekly_limit != null && props.account.quota_weekly_limit > 0
-)
-const showTotalQuota = computed(() =>
-  isQuotaEligible.value && props.account.quota_limit != null && props.account.quota_limit > 0
-)
+const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')
+const limited = (value: number | null | undefined): value is number => value != null && value > 0
+
+function concurrencyLine(): CapLine {
+  const current = props.account.current_concurrency || 0
+  const max = props.account.concurrency
+  // Only a list filtered to one group carries the group's share.
+  const group = props.account.current_group_concurrency
+  return {
+    key: 'concurrency',
+    label: t('admin.accounts.capacity.labels.concurrency'),
+    current,
+    max,
+    used: current,
+    full: current >= max,
+    group: group ?? null,
+    tip: group == null ? '' : t('admin.accounts.capacity.concurrencyGroup', { current, max, group })
+  }
+}
+
+function windowCostLine(): CapLine | null {
+  const limit = props.account.window_cost_limit
+  if (!isAnthropicOAuthOrSetupToken.value || !limited(limit)) return null
+  const current = props.account.current_window_cost ?? 0
+  const reserve = props.account.window_cost_sticky_reserve || 10
+  const tip = current >= limit + reserve
+    ? t('admin.accounts.capacity.windowCost.blocked')
+    : current >= limit ? t('admin.accounts.capacity.windowCost.stickyOnly') : t('admin.accounts.capacity.windowCost.normal')
+  return {
+    key: 'window_cost',
+    label: t('admin.accounts.capacity.labels.windowCost'),
+    current: shortMoney(current),
+    max: shortMoney(limit),
+    used: current,
+    full: current >= limit,
+    tip: withAmounts(tip, current, limit)
+  }
+}
+
+function sessionsLine(): CapLine | null {
+  const max = props.account.max_sessions
+  if (!isAnthropicOAuthOrSetupToken.value || !limited(max)) return null
+  const current = props.account.active_sessions ?? 0
+  const idle = props.account.session_idle_timeout_minutes || 5
+  return {
+    key: 'sessions',
+    label: t('admin.accounts.capacity.labels.sessions'),
+    current,
+    max,
+    used: current,
+    full: current >= max,
+    tip: current >= max ? t('admin.accounts.capacity.sessions.full', { idle }) : t('admin.accounts.capacity.sessions.normal', { idle })
+  }
+}
+
+function rpmLine(): CapLine | null {
+  const base = props.account.base_rpm
+  if (!isAnthropicOAuthOrSetupToken.value || !limited(base)) return null
+  const current = props.account.current_rpm ?? 0
+  const tiered = (props.account.rpm_strategy || 'tiered') !== 'sticky_exempt'
+  const buffer = props.account.rpm_sticky_buffer ?? Math.max(1, Math.floor(base / 5))
+  let tip: string
+  if (tiered) {
+    if (current >= base + buffer) tip = t('admin.accounts.capacity.rpm.tieredBlocked', { buffer })
+    else if (current >= base) tip = t('admin.accounts.capacity.rpm.tieredStickyOnly', { buffer })
+    else if (current >= base * 0.8) tip = t('admin.accounts.capacity.rpm.tieredWarning')
+    else tip = t('admin.accounts.capacity.rpm.tieredNormal')
+  } else if (current >= base) tip = t('admin.accounts.capacity.rpm.stickyExemptOver')
+  else if (current >= base * 0.8) tip = t('admin.accounts.capacity.rpm.stickyExemptWarning')
+  else tip = t('admin.accounts.capacity.rpm.stickyExemptNormal')
+  return {
+    key: 'rpm',
+    label: t('admin.accounts.capacity.labels.rpm'),
+    current,
+    max: base,
+    used: current,
+    full: current >= base,
+    suffix: tiered ? '[T]' : '[S]',
+    tip
+  }
+}
+
+function quotaLine(key: string, label: string, used: number | null | undefined, limit: number | null | undefined): CapLine | null {
+  if (!isQuotaEligible.value || !limited(limit)) return null
+  const value = used ?? 0
+  const tip = value >= limit ? t('admin.accounts.capacity.quota.exceeded') : t('admin.accounts.capacity.quota.normal')
+  return { key, label, current: shortMoney(value), max: shortMoney(limit), used: value, full: value >= limit, tip: withAmounts(tip, value, limit) }
+}
+
+/** Each line's value element: the tip tells the whole value of one the column cuts off. */
+const values: Record<string, HTMLElement | null> = {}
+const cut = (key: string) => {
+  const el = values[key]
+  return !!el && el.scrollWidth > el.clientWidth
+}
+/** The line's tip; for a cut-off value without exact amounts in it already, the whole value after it. */
+const tipOf = (line: CapLine) => {
+  const whole = line.tip.includes(' / ') || !cut(line.key) ? '' : [`${line.current} / ${line.max}`, line.suffix].filter(Boolean).join(' ')
+  return [line.tip, whole].filter(Boolean).join('\n')
+}
+
+const lines = computed<CapLine[]>(() => {
+  const a = props.account
+  return [
+    concurrencyLine(),
+    windowCostLine(),
+    sessionsLine(),
+    rpmLine(),
+    quotaLine('quota_daily', 'D', a.quota_daily_used, a.quota_daily_limit),
+    quotaLine('quota_weekly', 'W', a.quota_weekly_used, a.quota_weekly_limit),
+    quotaLine('quota_total', t('admin.accounts.capacity.labels.total'), a.quota_used, a.quota_limit)
+  ].filter((line): line is CapLine => line !== null)
+})
 </script>
+
+<style scoped>
+.cap {
+  display: grid;
+  /* The column, not the chip's text, sizes the track: a chip wider than the column shrinks and its value ends in "…". */
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 1px;
+  min-width: 0;
+}
+.cap__chip {
+  display: inline-flex;
+  height: 20px;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-pill);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.cap--multi .cap__chip {
+  height: 15px;
+  line-height: 15px;
+}
+.cap__chip > * {
+  flex: none;
+}
+.cap__chip > .cap__v {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap__l,
+.cap__group,
+.cap__suffix {
+  color: var(--color-text-secondary);
+}
+.cap__chip--zero,
+.cap__chip--zero .cap__l,
+.cap__chip--zero .cap__group,
+.cap__chip--zero .cap__suffix {
+  color: var(--color-text-muted-on-pill);
+}
+.cap__chip--full .cap__v {
+  color: var(--color-status-back-text);
+}
+</style>

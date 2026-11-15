@@ -43,6 +43,24 @@ describe('batch flow', () => {
     tr.querySelector('td')!.textContent, tr.querySelector('td:last-child')!.textContent?.trim()
   ])
 
+  // Backend 0.6.5: the batch test and 后排 are gone; 豁免 is the batch action that lists a result per account.
+  it('runs a batch exemption from the popover and lists each account with its result; a request error is failed', async () => {
+    api.setOverride.mockImplementation(async (id: number) => { if (id === 2) throw new Error('boom') })
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'exempt', accounts, anchor: null, groups: [] }, attachTo: document.body })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-batch-confirm]')).toBeNull()
+    expect(api.setOverride).not.toHaveBeenCalled()
+
+    await click('[data-sq-popover] .btn-primary')
+    expect(api.setOverride.mock.calls.map(([id, body]) => [id, body.mode])).toEqual([[1, 'exempt'], [2, 'exempt'], [3, 'exempt']])
+    expect(results()).toEqual([
+      ['acc-a', 'admin.schedQuality.result.ok'],
+      ['acc-b', 'admin.schedQuality.result.failed'],
+      ['acc-c', 'admin.schedQuality.result.ok']
+    ])
+    expect(wrapper.emitted('done')).toHaveLength(1)
+  })
+
   it('confirms a batch recovery with the account count and 取消 / 确定, then hands the accounts back without a result table (F3)', async () => {
     const wrapper = mount(SchedBatchDialog, { props: { action: 'reset', accounts, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
@@ -120,7 +138,6 @@ describe('batch flow', () => {
     // A new batch right away does not open while the old one is busy.
     await wrapper.setProps({ action: null })
     await wrapper.setProps({ action: 'reset', accounts: [{ id: 20, name: 'acc-20' }] })
-    // (Dialogs that closed earlier stay in jsdom, their leave transitions never end.)
     const resetConfirm = () => document.querySelector<HTMLElement>('[data-sq-batch-confirm]')
     expect(resetConfirm()).toBeNull()
 

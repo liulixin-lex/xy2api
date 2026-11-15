@@ -329,6 +329,10 @@ func (s *schedAdminPermissionService) Attention(context.Context) (service.SchedA
 	s.calls++
 	return service.SchedAdminAttention{Substandard: []int64{}}, nil
 }
+func (s *schedAdminPermissionService) AccountFilter(_ context.Context, quality string) (service.SchedQualityFilter, error) {
+	s.calls++
+	return service.SchedAdminAttention{Substandard: []int64{}}.Filter(quality, nil), nil
+}
 func (s *schedAdminPermissionService) Detail(context.Context, int64) (service.SchedAdminAccountDetail, error) {
 	s.calls++
 	return service.SchedAdminAccountDetail{}, nil

@@ -24,6 +24,7 @@ const (
 type Group struct {
 	ID             int64
 	Name           string
+	Alias          string
 	Description    string
 	Platform       string
 	RateMultiplier float64

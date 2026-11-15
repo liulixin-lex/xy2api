@@ -240,6 +240,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
+	service.InitializeNewAccountProbeDefault(account)
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -1301,6 +1302,9 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
+	if ids, enabled := service.AccountIDsFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	if filter, enabled := service.SchedQualityAccountFilter(ctx); enabled {
 		if !filter.Exclude {
 			q = q.Where(dbaccount.IDIn(filter.IDs...))

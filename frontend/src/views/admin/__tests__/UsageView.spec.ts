@@ -133,7 +133,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword, accountKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -816,6 +816,118 @@ describe('admin UsageView model audit export', () => {
     await (wrapper.vm as any).exportToExcel()
     expect(submitExport).toHaveBeenCalledWith(expect.objectContaining({ native_compaction_v2: true }))
     expect(exportList).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('admin UsageView live log', () => {
+  let atTop = true
+  const LiveUsageTableStub = {
+    name: 'UsageTable',
+    props: ['data', 'loading', 'rowClass'],
+    methods: { isAtTop: () => atTop, scrollToTop: () => undefined },
+    // The "N new records" anchor sits in the table's above-table slot (7j-4).
+    template: '<div><slot name="above-table" /></div>',
+  }
+  const page = (...keys: string[]) => ({
+    items: keys.map((key) => {
+      const [source, id] = key.split(':')
+      return { id: Number(id), source: source === 'usage' ? undefined : source, user_id: 1, model: 'm', created_at: '' }
+    }),
+    total: keys.length,
+    pages: 1,
+  })
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    atTop = true
+    Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const mountLive = () => mount(UsageView, {
+    global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+      UsageTable: LiveUsageTableStub, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+      ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, UserTokenRanking: true,
+    } },
+  })
+  const shownIn = (wrapper: ReturnType<typeof mountLive>) => () =>
+    (wrapper.findComponent(LiveUsageTableStub).props('data') as Array<{ id: number; source?: string }>)
+      .map((row) => `${row.source ?? 'usage'}:${row.id}`)
+
+  it('follows new records at the top on page 1, newest first, with the list top in view; otherwise only counts them', async () => {
+    list.mockReset().mockResolvedValue(page('usage:2', 'unbilled:2', 'usage:1'))
+    const wrapper = mountLive()
+    await flushPromises()
+    const shown = shownIn(wrapper)
+    expect(shown()).toEqual(['usage:2', 'unbilled:2', 'usage:1']) // the same id from two sources: two rows
+
+    list.mockResolvedValue(page('usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+
+    atTop = false // the user scrolled into the list
+    list.mockResolvedValue(page('usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+    expect((wrapper.vm as any).liveUsage.pending.value).toBe(1)
+
+    atTop = true
+    ;(wrapper.vm as any).handleSort('model', 'asc') // not newest first: no following
+    await flushPromises()
+    list.mockResolvedValue(page('usage:5', 'usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(shown()).toEqual(['usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
+    expect((wrapper.vm as any).liveUsage.pending.value).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('holds the list\'s 5 s check on the errors and ranking tabs while the cards go on, and checks at once on the way back (8.5a)', async () => {
+    list.mockReset().mockResolvedValue(page('usage:1'))
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mountLive()
+    await flushPromises()
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    const listed = list.mock.calls.length
+    const stats = getStats.mock.calls.length
+
+    await tabs[1].trigger('click') // errors
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(list.mock.calls.length).toBe(listed)
+    expect(getStats.mock.calls.length).toBe(stats + 1)
+
+    await tabs[0].trigger('click')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(list.mock.calls.length).toBe(listed + 1)
+    wrapper.unmount()
+  })
+
+  it('offers the records that came in while away from the top as "N new records"; a click takes them in', async () => {
+    list.mockReset().mockResolvedValue(page('usage:1'))
+    const wrapper = mountLive()
+    await flushPromises()
+    const shown = shownIn(wrapper)
+    expect(wrapper.find('[data-test="live-status"]').exists()).toBe(true)
+
+    atTop = false
+    list.mockResolvedValue(page('usage:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    const notice = wrapper.get('[data-test="pending-changes"]')
+    expect(notice.text()).toContain('admin.usage.newRecords')
+    expect(shown()).toEqual(['usage:1'])
+
+    await notice.trigger('click')
+    await flushPromises()
+    expect(shown()).toEqual(['usage:2', 'usage:1'])
     wrapper.unmount()
   })
 })

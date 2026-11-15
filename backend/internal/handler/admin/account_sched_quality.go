@@ -23,11 +23,10 @@ func (h *AccountHandler) bindSchedQualityAccountFilter(c *gin.Context, quality s
 		response.Error(c, http.StatusServiceUnavailable, "Scheduling quality service unavailable")
 		return false
 	}
-	attention, err := h.schedQuality.Attention(c.Request.Context())
+	filter, err := h.schedQuality.AccountFilter(c.Request.Context(), quality)
 	if response.ErrorFrom(c, err) {
 		return false
 	}
-	filter := attention.Filter(quality)
 	c.Request = c.Request.WithContext(service.WithSchedQualityAccountFilter(c.Request.Context(), filter.IDs, filter.Exclude))
 	return true
 }

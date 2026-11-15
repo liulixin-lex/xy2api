@@ -1,0 +1,69 @@
+<template>
+  <button
+    type="button"
+    role="switch"
+    class="account-switch"
+    :aria-checked="checked ? 'true' : 'false'"
+    :aria-label="label"
+    :aria-busy="busy ? 'true' : undefined"
+    :disabled="disabled"
+    @click="emit('toggle', !checked)"
+  >
+    <span class="account-switch__thumb" />
+  </button>
+</template>
+
+<script setup lang="ts">
+/** The accounts table's 28×16 switch (scheduling, IQ checks): one soft teal for "on" (spec 7a). */
+defineProps<{ checked: boolean; label: string; disabled?: boolean; busy?: boolean }>()
+const emit = defineEmits<{ toggle: [next: boolean] }>()
+</script>
+
+<style scoped>
+.account-switch {
+  position: relative;
+  flex: none;
+  width: var(--switch-width);
+  height: var(--switch-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-switch-off);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.account-switch::after {
+  /* a 44px-ish hit area without changing the layout */
+  content: '';
+  position: absolute;
+  inset: -8px -6px;
+}
+.account-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-switch-thumb-off);
+  transition: transform var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
+}
+.account-switch[aria-checked='true'] {
+  background: var(--color-switch-on);
+}
+.account-switch[aria-checked='true'] .account-switch__thumb {
+  transform: translateX(12px);
+  background: var(--color-switch-thumb);
+}
+.account-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.account-switch[aria-busy='true'] {
+  cursor: progress;
+}
+.account-switch:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: 2px;
+}
+</style>

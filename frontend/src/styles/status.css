@@ -1,0 +1,31 @@
+/*
+ * Shared status marks (spec 7a, 7b), for the accounts, users and groups pages.
+ *
+ * - One dot per state. "Not taking part" is always the same hollow ring: a group's stopped account, the status
+ *   column's paused account, the users page's disabled user and the live indicator's paused state.
+ * - Normal states read in the secondary text colour (the dot keeps its colour); only abnormal states use the body
+ *   text colour plus a status colour.
+ *
+ * Use <StatusDot tone="…" /> or the classes directly: .status-dot.status-dot--<tone>, .status-text-normal.
+ */
+.status-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--dot-size, 7px);
+  height: var(--dot-size, 7px);
+  border-radius: 50%;
+  background: var(--color-status-ok);
+}
+.status-dot--ok { background: var(--color-status-ok); }
+.status-dot--back { background: var(--color-status-back); }
+.status-dot--exempt { background: var(--color-status-exempt); }
+.status-dot--observe { background: var(--color-status-observe); }
+.status-dot--error { background: var(--color-status-error); }
+.status-dot--info { background: var(--color-status-info); }
+/* Not taking part: a 1.5px ring, no fill */
+.status-dot--off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--color-status-stopped);
+}
+
+.status-text-normal { color: var(--color-text-secondary); }

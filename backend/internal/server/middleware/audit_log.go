@@ -133,6 +133,14 @@ var auditSensitiveReads = map[string]string{
 	"GET /api/v1/admin/data-management/s3/config":      "admin.data_management.s3_config.read",
 }
 
+// auditReadOnlyPosts are polling queries that must not create operation records.
+// Scheduling quality summaries already opt out in their handler via SkipAudit.
+var auditReadOnlyPosts = map[string]struct{}{
+	"POST /api/v1/admin/accounts/today-stats/batch": {},
+	"POST /api/v1/admin/accounts/usage/batch":       {},
+	"POST /api/v1/admin/dashboard/users-usage":      {},
+}
+
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
 var auditActionOverrides = map[string]string{
 	"POST /api/v1/auth/login":                                     service.AuditActionLogin,
@@ -229,6 +237,9 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			} else if c.GetString("auth_method") == service.AuditAuthMethodMCPOAuth {
 				record = true
 			}
+		}
+		if _, readOnly := auditReadOnlyPosts[routeKey]; readOnly {
+			record = false
 		}
 		if !record {
 			c.Next()

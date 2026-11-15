@@ -7,7 +7,9 @@
 //   no layer is left); else the element with the same data-* attributes there; else the new top layer's panel;
 //   with no layer left, the element that opened the first layer from the page. A layer reused from inside itself
 //   keeps its earlier opener. If a re-render right after the close drops focus to the body, it goes to the target's
-//   new copy (see settleFocus). Focus the user has already moved out of the closing layer stays where it is.
+//   new copy (see settleFocus). Focus the user has already moved out of the closing layer stays where it is, and so
+//   does focus when a press outside the layer closes it: the press gives focus to what it lands on (7q-1). Focus
+//   given back never scrolls anything.
 // - A sub-layer (modal: false) is a menu or popover opened from the page or a layer, possibly teleported out of
 //   it (a Select menu in a dialog). While open it is the top layer, so the layer below neither answers Escape nor
 //   pulls focus back with holdFocus; it makes nothing inert.
@@ -43,6 +45,29 @@ export interface OverlayOptions {
 
 const layers: Layer[] = []
 let pageOpener: FocusRef | null = null
+let closedCount = 0
+
+// The press under way: a pointerdown or a click, until the task that dispatched it is over. A layer closed while it
+// lasts closes in the press's handlers or in the microtasks right after them.
+let press: EventTarget | null = null
+let pressTimer: ReturnType<typeof setTimeout> | undefined
+function onPress(event: Event) {
+  press = event.target
+  clearTimeout(pressTimer)
+  pressTimer = setTimeout(() => { press = null })
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', onPress, true)
+  window.addEventListener('click', onPress, true)
+}
+
+/**
+ * Whether a press under way landed outside `root`: a layer it closes leaves focus where the press puts it, so
+ * nothing moves or scrolls under the pointer before the click lands (7q-1). A pressed element the press itself
+ * took away (a confirm button replaced by a busy state) proves nothing either way.
+ */
+export const pressedOutside = (root: Element | null | undefined) =>
+  press instanceof Node && press.isConnected && !root?.contains(press)
 
 // data-* attributes identify a re-rendered opener; Vue's scoped-style attributes (data-v-*) are not identifying.
 const snapshot = (el: Element | null): FocusRef => {
@@ -107,7 +132,7 @@ function settleFocus(closed: Layer, page: FocusRef | null) {
     if (layers[layers.length - 1] !== top) return stop()
     const active = document.activeElement
     if (active && active !== document.body && active.isConnected) return
-    focusTarget(closed, page)?.focus()
+    focusTarget(closed, page)?.focus({ preventScroll: true })
   }
   const observer = new MutationObserver(retry)
   const timer = setTimeout(() => stop(), SETTLE_MS)
@@ -163,21 +188,35 @@ export function openOverlay(token: symbol, options: OverlayOptions): number {
   return z
 }
 
+/**
+ * Switches an open layer between modal and sub-layer where it stands: the layers opened above it stay above it.
+ * Inert and the scroll lock are re-applied. False when the layer is not open.
+ */
+export function setOverlayModal(token: symbol, modal: boolean, onCovered?: () => void): boolean {
+  const layer = layers.find((item) => item.token === token)
+  if (!layer) return false
+  layer.modal = modal
+  layer.onCovered = onCovered
+  syncOverlays()
+  return true
+}
+
 /** Removes a layer; when it was the top layer, focus moves as described above. */
 export function closeOverlay(token: symbol) {
   const index = layers.findIndex((layer) => layer.token === token)
   if (index === -1) return
   const [closed] = layers.splice(index, 1)
+  closedCount++
   const root = closed.root()
   if (root) root.inert = false
   syncOverlays()
   const page = pageOpener
   if (!layers.length) pageOpener = null
-  if (index !== layers.length) return
+  if (index !== layers.length || pressedOutside(root)) return
   // The user already moved focus somewhere else (clicked outside a menu): leave it there.
   const active = document.activeElement
   if (active instanceof HTMLElement && active !== document.body && active.isConnected && !root?.contains(active)) return
-  focusTarget(closed, page)?.focus()
+  focusTarget(closed, page)?.focus({ preventScroll: true })
   if (closed.modal) settleFocus(closed, page)
 }
 
@@ -198,6 +237,18 @@ export function holdFocus(token: symbol): () => void {
     ;((usable(before.el, root) ? before.el : null) ?? findByData(before.data, root) ?? layer.panel())?.focus()
   }
 }
+
+/** Whether `el` lies in a layer drawn above `token`'s layer: a popover, menu or dialog opened while it was open. */
+export function insideLayerAbove(token: symbol, el: Element): boolean {
+  const index = layers.findIndex((layer) => layer.token === token)
+  return index !== -1 && layers.slice(index + 1).some((layer) => !!layer.root()?.contains(el))
+}
+
+/** Whether any layer is open: a dialog, drawer, popover or menu. */
+export const anyOverlayOpen = () => layers.length > 0
+
+/** How many layers have closed so far: a different count later means a layer closed in between. */
+export const overlaysClosed = () => closedCount
 
 export function isTopOverlay(token: symbol) {
   return layers[layers.length - 1]?.token === token
@@ -231,7 +282,7 @@ export function trapTab(event: KeyboardEvent, panel: HTMLElement | null) {
   }
 }
 
-export function focusableIn(root: HTMLElement): HTMLElement[] {
+function focusableIn(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, summary, [tabindex]'))
     .filter((element) => !element.matches(':disabled, [tabindex="-1"]') &&
       !element.closest('[hidden], [inert], [aria-hidden="true"]') &&

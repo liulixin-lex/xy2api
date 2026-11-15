@@ -1,6 +1,6 @@
 <template>
   <!-- Text lines are 18px high, like the other multi-line cells of the account list (ui-proposal 6.2). -->
-  <div ref="rootRef" v-if="showUsageWindows" class="leading-[18px]">
+  <div v-if="showUsageWindows" class="leading-[18px]">
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
       v-if="
@@ -606,7 +606,7 @@
   </div>
 
   <!-- Non-OAuth/Setup-Token accounts -->
-  <div ref="rootRef" v-else>
+  <div v-else>
     <!-- Gemini API Key accounts: show quota info -->
     <AccountQuotaInfo v-if="account.platform === 'gemini'" :account="account" />
     <!-- Key/Bedrock accounts: show today stats + optional quota bars -->
@@ -689,12 +689,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
@@ -712,9 +711,9 @@ import {
 } from './credentialsBuilder'
 import OpenCodeGoUsageCell from './OpenCodeGoUsageCell.vue'
 
-// Module-level cache shared across all AccountUsageCell instances
-const _usageCache = new Map<number, { data: AccountUsageInfo; ts: number }>()
-const USAGE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+// Usage windows come from the page (the accounts table loads them in batches with a 5-minute cache, spec 8.5):
+// `batchedUsage` / `batchedUsageError` are the row's values and `requestBatchedUsage` asks for them again. The cell
+// computes what it shows from them; an active query of its own hands its answer to the page ('usage-loaded').
 
 const props = withDefaults(
   defineProps<{
@@ -723,21 +722,18 @@ const props = withDefaults(
     todayStatsLoading?: boolean
     /** 今日统计列可见时为 true：今日数据由该列显示，这里不重复 */
     hideTodayStats?: boolean
-    manualRefreshToken?: number
     batchedUsage?: AccountUsageInfo | null
     batchedUsageError?: string | null
     batchedUsageLoading?: boolean
-    requestBatchedUsage?: ((account: Account, options?: { force?: boolean }) => void) | null
+    requestBatchedUsage: (account: Account, options?: { force?: boolean }) => void
   }>(),
   {
     todayStats: null,
     todayStatsLoading: false,
     hideTodayStats: false,
-    manualRefreshToken: 0,
     batchedUsage: null,
     batchedUsageError: null,
-    batchedUsageLoading: false,
-    requestBatchedUsage: null
+    batchedUsageLoading: false
   }
 )
 
@@ -747,29 +743,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const desktopViewportQuery = '(min-width: 768px)'
 
-const unmounted = ref(false)
-onBeforeUnmount(() => { unmounted.value = true })
-
-const loading = ref(false)
+const loading = computed(() => props.batchedUsageLoading === true)
 const activeQueryLoading = ref(false)
-const error = ref<string | null>(null)
-const usageInfo = ref<AccountUsageInfo | null>(null)
-watch(usageInfo, (usage) => {
-  if (usage) emit('usage-loaded', usage)
-})
-const rootRef = ref<HTMLElement | null>(null)
-const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
-)
-const hasEnteredViewport = ref(false)
-const pendingAutoLoad = ref(false)
-const pendingAutoLoadSource = ref<'passive' | 'active' | undefined>(undefined)
-
-let desktopViewportMediaQuery: MediaQueryList | null = null
-let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
-let visibilityObserver: IntersectionObserver | null = null
+const error = computed(() => props.batchedUsageError ?? null)
+const usageInfo = computed<AccountUsageInfo | null>(() => props.batchedUsage ?? null)
 
 // Show usage windows for OAuth and Setup Token accounts
 const showUsageWindows = computed(() => {
@@ -807,8 +785,6 @@ const shouldFetchUsage = computed(() => {
 const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account))
 const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account))
 const cnBalanceInUpstreamColumn = computed(() => cnBalanceShownInUpstreamColumn(props.account))
-
-const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
 
 // API Key 等账号的今日数据与“今日统计”列相同；该列可见时这里不再重复，隐藏时照旧显示。
 const shownTodayStats = computed(() => (props.hideTodayStats ? null : props.todayStats))
@@ -869,14 +845,6 @@ const openAISevenDayEstimatedTotalCost = computed(() => {
 })
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
-
-const shouldAutoLoadUsageOnMount = computed(() => {
-  return shouldFetchUsage.value
-})
-
-const shouldLazyLoadOnMobile = computed(() => {
-  return shouldFetchUsage.value && !isDesktopViewport.value
-})
 
 // Antigravity quota types (用于 API 返回的数据)
 interface AntigravityUsageResult {
@@ -1428,115 +1396,17 @@ const copyValidationURL = async () => {
   }
 }
 
-const isAnthropicOAuthOrSetupToken = computed(() => {
-  return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
-})
-
-const requestParentBatchUsage = (options?: { force?: boolean }) => {
-  if (!isBatchManaged.value || !shouldFetchUsage.value) return
-  props.requestBatchedUsage?.(props.account, options)
-}
-
-const syncManagedUsageState = () => {
-  if (!isBatchManaged.value) return
-  usageInfo.value = props.batchedUsage ?? null
-  error.value = props.batchedUsageError ?? null
-  loading.value = props.batchedUsageLoading === true
-}
-
-const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean }) => {
+/** Asks the page for this account's usage again (force: past its cache). */
+const requestUsage = (options?: { force?: boolean }) => {
   if (!shouldFetchUsage.value) return
-  if (isBatchManaged.value) {
-    requestParentBatchUsage({ force: options?.bypassCache === true })
-    return
-  }
-
-  // Check cache
-  if (!options?.bypassCache) {
-    const cached = _usageCache.get(props.account.id)
-    if (cached && Date.now() - cached.ts < USAGE_CACHE_TTL) {
-      usageInfo.value = cached.data
-      loading.value = false
-      return
-    }
-  }
-
-  loading.value = true
-  error.value = null
-
-  try {
-		const fetchFn = () => options?.source
-			? adminAPI.accounts.getUsage(props.account.id, options.source, options.bypassCache === true)
-			: adminAPI.accounts.getUsage(props.account.id)
-    const result = await enqueueUsageRequest(props.account, fetchFn)
-    if (!unmounted.value) {
-      usageInfo.value = result
-      _usageCache.set(props.account.id, { data: result, ts: Date.now() })
-    }
-  } catch (e: any) {
-    if (!unmounted.value) {
-      error.value = t('common.error')
-      console.error('Failed to load usage:', e)
-    }
-  } finally {
-    if (!unmounted.value) loading.value = false
-  }
+  props.requestBatchedUsage(props.account, options)
 }
 
-const flushPendingAutoLoad = () => {
-  if (!pendingAutoLoad.value) return
-  const source = pendingAutoLoadSource.value
-  pendingAutoLoad.value = false
-  pendingAutoLoadSource.value = undefined
-  loadUsage({ source }).catch((e) => {
-    console.error('Failed to load deferred usage:', e)
-  })
-}
-
-const requestAutoLoad = (source?: 'passive' | 'active') => {
-  if (!shouldFetchUsage.value) return
-  if (shouldLazyLoadOnMobile.value && !hasEnteredViewport.value) {
-    pendingAutoLoad.value = true
-    pendingAutoLoadSource.value = source
-    return
-  }
-  loadUsage({ source }).catch((e) => {
-    console.error('Failed to auto load usage:', e)
-  })
-}
-
-const detachVisibilityObserver = () => {
-  visibilityObserver?.disconnect()
-  visibilityObserver = null
-}
-
-const attachVisibilityObserver = () => {
-  detachVisibilityObserver()
-  if (!shouldLazyLoadOnMobile.value || hasEnteredViewport.value) return
-  if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
-    hasEnteredViewport.value = true
-    flushPendingAutoLoad()
-    return
-  }
-  if (!rootRef.value) return
-
-  visibilityObserver = new IntersectionObserver((entries) => {
-    if (!entries.some((entry) => entry.isIntersecting)) return
-    hasEnteredViewport.value = true
-    detachVisibilityObserver()
-    flushPendingAutoLoad()
-  }, {
-    root: null,
-    rootMargin: '200px 0px',
-    threshold: 0.01
-  })
-  visibilityObserver.observe(rootRef.value)
-}
-
+/** An active sample: the answer goes to the page, which keeps it as the row's usage. */
 const loadActiveUsage = async () => {
   activeQueryLoading.value = true
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    emit('usage-loaded', await adminAPI.accounts.getUsage(props.account.id, 'active', true))
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
@@ -1546,8 +1416,8 @@ const loadActiveUsage = async () => {
 
 // The probe persists upstream quota state; refresh this cell so its compact
 // bars and entitlement status reflect the newly observed snapshot.
-const handleGrokProbed = async () => {
-  await loadUsage({ source: 'active', bypassCache: true })
+const handleGrokProbed = () => {
+  requestUsage({ force: true })
 }
 
 // ===== API Key quota progress bars =====
@@ -1649,128 +1519,22 @@ const formatKeyUserCost = computed(() => {
   return props.todayStats.user_cost.toFixed(2)
 })
 
-onMounted(() => {
-  if (typeof window !== 'undefined') {
-    desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
-    isDesktopViewport.value = desktopViewportMediaQuery.matches
-    desktopViewportListener = (event: MediaQueryListEvent) => {
-      isDesktopViewport.value = event.matches
-    }
-    if (typeof desktopViewportMediaQuery.addEventListener === 'function') {
-      desktopViewportMediaQuery.addEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.addListener(desktopViewportListener)
-    }
-  }
+onMounted(() => requestUsage())
 
-  if (isBatchManaged.value) {
-    syncManagedUsageState()
-    requestParentBatchUsage()
-    return
-  }
-
-  if (!shouldAutoLoadUsageOnMount.value) return
-  const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
-  requestAutoLoad(source)
-})
-
+// The account changed under the cell (another row in its place): its usage is asked for.
 watch(
-  () => [props.batchedUsage, props.batchedUsageError, props.batchedUsageLoading, isBatchManaged.value] as const,
-  () => {
-    syncManagedUsageState()
-  },
-  { immediate: true, deep: true }
-)
-
-watch(isBatchManaged, (managed, wasManaged) => {
-  if (managed && !wasManaged) {
-    syncManagedUsageState()
-    requestParentBatchUsage()
-  }
-})
-
-watch(
-  () => [props.account.id, props.account.platform, props.account.type, isBatchManaged.value] as const,
-  ([accountID, platform, accountType, managed], [previousAccountID, previousPlatform, previousAccountType]) => {
-    if (
-      accountID === previousAccountID &&
-      platform === previousPlatform &&
-      accountType === previousAccountType
-    ) {
-      return
-    }
-    if (!managed || !shouldFetchUsage.value) return
-    syncManagedUsageState()
-    requestParentBatchUsage()
+  () => [props.account.id, props.account.platform, props.account.type] as const,
+  ([accountID, platform, accountType], [previousAccountID, previousPlatform, previousAccountType]) => {
+    if (accountID === previousAccountID && platform === previousPlatform && accountType === previousAccountType) return
+    requestUsage()
   },
   { flush: 'post' }
 )
 
+// A new OpenAI usage snapshot on the row: the windows are asked for again past the cache.
 watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (!prevKey || nextKey === prevKey) return
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
-
-  if (isBatchManaged.value) {
-    requestParentBatchUsage({ force: true })
-    return
-  }
-
-  _usageCache.delete(props.account.id)
-  requestAutoLoad()
-})
-
-watch(
-  () => props.manualRefreshToken,
-  (nextToken, prevToken) => {
-    if (nextToken === prevToken) return
-    if (!shouldFetchUsage.value) return
-
-    if (isBatchManaged.value) {
-      requestParentBatchUsage({ force: true })
-      return
-    }
-
-    const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
-    _usageCache.delete(props.account.id)
-    loadUsage({ source, bypassCache: true }).catch((e) => {
-      console.error('Failed to refresh usage after manual refresh:', e)
-    })
-  }
-)
-
-watch(
-  [rootRef, shouldLazyLoadOnMobile],
-  () => {
-    if (shouldLazyLoadOnMobile.value) {
-      attachVisibilityObserver()
-      return
-    }
-    detachVisibilityObserver()
-  },
-  { immediate: true, flush: 'post' }
-)
-
-watch(isDesktopViewport, (isDesktop) => {
-  if (isDesktop) {
-    detachVisibilityObserver()
-    hasEnteredViewport.value = true
-    flushPendingAutoLoad()
-    return
-  }
-  hasEnteredViewport.value = false
-  attachVisibilityObserver()
-})
-
-onUnmounted(() => {
-  detachVisibilityObserver()
-  if (desktopViewportMediaQuery && desktopViewportListener) {
-    if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
-      desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.removeListener(desktopViewportListener)
-    }
-  }
-  desktopViewportListener = null
-  desktopViewportMediaQuery = null
+  requestUsage({ force: true })
 })
 </script>

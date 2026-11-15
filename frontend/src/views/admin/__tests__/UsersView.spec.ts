@@ -91,9 +91,11 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   ...overrides
 })
 
+const tableScrollToTop = vi.fn()
 const DataTableStub = {
   props: ['columns', 'data', 'selectedKeys'],
   emits: ['sort', 'update:selectedKeys'],
+  methods: { scrollToTop: tableScrollToTop },
   template: `
     <div>
       <div data-test="columns">{{ columns.map(col => col.key).join(',') }}</div>
@@ -113,6 +115,7 @@ const DataTableStub = {
         <slot :name="'header-' + col.key" :column="col" />
       </template>
       <div v-for="row in data" :key="row.id">
+        <slot name="cell-email" :value="row.email" :row="row" />
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
         <div :data-test="'actions-' + row.id"><slot name="cell-actions" :row="row" /></div>
       </div>
@@ -221,8 +224,10 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-delete-users"]').exists()).toBe(false)
+    // Always there, disabled until a row is ticked: the toolbar keeps its rows (7s-4).
+    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
+    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
     expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkDelete.confirm:1')
     expect(deleteUser).not.toHaveBeenCalled()
@@ -272,6 +277,25 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
+  it('takes deleted users off the page at once, before the reload answers (8.5a)', async () => {
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ id: 42, email: 'a@example.com' }), createAdminUser({ id: 43, email: 'b@example.com' })],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    deleteUser.mockResolvedValue(undefined)
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+    await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
+    listUsers.mockReturnValue(new Promise(() => {})) // the reload after the delete never answers here
+    await wrapper.get('[data-test="confirm-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteUser.mock.calls).toEqual([[42]])
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('b@example.com')
+    wrapper.unmount()
+  })
+
   it('deletes the confirmed selection while preserving users selected during deletion', async () => {
     listUsers.mockResolvedValue({
       items: [createAdminUser({ id: 42 }), createAdminUser({ id: 43 })],
@@ -294,6 +318,28 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
+  it('shows the live indicator and, after the 10 s check finds a new user, the changes notice that takes it in', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="live-status"]').attributes('data-status')).toBe('live')
+    expect(wrapper.find('[data-test="pending-changes"]').exists()).toBe(false)
+
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ id: 43, email: 'new@example.com' }), createAdminUser()],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('scoped@example.com') // counted, not shown yet
+    const notice = wrapper.get('[data-test="pending-changes"]')
+    expect(notice.text()).toContain('common.pendingChanges.changes')
+
+    await notice.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('new@example.com,scoped@example.com')
+    wrapper.unmount()
+  })
+
   it('disables users selected across pages in one request, then clears the selection and reloads', async () => {
     listUsers.mockImplementation(async (page: number) => ({
       items: [createAdminUser({ id: page === 2 ? 43 : 42 })],
@@ -303,7 +349,7 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-disable-users"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-disable-users"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -323,6 +369,35 @@ describe('admin UsersView', () => {
     expect(listUsers.mock.calls.length).toBe(listCallsBeforeConfirm + 1)
     expect(deleteUser).not.toHaveBeenCalled()
     expect(toggleStatus).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('names every secondary action whose text goes below 1024px; "create" keeps its text (7o-3)', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+
+    const labels = wrapper.findAll('.table-toolbar__label')
+    expect(labels).toHaveLength(7)
+    for (const label of labels) {
+      expect(label.element.closest('button')!.getAttribute('aria-label')).toBe(label.text())
+    }
+    const create = wrapper.findAll('button').find((button) => button.text() === 'admin.users.createUser')!
+    expect(create.find('.table-toolbar__label').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps a long email to one line, whole in the tip a tap shows (7o-5)', async () => {
+    const email = 'a-very-long-address-for-acceptance@example.test'
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    document.body.appendChild(wrapper.element)
+    const cell = wrapper.get('[data-test="user-email"]')
+    expect(cell.classes()).toContain('truncate')
+    await cell.trigger('click')
+    expect(document.getElementById('sq-tip')!.textContent).toBe(email)
     wrapper.unmount()
   })
 
@@ -390,26 +465,22 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
-  it('reloads the list when a list request is in flight as the toggle resolves', async () => {
+  it('keeps the toggled status when a list answer asked for before the toggle settled arrives, without reloading', async () => {
     let finishToggle!: (user: AdminUser) => void
     toggleStatus.mockImplementation(() => new Promise<AdminUser>(resolve => { finishToggle = resolve }))
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
     await getToggleStatusButton(wrapper, 42).trigger('click')
-    listUsers.mockImplementationOnce(() => new Promise(() => {}))
-    await wrapper.get('[data-test="sort-last-used"]').trigger('click')
+    expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0') // at once
+    await wrapper.get('[data-test="sort-last-used"]').trigger('click') // a reload that still reads the old status
     await flushPromises()
     expect(listUsers).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0') // the locked field keeps the new status
 
-    listUsers.mockResolvedValue({
-      items: [createAdminUser({ status: 'disabled' })],
-      total: 1, page: 1, page_size: 20, pages: 1
-    })
     finishToggle(createAdminUser({ status: 'disabled' }))
     await flushPromises()
-
-    expect(listUsers).toHaveBeenCalledTimes(3)
+    expect(listUsers).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-test="row-state"]').text()).toBe('42:disabled:0')
     wrapper.unmount()
   })
@@ -537,12 +608,14 @@ describe('admin UsersView', () => {
 
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('last-used-first@example.com,usage-first@example.com')
 
+    tableScrollToTop.mockClear()
     await wrapper.get('[data-test="usage-sort-trigger-usage"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="usage-sort-usage-today"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('usage-first@example.com,last-used-first@example.com')
+    expect(tableScrollToTop).toHaveBeenCalledTimes(1) // a usage sort starts from the first row (8.4a)
     expect(localStorage.getItem('admin-users-usage-sort')).toContain('"key":"usage"')
 
     await wrapper.get('[data-test="sort-last-used"]').trigger('click')
@@ -611,10 +684,10 @@ describe('admin UsersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -633,7 +706,7 @@ describe('admin UsersView', () => {
 
     expect(listUsers.mock.calls.length).toBeGreaterThan(callsBeforeSuccess)
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
 })

@@ -1,5 +1,23 @@
 export default {
   common: {
+    liveStatus: {
+      live: 'Live',
+      paused: 'Paused',
+      stale: 'Out of date',
+      liveTip: 'Updating live',
+      pausedTip: 'Live updates are paused',
+      staleTip: 'Data is out of date, retrying',
+      clickToPause: 'Click to pause',
+      clickToResume: 'Click to resume',
+      liveLabel: 'Live updates on, click to pause',
+      pausedLabel: 'Live updates paused, click to resume',
+      staleLabel: 'Data is out of date and retrying, click to pause'
+    },
+    pendingChanges: {
+      changes: '{n} changes',
+      tip: 'Row order holds between two of your own actions',
+      merge: 'click to merge'
+    },
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',

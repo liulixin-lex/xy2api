@@ -78,17 +78,18 @@ func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T
 		name      string
 		configure func(*SchedQualitySnapshot, *Account)
 		below     bool
+		effective bool
 	}{
-		{"enabled", func(*SchedQualitySnapshot, *Account) {}, true},
-		{"global off", func(p *SchedQualitySnapshot, _ *Account) { p.GlobalEnabled = false }, false},
-		{"group off", func(p *SchedQualitySnapshot, _ *Account) { p.Policies[1] = SchedPolicyRecord{} }, false},
-		{"missing policy", func(p *SchedQualitySnapshot, _ *Account) { delete(p.Policies, 1) }, false},
-		{"fresh boundary", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge) }, true},
-		{"stale", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge - time.Nanosecond) }, false},
+		{"enabled", func(*SchedQualitySnapshot, *Account) {}, true, true},
+		{"global off", func(p *SchedQualitySnapshot, _ *Account) { p.GlobalEnabled = false }, false, false},
+		{"group off", func(p *SchedQualitySnapshot, _ *Account) { p.Policies[1] = SchedPolicyRecord{} }, false, false},
+		{"missing policy", func(p *SchedQualitySnapshot, _ *Account) { delete(p.Policies, 1) }, false, false},
+		{"fresh boundary", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge) }, true, true},
+		{"stale", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge - time.Nanosecond) }, false, false},
 		{"exempt", func(p *SchedQualitySnapshot, _ *Account) {
 			p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
-		}, false},
-		{"stopped", func(_ *SchedQualitySnapshot, a *Account) { a.Schedulable = false }, false},
+		}, false, false},
+		{"stopped", func(_ *SchedQualitySnapshot, a *Account) { a.Schedulable = false }, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, e, r := schedAdminFixture()
@@ -108,9 +109,101 @@ func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T
 			require.NoError(t, err)
 			require.True(t, summary.Accounts[0].Error.Red)
 			require.Len(t, summary.Accounts[0].Substandard, 1)
+			require.Equal(t, tc.effective, summary.Accounts[0].Substandard[0].Effective)
 		})
 	}
 }
+
+func TestSchedAdminAccountFilterNormalUsesSummaryConditions(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		globalEnabled   bool
+		stale           bool
+		groupPolicy     bool
+		wantNormal      []int64
+		wantSubstandard []int64
+	}{
+		{name: "attention buckets", globalEnabled: true, groupPolicy: true, wantNormal: []int64{1}, wantSubstandard: []int64{4}},
+		{name: "global quality disabled", globalEnabled: false, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+		{name: "stale view", globalEnabled: true, stale: true, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+		{name: "group policy disabled", globalEnabled: true, groupPolicy: false, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, repo := schedAdminFixture()
+			repo.allPlatforms = true
+			p := e.snapshot
+			now := s.d.Now()
+			p.GlobalEnabled = tc.globalEnabled
+			if tc.stale {
+				p.At = now.Add(-schedquality.ViewMaxAge - time.Nanosecond)
+			}
+			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: tc.groupPolicy}}
+			for id := int64(2); id <= 7; id++ {
+				account := *repo.rows[1]
+				account.ID = id
+				repo.rows[id] = &account
+			}
+			repo.rows[2].Schedulable = false
+			repo.rows[7].Platform = PlatformAnthropic
+			for _, id := range []int64{1, 2, 4, 5, 6} {
+				p.Accounts[id] = schedquality.AccountSummary{Speed: schedquality.SpeedEvidence{N: schedquality.SpeedMinSamples}}
+			}
+			p.GroupRows[4] = []SchedGroupRow{{GroupID: 1, Model: "failing", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}}}}
+			p.GroupRows[5] = []SchedGroupRow{{GroupID: 1, Model: "group-exempt", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}}}}
+			p.GroupRows[6] = []SchedGroupRow{{GroupID: 1, Model: "all-groups-exempt", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}}}}
+			p.Overrides = []SchedOverride{
+				{AccountID: 5, GroupID: 1, Mode: schedquality.OverrideExempt},
+				{AccountID: 6, GroupID: 0, Mode: schedquality.OverrideExempt},
+			}
+
+			filter, err := s.AccountFilter(context.Background(), "normal")
+			require.NoError(t, err)
+			require.False(t, filter.Exclude)
+
+			ids := []int64{1, 2, 3, 4, 5, 6, 7}
+			summary, err := s.Summary(context.Background(), ids)
+			require.NoError(t, err)
+			byID := make(map[int64]SchedAdminAccountSummary, len(summary.Accounts))
+			wantFromSummary := []int64{}
+			for _, item := range summary.Accounts {
+				byID[item.AccountID] = item
+				hasEffectiveRow := false
+				for _, row := range item.Substandard {
+					hasEffectiveRow = hasEffectiveRow || row.Effective
+				}
+				if repo.rows[item.AccountID].Platform != PlatformOpenAI || item.Status != "normal" || item.Stop != nil || len(item.Exemptions) > 0 || hasEffectiveRow {
+					continue
+				}
+				wantFromSummary = append(wantFromSummary, item.AccountID)
+			}
+			require.Equal(t, tc.wantNormal, filter.IDs)
+			require.Equal(t, tc.wantNormal, wantFromSummary)
+			require.Equal(t, tc.globalEnabled && !tc.stale && tc.groupPolicy, byID[4].Substandard[0].Effective)
+			require.False(t, byID[5].Substandard[0].Effective)
+			require.False(t, byID[6].Substandard[0].Effective)
+			for _, category := range []struct {
+				quality string
+				want    []int64
+			}{
+				{quality: "substandard", want: tc.wantSubstandard},
+				{quality: "exempt", want: []int64{5, 6}},
+				{quality: "observing", want: []int64{3}},
+			} {
+				filter, err := s.AccountFilter(context.Background(), category.quality)
+				require.NoError(t, err)
+				require.False(t, filter.Exclude)
+				require.Equal(t, category.want, filter.IDs)
+			}
+
+			attention, err := s.Attention(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSubstandard, attention.Substandard)
+			require.Equal(t, []int64{5, 6}, attention.Exempt)
+			require.Equal(t, []int64{3}, attention.Observing)
+		})
+	}
+}
+
 func TestSchedAdminDetailEvidenceAndEmptyLists(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	p := e.snapshot

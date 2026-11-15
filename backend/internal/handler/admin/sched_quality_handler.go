@@ -19,6 +19,7 @@ import (
 type SchedQualityAdmin interface {
 	Summary(context.Context, []int64) (service.SchedAdminSummary, error)
 	Attention(context.Context) (service.SchedAdminAttention, error)
+	AccountFilter(context.Context, string) (service.SchedQualityFilter, error)
 	Detail(context.Context, int64) (service.SchedAdminAccountDetail, error)
 	Reset(context.Context, int64, int64) (service.SchedAdminReset, error)
 	SetOverride(context.Context, service.SchedOverride) error

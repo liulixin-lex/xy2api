@@ -2,9 +2,8 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div v-if="hasIssue" class="flex-1 sm:max-w-64">
+        <TableToolbar>
+          <template v-if="hasIssue" #search>
             <input
               v-model="searchQuery"
               type="text"
@@ -12,21 +11,22 @@
               class="input"
               @input="handleSearch"
             />
-          </div>
-          <Select
-            v-model="filters.status"
-            :options="filterStatusOptions"
-            class="w-36"
-            @change="loadCodes"
-          />
-
-          <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          </template>
+          <template #filters>
+            <Select
+              v-model="filters.status"
+              :options="filterStatusOptions"
+              class="w-36"
+              @change="loadCodes"
+            />
+          </template>
+          <template #actions>
             <button
               @click="loadCodes"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="btn btn-secondary table-toolbar__icon"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -34,8 +34,8 @@
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.promo.createCode') }}
             </button>
-          </div>
-        </div>
+          </template>
+        </TableToolbar>
       </template>
 
       <template #table>
@@ -399,12 +399,14 @@ import type { PromoCode, PromoCodeUsage } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()

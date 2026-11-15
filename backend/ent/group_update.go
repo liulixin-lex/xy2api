@@ -77,6 +77,20 @@ func (_u *GroupUpdate) SetNillableName(v *string) *GroupUpdate {
 	return _u
 }
 
+// SetAlias sets the "alias" field.
+func (_u *GroupUpdate) SetAlias(v string) *GroupUpdate {
+	_u.mutation.SetAlias(v)
+	return _u
+}
+
+// SetNillableAlias sets the "alias" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAlias(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetAlias(*v)
+	}
+	return _u
+}
+
 // SetDescription sets the "description" field.
 func (_u *GroupUpdate) SetDescription(v string) *GroupUpdate {
 	_u.mutation.SetDescription(v)
@@ -1656,6 +1670,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(group.FieldName, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.Alias(); ok {
+		_spec.SetField(group.FieldAlias, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(group.FieldDescription, field.TypeString, value)
 	}
@@ -2374,6 +2391,20 @@ func (_u *GroupUpdateOne) SetName(v string) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableName(v *string) *GroupUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetAlias sets the "alias" field.
+func (_u *GroupUpdateOne) SetAlias(v string) *GroupUpdateOne {
+	_u.mutation.SetAlias(v)
+	return _u
+}
+
+// SetNillableAlias sets the "alias" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAlias(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAlias(*v)
 	}
 	return _u
 }
@@ -3986,6 +4017,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(group.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Alias(); ok {
+		_spec.SetField(group.FieldAlias, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(group.FieldDescription, field.TypeString, value)

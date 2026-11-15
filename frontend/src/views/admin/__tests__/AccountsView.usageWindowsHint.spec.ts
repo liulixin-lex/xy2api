@@ -5,26 +5,24 @@ import AccountsView from '../AccountsView.vue'
 
 const {
   listAccounts,
-  listWithEtag,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn()
 }))
 
 // AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
-vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
+vi.mock('@/api/admin/schedQuality', () => ({ backendSummary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }), default: {} }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      listWithEtag,
       getBatchTodayStats,
+      getBatchUsage: vi.fn().mockResolvedValue({ usage: {}, errors: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -71,8 +69,11 @@ const DataTableStub = {
   template: `
     <div data-test="data-table">
       <template v-for="column in columns" :key="column.key">
-        <div v-if="['usage', 'capacity', 'schedulable', 'upstream_billing_rate'].includes(column.key)" data-test="plain-header">
+        <div v-if="['usage', 'capacity', 'schedulable'].includes(column.key)" data-test="plain-header">
           <slot :name="'header-' + column.key" :column="column">{{ column.label }}</slot>
+        </div>
+        <div v-if="column.key === 'upstream_billing_rate'" data-test="upstream-billing-header">
+          <slot :name="'header-' + column.key" :column="column" />
         </div>
       </template>
       <div v-for="row in data" :key="row.id" data-test="account-rate">
@@ -101,7 +102,7 @@ function mountView() {
         Pagination: true,
         ConfirmDialog: true,
         AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-        AccountTableFilters: {
+        AccountsToolbar: {
           props: ['groups'],
           template: '<div data-test="account-filters" :data-group-count="groups.length"></div>'
         },
@@ -113,6 +114,7 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
+        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -120,6 +122,7 @@ function mountView() {
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
+        AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
         AccountUsageCell: true,
@@ -134,7 +137,6 @@ describe('admin AccountsView usage windows hint', () => {
     localStorage.clear()
 
     listAccounts.mockReset()
-    listWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
@@ -145,11 +147,6 @@ describe('admin AccountsView usage windows hint', () => {
       page: 1,
       page_size: 20,
       pages: 0
-    })
-    listWithEtag.mockResolvedValue({
-      notModified: true,
-      etag: null,
-      data: null
     })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
@@ -166,27 +163,45 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="account-filters"]').attributes('data-group-count')).toBe('1')
   })
 
-  it('shows the capacity, scheduling, usage windows and declared-rate headers as plain names, without help text', async () => {
+  it('shows the capacity, scheduling and usage windows headers as plain names (ui-proposal 6.1 #12)', async () => {
+    localStorage.setItem('account-hidden-columns-v2', '[]')
     const wrapper = mountView()
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="plain-header"]').map(header => header.text())).toEqual([
-      'admin.accounts.columns.capacity',
       'admin.accounts.columns.schedulable',
-      'admin.accounts.columns.usageWindows',
-      'admin.accounts.columns.upstreamBillingRate'
+      'admin.accounts.columns.capacity',
+      'admin.accounts.columns.usageWindows'
     ])
     expect(wrapper.findAll('[data-test="plain-header"] [data-test="usage-windows-hint"]')).toHaveLength(0)
   })
 
   it('keeps Ollama Cloud in the single usage column and ignores legacy column preferences', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['ollama_cloud_usage']))
+    localStorage.setItem('account-hidden-columns-v2', JSON.stringify(['ollama_cloud_usage']))
     const wrapper = mountView()
     await flushPromises()
 
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>
     expect(columns.filter(column => column.key === 'usage')).toHaveLength(1)
     expect(columns.some(column => column.key === 'ollama_cloud_usage')).toBe(false)
+  })
+
+  it('labels the rate column short; its tip has the full name and the trust warning, with no info icon (7e-8)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    document.body.appendChild(wrapper.element)
+
+    const header = wrapper.find('[data-test="upstream-billing-header"]')
+    expect(header.exists()).toBe(true)
+    expect(header.text()).toBe('admin.accounts.columns.upstreamBillingRate')
+    expect(header.find('[data-test="usage-windows-hint"]').exists()).toBe(false)
+    vi.useFakeTimers()
+    header.get('[data-test="upstream-rate-head"]').element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    vi.useRealTimers()
+    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.columns.upstreamBillingRateFull\nadmin.accounts.upstreamBilling.trustWarning')
+    const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; sortable: boolean }>
+    expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
   })
 
   it('shows account multipliers with enough precision to match declared rates', async () => {

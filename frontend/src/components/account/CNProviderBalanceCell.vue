@@ -58,6 +58,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useHeldResult } from '@/composables/useHeldResult'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { CNProviderBalanceEntry, CNProviderBalanceResult } from '@/api/admin/cnProviders'
@@ -76,7 +77,6 @@ const visible = computed(() => cnBalanceCellVisible(props.account))
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const data = ref<CNProviderBalanceResult | null>(null)
 
 const extraKey = (suffix: string) => `${props.account.platform}_${suffix}`
 
@@ -101,6 +101,10 @@ const snapshotBalances = computed<CNProviderBalanceEntry[]>(() => {
   })
 })
 const balanceLow = computed(() => props.account.extra?.[extraKey('balance_low')] === true)
+
+// A probe's answer stands in for the row's snapshot until the snapshot changes.
+const probe = useHeldResult<CNProviderBalanceResult>(() => [snapshotBalance.value, snapshotCurrency.value, snapshotBalances.value])
+const data = computed(() => probe.current.value?.value ?? null)
 
 // 优先用探测结果，其次落库快照。多币种返回全部明细，否则主币种单条。
 const currentEntries = computed<CNProviderBalanceEntry[]>(() => {
@@ -157,7 +161,7 @@ const handleProbe = async () => {
     const result = await adminAPI.cnProviders.queryBalance(props.account.id)
     // 失败时保留快照展示（仅显示错误行），成功才覆盖。
     if (result.success) {
-      data.value = result
+      probe.hold(result)
     } else {
       error.value = result.error || t('common.error')
     }
@@ -171,7 +175,7 @@ const handleProbe = async () => {
 watch(
   () => props.account.id,
   () => {
-    data.value = null
+    probe.clear()
     error.value = null
     loading.value = false
   }
