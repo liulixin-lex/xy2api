@@ -202,6 +202,14 @@ func responsesItemWire(item *ResponsesOutput) map[string]any {
 		m["execution"] = "client"
 		m["arguments"] = toolSearchCallArgumentsJSON(item.Arguments)
 	}
+	if len(item.encryptedContentRaw) > 0 {
+		m["encrypted_content"] = item.encryptedContentRaw
+	} else if item.EncryptedContent != "" {
+		m["encrypted_content"] = item.EncryptedContent
+	}
+	if len(item.EncryptedFunctionArgs) > 0 {
+		m["encrypted_function_args"] = item.EncryptedFunctionArgs
+	}
 	return m
 }
 
