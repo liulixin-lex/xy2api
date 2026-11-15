@@ -260,6 +260,7 @@ type responsesAnthropicReasoning struct {
 	delivered     string
 	signature     string
 	signatureSent bool
+	rawConflict   bool
 }
 
 // ResponsesEventToAnthropicState tracks state for converting a sequence of
@@ -345,8 +346,8 @@ func resToAnthToolOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropic
 	indexed := state.tools[evt.OutputIndex]
 	// Programmatic callers retain the old integer API; wire zero is explicit only
 	// when its presence bit is set. An item ID without an index never means zero.
-	hasIndex := evt.OutputIndexPresent || evt.OutputIndex != 0 || id == ""
-	if tool != nil && hasIndex && indexed != nil && indexed != tool {
+	hasIndex := evt.OutputIndexPresent || evt.OutputIndex != 0 || id == "" || evt.Type == "response.output_item.added"
+	if tool != nil && hasIndex && tool.index != evt.OutputIndex {
 		state.fail("output_index", "tool identities disagree")
 		return nil
 	}
@@ -354,6 +355,13 @@ func resToAnthToolOf(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropic
 		tool = indexed
 	}
 	if tool != nil {
+		if evt.Item != nil {
+			if evt.Item.Type != tool.kind || (evt.Item.Name != "" && tool.name != "" && evt.Item.Name != tool.name) {
+				state.fail("item_id", "tool identities disagree")
+				return nil
+			}
+			tool.opaque = tool.opaque || len(normalizedRawJSON(evt.Item.EncryptedFunctionArgs)) > 0
+		}
 		if id != "" && tool.itemID != "" && id != tool.itemID || callID != "" && tool.callID != "" && callID != tool.callID {
 			state.fail("item_id", "tool identities disagree")
 			return nil
@@ -418,6 +426,9 @@ func ResponsesEventToAnthropicEvents(
 	state *ResponsesEventToAnthropicState,
 ) []AnthropicStreamEvent {
 	if state.err != nil || state.MessageStopSent {
+		if state.err != nil && (evt.Type == "response.completed" || evt.Type == "response.done" || evt.Type == "response.incomplete" || evt.Type == "response.failed") {
+			resToAnthRecordUsage(evt, state)
+		}
 		return nil
 	}
 	if resToAnthToolBlocksEvent(evt, state) {
@@ -896,7 +907,11 @@ func resToAnthHandleReasoningDelta(evt *ResponsesStreamEvent, state *ResponsesEv
 			return nil
 		}
 		if !strings.HasPrefix(evt.Text, parts[index]) {
-			state.fail("reasoning", "reasoning completion disagrees with its deltas")
+			if summary {
+				state.fail("reasoning", "reasoning completion disagrees with its deltas")
+			} else {
+				r.rawConflict = true
+			}
 			return nil
 		}
 		parts[index] = evt.Text
@@ -931,6 +946,10 @@ func resToAnthRecoverReasoning(evt *ResponsesStreamEvent, state *ResponsesEventT
 	}
 	selected := summary
 	if selected == "" {
+		if r.rawConflict {
+			state.fail("reasoning", "reasoning completion disagrees with its deltas")
+			return nil
+		}
 		selected = resToAnthJoinReasoning(r.raw)
 		final := ResponsesOutputReasoningText(*item)
 		if final != "" {
@@ -983,6 +1002,9 @@ func resToAnthHandleOutputItemDone(evt *ResponsesStreamEvent, state *ResponsesEv
 			raw, present = evt.Item.Input, evt.Item.Input != "" || tool.raw == ""
 		}
 		resToAnthCompleteTool(tool, raw, present, state)
+		if state.err != nil {
+			return nil
+		}
 		if !tool.opened {
 			if state.activeTool != nil && !state.activeTool.complete {
 				state.pendingBlocks = append(state.pendingBlocks, *evt)
@@ -1094,16 +1116,20 @@ func resToAnthHandleWebSearchDone(evt *ResponsesStreamEvent, state *ResponsesEve
 // the terminal response payload, which some streams populate without sending
 // any output_text event.
 //
-// It only runs when no text at all reached the client. Streamed events and the
-// terminal output array carry no guaranteed common identity, so reconciling
-// them part by part risks repeating an answer the client already has, which is
-// worse than leaving a partially streamed response as it is.
+// Named items and refusal parts are reconciled independently. Anonymous text
+// retains the legacy guard when a terminal array cannot identify streamed items.
 func resToAnthRecoverTerminalText(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	if evt.Response == nil {
 		return nil
 	}
 	var events []AnthropicStreamEvent
 	hadText := state.textDelivered
+	anonymousText := false
+	for part, delivered := range state.textByPart {
+		if part.ItemID == "" && part.Kind == "output_text" && delivered.Len() > 0 {
+			anonymousText = true
+		}
+	}
 	for outputIndex, item := range evt.Response.Output {
 		if item.Type != "message" {
 			continue
@@ -1112,7 +1138,7 @@ func resToAnthRecoverTerminalText(evt *ResponsesStreamEvent, state *ResponsesEve
 			if content.Type != "output_text" && content.Type != "refusal" {
 				continue
 			}
-			if content.Type == "output_text" && hadText && item.ID == "" {
+			if content.Type == "output_text" && hadText && (item.ID == "" || anonymousText) {
 				continue
 			}
 			part := responsesTextPart{OutputIndex: outputIndex, ItemID: item.ID, ContentIndex: contentIndex, Kind: content.Type}
@@ -1138,11 +1164,7 @@ func resToAnthRecoverTerminalText(evt *ResponsesStreamEvent, state *ResponsesEve
 	return events
 }
 
-func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
-	if state.MessageStopSent {
-		return nil
-	}
-
+func resToAnthRecordUsage(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) {
 	if evt.Usage != nil {
 		usage := anthropicUsageFromResponsesUsage(evt.Usage)
 		state.InputTokens = usage.InputTokens
@@ -1160,7 +1182,19 @@ func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventTo
 		}
 	}
 
-	status, reason := "completed", ""
+}
+
+func resToAnthHandleCompleted(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
+	if state.MessageStopSent {
+		return nil
+	}
+
+	resToAnthRecordUsage(evt, state)
+
+	status, reason := strings.TrimPrefix(evt.Type, "response."), ""
+	if status == "done" {
+		status = "completed"
+	}
 	if evt.Response != nil {
 		status = evt.Response.Status
 		reason = responsesIncompleteReason(evt.Response)
