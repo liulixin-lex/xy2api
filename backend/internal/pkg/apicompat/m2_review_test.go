@@ -177,7 +177,9 @@ func TestReviewM2QualifiedTerminalDefaults(t *testing.T) {
 			want := "stop"
 			if tools {
 				response.Output = []ResponsesOutput{{Type: "function_call", ID: "tool", CallID: "call", Name: "f", Arguments: `{}`}}
-				want = "tool_calls"
+				if tc.status != "incomplete" || tc.reason != "" {
+					want = "tool_calls"
+				}
 			}
 			var notices []ConversionNotice
 			opts := ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }}
@@ -258,16 +260,32 @@ func TestReviewM2VisibleSnapshotsDoNotRetractOrRepeat(t *testing.T) {
 }
 
 func TestReviewM2UnspecifiedIncompleteRetainsPartialArguments(t *testing.T) {
-	for _, reason := range []string{"", "max_tool_calls"} {
-		response := &ResponsesResponse{Status: "incomplete", Output: []ResponsesOutput{{Type: "function_call", CallID: "c", Name: "f", Arguments: `{"a":`}}}
-		if reason != "" {
-			response.IncompleteDetails = &ResponsesIncompleteDetails{Reason: reason}
+	for _, tc := range []struct {
+		status, reason, arguments, want string
+	}{
+		{"incomplete", "", `{"a":`, "stop"},
+		{"incomplete", "", `{}`, "stop"},
+		{"incomplete", "max_tool_calls", `{"a":`, "stop"},
+		{"incomplete", "max_tool_calls", `{}`, "tool_calls"},
+		{"future", "", `{"a":`, "stop"},
+		{"future", "", `{}`, "tool_calls"},
+		{"failed", "", `{}`, "stop"},
+	} {
+		response := &ResponsesResponse{Status: tc.status, Output: []ResponsesOutput{{Type: "function_call", CallID: "c", Name: "f", Arguments: tc.arguments}}}
+		if tc.reason != "" {
+			response.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+		}
+		chat := ResponsesToChatCompletions(response, "m")
+		require.Equal(t, tc.want, chat.Choices[0].FinishReason, "%s/%s %s", tc.status, tc.reason, tc.arguments)
+		require.Equal(t, tc.arguments, chat.Choices[0].Message.ToolCalls[0].Function.Arguments)
+		if tc.status == "failed" {
+			require.Error(t, ValidateResponsesForChat(response))
+			continue
 		}
 		require.NoError(t, ValidateResponsesForChat(response))
-		require.Equal(t, `{"a":`, ResponsesToChatCompletions(response, "m").Choices[0].Message.ToolCalls[0].Function.Arguments)
 		state := NewResponsesEventToChatState()
 		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.incomplete", Response: response}, state)
 		require.NoError(t, state.Err())
-		require.Equal(t, "tool_calls", *chunks[len(chunks)-1].Choices[0].FinishReason)
+		require.Equal(t, tc.want, *chunks[len(chunks)-1].Choices[0].FinishReason, "stream %s/%s %s", tc.status, tc.reason, tc.arguments)
 	}
 }

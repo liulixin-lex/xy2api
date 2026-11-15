@@ -64,6 +64,57 @@ func responsesChatTerminal(status string, details *ResponsesIncompleteDetails) (
 	return status, reason
 }
 
+// responsesChatToolsComplete reports whether tool calls may end with
+// tool_calls. Completed terminals keep the existing rule. An incomplete
+// terminal without a reason keeps the baseline stop. Other unlisted terminals
+// follow E15 only when every call is closed with complete arguments.
+func responsesChatToolsComplete(status string, details *ResponsesIncompleteDetails, output []ResponsesOutput) bool {
+	reason := ""
+	if details != nil {
+		reason = details.Reason
+	}
+	found := false
+	for _, item := range output {
+		if item.Type != "function_call" && item.Type != "custom_tool_call" {
+			continue
+		}
+		found = true
+		if status == "" || status == "completed" {
+			continue
+		}
+		if status == "incomplete" && reason == "" || item.Status != "" && item.Status != "completed" {
+			return false
+		}
+		kind := "function"
+		if item.Type == "custom_tool_call" {
+			kind = "custom"
+		}
+		if ValidateToolArguments(kind, responsesToolArguments(item, true), false, responsesToolOpaque(item)) != nil {
+			return false
+		}
+	}
+	return found
+}
+
+// resToChatTrackedTools returns stream calls with delivered arguments; calls
+// that never received a done or terminal snapshot remain in progress.
+func resToChatTrackedTools(state *ResponsesEventToChatState) []ResponsesOutput {
+	items := make([]ResponsesOutput, 0, len(state.tools.calls))
+	for _, call := range state.tools.calls {
+		item := call.Item
+		if !call.Closed {
+			item.Status = "in_progress"
+		}
+		if item.Type == "custom_tool_call" {
+			item.Input = call.Sent
+		} else {
+			item.Arguments = call.Sent
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 func validateResponsesChatTools(resp *ResponsesResponse) error {
 	if resp.Status != "completed" {
 		return nil
