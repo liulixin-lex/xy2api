@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -125,4 +126,85 @@ func TestM3ToolConstraints(t *testing.T) {
 			require.Equal(t, legacy, zero)
 		})
 	}
+}
+
+func m3ToolEvent(kind string, index int, id, args string) *ResponsesStreamEvent {
+	return &ResponsesStreamEvent{Type: kind, OutputIndex: index, OutputIndexPresent: true, ItemID: id, Arguments: args, ArgumentsPresent: true}
+}
+
+func TestM3ParallelToolQueue(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		for _, insert := range []string{"none", "text", "thinking", "search"} {
+			t.Run(fmt.Sprintf("reverse=%v/%s", reverse, insert), func(t *testing.T) {
+				st := NewResponsesEventToAnthropicState()
+				var events []AnthropicStreamEvent
+				feed := func(e *ResponsesStreamEvent) { events = append(events, ResponsesEventToAnthropicEvents(e, st)...) }
+				for i, id := range []string{"a", "b"} {
+					feed(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, OutputIndexPresent: true, Item: &ResponsesOutput{Type: "function_call", ID: "fc_" + id, CallID: "call_" + id, Name: "f"}})
+				}
+				require.Len(t, events, 1, "second added must not close the first tool")
+				switch insert {
+				case "text":
+					feed(&ResponsesStreamEvent{Type: "response.output_text.done", OutputIndex: 2, Text: "after"})
+				case "thinking":
+					feed(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: 2, Item: &ResponsesOutput{Type: "reasoning", ID: "r"}})
+					feed(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", OutputIndex: 2, Delta: "thought"})
+				case "search":
+					feed(&ResponsesStreamEvent{Type: "response.output_item.done", OutputIndex: 2, Item: &ResponsesOutput{Type: "web_search_call", ID: "w", Status: "completed"}})
+				}
+				order := []int{0, 1}
+				if reverse {
+					order = []int{1, 0}
+				}
+				for _, i := range order {
+					id := []string{"fc_a", "fc_b"}[i]
+					args := []string{`{"x":1}`, `{"y":2}`}[i]
+					e := m3ToolEvent("response.function_call_arguments.done", i, id, args)
+					feed(e)
+					feed(e)
+				}
+				feed(&ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed"}})
+				require.NoError(t, st.Err())
+				got := map[string]string{}
+				open := map[int]string{}
+				closed := map[int]bool{}
+				for _, e := range events {
+					if e.Index == nil {
+						continue
+					}
+					i := *e.Index
+					switch e.Type {
+					case "content_block_start":
+						require.False(t, closed[i])
+						open[i] = e.ContentBlock.ID
+					case "content_block_delta":
+						_, ok := open[i]
+						require.True(t, ok)
+						require.False(t, closed[i])
+						if e.Delta.Type == "input_json_delta" {
+							got[open[i]] += e.Delta.PartialJSON
+						}
+					case "content_block_stop":
+						_, ok := open[i]
+						require.True(t, ok)
+						require.False(t, closed[i])
+						closed[i] = true
+					}
+				}
+				require.Equal(t, map[string]string{"call_a": `{"x":1}`, "call_b": `{"y":2}`}, got)
+				require.Len(t, closed, len(open))
+			})
+		}
+	}
+	t.Run("duplicate call ID and conflicting identity", func(t *testing.T) {
+		st := NewResponsesEventToAnthropicState()
+		for i, id := range []string{"fc_a", "fc_b"} {
+			ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, OutputIndexPresent: true, Item: &ResponsesOutput{Type: "function_call", ID: id, CallID: "reused", Name: "f"}}, st)
+		}
+		ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 1, "fc_b", `{"y":2}`), st)
+		require.NoError(t, st.Err())
+		ResponsesEventToAnthropicEvents(m3ToolEvent("response.function_call_arguments.done", 1, "fc_a", `{}`), st)
+		require.Error(t, st.Err())
+		require.Empty(t, FinalizeResponsesAnthropicStream(st))
+	})
 }
