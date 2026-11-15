@@ -50,13 +50,13 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | `POST /v1/alpha/search` | Codex 使用的独立搜索端点 |
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
 
-API Key 请求中显式的 `reasoning.effort: none` 或 `reasoning_effort: none` 会保留，不因第三方端点而视为目录占位值；不支持该档位的最终模型按兼容策略映射。Responses-shaped Chat 的 API Key 请求保留 `metadata`；原生 Chat 保留 `stream_options`，转发至 Responses 时省略并记录该用量格式提示，实际用量仍按上游结果返回。
+API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
 
 ## 客户端配置
 
 ### Codex CLI
 
-在「使用密钥」中选择 **Codex CLI**。弹窗会读取当前密钥可用的模型目录，自动选择模型和思考深度。`base_url` 必须以 `/v1` 结尾，Codex 会直接拼接 `/responses`。
+在「使用密钥」中选择 **Codex CLI**。弹窗会读取当前密钥可用的模型目录，自动选择模型和思考深度。已获取的上游实时模型元数据优先于网关内置目录。`base_url` 必须以 `/v1` 结尾，Codex 会直接拼接 `/responses`。
 
 认证模式有两种：
 
@@ -134,7 +134,7 @@ goals = true
 网关内置支持 `gpt-6.1-sol`：
 
 - **名称**：模型目录、映射、计价和发往上游的 ID 都是 `gpt-6.1-sol`。大小写、下划线、`openai/` 等前缀和已知的思考深度、compact 后缀会精确归一到该模型；不认识的近似名称不会被映射过去。
-- **思考深度**：支持 `low`、`medium`、`high`、`xhigh`、`max`。在最终模型映射之后，显式的 `none`、`minimal` 或关闭 thinking 会在本地被拒绝，覆盖 HTTP、协议转换、透传以及 WebSocket 的首帧、后续轮次和 `session.update`。映射到其他模型的请求不套用这条限制。
+- **思考深度**：支持 `low`、`medium`、`high`、`xhigh`、`max`。API Key 账号的 HTTP 请求在最终模型确定后，把显式的 `none`、`minimal` 映射为 `low` 发送，按 `low` 计费。OAuth 账号与 WebSocket（首帧、后续轮次和 `session.update`）仍在本地拒绝 `none`、`minimal` 与关闭 thinking。映射到其他模型的请求不套用这条限制。
 - **工具调用**：只支持 Chat Completions 的账号无法为该模型执行工具调用，网关返回明确的请求错误（`gpt-6.1-sol requires Responses for tool calls`），不会静默丢弃工具，也不会把账号判为故障。
 - **Codex**：默认思考深度 `low`。API Key 账号的 Codex 模型目录对该模型及其映射别名不启用 Responses Lite。
 - **上下文**：API 与 OpenCode 口径为 context 1,050,000、最大输入 922,000、最大输出 128,000；Codex 模型描述符口径为 context 272,000、`max_context_window` 872,000。两个入口各按各自的口径。
@@ -150,30 +150,16 @@ goals = true
 
 输入超过 272,000 token 时启用长上下文计价：输入 ×2、输出 ×1.5。分组是否启用阶梯计费、渠道自定义价格和显式零价仍然优先。
 
+## 模型支持：GPT-6.1 Terra
+
+- **名称**：`gpt-6.1-terra`，供应商前缀、大小写、下划线与已知推理/compact 后缀精确归一；未知日期或近似别名不自动匹配。
+- **推理档位**：支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`；`minimal` 按最近可用档位映射到 `none`。工具调用只能走 Responses 接口。OAuth 原生 Responses 的 `minimal` 同样先归一为 `none` 再发送。
+- **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
+- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
+
 ## 相关功能
 
 - [OpenAI 智商检测](../guides/iq-check.md)：按“账号 × 模型”检测降智并暂停调度。
 - [Codex STATE](../guides/codex-state.md)：为 OAuth 账号获取并注入 STATE 票据。
 - [OpenAI 模型降档识别](../guides/quality-routing.md)、[提示词缓存](../guides/caching.md)、[分组与 Fast 优先级](../guides/groups.md)。
 - 同样经 OpenAI 网关转发的 Kimi、智谱、DeepSeek、MiniMax、OpenCode、Command Code、Cline 见 [其他平台](others.md)；这些平台的分组使用 `/v1/messages` 不需要开启「允许 /v1/messages 调度」。
-
-### 模型支持：GPT-6.1 Terra
-
-- **名称**：`gpt-6.1-terra`，供应商前缀、大小写、下划线与已知推理/compact 后缀精确归一；未知日期或近似别名不自动匹配。
-- **推理档位**：支持 `none`，`minimal` 按最近可用档位映射到 `none`；工具调用使用 Responses 接口。
-- **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
-- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
-
-Responses 上游明确拒绝 `max_output_tokens` 时，网关按既有请求预算删除该字段后重发；重发请求不再受调用方指定的输出上限约束，并记录 `max_output_tokens/omit` 降级。
-
-Chat 请求的 `reasoning` 接受字符串或对象；同时提供 `reasoning_effort` 时以该字段为准。扩展字段中的错误类型、未知推理档位与未知子字段继续忽略，`metadata`、`user`、`text` 与预算别名保留给目标协议转换。
-
-HTTP API Key 请求在最终账号和模型确定后执行一次分组推理策略，再将模型明确不支持的档位映射到最近可用档位，等距取较低档。模型支持的 none 原样保留；目录缺少某档本身不构成不支持的证据。请求档位与最终出站档位分别记录，计费使用实际出站值。
-
-GPT-6.1 Sol 的 API Key 原生 HTTP 请求先把 none/minimal 映射为 low 再校验；其他 Responses 模型继续沿用 minimal→none 的既有归一，修复重入也不会把 minimal 补回。OAuth 与 WebSocket 沿用原校验规则。
-
-模型后缀只记录请求意图，不单独触发分组映射或注入正文；只有最终模型的可靠能力限制确实要求调整时才投影该值。
-
-OAuth 的原生 Responses Terra minimal 请求仍先归一为 none 再发出；Terra 的新增校验只用于已完成最终归一的正文。
-
-第三方 API Key 的显式 reasoning.effort:none 首次原样发出。上游以 400 且 param 为 reasoning.effort 或 reasoning 明确拒绝时，使用既有修复预算删除后重发一次并记录 omit；同账号、同模型的重发不会补回 none，换目标重新计算。

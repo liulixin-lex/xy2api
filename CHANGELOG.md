@@ -6,51 +6,14 @@
 
 ### 参数与协议转换
 
-- 第三方上游明确拒绝 none 推理参数时，网关在既有预算内省略并重发一次，保留支持 none 的正常请求。
-
-- Anthropic 分组混合调度到 Antigravity 时恢复既有推理上限、映射与拒绝规则。
-
-- OAuth Chat 恢复一次分组推理映射、上限与拒绝规则，避免规则丢失或重复执行。
-
-- Messages 省略推理档位时保留转换默认值，不再被分组规则误降档或拒绝。
-
-- 显式启用 thinking 的慢思考请求继续享有原首包等待预算，计费实际档位仍只读出站字段。
-
-- Claude minimal 请求保留既有 adaptive 模式，不再被就近映射成关闭思考。
-
-- OAuth Terra 的 minimal 请求恢复为 none 后发送，不再被本地提前拒绝。
-
-- API Key Responses 请求继续将既有 minimal 兼容值归一为 none，避免上游拒绝。
-
-- 模型后缀与第三方 thinking 模式不再被误写成显式推理档位或触发分组拒绝。
-
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
-
-- 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式。
-
-- HTTP 请求的推理档位按最终模型映射到最近可用档位，Sol 的 none/minimal 可映射为 low，保留其他模型支持的档位，并分别记录请求值与实际值。
-
-- Gemini 中间转换保留推理意图与 JSON 格式，小输出上限不再提前受到 Claude 思考预算限制。
-
-- Anthropic 桥保留工具 strict，并在启用桥选项时将 allowed_tools 限制应用到实际声明。
-
-- Fable 5.2 与 Mythos 5.2 补齐模型目录及默认 adaptive/high 转换，强制工具选择按目标能力拒绝。
-
-- Chat 请求的字符串 `reasoning` 生效，`reasoning_effort` 继续优先，扩展字段的错误类型和未知档位继续忽略，转换也不新增拒绝。
-
-- 推理实际档位保留出站 `max`、`xhigh`、`ultra` 的区别，缺少显式字段时不再从模型后缀推导。
-
-- HTTP 兼容请求按最终发送正文记录推理实际档位，保持既有 OAuth 与 WebSocket 出站参数。
-
-- Responses 上游拒绝 `max_output_tokens` 时按既有预算删除该字段后重发。
-
+- 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
+- API Key 账号的 HTTP 请求遇到模型不支持的推理档位时改用最近的可用档位，不再返回 400：GPT-6.1 Sol 的 none、minimal 改为 low，按实际发送的档位计费；OAuth 与 WebSocket 不变。
+- Fable 5.2、Mythos 5.2 未指定档位时按 adaptive/high 思考，多轮对话保留已签名的 thinking 历史；`tool_choice` 为 required 或具名工具时返回 400。
 - GPT-6.1 Terra 使用专属模型身份与 Codex 能力目录，兼容缓存键按模型分开，API Key 不启用 Responses Lite。
-
-- API Key 请求的显式 `none` 不再因第三方端点而被删除，Responses-shaped Chat 按实际端点保留参数。
-
+- API Key 账号的请求显式写 `none` 时，不再因 Base URL 不是 OpenAI 官方地址而被删除；第三方上游明确拒绝时在既有预算内省略并重发一次。`/v1/chat/completions` 收到的 Responses 格式正文保留 `metadata`。
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
-
-- Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择。
+- Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
 ## [0.6.7] - 2026-11-15
 

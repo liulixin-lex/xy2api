@@ -220,10 +220,14 @@ actual_cost = total_cost × 分组倍率
 
 如果以前通过提高分组倍率来代替 Fast 收费，开启分组强制 Fast 后要把倍率恢复为业务原值，避免重复加价。
 
-HTTP 请求先保存原始推理档位和分组规则；选定最终账号与模型后依次执行 mapping、cap/deny、模型最近档位映射。映射规则中的模型条件匹配最终模型。同一目标的修复或协议回落复用已完成的映射，换目标则从原始值重算；未指定档位不把转换默认值当成调用方输入。
+## 推理档位策略
 
-Messages 没有显式 output_config.effort 时，不对转换器生成的默认档位执行 cap、mapping 或 deny；OAuth 与 API Key 都保留默认行为。
+API Key 账号的 HTTP 请求在最终账号和模型确定之后执行一次分组的推理档位规则，依次为：档位映射、上限与禁用、按模型就近映射。
 
-OAuth Chat 在进入转发链时执行一次分组规则；链式 mapping 不会因内部修复重入而执行第二遍，cap 与 deny 继续生效。
-
-Anthropic 分组混合调度到 Antigravity 时，OAuth 与 API Key 均在转发前执行一次既有分组策略，解析后的实际请求档位随改写更新。
+- 规则中的模型条件匹配最终模型，不是请求里写的模型。
+- 就近映射只处理模型明确不支持的档位，等距时取较低档；模型支持的 `none` 原样保留，目录里缺少某一档本身不算不支持。Responses 的既有 `minimal` 兼容归一仍保留。
+- 同一目标的修复重放或协议回落沿用已经映射的结果；换到另一个账号或模型时，从原始档位重新计算。
+- 请求没有写档位时，转换时补上的默认档位不当作调用方的输入，不参与规则。模型名后缀不单独触发分组映射；仅当最终模型明确不支持后缀表达的档位时才调整正文。
+- 发往 Anthropic 上游时：Sonnet 5.5 的 `none` 为 `between_tools` + `low`，`low` 为 adaptive + `low`；Haiku 5.5 的 `none` 为 `disabled` + `low`。Claude 的 `minimal` 保留既有 adaptive 转换。原生 Messages 显式写的 thinking 模式在普通档位映射时保留；第三方模型没有显式 effort 时不因 thinking 模式而补写 effort。
+- OAuth Chat 与 Anthropic 分组混合调度的 Antigravity 账号继续执行一次既有分组规则；Messages 省略 `output_config.effort` 时不对转换默认值封顶、映射或拒绝。
+- 请求档位与实际发送的档位分别记录，计费按实际档位，见[用量指标与导出](usage.md#请求与实际推理档位)。
