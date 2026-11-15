@@ -1838,7 +1838,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_Non2xxRecordsOllamaActivity(t
 	require.True(t, ok, "Anthropic passthrough non-2xx on Ollama account must record activity via handleErrorResponse")
 }
 
-func TestOpus55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
+func TestOpus55ValidatesParametersAfterFinalEffort(t *testing.T) {
 	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
 		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"thinking":{"type":"enabled","budget_tokens":1024}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
 			for _, count := range []bool{false, true} {
@@ -1854,11 +1854,30 @@ func TestOpus55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 				body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}],` + field + `}`)
 				parsed := &ParsedRequest{Model: model, Body: NewRequestBodyRef(body)}
 				svc := &GatewayService{}
+				mappedDisabled := typ == AccountTypeAPIKey && !count && field == `"thinking":{"type":"disabled"}`
+				var upstream *anthropicHTTPUpstreamRecorder
+				if mappedDisabled {
+					account.Credentials["api_key"] = "fixture"
+					upstream = &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(`{"id":"msg_fixture","type":"message","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+					}}
+					svc = newForwardPartialUsageServiceForTest(upstream)
+				}
 				var err error
 				if count {
 					err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
 				} else {
 					_, err = svc.Forward(context.Background(), c, account, parsed)
+				}
+				if mappedDisabled {
+					require.NoError(t, err)
+					require.Equal(t, http.StatusOK, rec.Code)
+					require.NotNil(t, upstream.lastReq)
+					require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+					require.Equal(t, "low", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+					continue
 				}
 				require.Error(t, err)
 				require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1881,7 +1900,7 @@ func TestOpus55ThinkingDefaultPreservesSignedHistory(t *testing.T) {
 	require.JSONEq(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(out, "messages").Raw)
 }
 
-func TestSonnet55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
+func TestSonnet55ValidatesParametersAfterFinalEffort(t *testing.T) {
 	fields := []string{
 		`"thinking":{"type":"disabled"}`,
 		`"thinking":{"type":"enabled","budget_tokens":1024}`,
@@ -1911,11 +1930,30 @@ func TestSonnet55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 				svc := &GatewayService{}
+				mappedDisabled := typ == AccountTypeAPIKey && !count && field == `"thinking":{"type":"disabled"}`
+				var upstream *anthropicHTTPUpstreamRecorder
+				if mappedDisabled {
+					account.Credentials["api_key"] = "fixture"
+					upstream = &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(`{"id":"msg_fixture","type":"message","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+					}}
+					svc = newForwardPartialUsageServiceForTest(upstream)
+				}
 				var err error
 				if count {
 					err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
 				} else {
 					_, err = svc.Forward(context.Background(), c, account, parsed)
+				}
+				if mappedDisabled {
+					require.NoError(t, err)
+					require.Equal(t, http.StatusOK, rec.Code)
+					require.NotNil(t, upstream.lastReq)
+					require.Equal(t, "between_tools", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
+					require.Equal(t, "low", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
+					continue
 				}
 				require.Error(t, err, field)
 				require.Equal(t, http.StatusBadRequest, rec.Code, field)

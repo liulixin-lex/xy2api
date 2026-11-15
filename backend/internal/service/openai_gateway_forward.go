@@ -63,7 +63,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			validationModel = mapped
 		}
 	}
-	if account.Type != AccountTypeAPIKey || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+	if account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
@@ -356,7 +356,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
 			return nil, err
 		}
-		originalBody = body
 		requestView = newOpenAIRequestView(body)
 	}
 

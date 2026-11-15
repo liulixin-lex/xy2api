@@ -169,3 +169,5 @@ Responses 上游明确拒绝 `max_output_tokens` 时，网关按既有请求预�
 Chat 请求的 `reasoning` 接受字符串或对象；同时提供 `reasoning_effort` 时以该字段为准。扩展字段中的错误类型与未知子字段继续忽略，`metadata`、`user`、`text` 与预算别名保留给目标协议转换。
 
 HTTP API Key 请求在最终账号和模型确定后执行一次分组推理策略，再将模型明确不支持的档位映射到最近可用档位，等距取较低档。模型支持的 none 原样保留；目录缺少某档本身不构成不支持的证据。请求档位与最终出站档位分别记录，计费使用实际出站值。
+
+GPT-6.1 Sol 的 API Key 原生 HTTP 请求先把 none/minimal 映射为 low 再校验；未确认不支持 minimal 的其他模型保留该值。OAuth 与 WebSocket 沿用原校验规则。
