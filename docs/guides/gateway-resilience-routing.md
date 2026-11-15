@@ -24,7 +24,7 @@
 几条判定规则：
 
 - 瞬时失败、首输出超时与停滞的账号冷却：上游带 `Retry-After` 时按它冷却，封顶 `failure.retry_after_cap_seconds`（默认 120 秒）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；不带时，OpenAI 兼容账号冷却 `failure.transient_cooldown_seconds`（默认 30 秒），Anthropic、Gemini、Antigravity 账号改为按账号 × 模型逐级冷却（见“模型级冷却”）。
-- 第三方 API Key 的 429 按本次实际目标限幅冷却；上游原始长窗口保留为证据，不再由自动暂停或平台阈值再次把该 key 封至长窗口结束。目标或协议变更后，旧窗口不能当作新目标的官方配额；本请求的原始最早重试时刻仍须遵守。
+- 第三方 API Key 的 429 按本次实际目标限幅冷却；上游原始长窗口保留为证据，不再由自动暂停或平台阈值再次把该 key 封至长窗口结束。目标或协议变更后，旧窗口不能当作新目标的官方配额；本请求的原始最早重试时刻仍须遵守。明确的模型专属窗口先按模型处理，不能被中转的账号冷却覆盖。
 - 中转前面的 CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页、HTML 页面）按瞬时失败处理，即使文案提到 overloaded。
 - `failure.decision_v2` 开启时，只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded”按瞬时或限流处理，可以换到同一主机上的其他账号。余额等更强的证据优先。
 - 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`），以及实际错误字段中的 `session_blocked_by_cyber_policy`、`cyber_policy`，不罚号、不换号，按请求拒绝结束，运维记录标为业务限制，不计入 SLA。裸 `Access denied` 仍按未知 403 处理；请求回显里的政策码不参与判定。

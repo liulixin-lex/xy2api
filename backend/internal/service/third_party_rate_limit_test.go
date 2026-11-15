@@ -167,3 +167,32 @@ func TestThirdParty429EffectiveCooldown(t *testing.T) {
 		require.Equal(t, "https://relay.invalid", target.Origin, fmt.Sprint(target))
 	})
 }
+
+func TestThirdParty429ExplicitModelOwnership(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, credits := range []bool{false, true} {
+		t.Run(fmt.Sprint("credits=", credits), func(t *testing.T) {
+			repo := &anthropicWindowLimitRepo{}
+			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			account := &Account{ID: 919, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://relay.invalid"}}
+			state := resilience.NewRequestState()
+			state.SetUpstreamAttemptTarget(&resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: APIProtocolAnthropic, Origin: "https://relay.invalid"})
+			ctx := resilience.WithRequestState(context.Background(), state)
+			now := time.Now()
+			reset := now.Add(80 * time.Hour).Truncate(time.Second)
+			headers := fable429Headers(now.Add(time.Hour), reset)
+			body := []byte(`{"error":{"message":"rate limited"}}`)
+			if credits {
+				headers = http.Header{"Anthropic-Ratelimit-Unified-Reset": {fmt.Sprint(reset.Unix())}}
+				body = []byte(`{"error":{"details":{"error_code":"credits_required","model":"claude-fable-5"}}}`)
+			}
+			svc.HandleUpstreamError(ctx, account, 429, headers, body, "claude-fable-5")
+			require.Equal(t, 0, repo.rateLimitCalls)
+			require.Equal(t, 1, repo.modelRateLimitCalls)
+			require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+			require.True(t, reset.Equal(repo.lastModelRateLimitReset))
+			evidence := repo.lastExtraUpdates[quotaCooldownEvidenceKey].(map[string]any)
+			require.Equal(t, "model", evidence["owner"])
+		})
+	}
+}

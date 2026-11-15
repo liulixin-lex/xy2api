@@ -167,3 +167,18 @@ func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 	}
 	return true
 }
+
+// Keep provider-proven model ownership on its existing model key and deadline.
+func (s *RateLimitService) persistRelayModelQuotaEvidence(ctx context.Context, account *Account, resetAt time.Time, source string) {
+	target, known := cooldownAttemptTarget(ctx, account)
+	if !known || cooldownTargetOfficial(account, target) {
+		return
+	}
+	evidence := QuotaCooldownEvidence{Owner: "model", Source: source, Protocol: target.Protocol, OriginDigest: cooldownOriginDigest(target.Origin), RawReset: resetAt, EffectiveUntil: resetAt}
+	if hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(account.ID); ok {
+		evidence.RetryNotBefore = hint.NotBefore
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{quotaCooldownEvidenceKey: evidence.extra()}); err != nil {
+		slog.Warn("model_quota_evidence_write_failed", "account_id", account.ID, "error", err)
+	}
+}
