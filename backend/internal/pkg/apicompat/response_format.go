@@ -34,6 +34,9 @@ func chatResponseFormatToResponsesTextFormatUnchecked(raw json.RawMessage) json.
 		return raw
 	}
 	schema["type"] = rawJSONString("json_schema")
+	if _, present := schema["strict"]; !present {
+		schema["strict"] = json.RawMessage("false")
+	}
 
 	out, err := json.Marshal(schema)
 	if err != nil {

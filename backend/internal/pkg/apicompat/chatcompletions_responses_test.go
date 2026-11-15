@@ -1875,3 +1875,22 @@ func TestBufferedResponseAccumulator_IgnoresNonFunctionCallItems(t *testing.T) {
 
 	assert.False(t, acc.HasContent())
 }
+
+func TestChatSchemaStrictDefaultsFalse(t *testing.T) {
+	for _, tc := range []struct{ name, input, expected string }{
+		{"missing", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":false}`},
+		{"true", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"},"strict":true}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":true}`},
+		{"false", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"},"strict":false}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":false}`},
+		{"text", `{"type":"text"}`, `{"type":"text"}`},
+		{"json_object", `{"type":"json_object"}`, `{"type":"json_object"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &ChatCompletionsRequest{Model: "gpt-4o", ResponseFormat: json.RawMessage(tc.input)}
+			converted, err := ChatCompletionsToResponses(request)
+			require.NoError(t, err)
+			require.NotNil(t, converted.Text)
+			require.JSONEq(t, tc.expected, string(converted.Text.Format))
+			require.Equal(t, tc.input, string(request.ResponseFormat))
+		})
+	}
+}
