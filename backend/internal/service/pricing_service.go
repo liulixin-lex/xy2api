@@ -24,7 +24,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/util/urlvalidator"
-	"go.uber.org/zap"
 )
 
 var (
@@ -284,6 +283,7 @@ type PricingService struct {
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
+	pricingOrigins  map[string]PricingProvenance
 
 	// 停止信号
 	stopCh chan struct{}
@@ -549,6 +549,7 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 	// 否则丢弃这次混合快照并重试，避免短暂应用不匹配的 fallback/override。
 	var data map[string]*LiteLLMModelPricing
 	var fingerprint string
+	var origins map[string]PricingProvenance
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		if validateErr := s.validateCustomPricingFiles(); validateErr != nil {
@@ -559,7 +560,7 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 		if readErr != nil {
 			return fmt.Errorf("read file failed: %w", readErr)
 		}
-		data, fingerprint, err = s.buildPricingData(body)
+		data, fingerprint, origins, err = s.buildPricingDataWithSource(body)
 		if err != nil {
 			return fmt.Errorf("parse pricing data: %w", err)
 		}
@@ -578,6 +579,7 @@ func (s *PricingService) reloadCustomPricingLayers() error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
+	s.pricingOrigins = origins
 	s.customFilesHash = fingerprint
 	s.mu.Unlock()
 
@@ -619,7 +621,7 @@ func (s *PricingService) downloadPricingData() error {
 			remoteHash[:min(8, len(remoteHash))], dataHashStr[:8])
 	}
 
-	data, customFilesHash, err := s.buildPricingData(body)
+	data, customFilesHash, origins, err := s.buildPricingDataWithSource(body)
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
@@ -637,6 +639,7 @@ func (s *PricingService) downloadPricingData() error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
+	s.pricingOrigins = origins
 	s.lastUpdated = time.Now()
 	s.localHash = syncHash
 	s.customFilesHash = customFilesHash
@@ -1030,24 +1033,63 @@ func (s *PricingService) mergeOverrideOnlyModels(data map[string]*LiteLLMModelPr
 	return data, nil
 }
 
-// buildPricingData 解析目录正文并依次叠加 fallback、override 两层，返回合并结果与
-// 叠加层文件指纹。指纹在合并读取之前采样：并发改文件只会让存下的指纹落后于实际
-// 合并的数据、不会领先，下一轮定时比对因此会再次重建。
+// buildPricingData retains the existing parsing entry point for validation callers.
 func (s *PricingService) buildPricingData(body []byte) (map[string]*LiteLLMModelPricing, string, error) {
+	data, fingerprint, _, err := s.buildPricingDataWithSource(body)
+	return data, fingerprint, err
+}
+
+// Publish the prices and their origins from one stable content revision.
+func (s *PricingService) buildPricingDataWithSource(body []byte) (map[string]*LiteLLMModelPricing, string, map[string]PricingProvenance, error) {
 	fingerprint := s.customPricingFilesFingerprint()
 	data, err := s.parsePricingData(body)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
+	}
+	origins := make(map[string]PricingProvenance, len(data))
+	for key := range data {
+		origins[key] = PricingProvenance{Source: "catalog"}
 	}
 	data, err = s.mergeFallbackPricingData(data)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
+	}
+	for key := range data {
+		if _, ok := origins[key]; !ok {
+			origins[key] = PricingProvenance{Source: "fallback_file"}
+		}
 	}
 	data, err = s.mergeOverrideOnlyModels(data)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return data, fingerprint, nil
+	overrides, err := s.loadPricingOverrideEntries()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	for key := range data {
+		source, ok := origins[key]
+		if !ok {
+			source = PricingProvenance{Source: "override_file"}
+		}
+		if patch := overrides[key]; len(patch) > 0 {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(patch, &fields); err != nil {
+				return nil, "", nil, err
+			}
+			source.Overrides = map[string]string{}
+			for field := range fields {
+				if strings.Contains(field, "cost") || strings.Contains(field, "multiplier") || strings.Contains(field, "threshold") {
+					source.Overrides[field] = "override_file:" + fingerprint
+				}
+			}
+		}
+		origins[key] = source
+	}
+	if fingerprint != s.customPricingFilesFingerprint() {
+		return nil, "", nil, fmt.Errorf("custom pricing files changed during build")
+	}
+	return data, fingerprint, origins, nil
 }
 
 // loadPricingData 从本地文件加载价格数据
@@ -1057,7 +1099,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 		return fmt.Errorf("read file failed: %w", err)
 	}
 
-	pricingData, customFilesHash, err := s.buildPricingData(data)
+	pricingData, customFilesHash, origins, err := s.buildPricingDataWithSource(data)
 	if err != nil {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
@@ -1069,6 +1111,7 @@ func (s *PricingService) loadPricingData(filePath string) error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, pricingData)
 	s.pricingData = pricingData
+	s.pricingOrigins = origins
 	s.localHash = hashStr
 	s.customFilesHash = customFilesHash
 
@@ -1147,7 +1190,7 @@ func (s *PricingService) useFallbackPricing() error {
 	if err != nil {
 		return fmt.Errorf("read fallback failed: %w", err)
 	}
-	data, fingerprint, err := s.buildPricingData(body)
+	data, fingerprint, origins, err := s.buildPricingDataWithSource(body)
 	if err != nil {
 		return fmt.Errorf("parse pricing fallback: %w", err)
 	}
@@ -1159,6 +1202,7 @@ func (s *PricingService) useFallbackPricing() error {
 	s.mu.Lock()
 	warnDroppedLongContextLadders(s.pricingData, data)
 	s.pricingData = data
+	s.pricingOrigins = origins
 	s.customFilesHash = fingerprint
 	s.localHash = syncHash
 	s.lastUpdated = time.Now()
@@ -1204,42 +1248,54 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	pricing, _ := s.lookupModelPricingWithSource(modelName)
+	return pricing
+}
+
+func (s *PricingService) lookupModelPricingWithSource(modelName string) (*LiteLLMModelPricing, PricingProvenance) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	if modelName == "" {
-		return nil
+	if strings.TrimSpace(modelName) == "" {
+		return nil, PricingProvenance{}
 	}
-
-	// 标准化模型名称（同时兼容 "models/xxx"、VertexAI 资源名等前缀）
-	modelLower := strings.ToLower(strings.TrimSpace(modelName))
-	lookupCandidates := s.buildModelLookupCandidates(modelLower)
-
-	// 1~3. 确定性识别（精确名 / 已知拼写变体 / 去掉日期版本后缀）
-	if pricing := s.lookupIdentifiedModelPricingLocked(lookupCandidates); pricing != nil {
-		return pricing
+	candidates := s.buildModelLookupCandidates(strings.ToLower(strings.TrimSpace(modelName)))
+	pricing, key, match := s.lookupIdentifiedModelPricingWithSourceLocked(candidates)
+	if pricing == nil {
+		pricing, key, match = s.matchByModelFamilyWithSource(candidates[0])
 	}
-
-	// 4. 基于模型系列匹配（Claude）
-	if pricing := s.matchByModelFamily(lookupCandidates[0]); pricing != nil {
-		return pricing
+	if pricing == nil && strings.HasPrefix(candidates[0], "gpt-") {
+		pricing, key, match = s.matchOpenAIModelWithSource(candidates[0])
 	}
-
-	// 5. OpenAI 模型回退策略
-	if strings.HasPrefix(lookupCandidates[0], "gpt-") {
-		return s.matchOpenAIModel(lookupCandidates[0])
+	if pricing == nil {
+		return nil, PricingProvenance{}
 	}
-
-	return nil
+	provenance := s.pricingOrigins[key]
+	source := provenance.Source
+	if source == "" {
+		source = "catalog"
+	}
+	revision := ""
+	if s.localHash != "" {
+		revision = s.localHash + ":" + s.customFilesHash
+	}
+	if match == "static" {
+		source = "builtin"
+		revision = pricingContentRevision(pricing)
+	}
+	return pricing, PricingProvenance{ModelKey: key, Source: source, Match: match, Revision: revision, Overrides: maps.Clone(provenance.Overrides)}
 }
 
 // lookupIdentifiedModelPricingLocked 只做"确定性识别"的三步查找：精确键、已知拼写
 // 变体、去掉日期/版本后缀后的同名条目。它刻意不包含 matchByModelFamily /
 // matchOpenAIModel 这类按子串猜系列的兜底——那些兜底会给任意名字都返回一个价格。
 // 调用方必须持有 s.mu 读锁。
-func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []string) *LiteLLMModelPricing {
+func (s *PricingService) lookupIdentifiedModelPricingLocked(candidates []string) *LiteLLMModelPricing {
+	pricing, _, _ := s.lookupIdentifiedModelPricingWithSourceLocked(candidates)
+	return pricing
+}
+func (s *PricingService) lookupIdentifiedModelPricingWithSourceLocked(lookupCandidates []string) (*LiteLLMModelPricing, string, string) {
 	if len(lookupCandidates) == 0 {
-		return nil
+		return nil, "", ""
 	}
 
 	// 1. 精确匹配
@@ -1248,7 +1304,7 @@ func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []s
 			continue
 		}
 		if pricing, ok := s.pricingData[candidate]; ok {
-			return pricing
+			return pricing, candidate, "exact"
 		}
 	}
 
@@ -1257,7 +1313,7 @@ func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []s
 	for _, candidate := range lookupCandidates {
 		normalized := strings.ReplaceAll(candidate, "-4-5-", "-4.5-")
 		if pricing, ok := s.pricingData[normalized]; ok {
-			return pricing
+			return pricing, normalized, "variant"
 		}
 	}
 
@@ -1267,11 +1323,11 @@ func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []s
 	for key, pricing := range s.pricingData {
 		keyBase := s.extractBaseName(strings.ToLower(key))
 		if keyBase == baseName {
-			return pricing
+			return pricing, key, "base"
 		}
 	}
 
-	return nil
+	return nil, "", ""
 }
 
 // GetIdentifiedModelPricing 在价格表中确定性地识别模型，识别不到时返回 nil。
@@ -1405,24 +1461,24 @@ func (s *PricingService) extractBaseName(model string) string {
 }
 
 // matchByModelFamily 基于模型系列匹配
-func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
+func (s *PricingService) matchByModelFamilyWithSource(model string) (*LiteLLMModelPricing, string, string) {
 	if claude.IsOpus55(model) {
 		if pricing, ok := s.pricingData["claude-opus-5-5"]; ok {
-			return pricing
+			return pricing, "claude-opus-5-5", "family"
 		}
-		return claudeOpus55FallbackPricing
+		return claudeOpus55FallbackPricing, "claude-opus-5-5", "static"
 	}
 	if claude.IsSonnet55(model) {
 		if pricing, ok := s.pricingData["claude-sonnet-5-5"]; ok {
-			return pricing
+			return pricing, "claude-sonnet-5-5", "family"
 		}
-		return claudeSonnet55FallbackPricing
+		return claudeSonnet55FallbackPricing, "claude-sonnet-5-5", "static"
 	}
 	if model == "claude-haiku-5-5" {
 		if pricing, ok := s.pricingData["claude-haiku-5-5"]; ok {
-			return pricing
+			return pricing, "claude-haiku-5-5", "family"
 		}
-		return claudeHaiku55FallbackPricing
+		return claudeHaiku55FallbackPricing, "claude-haiku-5-5", "static"
 	}
 	// modelFamily 定义一个模型系列的匹配和定价查找规则。
 	type modelFamily struct {
@@ -1513,7 +1569,7 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	}
 
 	if matched == nil {
-		return nil
+		return nil, "", ""
 	}
 
 	// Phase 3: 在定价数据中查找该系列的价格
@@ -1528,13 +1584,12 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 				continue
 			}
 			if strings.Contains(keyLower, pattern) {
-				logger.LegacyPrintf("service.pricing", "[Pricing] Fuzzy matched %s -> %s", model, key)
-				return pricing
+				return pricing, key, "family"
 			}
 		}
 	}
 
-	return nil
+	return nil, "", ""
 }
 
 // matchOpenAIModel OpenAI 模型回退匹配策略
@@ -1546,29 +1601,30 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 5. gpt-5.4* -> 业务静态兜底价
 // 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
+	pricing, _, _ := s.matchOpenAIModelWithSource(model)
+	return pricing
+}
+func (s *PricingService) matchOpenAIModelWithSource(model string) (*LiteLLMModelPricing, string, string) {
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
-			logger.LegacyPrintf("service.pricing", "[Pricing][SparkBilling] %s -> %s billing", model, "gpt-5.1-codex")
-			logger.With(zap.String("component", "service.pricing")).
-				Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.1-codex"))
-			return pricing
+			return pricing, "gpt-5.1-codex", "openai_variant"
 		}
 	}
 
 	if openai.IsGPT61SolModelSpelling(model) {
 		if pricing, ok := s.pricingData["gpt-6.1-sol"]; ok {
-			return pricing
+			return pricing, "gpt-6.1-sol", "openai_variant"
 		}
-		return openAIGPT61SolFallbackPricing
+		return openAIGPT61SolFallbackPricing, "gpt-6.1-sol", "static"
 	}
 	if openai.IsGPT6SolOrLunaModelSpelling(model) {
 		if pricing, ok := s.pricingData[normalizeKnownOpenAICodexModel(model)]; ok {
-			return pricing
+			return pricing, normalizeKnownOpenAICodexModel(model), "openai_variant"
 		}
 		if strings.HasPrefix(model, "gpt-6-sol") {
-			return openAIGPT6SolFallbackPricing
+			return openAIGPT6SolFallbackPricing, "gpt-6-sol", "static"
 		}
-		return openAIGPT6LunaFallbackPricing
+		return openAIGPT6LunaFallbackPricing, "gpt-6-luna", "static"
 	}
 
 	// 尝试的回退变体
@@ -1576,92 +1632,70 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 
 	for _, variant := range variants {
 		if pricing, ok := s.pricingData[variant]; ok {
-			logger.With(zap.String("component", "service.pricing")).
-				Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, variant))
-			return pricing
+			return pricing, variant, "openai_variant"
 		}
 	}
 
 	if strings.HasPrefix(model, "gpt-5.3-codex") {
 		if pricing, ok := s.pricingData["gpt-5.2-codex"]; ok {
-			logger.With(zap.String("component", "service.pricing")).
-				Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.2-codex"))
-			return pricing
+			return pricing, "gpt-5.2-codex", "openai_variant"
 		}
 	}
 
 	if isOpenAIGPT6AstraModel(model) {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-6-astra(static)"))
-		return openAIGPT6AstraFallbackPricing
+		return openAIGPT6AstraFallbackPricing, "gpt-6-astra", "static"
 	}
 
 	if strings.HasPrefix(model, "gpt-5.6-sol") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-sol(static)"))
-		return openAIGPT56SolFallbackPricing
+		return openAIGPT56SolFallbackPricing, "gpt-5.6-sol", "static"
 	}
 	if strings.HasPrefix(model, "gpt-5.6-terra") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-terra(static)"))
-		return openAIGPT56TerraFallbackPricing
+		return openAIGPT56TerraFallbackPricing, "gpt-5.6-terra", "static"
 	}
 	if strings.HasPrefix(model, "gpt-5.6-luna") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-luna(static)"))
-		return openAIGPT56LunaFallbackPricing
+		return openAIGPT56LunaFallbackPricing, "gpt-5.6-luna", "static"
 	}
 
 	// GPT-5.5 回退到 GPT-5.4 定价
 	if strings.HasPrefix(model, "gpt-5.5") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
-		return openAIGPT54FallbackPricing
+		return openAIGPT54FallbackPricing, "gpt-5.4", "static"
 	}
 
 	if strings.HasPrefix(model, "gpt-5.4-mini") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4-mini(static)"))
-		return openAIGPT54MiniFallbackPricing
+		return openAIGPT54MiniFallbackPricing, "gpt-5.4-mini", "static"
 	}
 
 	if strings.HasPrefix(model, "gpt-5.4-nano") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4-nano(static)"))
-		return openAIGPT54NanoFallbackPricing
+		return openAIGPT54NanoFallbackPricing, "gpt-5.4-nano", "static"
 	}
 
 	if strings.HasPrefix(model, "gpt-5.4") {
-		logger.With(zap.String("component", "service.pricing")).
-			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
-		return openAIGPT54FallbackPricing
+		return openAIGPT54FallbackPricing, "gpt-5.4", "static"
 	}
 
 	// Remote price mirrors can lag new releases. Never bill GPT Image 2.5
 	// using the older image model's rates when its entry is absent.
 	for _, imageModel := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
 		if model == imageModel || model == imageModel+"-2026-09-08" {
-			return openAIGPTImage25FallbackPricing
+			return openAIGPTImage25FallbackPricing, "gpt-image-2.5", "static"
 		}
 	}
 	if isOpenAIImageGenerationModel(model) {
 		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
 			if pricing, ok := s.pricingData[candidate]; ok {
-				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
-				return pricing
+				return pricing, candidate, "openai_variant"
 			}
 		}
-		return nil
+		return nil, "", ""
 	}
 
 	// 最终回退到 DefaultTestModel
 	defaultModel := strings.ToLower(openai.DefaultTestModel)
 	if pricing, ok := s.pricingData[defaultModel]; ok {
-		logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI fallback to default model %s -> %s", model, defaultModel)
-		return pricing
+		return pricing, defaultModel, "default"
 	}
 
-	return nil
+	return nil, "", ""
 }
 
 // generateOpenAIModelVariants 生成 OpenAI 模型的回退变体列表
