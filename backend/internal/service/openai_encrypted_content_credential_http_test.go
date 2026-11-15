@@ -107,7 +107,9 @@ func TestHTTPEncryptedLineageCredentialScopeM3(t *testing.T) {
 			attempt := svc.armOpenAIM3(req.c, account, body, version)
 			// Rotate the mutable account after arming: persistence still uses the send's version.
 			account.Credentials["api_key"] = "mutated-after-send"
-			attempt.learn(req.ctx, body, nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
+			learnErr := attempt.learn(req.ctx, body, nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
+			var signal *openAIRequestRepairSignal
+			require.ErrorAs(t, learnErr, &signal)
 			if version != "" {
 				require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, version), account.ID), 1)
 			}
