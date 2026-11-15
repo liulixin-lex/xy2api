@@ -16,13 +16,14 @@ func TestM1GeminiIntermediateIntent(t *testing.T) {
 			require.NoError(t, MarkConversionTarget(req, "gemini"))
 			out := AnthropicRequest{MaxTokens: limit}
 			require.NoError(t, mapAnthropicReasoning(req, &out))
-			if effort == "none" {
+			switch effort {
+			case "none":
 				require.Equal(t, &AnthropicThinking{Type: "disabled"}, out.Thinking)
 				require.Nil(t, out.OutputConfig)
-			} else if effort == "" {
+			case "":
 				require.Nil(t, out.Thinking)
 				require.Nil(t, out.OutputConfig)
-			} else {
+			default:
 				require.Nil(t, out.Thinking)
 				require.Equal(t, effort, out.OutputConfig.Effort)
 			}
