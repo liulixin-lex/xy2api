@@ -26,7 +26,7 @@ func TestOpsObservationDoesNotChangeQueueAdmission(t *testing.T) {
 	accepted := reserveOpsErrorLogQueueBytes(size)
 	t.Logf("headroom=%d queued_bytes=%d accepted=%t upstream_json_bytes=%d", headroom, size, accepted, len(*entry.UpstreamErrorsJSON))
 	// Resent is a required, visible false field in the foundation contract.
-	const eventBytes = 744 + len(`,"resent":false`)
+	const eventBytes int64 = 744 + int64(len(`,"resent":false`))
 	require.EqualValues(t, eventBytes, size, "admission must include the required resend fact")
 	require.True(t, accepted, "observe diagnostics must not change admission of the same legacy ops event")
 	require.Equal(t, stored, *entry.UpstreamErrorsJSON, "sizing must preserve persisted diagnostics")
