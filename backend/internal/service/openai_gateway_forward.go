@@ -809,7 +809,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	lineageGroupID := getOpenAIGroupIDFromContext(c)
 	lineageEntryBody := body
 	lineageSessionHash := ""
-	if stateStore := s.getOpenAIWSStateStore(); stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
+	credentialVersion := ""
+	if stateStore := s.getOpenAIWSStateStore(); wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 && stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
 		lineageSessionHash = s.GenerateSessionHash(c, body)
 		if invalidDigests := stateStore.GetSessionInvalidEncryptedContentDigests(lineageGroupID, lineageSessionHash); len(invalidDigests) > 0 {
 			strippedBody, strippedCount := s.stripSessionInvalidEncryptedContentLogged(
@@ -826,10 +827,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if selected.Digest == "" {
 			return
 		}
-		if lineageSessionHash == "" {
-			lineageSessionHash = s.GenerateSessionHash(c, lineageEntryBody)
-		}
-		s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, []string{selected.Digest})
+		s.markHTTPInvalidEncryptedContent(lineageGroupID, lineageSessionHash, account.ID, credentialVersion, selected)
 	}
 	imageBillingModel := ""
 	imageSizeTier := ""
@@ -855,6 +853,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
+	}
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+		// Freeze the credential used by this HTTP attempt before reading evidence.
+		credentialVersion = s.UpstreamCredentialVersion(account, token)
+		if lineage := s.beginOpenAIM3(c, lineageEntryBody); lineage != nil {
+			lineageSessionHash = lineage.session
+		}
+		if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
+			body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+		}
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 

@@ -217,6 +217,8 @@ Responses、Chat Completions 转换、HTTP SSE 与原生 WebSocket 的缓存读�
 
 ### 粘性会话
 
+原生 Responses HTTP 的密文拒绝证据另用 `encrypted-lineage-v2:` 键，按租户会话、所选账号、上游地址、认证方式及本次实际凭据的 HMAC 版本隔离，不改变路由会话身份。只记被唯一指认项的摘要，后续正文也必须唯一命中才预清理；旧会话级键不读、不迁移。缺少持久 secret、独立实例、重启或 TTL 到期造成的 miss 都表示未知，首发保留原文；本次明确拒绝仍可按原预算做安全单项修复。本地缓存只作优化，不能证明密文有效或上下文可迁移。
+
 已认证 GPT 会话的粘性绑定按 API 密钥、分组、客户端请求的模型和稳定会话信号隔离，经持久 JWT secret 做 HMAC 后生成带版本的 `v2:` 键。有尝试采集的 Responses、Chat、WebSocket 文本轮次在完整交付成功后写入首次绑定或提交换号，Redis 同时校验原持有者与代次。临时借号不改变长期绑定；换号失败保留原绑定，并在 2 分钟内避开同一目标。
 
 无显式身份时，内容回退只使用开头连续的 system / developer 指令、工具定义和首条 user，之后动态变化的 system / developer 消息不改变已有身份。网关不改写提示词或工具顺序，前缀复用依赖客户端保持内容不变。协议强续接、任务所有者与[质量门槛](group-quality-gate.md)共同约束会话去留，见[调度](scheduling.md#openai-会话的去留)。

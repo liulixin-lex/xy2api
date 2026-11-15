@@ -244,6 +244,7 @@ func TestForwardOpenAIRequestRepairReplaysInbandRejection(t *testing.T) {
 			req := newWebSearchReplayRequest(t)
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(tc.payload), webSearchSuccessStream("resp_repaired")}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.JWT.Secret = "m10-fixture-secret"
 			account := webSearchReplayAccount(false)
 			result, err := svc.Forward(req.ctx, req.c, account, []byte(tc.body))
 			require.NoError(t, err)
@@ -260,7 +261,7 @@ func TestForwardOpenAIRequestRepairReplaysInbandRejection(t *testing.T) {
 				require.Equal(t, "keep output", gjson.GetBytes(upstream.bodies[1], "input.1.output").String())
 				require.Equal(t, "resp_parent", gjson.GetBytes(upstream.bodies[1], "previous_response_id").String())
 				require.True(t, openAIRequestRepairFrom(req.c).encryptedTried)
-				require.Contains(t, svc.sessionInvalidEncryptedContentDigests(getOpenAIGroupIDFromContext(req.c), svc.GenerateSessionHash(req.c, []byte(tc.body))), openAIEncryptedContentDigest("cipher"))
+				require.Contains(t, svc.sessionInvalidEncryptedContentDigests(getOpenAIGroupIDFromContext(req.c), httpEncryptedLineageKey(svc.GenerateSessionHash(req.c, []byte(tc.body)), account.ID, svc.UpstreamCredentialVersion(account, account.GetCredential("api_key")))), openAIEncryptedContentDigest("cipher"))
 			} else {
 				require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_breakpoint").Exists())
 			}
