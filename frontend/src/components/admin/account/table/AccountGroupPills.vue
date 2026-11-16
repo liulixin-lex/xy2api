@@ -157,10 +157,10 @@ const { t, te } = useI18n()
 const now = useLiveClock()
 const coarse = usePointerCoarse()
 
-const DOT_TONES: Record<GroupDotState, StatusDotTone> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'off' }
-const STATE_KEYS: Record<GroupDotState, string> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
-const stateLabel = (state: GroupDotState) => t(`admin.accounts.table.dotStates.${STATE_KEYS[state]}`)
-const TIP_TONES: Record<GroupDotState, TipTone> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
+// Trial is blue (info); unknown keeps the grey of the former "observing".
+const DOT_TONES: Record<GroupDotState, StatusDotTone> = { ok: 'ok', back: 'back', exempt: 'exempt', trial: 'info', unknown: 'observe', stopped: 'off' }
+const stateLabel = (state: GroupDotState) => t(`admin.accounts.table.dotStates.${state}`)
+const TIP_TONES: Record<GroupDotState, TipTone> = { ok: 'ok', back: 'back', exempt: 'exempt', trial: 'info', unknown: 'observe', stopped: 'stopped' }
 const stateCell = (state: GroupDotState): TipCell => ({ text: stateLabel(state), tone: TIP_TONES[state], dot: true })
 
 const stateOf = (group: AdminGroup): GroupDotState | null => (props.quality ? groupDotState(props.quality, group.id) : null)
@@ -186,11 +186,18 @@ function backIn(until: string | null | undefined): string {
   return left === null ? '' : t('admin.accounts.table.pillBackUntil', { time: formatRemaining(t, left) })
 }
 
+/** "试用到 15:30" for a trial still running, else nothing. */
+function trialUntil(until: string | null | undefined): string {
+  return msLeft(until, now.value) === null ? '' : t('admin.accounts.table.tip.trialUntil', { time: formatShortTime(until) })
+}
+const latest = (items: { group_id: number; until: string }[], group: AdminGroup) =>
+  items.filter((item) => item.group_id === group.id).map((item) => item.until).filter(Boolean).sort().pop()
+
 const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
   quality.exemptions.find((item) => item.group_id === group.id) ?? quality.exemptions.find((item) => item.group_id === 0)
 const exemptEnd = (expiresAt: string | null | undefined) => (expiresAt ? formatShortTime(expiresAt) : t('admin.accounts.table.tip.forever'))
 
-/** The rows of the group's state (12.7): models at the back with why and when they are back, the exemption, … */
+/** The rows of the group's state (12.7): models at the back with why and when they are back, models on trial with its end, the exemption, … */
 function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
   if (!quality) return []
@@ -203,12 +210,17 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
         backIn(item.until)
       ])
   }
+  if (state === 'trial') {
+    return quality.trial
+      .filter((item) => item.group_id === group.id)
+      .map((item) => [iqModelLabel(item.model), trialUntil(item.until)])
+  }
   if (state === 'exempt') {
     const exemption = exemptionOf(quality, group)
     const rows = [[t('admin.accounts.table.tip.exemptUntil'), exemptEnd(exemption?.expires_at)]]
     return exemption?.reason ? [...rows, [t('admin.accounts.table.tip.reason'), exemption.reason]] : rows
   }
-  if (state === 'observe') return [[t('admin.accounts.table.tip.samples'), t('admin.accounts.table.tip.count', { n: quality.ttfo.n }, quality.ttfo.n)]]
+  if (state === 'unknown') return [[t('admin.accounts.table.tip.samples'), t('admin.accounts.table.tip.count', { n: quality.ttfo.n }, quality.ttfo.n)]]
   if (state === 'stopped' && quality.stop) {
     const rows = [
       [t('admin.accounts.table.tip.reason'), kindName(quality.stop.reason, t, te)],
@@ -251,10 +263,12 @@ function moreTip(): TipCard {
       const state = stateOf(group)!
       const end =
         state === 'back'
-          ? backIn(quality.rear.filter((item) => item.group_id === group.id).map((item) => item.until).filter(Boolean).sort().pop())
-          : state === 'exempt'
-            ? exemptEnd(exemptionOf(quality, group)?.expires_at)
-            : ''
+          ? backIn(latest(quality.rear, group))
+          : state === 'trial'
+            ? trialUntil(latest(quality.trial, group))
+            : state === 'exempt'
+              ? exemptEnd(exemptionOf(quality, group)?.expires_at)
+              : ''
       return [group.name, stateCell(state), end]
     })
   }

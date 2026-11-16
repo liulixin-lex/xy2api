@@ -27,8 +27,9 @@ const at = (ms: number) => new Date(NOW + ms).toISOString()
 const row = (patch: Partial<RecoverableRow> = {}): RecoverableRow =>
   ({ status: 'active', rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null, extra: {}, capability_learned: null, ...patch })
 // The backend's own summary: `cooling` substandard models (the account is at the back of those groups).
-const summary = (cooling: number) => ({
-  rear: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', lines: ['ttfo' as const], until: '', exempt: false, effective: true }))
+const summary = (cooling: number, trial = 0) => ({
+  rear: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', lines: ['ttfo' as const], until: '', exempt: false, effective: true })),
+  trial: Array.from({ length: trial }, (_, i) => ({ group_id: 60 + i, model: 'gpt-6.1-sol', until: '' }))
 })
 
 describe('canRecover (contract delta F1, scenario 37)', () => {
@@ -67,6 +68,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
   it('decides from the row alone until the summary is in', () => {
     expect(canRecover(row(), undefined, NOW)).toBe(false)
     expect(canRecover(row(), summary(1), NOW)).toBe(true)
+    // A model on trial is something a recovery clears too (H.11).
+    expect(canRecover(row(), summary(0, 1), NOW)).toBe(true)
   })
 })
 

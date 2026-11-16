@@ -4,29 +4,28 @@
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 
 /** A pill's dot, in the spec's order of precedence. `none`: no quality data (not an OpenAI account): no dot. */
-export type GroupDotState = 'stopped' | 'exempt' | 'back' | 'observe' | 'ok'
+export type GroupDotState = 'stopped' | 'exempt' | 'back' | 'trial' | 'unknown' | 'ok'
 
 /** What the dot derivation reads from the account's quality summary. */
-export type AccountQualityView = Pick<BackendAccountSummary, 'status' | 'stop' | 'rear' | 'exemptions'>
+export type AccountQualityView = Pick<BackendAccountSummary, 'group_status' | 'stop' | 'rear' | 'trial' | 'exemptions'>
+
+const STATUS_DOTS = { rear: 'back', trial: 'trial', pass: 'ok', unknown: 'unknown' } as const
 
 /**
- * The dot for one group, first match wins:
+ * The dot for one group, first match wins (H.11):
  * 1 stopped: the whole account takes no part in scheduling (`stop` set);
  * 2 exempt: an exemption for this group or for every group (group_id 0);
- * 3 back: a rear record of this group that is in effect (the backend's `effective`: the account really is
- *   at the back of the group's order);
- * 4 observe: the account is still observed (too few samples);
- * 5 ok.
+ * 3 the backend's identity of the group (`group_status`): rear → back, trial, pass → ok, unknown; a group the summary
+ *   does not name has no data, which is unknown.
  */
 export function groupDotState(quality: AccountQualityView, groupId: number): GroupDotState {
   if (quality.stop) return 'stopped'
   if (quality.exemptions.some((exemption) => exemption.group_id === groupId || exemption.group_id === 0)) return 'exempt'
-  if (quality.rear.some((item) => item.group_id === groupId && item.effective)) return 'back'
-  if (quality.status === 'observing') return 'observe'
-  return 'ok'
+  const status = quality.group_status?.[String(groupId)]
+  return status && status in STATUS_DOTS ? STATUS_DOTS[status] : 'unknown'
 }
 
-const SEVERITY: Record<GroupDotState, number> = { ok: 1, exempt: 2, observe: 3, back: 4, stopped: 5 }
+const SEVERITY: Record<GroupDotState, number> = { ok: 1, exempt: 2, unknown: 3, trial: 4, back: 5, stopped: 6 }
 
 /** The worst of several dots (the "+N" pill shows the worst of the groups folded into it). */
 export function worstDotState(states: GroupDotState[]): GroupDotState | null {

@@ -3,55 +3,39 @@ import { describe, expect, it } from 'vitest'
 import { groupDotState, orderGroups, splitPills, worstDotState, type AccountQualityView } from '../accountGroups'
 
 const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView => ({
-  status: 'normal',
+  group_status: {},
   stop: null,
   rear: [],
+  trial: [],
   exemptions: [],
   ...patch
 })
-const back = (groupId: number, model: string, effective = true) => ({ group_id: groupId, model, lines: ['ttfo' as const], until: '', exempt: false, effective })
 
 describe('group dot state', () => {
-  it('derives the five states', () => {
-    expect(groupDotState(quality({ stop: { source: 'manual', reason: 'manual_off', until: null } }), 1)).toBe('stopped')
-    expect(groupDotState(quality({ exemptions: [{ group_id: 1, expires_at: null, reason: '' }] }), 1)).toBe('exempt')
-    expect(groupDotState(quality({ rear: [back(1, 'gpt-6')] }), 1)).toBe('back')
-    expect(groupDotState(quality({ status: 'observing' }), 1)).toBe('observe')
-    expect(groupDotState(quality(), 1)).toBe('ok')
+  // H.11: the group's identity comes from the summary's group_status; a group it does not name has no data.
+  it('reads each identity of the group: rear, trial, pass, unknown, and unknown for a group not named', () => {
+    const q = quality({ group_status: { 1: 'rear', 2: 'trial', 3: 'pass', 4: 'unknown' } })
+    expect([1, 2, 3, 4, 5].map((id) => groupDotState(q, id))).toEqual(['back', 'trial', 'ok', 'unknown', 'unknown'])
   })
 
-  it('takes the first match in the order stopped, exempt, back, observing', () => {
+  it('takes the first match in the order stopped, exempt, then the group\'s identity', () => {
     const all = quality({
-      status: 'observing',
+      group_status: { 1: 'rear' },
       stop: { source: 'auto', reason: 'rate_limit', until: null },
-      rear: [back(1, 'gpt-6')],
       exemptions: [{ group_id: 1, expires_at: null, reason: '' }]
     })
     expect(groupDotState(all, 1)).toBe('stopped')
     expect(groupDotState({ ...all, stop: null }, 1)).toBe('exempt')
     expect(groupDotState({ ...all, stop: null, exemptions: [] }, 1)).toBe('back')
+    // An exemption for every group (group 0) covers a trial too; another group's exemption does not.
+    expect(groupDotState(quality({ group_status: { 7: 'trial' }, exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 7)).toBe('exempt')
+    expect(groupDotState(quality({ group_status: { 7: 'trial' }, exemptions: [{ group_id: 2, expires_at: null, reason: '' }] }), 7)).toBe('trial')
   })
 
-  it('counts an exemption for every group (group 0) and only this group\'s substandard models', () => {
-    expect(groupDotState(quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 7)).toBe('exempt')
-    expect(groupDotState(quality({ rear: [back(2, 'gpt-6')] }), 1)).toBe('ok')
-  })
-
-  // 7f-2, spec 9.6: a substandard record not in effect (quality scheduling off, a stale view, the group's policy off)
-  // puts nobody at the back: the dot reads as if it were not there.
-  it('is back only for a record in effect', () => {
-    expect(groupDotState(quality({ rear: [back(1, 'gpt-6', false)] }), 1)).toBe('ok')
-    expect(groupDotState(quality({ rear: [back(1, 'gpt-6', false)], status: 'observing' }), 1)).toBe('observe')
-    expect(groupDotState(quality({ rear: [back(1, 'gpt-6', false), back(1, 'gpt-6.1-sol')] }), 1)).toBe('back')
-  })
-
-  it('is back as soon as any one model of the group is substandard', () => {
-    expect(groupDotState(quality({ rear: [back(1, 'gpt-6.1-sol')] }), 1)).toBe('back')
-  })
-
-  it('shows the worst state on the "+N" pill', () => {
-    expect(worstDotState(['ok', 'exempt', 'observe'])).toBe('observe')
-    expect(worstDotState(['ok', 'back', 'observe'])).toBe('back')
+  it('shows the worst state on the "+N" pill: stopped, back, trial, unknown, exempt, ok', () => {
+    expect(worstDotState(['ok', 'exempt', 'unknown'])).toBe('unknown')
+    expect(worstDotState(['ok', 'unknown', 'trial'])).toBe('trial')
+    expect(worstDotState(['trial', 'back', 'unknown'])).toBe('back')
     expect(worstDotState(['back', 'stopped'])).toBe('stopped')
     expect(worstDotState([])).toBeNull()
   })

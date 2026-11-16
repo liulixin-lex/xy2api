@@ -13,10 +13,13 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key), te: () => true })
 }))
 
-type Quality = Pick<BackendAccountSummary, 'status' | 'stop' | 'rear' | 'exemptions' | 'ttfo'>
+type Quality = Pick<BackendAccountSummary, 'group_status' | 'stop' | 'rear' | 'trial' | 'exemptions' | 'ttfo'>
 const group = (id: number) => ({ id, name: `Group ${id}`, platform: 'openai', status: 'active' }) as AdminGroup
+/** Every group passing, but for the identities given (H.11: the summary's group_status). */
+const statuses = (patch: Quality['group_status'] = {}): Quality['group_status'] =>
+  ({ ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [String(i + 1), 'pass' as const])), ...patch })
 const baseQuality = (patch: Partial<Quality> = {}): Quality => ({
-  status: 'normal', stop: null, rear: [], exemptions: [], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 }, ...patch
+  group_status: statuses(), stop: null, rear: [], trial: [], exemptions: [], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 }, ...patch
 })
 const quality = baseQuality()
 const mountPills = (count: number, withQuality: Quality | boolean = true) => mount(AccountGroupPills, {
@@ -166,6 +169,7 @@ describe('AccountGroupPills', () => {
   // Tip cards (12.7): data and state words only, the same card on both zones.
   it('shows the group\'s name and state on both zones; at the back a row per model with why and when it is back', () => {
     const wrapper = mountPills(2, baseQuality({
+      group_status: statuses({ 2: 'rear' }),
       rear: [back(2, 'gpt-6-astra', ['ttfo', 'error'], inMinutes(15)), back(2, 'gpt-5', ['cache'], inMinutes(-1))]
     }))
     const [ok, atBack] = wrapper.findAll('[data-test="group-pill"]')
@@ -184,15 +188,25 @@ describe('AccountGroupPills', () => {
     })
   })
 
-  it('shows an exemption\'s end and reason, the TTFT samples while observed, and a stop\'s reason, source and end', () => {
+  it('shows a trial\'s models and end, an exemption\'s end and reason, the TTFT samples while unknown, and a stop\'s reason, source and end', () => {
+    const trialEnd = inMinutes(40)
+    const trial = mountPills(1, baseQuality({
+      group_status: statuses({ 1: 'trial' }),
+      trial: [{ group_id: 1, model: 'gpt-6-astra', until: trialEnd }, { group_id: 1, model: 'gpt-5', until: inMinutes(-1) }, { group_id: 2, model: 'gpt-5', until: trialEnd }]
+    }))
+    expect(cardOf(trial.get('[data-test="group-pill-dot"]'))).toEqual({
+      title: 'Group 1',
+      chip: { text: 'admin.accounts.table.dotStates.trial', tone: 'info', dot: true },
+      rows: [['Astra', `admin.accounts.table.tip.trialUntil:{"time":"${formatShortTime(trialEnd)}"}`], ['gpt-5', '']]
+    })
     const exempt = mountPills(1, baseQuality({ exemptions: [{ group_id: 0, expires_at: null, reason: '试用' }] }))
     expect(cardOf(exempt.get('[data-test="group-pill-dot"]'))).toMatchObject({
       chip: { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true },
       rows: [['admin.accounts.table.tip.exemptUntil', 'admin.accounts.table.tip.forever'], ['admin.accounts.table.tip.reason', '试用']]
     })
-    const observed = mountPills(1, baseQuality({ status: 'observing', ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
-    expect(cardOf(observed.get('[data-test="group-pill-dot"]'))).toMatchObject({
-      chip: { tone: 'observe' }, rows: [['admin.accounts.table.tip.samples', 'admin.accounts.table.tip.count:{"n":12}']]
+    const unknown = mountPills(1, baseQuality({ group_status: statuses({ 1: 'unknown' }), ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
+    expect(cardOf(unknown.get('[data-test="group-pill-dot"]'))).toMatchObject({
+      chip: { text: 'admin.accounts.table.dotStates.unknown', tone: 'observe' }, rows: [['admin.accounts.table.tip.samples', 'admin.accounts.table.tip.count:{"n":12}']]
     })
     const until = inMinutes(90)
     const stopped = mountPills(1, baseQuality({ stop: { source: 'manual', reason: 'manual_off', until } }))
@@ -208,7 +222,7 @@ describe('AccountGroupPills', () => {
 
   it('lists each folded group under "+N" with its dot, state and end; without quality data names only; "+" has no tip', () => {
     const expires = inMinutes(120)
-    const wrapper = mountPills(11, baseQuality({ rear: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
+    const wrapper = mountPills(11, baseQuality({ group_status: statuses({ 10: 'rear' }), rear: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
     expect(cardOf(wrapper.get('[data-test="group-pill-more-text"]'))).toEqual({
       title: 'admin.accounts.table.pillMore:{"n":3}',
       rows: [

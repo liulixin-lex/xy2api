@@ -113,7 +113,7 @@ const FiltersStub = defineComponent({
   emits: ['change'],
   setup(props, { emit }) {
     return () => [
-      h('button', { 'data-test': 'filter-cooling', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) }),
+      h('button', { 'data-test': 'filter-cooling', onClick: () => emit('change', { ...props.filters, sched_quality: 'rear' }) }),
       h('button', { 'data-test': 'pause-table', onClick: () => props.pause() })
     ]
   }
@@ -124,13 +124,14 @@ const account = (id: number, patch: Record<string, unknown> = {}) =>
 // The backend's own summary: `cooling` substandard models in group 53.
 const summaryOf = (id: number, cooling: number): BackendAccountSummary => ({
   account_id: id,
-  status: 'normal',
+  group_status: { 53: cooling ? 'rear' : 'pass' },
   reset_at: null,
   stop: null,
   ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0 },
   cache: { ratio: 0.9, turns: 40, all_ratio: 0.7, all_requests: 120 },
   rear: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }] : [],
+  trial: [],
   exemptions: []
 })
 
@@ -321,7 +322,7 @@ describe('AccountsView — recover state', () => {
     recoverItem()!.click()
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBeGreaterThan(loads)
-    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'substandard' })
+    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'rear' })
     expect(rowIds()).toEqual([1])
     wrapper.unmount()
   })
@@ -477,7 +478,7 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     await flushPromises()
     // The reload is in (row 2 still on it), the summary after it is not: the row still reads "cooling", and stays locked.
     expect(listAccounts.mock.calls.length).toBe(loads + 1)
-    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'substandard' })
+    expect(listAccounts.mock.calls.at(-1)![2]).toMatchObject({ sched_quality: 'rear' })
     await openMenuFor(wrapper, 2)
     expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
 

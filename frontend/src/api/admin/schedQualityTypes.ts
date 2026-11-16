@@ -60,10 +60,23 @@ export interface BackendRear {
   effective: boolean
 }
 
+/** A model of a group in which the account is on trial; `until` is the trial's end. */
+export interface BackendTrial {
+  group_id: number
+  model: string
+  until: string
+}
+
+/**
+ * A group's identity for the account's dot: any model at the rear (not exempt) → rear; else any on trial → trial;
+ * else any line of any model passing → pass; else unknown.
+ */
+export type BackendGroupStatus = 'rear' | 'trial' | 'pass' | 'unknown'
+
 export interface BackendAccountSummary {
   account_id: number
-  /** normal | observing | disabled */
-  status: string
+  /** Each of the account's OpenAI groups by id (as a string key). */
+  group_status: Record<string, BackendGroupStatus>
   reset_at: string | null
   /** The whole account takes no part in scheduling (manual off, error, rate limit …). */
   stop: { source: string; reason: string; until: string | null } | null
@@ -73,6 +86,7 @@ export interface BackendAccountSummary {
   /** Cache hit ratio over continuation turns (what the line judges) and over every successful request. */
   cache: { ratio: number | null; turns: number; all_ratio: number | null; all_requests: number }
   rear: BackendRear[]
+  trial: BackendTrial[]
   exemptions: BackendExemption[]
 }
 

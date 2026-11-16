@@ -38,7 +38,10 @@ describe('quality panel place', () => {
   it('is at the rear only while quality scheduling is on, fresh and the group\'s policy enabled, as the group\'s dot says', () => {
     const rear = group(1, [groupModel('a', { ttfo: 'rear' })])
     const off = { ...rear, policy: { ...rear.policy, enabled: false } }
-    const summary = (effective: boolean) => ({ status: 'normal', stop: null, exemptions: [], rear: [{ group_id: 1, model: 'a', lines: ['ttfo' as const], until: '', exempt: false, effective }] })
+    const summary = (effective: boolean) => ({
+      group_status: { 1: effective ? ('rear' as const) : ('pass' as const) }, stop: null, exemptions: [], trial: [],
+      rear: [{ group_id: 1, model: 'a', lines: ['ttfo' as const], until: '', exempt: false, effective }]
+    })
     const cases = [
       { detail: { stop: null, global_enabled: true, stale: false, groups: [rear] }, effective: true },
       { detail: { stop: null, global_enabled: false, stale: false, groups: [rear] }, effective: false },
