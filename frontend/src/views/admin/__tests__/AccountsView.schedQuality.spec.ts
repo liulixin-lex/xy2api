@@ -96,15 +96,15 @@ const summaryOf = (id: number, patch: Partial<BackendAccountSummary> = {}): Back
   status: 'normal',
   reset_at: null,
   stop: null,
-  ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
+  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0 },
-  cache: { n: 40, short: false, red: false, ratio: 0.9 },
-  substandard: [],
+  cache: { ratio: 0.9, turns: 40, all_ratio: 0.7, all_requests: 120 },
+  rear: [],
   exemptions: [],
   ...patch
 })
 const summaries = () => [
-  summaryOf(1, { substandard: [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }], ttfo: { n: 30, short: false, red: true, p50_ms: 9100 } }),
+  summaryOf(1, { rear: [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 9100, gap_p50_ms: 7900, n: 30 } }),
   summaryOf(2),
   summaryOf(3, { status: 'observing' }),
   summaryOf(4, { stop: { source: 'manual', reason: 'manual_off', until: null } })

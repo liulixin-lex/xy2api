@@ -195,11 +195,11 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
   if (!quality) return []
   if (state === 'back') {
-    return quality.substandard
+    return quality.rear
       .filter((item) => item.group_id === group.id)
       .map((item) => [
         iqModelLabel(item.model),
-        { text: item.dims.map((dim) => t(`admin.accounts.table.dimReasons.${dim}`)).join('、'), tone: 'back' },
+        { text: item.lines.map((line) => t(`admin.accounts.table.dimReasons.${line}`)).join('、'), tone: 'back' },
         backIn(item.until)
       ])
   }
@@ -251,7 +251,7 @@ function moreTip(): TipCard {
       const state = stateOf(group)!
       const end =
         state === 'back'
-          ? backIn(quality.substandard.filter((item) => item.group_id === group.id).map((item) => item.until).filter(Boolean).sort().pop())
+          ? backIn(quality.rear.filter((item) => item.group_id === group.id).map((item) => item.until).filter(Boolean).sort().pop())
           : state === 'exempt'
             ? exemptEnd(exemptionOf(quality, group)?.expires_at)
             : ''

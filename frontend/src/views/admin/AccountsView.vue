@@ -1053,7 +1053,7 @@ const panelAnchor = () => accountTableRef.value
 const sqOpenAIGroups = computed(() => groups.value.filter((group) => group.platform === 'openai').map((group) => ({ id: group.id, name: group.name })))
 /** The pill's dot: the quality panel on that group, with the tab of its model at the back when it has one. */
 const openQuality = (row: LiveAccount, groupId: number) => {
-  const model = row.quality?.substandard.find((item) => item.group_id === groupId && item.effective)?.model ?? null
+  const model = row.quality?.rear.find((item) => item.group_id === groupId && item.effective)?.model ?? null
   openSchedDrawer({ id: row.id, name: row.name }, { groupId, model })
 }
 const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {

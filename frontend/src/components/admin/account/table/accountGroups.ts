@@ -7,13 +7,13 @@ import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 export type GroupDotState = 'stopped' | 'exempt' | 'back' | 'observe' | 'ok'
 
 /** What the dot derivation reads from the account's quality summary. */
-export type AccountQualityView = Pick<BackendAccountSummary, 'status' | 'stop' | 'substandard' | 'exemptions'>
+export type AccountQualityView = Pick<BackendAccountSummary, 'status' | 'stop' | 'rear' | 'exemptions'>
 
 /**
  * The dot for one group, first match wins:
  * 1 stopped: the whole account takes no part in scheduling (`stop` set);
  * 2 exempt: an exemption for this group or for every group (group_id 0);
- * 3 back: a substandard record of this group that is in effect (the backend's `effective`: the account really is
+ * 3 back: a rear record of this group that is in effect (the backend's `effective`: the account really is
  *   at the back of the group's order);
  * 4 observe: the account is still observed (too few samples);
  * 5 ok.
@@ -21,7 +21,7 @@ export type AccountQualityView = Pick<BackendAccountSummary, 'status' | 'stop' |
 export function groupDotState(quality: AccountQualityView, groupId: number): GroupDotState {
   if (quality.stop) return 'stopped'
   if (quality.exemptions.some((exemption) => exemption.group_id === groupId || exemption.group_id === 0)) return 'exempt'
-  if (quality.substandard.some((item) => item.group_id === groupId && item.effective)) return 'back'
+  if (quality.rear.some((item) => item.group_id === groupId && item.effective)) return 'back'
   if (quality.status === 'observing') return 'observe'
   return 'ok'
 }

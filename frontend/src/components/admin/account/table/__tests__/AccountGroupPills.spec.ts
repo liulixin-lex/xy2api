@@ -13,10 +13,10 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key), te: () => true })
 }))
 
-type Quality = Pick<BackendAccountSummary, 'status' | 'stop' | 'substandard' | 'exemptions' | 'ttfo'>
+type Quality = Pick<BackendAccountSummary, 'status' | 'stop' | 'rear' | 'exemptions' | 'ttfo'>
 const group = (id: number) => ({ id, name: `Group ${id}`, platform: 'openai', status: 'active' }) as AdminGroup
 const baseQuality = (patch: Partial<Quality> = {}): Quality => ({
-  status: 'normal', stop: null, substandard: [], exemptions: [], ttfo: { n: 30, short: false, red: false, p50_ms: 2800 }, ...patch
+  status: 'normal', stop: null, rear: [], exemptions: [], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 }, ...patch
 })
 const quality = baseQuality()
 const mountPills = (count: number, withQuality: Quality | boolean = true) => mount(AccountGroupPills, {
@@ -27,8 +27,8 @@ const mountPills = (count: number, withQuality: Quality | boolean = true) => mou
     quality: withQuality === true ? quality : withQuality || null
   }
 })
-const back = (groupId: number, model: string, dims: Quality['substandard'][number]['dims'], until: string) =>
-  ({ group_id: groupId, model, dims, until, other_group: false, exempt: false, effective: true })
+const back = (groupId: number, model: string, lines: Quality['rear'][number]['lines'], until: string) =>
+  ({ group_id: groupId, model, lines, until, exempt: false, effective: true })
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
 /** The card the zone's tip shows (its v-tip value, called as the tip does when it shows). */
 const cardOf = (el: { element: Element }) => {
@@ -166,7 +166,7 @@ describe('AccountGroupPills', () => {
   // Tip cards (12.7): data and state words only, the same card on both zones.
   it('shows the group\'s name and state on both zones; at the back a row per model with why and when it is back', () => {
     const wrapper = mountPills(2, baseQuality({
-      substandard: [back(2, 'gpt-6-astra', ['ttfo', 'error'], inMinutes(15)), back(2, 'gpt-5', ['cache'], inMinutes(-1))]
+      rear: [back(2, 'gpt-6-astra', ['ttfo', 'error'], inMinutes(15)), back(2, 'gpt-5', ['cache'], inMinutes(-1))]
     }))
     const [ok, atBack] = wrapper.findAll('[data-test="group-pill"]')
     expect(cardOf(ok.get('[data-test="group-pill-dot"]'))).toEqual({
@@ -190,7 +190,7 @@ describe('AccountGroupPills', () => {
       chip: { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true },
       rows: [['admin.accounts.table.tip.exemptUntil', 'admin.accounts.table.tip.forever'], ['admin.accounts.table.tip.reason', '试用']]
     })
-    const observed = mountPills(1, baseQuality({ status: 'observing', ttfo: { n: 12, short: true, red: false, p50_ms: null } }))
+    const observed = mountPills(1, baseQuality({ status: 'observing', ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
     expect(cardOf(observed.get('[data-test="group-pill-dot"]'))).toMatchObject({
       chip: { tone: 'observe' }, rows: [['admin.accounts.table.tip.samples', 'admin.accounts.table.tip.count:{"n":12}']]
     })
@@ -208,7 +208,7 @@ describe('AccountGroupPills', () => {
 
   it('lists each folded group under "+N" with its dot, state and end; without quality data names only; "+" has no tip', () => {
     const expires = inMinutes(120)
-    const wrapper = mountPills(11, baseQuality({ substandard: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
+    const wrapper = mountPills(11, baseQuality({ rear: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
     expect(cardOf(wrapper.get('[data-test="group-pill-more-text"]'))).toEqual({
       title: 'admin.accounts.table.pillMore:{"n":3}',
       rows: [

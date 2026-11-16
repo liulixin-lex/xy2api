@@ -28,7 +28,7 @@ const row = (patch: Partial<RecoverableRow> = {}): RecoverableRow =>
   ({ status: 'active', rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null, extra: {}, capability_learned: null, ...patch })
 // The backend's own summary: `cooling` substandard models (the account is at the back of those groups).
 const summary = (cooling: number) => ({
-  substandard: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', dims: ['ttfo' as const], until: '', other_group: false, exempt: false, effective: true }))
+  rear: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', lines: ['ttfo' as const], until: '', exempt: false, effective: true }))
 })
 
 describe('canRecover (contract delta F1, scenario 37)', () => {

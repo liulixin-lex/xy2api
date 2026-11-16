@@ -1,19 +1,34 @@
 /**
- * Quality scheduling as backend 0.6.5 sends and takes it (backend/internal/service/sched_admin_dto.go and
- * internal/handler/admin/sched_quality_handler.go). Every reader uses these shapes as they are; there is no
- * translation layer.
+ * Quality scheduling as the backend sends and takes it (quality gate v2: three lines, four identities, three layers;
+ * the contract is 实施/01-架构蓝图.md section 4 with 02-裁决与修订.md section D). Every reader uses these shapes as
+ * they are; there is no translation layer.
  *
  * - POST /admin/sched-quality/accounts/summary: BackendAccountsSummary
  * - GET /admin/sched-quality/accounts/:id: BackendAccountDetail
+ * - GET /admin/sched-quality/accounts/:id/decisions?limit=&before_id=: BackendDecision[]
  * - POST /admin/sched-quality/accounts/:id/reset: BackendResetResult
  * - PUT | DELETE /admin/sched-quality/accounts/:id/override: SchedOverrideRequest (the exemption is the only override)
  * - DELETE /admin/sched-quality/accounts/:id/auto-states/:key: BackendClearAutoState
  * - GET | PUT /admin/sched-quality/groups/:id/policy (+ POST …/preview): BackendGroupPolicy, SchedGroupPolicyUpdate,
  *   BackendPolicyPreview
  * - GET /admin/sched-quality/groups/:id/order: BackendOrder (the group board)
+ * - GET | PUT /admin/sched-quality/ttft-rule: BackendTTFTRule, SchedTTFTRuleUpdate
  */
 
+/** The three quality lines: first useful output, errors, cache. */
 export type BackendDim = 'ttfo' | 'error' | 'cache'
+
+/**
+ * A line's identity for one account × model × group: pass (enough evidence, within the threshold), unknown (not
+ * enough evidence; no data is unknown), trial (back from the rear on probation), rear (confirmed below standard).
+ */
+export type BackendIdentity = 'pass' | 'unknown' | 'trial' | 'rear'
+
+/** Where the three lines put the account in the group: any line at the rear → rear; else any on trial → trial. */
+export type BackendPlacement = 'front' | 'trial' | 'rear'
+
+/** The latest assessment of a line, apart from its identity. */
+export type BackendVerdict = 'pass' | 'fail' | 'unknown'
 
 export interface BackendMark {
   n: number
@@ -30,12 +45,13 @@ export interface BackendExemption {
   reason: string
 }
 
-export interface BackendSubstandard {
+/** A model of a group at whose rear the account is. */
+export interface BackendRear {
   group_id: number
   model: string
-  dims: BackendDim[]
+  /** The lines at the rear. */
+  lines: BackendDim[]
   until: string
-  other_group: boolean
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -51,10 +67,12 @@ export interface BackendAccountSummary {
   reset_at: string | null
   /** The whole account takes no part in scheduling (manual off, error, rate limit …). */
   stop: { source: string; reason: string; until: string | null } | null
-  ttfo: BackendMark & { p50_ms: number | null }
+  /** First token: the first event and the first useful output (what the line judges), and the gap between them. */
+  ttfo: { first_event_p50_ms: number | null; first_output_p50_ms: number | null; gap_p50_ms: number | null; n: number }
   error: BackendMark & { rate: number | null }
-  cache: BackendMark & { ratio: number | null }
-  substandard: BackendSubstandard[]
+  /** Cache hit ratio over continuation turns (what the line judges) and over every successful request. */
+  cache: { ratio: number | null; turns: number; all_ratio: number | null; all_requests: number }
+  rear: BackendRear[]
   exemptions: BackendExemption[]
 }
 
@@ -67,31 +85,81 @@ export interface BackendAccountsSummary {
 
 // ---- GET /accounts/:id ----
 
-/** pass | fail | short (too few samples). */
-export type BackendVerdict = 'pass' | 'fail' | 'short'
-
-export interface BackendDimDetail {
-  /** own | merged: the evidence window is the group's own or merged with the account's other groups. */
-  scope: string
-  window_min: number
+/** Evidence of the first-output line. n, k and x are time-discounted amounts, not request counts. */
+export interface BackendTTFOEvidence {
+  /** The group's first-output limit, seconds. */
+  limit_s: number
+  /** Discounted samples, of which k over the limit and x with an unknown outcome. */
   n: number
-  lcb: number | null
-  verdict: BackendVerdict | string
+  k: number
+  x: number
+  /** Sessions the samples come from (counted up to 3), and sessions with a request over the limit (up to 2). */
+  s: number
+  d: number
+  /** Share over the limit of the group's other accounts on the model (the prior the estimate shrinks towards). */
+  prior_mu: number
+  /** Share over the limit of all the group's accounts on the model (the peers' prior). */
+  peer_nu: number
+  /** Confidence that the share over the limit is above the tolerance. */
+  p_abs: number
+  /** Confidence that the share is above the peers' by the margin; null without enough peer evidence. */
+  p_rel: number | null
+  /** Upper estimate of the front peers' share over the limit, and the line compared against (u + margin). */
+  u: number | null
+  z: number | null
+  /** Why the verdict is unknown (rule B's unknown reasons). */
+  causes: string[]
 }
 
-/** One model of one group: whether it is substandard (moved to the back), and the verdict of each dimension. */
+export interface BackendErrorEvidence {
+  limit: number
+  /** Requests with a clear outcome, the counted failures among them, and running or unattributed ones. */
+  clear: number
+  failed: number
+  unknown: number
+  /** Requests the rate is computed over (missing ones up to 50 count as successes). */
+  padded: number
+  /** Conservative lower bound of the failure rate, and the same with every unknown counted as a failure. */
+  lower_fail: number
+  lower_pass: number
+}
+
+export interface BackendCacheEvidence {
+  min_ratio: number
+  /** Continuation turns, their token-weighted hit ratio, the sessions and the sessions below the minimum. */
+  turns: number
+  ratio: number
+  sessions: number
+  low_sessions: number
+}
+
+export interface BackendEvidenceOf {
+  ttfo: BackendTTFOEvidence
+  error: BackendErrorEvidence
+  cache: BackendCacheEvidence
+}
+
+/** One line of one group × model. */
+export interface BackendLine<D extends BackendDim = BackendDim> {
+  identity: BackendIdentity
+  /** Rear stay step, 0..4 (20, 40, 60, 90, 120 minutes). */
+  level: number
+  /** End of the rear stay. */
+  until: string | null
+  /** End of the trial. */
+  trial_until: string | null
+  verdict: BackendVerdict
+  evidence: BackendEvidenceOf[D]
+  /** Groups the evidence comes from (the account's quality is judged on the requests of all its groups). */
+  source_groups: number[]
+}
+
+/** One model of one group: each line's identity and evidence, and the place they add up to. */
 export interface BackendGroupModel {
   model: string
-  failing: boolean
-  dims: BackendDim[]
-  level: number
-  since: string | null
-  until: string | null
-  other_group_ids: number[]
+  placement: BackendPlacement
   exempt: boolean
-  ttfo: BackendDimDetail & { bad: number }
-  error: BackendDimDetail & { bad: number }
-  cache: BackendDimDetail & { ratio: number | null }
+  lines: { [D in BackendDim]: BackendLine<D> }
 }
 
 /** -1 off, 0 immediately, otherwise idle seconds. */
@@ -147,6 +215,37 @@ export interface BackendAccountDetail {
   exemptions: BackendExemption[]
 }
 
+// ---- GET /accounts/:id/decisions ----
+
+/** The evidence a decision was taken on (one of ttft, error, cache, by its line). */
+export interface BackendBasis {
+  rule_version: string
+  line: BackendDim
+  /** regular | trial | review | relax */
+  kind: string
+  cut: string | null
+  /** The threshold then: first-output limit (seconds), error limit or cache minimum (ratios). */
+  threshold: number
+  source_groups: number[]
+  ttft?: BackendTTFOEvidence
+  error?: BackendErrorEvidence
+  cache?: BackendCacheEvidence
+}
+
+/** A change of a line's identity. Records of the previous rules have an empty line and no basis. */
+export interface BackendDecision {
+  id: number
+  at: string
+  group_id: number
+  model: string
+  line: BackendDim | ''
+  /** enter | renew | release | trial | trial_pass | trial_fail | trial_timeout | reset | relax | clear */
+  action: string
+  level: number
+  until: string | null
+  basis?: BackendBasis | null
+}
+
 // ---- POST /accounts/:id/reset (also the account list's "recover state") ----
 
 export interface BackendResetResult {
@@ -181,6 +280,12 @@ export interface BackendGroupPolicy {
   policy: BackendPolicy
 }
 
+/** The answer to a save: the lines a relaxed threshold cleared and re-judged, and how many line states that was. */
+export interface BackendGroupPolicySaved extends BackendGroupPolicy {
+  relaxed_lines: BackendDim[]
+  cleared: number
+}
+
 /** A version conflict is rejected with HTTP 409. */
 export interface SchedGroupPolicyUpdate {
   expected_version: number
@@ -196,17 +301,24 @@ export interface BackendPolicyPreview {
 
 // ---- GET /groups/:id/order?model= (the group board) ----
 
+/** front | trial (a free trial seat) | trial_full (every trial seat taken) | rear | stopped (takes no part). */
+export type BackendOrderLayer = 'front' | 'trial' | 'trial_full' | 'rear' | 'stopped'
+
 export interface BackendOrderRow {
   /** Place in the selection order. */
   rank: number
   account_id: number
   name: string
-  /** normal | below (at the back: substandard) | stopped (takes no part) */
-  layer: string
-  /** Failing dimensions of a row at the back. */
-  dims: BackendDim[]
+  layer: BackendOrderLayer
+  /** Each line's identity in this group for the model. */
+  lines: Record<BackendDim, BackendIdentity>
+  /** End of the rear stay, of the trial or of the stop. */
   until: string | null
   exempt: boolean
+  /** Pinned in this group: first in its layer, outside the rate range. */
+  pinned: boolean
+  /** Why the account is not used at all (profit_floor, profit_threshold …); null when it is. */
+  excluded: string | null
   priority: number
   rate: number
   load_rate: number
@@ -226,4 +338,36 @@ export interface BackendOrder {
   global_enabled: boolean
   /** In the current selection order; render as given. */
   rows: BackendOrderRow[]
+}
+
+// ---- GET | PUT /ttft-rule (the first-output line's three settings, global) ----
+
+/** Ratios: confidence 0.5 < γ < 1, tolerance 0 < p < 1, margin over the peers 0 ≤ δ < 1. */
+export interface SchedTTFTRuleValues {
+  confidence: number
+  tolerance: number
+  peer_margin: number
+}
+
+export type SchedTTFTRuleField = keyof SchedTTFTRuleValues
+
+export interface BackendTTFTRule extends SchedTTFTRuleValues {
+  version: number
+  defaults: SchedTTFTRuleValues
+  /** The range each setting was replayed over; outside it there is no data behind the setting. */
+  replayed: Record<SchedTTFTRuleField, [number, number]>
+}
+
+/** A version conflict is rejected with HTTP 409, an invalid value with 400 INVALID_TTFT_RULE. */
+export interface SchedTTFTRuleUpdate extends SchedTTFTRuleValues {
+  expected_version: number
+}
+
+/** none | relax (any value up) | tighten (any value down) | mixed (counts as relax). */
+export type SchedRuleChange = 'none' | 'relax' | 'tighten' | 'mixed'
+
+export interface BackendTTFTRuleSaved extends BackendTTFTRule {
+  change: SchedRuleChange
+  /** First-output line states cleared and re-judged. */
+  cleared: number
 }

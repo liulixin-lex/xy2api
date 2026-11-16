@@ -28,7 +28,7 @@ export const PRIVACY_UNSET_FILTER = '__unset__'
 /**
  * The quality filter against the account's summary, as the backend's filter decides it (sched_admin_summary.go,
  * attention): only OpenAI accounts take part in any of the four; observing by the summary status, exempt by any
- * exemption, back of queue by a substandard record in effect while the account is not stopped, normal by status
+ * exemption, back of queue by a rear record in effect while the account is not stopped, normal by status
  * normal (not stopped, not observed) with no exemption and no record in effect. An account the summary answered
  * without (`null`) matches none. Before the first summary of the row is in (`undefined`) nothing is judged: it matches,
  * so the rows of a fresh page do not dim for the moment the summary takes.
@@ -38,7 +38,7 @@ export function qualityMatches(platform: string, quality: AccountQualityView | n
   if (platform !== 'openai') return false
   if (quality === undefined) return true
   if (quality === null) return false
-  const back = !quality.stop && quality.substandard.some((item) => item.effective)
+  const back = !quality.stop && quality.rear.some((item) => item.effective)
   switch (filter) {
     case 'observing':
       return quality.status === 'observing'

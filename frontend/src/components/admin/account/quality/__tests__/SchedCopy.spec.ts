@@ -108,7 +108,7 @@ describe('quality UI copy', () => {
     // Normal path of the board's admission checks, then the codes a second admission check can pass through.
     const codes = [
       'platform_mismatch', 'model_rate_limited', 'not_schedulable', 'quota_auto_pause_5h', 'quota_auto_pause_7d',
-      'model_not_supported', 'profit_threshold', 'profit_invalid_account_rate', 'account_scheduling_threshold',
+      'model_not_supported', 'profit_threshold', 'profit_floor', 'profit_invalid_account_rate', 'account_scheduling_threshold',
       'privacy_not_set', 'runtime_blocked', 'proxy_stream_quarantined', 'shadow_parent_unhealthy',
       'channel_upstream_restricted', 'channel_pricing_restricted',
       'quota_auto_reset_pending_5h', 'quota_auto_reset_pending_7d', 'quota_auto_reset_credit_check_5h', 'quota_auto_reset_credit_check_7d'

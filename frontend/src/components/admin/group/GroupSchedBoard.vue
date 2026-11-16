@@ -39,6 +39,7 @@
             <th scope="col" class="sq-r">{{ t('admin.schedQuality.col.rank') }}</th>
             <th scope="col">{{ t('admin.schedQuality.col.account') }}</th>
             <th scope="col">{{ t('admin.schedQuality.col.state') }}</th>
+            <th scope="col">{{ t('admin.schedQuality.col.pinned') }}</th>
             <th scope="col" class="sq-r">{{ t('admin.schedQuality.drawer.priority') }}</th>
             <th scope="col" class="sq-r">{{ t('admin.schedQuality.drawer.rate') }}</th>
             <th scope="col" class="sq-r">{{ t('admin.schedQuality.drawer.concurrency') }}</th>
@@ -49,10 +50,10 @@
           <tr
             v-for="(row, index) in data.rows"
             :key="row.account_id"
-            :class="{ 'sq-weak': stopped(row), 'sq-split': stopped(row) && index > 0 && !stopped(data.rows[index - 1]) }"
+            :class="{ 'sq-weak': unused(row), 'sq-split': unused(row) && index > 0 && !unused(data.rows[index - 1]) }"
             :data-sq-board-row="row.account_id"
           >
-            <td class="sq-r sq-num sq-text-3">{{ stopped(row) ? '—' : row.rank }}</td>
+            <td class="sq-r sq-num sq-text-3">{{ unused(row) ? '—' : row.rank }}</td>
             <td>
               <button
                 v-if="canViewAccounts"
@@ -67,13 +68,38 @@
             <td>
               <span :class="stateOf(row).cls" data-sq-state>{{ stateOf(row).text }}</span>
             </td>
+            <td>
+              <span class="inline-flex items-center gap-2">
+                <AccountSwitch
+                  v-if="canManageGroups"
+                  :checked="pinnedOf(row)"
+                  :busy="pinBusy.has(row.account_id)"
+                  :disabled="pinBusy.has(row.account_id)"
+                  :label="t('admin.schedQuality.board.pinLabel', { name: row.name })"
+                  :data-sq-pin="row.account_id"
+                  @toggle="(next) => setPinned(row, next)"
+                />
+                <span v-else-if="row.pinned" data-sq-pinned>{{ t('admin.schedQuality.board.pinned') }}</span>
+                <span v-else class="sq-text-3">{{ DASH }}</span>
+                <span v-if="pinFailed.has(row.account_id)" class="sq-fail-word text-xs">{{ t('admin.schedQuality.result.failed') }}</span>
+              </span>
+            </td>
             <td class="sq-r sq-num">{{ row.priority }}</td>
             <td class="sq-r sq-num">{{ row.rate.toFixed(3) }}</td>
             <td class="sq-r sq-num">{{ row.in_flight }} / {{ row.concurrency }}</td>
             <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
-              <!-- The backend names the failing dimensions of a row at the back; it sends no numbers for the board. -->
-              <span v-if="failing(row, dim)" role="img" :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t('admin.schedQuality.aria.fail')}`" class="sq-shape sq-shape--fail" />
-              <span v-else tabindex="0" :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t('admin.schedQuality.aria.nodata')}`" class="sq-focus sq-text-3">{{ DASH }}</span>
+              <!-- Each line's identity in this group; the board carries no numbers (the account's panel has the evidence). -->
+              <span
+                v-if="!stopped(row)"
+                role="img"
+                tabindex="0"
+                :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t(`admin.schedQuality.identity.${row.lines[dim]}`)}`"
+                v-tip="`${t(`admin.schedQuality.dim.${dim}`)} · ${t(`admin.schedQuality.identity.${row.lines[dim]}`)}`"
+                :class="['sq-focus', IDENTITY_SHAPES[row.lines[dim]]]"
+                :data-sq-line="dim"
+                :data-identity="row.lines[dim]"
+              >{{ row.lines[dim] === 'unknown' ? DASH : '' }}</span>
+              <span v-else class="sq-text-3">{{ DASH }}</span>
             </td>
           </tr>
         </tbody>
@@ -83,27 +109,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
+import AccountSwitch from '@/components/admin/account/table/AccountSwitch.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
-import type { BackendDim, BackendOrderRow } from '@/api/admin/schedQualityTypes'
+import { adminAPI } from '@/api/admin'
+import type { BackendIdentity, BackendOrderRow } from '@/api/admin/schedQualityTypes'
 import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
-import { closeSchedBoard, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { DASH, fmtCountdown, rejectName, SCHED_DIMS, secondsUntil } from '@/utils/schedQualityFormat'
+import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
-// re-sorted here), fetched every 5 s by the host page's live table while open (useSchedLayerData). Accounts that take
-// no part (layer stopped) come last in the secondary colour; a row at the back (layer below) counts down to its end
-// and marks its failing dimensions.
+// re-sorted here), fetched every 5 s by the host page's live table while open (useSchedLayerData). The layers are
+// front, trial (a free trial seat), trial with every seat taken, rear and stopped; pinned accounts lead their layer.
+// Accounts the group does not use at all (stopped, or excluded by the rate range) come last in the secondary colour,
+// with the reason. Each line shows its identity; a rear or trial row counts down to its end. Pinning needs
+// groups:manage and is saved at once (PUT /admin/groups/:id/members/:account_id).
 const { t, te } = useI18n()
 const { board } = useSchedLayers()
 const { board: boardData, boardKey, retry } = useSchedLayerData()
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
+const { canManage: canManageGroups } = useAdminPermission('groups')
 const now = useLiveClock()
 const shellRef = ref<{ holdFocus: () => () => void } | null>(null)
 
@@ -118,20 +150,50 @@ watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { f
 
 const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
 
+const IDENTITY_SHAPES: Record<BackendIdentity, string> = {
+  pass: 'sq-shape sq-shape--pass',
+  rear: 'sq-shape sq-shape--fail',
+  trial: 'sq-shape sq-shape--trial',
+  unknown: 'sq-text-3'
+}
+
 const stopped = (row: BackendOrderRow) => row.layer === 'stopped'
-const failing = (row: BackendOrderRow, dim: BackendDim) => !stopped(row) && row.dims.includes(dim)
+/** Takes no part in the group: stopped, or outside the rate range. */
+const unused = (row: BackendOrderRow) => stopped(row) || row.excluded !== null
 
 function stateOf(row: BackendOrderRow): { text: string; cls: string } {
   const left = secondsUntil(row.until, now.value)
-  if (stopped(row)) {
-    const word = rejectName('not_schedulable', t, te)
-    return { text: left ? `${word} ${fmtCountdown(left)}` : word, cls: '' }
-  }
+  const timed = (word: string) => (left ? `${word} ${fmtCountdown(left)}` : word)
+  if (stopped(row)) return { text: timed(rejectName('not_schedulable', t, te)), cls: '' }
+  if (row.excluded !== null) return { text: t('admin.schedQuality.board.excluded', { reason: rejectName(row.excluded, t, te) }), cls: '' }
   if (row.exempt) return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
-  if (row.layer === 'below') {
-    const word = t('admin.schedQuality.state.cooling')
-    return { text: left ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool' }
+  const word = t(`admin.schedQuality.layer.${row.layer}`)
+  if (row.layer === 'rear') return { text: timed(word), cls: 'sq-cool' }
+  if (row.layer === 'trial' || row.layer === 'trial_full') return { text: timed(word), cls: 'sq-trial' }
+  return { text: word, cls: 'sq-text' }
+}
+
+// ---- Pinning: saved at once; the switch shows the new state until the board's next answer ----
+const pinBusy = reactive(new Set<number>())
+const pinFailed = reactive(new Set<number>())
+const pinShown = reactive(new Map<number, boolean>())
+watch(() => boardData.data, () => pinShown.clear())
+const pinnedOf = (row: BackendOrderRow) => pinShown.get(row.account_id) ?? row.pinned
+
+async function setPinned(row: BackendOrderRow, pinned: boolean) {
+  const groupId = board.groupId
+  if (groupId === null || !canManageGroups.value || pinBusy.has(row.account_id)) return
+  pinBusy.add(row.account_id)
+  pinFailed.delete(row.account_id)
+  try {
+    const result = await adminAPI.groups.setMemberPinned(groupId, row.account_id, pinned)
+    pinShown.set(row.account_id, result.pinned)
+    void markSchedChanged()
+  } catch {
+    pinFailed.add(row.account_id)
+    setTimeout(() => pinFailed.delete(row.account_id), 2000)
+  } finally {
+    pinBusy.delete(row.account_id)
   }
-  return { text: t('admin.schedQuality.state.normal'), cls: 'sq-text' }
 }
 </script>

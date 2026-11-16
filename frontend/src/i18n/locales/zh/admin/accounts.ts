@@ -26,6 +26,13 @@ export default {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '错误', cache: '缓存' },
         dimReasons: { ttfo: '首字超限', error: '错误率超限', cache: '缓存偏低' },
+        recent: {
+          firstOutput: '首个有效输出 P50',
+          firstEvent: '首个事件 P50',
+          gap: '两者之差 P50',
+          cacheTurns: '缓存 · 续接轮（判定用）',
+          cacheAll: '缓存 · 全部成功请求'
+        },
         dotStates: { ok: '正常', back: '后排', exempt: '豁免', observe: '观察中', stopped: '停止' },
         pillTip: '{name} · {state}',
         pillNoQuality: '无质量数据',
@@ -46,6 +53,8 @@ export default {
           samples: '首字样本',
           count: '{n} 次',
           countShort: '{n} 次 · 样本不足',
+          turns: '{n} 轮',
+          turnsShort: '{n} 轮 · 样本不足',
           recentTitle: '近 1 小时',
           recentSince: '{time} 起',
           iqModel: '模型',

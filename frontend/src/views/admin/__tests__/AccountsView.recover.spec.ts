@@ -5,22 +5,18 @@ import { defineComponent, h } from 'vue'
 import AccountsView from '../AccountsView.vue'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import { closeSchedDrawer, openSchedDrawer } from '@/composables/useSchedLayers'
+import { groupModel } from '@/__tests__/fixtures/schedQuality/lines'
 
 // "Recover state" on the account list (contract delta F; acceptance scenarios 37–41).
 
-/** The quality panel's detail (backend 0.6.5) of an account with one substandard model, so 恢复 is enabled. */
+/** The quality panel's detail of an account with one model at the rear, so 恢复 is enabled. */
 const panelDetail = (id: number) => ({
   account: { id, name: `acc-${id}`, priority: 1, rate: 1, concurrency: 5, in_flight: 0 },
   at: '', stale: false, global_enabled: true, status: 'normal', stop: null, reset_at: null,
   groups: [{
     group_id: 53, name: '晨星组', exemption: null,
     policy: { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0, takeover_idle_seconds: 0 },
-    by_model: [{
-      model: 'gpt-6.1-sol', failing: true, dims: ['ttfo'], level: 1, since: null, until: null, other_group_ids: [], exempt: false,
-      ttfo: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'fail', bad: 9 },
-      error: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', bad: 0 },
-      cache: { scope: 'own', window_min: 60, n: 40, lcb: null, verdict: 'pass', ratio: 0.8 }
-    }]
+    by_model: [groupModel('gpt-6.1-sol', { ttfo: 'rear' })]
   }],
   auto_states: [], exemptions: []
 })
@@ -131,10 +127,10 @@ const summaryOf = (id: number, cooling: number): BackendAccountSummary => ({
   status: 'normal',
   reset_at: null,
   stop: null,
-  ttfo: { n: 30, short: false, red: cooling > 0, p50_ms: 2800 },
+  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0 },
-  cache: { n: 40, short: false, red: false, ratio: 0.9 },
-  substandard: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }] : [],
+  cache: { ratio: 0.9, turns: 40, all_ratio: 0.7, all_requests: 120 },
+  rear: cooling ? [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }] : [],
   exemptions: []
 })
 

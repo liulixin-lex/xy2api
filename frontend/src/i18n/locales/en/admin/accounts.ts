@@ -26,6 +26,13 @@ export default {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },
         dimReasons: { ttfo: 'slow first token', error: 'error rate too high', cache: 'cache too low' },
+        recent: {
+          firstOutput: 'First useful output P50',
+          firstEvent: 'First event P50',
+          gap: 'Gap between them P50',
+          cacheTurns: 'Cache · continuation turns (judged)',
+          cacheAll: 'Cache · every successful request'
+        },
         dotStates: { ok: 'Normal', back: 'Back of queue', exempt: 'Exempt', observe: 'Observing', stopped: 'Stopped' },
         pillTip: '{name} · {state}',
         pillNoQuality: 'No quality data',
@@ -46,6 +53,8 @@ export default {
           samples: 'TTFT',
           count: '{n} sample | {n} samples',
           countShort: '{n} sample · too few | {n} samples · too few',
+          turns: '{n} turn | {n} turns',
+          turnsShort: '{n} turn · too few | {n} turns · too few',
           recentTitle: 'Last hour',
           recentSince: 'Since {time}',
           iqModel: 'Model',

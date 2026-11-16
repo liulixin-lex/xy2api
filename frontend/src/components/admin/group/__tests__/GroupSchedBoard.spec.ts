@@ -9,10 +9,17 @@ import { withSchedHost } from '@/components/admin/account/quality/__tests__/sche
 
 const api = vi.hoisted(() => ({ groupBoard: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const groupsApi = vi.hoisted(() => ({ setMemberPinned: vi.fn() }))
+vi.mock('@/api/admin', () => ({ adminAPI: { groups: groupsApi } }))
 const perms = vi.hoisted(() => ({ granted: [] as string[] }))
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
-  return { useAdminPermission: (module: string) => ({ canView: computed(() => perms.granted.includes(`${module}:view`)) }) }
+  return {
+    useAdminPermission: (module: string) => ({
+      canView: computed(() => perms.granted.includes(`${module}:view`)),
+      canManage: computed(() => perms.granted.includes(`${module}:manage`))
+    })
+  }
 })
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -27,15 +34,16 @@ enableAutoUnmount(afterEach)
 const base = (orderFixture as BackendOrder).rows[0]
 const row = (id: number, patch: Partial<BackendOrderRow>): BackendOrderRow => ({ ...structuredClone(base), account_id: id, name: `acc-${id}`, ...patch })
 
-// The backend's selection order: normal first, then at the back (below), then accounts that take no part (stopped).
+// The backend's selection order: front first, then the rear, then accounts that take no part (stopped).
+const REAR_LINES = { ttfo: 'rear', error: 'pass', cache: 'rear' } as const
 function board(): BackendOrder {
   return {
     ...(structuredClone(orderFixture) as BackendOrder),
     rows: [
       row(7, { rank: 1 }),
       row(5, { rank: 2, exempt: true }),
-      row(3, { rank: 3, layer: 'below', dims: ['ttfo', 'cache'], until: new Date(Date.now() + 90_000).toISOString() }),
-      row(9, { rank: 4, layer: 'stopped', dims: ['error'], until: new Date(Date.now() + 130_000).toISOString() }),
+      row(3, { rank: 3, layer: 'rear', lines: { ...REAR_LINES }, until: new Date(Date.now() + 90_000).toISOString() }),
+      row(9, { rank: 4, layer: 'stopped', lines: { ttfo: 'pass', error: 'rear', cache: 'pass' }, until: new Date(Date.now() + 130_000).toISOString() }),
       row(1, { rank: 5, layer: 'stopped' })
     ]
   }
@@ -51,6 +59,7 @@ beforeEach(() => {
   perms.granted = ['accounts:view', 'groups:view']
   document.documentElement.dataset.motion = 'reduced'
   api.groupBoard.mockReset().mockResolvedValue(board())
+  groupsApi.setMemberPinned.mockReset()
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
@@ -88,15 +97,16 @@ describe('GroupSchedBoard', () => {
     expect(rows().map((tr) => tr.querySelector('td')!.textContent)).toEqual(['1', '2', '3', '—', '—'])
   })
 
-  it('shows stopped rows weak at the end with a countdown, a row at the back with its countdown and failing dimensions', async () => {
+  it('shows stopped rows weak at the end with a countdown, a rear row with its countdown and the lines at the rear', async () => {
     mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
     const [normal, exempt, back, stopped, stoppedNoEnd] = rows()
-    expect(normal.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.normal')
+    expect(normal.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.layer.front')
     expect(exempt.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.exempted')
-    expect(back.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.state\.cooling 1:(29|30)$/)
-    expect(Array.from(back.querySelectorAll('td:nth-last-child(-n+3) > span'), (el) => el.classList.contains('sq-shape--fail'))).toEqual([true, false, true])
+    expect(back.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.layer\.rear 1:(29|30)$/)
+    expect(Array.from(back.querySelectorAll('[data-sq-line]'), (el) => (el as HTMLElement).dataset.identity)).toEqual(['rear', 'pass', 'rear'])
+    expect(Array.from(back.querySelectorAll('[data-sq-line]'), (el) => el.classList.contains('sq-shape--fail'))).toEqual([true, false, true])
 
     expect(stopped.classList.contains('sq-weak')).toBe(true)
     expect(stopped.classList.contains('sq-split')).toBe(true)
@@ -105,6 +115,66 @@ describe('GroupSchedBoard', () => {
     expect(stopped.querySelectorAll('.sq-shape')).toHaveLength(0)
     expect(stoppedNoEnd.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.reject.not_schedulable')
     expect(stoppedNoEnd.classList.contains('sq-split')).toBe(false)
+  })
+
+  it('names the trial layers, the reason an account is not used, and greys out an unknown line', async () => {
+    const soon = (s: number) => new Date(Date.now() + s * 1000).toISOString()
+    const trialLines = { ttfo: 'trial', error: 'pass', cache: 'unknown' } as const
+    api.groupBoard.mockResolvedValue({
+      ...board(),
+      rows: [
+        row(4, { rank: 1, layer: 'trial', lines: { ...trialLines }, until: soon(600) }),
+        row(6, { rank: 2, layer: 'trial_full', lines: { ...trialLines }, until: soon(60) }),
+        row(8, { rank: 3, excluded: 'profit_floor' })
+      ]
+    })
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    const [trial, full, excluded] = rows()
+    const state = (tr: HTMLElement) => tr.querySelector('[data-sq-state]')!.textContent
+    expect(state(trial)).toMatch(/^admin\.schedQuality\.layer\.trial (9:59|10:00)$/)
+    expect(state(full)).toMatch(/^admin\.schedQuality\.layer\.trial_full (0:59|1:00)$/)
+    expect(trial.querySelector('[data-sq-line="ttfo"]')!.classList.contains('sq-shape--trial')).toBe(true)
+    expect(trial.querySelector('[data-sq-line="cache"]')!.textContent).toBe('—')
+    // Excluded by the rate range: not used at all, so it reads weak, has no place and names why.
+    expect(state(excluded)).toBe('admin.schedQuality.board.excluded:{"reason":"admin.schedQuality.reject.profit_floor"}')
+    expect(excluded.classList.contains('sq-weak')).toBe(true)
+    expect(excluded.querySelector('td')!.textContent).toBe('—')
+  })
+
+  it('pins an account in the group at once with groups:manage; a failure leaves it and says so', async () => {
+    perms.granted = ['accounts:view', 'groups:view', 'groups:manage']
+    groupsApi.setMemberPinned.mockResolvedValueOnce({ group_id: 53, account_id: 7, pinned: true }).mockRejectedValueOnce(new Error('boom'))
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    const pin = (id: number) => document.querySelector<HTMLButtonElement>(`[data-sq-pin="${id}"]`)!
+    expect(pin(7).getAttribute('aria-checked')).toBe('false')
+    const asked = api.groupBoard.mock.calls.length
+    pin(7).click()
+    await flushPromises()
+    expect(groupsApi.setMemberPinned).toHaveBeenCalledWith(53, 7, true)
+    // The board is asked again; the switch shows the saved state meanwhile.
+    expect(api.groupBoard.mock.calls.length).toBeGreaterThan(asked)
+    expect(pin(7).getAttribute('aria-checked')).toBe('true')
+
+    // A failed request leaves the switch as it was and says so next to it.
+    pin(5).click()
+    await flushPromises()
+    expect(groupsApi.setMemberPinned).toHaveBeenLastCalledWith(53, 5, true)
+    expect(pin(5).getAttribute('aria-checked')).toBe('false')
+    expect(rows()[1].textContent).toContain('admin.schedQuality.result.failed')
+  })
+
+  it('shows a pinned account as text without groups:manage', async () => {
+    api.groupBoard.mockResolvedValue({ ...board(), rows: [row(7, { rank: 1, pinned: true }), row(5, { rank: 2 })] })
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-pin]')).toBeNull()
+    expect(rows()[0].querySelector('[data-sq-pinned]')!.textContent).toBe('admin.schedQuality.board.pinned')
+    expect(rows()[1].querySelector('[data-sq-pinned]')).toBeNull()
   })
 
   it('opens the account panel on the board\'s model from an account link', async () => {

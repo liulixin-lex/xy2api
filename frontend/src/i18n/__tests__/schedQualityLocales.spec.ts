@@ -1,0 +1,49 @@
+import { describe, expect, it } from 'vitest'
+
+import en from '../locales/en'
+import zh from '../locales/zh'
+import { lineEvidence } from '@/components/admin/account/quality/qualityPanel'
+import { cacheEvidence, errorEvidence, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+
+// The quality panel, the group board and the decision records build these keys from values the backend sends
+// (identities, placements, layers, actions, unknown causes, evidence fields), so the static key check cannot see
+// them. Every value of the contract (blueprint section 4, machine Action list, rule B's unknown reasons) has copy in
+// both languages, and every evidence template takes its value.
+const VALUES: Record<string, string[]> = {
+  'admin.schedQuality.identity': ['pass', 'unknown', 'trial', 'rear'],
+  'admin.schedQuality.placement': ['front', 'trial', 'rear', 'exempt', 'stopped'],
+  'admin.schedQuality.layer': ['front', 'trial', 'trial_full', 'rear', 'stopped'],
+  'admin.schedQuality.decisions.action': ['enter', 'renew', 'release', 'trial', 'trial_pass', 'trial_fail', 'trial_timeout', 'reset', 'relax', 'clear'],
+  'admin.schedQuality.evidence.causes': [
+    'no_peers', 'all_peers_rear', 'peer_known_insufficient', 'no_samples', 'mass_insufficient', 'sessions_insufficient',
+    'slow_sessions_insufficient', 'absolute_unconfirmed', 'relative_unconfirmed', 'worst_mean_above_tolerance', 'relative_veto'
+  ],
+  'admin.schedQuality.evidence.ttfo': lineEvidence('ttfo', ttfoEvidence()).map((item) => item.key),
+  'admin.schedQuality.evidence.error': lineEvidence('error', errorEvidence()).map((item) => item.key),
+  'admin.schedQuality.evidence.cache': lineEvidence('cache', cacheEvidence()).map((item) => item.key),
+  'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
+  'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
+  'admin.schedQuality.reject': ['profit_floor']
+}
+
+const lookup = (messages: unknown, path: string): unknown =>
+  path.split('.').reduce<unknown>((node, key) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined), messages)
+
+describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_locale, messages) => {
+  it('names every identity, place, layer, action, unknown cause and evidence field the backend sends', () => {
+    const missing = Object.entries(VALUES).flatMap(([prefix, values]) =>
+      values.map((value) => `${prefix}.${value}`).filter((key) => {
+        const text = lookup(messages, key)
+        return typeof text !== 'string' || text.trim() === ''
+      })
+    )
+    expect(missing).toEqual([])
+  })
+
+  it('puts the value into every evidence template', () => {
+    const templates = ['ttfo', 'error', 'cache'].flatMap((line) =>
+      VALUES[`admin.schedQuality.evidence.${line}`].map((key) => [key, String(lookup(messages, `admin.schedQuality.evidence.${line}.${key}`))])
+    )
+    expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
+  })
+})

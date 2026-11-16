@@ -11,7 +11,10 @@ const pluralKeys = new Set([
   'batchImage.create.outputCountOption',
   'batchImage.create.referenceCount',
   'admin.accounts.table.tip.count',
-  'admin.accounts.table.tip.countShort'
+  'admin.accounts.table.tip.countShort',
+  'admin.accounts.table.tip.turns',
+  'admin.accounts.table.tip.turnsShort',
+  'admin.schedQuality.panel.allRequests'
 ])
 
 function pipeMessages(node: unknown, prefix = ''): Array<[string, string]> {
