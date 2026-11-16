@@ -54,8 +54,12 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 		return
 	}
 	choices := root.Get("choices")
+	meterOnly := !choices.Exists() || choices.Type == gjson.Null || choices.IsArray()
 	for _, choice := range choices.Array() {
 		delta := choice.Get("delta")
+		if delta.Exists() && delta.Type != gjson.Null && (!delta.IsObject() || len(delta.Map()) != 0) {
+			meterOnly = false
+		}
 		generation := len(delta.Get("tool_calls").Array()) > 0 || delta.Get("function_call").IsObject()
 		for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal", "images", "audio"} {
 			v := delta.Get(field)
@@ -78,7 +82,7 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	counts := apicompat.ParseOpenAIUsageCounts(root.Get("usage"))
 	_, present := openAIResponsesUsageEvidence([]byte(payload), "upstream_sse_progressive")
 	t.sawUsage = t.sawUsage || present
-	if choices.IsArray() && len(choices.Array()) == 0 && counts.InputTokensPresent && counts.OutputTokensPresent {
+	if meterOnly && counts.InputTokensPresent && counts.OutputTokensPresent {
 		t.sawCompleteTrailingUsage = true
 		t.sawUnfinishedGeneration = false
 	}
