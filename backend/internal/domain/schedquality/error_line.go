@@ -13,15 +13,16 @@ const (
 )
 
 type ErrorAssessment struct {
-	Verdict    Verdict  `json:"verdict"`
-	Limit      float64  `json:"limit"` // max(分组上限, 0.05)
-	Clear      int      `json:"clear"`
-	Failed     int      `json:"failed"`
-	Unknown    int      `json:"unknown"`
-	Padded     int      `json:"padded"` // n = max(50, k+u)
-	LowerFail  float64  `json:"lower_fail"`
-	LowerPass  float64  `json:"lower_pass"`
-	AttemptIDs []string `json:"-"`
+	Verdict      Verdict  `json:"verdict"`
+	Limit        float64  `json:"limit"` // max(分组上限, 0.05)
+	Clear        int      `json:"clear"`
+	Failed       int      `json:"failed"`
+	Unknown      int      `json:"unknown"`
+	Padded       int      `json:"padded"` // n = max(50, k+u)
+	LowerFail    float64  `json:"lower_fail"`
+	LowerPass    float64  `json:"lower_pass"`
+	AttemptIDs   []string `json:"-"`
+	SourceGroups []int64  `json:"-"` // Actual selected request units, deduplicated and ascending.
 }
 
 // 请求单位按 RequestID（为空时用 AttemptID）分组，保留最早开始时间与最终尝试。
@@ -43,8 +44,10 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 			selected = append(selected, unit)
 		}
 	}
+	groups := make(map[int64]struct{})
 	for _, unit := range selected[:min(ErrorSlots, len(selected))] {
 		s := unit.final
+		groups[s.GroupID] = struct{}{}
 		switch {
 		case s.FinishedAt.IsZero():
 			out.Unknown++
@@ -60,6 +63,7 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 			out.Unknown++
 		}
 	}
+	out.SourceGroups = sortedSourceGroups(groups)
 	out.Padded = max(ErrorMinClear, out.Clear+out.Unknown)
 	out.LowerFail = WilsonLower(out.Failed, out.Padded)
 	out.LowerPass = WilsonLower(out.Failed+out.Unknown, out.Padded)
@@ -70,6 +74,15 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 		out.Verdict = VerdictPass
 	}
 	return out
+}
+
+func sortedSourceGroups(groups map[int64]struct{}) []int64 {
+	var ids []int64
+	for id := range groups {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 type requestUnit struct {

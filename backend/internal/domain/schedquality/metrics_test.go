@@ -97,8 +97,8 @@ func TestAssessmentJSONContract(t *testing.T) {
 		value any
 		keys  []string
 	}{
-		{ErrorAssessment{AttemptIDs: []string{"private"}}, []string{"verdict", "limit", "clear", "failed", "unknown", "padded", "lower_fail", "lower_pass"}},
-		{CacheAssessment{AttemptIDs: []string{"private"}}, []string{"verdict", "min_ratio", "ratio", "turns", "sessions", "low_sessions", "read_tokens", "input_tokens"}},
+		{ErrorAssessment{AttemptIDs: []string{"private"}, SourceGroups: []int64{10}}, []string{"verdict", "limit", "clear", "failed", "unknown", "padded", "lower_fail", "lower_pass"}},
+		{CacheAssessment{AttemptIDs: []string{"private"}, SourceGroups: []int64{10}}, []string{"verdict", "min_ratio", "ratio", "turns", "sessions", "low_sessions", "read_tokens", "input_tokens"}},
 	} {
 		data, err := json.Marshal(tc.value)
 		if err != nil {
