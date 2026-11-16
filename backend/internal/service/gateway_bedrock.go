@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）
@@ -175,6 +176,7 @@ func (s *GatewayService) forwardBedrock(
 		Usage:            *usage,
 		Model:            reqModel,
 		UpstreamModel:    mappedModel,
+		ReasoningEffort:  NormalizeClaudeOutputEffort(gjson.GetBytes(bedrockBody, "output_config.effort").String()),
 		Stream:           reqStream,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
