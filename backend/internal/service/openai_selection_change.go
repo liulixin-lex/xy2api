@@ -43,6 +43,11 @@ type openAIStickyChange struct {
 	key              string
 	model            string
 	kind             string
+	reason           string
+	fromModel        string
+	trialSession     string
+	leases           SchedTrialLeases
+	trial            *selectionTrialReservation
 	expected         StickySessionBinding
 	target           int64
 	ttl              time.Duration
@@ -158,6 +163,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
 		skipCommit:      unreadable,
 		resetAt:         s.resilience.sessionAccountResetAt,
+		leases:          s.selectionTrialLeases(), trialSession: session,
 	})
 }
 
@@ -174,7 +180,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
 		return
 	}
-	kind := "migrate"
+	kind := "owner_released"
 	if change.expected.AccountID == 0 {
 		kind = "create"
 	}
@@ -185,6 +191,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 		skipCommit:      change.skipCommit,
 		ownerReleased:   change.ownerReleased,
 		resetAt:         change.resetAt,
+		leases:          change.leases, fromModel: change.fromModel, trialSession: change.trialSession, reason: resilience.StateFrom(ctx).StickyBypassReason(),
 	})
 }
 
@@ -202,6 +209,23 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		return
 	}
 	change.done = true
+	committed := false
+	defer func() {
+		if committed && change.trial != nil {
+			change.trial.retained.Store(true)
+		}
+		if !committed {
+			change.releaseTrial(ctx)
+		}
+		reason := change.reason
+		if reason == "" {
+			reason = change.kind
+		}
+		slog.InfoContext(ctx, "sched_quality.session_switch", "component", "sched_quality",
+			"gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(), "group_id", change.groupID,
+			"model", change.model, "from", change.expected.AccountID, "to", change.target,
+			"kind", change.kind, "reason", reason, "committed", committed)
+	}()
 	if canceled || change.skipCommit {
 		return
 	}
@@ -232,6 +256,14 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if !changed {
 		return
 	}
+	committed = true
+	if change.expected.AccountID != change.target {
+		model := change.fromModel
+		if model == "" {
+			model = change.model
+		}
+		releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, TrialLeaseSessionMember(change.trialSessionKey()))
+	}
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
 		if aliases, ok := change.cache.(OpenAIStickyAliasCache); ok {
 			if err := aliases.SyncSessionBindingAlias(stateCtx, change.groupID, change.key, change.expected.LegacyKey, accountID, min(change.ttl, 10*time.Minute), true); err != nil {
@@ -242,11 +274,25 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	st := resilience.StateFrom(ctx)
 	st.ClearKeptStickyIfOwner(change.expected.AccountID)
 	st.NoteStickyBypassBindingChange()
-	if change.kind == "create" {
+}
+
+func (c *openAIStickyChange) trialSessionKey() string {
+	if c.trialSession != "" {
+		return c.trialSession
+	}
+	return c.session
+}
+
+// Concurrent first requests can reserve the same session member. A losing or
+// failed request must not release the lease of another request's committed owner.
+func (c *openAIStickyChange) releaseTrial(ctx context.Context) {
+	if c.trial == nil || c.trial.retained.Load() {
 		return
 	}
-	slog.InfoContext(ctx, "sched_quality.takeover", "component", "sched_quality",
-		"kind", change.kind, "gateway_request_id", st.GatewayRequestID(),
-		"group_id", change.groupID, "model", change.model,
-		"from_account_id", change.expected.AccountID, "to_account_id", change.target)
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	if binding, err := c.cache.GetSessionBinding(stateCtx, c.groupID, c.key); err == nil && binding.AccountID == c.target {
+		c.trial.retained.Store(true)
+	}
+	c.trial.release(ctx)
 }

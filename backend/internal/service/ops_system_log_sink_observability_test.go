@@ -58,12 +58,12 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 		{"cycles": float64(1), "cycles_failed": float64(1), "cycle_ms_max": float64(123),
 			"cooled": float64(2), "released": float64(4)},
 		{"kind": "takeover", "gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
-			"model": "m", "from_account_id": float64(10), "to_account_id": float64(1)},
+			"model": "m", "from": float64(10), "to": float64(1), "reason": "priority_takeover", "committed": true},
 	}
 	for i, row := range saved {
 		require.Equal(t, "info", row.Level)
 		require.Equal(t, "sched_quality", row.Component)
-		require.Equal(t, []string{"sched_quality.summary", "sched_quality.takeover"}[i], row.Message)
+		require.Equal(t, []string{"sched_quality.summary", "sched_quality.session_switch"}[i], row.Message)
 		require.False(t, row.CreatedAt.IsZero())
 		var fields map[string]any
 		require.NoError(t, json.Unmarshal([]byte(row.ExtraJSON), &fields))

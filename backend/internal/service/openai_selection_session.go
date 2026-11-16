@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type selectionSession struct {
 	bindingTTL time.Duration
 	recheck    func(context.Context, *Account) *Account
 	resetAt    func(int64) time.Time
+	leases     SchedTrialLeases
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
@@ -48,16 +50,16 @@ func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.
 	return err == nil && id == owner && remaining > 0 && s.bindingTTL-remaining >= idle
 }
 
-func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int64, model string, owner, target *Account, migrate bool, now time.Time) bool {
+func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int64, model string, owner, target *Account, migrate bool, req selectionRequest, now time.Time) bool {
 	if groupID > 0 && !openAIStickyAccountMatchesGroup(target, &groupID) {
 		return false
 	}
 	state := selectionState(view, groupID, target, model)
 	auto := selectionAuto(view, groupID, now)
 	if migrate {
-		return auto && selectionState(view, groupID, owner, model).Placement(auto, now) == schedquality.PlaceRear && state.Placement(auto, now) == schedquality.PlaceFront
+		return selectionMigrateOwner(view, groupID, owner, model, req.Session, now) && (state.Placement(auto, now) == schedquality.PlaceFront || state.Placement(auto, now) == schedquality.PlaceTrial && req.Room != nil && req.Room(target.ID, OpenAIAttemptModel(target, model)))
 	}
-	return selectionLive(view, now) && selectionState(view, groupID, owner, model).Placement(auto, now) == schedquality.PlaceFront && target.Priority < owner.Priority && state.Placement(auto, now) == schedquality.PlaceFront && !s.marks.Recently(target.ID, now)
+	return selectionLive(view, now) && selectionState(view, groupID, owner, model).Placement(auto, now) != schedquality.PlaceRear && target.Priority < owner.Priority && state.Placement(auto, now) == schedquality.PlaceFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
@@ -80,7 +82,8 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	now, view := s.now(), s.view()
-	migrate := selectionState(view, groupID, owner, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceRear
+	req.Session = sessionHash
+	migrate := selectionMigrateOwner(view, groupID, owner, model, sessionHash, now)
 	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
 		return nil
 	}
@@ -107,7 +110,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	}
 	ordered := make([]candidate, 0, len(candidates))
 	for _, account := range candidates {
-		if account == nil || account.ID == owner.ID || !s.candidateAllowed(view, groupID, model, owner, account, migrate, now) {
+		if account == nil || account.ID == owner.ID || !s.candidateAllowed(view, groupID, model, owner, account, migrate, req, now) {
 			continue
 		}
 		if _, blocked := avoided[account.ID]; blocked {
@@ -116,12 +119,15 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		ordered = append(ordered, candidate{account, buildSelectionKey(view, groupID, model, account, req, now)})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
+		// Compact capability routing predates quality ranking and applies only
+		// to RequireCompact: confirmed support precedes unknown, then the quality key.
 		if req.RequireCompact {
 			a, b := openAICompactSupportTier(ordered[i].account), openAICompactSupportTier(ordered[j].account)
 			if a != b {
 				return a > b
 			}
 		}
+
 		return selectionLess(ordered[i].key, ordered[j].key)
 	})
 	if !migrate && len(ordered) > schedquality.TakeoverMaxCandidates {
@@ -132,7 +138,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			return nil
 		}
 		target := s.recheck(ctx, item.account)
-		if target == nil || !s.candidateAllowed(s.view(), groupID, model, owner, target, migrate, s.now()) {
+		if target == nil || !s.candidateAllowed(s.view(), groupID, model, owner, target, migrate, req, s.now()) {
 			continue
 		}
 		slot, err := s.slots.tryAcquireAccountSlot(ctx, target.ID, target.Concurrency)
@@ -151,7 +157,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			latestOwner = s.recheck(ctx, owner)
 		}
 		now, view = s.now(), s.view()
-		allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, now)
+		allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, req, now)
 		if !migrate {
 			allowed = allowed && s.takeoverReady(ctx, view, groupID, key, owner.ID, now)
 		}
@@ -159,16 +165,38 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			slot.ReleaseFunc()
 			continue
 		}
-		kind := "takeover"
-		if migrate {
-			kind = "migrate"
+		var reservation *selectionTrialReservation
+		if selectionState(view, groupID, latest, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceTrial {
+			acquired := false
+			if s.leases != nil {
+				var err error
+				acquired, err = s.leases.Acquire(ctx, latest.ID, OpenAIAttemptModel(latest, model), groupID, TrialLeaseSessionMember(sessionHash), now)
+				if err != nil {
+					slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", latest.ID, "error", err)
+					acquired = false
+				}
+			}
+			if !acquired {
+				slot.ReleaseFunc()
+				continue
+			}
+			reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseSessionMember(sessionHash)}
 		}
-		resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
+		kind, reason := "takeover", "priority_takeover"
+		if migrate {
+			kind, reason = "migrate", "quality_migration_ttfo"
+			if selectionState(view, groupID, owner, model).Error.Identity == schedquality.IdentityRear {
+				reason = "quality_migration_error"
+			}
+		}
+		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+		change := &openAIStickyChange{
 			groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model,
 			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache,
-			resetAt: s.resetAt,
-		})
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
+			resetAt: s.resetAt, reason: reason, leases: s.leases, trial: reservation, fromModel: OpenAIAttemptModel(owner, model), trialSession: sessionHash,
+		}
+		resilience.StateFrom(ctx).SetStickyChange(change)
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: releaseSelectionTrialWithSlot(ctx, change, reservation, slot.ReleaseFunc)})
 	}
 	return nil
 }
@@ -189,4 +217,12 @@ func withOpenAIStickyMigrationGuard(ctx context.Context, previousResponseID stri
 		return withOpenAINoStickyMigration(ctx)
 	}
 	return ctx
+}
+
+func selectionMigrateOwner(view schedquality.View, groupID int64, owner *Account, model, session string, now time.Time) bool {
+	if view == nil || owner == nil {
+		return false
+	}
+	state := selectionState(view, groupID, owner, model)
+	return state.MigrateOwner(selectionAuto(view, groupID, now), now, view.SessionSlowTwice(groupID, owner.ID, OpenAIAttemptModel(owner, model), session))
 }

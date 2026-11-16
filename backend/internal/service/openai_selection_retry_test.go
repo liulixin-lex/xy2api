@@ -40,7 +40,11 @@ func TestSelectionRetryAfterFailedChange(t *testing.T) {
 			}
 			next := selectNext(map[int64]struct{}{first.Account.ID: {}})
 			require.EqualValues(t, 2, next.Account.ID, "a failed migration must not strand this request on the below-standard owner")
-			require.Equal(t, "migrate", pendingOpenAIStickyChange(ctx).kind)
+			expectedKind := "migrate"
+			if kind == "takeover" {
+				expectedKind = "owner_released"
+			}
+			require.Equal(t, expectedKind, pendingOpenAIStickyChange(ctx).kind)
 			fallback, takeover := state.SchedSelectionFlags(next.Account.ID)
 			require.False(t, fallback)
 			require.False(t, takeover, "a hard-unavailable replacement is not the earlier takeover")

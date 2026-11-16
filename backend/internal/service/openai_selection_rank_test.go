@@ -27,7 +27,9 @@ func TestOpenAISelectionComparator(t *testing.T) {
 		name string
 		a, b selectionKey
 	}{
-		{"standing", selectionKey{Standing: 0, Priority: 2}, selectionKey{Standing: 1, Priority: 1}},
+		{"tier_before_pinned", selectionKey{Tier: 0, Priority: 2}, selectionKey{Tier: 1, Pinned: true, Priority: 1}},
+		{"full_trial_before_rear", selectionKey{Tier: 1, Priority: 99}, selectionKey{Tier: 2, Pinned: true, Priority: 0}},
+		{"pinned", selectionKey{Pinned: true, Priority: 100}, selectionKey{Priority: 0}},
 		{"priority", selectionKey{Priority: 1, Rate: 100, LoadRate: 100}, selectionKey{Priority: 2, Rate: 0, LoadRate: 0}},
 		{"rate", selectionKey{RateKnown: true, Rate: 1, LoadRate: 100}, selectionKey{RateKnown: true, Rate: 2}},
 		{"known_before_unknown_rate", selectionKey{RateKnown: true, Rate: 100, LoadRate: 100}, selectionKey{}},
@@ -70,13 +72,13 @@ func TestOpenAISelectionStanding(t *testing.T) {
 			account.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "outbound"}}
 			view.States[fakeSchedViewKey{7, 1, "outbound"}] = tt.state
 			key := buildSelectionKey(view, 7, "alias", account, selectionRequest{}, now)
-			require.Equal(t, int(tt.want), key.Standing)
+			require.Equal(t, int(tt.want), key.Tier)
 		})
 	}
 	t.Run("override_in_other_group", func(t *testing.T) {
 		view := selectionTestView(now)
 		view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}, Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
-		require.Equal(t, 0, buildSelectionKey(view, 8, "m", selectionTestAccount(1, 1), selectionRequest{}, now).Standing)
+		require.Equal(t, 0, buildSelectionKey(view, 8, "m", selectionTestAccount(1, 1), selectionRequest{}, now).Tier)
 	})
 }
 

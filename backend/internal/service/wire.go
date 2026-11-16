@@ -895,7 +895,9 @@ func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAtt
 }
 
 func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQualityEngineService) *OpenAISelectionBoard {
-	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View })
+	board := NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View })
+	board.leases = engine.leases
+	return board
 }
 
 func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTransientAdmin {
