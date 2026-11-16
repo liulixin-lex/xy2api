@@ -73,7 +73,7 @@
 ### 失败分类与冷却 `failure`
 
 - **做什么**：把每次上游失败归为一类（余额不足、鉴权、限流、容量降载、瞬时失败、首输出超时、停滞、模型不可用、客户端错误等，完整列表见 [罚则与选号](gateway-resilience-routing.md#失败分类)），据此决定是否换号、是否罚号、罚多久。瞬时失败（502、503、超时、传输错误）让账号进入短冷却；CDN 或代理写出的 5xx 错误页按瞬时失败处理。同一账号 60 秒内输出后失败 3 次，也进入同样的短冷却（池模式账号除外）。
-- **主要字段**：`transient_cooldown_seconds` 默认 30；上游带 `Retry-After` 时按它冷却，封顶 `retry_after_cap_seconds`（默认 120）；`balance_keywords_extra` 追加余额不足的识别文案；`decision_v2` 默认开，只把真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化的 overloaded）算作容量降载，“服务繁忙”“排队过多”“并发超限”一类按瞬时或限流处理，可以换到同一主机的其他账号。
+- **主要字段**：`transient_cooldown_seconds` 默认 30；上游带 `Retry-After` 时按它冷却，封顶 `retry_after_cap_seconds`（默认 120）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；`balance_keywords_extra` 追加余额不足的识别文案；`decision_v2` 默认开，只把真正的容量信号（`server_is_overloaded`、`slow_down`、529、结构化的 overloaded）算作容量降载，“服务繁忙”“排队过多”“并发超限”一类按瞬时或限流处理，可以换到同一主机的其他账号。
 - **何时关闭**：一般不关闭。关闭 `decision_v2` 回到较粗的旧分类规则，同时“仅流式账号学习”只学习、不在本请求换号。
 - **计费与客户端**：分类本身不改变计费。分类结果写进运维错误记录的 `resilience_category`。[分组质量门槛](group-quality-gate.md)的报错线用同一套分类规则，但不看韧性开关：同一个失败，开关开或关结论都一样。
 - **观测**：`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.unclassified`（只按状态码归类的 4xx 文案采样，可据此补充 `balance_keywords_extra`）。
@@ -156,9 +156,6 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 错误语义与防风暴 `errors`
 
-明确的 HTTP 续接过期/不支持与 `encrypted_content_rejected` 在通用错误转换前按请求错误终止；不换号、不罚号，未提交时禁止重试。
-
-只有完整证据确认对整个分组成立的耗尽结果才进入负缓存，并保留其原因和状态映射。带工具、归属、隐私、利润、渠道、会话及排除集相关的请求专属失败不进入组级缓存，也不累计组级快速失败；旧空值缓存按未命中处理。
 
 - **做什么**：
   - Responses 失败帧保留上游给出的等待提示（0 不算提示），没有其他已知建议时给客户端的等待夹到 2–10 秒，同一账号仍按上游原始时刻恢复；无 `type` 的失败不会被之后的 `response.completed` 清除。
@@ -189,6 +186,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。
   - **raw Chat 开场**：raw Chat 的 role 与无内容开场同样暂存，与请求大小无关；正文前出错可以换号，正文后的错误只写一次终止帧。无内容开场的暂存仍以 8 MiB 为上限，正文和图片等实际输出不受此上限限制。
   - **Chat 上游的结束判定**：转换后的流与 raw Chat 都按同一规则判断是否正常结束，转换前先检查原始帧中的错误与用量，已确认的失败不会被之后的成功事件覆盖。规则见[客户端可见的行为](gateway-resilience-client.md#已提交后的失败)。
+  - 上游的 408、409、422 按[错误响应](gateway-resilience-client.md#错误响应)保留状态码与字段，流内同样按入站协议写终止帧。
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
   - `native_prelude_whitelist`：原生 Responses 把 `response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不含内容的 added 事件也算作开场。
   - `strict_terminal`：明确识别失败终态，例如 raw Chat 透传中 `error` 后跟 `[DONE]` 判为失败；输出后断流、读错或停滞时按协议写失败终态，不再合成成功结束；启用 Responses 透传的首输出截止与停滞检测。
