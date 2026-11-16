@@ -56,7 +56,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	}
 	platform := NormalizeOpenAICompatiblePlatform(req.Platform)
 	gate := s
-	gateCtx := withResilienceLastResortGate(ctx)
+	gateCtx := withResilienceLastResortGate(context.WithValue(ctx, openAISelectionRequestKey{}, req))
 	now := s.selectionNow()
 	var cands []lastResortCandidate
 	meta := lastResortLogMeta{candidates: len(accounts)}

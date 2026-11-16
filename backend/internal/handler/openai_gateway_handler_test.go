@@ -2020,6 +2020,7 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	configureAdmission     func(*openAIWSUsageHandlerAccountRepoStub, *concurrencyCacheMock)
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
@@ -2195,7 +2196,8 @@ func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T)
 
 type openAIWSUsageHandlerAccountRepoStub struct {
 	service.AccountRepository
-	account service.Account
+	account       service.Account
+	lookupAccount func(service.Account) service.Account
 }
 
 func (s *openAIWSUsageHandlerAccountRepoStub) ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
@@ -2214,6 +2216,9 @@ func (s *openAIWSUsageHandlerAccountRepoStub) GetByID(ctx context.Context, id in
 		return nil, nil
 	}
 	account := s.account
+	if s.lookupAccount != nil {
+		account = s.lookupAccount(account)
+	}
 	return &account, nil
 }
 
@@ -3288,6 +3293,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return tc.acquireAccountSlot == nil || tc.acquireAccountSlot(), nil
 		},
 	}
+	if tc.configureAdmission != nil {
+		tc.configureAdmission(accountRepo, cache)
+	}
+
 	h := &OpenAIGatewayHandler{
 		cfg:                 cfg,
 		compositeResolver:   tc.compositeResolver,

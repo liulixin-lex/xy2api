@@ -5,9 +5,12 @@ import "context"
 // openAISelectionContext carries the effective scheduling group, independently
 // of whether its profit gate is enabled, plus continuation/migration guards.
 type openAISelectionContext struct {
-	service *OpenAIGatewayService
-	groupID int64
-	exempt  bool
+	service     *OpenAIGatewayService
+	groupID     int64
+	exempt      bool
+	request     *OpenAIAccountScheduleRequest
+	lastResort  bool
+	proxyBypass bool
 }
 type openAISelectionContextKey struct{}
 type openAISelectionExemptContextKey struct{}
@@ -46,17 +49,58 @@ func openAISelectionExempt(ctx context.Context) bool {
 	return exempt
 }
 func attachSelectionContext(ctx context.Context, selection *AccountSelectionResult) {
-	gate, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext)
-	if selection == nil || gate == nil {
+	if selection == nil {
 		return
 	}
-	copy := *gate
-	copy.exempt = openAISelectionExempt(ctx)
-	selection.selectionContext = &copy
+	gate, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext)
+	if _, hasRequest := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); gate == nil && !hasRequest {
+		return
+	}
+	var copied openAISelectionContext
+	if gate != nil {
+		copied = *gate
+	}
+	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+		// Preserve the effective route even with profit control disabled.
+		if req.GroupID != nil {
+			gid := *req.GroupID
+			req.GroupID = &gid
+		}
+		if req.ExcludedIDs != nil {
+			excluded := make(map[int64]struct{}, len(req.ExcludedIDs))
+			for id := range req.ExcludedIDs {
+				excluded[id] = struct{}{}
+			}
+			req.ExcludedIDs = excluded
+		}
+		copied.request = &req
+	}
+	copied.exempt = openAISelectionExempt(ctx)
+	copied.lastResort = resilienceLastResortGate(ctx)
+	copied.proxyBypass = openAIProxyStreamQuarantineBypassed(ctx)
+	selection.selectionContext = &copied
 }
 func contextWithSelectionContext(ctx context.Context, selection *AccountSelectionResult) context.Context {
 	if selection == nil || selection.selectionContext == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, openAISelectionContextKey{}, selection.selectionContext)
+	gate := selection.selectionContext
+	ctx = context.WithValue(ctx, openAISelectionContextKey{}, gate)
+	if gate.request != nil {
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, *gate.request)
+	}
+	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, gate.lastResort)
+	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, gate.proxyBypass)
+	return ctx
+}
+
+// WithOpenAISelectionRequestModel updates a persistent connection's request
+// constraints for the current turn while retaining its group and capabilities.
+func WithOpenAISelectionRequestModel(ctx context.Context, model string) context.Context {
+	req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if !ok {
+		return ctx
+	}
+	req.RequestedModel = model
+	return context.WithValue(ctx, openAISelectionRequestKey{}, req)
 }

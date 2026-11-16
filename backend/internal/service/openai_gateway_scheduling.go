@@ -1185,6 +1185,8 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
+	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
@@ -1217,6 +1219,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
 	}
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
 	if sessionHash != "" && s.cache != nil {
 		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1572,14 +1575,20 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 		observeSelectionFailure(ctx, latest.ID, "privacy_not_set", nil)
 		return nil
 	}
-	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s) {
-		return nil
+	if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s); reason != "" {
+		compactOutbound := ""
+		if requireCompact {
+			compactOutbound = s.openAICodexTicketOutboundModel(latest, requestedModel, true)
+		}
+		if reason != "model_rate_limited" || !lastResortModelLimitSoft(ctx, latest, requestedModel, requireCompact, compactOutbound) {
+			return nil
+		}
 	}
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
 		observeSelectionFailure(ctx, latest.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+	if !resilienceLastResortGate(ctx) && s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
 		observeSelectionFailure(ctx, latest.ID, "runtime_blocked", nil)
 		return nil
 	}
@@ -1587,7 +1596,7 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 		observeSelectionFailure(ctx, latest.ID, "account_scheduling_threshold", nil)
 		return nil
 	}
-	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
+	if !resilienceLastResortGate(ctx) && s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		observeSelectionFailure(ctx, latest.ID, "proxy_stream_quarantined", nil)
 		return nil
 	}
@@ -1726,18 +1735,46 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 	}
 }
 
-// SelectionAdmissionVetoLatest shares the profit-gate refresh and checks the
-// current account after acquiring a slot, including after a wait plan.
-// Quality is an ordering signal and never vetoes an already selected account.
+// SelectionAdmissionVetoLatest re-reads the authoritative account after taking
+// a slot, including a queued slot, and shares normal selection's admission gate.
 func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context, account *Account) (*Account, bool, string) {
-	latest, vetoed, reason := s.ProfitControlVetoLatest(ctx, account)
-	if vetoed {
-		if account != nil {
-			observeSelectionFailure(ctx, account.ID, reason, nil)
-		}
-		return latest, vetoed, reason
+	if account == nil {
+		return nil, true, "account_nil"
 	}
-	return latest, false, ""
+	req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if !ok {
+		req.Platform = account.Platform
+		if gate, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext); gate != nil && gate.groupID > 0 {
+			gid := gate.groupID
+			req.GroupID = &gid
+		}
+	}
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	// A cached group requirement from initial selection must not survive a wait.
+	req.RequirePrivacySet = s.loadOpenAIGroupRequiresPrivacySet(ctx, req.GroupID)
+	ctx = context.WithValue(ctx, openAIGroupPrivacyRequirementContextKey{}, openAIGroupPrivacyRequirement{
+		groupID: derefGroupID(req.GroupID), required: req.RequirePrivacySet,
+	})
+	latest := account
+	if s != nil && s.accountRepo != nil {
+		var err error
+		latest, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
+			return account, true, string(SelectionReasonDependencyError)
+		}
+	} else if s != nil && s.schedulerSnapshot != nil {
+		var err error
+		latest, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		if err != nil || latest == nil {
+			return account, true, string(SelectionReasonDependencyError)
+		}
+	}
+	latest, reason := s.recheckSelectionAdmission(ctx, req, latest)
+	if reason != "" {
+		observeSelectionFailure(ctx, account.ID, reason, nil)
+	}
+	return latest, reason != "", reason
 }
 
 // OpenAIQualityTurnPinned uses the same chain ownership predicate as
@@ -1868,6 +1905,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx contex
 }
 
 func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	if req.NoWait || openAISelectionNoWait(ctx) {
 		fallbackWait = false
 	}
