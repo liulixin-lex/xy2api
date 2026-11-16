@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
@@ -16,14 +17,50 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		return nil, unsupportedConversion("request", "request is nil")
 	}
 	_, is55 := claude.Claude55(req.Model)
+	return responsesToAnthropicRequest(req, is55, nil)
+}
+
+// ResponsesToAnthropicRequestWithOptions is the explicit API-key/Gemini
+// intermediate entry. Bridge-only policies remain gated by opts.Bridge.
+func ResponsesToAnthropicRequestWithOptions(req *ResponsesRequest, opts ConversionOptions) (*AnthropicRequest, error) {
+	if req == nil {
+		return nil, unsupportedConversion("request", "request is nil")
+	}
+	if bridgeEnabled(opts.Bridge) {
+		var err error
+		req, err = prepareBridgeAnthropicRequest(req, opts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	_, is55 := claude.Claude55(req.Model)
+	spec, ok := claude.Claude52(req.Model)
+	return responsesToAnthropicRequest(req, is55 || (ok && spec.PreserveSignedThinking), &opts)
+}
+
+func responsesToAnthropicRequest(req *ResponsesRequest, preserveThinking bool, opts *ConversionOptions) (*AnthropicRequest, error) {
 	out := &AnthropicRequest{CacheControl: req.CacheControl, Model: req.Model, Stream: req.Stream}
-	if err := applyAnthropicFieldPolicies(req, out); err != nil {
+	policyOpts := ConversionOptions{}
+	if opts != nil {
+		policyOpts = *opts
+	}
+	if err := applyAnthropicFieldPoliciesWithOptions(req, out, policyOpts); err != nil {
 		return nil, err
 	}
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)
+	input := req.Input
+	var restore map[string]string
+	if opts != nil {
+		var err error
+		input, restore, err = bridgeHistoryOccurrences(input)
+		if err != nil {
+			return nil, err
+		}
+	}
+	system, messages, err := convertResponsesInputToAnthropicWithOptions(req.Instructions, input, preserveThinking, opts, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}
+	restoreBridgeAnthropicHistory(messages, restore)
 	out.Messages = messages
 	if len(system) > 0 {
 		out.System = system
@@ -37,6 +74,10 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 // (for Anthropic's polymorphic system field) and a list of Anthropic messages.
 // chatCacheControls are ResponsesRequest.chatCacheControls, aligned with input.
 func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool, chatCacheControls ...*AnthropicCacheControl) (json.RawMessage, []AnthropicMessage, error) {
+	return convertResponsesInputToAnthropicWithOptions(instructions, inputRaw, preserveThinking, nil, chatCacheControls...)
+}
+
+func convertResponsesInputToAnthropicWithOptions(instructions string, inputRaw json.RawMessage, preserveThinking bool, opts *ConversionOptions, chatCacheControls ...*AnthropicCacheControl) (json.RawMessage, []AnthropicMessage, error) {
 	var systemParts []string
 	var systemBlocks []AnthropicContentBlock
 	if instructions != "" {
@@ -63,13 +104,14 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 	var messages []AnthropicMessage
 
-	for _, item := range items {
+	for itemIndex, item := range items {
+		field := fmt.Sprintf("input[%d]", itemIndex)
 		if item.Type != "" && item.Type != "message" && item.Type != "function_call" && item.Type != "function_call_output" && item.Type != "reasoning" {
 			return nil, nil, unsupportedConversion("input.type", "unsupported Responses input item")
 		}
 		switch {
 		case item.Role == "system" || item.Role == "developer":
-			validated, err := convertResponsesUserToAnthropicContent(item.Content)
+			validated, err := convertResponsesUserToAnthropicContentWithOptions(item.Content, opts, field+".content")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -81,7 +123,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			text := extractTextFromContent(item.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
-				converted, convErr := convertResponsesUserToAnthropicContent(item.Content)
+				converted, convErr := convertResponsesUserToAnthropicContentWithOptions(item.Content, opts, field+".content")
 				if convErr != nil {
 					return nil, nil, convErr
 				}
@@ -114,7 +156,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 		case item.Type == "function_call_output":
 			// function_call_output → user message with tool_result block
-			contentJSON, err := responsesFunctionOutputToAnthropicContent(item)
+			contentJSON, err := responsesFunctionOutputToAnthropicContentWithOptions(item, opts, field+".output")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -146,7 +188,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			}
 
 		case item.Role == "user":
-			content, err := convertResponsesUserToAnthropicContent(item.Content)
+			content, err := convertResponsesUserToAnthropicContentWithOptions(item.Content, opts, field+".content")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -206,7 +248,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.RawMessage, error) {
+func responsesFunctionOutputToAnthropicContentWithOptions(item ResponsesInputItem, opts *ConversionOptions, field string) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
 		output := item.Output
 		if output == "" {
@@ -228,7 +270,7 @@ func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.Ra
 			return json.Marshal(item.Output)
 		}
 		blocks := make([]AnthropicContentBlock, 0, len(parts))
-		for _, part := range parts {
+		for partIndex, part := range parts {
 			switch part.Type {
 			case "input_text", "output_text", "text":
 				if part.Text != "" {
@@ -237,7 +279,7 @@ func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.Ra
 			case "input_image", "input_file":
 				// The final part's cache marker is already lifted to tool_result.
 				part.CacheControl = nil
-				block, err := responsesMediaToAnthropic(part)
+				block, err := bridgeMediaToAnthropic(part, opts, fmt.Sprintf("%s[%d]", field, partIndex))
 				if err != nil {
 					return nil, err
 				}
@@ -428,7 +470,7 @@ func anthropicContentIsOnlyBlankText(content json.RawMessage) bool {
 	return true
 }
 
-func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
+func convertResponsesUserToAnthropicContentWithOptions(raw json.RawMessage, opts *ConversionOptions, field string) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return json.Marshal("") // empty string content
 	}
@@ -446,7 +488,7 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 	}
 
 	var blocks []AnthropicContentBlock
-	for _, p := range parts {
+	for partIndex, p := range parts {
 		switch p.Type {
 		case "input_text", "text":
 			if p.Text != "" {
@@ -457,7 +499,7 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 				})
 			}
 		case "input_image", "input_file":
-			block, err := responsesMediaToAnthropic(p)
+			block, err := bridgeMediaToAnthropic(p, opts, fmt.Sprintf("%s[%d]", field, partIndex))
 			if err != nil {
 				return nil, err
 			}

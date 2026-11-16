@@ -169,6 +169,10 @@ func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicC
 // AnthropicEventToResponsesState tracks state for converting a sequence of
 // Anthropic SSE events into Responses SSE events.
 type AnthropicEventToResponsesState struct {
+	bridgeRecord      func(ConversionNotice)
+	bridgeErr         error
+	bridgeSummaryOpen bool
+
 	Bridge         *BridgeOptions
 	CacheUsage     AnthropicUsage
 	ResponseID     string
@@ -270,6 +274,14 @@ func FinalizeAnthropicResponsesStream(state *AnthropicEventToResponsesState) []R
 	events = append(events, closeCurrentResponsesItem(state)...)
 
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false, state.bridgeRecord)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
+	}
 	events = append(events, makeResponsesCompletedEvent(state, status, incompleteDetails))
 	state.CompletedSent = true
 	return events
@@ -332,9 +344,15 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 		events = append(events, closeCurrentResponsesItem(state)...)
 
 		state.CurrentItemID = generateItemID()
+		if bridgeEnabled(state.Bridge) {
+			state.CurrentItemID = generateReasoningItemID()
+		}
 		state.CurrentItemType = "reasoning"
 		state.CurrentThinking = *evt.ContentBlock
 		state.CurrentSummary = evt.ContentBlock.Thinking
+		if bridgeEnabled(state.Bridge) {
+			state.CurrentSummary = ""
+		}
 		state.ContentIndex = 0
 
 		events = append(events, makeResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -344,6 +362,10 @@ func anthToResHandleContentBlockStart(evt *AnthropicStreamEvent, state *Anthropi
 				ID:   state.CurrentItemID,
 			},
 		}))
+
+		if bridgeEnabled(state.Bridge) {
+			events = append(events, appendAnthropicReasoningSummary(state, evt.ContentBlock.Thinking)...)
+		}
 
 	case "text":
 		// If we don't have an open message item, open one
@@ -433,6 +455,9 @@ func anthToResHandleContentBlockDelta(evt *AnthropicStreamEvent, state *Anthropi
 		})}
 
 	case "thinking_delta":
+		if bridgeEnabled(state.Bridge) {
+			return appendAnthropicReasoningSummary(state, evt.Delta.Thinking)
+		}
 		if evt.Delta.Thinking == "" {
 			return nil
 		}
@@ -474,6 +499,9 @@ func anthToResHandleContentBlockDelta(evt *AnthropicStreamEvent, state *Anthropi
 func anthToResHandleContentBlockStop(evt *AnthropicStreamEvent, state *AnthropicEventToResponsesState) []ResponsesStreamEvent {
 	switch state.CurrentItemType {
 	case "reasoning":
+		if bridgeEnabled(state.Bridge) {
+			return closeCurrentResponsesItem(state)
+		}
 		// Emit reasoning summary done + output item done
 		events := []ResponsesStreamEvent{
 			makeResponsesEvent(state, "response.reasoning_summary_text.done", &ResponsesStreamEvent{
@@ -582,6 +610,14 @@ func anthToResHandleMessageStop(state *AnthropicEventToResponsesState) []Respons
 	events = append(events, closeCurrentResponsesItem(state)...)
 
 	status, incompleteDetails := anthropicResponsesStreamTerminalState(state.StopReason)
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("anthropic", state.StopReason, bridgeOutputsHaveTools(state.Outputs), false, state.bridgeRecord)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
+	}
 	events = append(events, makeResponsesCompletedEvent(state, status, incompleteDetails))
 	state.CompletedSent = true
 	return events
@@ -612,6 +648,11 @@ func seedToolArguments(input json.RawMessage) string {
 func closeCurrentResponsesItem(state *AnthropicEventToResponsesState) []ResponsesStreamEvent {
 	if state.CurrentItemType == "" {
 		return nil
+	}
+
+	var events []ResponsesStreamEvent
+	if bridgeEnabled(state.Bridge) && state.CurrentItemType == "reasoning" {
+		events = append(events, closeAnthropicReasoningSummary(state)...)
 	}
 
 	// Assemble the full item: both output_item.done and response.completed must
@@ -659,10 +700,10 @@ func closeCurrentResponsesItem(state *AnthropicEventToResponsesState) []Response
 	state.OutputIndex++
 	state.ContentIndex = 0
 
-	return []ResponsesStreamEvent{makeResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
+	return append(events, makeResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
 		OutputIndex: state.OutputIndex - 1, // Use the index before increment
 		Item:        &item,
-	})}
+	}))
 }
 
 func makeResponsesCreatedEvent(state *AnthropicEventToResponsesState) ResponsesStreamEvent {
@@ -709,6 +750,9 @@ func makeResponsesCompletedEvent(
 	if status == "incomplete" {
 		eventType = "response.incomplete"
 	}
+	if bridgeEnabled(state.Bridge) {
+		eventType, _ = ResponsesTerminalEventType(status)
+	}
 
 	// Carry the output items accumulated over the stream. The SDK's
 	// get_final_response() reads them straight from the terminal event, so an
@@ -754,4 +798,10 @@ func generateItemID() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return "item_" + hex.EncodeToString(b)
+}
+
+func generateReasoningItemID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "rs_" + hex.EncodeToString(b)
 }

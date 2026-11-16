@@ -570,6 +570,13 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 // ChatCompletionsToResponsesStreamState + ResponsesEventToAnthropicState pair
 // into one state machine.
 type ChatCompletionsToAnthropicStreamState struct {
+	bridgeRecord          func(ConversionNotice)
+	bridgeHasRefusal      bool
+	bridgePendingThinking string
+	bridgeSlots           chatToolSlots
+	bridgeFlow            *bridgeAnthropicFlow
+	bridgeErr             error
+
 	Bridge           *BridgeOptions
 	MessageStartSent bool
 	MessageStopSent  bool
@@ -631,7 +638,11 @@ func ChatCompletionsChunkToAnthropicEvents(
 	chunk *ChatCompletionsChunk,
 	state *ChatCompletionsToAnthropicStreamState,
 ) []AnthropicStreamEvent {
-	if chunk == nil || state == nil {
+	return chatCompletionsChunkToAnthropicEventsWithParts(chunk, state, nil)
+}
+
+func chatCompletionsChunkToAnthropicEventsWithParts(chunk *ChatCompletionsChunk, state *ChatCompletionsToAnthropicStreamState, parts map[int][]ChatOutputPart) []AnthropicStreamEvent {
+	if chunk == nil || state == nil || state.Err() != nil {
 		return nil
 	}
 	if chunk.ID != "" {
@@ -651,10 +662,17 @@ func ChatCompletionsChunkToAnthropicEvents(
 		state.CacheCreationInputTokens = u.CacheCreationInputTokens
 	}
 
+	if bridgeEnabled(state.Bridge) {
+		return consumeBridgeAnthropicChunk(chunk, state, parts)
+	}
 	var events []AnthropicStreamEvent
 	events = append(events, ensureCCAnthropicMessageStart(state)...)
 
 	for _, choice := range chunk.Choices {
+		if bridgeEnabled(state.Bridge) && choice.Index != 0 {
+			state.bridgeErr = bridgeConversionError("choices.index", fmt.Errorf("unsupported choice index %d", choice.Index))
+			return events
+		}
 		// Reasoning content → thinking block.
 		reasoning := choice.Delta.reasoningText()
 		if reasoning != nil && *reasoning != "" {
@@ -676,7 +694,15 @@ func ChatCompletionsChunkToAnthropicEvents(
 		}
 
 		// Tool calls → tool_use blocks.
-		for _, toolCall := range choice.Delta.ToolCalls {
+		for position, toolCall := range choice.Delta.ToolCalls {
+			if bridgeEnabled(state.Bridge) {
+				idx, err := ResolveChatToolSlot(choice.Index, position, toolCall.Index, toolCall.ID, &state.bridgeSlots)
+				if err != nil {
+					state.bridgeErr = bridgeConversionError("tool_calls.index", err)
+					return events
+				}
+				toolCall.Index = &idx
+			}
 			events = append(events, closeCCAnthropicBlockIfOpen(state, "thinking")...)
 			events = append(events, handleCCAnthropicToolCall(state, &toolCall)...)
 		}
@@ -692,11 +718,26 @@ func ChatCompletionsChunkToAnthropicEvents(
 // FinalizeChatCompletionsAnthropicStream emits terminal Anthropic events
 // (close open blocks + message_delta + message_stop) when the stream ends.
 func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStreamState) []AnthropicStreamEvent {
-	if state == nil || state.MessageStopSent {
+	if state == nil || state.MessageStopSent || state.Err() != nil {
 		return nil
 	}
 
+	stopReason := ccFinishReasonToAnthropicStopReason(state.FinishReason, state.HasToolCall)
+	if bridgeEnabled(state.Bridge) {
+		_, projected, err := bridgeProjectTerminal("chat", "anthropic", state.FinishReason, state.HasToolCall && state.FinishReason != "length", state.bridgeHasRefusal, state.bridgeRecord)
+		if err != nil {
+			state.bridgeErr = err
+			return nil
+		}
+		stopReason = projected
+	}
 	var events []AnthropicStreamEvent
+	if bridgeEnabled(state.Bridge) {
+		events = append(events, finalizeBridgeAnthropicBlocks(state)...)
+		if state.Err() != nil {
+			return events
+		}
+	}
 	if !state.MessageStartSent {
 		events = append(events, ensureCCAnthropicMessageStart(state)...)
 	}
@@ -714,13 +755,18 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 		for _, idx := range idxs {
 			callID := state.pendingToolCallID[idx]
 			events = append(events, closeCCAnthropicBlock(state)...)
-			events = append(events, announceCCAnthropicToolBlock(state, idx, callID, "")...)
+			name := ""
+			if bridgeEnabled(state.Bridge) {
+				name = state.toolName[idx]
+				if callID == "" {
+					callID = generateItemID()
+				}
+			}
+			events = append(events, announceCCAnthropicToolBlock(state, idx, callID, name)...)
 		}
 	}
 
 	events = append(events, closeCCAnthropicBlock(state)...)
-
-	stopReason := ccFinishReasonToAnthropicStopReason(state.FinishReason, state.HasToolCall)
 
 	events = append(events,
 		AnthropicStreamEvent{
@@ -820,23 +866,32 @@ func handleCCAnthropicToolCall(state *ChatCompletionsToAnthropicStreamState, too
 		state.HasToolCall = true
 
 		callID := toolCall.ID
-		if callID == "" {
+		if callID == "" && !bridgeEnabled(state.Bridge) {
 			callID = generateItemID()
 		}
-		if name := toolCall.Function.Name; name != "" {
+		if name := toolCall.Function.Name; name != "" && (!bridgeEnabled(state.Bridge) || callID != "") {
 			events = append(events, announceCCAnthropicToolBlock(state, idx, callID, name)...)
 		} else {
 			state.toolAnnounced[idx] = false
 			state.pendingToolCallID[idx] = callID
+			if bridgeEnabled(state.Bridge) {
+				state.toolName[idx] = toolCall.Function.Name
+			}
 		}
-	} else if !state.toolAnnounced[idx] && toolCall.Function.Name != "" {
+	} else if !state.toolAnnounced[idx] && (toolCall.Function.Name != "" || (bridgeEnabled(state.Bridge) && state.toolName[idx] != "")) {
 		// Deferred announcement: the name has arrived.
 		callID := state.pendingToolCallID[idx]
 		if toolCall.ID != "" {
 			callID = toolCall.ID
 		}
 		events = append(events, closeCCAnthropicBlock(state)...)
-		events = append(events, announceCCAnthropicToolBlock(state, idx, callID, toolCall.Function.Name)...)
+		name := toolCall.Function.Name
+		if bridgeEnabled(state.Bridge) && name == "" {
+			name = state.toolName[idx]
+		}
+		if !bridgeEnabled(state.Bridge) || callID != "" {
+			events = append(events, announceCCAnthropicToolBlock(state, idx, callID, name)...)
+		}
 	}
 
 	// Argument fragment → input_json_delta on the tool's block once announced,
@@ -934,7 +989,7 @@ func closeCCAnthropicBlock(state *ChatCompletionsToAnthropicStreamState) []Anthr
 	}
 	idx := state.ContentBlockIndex
 	var events []AnthropicStreamEvent
-	if state.CurrentBlockType == "tool_use" && !state.CurrentToolHadDelta {
+	if state.CurrentBlockType == "tool_use" && !state.CurrentToolHadDelta && !bridgeTruncatedToolFinish(state) {
 		events = append(events, AnthropicStreamEvent{
 			Type:  "content_block_delta",
 			Index: &idx,
@@ -974,4 +1029,11 @@ func ccFinishReasonToAnthropicStopReason(reason string, hasToolCall bool) string
 		}
 		return "end_turn"
 	}
+}
+
+func (state *ChatCompletionsToAnthropicStreamState) Err() error {
+	if state == nil {
+		return nil
+	}
+	return state.bridgeErr
 }

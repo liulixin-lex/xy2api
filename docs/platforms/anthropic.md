@@ -105,7 +105,7 @@ Cline、Cherry Studio、new-api 中转、OpenAI SDK 等客户端使用同一个 
 |---|---|
 | system | 去掉请求里已有的 billing 块（以 `x-anthropic-billing-header:` 开头的文本块）和重复的 Claude Code 身份块，在最前面放一个 billing 块和一个身份块；其余 system 块的内容与顺序不变 |
 | 请求头 | `User-Agent: claude-cli/2.1.114 (external, sdk-cli)`、`X-App: cli`、`anthropic-version: 2023-06-01`；`anthropic-beta` 补齐 `claude-code-20250219`、`interleaved-thinking-2025-05-14`、`context-management-2025-06-27`、`prompt-caching-scope-2026-01-05`、`advisor-tool-2026-03-01`，客户端自带的其他 beta 保留（Beta 策略过滤的除外） |
-| 会话身份 | 改写 `metadata.user_id`（`metadata` 的其他字段不变），设置 `X-Claude-Code-Session-Id`。两者按用户、API 密钥、上游账号和会话派生，不同用户、不同密钥互不相同 |
+| 会话身份 | 改写 `metadata.user_id`（`metadata` 的其他字段不变），设置 `X-Claude-Code-Session-Id`。两者按用户、API 密钥、上游账号和会话派生，不同用户、不同密钥互不相同；`/v1/chat/completions`、`/v1/responses` 请求中可识别的 `metadata.user_id` 先回填为 Anthropic 的 `metadata.user_id`，再按本行改写 |
 
 会话依次取：客户端会话头（`session_id`、`conversation_id`、`X-Claude-Code-Session-Id` 等）→ `metadata.user_id` 中的 session_id → 粘性会话标识；都没有时，每个请求各用一个随机会话。同一会话每轮生成的 system 相同。
 
@@ -222,11 +222,13 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 字段 | 处理 | 说明 |
 |---|---|---|
 | `model`、`messages`、`input`、`instructions` | 映射 | 转为 Messages 的 `system` 与 `messages` |
-| `max_tokens`、`max_completion_tokens`、`max_output_tokens` | 映射 | 转为 `max_tokens`，`max_completion_tokens` 优先于 `max_tokens`；都没有时为 8192 |
+| `max_tokens`、`max_completion_tokens`、`max_output_tokens` | 映射 | 转为 `max_tokens`，Chat 按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的顺序取已提供值，Responses 取 `max_output_tokens`；都没有时为 8192 |
 | `stream`、`stream_options` | 映射 | 按入口协议返回流式事件 |
+| 图片的 `image_url.detail`、`input_image.detail`，文件的 `detail` | 校验后省略 | 图片接受 `auto`、`low`、`high`，文件只接受 `auto`，其他值返回 400；API Key 账号的错误 `param` 是原请求中的字段路径（如 `input[0].content[1].detail`）。合法提示去掉后照常发送图片与文件，图片的提示记录 `<字段路径>/omit` 降级。Chat 的 `image_url.detail` 按同样的取值校验。Anthropic 没有对应参数，质量与费用不保证与指定 `detail` 时相同 |
+| 工具历史 | 映射 | API Key 账号按轮次与出现顺序配对；后一轮复用同一 ID 时保留各轮自己的结果，历史工具不会补进本轮声明。缺结果、孤儿结果与同轮重复 ID 维持原有处理 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
-| function 工具、Responses `custom` 工具 | 映射 | 转为 Anthropic 工具；`parameters` 缺失、为 `null` 或为空数组 `[]`（PHP 客户端常见）时用空的 object schema |
+| function 工具、Responses `custom` 工具（含 namespace 中的工具） | 映射 | 转为 Anthropic 工具；`parameters` 缺失、为 `null` 或为空数组 `[]`（PHP 客户端常见）时用空的 object schema。API Key 账号上：名称超过 Anthropic 长度限制、含 Anthropic 不接受的字符，或 namespace 展开后重名的工具，以短别名发往上游，响应中还原原名；`tools` 与 `additional_tools` 中类型、namespace 路径和名称都相同的工具只发送第一份，后续不同的 schema、`strict` 或 format 记录 `<字段路径>/omit` 降级 |
 | Anthropic 原生工具类型（`bash_20250124` 这类 `名称_YYYYMMDD`） | Responses 透传，Chat 丢弃 | Responses 按原定义转发；Chat Completions 中去掉 |
 | `web_search`、`web_search_preview`、`code_execution` | 映射（网关扩展） | 两个入口都支持；前两种转为 Anthropic `web_search_20250305` |
 | `google_search`、`web_search_20250305` | Responses 映射（网关扩展），Chat 丢弃 | Responses 中转为 Anthropic `web_search_20250305`；Chat Completions 中去掉 |
@@ -235,17 +237,17 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具 schema，根为 `allOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取并集；没有 `type` 的分支视为 object |
 | 工具 schema，根为 `anyOf`、`oneOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取交集；没有 `type` 的分支（如只写了 `required`）视为 object |
 | 工具 schema，根不是 object，或联合分支显式声明了非 object 类型 | 报错 | 400，`param` 指向 `tools[i]…parameters` |
-| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`；`allowed_tools` 按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
+| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`。`allowed_tools`：API Key 账号只发送允许的工具，重复项去重，未知项忽略并记录降级，`mode: auto` 且允许列表为空时转为 `none`，只在历史中出现的工具不会补进本轮声明；OAuth 账号仍只按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
 | Chat 历史的 `tool_calls[].function.arguments` | 保留 | 原样保留上一轮参数，空字符串按 `{}` 处理；不因参数不是完整 JSON 而新增本地拒绝 |
 | `parallel_tool_calls` | 映射 | `false` 转为 `disable_parallel_tool_use: true` |
 | `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射 |
 | `response_format` 的 `json_object` | 忽略（网关放宽） | Anthropic 没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema` |
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
 | `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理 |
-| 图片的 `image_url.detail`、`input_image.detail` | 省略并记录 | `auto`、`low`、`high` 时去掉该提示并记录 `<字段路径>/omit` 降级，图片照常发送；其他值返回 400。Anthropic 没有对应参数，质量与费用不保证与指定 `detail` 时相同 |
+| `metadata`、`user` | 部分映射 | API Key 账号上，可识别的 `metadata.user_id` 作为 Anthropic 的 `metadata.user_id` 发送（兼容账号随后按 [Claude Code 请求兼容](#claude-code-请求兼容api-key-账号) 改写）；其余 `metadata` 字段与 `user` 不发送，也不把 `user` 当作身份。OAuth 账号不变 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
-| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
+| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
 
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 
@@ -262,7 +264,11 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 
 流式响应已经开始时，Chat Completions 以流内错误事件、Responses 以 `response.failed` 事件返回，`type` 与 `code` 相同。
 
+`/v1/responses` 的流式响应中，每段 thinking 摘要依次发出 `response.reasoning_summary_part.added`、文本增量、带完整文本的 `response.reasoning_summary_text.done` 与 `response.reasoning_summary_part.done`，之后才结束该 reasoning 项；只有签名或 redacted thinking 时不生成空摘要。
+
 ## 限制与注意事项
 
 - Anthropic Claude 与 Antigravity Claude 不能在同一上下文中混用。如果 Antigravity 账号开启了混合调度，请用分组隔离，见 [Antigravity](antigravity.md)。
 - 提示词缓存的自动补断点、缓存 TTL 与计费规则见 [提示词缓存](../guides/caching.md)。
+
+Anthropic 上游的结束原因转为 Chat Completions 与 Responses 时，非流式与流式相同：`max_tokens`、`model_context_window_exceeded` 为截断（Chat 为 `length`，Responses 为 `incomplete`），`refusal` 保留已收到的正文；`pause_turn` 返回错误；其他未列出的结束原因按正常结束处理，并记录 `map` 降级。

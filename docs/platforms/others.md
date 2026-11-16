@@ -28,6 +28,29 @@ Embeddings、图片、视频、语音等端点对这些平台返回 `404 not_fou
 
 - **客户端配置**：「使用密钥」弹窗提供 Claude Code、Codex CLI 与 OpenCode 三个选项卡。Claude Code 的写法与 [Anthropic](anthropic.md#claude-code) 相同（`ANTHROPIC_BASE_URL` 填根地址，不带 `/v1`）；Codex CLI 使用 `env_key = "XY2API_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false`，并可加载当前分组的远程模型目录。
 
+### 协议转换
+
+入站协议不是账号（或模型）所用的上游协议时，网关在两种协议之间转换请求与响应。转为 Anthropic Messages 上游时，工具名、`allowed_tools`、重复声明与工具历史的处理同 [Anthropic 协议转换字段表](anthropic.md#协议转换字段表)。以下是转为 Chat Completions 上游（入站为 `/v1/responses` 或 `/v1/messages`）时的处理。
+
+请求：
+
+- **字段**：Responses 的字符串 `user` 原样转发，`metadata` 与非字符串 `user` 省略并记录 `<字段路径>/omit` 降级，`text.verbosity` 转为 `verbosity`。
+- **工具名**：名称超长、含非 ASCII 字符，或 namespace 展开后重名的工具，以短别名发往上游；工具声明、具名的 `tool_choice`、历史与响应使用同一套别名，响应中还原原名。只在历史里出现的工具不会补进本轮声明。同协议直通时不改名。
+- **namespace 中的 custom 工具**：以 `{"input":"原文"}` 作为参数发往上游，响应中还原原 namespace、名称与 custom 类型。
+- **重复声明与发现工具**：`tools` 与输入中的 `additional_tools` 里类型、namespace 路径和名称都相同的工具只发送先出现的一份；后续不同的 schema 记录 `<字段路径>/omit` 降级，不报错。通过 tool_search 发现的工具只加入一次，长名与 namespace 工具同样使用短别名。
+- **允许工具**：`allowed_tools` 仅发送允许的声明；允许列表为空时，同时省略 `tools` 与 `tool_choice`，本轮不允许工具调用。
+- **历史 reasoning**：取 `summary_text`，为空时按顺序拼接 `reasoning_text`；普通 text、密文与签名不作为推理文本。
+- **工具历史**：按轮次与出现顺序配对，后一轮复用同一 ID 不再覆盖前一轮的结果；旧式按同名先后配对、交错消息与工具结果中的媒体照旧。
+
+响应：
+
+- **content 数组**：`content` 可以是字符串、`null`，或按顺序包含 `text`、`thinking` 的数组，转换后保持原顺序；thinking 支持字符串、含 text 的对象，以及按顺序拼接的字符串/text 对象数组。数组里已有 thinking 时不再重复输出 `reasoning_content`。其他类型的片段忽略并记录 `<字段路径>/omit` 降级；片段缺少 `type`，或 `text`、thinking 的文本不是字符串时返回错误。
+- **reasoning**：`reasoning_content`、`reasoning` 在正文或工具调用开始之后才到时，不再新开 reasoning 项，也不改写已结束的摘要。只有空白的 reasoning 不生成 thinking 块；流式中的前导空白先暂存，出现非空白内容后连同前缀一起发出。
+- **工具调用**：允许缺省或不连续的 `index`，按 index、调用 ID 与位置确定每个调用；工具调用片段无法确定归属，或位于非 0 的 choice 中时返回错误。转为 Messages 时，工具参数完成前到达的正文、thinking 与其他工具先排队，之后按顺序发出，迟到的参数不会写进已关闭的块。长度或过滤结束时，已排队正文与工具参数片段按顺序保留，不补空对象。
+- **工具参数与截断**：上游生成的普通函数参数不是合法 JSON 时返回错误，不再删掉该调用后报成功；custom 的原文不做 JSON 校验。`finish_reason` 为 `length` 时，Responses 中的工具调用不作为完成的调用交付，即使参数恰好是合法 JSON 或为空。
+- **结束原因**：非流式与流式相同。`length` 为截断（Responses 以 `response.incomplete` 结束），`content_filter` 保留为过滤，拒答保留正文（Responses 为 refusal 片段，Messages 为正文）；其他未列出的结束原因按正常结束处理，并记录 `map` 降级。以 DONE 或完整尾部用量正常收尾时，省略 finish_reason 的完整工具调用仍正常交付。
+- **项 ID**：网关合成的 reasoning 项 ID 以 `rs_` 开头；reasoning 与工具调用（function、custom、tool_search）在 added、done 事件与最终响应中使用同一个 ID。
+
 ## Kimi（`kimi`）
 
 | 接入模式 | 说明 | Chat Completions / Responses | Anthropic |

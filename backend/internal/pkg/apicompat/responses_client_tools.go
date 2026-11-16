@@ -21,6 +21,10 @@ type ResponsesClientToolMapping struct {
 // ordinary function tools. It mutates req and returns the mapping required to
 // restore the upstream response.
 func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, bool, error) {
+	return adaptResponsesClientTools(req, true)
+}
+
+func adaptResponsesClientTools(req map[string]any, promote bool) (ResponsesClientToolMapping, bool, error) {
 	if req == nil {
 		return ResponsesClientToolMapping{}, false, nil
 	}
@@ -28,9 +32,13 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if !ok || len(tools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	discovered, err := promoteResponsesToolSearchDiscoveries(req)
-	if err != nil {
-		return ResponsesClientToolMapping{}, false, err
+	discovered := false
+	if promote {
+		var err error
+		discovered, err = promoteResponsesToolSearchDiscoveries(req)
+		if err != nil {
+			return ResponsesClientToolMapping{}, false, err
+		}
 	}
 	if discovered {
 		tools, _ = req["tools"].([]any)
@@ -492,7 +500,7 @@ func RestoreResponsesClientToolPayload(payload []byte, mapping ResponsesClientTo
 		return payload, false, err
 	}
 	rebuiltPayload := bytes.TrimSuffix(rebuilt.Bytes(), []byte("\n"))
-	if len(mapping.NamespaceTools) == 0 {
+	if bridgeEnabled(mapping.Bridge) || len(mapping.NamespaceTools) == 0 {
 		return rebuiltPayload, true, nil
 	}
 	restored, _, err := RestoreResponsesNamespaceCalls(rebuiltPayload, mapping.NamespaceTools)
@@ -503,6 +511,9 @@ func RestoreResponsesClientToolPayload(payload []byte, mapping ResponsesClientTo
 }
 
 func restoreClientToolValue(value any, adapter *ResponsesClientToolMapping) bool {
+	if bridgeEnabled(adapter.Bridge) {
+		return restoreBridgeRawValue(value, adapter.Bridge.ToolNames)
+	}
 	changed := false
 	switch typed := value.(type) {
 	case []any:
@@ -617,7 +628,7 @@ func (r *ResponsesClientToolStreamRestorer) Restore(event ResponsesStreamEvent) 
 				if input != "" {
 					emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.delta", OutputIndex: call.outputIdx, ItemID: call.clientItemID, Delta: input})
 				}
-				emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", OutputIndex: call.outputIdx, ItemID: call.clientItemID, CallID: call.callID, Name: call.name, Input: input})
+				emit(ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", OutputIndex: call.outputIdx, ItemID: call.clientItemID, CallID: call.callID, Name: bridgeRestoredToolName(call.name, r.adapter.Bridge), Input: input})
 			}
 			return out
 		}
@@ -843,6 +854,15 @@ func (r *ResponsesClientToolStreamRestorer) callFor(event ResponsesStreamEvent) 
 }
 
 func (r *ResponsesClientToolStreamRestorer) restoreNamespaceEvent(event ResponsesStreamEvent) ResponsesStreamEvent {
+	if bridgeEnabled(r.adapter.Bridge) {
+		restoreBridgeOutputIdentity(event.Item, r.adapter.Bridge.ToolNames)
+		if r.adapter.Bridge.ToolNames != nil {
+			if id, ok := r.adapter.Bridge.ToolNames.Reverse[event.Name]; ok {
+				event.Name = id.Name
+			}
+		}
+		return event
+	}
 	if len(r.adapter.NamespaceTools) == 0 {
 		return event
 	}
@@ -860,6 +880,12 @@ func (r *ResponsesClientToolStreamRestorer) restoreNamespaceEvent(event Response
 }
 
 func restoreResponsesOutputClientTools(outputs []ResponsesOutput, adapter *ResponsesClientToolMapping) {
+	if bridgeEnabled(adapter.Bridge) {
+		for i := range outputs {
+			restoreBridgeOutputIdentity(&outputs[i], adapter.Bridge.ToolNames)
+		}
+		return
+	}
 	for index := range outputs {
 		output := &outputs[index]
 		if output.Type != "function_call" {

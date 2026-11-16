@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -49,6 +50,14 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
+	if opts != nil && bridgeEnabled(opts.Bridge) {
+		return responsesToChatBridgeRequest(req, opts)
+	}
+	return responsesToChatCompletionsRequest(req, opts, false)
+}
+
+// preparedTools means the explicit bridge has already merged and promoted tools.
+func responsesToChatCompletionsRequest(req *ResponsesRequest, opts *ResponsesToChatOptions, preparedTools bool) (*ChatCompletionsRequest, error) {
 	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
 		return nil, err
 	}
@@ -76,7 +85,10 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
-	effectiveTools, err := EffectiveResponsesTools(req)
+	effectiveTools := req.Tools
+	if !preparedTools {
+		effectiveTools, err = EffectiveResponsesTools(req)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1571,9 +1583,13 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 		return nil
 	}
 	out := &ResponsesUsage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
-		TotalTokens:  usage.TotalTokens,
+		UsagePresenceKnown:  usage.UsagePresenceKnown,
+		InputTokensPresent:  usage.PromptTokensPresent,
+		OutputTokensPresent: usage.CompletionTokensPresent,
+		TotalTokensPresent:  usage.TotalTokensPresent,
+		InputTokens:         usage.PromptTokens,
+		OutputTokens:        usage.CompletionTokens,
+		TotalTokens:         usage.TotalTokens,
 	}
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
@@ -1597,6 +1613,14 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 // ChatCompletionsToResponsesStreamState tracks state while converting Chat
 // Completions SSE chunks into Responses SSE events.
 type ChatCompletionsToResponsesStreamState struct {
+	bridgeRecord        func(ConversionNotice)
+	bridgeParts         []bridgeChatPart
+	bridgePartOpen      bool
+	bridgeMessageClosed bool
+	bridgeSlots         chatToolSlots
+	bridgeErr           error
+	bridgeLateReasoning strings.Builder
+
 	Bridge         *BridgeOptions
 	ResponseID     string
 	Model          string
@@ -1694,6 +1718,9 @@ func (state *ChatCompletionsToResponsesStreamState) ValidateToolCallArguments() 
 	if state == nil {
 		return nil
 	}
+	if bridgeEnabled(state.Bridge) {
+		return validateBridgeStreamTools(state)
+	}
 	for idx, toolCall := range state.ToolCalls {
 		if toolCall == nil {
 			continue
@@ -1724,8 +1751,11 @@ func ChatCompletionsChunkToResponsesEvents(
 	chunk *ChatCompletionsChunk,
 	state *ChatCompletionsToResponsesStreamState,
 ) []ResponsesStreamEvent {
-	if chunk == nil || state == nil {
+	if chunk == nil || state == nil || state.Err() != nil {
 		return nil
+	}
+	if bridgeEnabled(state.Bridge) && state.Bridge.ToolNames != nil {
+		state.CustomTools, state.FunctionTools, state.NamespaceTools = bridgeChatNameIndexes(state.Bridge.ToolNames)
 	}
 	if chunk.ID != "" {
 		state.ResponseID = chunk.ID
@@ -1744,12 +1774,23 @@ func ChatCompletionsChunkToResponsesEvents(
 	events = append(events, ensureChatToResponsesCreated(state)...)
 
 	for _, choice := range chunk.Choices {
+		if bridgeEnabled(state.Bridge) && choice.Index != 0 {
+			state.bridgeErr = bridgeConversionError("choices.index", fmt.Errorf("unsupported choice index %d", choice.Index))
+			return events
+		}
+		if bridgeEnabled(state.Bridge) && choice.Delta.Refusal != nil && *choice.Delta.Refusal != "" {
+			events = append(events, closeChatReasoningItem(state)...)
+			events = append(events, closeBridgeOriginalMessage(state)...)
+			events = append(events, appendBridgeChatPart(state, ChatOutputPart{Kind: "refusal", Text: *choice.Delta.Refusal})...)
+		}
 		// Reasoning is emitted as its own output item and must be opened
 		// (output_item.added + reasoning_summary_part.added) before the first
 		// delta, otherwise a strict client discards the delta. The leading
 		// empty-string reasoning delta upstreams send is filtered out.
 		reasoning := choice.Delta.reasoningText()
-		if reasoning != nil && *reasoning != "" {
+		if reasoning != nil && *reasoning != "" && bridgeEnabled(state.Bridge) && state.ReasoningDone {
+			_, _ = state.bridgeLateReasoning.WriteString(*reasoning)
+		} else if reasoning != nil && *reasoning != "" {
 			events = append(events, ensureChatReasoningItem(state)...)
 			_, _ = state.Reasoning.WriteString(*reasoning)
 			events = append(events, chatToResponsesEvent(state, "response.reasoning_summary_text.delta", &ResponsesStreamEvent{
@@ -1773,17 +1814,25 @@ func ChatCompletionsChunkToResponsesEvents(
 				ItemID:       state.MessageItemID,
 			}))
 		}
-		for _, toolCall := range choice.Delta.ToolCalls {
+		for position, toolCall := range choice.Delta.ToolCalls {
 			idx := 0
 			if toolCall.Index != nil {
 				idx = *toolCall.Index
+			}
+			if bridgeEnabled(state.Bridge) {
+				var err error
+				idx, err = ResolveChatToolSlot(choice.Index, position, toolCall.Index, toolCall.ID, &state.bridgeSlots)
+				if err != nil {
+					state.bridgeErr = bridgeConversionError("tool_calls.index", err)
+					return events
+				}
 			}
 			stored, ok := state.ToolCalls[idx]
 			if !ok {
 				// A tool call closes any open reasoning item first.
 				events = append(events, closeChatReasoningItem(state)...)
 				copyCall := toolCall
-				if copyCall.ID == "" {
+				if copyCall.ID == "" && !bridgeEnabled(state.Bridge) {
 					copyCall.ID = generateItemID()
 				}
 				copyCall.Type = "function"
@@ -1799,6 +1848,10 @@ func ChatCompletionsChunkToResponsesEvents(
 				state.ToolItemIDs[idx] = generateItemID()
 				state.ToolOutputIndex[idx] = state.allocOutputIndex()
 			} else {
+				if bridgeEnabled(state.Bridge) && state.toolAnnounced[idx] && ((toolCall.ID != "" && toolCall.ID != stored.ID) || (toolCall.Function.Name != "" && toolCall.Function.Name != stored.Function.Name)) {
+					state.bridgeErr = bridgeConversionError("tool_calls", fmt.Errorf("announced tool identity changed"))
+					return events
+				}
 				if toolCall.ID != "" {
 					stored.ID = toolCall.ID
 				}
@@ -1834,18 +1887,40 @@ func ChatCompletionsChunkToResponsesEvents(
 
 // FinalizeChatCompletionsResponsesStream emits terminal Responses events.
 func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
-	if state == nil || state.CompletedSent {
+	if state == nil || state.CompletedSent || state.Err() != nil {
 		return nil
+	}
+	if bridgeEnabled(state.Bridge) {
+		if err := state.ValidateToolCallArguments(); err != nil {
+			state.bridgeErr = err
+			return nil
+		}
+	}
+	status := "completed"
+	var incompleteDetails *ResponsesIncompleteDetails
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		status, incompleteDetails, err = bridgeResponsesTerminal("chat", state.FinishReason, len(state.ToolCalls) > 0 && state.FinishReason != "length", false, state.bridgeRecord)
+		if err != nil {
+			state.bridgeErr = err
+			return nil
+		}
+	} else if state.FinishReason == "length" {
+		status = "incomplete"
+		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
 	}
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)
+	if bridgeEnabled(state.Bridge) {
+		events = append(events, closeBridgeChatPart(state)...)
+	}
 
 	// Close a reasoning item that never transitioned to content (reasoning-only
 	// or empty completion).
 	events = append(events, closeChatReasoningItem(state)...)
 	events = append(events, synthesizeChatReasoningFallbackMessage(state)...)
 
-	if state.MessageItemID != "" {
+	if state.MessageItemID != "" && !state.bridgeMessageClosed {
 		if state.TextPartOpen {
 			events = append(events, chatToResponsesEvent(state, "response.output_text.done", &ResponsesStreamEvent{
 				OutputIndex:  state.MessageIndex,
@@ -1878,15 +1953,17 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	// Mirrors cc-switch's finalize_tools.
 	events = append(events, closeChatToolItems(state)...)
 
-	status := "completed"
-	var incompleteDetails *ResponsesIncompleteDetails
-	if state.FinishReason == "length" {
-		status = "incomplete"
-		incompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+	eventType := "response.completed"
+	if bridgeEnabled(state.Bridge) {
+		var err error
+		eventType, err = ResponsesTerminalEventType(status)
+		if err != nil {
+			state.bridgeErr = err
+			return events
+		}
 	}
-
 	state.CompletedSent = true
-	events = append(events, chatToResponsesEvent(state, "response.completed", &ResponsesStreamEvent{
+	events = append(events, chatToResponsesEvent(state, eventType, &ResponsesStreamEvent{
 		Response: &ResponsesResponse{
 			ID:                state.ResponseID,
 			Object:            "response",
@@ -1929,6 +2006,9 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 	}
 	state.ReasoningOpen = true
 	state.ReasoningItemID = generateItemID()
+	if bridgeEnabled(state.Bridge) {
+		state.ReasoningItemID = generateReasoningItemID()
+	}
 	state.ReasoningIndex = state.allocOutputIndex()
 	return []ResponsesStreamEvent{
 		chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -1947,6 +2027,9 @@ func ensureChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Res
 // closeChatReasoningItem emits the reasoning item's terminal events
 // (reasoning_summary_text.done + reasoning_summary_part.done + output_item.done).
 func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if bridgeEnabled(state.Bridge) {
+		state.ReasoningDone = true
+	}
 	if !state.ReasoningOpen {
 		return nil
 	}
@@ -1979,6 +2062,9 @@ func closeChatReasoningItem(state *ChatCompletionsToResponsesStreamState) []Resp
 }
 
 func synthesizeChatReasoningFallbackMessage(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if len(state.bridgeParts) > 0 {
+		return nil
+	}
 	if state == nil ||
 		state.MessageItemID != "" ||
 		state.Text.Len() > 0 ||
@@ -2048,6 +2134,14 @@ func announceChatToolItem(
 	if state.toolAnnounced[idx] {
 		return nil
 	}
+	if bridgeEnabled(state.Bridge) {
+		if !force && (stored.Function.Name == "" || stored.ID == "") {
+			return nil
+		}
+		if force && stored.ID == "" {
+			stored.ID = generateItemID()
+		}
+	}
 	if !force && stored.Function.Name == "" && (len(state.CustomTools) > 0 || len(state.FunctionTools) > 0 || state.ToolSearchDeclared || len(state.NamespaceTools) > 0) {
 		return nil
 	}
@@ -2102,6 +2196,9 @@ func announceChatToolItem(
 // arguments so codex can deserialize and execute the call. Mirrors cc-switch's
 // finalize_tools.
 func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if bridgeEnabled(state.Bridge) && state.FinishReason == "length" {
+		return nil
+	}
 	if len(state.ToolCalls) == 0 {
 		return nil
 	}
@@ -2205,14 +2302,14 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	if state.Reasoning.Len() > 0 {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "reasoning",
-			ID:   generateItemID(),
+			ID:   chatBridgeReasoningItemID(state),
 			Summary: []ResponsesSummary{{
 				Type: "summary_text",
 				Text: state.Reasoning.String(),
 			}},
 		})
 	}
-	if state.MessageItemID != "" || len(state.ToolCalls) == 0 {
+	if state.MessageItemID != "" || (len(state.ToolCalls) == 0 && len(state.bridgeParts) == 0) {
 		outputs = append(outputs, ResponsesOutput{
 			Type: "message",
 			ID:   nonEmpty(state.MessageItemID, generateItemID()),
@@ -2230,13 +2327,13 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			continue
 		}
 		arguments := toolCall.Function.Arguments
-		if strings.TrimSpace(arguments) == "" {
+		if strings.TrimSpace(arguments) == "" && (!bridgeEnabled(state.Bridge) || state.FinishReason != "length") {
 			arguments = "{}"
 		}
 		if state.toolIsCustom[i] {
 			outputs = append(outputs, ResponsesOutput{
 				Type:   "custom_tool_call",
-				ID:     generateItemID(),
+				ID:     chatBridgeToolItemID(state, i),
 				CallID: toolCall.ID,
 				Name:   customNameForStreamTool(state, toolCall.Function.Name),
 				Input:  extractCustomToolCallInput(arguments),
@@ -2247,7 +2344,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if state.toolIsToolSearch[i] {
 			outputs = append(outputs, ResponsesOutput{
 				Type:      "tool_search_call",
-				ID:        generateItemID(),
+				ID:        chatBridgeToolItemID(state, i),
 				CallID:    toolCall.ID,
 				Arguments: arguments,
 				Status:    "completed",
@@ -2260,13 +2357,40 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
-			ID:        generateItemID(),
+			ID:        chatBridgeToolItemID(state, i),
 			CallID:    toolCall.ID,
 			Name:      name,
 			Namespace: namespace,
 			Arguments: arguments,
 			Status:    "completed",
 		})
+	}
+	if bridgeEnabled(state.Bridge) {
+		for i := range outputs {
+			if state.FinishReason == "length" && (outputs[i].Type == "function_call" || outputs[i].Type == "custom_tool_call" || outputs[i].Type == "tool_search_call") {
+				outputs[i].Status = "incomplete"
+			}
+			restoreBridgeOutputIdentity(&outputs[i], state.Bridge.ToolNames)
+		}
+	}
+	if bridgeEnabled(state.Bridge) {
+		indices := make(map[string]int)
+		for _, part := range state.bridgeParts {
+			outputs = append(outputs, part.output)
+			indices[part.output.ID] = part.index
+		}
+		for slot, id := range state.ToolItemIDs {
+			indices[id] = state.ToolOutputIndex[slot]
+		}
+		for _, output := range outputs {
+			if output.Type == "reasoning" && output.ID == state.ReasoningItemID {
+				indices[output.ID] = state.ReasoningIndex
+			}
+			if output.Type == "message" && output.ID == state.MessageItemID {
+				indices[output.ID] = state.MessageIndex
+			}
+		}
+		sort.SliceStable(outputs, func(i, j int) bool { return indices[outputs[i].ID] < indices[outputs[j].ID] })
 	}
 	return outputs
 }
@@ -2281,6 +2405,10 @@ func chatToResponsesEvent(
 	evt := *template
 	evt.Type = eventType
 	evt.SequenceNumber = seq
+	if bridgeEnabled(state.Bridge) {
+		restoreBridgeOutputIdentity(evt.Item, state.Bridge.ToolNames)
+		evt.Name = bridgeRestoredToolName(evt.Name, state.Bridge)
+	}
 	return evt
 }
 
@@ -2313,4 +2441,21 @@ func nonEmpty(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func (state *ChatCompletionsToResponsesStreamState) Err() error {
+	if state == nil {
+		return nil
+	}
+	return state.bridgeErr
+}
+func chatBridgeToolItemID(state *ChatCompletionsToResponsesStreamState, slot int) string {
+	return state.ToolItemIDs[slot]
+}
+
+func chatBridgeReasoningItemID(state *ChatCompletionsToResponsesStreamState) string {
+	if bridgeEnabled(state.Bridge) {
+		return state.ReasoningItemID
+	}
+	return generateItemID()
 }

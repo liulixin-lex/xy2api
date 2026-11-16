@@ -56,6 +56,12 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 - 工具参数：上游生成的普通函数参数不是合法 JSON 时以错误结束，不修补；成功结束而参数为空时按 `{}` 交付。明确的输出上限截断以 `length` 结束，incomplete 未给原因或工具参数不完整时以 `stop` 结束，都不会以 `tool_calls` 交给客户端执行。流内事件之间的同一调用身份或参数与已发部分矛盾时以错误结束；结束事件更换 item ID 则按内容与顺序对应。
 
 
+Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见 [其他平台](../platforms/others.md#协议转换)）：
+
+- 长度截断与内容过滤是合法结束：Responses 以 `response.incomplete` 结束，事件类型与响应体的 `status` 一致；只有转换出错时才以 `response.failed` 结束。Anthropic 上游的 `pause_turn` 按错误结束。
+- 转为 Responses 时，Chat 上游因 `length` 截断的工具调用不发送参数完成事件，也不发送完成的工具项（即使参数是合法 JSON 或为空）；已收到的文本、参数片段和用量照常保留。
+- 上游生成的工具参数不是合法 JSON，或工具调用片段无法确定归属、位于非 0 的 choice 中时，按上表写终止帧，不会删掉该调用后报成功。转为 Messages 时，工具参数未完成前不会因交错的正文关闭工具块；长度或过滤结束时保留参数片段和排队正文，不补空参数。
+
 ### `response.failed` 的重试时间
 
 `errors.failed_frame_retry_after` 开启时（默认），合成的 `response.failed` 在 `error.headers.retry-after` 中给出重试时间（Codex 从这里读取），正文 “try again in Ns” 的 N 与之相同：
@@ -68,7 +74,7 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 
 ### 正文前失败的换号
 
-上游已经发出开场事件、但还没有正文时失败（过载、服务忙、断流、读错），网关会换号重试，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 ID），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。`response.incomplete`、内容拒绝与只有用量的合法空回答照常返回，不重放。一旦写出正文（哪怕只写出一部分），就不再换号。
+上游已经发出开场事件、但还没有正文时失败（过载、服务忙、断流、读错），网关会换号重试，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 ID），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。包括工具被 length 截断在内的 `response.incomplete`、内容拒绝与只有用量的合法空回答照常返回，不重放。一旦写出正文（哪怕只写出一部分），就不再换号。
 
 ### 中转伪保活帧
 
