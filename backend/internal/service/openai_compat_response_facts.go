@@ -35,18 +35,16 @@ func observeOpenAICompatFrame(c *gin.Context, resp *http.Response, frame openAIC
 		source = "upstream_sse_terminal"
 	}
 	if observed, present := openAIResponsesUsageEvidence(data, source); present {
-		if terminal.Seen && terminal.Valid {
-			if openAIUsageHasTokens(&observed) || !openAIUsageHasTokens(usage) {
-				*usage = observed
-			}
-		} else {
-			mergeOpenAIUsageNonZero(usage, observed)
+		adopt := !terminal.Seen || !terminal.Valid || openAIUsageHasTokens(&observed) || !openAIUsageHasTokens(usage)
+		if adopt {
+			mergeOpenAICompatObservedUsage(usage, observed, terminal.Seen && terminal.Valid)
+			facts.UsageSource = source
 		}
 		usage.InputTokensPresent = usage.InputTokensPresent || observed.InputTokensPresent
 		usage.OutputTokensPresent = usage.OutputTokensPresent || observed.OutputTokensPresent
 		usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent || observed.CacheReadInputTokensPresent
 		usage.CacheCreationInputTokensPresent = usage.CacheCreationInputTokensPresent || observed.CacheCreationInputTokensPresent
-		facts.UsagePresent, facts.UsageSource = true, source
+		facts.UsagePresent = true
 	}
 	if terminal.Seen {
 		facts.TerminalSeen, facts.TerminalValid = true, terminal.Valid
@@ -113,4 +111,26 @@ func openAICompatFailedTerminalResponse(terminal OpenAIResponsesTerminal, payloa
 		}
 	}
 	return &apicompat.ResponsesResponse{ID: root.Get("id").String(), Model: root.Get("model").String(), Status: "failed", Error: &apicompat.ResponsesError{Code: code, Message: message}}
+}
+
+// Merge raw fields independently; an absent field cannot erase an earlier count.
+func mergeOpenAICompatObservedUsage(dst *OpenAIUsage, src OpenAIUsage, terminal bool) {
+	old := *dst
+	mergeOpenAIUsageNonZero(dst, src)
+	for _, field := range []struct {
+		value              *int
+		previous, incoming int
+		present            bool
+	}{
+		{&dst.InputTokens, old.InputTokens, src.InputTokens, src.InputTokensPresent},
+		{&dst.OutputTokens, old.OutputTokens, src.OutputTokens, src.OutputTokensPresent},
+		{&dst.CacheReadInputTokens, old.CacheReadInputTokens, src.CacheReadInputTokens, src.CacheReadInputTokensPresent},
+		{&dst.CacheCreationInputTokens, old.CacheCreationInputTokens, src.CacheCreationInputTokens, src.CacheCreationInputTokensPresent},
+	} {
+		if !field.present {
+			*field.value = field.previous
+		} else if terminal {
+			*field.value = field.incoming
+		}
+	}
 }
