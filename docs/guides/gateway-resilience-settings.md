@@ -103,7 +103,7 @@
 | `balance_keywords_extra` | `[]` | 最多 64 条，每条 2–128 字符 | 追加识别为“上游余额不足”的错误文案关键词 |
 | `decision_v2` | true | 布尔 | 失败分类修正；也是仅流式学习后本请求立即换号的前提 |
 
-第三方 API Key 的 HTTP 与流内 429 同样以 `retry_after_cap_seconds` 封顶；上游给出的长配额重置时间不再当作冷却时长，上游重试提示给出的最早重试时刻仍然遵守。 同一账号切换 Chat 与 Responses 时按本次实际地址判断，官方 Chat 地址继续使用官方配额窗口。
+第三方 API Key 的 HTTP 与流内 429 同样以 `retry_after_cap_seconds` 封顶；上游给出的长配额重置时间不再当作冷却时长，上游重试提示给出的最早重试时刻仍然遵守。同一账号切换 Chat 与 Responses 时按本次实际地址判断，官方 Chat 地址继续使用官方配额窗口。
 
 ### 会话 `session`
 
