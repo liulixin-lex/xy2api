@@ -64,8 +64,9 @@
 <script setup lang="ts">
 /**
  * The quality panel's "判定记录": each change of a line's identity for the account (GET …/accounts/:id/decisions),
- * newest first, 50 at a time. Closed by default; the first opening loads it, another account starts over. A record
- * of the new rules opens to the evidence it was taken on; records of the previous rules have none.
+ * newest first, 50 at a time. Closed by default; the first opening loads it, another account starts over, and a
+ * quality change made from the page (a recovery, an exemption) loads the first page again. A record of the new rules
+ * opens to the evidence it was taken on; records of the previous rules have none and read "旧规则 · <action>".
  */
 import { reactive, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -73,6 +74,8 @@ import Icon from '@/components/icons/Icon.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendBasis, BackendDecision } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
+import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
+import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
 
 const PAGE = 50
@@ -85,6 +88,7 @@ const props = defineProps<{
   groupName: (id: number) => string | undefined
 }>()
 const { t, te } = useI18n()
+const { changed } = useSchedLayers()
 const listId = `qp-decisions-${useId()}`
 
 const open = ref(false)
@@ -124,16 +128,20 @@ watch(() => props.accountId, () => {
   if (open.value) void load(false)
 })
 
+// A recovery or an exemption writes records: an open list starts over from the newest.
+watch(changed, () => {
+  if (open.value && state.value !== 'idle') trackSchedReload(load(false))
+})
+
 function toggleEvidence(id: number) {
   if (shown.has(id)) shown.delete(id)
   else shown.add(id)
 }
 
-/** The action in words; records of the previous rules (no line) read as such. */
+/** The action in words (其他 for one the copy does not know); records of the previous rules (no line) say so first. */
 function actionWord(item: BackendDecision): string {
-  const key = `admin.schedQuality.decisions.action.${item.action}`
-  if (item.line && te(key)) return t(key)
-  return t('admin.schedQuality.decisions.legacy')
+  const word = schedWord('decisions.action', item.action, t, te)
+  return item.line ? word : t('admin.schedQuality.decisions.legacy', { action: word })
 }
 
 const BAD = new Set(['enter', 'renew', 'trial_fail'])

@@ -4,7 +4,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
-import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
 
@@ -508,7 +508,7 @@ describe('SchedQualityPanel', () => {
       basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', cut: null, threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
       ...patch
     })
-    const page = [record(60), record(59, { action: 'trial', until: inMinutes(50) }), record(58, { line: '', action: 'cooldown', basis: null })]
+    const page = [record(60), record(59, { action: 'trial', until: inMinutes(50) }), record(58, { line: '', action: 'renew', basis: null })]
     api.accountDecisions.mockResolvedValueOnce([...page, ...Array.from({ length: 47 }, (_, i) => record(57 - i, { action: 'release', until: null }))])
       .mockResolvedValueOnce([record(3, { action: 'clear', until: null })])
     mount(Panel, { attachTo: document.body })
@@ -522,8 +522,8 @@ describe('SchedQualityPanel', () => {
     expect(rowOf(60).querySelector('.drow__where')!.textContent).toBe('晨星组 · gpt-b · admin.schedQuality.dim.ttfo')
     expect(rowOf(60).querySelector('.drow__sub')!.textContent).toMatch(/^admin\.schedQuality\.identity\.rearUntil:\{"time":"\d\d:\d\d","minutes":40\}$/)
     expect(rowOf(59).querySelector('.drow__sub')!.textContent).toMatch(/^admin\.schedQuality\.decisions\.trialUntil:/)
-    // A record of the previous rules: named as such, no evidence to open.
-    expect(rowOf(58).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.legacy')
+    // A record of the previous rules: named as such with its action, no evidence to open.
+    expect(rowOf(58).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.renew"}')
     expect(rowOf(58).querySelector('[data-qp-decision-evidence]')).toBeNull()
 
     expect(rowOf(60).querySelector('[data-qp-evidence]')).toBeNull()
@@ -536,5 +536,13 @@ describe('SchedQualityPanel', () => {
     expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: 11 })
     expect(rowOf(3).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.clear')
     expect(document.querySelector('[data-qp-decisions-more]')).toBeNull()
+
+    // A recovery or an exemption from the panel writes records: the open list starts over from the newest.
+    api.accountDecisions.mockResolvedValueOnce([record(61, { action: 'reset', until: null })])
+    await markSchedChanged()
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: undefined })
+    expect(rowOf(61).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.reset')
+    expect(document.querySelector('[data-qp-decision="60"]')).toBeNull()
   })
 })

@@ -11420,8 +11420,11 @@ async function saveSettings() {
       document.getElementById("openai-oauth-scheduling-rate-multiplier")?.focus();
       return;
     }
-    // 首字线三个数不合法时输入框旁已标出合法范围，不保存。
+    // 首字线三个数不合法时输入框旁已标出合法范围，不保存；在别的标签页保存时先切到它所在的网关页。
     if (ttftRuleRef.value && !ttftRuleRef.value.valid) {
+      activeTab.value = "gateway";
+      appStore.showError(t("admin.schedQuality.ttftRule.invalidOnSave"));
+      await nextTick();
       ttftRuleRef.value.focusInvalid();
       return;
     }
@@ -11864,6 +11867,10 @@ async function saveSettings() {
     const wsOk = await saveWebSearchConfig();
     // 首字线三个数单独保存；放宽时先确认，失败或冲突显示在它自己的位置。
     const ttftRuleOk = (await ttftRuleRef.value?.save()) !== false;
+    if (!ttftRuleOk && ttftRuleRef.value?.failed) {
+      activeTab.value = "gateway";
+      appStore.showError(t("admin.schedQuality.ttftRule.notSaved"));
+    }
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);

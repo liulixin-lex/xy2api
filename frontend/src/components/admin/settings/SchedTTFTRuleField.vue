@@ -31,7 +31,7 @@
             step="1"
             :aria-invalid="!valid[field]"
             :aria-describedby="!valid[field] || outside[field] ? `${ids[field]}-note` : undefined"
-            :placeholder="display(record.defaults[field])"
+            :placeholder="record.defaults ? display(record.defaults[field]) : undefined"
             :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid[field] }]"
             :data-sq-ttft-input="field"
             @input="edited[field] = true"
@@ -39,7 +39,7 @@
           <span class="w-16 text-sm sq-text-3">{{ t(`admin.schedQuality.ttftRule.unit.${UNITS[field]}`) }}</span>
         </span>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400" data-sq-ttft-defaults>
+      <p v-if="record.defaults" class="text-xs text-gray-500 dark:text-gray-400" data-sq-ttft-defaults>
         {{ t('admin.schedQuality.ttftRule.defaults', {
           confidence: display(record.defaults.confidence),
           tolerance: display(record.defaults.tolerance),
@@ -78,6 +78,7 @@ import { useI18n } from 'vue-i18n'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendTTFTRule, SchedTTFTRuleField, SchedTTFTRuleValues } from '@/api/admin/schedQualityTypes'
+import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import {
   TTFT_RULE_FIELDS as FIELDS,
@@ -90,6 +91,7 @@ import {
 const UNITS: Record<SchedTTFTRuleField, 'percent' | 'points'> = { confidence: 'percent', tolerance: 'percent', peer_margin: 'points' }
 
 const { t } = useI18n()
+const appStore = useAppStore()
 const ids = { confidence: `sq-ttft-c-${useId()}`, tolerance: `sq-ttft-p-${useId()}`, peer_margin: `sq-ttft-d-${useId()}` }
 
 const record = shallowRef<BackendTTFTRule | null>(null)
@@ -134,11 +136,11 @@ const current = computed<SchedTTFTRuleValues>(() => {
 })
 
 const outside = computed(() =>
-  Object.fromEntries(FIELDS.map((field) => [field, outsideReplayed(record.value?.replayed[field], current.value[field])])) as Record<SchedTTFTRuleField, boolean>
+  Object.fromEntries(FIELDS.map((field) => [field, outsideReplayed(record.value?.replayed?.[field], current.value[field])])) as Record<SchedTTFTRuleField, boolean>
 )
 
 const replayedRange = (field: SchedTTFTRuleField) => {
-  const range = record.value?.replayed[field]
+  const range = record.value?.replayed?.[field]
   return range ? t(`admin.schedQuality.ttftRule.range.${UNITS[field]}`, { min: display(range[0]), max: display(range[1]) }) : ''
 }
 
@@ -169,9 +171,14 @@ async function save(): Promise<boolean> {
   saveMessage.value = ''
   try {
     const result = await schedQualityAPI.updateTTFTRule({ expected_version: saved.version, ...next })
-    record.value = result
-    fill(result)
+    // Merged: an answer without the defaults or the replayed ranges keeps the ones loaded.
+    const merged = { ...saved, ...result }
+    record.value = merged
+    fill(merged)
     conflict.value = false
+    if (result.change === 'relax' || result.change === 'mixed') {
+      appStore.showInfo(t('admin.schedQuality.ttftRule.savedRelaxed', { n: result.cleared ?? 0 }), 6000)
+    }
     return true
   } catch (error) {
     if ((error as { status?: number })?.status === 409) conflict.value = true
@@ -189,5 +196,8 @@ function focusInvalid() {
   if (field) document.getElementById(ids[field])?.focus()
 }
 
-defineExpose({ save, valid: isValid, focusInvalid })
+/** The last save was refused (conflict or another failure), as opposed to declined or not needed. */
+const failed = computed(() => conflict.value || saveFailed.value)
+
+defineExpose({ save, valid: isValid, failed, focusInvalid })
 </script>

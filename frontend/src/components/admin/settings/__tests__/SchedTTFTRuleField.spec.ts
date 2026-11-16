@@ -8,6 +8,8 @@ import { ttftRuleChange, ttftRuleInputValid } from '../schedTTFTRule'
 
 const api = vi.hoisted(() => ({ getTTFTRule: vi.fn(), updateTTFTRule: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const toast = vi.hoisted(() => ({ showInfo: vi.fn() }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
@@ -49,6 +51,7 @@ const vm = (w: ReturnType<typeof mount>) => w.vm as unknown as Field
 beforeEach(() => {
   api.getTTFTRule.mockReset().mockResolvedValue(rule())
   api.updateTTFTRule.mockReset().mockImplementation(async (update) => ({ ...rule(update), version: 5, change: 'tighten', cleared: 0 }))
+  toast.showInfo.mockReset()
 })
 
 describe('ttft rule helpers', () => {
@@ -140,6 +143,27 @@ describe('SchedTTFTRuleField', () => {
       expect(w.find('[data-test="confirm"]').exists()).toBe(false)
     })
   }
+
+  it('keeps the loaded defaults and replayed ranges when the save answer leaves them out, and says what a relaxation cleared', async () => {
+    const w = await mountField()
+    await input(w, 'peer_margin').setValue('10')
+    api.updateTTFTRule.mockResolvedValueOnce({ version: 5, confidence: 0.8, tolerance: 0.2, peer_margin: 0.1, change: 'relax', cleared: 12 })
+    const saving = vm(w).save()
+    await flushPromises()
+    await w.get('[data-test="ok"]').trigger('click')
+    expect(await saving).toBe(true)
+    await flushPromises()
+    expect((input(w, 'peer_margin').element as HTMLInputElement).value).toBe('10')
+    expect(w.get('[data-sq-ttft-defaults]').text()).toContain('"peer_margin":"5"')
+    expect(row(w, 'peer_margin').find('[data-sq-ttft-outside]').exists()).toBe(false)
+    expect(toast.showInfo).toHaveBeenCalledWith('admin.schedQuality.ttftRule.savedRelaxed:{"n":12}', 6000)
+
+    // The next save goes with the new version; a tightening says nothing more.
+    await input(w, 'tolerance').setValue('15')
+    expect(await vm(w).save()).toBe(true)
+    expect(api.updateTTFTRule).toHaveBeenLastCalledWith({ expected_version: 5, confidence: 0.8, tolerance: 0.15, peer_margin: 0.1 })
+    expect(toast.showInfo).toHaveBeenCalledTimes(1)
+  })
 
   it('shows 失败 + 重新载入 on a version conflict and the backend\'s message on a rejected value', async () => {
     const w = await mountField()

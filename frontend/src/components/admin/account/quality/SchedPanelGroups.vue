@@ -31,7 +31,7 @@
         </span>
         <span class="grow__state" role="cell" data-test="qp-state" :data-qp-place="item.place">
           <StatusDot :tone="PLACE_TONES[item.place]" />
-          <span :class="item.place === 'front' ? 'status-text-normal' : ''">{{ t(`admin.schedQuality.placement.${item.place}`) }}</span>
+          <span :class="item.place === 'front' ? 'status-text-normal' : ''">{{ word('placement', item.place) }}</span>
           <span v-if="item.extra" class="grow__extra">{{ item.extra }}</span>
         </span>
         <span class="grow__marks" role="none">
@@ -80,7 +80,7 @@
           <div v-for="mark in item.marks" :key="mark.dim" class="gdet__line" :data-qp-line="mark.dim">
             <div class="gdet__head">
               <span class="gdet__k">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
-              <span class="idw" :class="`idw--${mark.identity}`">{{ t(`admin.schedQuality.identity.${mark.identity}`) }}</span>
+              <span class="idw" :class="`idw--${mark.identity}`">{{ mark.word }}</span>
               <span v-if="mark.status" class="gdet__t">{{ mark.status }}</span>
             </div>
             <SchedEvidence
@@ -113,7 +113,7 @@ import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
 import type { BackendAccountDetail, BackendDetailGroup, BackendLine } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { RECENT_DIMS } from '@/components/admin/account/table/accountRecent'
-import { fmtCountdown } from '@/utils/schedQualityFormat'
+import { fmtCountdown, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 import SchedEvidence from './SchedEvidence.vue'
 import { groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
@@ -129,7 +129,8 @@ const props = defineProps<{
   failedGroups: Set<number>
 }>()
 const emit = defineEmits<{ exempt: [group: BackendDetailGroup, anchor: HTMLElement]; unexempt: [group: BackendDetailGroup] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+const word = (table: string, value: string) => schedWord(table, value, t, te)
 const detailIdPrefix = `qp-gdet-${useId()}`
 
 const PLACE_TONES: Record<PanelPlace, StatusDotTone> = { front: 'ok', trial: 'info', rear: 'back', exempt: 'exempt', stopped: 'off' }
@@ -169,8 +170,8 @@ const rows = computed(() =>
       const identity = lineIdentity(row, dim)
       const left = lineSecondsLeft(line, props.now)
       const status = lineStatus(line, left)
-      const word = t(`admin.schedQuality.identity.${identity}`)
-      return { dim, identity, left, status, tip: [t(`admin.schedQuality.dim.${dim}`), word, status].filter(Boolean).join(' · ') }
+      const name = word('identity', identity)
+      return { dim, identity, left, status, word: name, tip: [t(`admin.schedQuality.dim.${dim}`), name, status].filter(Boolean).join(' · ') }
     })
     let extra = ''
     if (place === 'rear' || place === 'trial') {
