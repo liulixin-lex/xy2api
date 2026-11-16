@@ -207,7 +207,7 @@ func TestStickyChangeWSTurnFinalizesItsOwnAttempt(t *testing.T) {
 			defer selected.ReleaseFunc()
 			a := (&OpenAIGatewayService{}).beginSchedAttempt(ctx, selected.Account, nil, 0, true)
 			a.expectTerminal = true
-			a.observe([]byte(`{"type":"` + event + `"}`))
+			a.observe([]byte(`{"type":"` + event + `","response":{"status":"` + strings.TrimPrefix(event, "response.") + `"}}`))
 			turn := &schedWSTurnCapture{active: a}
 			turn.finish(&OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: event}, nil)
 			if event == "response.completed" {

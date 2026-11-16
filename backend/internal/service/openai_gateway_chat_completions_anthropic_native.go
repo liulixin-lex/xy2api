@@ -354,11 +354,15 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	}
 	// 非流式响应必须是 application/json（上游被强制流式，透传头会污染）。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if respBytes, err := json.Marshal(ccResp); err == nil {
-		respBytes = reverseToolNamesIfPresent(c, respBytes)
-		c.Data(http.StatusOK, "application/json; charset=utf-8", respBytes)
-	} else {
-		c.JSON(http.StatusOK, ccResp)
+	respBytes, err := json.Marshal(ccResp)
+	if err != nil {
+		return nil, err
+	}
+	respBytes = reverseToolNamesIfPresent(c, respBytes)
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(respBytes)
+	if writeErr != nil {
+		cancelSchedClient(c)
 	}
 
 	return &OpenAIForwardResult{
@@ -371,8 +375,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		UpstreamEndpoint: "/v1/messages",
 		ReasoningEffort:  reasoningEffort,
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleCCStreamingFromNativeAnthropic reads Anthropic SSE events, converts each

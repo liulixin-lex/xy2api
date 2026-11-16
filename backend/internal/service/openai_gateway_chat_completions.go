@@ -480,7 +480,9 @@ retryChatResponsesWire:
 	}
 	defer func(a *schedAttemptCapture) {
 		// Freeze this send before cleanup can cancel its upstream reader.
-		a.finish(schedResult, schedErr)
+		if a == schedCapture {
+			a.finish(schedResult, schedErr)
+		}
 		closeAttempt()
 	}(schedCapture)
 

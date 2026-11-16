@@ -351,15 +351,19 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	}
 	// 非流式响应必须是 application/json（上游被强制流式，透传头会污染）。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if respBytes, err := json.Marshal(responsesResp); err == nil {
-		respBytes = reverseToolNamesIfPresent(c, respBytes)
-		respBytes, _, err = apicompat.RestoreResponsesClientToolPayload(respBytes, clientToolMapping)
-		if err != nil {
-			return nil, fmt.Errorf("restore responses client tools: %w", err)
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", respBytes)
-	} else {
-		c.JSON(http.StatusOK, responsesResp)
+	respBytes, err := json.Marshal(responsesResp)
+	if err != nil {
+		return nil, err
+	}
+	respBytes = reverseToolNamesIfPresent(c, respBytes)
+	respBytes, _, err = apicompat.RestoreResponsesClientToolPayload(respBytes, clientToolMapping)
+	if err != nil {
+		return nil, fmt.Errorf("restore responses client tools: %w", err)
+	}
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(respBytes)
+	if writeErr != nil {
+		cancelSchedClient(c)
 	}
 
 	return &OpenAIForwardResult{
@@ -372,8 +376,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		UpstreamEndpoint: "/v1/messages",
 		ReasoningEffort:  reasoningEffort,
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleResponsesStreamingFromNativeAnthropic reads Anthropic SSE events, converts

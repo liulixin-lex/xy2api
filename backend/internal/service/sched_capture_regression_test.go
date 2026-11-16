@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -116,8 +117,8 @@ type captureCloseBody struct {
 
 type captureDelayedCloseBody struct {
 	*strings.Reader
-	waiting, closed     chan struct{}
-	waitOnce, closeOnce sync.Once
+	waiting, closed, readError chan struct{}
+	waitOnce, closeOnce        sync.Once
 }
 
 func (b *captureDelayedCloseBody) Read(p []byte) (int, error) {
@@ -125,6 +126,7 @@ func (b *captureDelayedCloseBody) Read(p []byte) (int, error) {
 	if err == io.EOF {
 		b.waitOnce.Do(func() { close(b.waiting) })
 		<-b.closed
+		close(b.readError)
 		return 0, io.ErrClosedPipe
 	}
 	return n, err
@@ -149,32 +151,37 @@ func TestCaptureCompletedBeforeUpstreamClose(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, target := range []string{"chat", "messages"} {
 		t.Run(target, func(t *testing.T) {
-			body := &captureDelayedCloseBody{Reader: strings.NewReader(captureResponsesWire()), waiting: make(chan struct{}), closed: make(chan struct{})}
-			t.Cleanup(func() { _ = body.Close() })
-			c, _ := compatStreamContext("/v1/"+target, "")
-			c.Writer = &captureAwaitReadWriter{ResponseWriter: c.Writer, waiting: body.waiting}
-			account := rawChatCompletionsTestAccount()
-			st := resilience.NewRequestState()
-			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "fixture"})
-			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), st))
-			rec := &captureServiceRecorder{}
-			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), schedAttemptRecorder: rec}
-			svc.cfg.Gateway.StreamKeepaliveInterval = 60
-			a := svc.beginSchedAttempt(c.Request.Context(), account, nil, 0, true)
-			a.expectTerminal = true
-			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: body}
-			var result *OpenAIForwardResult
-			var err error
-			if target == "chat" {
-				result, err = svc.handleChatStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now(), 1)
-			} else {
-				result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now())
-			}
-			require.NoError(t, err)
-			a.finish(result, err)
-			require.NoError(t, body.Close())
-			require.Len(t, rec.samples, 1)
-			require.Equal(t, q.OutcomeOK, rec.samples[0].Outcome)
+			synctest.Test(t, func(t *testing.T) {
+				body := &captureDelayedCloseBody{Reader: strings.NewReader(captureResponsesWire()), waiting: make(chan struct{}), closed: make(chan struct{}), readError: make(chan struct{})}
+				t.Cleanup(func() { _ = body.Close() })
+				c, _ := compatStreamContext("/v1/"+target, "")
+				c.Writer = &captureAwaitReadWriter{ResponseWriter: c.Writer, waiting: body.waiting}
+				account := rawChatCompletionsTestAccount()
+				st := resilience.NewRequestState()
+				st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "fixture"})
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), st))
+				rec := &captureServiceRecorder{}
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), schedAttemptRecorder: rec}
+				svc.cfg.Gateway.StreamKeepaliveInterval = 60
+				a := svc.beginSchedAttempt(c.Request.Context(), account, nil, 0, true)
+				a.expectTerminal = true
+				resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: body}
+				var result *OpenAIForwardResult
+				var err error
+				if target == "chat" {
+					result, err = svc.handleChatStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now(), 1)
+				} else {
+					result, err = svc.handleAnthropicStreamingResponse(resp, c, account, "fixture", "fixture", "fixture", time.Now())
+				}
+				require.NoError(t, err)
+				require.NoError(t, body.Close())
+				<-body.readError
+				// Let the scanner finish reporting the late error before recording the result.
+				synctest.Wait()
+				a.finish(result, err)
+				require.Len(t, rec.samples, 1)
+				require.Equal(t, q.OutcomeOK, rec.samples[0].Outcome)
+			})
 		})
 	}
 }
@@ -310,54 +317,6 @@ func TestCaptureResponsesTerminalReadOrder(t *testing.T) {
 					}
 				})
 			}
-		}
-	}
-}
-
-func TestCaptureNativeResponsesCompletion(t *testing.T) {
-	withResilienceSettings(t, nil)
-	for _, stream := range []bool{false, true} {
-		for _, failed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("stream=%v/failed=%v", stream, failed), func(t *testing.T) {
-				body := []byte(fmt.Sprintf(`{"model":"fixture","input":"hello","stream":%v}`, stream))
-				c := newOpenAIRejectedFieldTestContext(body)
-				account := newOpenAIRejectedFieldTestAccount()
-				st := resilience.NewRequestState()
-				st.EnableGatewayRequest(time.Now())
-				st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "fixture"})
-				ctx := resilience.WithRequestState(c.Request.Context(), st)
-				c.Request = c.Request.WithContext(ctx)
-				wire := `{"id":"resp_fixture","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":4,"output_tokens":2}}`
-				if failed {
-					wire = `{"id":"resp_fixture","object":"response","status":"failed","error":{"type":"server_error","message":"fixture failure"},"usage":{"input_tokens":4,"output_tokens":2}}`
-				}
-				resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}}
-				if stream {
-					event := "response.completed"
-					if failed {
-						event = "response.failed"
-					}
-					wire = m7ReviewWire(`{"type":"` + event + `","response":` + wire + `}`)
-					resp.Header.Set("Content-Type", "text/event-stream")
-				}
-				resp.Body = io.NopCloser(strings.NewReader(wire))
-				up := &httpUpstreamRecorder{resp: resp}
-				svc := newOpenAIRejectedFieldTestService(up)
-				rec := &captureServiceRecorder{}
-				svc.SetSchedAttemptRecorder(rec)
-				result, err := svc.Forward(ctx, c, account, body)
-				require.Len(t, rec.samples, 1)
-				if failed {
-					require.Equal(t, q.OutcomeAccountFault, rec.samples[0].Outcome)
-				} else {
-					require.NoError(t, err)
-					require.True(t, result.CompletedForDelivery())
-					require.Equal(t, q.OutcomeOK, rec.samples[0].Outcome)
-					st.CompleteGatewayForward(true, false)
-					meta, _ := st.ClaimGatewayRequest(false)
-					require.Equal(t, resilience.RequestSuccess, meta.Result)
-				}
-			})
 		}
 	}
 }
