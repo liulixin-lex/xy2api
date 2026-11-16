@@ -3,8 +3,11 @@
 package repository
 
 import (
+	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -88,5 +91,83 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 		value, err := driver.DefaultParameterConverter.ConvertValue(arg)
 		require.NoError(t, err)
 		require.Nil(t, value)
+	}
+}
+
+// Capture the value actually bound by INSERT; the SELECT returns that value,
+// so omitting or changing either persistence boundary fails the round trip.
+type noticeArgument struct{ raw []byte }
+
+func (a *noticeArgument) Match(value driver.Value) bool {
+	switch value := value.(type) {
+	case []byte:
+		a.raw = append([]byte(nil), value...)
+	case string:
+		a.raw = []byte(value)
+	default:
+		return false
+	}
+	return json.Valid(a.raw)
+}
+
+func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
+	for _, result := range []int16{3, 4} {
+		t.Run(fmt.Sprint(result), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			notices := []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}, {Field: "reasoning.effort", Action: "map"}}
+			row := &service.GatewayUnbilledRequest{RequestID: "failed-no-usage", CreatedAt: time.Now(), Result: result, ConversionNotices: notices}
+			capture := &noticeArgument{}
+			args := make([]driver.Value, 28)
+			for i := range args {
+				args[i] = sqlmock.AnyArg()
+			}
+			for i := 22; i < 27; i++ {
+				args[i] = nil
+			}
+			args[27] = capture
+			mock.ExpectExec("INSERT INTO gateway_unbilled_requests").WithArgs(args...).WillReturnResult(sqlmock.NewResult(1, 1))
+			repo := newUsageLogRepositoryWithSQL(nil, db)
+			require.NoError(t, repo.CreateUnbilledRequest(context.Background(), row))
+			require.NotEmpty(t, capture.raw)
+			mock.ExpectQuery("SELECT degradations, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type FROM gateway_unbilled_requests").WillReturnRows(sqlmock.NewRows([]string{"degradations", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type"}).AddRow(capture.raw, nil, nil, nil, nil, nil))
+			var raw []byte
+			var observed, seen, valid sql.NullBool
+			var source, kind sql.NullString
+			require.NoError(t, db.QueryRow("SELECT degradations, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type FROM gateway_unbilled_requests").Scan(&raw, &observed, &source, &seen, &valid, &kind))
+			var decoded []apicompat.ConversionNotice
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			require.Equal(t, notices, decoded)
+			require.False(t, observed.Valid || source.Valid || seen.Valid || valid.Valid || kind.Valid)
+			ops := &opsRepository{db: db}
+			input := &service.OpsInsertErrorLogInput{RequestID: row.RequestID, GatewayRequestID: row.RequestID, CreatedAt: row.CreatedAt, ConversionNotices: notices}
+			opsArgs := make([]driver.Value, 45)
+			for i := range opsArgs {
+				opsArgs[i] = sqlmock.AnyArg()
+			}
+			opsCapture := &noticeArgument{}
+			opsArgs[44] = opsCapture
+			mock.ExpectQuery("INSERT INTO ops_error_logs").WithArgs(opsArgs...).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
+			id, err := ops.InsertErrorLog(context.Background(), input)
+			require.NoError(t, err)
+			// GetErrorLogByID has 51 selected values; nullable joins are kept nil.
+			values := make([]driver.Value, 51)
+			columns := make([]string, 51)
+			for i := range values {
+				values[i] = ""
+				columns[i] = fmt.Sprint(i)
+			}
+			values[0], values[1], values[7], values[10], values[21], values[31] = int64(9), row.CreatedAt, int64(502), false, false, false
+			for _, i := range []int{11, 12, 17, 22, 24, 25, 27, 29, 36, 38, 39, 40, 41, 42, 43, 44, 45, 48} {
+				values[i] = nil
+			}
+			values[50] = opsCapture.raw
+			mock.ExpectQuery("SELECT.*e.id").WithArgs(id).WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
+			detail, err := ops.GetErrorLogByID(context.Background(), id)
+			require.NoError(t, err)
+			require.Equal(t, notices, detail.ConversionNotices)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
 	}
 }
