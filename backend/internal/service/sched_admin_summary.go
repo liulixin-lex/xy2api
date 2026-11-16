@@ -66,23 +66,21 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 	out.TTFO.Short, out.Error.Short, out.Cache.Short = true, true, true
 	if a.Platform == PlatformOpenAI {
 		v := p.Account(a.ID)
-		out.TTFO = SchedAdminAccountSummaryTTFO{SchedAdminMark: SchedAdminMark{N: v.Speed.N, Short: v.Speed.N < schedquality.SpeedMinSamples}, P50Ms: v.Speed.P50Ms}
-		out.Error.SchedAdminMark = SchedAdminMark{N: v.Error.N, Short: v.Error.N < schedquality.ErrorMinSamples}
-		if v.Error.N > 0 {
-			out.Error.Rate = schedAdminFloat(v.Error.Rate)
+		out.TTFO = SchedAdminAccountSummaryTTFO{SchedAdminMark: SchedAdminMark{Short: v.FirstOutputP50Ms == nil}, P50Ms: v.FirstOutputP50Ms}
+		out.Error.SchedAdminMark = SchedAdminMark{N: v.ErrorN, Short: v.ErrorN < schedquality.ErrorMinClear}
+		if v.ErrorN > 0 {
+			out.Error.Rate = schedAdminFloat(float64(v.ErrorBad) / float64(v.ErrorN))
 		}
-		out.Cache.SchedAdminMark = SchedAdminMark{N: v.Cache.Turns, Short: v.Cache.Turns < schedquality.CacheMinSamples}
-		if v.Cache.InputTokens > 0 {
-			out.Cache.Ratio = schedAdminFloat(v.Cache.Ratio)
-		}
+		out.Cache.SchedAdminMark = SchedAdminMark{N: v.CacheTurns, Short: v.CacheTurns < schedquality.CacheMinTurns}
+		out.Cache.Ratio = v.CacheRatio
 		for _, r := range p.RowsForAccount(a.ID) {
-			if !schedAdminMember(a, r.GroupID) || !r.View.Failing {
+			if !schedAdminMember(a, r.GroupID) || len(schedRearLines(r.View)) == 0 {
 				continue
 			}
 			exempt := schedAdminExemption(out.Exemptions, r.GroupID) != nil
 			effective := schedAdminBelow(p, a.ID, r.GroupID, exempt, schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled))
-			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: exempt, Effective: effective})
-			for _, d := range r.View.Dims {
+			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, schedRearLines(r.View)...), Until: schedAdminStamp(schedStateUntil(r.View)), OtherGroup: len(r.SourceGroups) > 0, Exempt: exempt, Effective: effective})
+			for _, d := range schedRearLines(r.View) {
 				switch string(d) {
 				case "ttfo":
 					out.TTFO.Red = true
@@ -256,43 +254,21 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 	}
 	return out, nil
 }
-func schedAdminDim(w schedquality.EvidenceWindow, n int, lcb *float64, v schedquality.Verdict) SchedAdminDimDetail {
-	verdict := "short"
-	if v == schedquality.VerdictPass {
-		verdict = "pass"
-	}
-	if v == schedquality.VerdictFail {
-		verdict = "fail"
-	}
-	scope := "own"
-	if w.Source != schedquality.EvidenceLocal {
-		scope = "merged"
-	}
-	return SchedAdminDimDetail{Scope: scope, WindowMin: int(w.Window / time.Minute), N: n, LCB: lcb, Verdict: verdict}
-}
 
-// SchedAdminGroupModel is shared with MCP so both readers expose the same evidence.
+// SchedAdminGroupModel temporarily projects the new evidence into the existing
+// response. The admin package supplies the full per-line API at integration.
 func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailGroupsByModel {
-	v, w := r.Evaluation, r.View
-	out := SchedAdminAccountDetailGroupsByModel{Model: r.Model, Failing: w.Failing, Dims: append([]schedquality.Dimension{}, w.Dims...), Level: w.Level, OtherGroupIDs: append([]int64{}, r.OtherGroupIDs...), Exempt: exempt}
-	if w.Failing {
-		out.Since, out.Until = schedAdminTime(w.Since), schedAdminTime(w.Until)
-	} else {
-		out.Dims = []schedquality.Dimension{}
-		out.OtherGroupIDs = []int64{}
+	out := SchedAdminAccountDetailGroupsByModel{Model: r.Model, Failing: len(schedRearLines(r.View)) > 0, Dims: schedRearLines(r.View), OtherGroupIDs: r.SourceGroups, Exempt: exempt, Level: max(r.View.TTFO.Level, max(r.View.Error.Level, r.View.Cache.Level))}
+	out.Until = schedAdminTime(schedStateUntil(r.View))
+	verdict := schedquality.VerdictUnknown
+	if r.TTFT.State == schedquality.RuleBGood {
+		verdict = schedquality.VerdictPass
 	}
-	var speedLCB, errorLCB, ratio *float64
-	if v.Speed.N > 0 {
-		speedLCB = schedAdminFloat(v.Speed.LCB)
+	if r.TTFT.State == schedquality.RuleBBad {
+		verdict = schedquality.VerdictFail
 	}
-	if v.Error.N > 0 {
-		errorLCB = schedAdminFloat(v.Error.LCB)
-	}
-	if v.Cache.InputTokens > 0 {
-		ratio = schedAdminFloat(v.Cache.Ratio)
-	}
-	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: schedAdminDim(v.Speed.EvidenceWindow, v.Speed.N, speedLCB, v.Verdicts.Speed), Bad: v.Speed.Slow}
-	out.Error = SchedAdminCountDetail{SchedAdminDimDetail: schedAdminDim(v.Error.EvidenceWindow, v.Error.N, errorLCB, v.Verdicts.Error), Bad: v.Error.Bad}
-	out.Cache = SchedAdminCacheDetail{SchedAdminDimDetail: schedAdminDim(v.Cache.EvidenceWindow, v.Cache.Turns, nil, v.Verdicts.Cache), Ratio: ratio}
+	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 240, N: int(r.TTFT.Counts.N), Verdict: verdict.String()}, Bad: int(r.TTFT.Counts.K)}
+	out.Error = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 60, N: r.Error.Clear, LCB: schedAdminFloat(r.Error.LowerFail), Verdict: r.Error.Verdict.String()}, Bad: r.Error.Failed}
+	out.Cache = SchedAdminCacheDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 30, N: r.Cache.Turns, Verdict: r.Cache.Verdict.String()}, Ratio: schedAdminFloat(r.Cache.Ratio)}
 	return out
 }

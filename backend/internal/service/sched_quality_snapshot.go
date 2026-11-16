@@ -18,6 +18,10 @@ type schedQualityData struct {
 	now           time.Time
 	samples       map[SchedAccountModel][]q.AttemptSample
 	globalEnabled bool
+	running       map[string]q.AttemptSample
+	ruleSamples   map[SchedAccountModel][]q.RuleBSample
+	ruleGroups    map[schedGroupModel][]q.RuleBSample
+	peers         *peerBucket
 }
 
 type schedQualityView struct {
@@ -28,6 +32,7 @@ type schedQualityView struct {
 	policies      map[int64]SchedPolicyRecord
 	overrides     map[int64][]SchedOverride
 	resets        map[int64]time.Time
+	sessions      map[schedSessionKey][]q.AttemptSample
 }
 
 func (v *schedQualityView) Version() int64            { return v.version }
@@ -37,7 +42,6 @@ func (v *schedQualityView) GroupEnabled(g int64) bool { return v.policies[g].Pol
 func (v *schedQualityView) ResetAt(a int64) time.Time { return v.resets[a] }
 func (v *schedQualityView) StateOf(g, a int64, m string) q.StateView {
 	state := v.states[schedQualityKey{a, m, g}]
-	state.Dims = append([]q.Dimension(nil), state.Dims...)
 	state.GroupOverride = overrideRef(v.overrides[a], g)
 	state.AllOverride = overrideRef(v.overrides[a], 0)
 	return state
@@ -53,10 +57,24 @@ func (v *schedQualityView) TakeoverIdle(g int64) (time.Duration, bool) {
 	return time.Duration(p.Policy.TakeoverIdleSeconds) * time.Second, true
 }
 
+func (v *schedQualityView) SessionSlowTwice(g, a int64, m, session string) bool {
+	rows := v.sessions[schedSessionKey{g, m, session}]
+	if len(rows) < 2 {
+		return false
+	}
+	limit := v.policies[g].Policy.TTFTSeconds
+	for _, r := range rows[len(rows)-2:] {
+		if r.AccountID != a || !r.StartedAt.After(v.resets[a]) || !schedSlow(r, limit) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *SchedQualitySnapshot) Account(id int64) q.AccountSummary       { return s.Accounts[id] }
 func (s *SchedQualitySnapshot) RowsForAccount(id int64) []SchedGroupRow { return s.GroupRows[id] }
 
-func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.StateRow, overrides []SchedOverride, resets map[int64]time.Time, evaluatedAt time.Time) map[int64]time.Time {
+func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.LineState, overrides []SchedOverride, resets map[int64]time.Time, evaluatedAt time.Time) map[int64]time.Time {
 	version := s.snapshot.Load().Version + 1
 	active := make(map[int64][]SchedOverride)
 	var copied []SchedOverride
@@ -74,30 +92,81 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Stat
 	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
 	keys, previous := s.rowKeys(d, states)
 	groupRows := make(map[int64][]SchedGroupRow)
+	// Display uses the same bucket membership as replay, without changing it.
+	if d.peers == nil {
+		d.peers = freezePeers(d.now, previous)
+	}
+	grouped := make(map[schedQualityKey]*SchedGroupRow)
 	for _, key := range keys {
-		row := previous[key]
-		cut := schedQualitySince(resets[key.account], row.EvidenceSince)
-		e := q.EvaluateAt(d.samples[SchedAccountModel{key.account, key.model}], q.Scope{AccountID: key.account, Model: key.model, GroupID: key.group}, s.policies[key.group].Policy, cut, d.now, q.EvaluateRegular)
-		v := q.StateView{Failing: row.State == q.StateCooling, Level: row.Level, Since: row.Since, Until: row.Until, EvidenceSince: cut, GroupOverride: overrideRef(active[key.account], key.group), AllOverride: overrideRef(active[key.account], 0)}
-		var other []int64
-		if v.Failing && row.Basis != nil {
-			v.Dims = append([]q.Dimension(nil), row.Basis.Dims...)
-			groups := make(map[int64]bool)
-			for _, metric := range row.Basis.Metrics {
-				for _, g := range metric.OtherGroupIDs {
-					groups[g] = true
-				}
-			}
-			for g := range groups {
-				other = append(other, g)
-			}
-			sort.Slice(other, func(i, j int) bool { return other[i] < other[j] })
+		r := previous[key]
+		r.LineKey = key
+		groupKey := schedQualityKey{key.AccountID, key.Model, key.GroupID}
+		row := grouped[groupKey]
+		if row == nil {
+			row = &SchedGroupRow{GroupID: key.GroupID, Model: key.Model}
+			grouped[groupKey] = row
 		}
-		if !v.Failing && !cut.IsZero() && d.now.Sub(cut) >= q.LevelDecayAfter {
-			v.Level = 0
+		lv := q.LineView{Identity: r.Identity, Trial: r.Trial, Level: r.Level, Until: r.Until, TrialUntil: r.TrialUntil}
+		_, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
+		switch key.Line {
+		case q.DimensionTTFO:
+			row.View.TTFO = lv
+			if basis.TTFT != nil {
+				row.TTFT = *basis.TTFT
+			}
+		case q.DimensionError:
+			row.View.Error = lv
+			if basis.Error != nil {
+				row.Error = *basis.Error
+			}
+		case q.DimensionCache:
+			row.View.Cache = lv
+			if basis.Cache != nil {
+				row.Cache = *basis.Cache
+			}
 		}
-		view.states[key] = v
-		groupRows[key.account] = append(groupRows[key.account], SchedGroupRow{GroupID: key.group, Model: key.model, View: v, Evaluation: e, OtherGroupIDs: other})
+		row.SourceGroups = append(row.SourceGroups, basis.SourceGroups...)
+	}
+	for key, row := range grouped {
+		row.View.GroupOverride = overrideRef(active[key.account], key.group)
+		row.View.AllOverride = overrideRef(active[key.account], 0)
+		sort.Slice(row.SourceGroups, func(i, j int) bool { return row.SourceGroups[i] < row.SourceGroups[j] })
+		unique := row.SourceGroups[:0]
+		for _, g := range row.SourceGroups {
+			if len(unique) == 0 || unique[len(unique)-1] != g {
+				unique = append(unique, g)
+			}
+		}
+		row.SourceGroups = unique
+		view.states[key] = row.View
+		groupRows[key.account] = append(groupRows[key.account], *row)
+	}
+	for _, rows := range groupRows {
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].GroupID != rows[j].GroupID {
+				return rows[i].GroupID < rows[j].GroupID
+			}
+			return rows[i].Model < rows[j].Model
+		})
+	}
+	sessions := make(schedPredecessorIndex)
+	for _, rows := range d.samples {
+		for _, r := range rows {
+			if !schedAvailableAt(r).After(d.now) {
+				sessions.add(schedQualityCloneSample(r))
+			}
+		}
+	}
+	for _, r := range d.running {
+		sessions.add(schedQualityCloneSample(r))
+	}
+	sessions.sort()
+	view.sessions = make(map[schedSessionKey][]q.AttemptSample)
+	for k, rows := range sessions {
+		if len(rows) > 2 {
+			rows = rows[len(rows)-2:]
+		}
+		view.sessions[k] = append([]q.AttemptSample(nil), rows...)
 	}
 	members := make(map[int64][]int64)
 	for group, ids := range s.members {
@@ -194,7 +263,7 @@ func schedQualitySince(reset, since time.Time) time.Time {
 	}
 	return since
 }
-func (s *SchedQualityEngineService) rowKeys(d *schedQualityData, rows []q.StateRow) ([]schedQualityKey, map[schedQualityKey]q.StateRow) {
+func (s *SchedQualityEngineService) rowKeys(d *schedQualityData, states []q.LineState) ([]q.LineKey, map[q.LineKey]q.LineState) {
 	models := make(map[int64]map[string]bool)
 	add := func(a int64, m string) {
 		if models[a] == nil {
@@ -202,31 +271,41 @@ func (s *SchedQualityEngineService) rowKeys(d *schedQualityData, rows []q.StateR
 		}
 		models[a][m] = true
 	}
-	previous := make(map[schedQualityKey]q.StateRow)
-	keys := make(map[schedQualityKey]bool)
+	rows := make(map[q.LineKey]q.LineState)
 	for pair := range d.samples {
 		add(pair.AccountID, pair.Model)
 	}
-	for _, r := range rows {
-		previous[schedQualityKeyOf(r)] = r
+	for _, r := range d.running {
 		add(r.AccountID, r.Model)
 	}
-	for group, ids := range s.members {
-		for _, id := range ids {
-			for model := range models[id] {
-				keys[schedQualityKey{id, model, group}] = true
+	for _, r := range states {
+		rows[r.LineKey] = r
+		add(r.AccountID, r.Model)
+	}
+	var keys []q.LineKey
+	for g, ids := range s.members {
+		for _, a := range ids {
+			for m := range models[a] {
+				for _, line := range q.Lines {
+					keys = append(keys, q.LineKey{AccountID: a, GroupID: g, Model: m, Line: line})
+				}
 			}
 		}
 	}
-	out := make([]schedQualityKey, 0, len(keys))
-	for key := range keys {
-		out = append(out, key)
-	}
-	sort.Slice(out, func(i, j int) bool { return schedQualityLess(out[i], out[j]) })
-	return out, previous
+	sort.Slice(keys, func(i, j int) bool { return schedLineLess(keys[i], keys[j]) })
+	return keys, rows
 }
-func schedQualityKeyOf(r q.StateRow) schedQualityKey {
-	return schedQualityKey{r.AccountID, r.Model, r.GroupID}
+func schedLineLess(a, b q.LineKey) bool {
+	if a.AccountID != b.AccountID {
+		return a.AccountID < b.AccountID
+	}
+	if a.Model != b.Model {
+		return a.Model < b.Model
+	}
+	if a.GroupID != b.GroupID {
+		return a.GroupID < b.GroupID
+	}
+	return a.Line < b.Line
 }
 func schedQualityLess(a, b schedQualityKey) bool {
 	if a.account != b.account {
@@ -248,5 +327,29 @@ func (s *SchedQualityEngineService) isMember(group, account int64) bool {
 
 // LogSchedQualityDecision emits a committed decision using the shared state-event format.
 func LogSchedQualityDecision(ctx context.Context, d q.Decision) {
-	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Scope.AccountID, "model", d.Scope.Model, "group_id", d.Scope.GroupID, "action", d.Action, "dims", d.Basis.Dims, "level", d.Level, "until", d.Until, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
+	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "action", d.Action, "line", d.Key.Line, "level", d.Level, "until", d.Until, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
+}
+
+// These projections support the existing board/admin response during integration.
+// The downstream packages replace their response shapes with per-line fields.
+func schedRearLines(v q.StateView) []q.Dimension {
+	var out []q.Dimension
+	for i, l := range []q.LineView{v.TTFO, v.Error, v.Cache} {
+		if l.Identity == q.IdentityRear {
+			out = append(out, q.Lines[i])
+		}
+	}
+	return out
+}
+func schedStateUntil(v q.StateView) time.Time {
+	var until time.Time
+	for _, l := range []q.LineView{v.TTFO, v.Error, v.Cache} {
+		if l.Identity == q.IdentityRear && l.Until.After(until) {
+			until = l.Until
+		}
+		if l.Trial && l.TrialUntil.After(until) {
+			until = l.TrialUntil
+		}
+	}
+	return until
 }

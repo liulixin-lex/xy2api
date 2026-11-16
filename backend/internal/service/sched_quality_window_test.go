@@ -20,7 +20,7 @@ func TestQualityWindowCompletionRetentionAndNoSampleCap(t *testing.T) {
 	w := schedQualityWindow{}
 	w.merge(append(rows, rows...), now)
 	require.Len(t, w.samples[SchedAccountModel{1, "synthetic-model"}], 250)
-	w.take(now.Add(180 * time.Minute))
+	w.take(now.Add(250 * time.Minute))
 	require.Empty(t, w.samples)
 }
 
@@ -36,7 +36,7 @@ func (s *previousCountingStore) LoadPreviousAttempts(ctx context.Context, rows [
 
 func TestQualityWindowCrossAccountPredecessorAndSupplementCache(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	old := engineSamples(1, now.Add(-181*time.Minute), true)[0]
+	old := engineSamples(1, now.Add(-5*time.Minute), true)[0]
 	old.SessionKey = "session"
 	current := engineSamples(1, now.Add(-time.Minute), true)[0]
 	current.SessionKey = "session"

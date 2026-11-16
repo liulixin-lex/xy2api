@@ -22,9 +22,9 @@ func TestOpenAISelectionRuntimeFrontPriorityBeforeRateAndLoad(t *testing.T) {
 func TestOpenAISelectionRuntimeBelowRecoveryRestoresPriority(t *testing.T) {
 	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 	key := fakeSchedViewKey{7, 1, "m"}
-	f.view.States[key] = schedquality.StateView{Failing: true}
+	f.view.States[key] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 	require.Equal(t, int64(2), f.selectNow(t, context.Background(), "", nil).Account.ID)
-	f.view.States[key] = schedquality.StateView{Failing: false}
+	f.view.States[key] = schedquality.StateView{Error: schedquality.LineView{}}
 	require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID)
 }
 

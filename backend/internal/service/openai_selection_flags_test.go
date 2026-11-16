@@ -20,7 +20,7 @@ func TestSelectionAttemptFlagsFollowSelectedAccount(t *testing.T) {
 			}
 			if mode == "fallback" {
 				for _, id := range []int64{10, 1} {
-					f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{Failing: true}
+					f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 				}
 			}
 			state := resilience.NewRequestState()
@@ -55,7 +55,7 @@ func TestRefreshSelectionFlagsReevaluatesFallbackForCurrentTurn(t *testing.T) {
 	require.False(t, fallback)
 	require.False(t, takeover)
 
-	f.view.States[fakeSchedViewKey{7, account.ID, "m"}] = schedquality.StateView{Failing: true}
+	f.view.States[fakeSchedViewKey{7, account.ID, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 	f.svc.RefreshOpenAISelectionFlags(ctx, groupID, &account, "m")
 	fallback, takeover = state.SchedSelectionFlags(account.ID)
 	require.True(t, fallback)

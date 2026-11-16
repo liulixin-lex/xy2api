@@ -16,7 +16,7 @@ func TestSelectionGroupGateAndManualOnly(t *testing.T) {
 	for _, mode := range []string{"enabled", "group_disabled", "global_disabled", "stale", "manual_only", "exempt"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-			st := schedquality.StateView{Failing: true}
+			st := schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 			v := &selectionPolicyView{View: f.view, disabled: mode == "group_disabled"}
 			f.svc.selectionBoard.view = func() schedquality.View { return v }
 			if mode == "global_disabled" {
@@ -44,7 +44,7 @@ func TestSelectionGroupGateAndManualOnly(t *testing.T) {
 
 func TestSelectionMigrationTriesEveryAvailableNormalTarget(t *testing.T) {
 	f := selectionNewSessionFixture()
-	f.state(f.owner.ID, schedquality.StateView{Failing: true})
+	f.state(f.owner.ID, schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}})
 	f.slots.failed[1], f.slots.failed[2] = true, true
 	selected := f.selectNow(context.Background())
 	require.NotNil(t, selected)

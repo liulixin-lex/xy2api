@@ -55,9 +55,9 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 	state := selectionState(view, groupID, target, model)
 	auto := selectionAuto(view, groupID, now)
 	if migrate {
-		return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandBack && schedquality.StandingOf(state, auto, now) == schedquality.StandFront
+		return auto && selectionState(view, groupID, owner, model).Placement(auto, now) == schedquality.PlaceRear && state.Placement(auto, now) == schedquality.PlaceFront
 	}
-	return selectionLive(view, now) && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandFront && target.Priority < owner.Priority && schedquality.StandingOf(state, auto, now) == schedquality.StandFront && !s.marks.Recently(target.ID, now)
+	return selectionLive(view, now) && selectionState(view, groupID, owner, model).Placement(auto, now) == schedquality.PlaceFront && target.Priority < owner.Priority && state.Placement(auto, now) == schedquality.PlaceFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
@@ -80,7 +80,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	now, view := s.now(), s.view()
-	migrate := schedquality.StandingOf(selectionState(view, groupID, owner, model), selectionAuto(view, groupID, now), now) == schedquality.StandBack
+	migrate := selectionState(view, groupID, owner, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceRear
 	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
 		return nil
 	}

@@ -32,6 +32,8 @@ type SchedQualityEngineService struct {
 	loaded      bool
 	insertedAt  time.Time
 	configAt    time.Time
+	rule        SchedTTFTRuleRecord
+	peers       *peerBucket
 	policies    map[int64]SchedPolicyRecord
 	members     map[int64][]int64
 	seenResets  map[int64]time.Time
@@ -54,7 +56,7 @@ func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttempt
 	if now == nil {
 		now = time.Now
 	}
-	s := &SchedQualityEngineService{store: store, attempts: attempts, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs)}
+	s := &SchedQualityEngineService{store: store, attempts: attempts, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs), rule: SchedTTFTRuleRecord{Params: schedquality.DefaultRuleBParams()}}
 	s.snapshot.Store(&SchedQualitySnapshot{View: &schedQualityView{}})
 	return s
 }
@@ -182,7 +184,13 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time, s
 	if err := s.refreshConfig(ctx, now); err != nil {
 		return nil, err
 	}
-	d := &schedQualityData{now: now, samples: samples, globalEnabled: true}
+	d := &schedQualityData{now: now, samples: samples, globalEnabled: true, running: s.window.running, peers: s.peers, ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
+	for pair, rows := range samples {
+		d.ruleSamples[pair] = ruleBSamples(rows)
+	}
+	for key, rows := range s.window.byGroupModel {
+		d.ruleGroups[key] = ruleBSamples(rows)
+	}
 	if s.switches != nil {
 		d.globalEnabled = s.switches.SchedQualityEnabled(ctx)
 	}
@@ -204,7 +212,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	if err != nil {
 		return err
 	}
-	var states []schedquality.StateRow
+	var states []schedquality.LineState
 	var overrides []SchedOverride
 	var resets map[int64]time.Time
 	var decisions []schedquality.Decision
@@ -232,7 +240,8 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 		if err != nil {
 			return err
 		}
-		var changed, deleted []schedquality.StateRow
+		var changed []schedquality.LineState
+		var deleted []schedquality.LineKey
 		states, changed, deleted, decisions = s.replay(d, states, resets, after, horizon)
 		if err := tx.Upsert(changed); err != nil {
 			return err
@@ -262,12 +271,15 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	}
 	if !locked {
 		s.processedAt = time.Time{}
+		s.peers = nil
+		d.peers = nil
 		states, overrides, resets, err = s.store.LoadRows(ctx)
 		if err != nil {
 			return err
 		}
 	} else {
 		s.processedAt = horizon
+		s.peers = d.peers
 		for _, decision := range decisions {
 			LogSchedQualityDecision(ctx, decision)
 			if decision.Action == "enter" || decision.Action == "renew" {
@@ -282,78 +294,57 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	return nil
 }
 
-// replay advances chronological event instants, not the polling clock. Persisted
-// Since/EvidenceSince skip events already covered by a previous leader or reset.
-func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedquality.StateRow, resets map[int64]time.Time, after, horizon time.Time) (kept, changed, deleted []schedquality.StateRow, decisions []schedquality.Decision) {
-	keys, rows := s.rowKeys(d, states)
-	initial := make(map[schedQualityKey]schedquality.StateRow)
-	for _, row := range states {
-		initial[schedQualityKeyOf(row)] = row
+// replay advances complete event batches in chronological order. EvaluatedAt is
+// persisted even when Step emits no decision, preventing repeat work on restart.
+func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, after, horizon time.Time) (kept, changed []schedquality.LineState, deleted []schedquality.LineKey, decisions []schedquality.Decision) {
+	keys, loaded := s.rowKeys(d, states)
+	initial := make(map[schedquality.LineKey]schedquality.LineState)
+	for _, r := range states {
+		initial[r.LineKey] = r
 	}
+	rows := make(map[schedquality.LineKey]schedquality.LineState)
 	enabled := keys[:0]
-	for _, key := range keys {
-		if !s.policies[key.group].Policy.Enabled {
-			delete(rows, key)
-			continue
-		}
-		enabled = append(enabled, key)
-		if _, ok := rows[key]; !ok {
-			rows[key] = schedquality.StateRow{AccountID: key.account, Model: key.model, GroupID: key.group}
+	for _, k := range keys {
+		if s.policies[k.GroupID].Policy.Enabled {
+			r := loaded[k]
+			r.LineKey = k
+			rows[k] = r
+			enabled = append(enabled, k)
 		}
 	}
 	keys = enabled
 	events := make(map[time.Time]map[SchedAccountModel]bool)
 	add := func(at time.Time) {
-		if events[at] == nil {
-			events[at] = make(map[SchedAccountModel]bool)
+		if !at.IsZero() && !at.After(horizon) && at.After(after) {
+			if events[at] == nil {
+				events[at] = make(map[SchedAccountModel]bool)
+			}
 		}
 	}
 	for at := after.Truncate(time.Minute).Add(time.Minute); !at.After(horizon); at = at.Add(time.Minute) {
 		add(at)
 	}
 	for pair, samples := range d.samples {
-		for _, sample := range samples {
-			if sample.FinishedAt.After(after) && !sample.FinishedAt.After(horizon) && sample.Stream && (sample.TTFOMs != nil || sample.Outcome == schedquality.OutcomeTimeout) {
-				add(sample.FinishedAt)
-				events[sample.FinishedAt][pair] = true
+		for _, r := range samples {
+			at := schedAvailableAt(r)
+			add(at)
+			if events[at] != nil {
+				events[at][pair] = true
 			}
 		}
 	}
-	for _, key := range keys {
-		r := rows[key]
-		if r.State == schedquality.StateCooling && !r.Until.After(horizon) {
-			add(r.Until)
+	schedule := func(r schedquality.LineState) {
+		for _, at := range []time.Time{r.Until, r.TrialUntil, r.LastRear.Add(schedquality.LevelClearQuiet)} {
+			if at.After(r.EvaluatedAt) {
+				if !at.After(after) {
+					at = after.Add(time.Nanosecond)
+				}
+				add(at)
+			}
 		}
 	}
-	transition := func(key schedQualityKey, at time.Time, kind schedquality.EvaluationKind) {
-		prev := rows[key]
-		if at.Before(prev.Since) || !at.After(resets[key.account]) || at.Before(prev.EvidenceSince) {
-			return
-		}
-		prev.EvidenceSince = schedQualitySince(prev.EvidenceSince, resets[key.account])
-		next, _ := schedquality.AdvanceAt(prev, s.policies[key.group].Policy, d.samples[SchedAccountModel{key.account, key.model}], at, kind)
-		rows[key] = next
-		action := ""
-		if prev.State != next.State {
-			if next.State == schedquality.StateCooling {
-				action = "enter"
-			} else {
-				action = "release"
-			}
-		} else if next.State == schedquality.StateCooling && !next.Since.Equal(prev.Since) {
-			action = "renew"
-		}
-		if action == "" {
-			return
-		}
-		basis := schedquality.DecisionBasis{RuleVersion: schedquality.RuleVersion}
-		if next.Basis != nil {
-			basis = *next.Basis
-		}
-		decisions = append(decisions, schedquality.Decision{At: at, Scope: schedquality.Scope{AccountID: key.account, Model: key.model, GroupID: key.group}, Action: action, Level: next.Level, Until: next.Until, Basis: basis})
-		if next.State == schedquality.StateCooling && !next.Until.After(horizon) {
-			add(next.Until)
-		}
+	for _, r := range rows {
+		schedule(r)
 	}
 	for len(events) > 0 {
 		var at time.Time
@@ -362,47 +353,48 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 				at = t
 			}
 		}
-		fast := events[at]
+		touched := events[at]
 		delete(events, at)
-		for _, key := range keys {
-			r := rows[key]
-			if r.State == schedquality.StateCooling && !r.Until.After(at) {
-				transition(key, at, schedquality.EvaluateDeadline)
-			}
+		bucket := at.UTC().Truncate(schedquality.RegularInterval)
+		if d.peers == nil || !d.peers.at.Equal(bucket) {
+			d.peers = freezePeers(at, rows)
 		}
-		if at.After(after) && at.Equal(at.Truncate(time.Minute)) {
-			for _, key := range keys {
-				if rows[key].State == schedquality.StateNormal {
-					transition(key, at, schedquality.EvaluateRegular)
-				}
+		fiveMin := at.Equal(bucket)
+		minute := at.Equal(at.Truncate(time.Minute))
+		for _, k := range keys {
+			prev := rows[k]
+			if !at.After(prev.EvaluatedAt) || !at.After(resets[k.AccountID]) {
+				continue
 			}
-		}
-		for _, key := range keys {
-			if fast[SchedAccountModel{key.account, key.model}] && rows[key].State == schedquality.StateNormal {
-				transition(key, at, schedquality.EvaluateFast)
+			kind, due := schedquality.Due(prev, at, fiveMin, minute || touched[SchedAccountModel{k.AccountID, k.Model}])
+			if !due {
+				continue
 			}
+			v, basis := s.assessLine(d, prev, kind, at, resets)
+			next, action := schedquality.Step(prev, kind, v, basis, at)
+			rows[k] = next
+			if action != "" {
+				decisions = append(decisions, schedquality.Decision{At: at, Key: k, Action: action, Level: next.Level, Until: next.Until, Basis: basis})
+			}
+			schedule(next)
 		}
 	}
-	active := make(map[schedQualityKey]bool)
-	for _, key := range keys {
-		row := rows[key]
-		active[key] = true
-		if row.Since.IsZero() {
+	for _, k := range keys {
+		r := rows[k]
+		if r.EvaluatedAt.IsZero() {
 			continue
 		}
-		kept = append(kept, row)
-		if !reflect.DeepEqual(row, initial[key]) {
-			changed = append(changed, row)
+		kept = append(kept, r)
+		if !reflect.DeepEqual(r, initial[k]) {
+			changed = append(changed, r)
 		}
 	}
-	for key, row := range initial {
-		if !active[key] {
-			deleted = append(deleted, row)
+	for k := range initial {
+		if _, ok := rows[k]; !ok {
+			deleted = append(deleted, k)
 		}
 	}
-	sort.Slice(deleted, func(i, j int) bool {
-		return schedQualityLess(schedQualityKeyOf(deleted[i]), schedQualityKeyOf(deleted[j]))
-	})
+	sort.Slice(deleted, func(i, j int) bool { return schedLineLess(deleted[i], deleted[j]) })
 	return
 }
 

@@ -63,7 +63,7 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
-		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, groupID, now), now)),
+		Standing: int(selectionState(view, groupID, acc, model).Placement(!req.ManualOnly && selectionAuto(view, groupID, now), now)),
 		Priority: acc.Priority, RateKnown: !req.TokenBilled, ID: acc.ID,
 	}
 	if req.TokenBilled {

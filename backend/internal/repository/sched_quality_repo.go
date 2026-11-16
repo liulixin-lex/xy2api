@@ -20,7 +20,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const schedQualityCycleLockID int64 = 734891260229
+const schedQualityCycleLockID int64 = 734891260230
 
 var (
 	schedQualityResetWarnings  = rate.NewLimiter(rate.Every(time.Minute), 1)
@@ -82,18 +82,18 @@ func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) 
 	}
 	var decisions []schedquality.Decision
 	for _, row := range rows {
-		if row.AccountID == accountID && row.State == schedquality.StateCooling {
-			basis := schedquality.DecisionBasis{RuleVersion: schedquality.RuleVersion}
+		if row.AccountID == accountID && (row.Identity == schedquality.IdentityRear || row.Trial) {
+			basis := schedquality.Basis{RuleVersion: schedquality.RuleVersion}
 			if row.Basis != nil {
 				basis = *row.Basis
 			}
-			decisions = append(decisions, schedquality.Decision{At: at, Scope: schedquality.Scope{AccountID: accountID, GroupID: row.GroupID, Model: row.Model}, Action: "reset", Basis: basis})
+			decisions = append(decisions, schedquality.Decision{At: at, Key: row.LineKey, Action: "reset", Basis: basis})
 		}
 	}
 	if err := (&schedQualityTx{ctx: ctx, tx: tx}).InsertDecisions(decisions); err != nil {
 		return time.Time{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM sched_states WHERE account_id=$1`, accountID); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM sched_line_states WHERE account_id=$1`, accountID); err != nil {
 		return time.Time{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -105,7 +105,7 @@ func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) 
 	return at, nil
 }
 
-func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.StateRow, []service.SchedOverride, map[int64]time.Time, error) {
+func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.LineState, []service.SchedOverride, map[int64]time.Time, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, nil, nil, err
@@ -134,38 +134,33 @@ func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.S
 
 func loadSchedQualityStates(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}) ([]schedquality.StateRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,failing,dims,level,since,until,evidence_since,basis FROM sched_states ORDER BY account_id,model,group_id`)
+}) ([]schedquality.LineState, error) {
+	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis FROM sched_line_states ORDER BY account_id,model,group_id,line`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []schedquality.StateRow
+	var out []schedquality.LineState
 	for rows.Next() {
-		var r schedquality.StateRow
-		var failing bool
-		var dims pq.StringArray
-		var since, until, evidence sql.NullTime
+		var r schedquality.LineState
+		var pending, epoch, entry, until, trial, good, rear, evaluated sql.NullTime
 		var raw []byte
-		if err := rows.Scan(&r.AccountID, &r.Model, &r.GroupID, &failing, &dims, &r.Level, &since, &until, &evidence, &raw); err != nil {
+		if err := rows.Scan(&r.AccountID, &r.Model, &r.GroupID, &r.Line, &r.Identity, &r.Trial, &r.Level, &r.Admissions, &pending, &epoch, &entry, &until, &trial, &good, &rear, &evaluated, &raw); err != nil {
 			return nil, err
 		}
-		r.Since, r.Until, r.EvidenceSince = since.Time, until.Time, evidence.Time
-		if failing {
-			r.State = schedquality.StateCooling
-		}
-		r.Basis = &schedquality.DecisionBasis{}
-		if err := json.Unmarshal(raw, r.Basis); err != nil {
-			return nil, err
-		}
-		r.Basis.Dims = nil
-		for _, dim := range dims {
-			r.Basis.Dims = append(r.Basis.Dims, schedquality.Dimension(dim))
+		r.PendingAt, r.Epoch, r.Entry, r.Until = pending.Time, epoch.Time, entry.Time, until.Time
+		r.TrialUntil, r.GoodSince, r.LastRear, r.EvaluatedAt = trial.Time, good.Time, rear.Time, evaluated.Time
+		if string(raw) != "{}" {
+			r.Basis = &schedquality.Basis{}
+			if err := json.Unmarshal(raw, r.Basis); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
+
 func loadSchedQualityOverrides(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]service.SchedOverride, error) {
@@ -259,7 +254,7 @@ type schedQualityTx struct {
 	tx  *sql.Tx
 }
 
-func (t *schedQualityTx) States() ([]schedquality.StateRow, error) {
+func (t *schedQualityTx) States() ([]schedquality.LineState, error) {
 	return loadSchedQualityStates(t.ctx, t.tx)
 }
 func (t *schedQualityTx) Overrides() ([]service.SchedOverride, error) {
@@ -274,27 +269,22 @@ func nullableQualityTime(at time.Time) any {
 	}
 	return at
 }
-func qualityBasis(b *schedquality.DecisionBasis) ([]byte, []string, error) {
+func qualityBasis(b *schedquality.Basis) ([]byte, error) {
 	if b == nil {
-		return []byte("{}"), []string{}, nil
+		return []byte("{}"), nil
 	}
-	raw, err := json.Marshal(b)
-	dims := make([]string, len(b.Dims))
-	for i, dim := range b.Dims {
-		dims[i] = string(dim)
-	}
-	return raw, dims, err
+	return json.Marshal(b)
 }
-func (t *schedQualityTx) Upsert(rows []schedquality.StateRow) error {
+func (t *schedQualityTx) Upsert(rows []schedquality.LineState) error {
 	for _, r := range rows {
-		raw, dims, err := qualityBasis(r.Basis)
+		raw, err := qualityBasis(r.Basis)
 		if err != nil {
 			return err
 		}
-		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_states(account_id,model,group_id,failing,dims,level,since,until,evidence_since,basis)
-  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-  ON CONFLICT(account_id,model,group_id) DO UPDATE SET failing=EXCLUDED.failing,dims=EXCLUDED.dims,level=EXCLUDED.level,since=EXCLUDED.since,until=EXCLUDED.until,evidence_since=EXCLUDED.evidence_since,basis=EXCLUDED.basis,updated_at=NOW()`,
-			r.AccountID, r.Model, r.GroupID, r.State == schedquality.StateCooling, pq.Array(dims), r.Level, nullableQualityTime(r.Since), nullableQualityTime(r.Until), nullableQualityTime(r.EvidenceSince), string(raw))
+		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+ ON CONFLICT(account_id,model,group_id,line) DO UPDATE SET identity=EXCLUDED.identity,trial=EXCLUDED.trial,level=EXCLUDED.level,admissions=EXCLUDED.admissions,pending_at=EXCLUDED.pending_at,epoch=EXCLUDED.epoch,entry=EXCLUDED.entry,until=EXCLUDED.until,trial_until=EXCLUDED.trial_until,good_since=EXCLUDED.good_since,last_rear=EXCLUDED.last_rear,evaluated_at=EXCLUDED.evaluated_at,basis=EXCLUDED.basis,updated_at=NOW()`,
+			r.AccountID, r.Model, r.GroupID, r.Line, r.Identity, r.Trial, r.Level, r.Admissions, nullableQualityTime(r.PendingAt), nullableQualityTime(r.Epoch), nullableQualityTime(r.Entry), nullableQualityTime(r.Until), nullableQualityTime(r.TrialUntil), nullableQualityTime(r.GoodSince), nullableQualityTime(r.LastRear), nullableQualityTime(r.EvaluatedAt), string(raw))
 		if err != nil {
 			return err
 		}
@@ -303,7 +293,7 @@ func (t *schedQualityTx) Upsert(rows []schedquality.StateRow) error {
 }
 func (t *schedQualityTx) InsertDecisions(rows []schedquality.Decision) error {
 	for _, r := range rows {
-		raw, dims, err := qualityBasis(&r.Basis)
+		raw, err := qualityBasis(&r.Basis)
 		if err != nil {
 			return err
 		}
@@ -311,8 +301,7 @@ func (t *schedQualityTx) InsertDecisions(rows []schedquality.Decision) error {
 		if ids == nil {
 			ids = []string{}
 		}
-		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_decisions(at,rule_version,account_id,model,group_id,action,dims,level,until,basis,attempt_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-			r.At, schedquality.RuleVersion, r.Scope.AccountID, r.Scope.Model, r.Scope.GroupID, r.Action, pq.Array(dims), r.Level, nullableQualityTime(r.Until), string(raw), pq.Array(ids))
+		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_decisions(at,rule_version,account_id,model,group_id,line,action,dims,level,until,basis,attempt_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, r.At, schedquality.RuleVersion, r.Key.AccountID, r.Key.Model, r.Key.GroupID, r.Key.Line, r.Action, pq.Array([]string{string(r.Key.Line)}), r.Level, nullableQualityTime(r.Until), string(raw), pq.Array(ids))
 		if err != nil {
 			return err
 		}
@@ -326,9 +315,9 @@ func (r *schedQualityRepository) DeleteDecisionsBefore(ctx context.Context, befo
 	}
 	return result.RowsAffected()
 }
-func (t *schedQualityTx) Delete(rows []schedquality.StateRow) error {
+func (t *schedQualityTx) Delete(rows []schedquality.LineKey) error {
 	for _, r := range rows {
-		if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM sched_states WHERE account_id=$1 AND model=$2 AND group_id=$3`, r.AccountID, r.Model, r.GroupID); err != nil {
+		if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM sched_line_states WHERE account_id=$1 AND model=$2 AND group_id=$3 AND line=$4`, r.AccountID, r.Model, r.GroupID, r.Line); err != nil {
 			return err
 		}
 	}
@@ -491,18 +480,15 @@ func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]se
 	return out, rows.Err()
 }
 
-func (r *schedQualityRepository) SavePolicy(ctx context.Context, groupID, expected int64, p schedquality.Policy) (service.SchedPolicyRecord, error) {
+func (t *schedQualityTx) SavePolicy(groupID, expected int64, p schedquality.Policy) (service.SchedPolicyRecord, error) {
 	if groupID <= 0 {
 		return service.SchedPolicyRecord{}, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
 	}
 	if err := service.ValidateSchedQualityPolicy(p); err != nil {
 		return service.SchedPolicyRecord{}, err
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return service.SchedPolicyRecord{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
+	ctx, tx := t.ctx, t.tx
+	var err error
 	var platform string
 	if err := tx.QueryRowContext(ctx, `SELECT platform FROM groups WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, groupID).Scan(&platform); err != nil {
 		return service.SchedPolicyRecord{}, err
@@ -540,8 +526,78 @@ func (r *schedQualityRepository) SavePolicy(ctx context.Context, groupID, expect
 	if _, err = tx.ExecContext(ctx, `UPDATE settings SET value=$2,updated_at=NOW() WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies, raw); err != nil {
 		return service.SchedPolicyRecord{}, err
 	}
-	if err = tx.Commit(); err != nil {
-		return service.SchedPolicyRecord{}, err
-	}
 	return service.SchedPolicyRecord{GroupID: groupID, Version: version + 1, Policy: p}, nil
+}
+
+// RunExclusive uses the same database lock as cycles and resets. Configuration and
+// the resulting line states commit together, including on a non-leader instance.
+func (r *schedQualityRepository) RunExclusive(ctx context.Context, fn func(service.SchedQualityTx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `SELECT set_config('lock_timeout',$1,true)`, fmt.Sprintf("%dms", schedquality.ResetLockTimeout.Milliseconds())); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, schedQualityCycleLockID); err != nil {
+		return err
+	}
+	if err = fn(&schedQualityTx{ctx: ctx, tx: tx}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func decodeSchedTTFTRule(raw string) (service.SchedTTFTRuleRecord, error) {
+	r := service.SchedTTFTRuleRecord{Params: schedquality.DefaultRuleBParams()}
+	if raw == "" {
+		return r, nil
+	}
+	value := struct {
+		Version int64 `json:"version"`
+		schedquality.RuleBParams
+	}{RuleBParams: r.Params}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return r, err
+	}
+	r.Version, r.Params = value.Version, value.RuleBParams
+	return r, r.Params.Validate()
+}
+func (r *schedQualityRepository) LoadTTFTRule(ctx context.Context) (service.SchedTTFTRuleRecord, error) {
+	var raw string
+	err := r.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeySchedQualityTTFTRule).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return service.SchedTTFTRuleRecord{}, err
+	}
+	return decodeSchedTTFTRule(raw)
+}
+func (t *schedQualityTx) SaveTTFTRule(expected int64, p schedquality.RuleBParams) (service.SchedTTFTRuleRecord, error) {
+	var result service.SchedTTFTRuleRecord
+	if err := p.Validate(); err != nil {
+		return result, err
+	}
+	if _, err := t.tx.ExecContext(t.ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,'{"version":0,"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}',NOW()) ON CONFLICT(key) DO NOTHING`, service.SettingKeySchedQualityTTFTRule); err != nil {
+		return result, err
+	}
+	var raw string
+	if err := t.tx.QueryRowContext(t.ctx, `SELECT value FROM settings WHERE key=$1 FOR UPDATE`, service.SettingKeySchedQualityTTFTRule).Scan(&raw); err != nil {
+		return result, err
+	}
+	old, err := decodeSchedTTFTRule(raw)
+	if err != nil {
+		return result, err
+	}
+	if old.Version != expected {
+		return result, service.ErrSchedPolicyConflict
+	}
+	result = service.SchedTTFTRuleRecord{Version: old.Version + 1, Params: p}
+	encoded, err := json.Marshal(struct {
+		Version int64 `json:"version"`
+		schedquality.RuleBParams
+	}{result.Version, p})
+	if err != nil {
+		return result, err
+	}
+	_, err = t.tx.ExecContext(t.ctx, `UPDATE settings SET value=$2,updated_at=NOW() WHERE key=$1`, service.SettingKeySchedQualityTTFTRule, string(encoded))
+	return result, err
 }

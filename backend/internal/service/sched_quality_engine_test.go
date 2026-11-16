@@ -50,133 +50,6 @@ func (f *qualityFixture) view() q.StateView {
 	return f.e.Snapshot().View.StateOf(10, 1, "synthetic-model")
 }
 
-func TestEngineInstantOrder(t *testing.T) {
-	f := newQualityFixture(t)
-	minute := f.now.Add(-10 * time.Second)
-	rows := engineSamples(50, minute, false)
-	for i := 0; i < 6; i++ {
-		rows[i].Outcome = q.OutcomeAccountFault
-	}
-	for i := 6; i < 12; i++ {
-		rows[i].Stream = true
-	}
-	f.ledger.Rows = rows
-	f.cycle()
-	v := f.view()
-	require.True(t, v.Failing)
-	require.Equal(t, minute, v.Since)
-	require.Equal(t, []q.Dimension{q.DimensionError}, v.Dims, "ordinary entry precedes same-instant fast entry")
-	require.Len(t, f.store.Decisions, 1)
-	require.Equal(t, "enter", f.store.Decisions[0].Action)
-	require.Equal(t, 20*time.Minute, v.Until.Sub(v.Since))
-}
-
-func TestEngineCompletionOnlyFastAndMinuteOnlyRegular(t *testing.T) {
-	f := newQualityFixture(t)
-	completion := f.now.Add(-20 * time.Second) // 11:59:50, processed with the 12:00 ordinary minute
-	f.ledger.Rows = engineSamples(6, completion, true)
-	f.cycle()
-	require.Equal(t, completion, f.view().Since)
-	require.Equal(t, []q.Dimension{q.DimensionTTFO}, f.view().Dims)
-	// Ordinary threshold reached between minute ticks cannot enter until next tick.
-	g := newQualityFixture(t)
-	g.now = f.now.Add(-15 * time.Second) // horizon 11:59:45
-	at := g.now.Add(-11 * time.Second)
-	g.ledger.Rows = engineSamples(50, at, false)
-	for i := range g.ledger.Rows {
-		g.ledger.Rows[i].Outcome = q.OutcomeAccountFault
-	}
-	g.cycle()
-	require.False(t, g.view().Failing)
-	g.now = f.now
-	g.cycle()
-	require.True(t, g.view().Failing)
-	require.Equal(t, f.now.Add(-10*time.Second), g.view().Since)
-}
-
-func TestEngineReplayIdempotentAndExactDeadline(t *testing.T) {
-	f := newQualityFixture(t)
-	completion := f.now.Add(-20 * time.Second)
-	f.ledger.Rows = engineSamples(6, completion, true)
-	f.cycle()
-	until := f.view().Until
-	f.e.processedAt = time.Time{} // new leader/restart rereads persisted state
-	f.cycle()
-	require.Len(t, f.store.Decisions, 1)
-	require.Equal(t, 1, f.view().Level)
-	f.now = until.Add(9 * time.Second)
-	f.cycle()
-	require.True(t, f.view().Failing, "watermark has not reached the deadline")
-	f.now = until.Add(10 * time.Second)
-	f.cycle()
-	require.False(t, f.view().Failing)
-	require.Equal(t, until, f.view().EvidenceSince)
-	require.Len(t, f.store.Decisions, 2)
-	require.Equal(t, "release", f.store.Decisions[1].Action)
-	f.e.processedAt = time.Time{}
-	f.cycle()
-	require.Len(t, f.store.Decisions, 2, "replay must not reuse pre-release attempts")
-}
-
-func TestEngineResetAndExemptionDoNotFreezeInternalState(t *testing.T) {
-	f := newQualityFixture(t)
-	f.ledger.Rows = engineSamples(6, f.now.Add(-20*time.Second), true)
-	f.store.OverrideRows = []SchedOverride{{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}}
-	f.switches.enabled = false
-	f.cycle()
-	require.True(t, f.view().Failing)
-	require.False(t, f.e.Snapshot().View.GlobalEnabled())
-	require.Equal(t, q.StandFront, q.StandingOf(f.view(), true, f.now), "exemption covers placement")
-	reset, err := f.e.Reset(context.Background(), 1)
-	require.NoError(t, err)
-	require.False(t, f.view().Failing)
-	require.Equal(t, reset, f.e.Snapshot().View.ResetAt(1))
-	require.Zero(t, f.e.Snapshot().Account(1).Speed.N)
-	f.now = f.now.Add(time.Minute)
-	f.cycle()
-	require.False(t, f.view().Failing, "pre-reset dispatches cannot enter again")
-}
-
-func TestEngineGroupDisableAndReadOnlyFollower(t *testing.T) {
-	f := newQualityFixture(t)
-	f.ledger.Rows = engineSamples(6, f.now.Add(-20*time.Second), true)
-	f.cycle()
-	f.store.lock.Lock()
-	f.e.processedAt = time.Time{}
-	f.cycle()
-	require.True(t, f.view().Failing)
-	require.Len(t, f.store.Decisions, 1)
-	require.True(t, f.e.processedAt.IsZero())
-	f.store.lock.Unlock()
-	p := f.store.Policies[10]
-	p.Policy.Enabled = false
-	f.store.Policies[10] = p
-	f.e.configAt = time.Time{}
-	f.cycle()
-	require.Empty(t, f.store.Rows)
-	require.False(t, f.e.Snapshot().View.GroupEnabled(10))
-}
-
-func TestEngineAccountMetricsAndModelCounts(t *testing.T) {
-	f := newQualityFixture(t)
-	rows := engineSamples(2, f.now.Add(-time.Minute), true)
-	first, timeout := 100, 3000
-	rows[0].TTFOMs = &first
-	rows[1].Outcome, rows[1].TTFOMs, rows[1].CensoredMs = q.OutcomeTimeout, nil, &timeout
-	rows[1].Model = "second-model"
-	f.ledger.Rows = rows
-	f.cycle()
-	a := f.e.Snapshot().Account(1)
-	require.Equal(t, 2, a.Speed.N)
-	require.Equal(t, 100, *a.Speed.P50Ms, "nearest rank median")
-	require.Equal(t, 2, a.Error.N)
-	require.Equal(t, 1, a.Error.Bad)
-	require.Len(t, f.e.Snapshot().GroupModels[10], 2)
-	idle, on := f.e.Snapshot().View.TakeoverIdle(999)
-	require.True(t, on)
-	require.Equal(t, 15*time.Minute, idle)
-}
-
 func TestValidatePolicyErrorFloor(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -192,29 +65,228 @@ func TestValidatePolicyErrorFloor(t *testing.T) {
 	}
 }
 
-func TestEnginePreviewUsesLastMinuteAndNoFastTrack(t *testing.T) {
-	f := newQualityFixture(t)
-	f.ledger.Rows = engineSamples(6, f.now.Add(-time.Second), true)
-	f.cycle()
-	changes, err := f.e.PreviewPolicy(context.Background(), 10, f.store.Policies[10].Policy)
-	require.NoError(t, err)
-	require.Empty(t, changes)
-	require.Empty(t, f.store.Decisions)
-	f = newQualityFixture(t)
-	rows := engineSamples(20, f.now.Add(-time.Minute), true)
+func (f *qualityFixture) badTTFT() {
+	f.store.Members[10] = []int64{1, 2}
+	rows := engineSamples(80, f.now.Add(-30*time.Second), true)
 	for i := range rows {
-		value := 500
-		rows[i].TTFOMs = &value
+		rows[i].SessionKey = fmt.Sprintf("s-%d", i%3)
 	}
-	require.NoError(t, f.ledger.InsertBatch(context.Background(), rows))
+	f.ledger.Rows = append(f.ledger.Rows, rows...)
+	for i, r := range rows {
+		r.AccountID = 2
+		r.AttemptID = fmt.Sprintf("peer-%d", i)
+		r.RequestID = r.AttemptID
+		ms := 100
+		r.TTFOMs = &ms
+		f.ledger.Rows = append(f.ledger.Rows, r)
+	}
+}
+func (f *qualityFixture) line(line q.Dimension) q.LineState {
+	for _, r := range f.store.Rows {
+		if r.AccountID == 1 && r.GroupID == 10 && r.Line == line {
+			return r
+		}
+	}
+	return q.LineState{}
+}
+func TestEngineThreeLinesAndAdjacentEvaluations(t *testing.T) {
+	f := newQualityFixture(t)
+	rows := engineSamples(50, f.now.Add(-30*time.Second), false)
+	for i := 0; i < 6; i++ {
+		rows[i].Outcome = q.OutcomeAccountFault
+		rows[i].Class = q.ClassUpstream
+	}
+	f.ledger.Rows = rows
+	f.cycle()
+	require.Equal(t, q.IdentityUnknown, f.view().Error.Identity)
+	require.Equal(t, f.now.Add(-10*time.Second), f.line(q.DimensionError).PendingAt)
+	require.Empty(t, f.store.Decisions)
+	f.now = f.now.Add(5 * time.Minute)
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().Error.Identity)
+	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
+	require.Len(t, f.store.Decisions, 1)
+	require.Equal(t, q.ActionEnter, f.store.Decisions[0].Action)
+	require.Equal(t, 20*time.Minute, f.line(q.DimensionError).Until.Sub(f.line(q.DimensionError).Entry))
+}
+func TestEngineRestartIdempotentAndExactReview(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	original := append([]q.LineState(nil), f.store.Rows...)
+	decisions := len(f.store.Decisions)
+	restarted := NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
+	require.NoError(t, restarted.cycle(context.Background()))
+	require.Equal(t, original, f.store.Rows)
+	require.Len(t, f.store.Decisions, decisions)
+	until := f.view().TTFO.Until
+	f.now = until.Add(9 * time.Second)
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	f.now = until.Add(10 * time.Second)
+	f.cycle()
+	require.True(t, f.view().TTFO.Trial)
+	require.Equal(t, until, f.line(q.DimensionTTFO).Epoch)
+	require.Equal(t, q.ActionTrial, f.store.Decisions[len(f.store.Decisions)-1].Action)
+}
+func TestEngineTrialAvailabilityUsesLaterInsertion(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	at := f.now.Add(-10 * time.Second)
+	f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Trial: true, Epoch: at.Add(-time.Minute), TrialUntil: at, Admissions: 1}}
+	for i := range f.ledger.Rows {
+		f.ledger.Rows[i].InsertedAt = at
+	}
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	require.Equal(t, q.ActionTrialFail, f.store.Decisions[0].Action)
+	require.Equal(t, at, f.line(q.DimensionTTFO).Entry)
+}
+func TestEngineResetExemptionAndDisabledGroup(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.store.OverrideRows = []SchedOverride{{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}}
+	f.switches.enabled = false
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	require.Equal(t, q.PlaceFront, f.view().Placement(true, f.now))
+	at, err := f.e.Reset(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, at, f.e.Snapshot().View.ResetAt(1))
+	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
+	require.Len(t, f.store.OverrideRows, 1)
+	f.now = f.now.Add(5 * time.Minute)
+	f.cycle()
+	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
+	p := f.store.Policies[10].Policy
+	p.Enabled = false
+	_, err = f.e.UpdatePolicy(context.Background(), 10, 0, p)
+	require.NoError(t, err)
+	require.Empty(t, f.store.Rows)
+}
+func TestEngineReadOnlyFollowerAndMemberRemoval(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	before := append([]q.LineState(nil), f.store.Rows...)
+	f.store.lock.Lock()
 	f.now = f.now.Add(time.Minute)
 	f.cycle()
-	require.False(t, f.view().Failing)
+	f.store.lock.Unlock()
+	require.Equal(t, before, f.store.Rows)
+	require.True(t, f.e.processedAt.IsZero())
+	f.store.Members[10] = []int64{2}
+	f.e.configAt = time.Time{}
+	f.cycle()
+	for _, r := range f.store.Rows {
+		require.NotEqual(t, int64(1), r.AccountID)
+	}
+}
+func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
+	for _, change := range []string{"tighten", "relax", "mixed"} {
+		t.Run(change, func(t *testing.T) {
+			f := newQualityFixture(t)
+			f.badTTFT()
+			f.cycle()
+			old := f.line(q.DimensionTTFO)
+			old.Level = 3
+			old.Admissions = 4
+			old.Epoch = f.now.Add(-time.Minute)
+			for i, r := range f.store.Rows {
+				if r.LineKey == old.LineKey {
+					f.store.Rows[i] = old
+				}
+			}
+			before := append([]q.LineState(nil), f.store.Rows...)
+			p := q.DefaultRuleBParams()
+			switch change {
+			case "tighten":
+				p.Confidence = .7
+			case "relax":
+				p.Confidence = .9
+			case "mixed":
+				p.Confidence = .9
+				p.Tolerance = .19
+			}
+			result, err := f.e.UpdateTTFTRule(context.Background(), 0, p)
+			require.NoError(t, err)
+			require.Equal(t, int64(1), result.Version)
+			if change == "tighten" {
+				require.Equal(t, before, f.store.Rows)
+				require.Zero(t, result.Cleared)
+			} else {
+				require.Equal(t, 2, result.Cleared)
+				r := f.line(q.DimensionTTFO)
+				require.Equal(t, q.IdentityRear, r.Identity)
+				require.Zero(t, r.Level)
+				require.Equal(t, 1, r.Admissions)
+				require.True(t, r.Epoch.IsZero())
+				require.Equal(t, f.now, r.Entry)
+			}
+			rows := append([]q.LineState(nil), f.store.Rows...)
+			_, err = f.e.UpdateTTFTRule(context.Background(), 0, p)
+			require.ErrorIs(t, err, ErrSchedPolicyConflict)
+			require.Equal(t, rows, f.store.Rows)
+		})
+	}
+}
+func TestEnginePolicyRelaxesOnlySelectedGroupAndLine(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.store.Members[20] = []int64{1, 2}
+	f.store.Policies[20] = SchedPolicyRecord{GroupID: 20, Policy: f.store.Policies[10].Policy}
+	f.cycle()
+	before := append([]q.LineState(nil), f.store.Rows...)
 	p := f.store.Policies[10].Policy
-	p.TTFTSeconds = .1
-	changes, err = f.e.PreviewPolicy(context.Background(), 10, p)
+	p.TTFTSeconds = 10
+	result, err := f.e.UpdatePolicy(context.Background(), 10, 0, p)
 	require.NoError(t, err)
-	require.Len(t, changes, 1)
-	require.Equal(t, []q.Dimension{q.DimensionTTFO}, changes[0].Dims)
-	require.False(t, f.view().Failing, "preview must not mutate internal state")
+	require.Equal(t, []q.Dimension{q.DimensionTTFO}, result.RelaxedLines)
+	require.Equal(t, 2, result.Cleared)
+	for _, old := range before {
+		if old.GroupID == 10 && old.Line == q.DimensionTTFO {
+			continue
+		}
+		found := false
+		for _, r := range f.store.Rows {
+			if r.LineKey == old.LineKey {
+				require.Equal(t, old, r)
+				found = true
+			}
+		}
+		require.True(t, found)
+	}
+	require.Equal(t, q.IdentityPass, f.view().TTFO.Identity)
+}
+func TestEngineRuleCommitFailureKeepsConfigAndSnapshot(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	before := f.e.Snapshot()
+	rows := append([]q.LineState(nil), f.store.Rows...)
+	f.store.CommitErr = fmt.Errorf("synthetic commit failure")
+	p := q.DefaultRuleBParams()
+	p.Tolerance = .3
+	_, err := f.e.UpdateTTFTRule(context.Background(), 0, p)
+	require.ErrorIs(t, err, f.store.CommitErr)
+	require.Same(t, before, f.e.Snapshot())
+	require.Equal(t, rows, f.store.Rows)
+	require.Zero(t, f.store.Rule.Version)
+	require.Equal(t, q.DefaultRuleBParams(), f.e.rule.Params)
+}
+func TestEngineSessionSlowTwice(t *testing.T) {
+	f := newQualityFixture(t)
+	rows := engineSamples(3, f.now.Add(-time.Minute), true)
+	for i := range rows {
+		rows[i].SessionKey = "session"
+		rows[i].StartedAt = rows[i].StartedAt.Add(time.Duration(i) * time.Second)
+	}
+	rows[0].AccountID = 2
+	f.ledger.Rows = rows
+	f.cycle()
+	require.True(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "session"))
+	require.True(t, f.e.window.samples[SchedAccountModel{1, "synthetic-model"}][0].Switched)
+	require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 2, "synthetic-model", "session"))
+	require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "missing"))
 }

@@ -91,13 +91,13 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		state := selectionState(view, groupID, account, model)
 		override, _ := state.EffectiveOverride(now)
 		row.Exempt = override.Mode == schedquality.OverrideExempt
-		if key.Standing == int(schedquality.StandBack) {
+		if key.Standing == int(schedquality.PlaceRear) {
 			row.Layer = "below"
 		}
-		if state.Failing {
-			row.Dims = append([]schedquality.Dimension(nil), state.Dims...)
-			if !state.Until.IsZero() {
-				until := state.Until
+		if len(schedRearLines(state)) > 0 {
+			row.Dims = append([]schedquality.Dimension(nil), schedRearLines(state)...)
+			if !schedStateUntil(state).IsZero() {
+				until := schedStateUntil(state)
 				row.Until = &until
 			}
 		}

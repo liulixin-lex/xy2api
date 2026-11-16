@@ -13,9 +13,10 @@ var _ schedquality.View = (*emptySelectionView)(nil)
 
 type emptySelectionView struct{}
 
-func (emptySelectionView) Version() int64      { return 0 }
-func (emptySelectionView) At() time.Time       { return time.Time{} }
-func (emptySelectionView) GlobalEnabled() bool { return false }
+func (emptySelectionView) Version() int64                                     { return 0 }
+func (emptySelectionView) At() time.Time                                      { return time.Time{} }
+func (emptySelectionView) GlobalEnabled() bool                                { return false }
+func (emptySelectionView) SessionSlowTwice(int64, int64, string, string) bool { return false }
 func (emptySelectionView) StateOf(int64, int64, string) schedquality.StateView {
 	return schedquality.StateView{}
 }

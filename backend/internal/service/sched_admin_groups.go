@@ -30,7 +30,7 @@ func schedAdminBelow(p *SchedQualitySnapshot, id, g int64, exempt bool, enabled 
 		return false
 	}
 	for _, r := range p.RowsForAccount(id) {
-		if r.GroupID == g && r.View.Failing {
+		if r.GroupID == g && len(schedRearLines(r.View)) > 0 {
 			return true
 		}
 	}
@@ -161,10 +161,10 @@ func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64,
 	}
 	for _, c := range changes {
 		a := eligible[c.AccountID]
-		if a == nil {
+		if a == nil || len(schedFailedLines(c.Lines)) == 0 {
 			continue
 		}
-		out.Changed = append(out.Changed, SchedAdminPolicyChange{AccountID: a.ID, Name: a.Name, Model: c.Model, Dims: append([]schedquality.Dimension{}, c.Dims...)})
+		out.Changed = append(out.Changed, SchedAdminPolicyChange{AccountID: a.ID, Name: a.Name, Model: c.Model, Dims: append([]schedquality.Dimension{}, schedFailedLines(c.Lines)...)})
 		if !changed[a.ID] {
 			out.After.Normal--
 			out.After.Below++
