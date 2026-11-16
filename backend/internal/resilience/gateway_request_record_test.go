@@ -312,3 +312,30 @@ func TestGatewaySendClearsPreviousHTTPStatus(t *testing.T) {
 		require.Zero(t, st.UpstreamHTTPStatus(2))
 	}
 }
+
+func TestGatewayRequestDeliveredIncompleteIsNotRescued(t *testing.T) {
+	st := NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	st.NoteGatewaySend(1)
+	st.NoteGatewayAttempt(false, "OUTPUT_INCOMPLETE", nil, nil, nil)
+	st.CompleteGatewayForward(true, false)
+	meta, _ := st.ClaimGatewayRequest(true)
+	require.Equal(t, RequestSuccess, meta.Result)
+	require.Equal(t, "OUTPUT_INCOMPLETE", meta.ErrorClass)
+}
+
+func TestGatewayAttemptKeepsItsRequestIdentity(t *testing.T) {
+	st := NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	st.NoteGatewaySend(1)
+	previous := st.GatewayRequestID()
+	st.BeginGatewayTurn(time.Now())
+	st.NoteGatewaySend(1)
+	usage := 7
+	st.NoteGatewayAttemptForRequest(previous, false, "OUTPUT_INCOMPLETE", &usage, nil, nil)
+	st.CompleteGatewayForward(true, false)
+	meta, _ := st.ClaimGatewayRequest(true)
+	require.Equal(t, RequestSuccess, meta.Result)
+	require.Empty(t, meta.ErrorClass)
+	require.Nil(t, meta.InputTokens)
+}

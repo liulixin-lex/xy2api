@@ -5,10 +5,13 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,4 +282,51 @@ type errclassResponseErrorTransport struct{ *httpUpstreamRecorder }
 func (u *errclassResponseErrorTransport) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
 	resp, _ := u.httpUpstreamRecorder.Do(req, proxy, account, concurrency)
 	return resp, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("synthetic transport failure after headers")}
+}
+
+func TestErrclassDeliveredIncompleteQuality(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, stream := range []bool{false, true} {
+		for _, reason := range []string{"", "interrupted", "max_output_tokens", "content_filter"} {
+			t.Run(fmt.Sprintf("stream=%v/reason=%s", stream, reason), func(t *testing.T) {
+				body := []byte(fmt.Sprintf(`{"model":"synthetic-model","input":"synthetic","stream":%v}`, stream))
+				c := newOpenAIRejectedFieldTestContext(body)
+				account := newOpenAIRejectedFieldTestAccount()
+				st := resilience.NewRequestState()
+				st.EnableGatewayRequest(time.Now())
+				st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "synthetic-model"})
+				ctx := resilience.WithRequestState(c.Request.Context(), st)
+				c.Request = c.Request.WithContext(ctx)
+				wire := fmt.Sprintf(`{"id":"resp_synthetic","object":"response","status":"incomplete","incomplete_details":{"reason":%q},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic"}]}],"usage":{"input_tokens":4,"output_tokens":2}}`, reason)
+				contentType := "application/json"
+				if stream {
+					wire = m7ReviewWire(`{"type":"response.incomplete","response":` + wire + `}`)
+					contentType = "text/event-stream"
+				}
+				up := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(wire))}}
+				svc := newOpenAIRejectedFieldTestService(up)
+				rec := &errclassRecorder{}
+				svc.SetSchedAttemptRecorder(rec)
+				result, err := svc.Forward(ctx, c, account, body)
+				require.NoError(t, err)
+				require.True(t, result.CompletedForDelivery())
+				require.Len(t, up.requests, 1)
+				require.Len(t, rec.finishes, 1)
+				if reason == "" || reason == "interrupted" {
+					require.Equal(t, schedquality.ClassInterrupted, rec.finishes[0].Class)
+					require.Equal(t, "OUTPUT_INCOMPLETE", rec.finishes[0].Detail)
+				} else {
+					require.Equal(t, schedquality.ClassNone, rec.finishes[0].Class)
+					require.Equal(t, schedquality.OutcomeOK, rec.finishes[0].Outcome)
+				}
+				st.CompleteGatewayForward(result.CompletedForDelivery(), result.ClientDisconnect)
+				meta, _ := st.ClaimGatewayRequest(true)
+				require.Equal(t, resilience.RequestSuccess, meta.Result)
+			})
+		}
+	}
+	// No first-output marker is required: the non-benign terminal itself
+	// establishes that output did not complete normally (ruling J).
+	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: "OUTPUT_INCOMPLETE"}, nil, false)
+	require.Equal(t, schedquality.ClassInterrupted, got.Class)
 }

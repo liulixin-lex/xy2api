@@ -43,6 +43,7 @@ type schedAttemptCapture struct {
 	outputStart                                int64
 	bodyHash                                   [32]byte
 	attemptID                                  string
+	requestID                                  string
 	repairStep                                 bool
 	repairPrepared                             bool
 	unverifiedHTTP                             bool
@@ -61,7 +62,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body)}
+	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
@@ -73,7 +74,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
-		Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
+		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
 	a.attempt = s.schedAttemptRecorder.Begin(in)
 	if handle, ok := a.attempt.(*schedAttemptHandle); ok {
 		a.attemptID = handle.row.AttemptID
@@ -105,7 +106,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	}
 	in.OutputBytes = int(written)
 	logger.FromContext(a.ctx).Info("sched_quality.attempt_finished",
-		zap.String("component", "sched_quality"), zap.String("request_id", a.state.GatewayRequestID()),
+		zap.String("component", "sched_quality"), zap.String("request_id", a.requestID),
 		zap.String("attempt_id", a.attemptID), zap.Int("outcome", int(in.Outcome)),
 		zap.String("class", in.Class.String()), zap.Int("status_origin", int(in.StatusOrigin)), zap.Int("http_status", in.HTTPStatus),
 		zap.Bool("client_disconnect", a.client || a.state.ClientCanceled()), zap.Bool("terminal_seen", a.terminal),
@@ -120,7 +121,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 			read = &in.Usage.CacheReadTokens
 		}
 	}
-	a.state.NoteGatewayAttempt(in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
+	a.state.NoteGatewayAttemptForRequest(a.requestID, in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
 	a.attempt.Finish(in)
 }
 func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {

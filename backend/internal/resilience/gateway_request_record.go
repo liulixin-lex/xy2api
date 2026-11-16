@@ -180,13 +180,20 @@ func (s *RequestState) NoteGatewaySend(accountID int64) {
 }
 
 func (s *RequestState) NoteGatewayAttempt(success bool, detail string, input, read, creation *int) {
+	s.NoteGatewayAttemptForRequest("", success, detail, input, read, creation)
+}
+
+// NoteGatewayAttemptForRequest prevents a late previous-turn capture from
+// adding failure or usage facts to a new WebSocket request. An empty ID denotes
+// the synchronous current-request callers of NoteGatewayAttempt.
+func (s *RequestState) NoteGatewayAttemptForRequest(requestID string, success bool, detail string, input, read, creation *int) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.gatewayRecord
-	if r == nil || r.final != nil {
+	if r == nil || r.final != nil || requestID != "" && requestID != s.requestID {
 		return
 	}
 	if !success {
