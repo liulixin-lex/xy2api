@@ -80,6 +80,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "error", gjson.GetBytes(w.Body.Bytes(), "type").String())
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
+	require.Equal(t, "content_policy_violation", gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 	require.Equal(t, zhipuPreflightMessage, gjson.GetBytes(w.Body.Bytes(), "error.message").String())
 
 	// Anthropic gateway.
@@ -87,6 +88,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 	(&GatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), service.PlatformAnthropic, false)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
+	require.Equal(t, "content_policy_violation", gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 	require.Equal(t, zhipuPreflightMessage, gjson.GetBytes(w.Body.Bytes(), "error.message").String())
 
 	// Gateway Chat Completions and Responses.
@@ -111,7 +113,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
 	(&GatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), service.PlatformAnthropic, true)
 	require.Contains(t, w.Body.String(), `"type":"invalid_request_error"`)
-	require.NotContains(t, w.Body.String(), `"code":`)
+	require.Contains(t, w.Body.String(), `"code":"content_policy_violation"`)
 }
 
 func TestContentRefusalMessageIsScrubbed(t *testing.T) {

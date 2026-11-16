@@ -93,7 +93,7 @@ func TestRetryHintsOffRestoresLegacy(t *testing.T) {
 func TestUserBalanceErrorsCarryCodes(t *testing.T) {
 	withHandlerResilience(t, nil)
 	c, w := newResilienceTestContext(t)
-	c.Request.URL.Path = EndpointResponses
+	c.Request.URL.Path = "/v1/messages"
 	status, code, msg, _ := billingErrorDetails(service.ErrInsufficientBalance)
 	(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, code, msg, false)
 	require.Equal(t, http.StatusForbidden, w.Code)
@@ -102,7 +102,7 @@ func TestUserBalanceErrorsCarryCodes(t *testing.T) {
 
 	// Spec: concurrent requests with a small balance -> 429 reservation.
 	c, w = newResilienceTestContext(t)
-	c.Request.URL.Path = EndpointResponses
+	c.Request.URL.Path = "/v1/messages"
 	status, code, msg, retry := billingErrorDetails(service.NewInflightBalanceReservedError(0.8, 0.74))
 	c.Header("Retry-After", strconv.Itoa(retry))
 	(&GatewayHandler{}).handleStreamingAwareError(c, status, code, msg, false)

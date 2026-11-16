@@ -1800,7 +1800,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	}) {
 		return
 	}
-	write := func(status int, errType, message string) {
+	write := func(status int, errType, message string, codes ...string) {
 		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
 			return
@@ -1811,7 +1811,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		status, errType, message = anthropicFailoverError(status, errType, message, failoverErr)
 		message = service.SanitizeUpstreamErrorMessage(message)
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
-		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
+		if len(codes) > 0 {
+			writeHandlerProtocolError(c, service.PreOutputProtocolAnthropic, status, errType, codes[0], "", message)
+		} else {
+			h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
+		}
 	}
 	if failoverErr.IsCapabilityStreamOnly() {
 		status, errType, message := resilienceCapacityExhausted(c, failoverErr, http.StatusServiceUnavailable, "api_error", "")
@@ -1833,7 +1837,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	}
 	// xy2api resilience: a content-safety refusal is the client's 400.
 	if msg, rejected := resilienceContentRejection(c, failoverErr); rejected {
-		write(http.StatusBadRequest, "invalid_request_error", msg)
+		write(http.StatusBadRequest, "invalid_request_error", msg, "content_policy_violation")
 		return
 	}
 	statusCode := http.StatusBadGateway

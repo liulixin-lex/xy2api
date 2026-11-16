@@ -3,6 +3,8 @@
 package handler
 
 import (
+	"fmt"
+	"github.com/tidwall/gjson"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,6 +118,30 @@ func TestM7ContinuationExhaustionKeepsStructuredError(t *testing.T) {
 			require.Contains(t, before, expected.Code)
 			require.Contains(t, before, expected.Param)
 			require.Contains(t, before, expected.Message)
+		}
+	}
+}
+
+func TestM7ReviewMessagesErrorCodes(t *testing.T) {
+	for _, code := range []string{"concurrent_balance_reserved", "INSUFFICIENT_BALANCE", "content_policy_violation", "gateway_queue_full", "server_is_overloaded"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(code+fmt.Sprint(stream), func(t *testing.T) {
+				c, rec := newGinContextForEndpoint(t, "/v1/messages")
+				if stream {
+					c.Header("Content-Type", "text/event-stream")
+					_, err := c.Writer.WriteString(": ping\n\n")
+					require.NoError(t, err)
+				}
+				require.True(t, service.WriteTargetProtocolError(c, service.PreOutputProtocolAnthropic, 429, "rate_limit_error", code, "private", "failure"))
+				body := rec.Body.String()
+				if stream {
+					events := parseSSEEvents(body)
+					require.Len(t, events, 1)
+					body = events[0].data
+				}
+				require.Equal(t, code, gjson.Get(body, "error.code").String())
+				require.False(t, gjson.Get(body, "error.param").Exists())
+			})
 		}
 	}
 }

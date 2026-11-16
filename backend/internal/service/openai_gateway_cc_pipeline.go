@@ -532,7 +532,6 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	}
 	payload := gin.H{"error": errorBody}
 	if protocol == PreOutputProtocolAnthropic {
-		delete(errorBody, "code")
 		delete(errorBody, "param")
 		payload["type"] = "error"
 	}
