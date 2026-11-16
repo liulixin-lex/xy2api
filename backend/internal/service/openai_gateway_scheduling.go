@@ -1051,6 +1051,13 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 
+	if gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); gate != nil && gate.floor > 0 {
+		if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
+			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+			return nil
+		}
+	}
 	if _, excluded := excludedIDs[accountID]; excluded {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 		return nil
@@ -1256,6 +1263,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
 			} else if account == nil {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_unavailable")
+			}
+			if err == nil && account != nil {
+				if gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); gate != nil && gate.floor > 0 {
+					if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
+						resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						account = nil
+					}
+				}
 			}
 			if err == nil && account != nil && isExcluded(accountID) {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")

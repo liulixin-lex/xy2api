@@ -274,3 +274,27 @@ func TestRatefloorQueuedUnpinDoesNotRestoreStaleCache(t *testing.T) {
 	require.True(t, cached.PinnedIn(gid), "outbox has not refreshed the cached projection yet")
 	require.Zero(t, bindings.sessionBindings["openai:queued-unpin"])
 }
+
+func TestRatefloorSoftOwnerCanCommitReplacement(t *testing.T) {
+	owner := selectionFixtureAccount(1, 1)
+	owner.RateMultiplier = floatPtr(0.1)
+	until := time.Now().Add(time.Minute)
+	owner.TempUnschedulableUntil = &until
+	owner.TempUnschedulableReason = "transient:synthetic"
+	replacement := selectionFixtureAccount(2, 2)
+	replacement.RateMultiplier = floatPtr(0.6)
+	f := newSelectionRuntimeFixture(t, owner, replacement)
+	f.cache.sessionBindings["openai:floor-soft"] = 1
+	gid := int64(7)
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, platform: PlatformOpenAI, floor: 0.4, pricingAt: time.Now()})
+	selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, &gid, "", "floor-soft", "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, selected.Account.ID)
+	defer selected.ReleaseFunc()
+	require.True(t, pendingOpenAIStickyChange(ctx).ownerReleased)
+	require.EqualValues(t, 1, f.cache.sessionBindings["openai:floor-soft"])
+	CompleteOpenAIStickyChange(ctx, 2, true, false)
+	require.EqualValues(t, 2, f.cache.sessionBindings["openai:floor-soft"])
+}
