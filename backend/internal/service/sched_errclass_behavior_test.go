@@ -172,7 +172,6 @@ func TestErrclassRepairResendSharesRequest(t *testing.T) {
 			req, err := http.NewRequestWithContext(ctx, "POST", "https://synthetic.invalid/v1/responses", nil)
 			require.NoError(t, err)
 			var first, second *schedAttemptCapture
-			st.NoteGatewaySend(account.ID)
 			resp, err := svc.sendSchedHTTP(ctx, account, req, "", original, false, &first)
 			require.NoError(t, err)
 			first.finishHTTP(resp, []byte(`{"error":{"code":"invalid_encrypted_content"}}`))
@@ -184,9 +183,9 @@ func TestErrclassRepairResendSharesRequest(t *testing.T) {
 			up.resp = &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}
 			_, err = svc.sendSchedHTTP(ctx, account, req, "", next, false, &second)
 			require.NoError(t, err)
-			st.NoteGatewaySend(account.ID)
 			second.finish(nil, nil)
 			first.finish(nil, errors.New("late cleanup"))
+			require.Len(t, up.requests, 2)
 			require.Len(t, rec.finishes, 2)
 			want := schedquality.ClassMigration400
 			if changed {
@@ -255,4 +254,29 @@ func TestErrclassPreparedInbandRepairIsNotAResend(t *testing.T) {
 	FinishSchedAttemptAtHandlerExit(ctx) // No second send actually started.
 	require.Len(t, rec.finishes, 1)
 	require.Equal(t, schedquality.ClassMigration400, rec.finishes[0].Class)
+}
+
+func TestErrclassTransportErrorKeepsReceivedStatus(t *testing.T) {
+	st := resilience.NewRequestState()
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "synthetic-model"})
+	ctx := resilience.WithRequestState(context.Background(), st)
+	rec := &errclassRecorder{}
+	transport := &errclassResponseErrorTransport{httpUpstreamRecorder: &httpUpstreamRecorder{resp: &http.Response{StatusCode: 502, Header: http.Header{}, Body: http.NoBody}}}
+	svc := &OpenAIGatewayService{schedAttemptRecorder: rec, httpUpstream: transport}
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://synthetic.invalid/v1/responses", nil)
+	require.NoError(t, err)
+	var capture *schedAttemptCapture
+	_, err = svc.sendSchedHTTP(ctx, &Account{ID: 1, Platform: PlatformOpenAI}, req, "", nil, false, &capture)
+	require.Error(t, err)
+	capture.finish(nil, err)
+	require.Len(t, rec.finishes, 1)
+	require.Equal(t, 502, rec.finishes[0].HTTPStatus)
+	require.Equal(t, schedquality.OriginUpstream, rec.finishes[0].StatusOrigin)
+}
+
+type errclassResponseErrorTransport struct{ *httpUpstreamRecorder }
+
+func (u *errclassResponseErrorTransport) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
+	resp, _ := u.httpUpstreamRecorder.Do(req, proxy, account, concurrency)
+	return resp, &net.OpError{Op: "read", Net: "tcp", Err: errors.New("synthetic transport failure after headers")}
 }

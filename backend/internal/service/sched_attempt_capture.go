@@ -472,14 +472,15 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	if resp != nil {
 		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)
+		if *owner != nil {
+			(*owner).mu.Lock()
+			(*owner).httpStatus = resp.StatusCode
+			(*owner).expectTerminal = isEventStreamResponse(resp.Header)
+			(*owner).mu.Unlock()
+		}
 	}
 	if err != nil {
 		(*owner).noteError(err)
-	} else if resp != nil && *owner != nil {
-		(*owner).mu.Lock()
-		(*owner).httpStatus = resp.StatusCode
-		(*owner).expectTerminal = isEventStreamResponse(resp.Header)
-		(*owner).mu.Unlock()
 	}
 	return resp, err
 }
