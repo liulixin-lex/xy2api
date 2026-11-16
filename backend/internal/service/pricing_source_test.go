@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -195,9 +196,10 @@ func TestPricingFallbackStartupSourceSurvivesCache(t *testing.T) {
 	fallback := filepath.Join(dir, "fallback.json")
 	body := []byte(`{"fallback-only":{"input_cost_per_token":0.001,"output_cost_per_token":0.002}}`)
 	require.NoError(t, os.WriteFile(fallback, body, 0600))
-	cfg := &config.Config{Pricing: config.PricingConfig{DataDir: dir, FallbackFile: fallback}}
-	svc := NewPricingService(cfg, nil)
-	require.NoError(t, svc.useFallbackPricing())
+	cfg := &config.Config{Pricing: config.PricingConfig{DataDir: dir, FallbackFile: fallback, RemoteURL: "https://fixture.invalid/pricing.json"}}
+	svc := NewPricingService(cfg, &pricingHashRemote{err: fmt.Errorf("fixture offline")})
+	require.NoError(t, svc.Initialize())
+	defer svc.Stop()
 	for _, phase := range []string{"startup", "reload", "restart", "unknown-cache"} {
 		t.Run(phase, func(t *testing.T) {
 			if phase == "reload" {
