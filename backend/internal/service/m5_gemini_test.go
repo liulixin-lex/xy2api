@@ -400,14 +400,14 @@ func TestM5StructuredOutput(t *testing.T) {
 
 func TestM5ToolChoice(t *testing.T) {
 	t.Run("intermediate_conversion_error", func(t *testing.T) {
-		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{broken"}}]}]}`)
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[{"type":"mystery","text":"hi"}]}]}`)
 		upstream := &queuedHTTPUpstreamStub{}
 		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
 		c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
 		_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, geminiSignalTestAccount(), body)
 		var conversion *apicompat.UnsupportedConversionError
 		require.ErrorAs(t, err, &conversion)
-		require.Equal(t, "messages[0].tool_calls[0].function.arguments", conversion.Field)
+		require.Equal(t, "content.type", conversion.Field)
 		require.Zero(t, upstream.callCount)
 		require.Empty(t, recorder.Body.String(), "preserve the field for the handler before writing a generic response")
 	})
@@ -760,10 +760,6 @@ func TestM5ToolHistoryRounds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := apicompat.ChatCompletionsToResponses(&apicompat.ChatCompletionsRequest{Model: "probe", Messages: tc.msgs})
-			if tc.name == "arguments_invalid" {
-				require.EqualError(t, err, "unsupported protocol conversion at messages[0].tool_calls[0].function.arguments: expected complete JSON arguments")
-				return
-			}
 			if err != nil {
 				require.EqualError(t, err, "unsupported protocol conversion at content.type: unsupported Chat content part")
 				if !tc.wantError {
@@ -775,6 +771,12 @@ func TestM5ToolHistoryRounds(t *testing.T) {
 				t.Fatal("wanted local error")
 			}
 			require.Equal(t, wantInputs[tc.name], string(out.Input))
+			if tc.name == "arguments_invalid" {
+				// A1/D5: malformed historical arguments do not add a local rejection.
+				body, marshalErr := json.Marshal(&apicompat.ChatCompletionsRequest{Model: "gemini-2.5-flash", Messages: tc.msgs})
+				require.NoError(t, marshalErr)
+				m5ForwardChat(t, body)
+			}
 			var items []map[string]any
 			if err = json.Unmarshal(out.Input, &items); err != nil {
 				t.Fatal(err)
