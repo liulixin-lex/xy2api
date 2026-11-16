@@ -360,6 +360,42 @@ func (_u *UsageLogUpdate) ClearPricingSource() *UsageLogUpdate {
 	return _u
 }
 
+// SetProfitBasis sets the "profit_basis" field.
+func (_u *UsageLogUpdate) SetProfitBasis(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetProfitBasis(v)
+	return _u
+}
+
+// AppendProfitBasis appends value to the "profit_basis" field.
+func (_u *UsageLogUpdate) AppendProfitBasis(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendProfitBasis(v)
+	return _u
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (_u *UsageLogUpdate) ClearProfitBasis() *UsageLogUpdate {
+	_u.mutation.ClearProfitBasis()
+	return _u
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (_u *UsageLogUpdate) SetDispatchPhases(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetDispatchPhases(v)
+	return _u
+}
+
+// AppendDispatchPhases appends value to the "dispatch_phases" field.
+func (_u *UsageLogUpdate) AppendDispatchPhases(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendDispatchPhases(v)
+	return _u
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (_u *UsageLogUpdate) ClearDispatchPhases() *UsageLogUpdate {
+	_u.mutation.ClearDispatchPhases()
+	return _u
+}
+
 // SetModel sets the "model" field.
 func (_u *UsageLogUpdate) SetModel(v string) *UsageLogUpdate {
 	_u.mutation.SetModel(v)
@@ -954,6 +990,33 @@ func (_u *UsageLogUpdate) AddDurationMs(v int) *UsageLogUpdate {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (_u *UsageLogUpdate) ClearDurationMs() *UsageLogUpdate {
 	_u.mutation.ClearDurationMs()
+	return _u
+}
+
+// SetFirstOutputMs sets the "first_output_ms" field.
+func (_u *UsageLogUpdate) SetFirstOutputMs(v int) *UsageLogUpdate {
+	_u.mutation.ResetFirstOutputMs()
+	_u.mutation.SetFirstOutputMs(v)
+	return _u
+}
+
+// SetNillableFirstOutputMs sets the "first_output_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableFirstOutputMs(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetFirstOutputMs(*v)
+	}
+	return _u
+}
+
+// AddFirstOutputMs adds value to the "first_output_ms" field.
+func (_u *UsageLogUpdate) AddFirstOutputMs(v int) *UsageLogUpdate {
+	_u.mutation.AddFirstOutputMs(v)
+	return _u
+}
+
+// ClearFirstOutputMs clears the value of the "first_output_ms" field.
+func (_u *UsageLogUpdate) ClearFirstOutputMs() *UsageLogUpdate {
+	_u.mutation.ClearFirstOutputMs()
 	return _u
 }
 
@@ -2047,6 +2110,28 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.ProfitBasis(); ok {
+		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProfitBasis(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProfitBasis, value)
+		})
+	}
+	if _u.mutation.ProfitBasisCleared() {
+		_spec.ClearField(usagelog.FieldProfitBasis, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.DispatchPhases(); ok {
+		_spec.SetField(usagelog.FieldDispatchPhases, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDispatchPhases(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDispatchPhases, value)
+		})
+	}
+	if _u.mutation.DispatchPhasesCleared() {
+		_spec.ClearField(usagelog.FieldDispatchPhases, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
@@ -2208,6 +2293,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
+	}
+	if value, ok := _u.mutation.FirstOutputMs(); ok {
+		_spec.SetField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedFirstOutputMs(); ok {
+		_spec.AddField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
+	}
+	if _u.mutation.FirstOutputMsCleared() {
+		_spec.ClearField(usagelog.FieldFirstOutputMs, field.TypeInt)
 	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
@@ -2955,6 +3049,42 @@ func (_u *UsageLogUpdateOne) ClearPricingSource() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetProfitBasis sets the "profit_basis" field.
+func (_u *UsageLogUpdateOne) SetProfitBasis(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetProfitBasis(v)
+	return _u
+}
+
+// AppendProfitBasis appends value to the "profit_basis" field.
+func (_u *UsageLogUpdateOne) AppendProfitBasis(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendProfitBasis(v)
+	return _u
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (_u *UsageLogUpdateOne) ClearProfitBasis() *UsageLogUpdateOne {
+	_u.mutation.ClearProfitBasis()
+	return _u
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) SetDispatchPhases(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetDispatchPhases(v)
+	return _u
+}
+
+// AppendDispatchPhases appends value to the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) AppendDispatchPhases(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendDispatchPhases(v)
+	return _u
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) ClearDispatchPhases() *UsageLogUpdateOne {
+	_u.mutation.ClearDispatchPhases()
+	return _u
+}
+
 // SetModel sets the "model" field.
 func (_u *UsageLogUpdateOne) SetModel(v string) *UsageLogUpdateOne {
 	_u.mutation.SetModel(v)
@@ -3549,6 +3679,33 @@ func (_u *UsageLogUpdateOne) AddDurationMs(v int) *UsageLogUpdateOne {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (_u *UsageLogUpdateOne) ClearDurationMs() *UsageLogUpdateOne {
 	_u.mutation.ClearDurationMs()
+	return _u
+}
+
+// SetFirstOutputMs sets the "first_output_ms" field.
+func (_u *UsageLogUpdateOne) SetFirstOutputMs(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetFirstOutputMs()
+	_u.mutation.SetFirstOutputMs(v)
+	return _u
+}
+
+// SetNillableFirstOutputMs sets the "first_output_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableFirstOutputMs(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetFirstOutputMs(*v)
+	}
+	return _u
+}
+
+// AddFirstOutputMs adds value to the "first_output_ms" field.
+func (_u *UsageLogUpdateOne) AddFirstOutputMs(v int) *UsageLogUpdateOne {
+	_u.mutation.AddFirstOutputMs(v)
+	return _u
+}
+
+// ClearFirstOutputMs clears the value of the "first_output_ms" field.
+func (_u *UsageLogUpdateOne) ClearFirstOutputMs() *UsageLogUpdateOne {
+	_u.mutation.ClearFirstOutputMs()
 	return _u
 }
 
@@ -4672,6 +4829,28 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.ProfitBasis(); ok {
+		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProfitBasis(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProfitBasis, value)
+		})
+	}
+	if _u.mutation.ProfitBasisCleared() {
+		_spec.ClearField(usagelog.FieldProfitBasis, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.DispatchPhases(); ok {
+		_spec.SetField(usagelog.FieldDispatchPhases, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDispatchPhases(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDispatchPhases, value)
+		})
+	}
+	if _u.mutation.DispatchPhasesCleared() {
+		_spec.ClearField(usagelog.FieldDispatchPhases, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
@@ -4833,6 +5012,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
+	}
+	if value, ok := _u.mutation.FirstOutputMs(); ok {
+		_spec.SetField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedFirstOutputMs(); ok {
+		_spec.AddField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
+	}
+	if _u.mutation.FirstOutputMsCleared() {
+		_spec.ClearField(usagelog.FieldFirstOutputMs, field.TypeInt)
 	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)

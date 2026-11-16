@@ -132,6 +132,33 @@ func (_u *GroupUpdate) AddRateMultiplier(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (_u *GroupUpdate) SetMinUpstreamRate(v float64) *GroupUpdate {
+	_u.mutation.ResetMinUpstreamRate()
+	_u.mutation.SetMinUpstreamRate(v)
+	return _u
+}
+
+// SetNillableMinUpstreamRate sets the "min_upstream_rate" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableMinUpstreamRate(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetMinUpstreamRate(*v)
+	}
+	return _u
+}
+
+// AddMinUpstreamRate adds value to the "min_upstream_rate" field.
+func (_u *GroupUpdate) AddMinUpstreamRate(v float64) *GroupUpdate {
+	_u.mutation.AddMinUpstreamRate(v)
+	return _u
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (_u *GroupUpdate) ClearMinUpstreamRate() *GroupUpdate {
+	_u.mutation.ClearMinUpstreamRate()
+	return _u
+}
+
 // SetPeakRateEnabled sets the "peak_rate_enabled" field.
 func (_u *GroupUpdate) SetPeakRateEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetPeakRateEnabled(v)
@@ -1685,6 +1712,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.MinUpstreamRate(); ok {
+		_spec.SetField(group.FieldMinUpstreamRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMinUpstreamRate(); ok {
+		_spec.AddField(group.FieldMinUpstreamRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.MinUpstreamRateCleared() {
+		_spec.ClearField(group.FieldMinUpstreamRate, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)
 	}
@@ -2447,6 +2483,33 @@ func (_u *GroupUpdateOne) SetNillableRateMultiplier(v *float64) *GroupUpdateOne 
 // AddRateMultiplier adds value to the "rate_multiplier" field.
 func (_u *GroupUpdateOne) AddRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddRateMultiplier(v)
+	return _u
+}
+
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (_u *GroupUpdateOne) SetMinUpstreamRate(v float64) *GroupUpdateOne {
+	_u.mutation.ResetMinUpstreamRate()
+	_u.mutation.SetMinUpstreamRate(v)
+	return _u
+}
+
+// SetNillableMinUpstreamRate sets the "min_upstream_rate" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableMinUpstreamRate(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetMinUpstreamRate(*v)
+	}
+	return _u
+}
+
+// AddMinUpstreamRate adds value to the "min_upstream_rate" field.
+func (_u *GroupUpdateOne) AddMinUpstreamRate(v float64) *GroupUpdateOne {
+	_u.mutation.AddMinUpstreamRate(v)
+	return _u
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (_u *GroupUpdateOne) ClearMinUpstreamRate() *GroupUpdateOne {
+	_u.mutation.ClearMinUpstreamRate()
 	return _u
 }
 
@@ -4032,6 +4095,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.MinUpstreamRate(); ok {
+		_spec.SetField(group.FieldMinUpstreamRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMinUpstreamRate(); ok {
+		_spec.AddField(group.FieldMinUpstreamRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.MinUpstreamRateCleared() {
+		_spec.ClearField(group.FieldMinUpstreamRate, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)
