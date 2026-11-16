@@ -8,11 +8,7 @@
 
 - Grok API Key 账号的 Responses 请求恢复分组推理档位映射、封顶与 403 拒绝，未配置分组策略时正文处理不变。
 
-- Chat 转 Responses 保留 metadata、user、文本详细程度和显式 include，GPT-6.1 Terra 使用最终模型的推理档位与输出上限。
-
-- Chat 转 Responses 保留字符串或对象形式的 reasoning 与显式摘要，reasoning_effort 继续优先，兼容扩展不新增报错。
-
-- 上游的非标准结束原因继续按原默认规则转换，并记录映射降级，不新增请求失败。
+- 各协议转换遇到未列出的非标准结束原因时仍按正常结束处理（有完整工具调用时按工具调用结束），并记录一条映射降级，不新增请求失败。
 
 - API Key 账号的请求转为 Anthropic 时，只发送 `allowed_tools` 允许的工具；未知条目记录后忽略，`mode: auto` 且允许列表为空时不允许调用工具。
 
@@ -38,7 +34,7 @@
 
 - 纯空白 reasoning 不再生成 Anthropic thinking 块，真实思考的前导空白和块内空白仍完整保留。
 
-- Chat 上游的 content 为数组时，thinking 与正文按原顺序保留（thinking 也可以是数组），流式不再解码失败；其他类型的片段忽略并记录。
+- Chat 上游的 content 为数组时，thinking 与正文按原顺序保留（thinking 也可以是数组），流式不再解码失败；其他类型的片段忽略并记录，片段缺少 `type` 或文本不是字符串时返回错误。
 
 - Chat 正文或工具开始后的迟到 reasoning 不再写入已关闭项或仅出现在最终响应中。
 
@@ -76,8 +72,6 @@
 
 - Messages 转 Responses 时保留上游的拒答正文并以 `refusal` 结束，内容过滤与无原因的截断不再报成 `end_turn`，流式遇到上游失败或取消时以错误结束。
 
-- Messages 转 Responses 时，上游返回未列出的非标准结束原因仍按正常结束（有完整工具调用时为 `tool_use`）返回，并记录一条映射降级。
-
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
@@ -94,12 +88,6 @@
 
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
-- Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择。
-
-- Gemini 兼容响应保留截断与过滤原因，坏工具生成以错误结束并保留已读用量。
-
-- Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
-
 - Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
 
 - Chat 请求的 `reasoning` 写成字符串或对象时生效，`reasoning_effort` 仍优先；转 Responses 时显式 `summary` 不再被改成 `auto`，只给 summary 时不再丢失。
@@ -114,7 +102,7 @@
 
 - 图片携带合法 `detail` 提示时可转换为 Anthropic/Gemini，保留图片并记录提示省略，质量与费用不保证等价。
 
-- Responses 上游转 Chat 时，上游失败或取消返回错误；未知结束原因照旧正常结束，合法结束事件缺少状态或 incomplete 未给原因时也保持原有结束方式。
+- Responses 上游转 Chat 时，上游失败或取消返回错误；合法结束事件缺少状态或 incomplete 未给原因时也保持原有结束方式。
 
 - Responses 上游转 Chat 时，上游生成的普通工具参数不是合法 JSON 时返回错误，不交给客户端执行；客户端历史参数仍原样保留。
 
@@ -128,14 +116,6 @@
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
-- Gemini API Key 兼容请求的工具 schema 自动清理空 enum，并记录敏感条件整段省略造成的约束损失。
-
-- Gemini API Key 兼容请求保留工具选择和历史，无法表达的 builtin 强制调用、禁并行控制会记录降级。
-
-- Gemini API Key 兼容请求按最终模型映射思考控制，费用只采用最后实际发出的 level，预算不推断档位。
-
-- Gemini Messages 兼容请求保留 JSON 输出格式与 schema 精度，不支持的格式约束会记录降级。
-
 - Gemini 分组的 Chat 请求设置了较小的输出上限，同时带 medium、high 推理档位时，不再按 Claude 的思考预算被本地拒绝，输出上限按原值发送。
 
 - Gemini 分组的兼容请求按最终模型写入思考控制，按最后实际发出的 `thinkingLevel` 计费，只给预算时不推断档位。
@@ -145,6 +125,8 @@
 - Gemini 工具 schema 中空的 `enum` 不再导致上游 400；位于条件、否定等位置、无法单独删除时，省略整段约束并记录。
 
 - Gemini 分组的 `tool_choice` 生效；选了未声明的工具或并行控制类型不对时返回 400，无法表达的强制内置工具与禁并行控制省略并记录。
+
+- Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
 
 - Gemini 缓存读取不再产生负输入用量，流中的缺失字段与明确修正值分别处理。
 
