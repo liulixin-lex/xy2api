@@ -180,4 +180,3 @@ Gemini 的 prompt 计数包含缓存读取：未缓存输入按 `max(prompt - ca
 ### 停用与回滚
 
 依次关闭 `enabled`、等待或取消活动任务、停止服务，再回滚应用。导出相关表由迁移 `252_usage_export_tasks.sql` 追加创建，回滚时不需要删表。
-
