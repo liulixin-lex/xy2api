@@ -7,7 +7,10 @@ package service
 //
 // 准入条件：
 //
-//	U(pricingAt) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
+//	MinUpstreamRate <= U(pricingAt) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
+//
+// 下限仅在 OpenAI 分组设置后独立生效；上限由利润开关控制。组内固定号免检两端，
+// 其余可调度性和质量规则照常应用。
 //
 //   - D（用户售价倍率）固定在请求开始的 pricingAt：同一请求的全部 failover 与
 //     最终扣费共用同一 D（RecordUsage 的高峰因子同样取 pricingAt），一个请求
@@ -55,7 +58,7 @@ package service
 // 可用性优先"的显式取舍——该异常窗口内利润保证不成立，靠 WARN 与采样观测
 // 暴露，绝不把瞬时 DB 抖动放大成全站不可调度。
 //
-// 可观测性：按分组和平台累计装门/threshold 否决/invalid-rate 否决/终检刷新
+// 可观测性：按分组和平台累计装门/floor 否决/threshold 否决/invalid-rate 否决/终检刷新
 // 失败计数，≥5 分钟采样输出一条 Info（profit_control_activity），无逐请求日志。
 
 import (
@@ -79,6 +82,7 @@ const (
 
 	// 进入 openAISelectionFilterStats 的排除原因，全排除时出现在
 	// "no available accounts" 的内部统计摘要里（与 quota_auto_pause 等同通道）。
+	openAIProfitFilterReasonFloor              = "profit_floor"
 	openAIProfitFilterReasonThreshold          = "profit_threshold"
 	openAIProfitFilterReasonInvalidAccountRate = "profit_invalid_account_rate"
 
@@ -124,6 +128,9 @@ type openAIProfitControlGate struct {
 	platform string
 	// threshold = D(pricingAt) × (1 − margin − buffer)，账号倍率必须 <= 它。
 	threshold float64
+	ceilingOn bool
+	floor     float64
+	sell      float64
 	// pricingAt 是本请求的统一定价时刻（D 侧）。
 	pricingAt time.Time
 }
@@ -244,7 +251,7 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 		}
 		group = loaded
 	}
-	if group == nil || !group.ProfitControlEnabled ||
+	if group == nil || (!group.ProfitControlEnabled && groupProfitFloor(group) <= 0) ||
 		(group.Platform != PlatformOpenAI && group.Platform != PlatformGrok) {
 		return nil
 	}
@@ -271,6 +278,9 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 		groupID:   *groupID,
 		platform:  group.Platform,
 		threshold: threshold,
+		ceilingOn: group.ProfitControlEnabled,
+		floor:     groupProfitFloor(group),
+		sell:      downstream,
 		pricingAt: pricingAt,
 	}
 }
@@ -306,20 +316,22 @@ func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionRe
 }
 
 // openAIProfitControlVetoReason 报告利润门是否否决该账号。ctx 中没有门
-// （分组未启用利润控制或本请求跳门）或账号为 nil 时一律放行。
+// （上下限都未启用或本请求跳门）或账号为 nil 时一律放行。
 func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool, string) {
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || account == nil {
 		return false, ""
 	}
-	upstream, ok := openAIProfitGateCost(account, gate.pricingAt)
-	if !ok {
-		openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, openAIProfitFilterReasonInvalidAccountRate)
-		return true, openAIProfitFilterReasonInvalidAccountRate
+	upstream, source, ok := openAIProfitGateCostSource(account, gate.pricingAt)
+	var ceiling *float64
+	if gate.ceilingOn {
+		ceiling = &gate.threshold
 	}
-	if profitControlOverThreshold(upstream, gate.threshold) {
-		openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, openAIProfitFilterReasonThreshold)
-		return true, openAIProfitFilterReasonThreshold
+	verdict := profitRangeVerdict(upstream, ok, ceiling, gate.floor, gate.platform == PlatformOpenAI && account.PinnedIn(gate.groupID))
+	recordProfitDecision(ctx, gate, account.ID, upstream, source, ok, verdict)
+	if !profitVerdictAdmitted(verdict) {
+		openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, verdict)
+		return true, verdict
 	}
 	return false, ""
 }
@@ -374,6 +386,7 @@ func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context
 // 构成，不能当作精确的请求数或账号数。
 
 type openAIProfitControlGroupStats struct {
+	vetoFloor        atomic.Uint64
 	installs         atomic.Int64
 	vetoThreshold    atomic.Int64
 	vetoInvalidRate  atomic.Int64
@@ -415,6 +428,8 @@ func (o *openAIProfitControlObserver) recordInstall(groupID int64, platform stri
 func (o *openAIProfitControlObserver) recordVeto(groupID int64, platform string, threshold float64, reason string) {
 	s := o.stats(groupID, platform)
 	switch reason {
+	case openAIProfitFilterReasonFloor:
+		s.vetoFloor.Add(1)
 	case openAIProfitFilterReasonThreshold:
 		s.vetoThreshold.Add(1)
 	case openAIProfitFilterReasonInvalidAccountRate:
@@ -441,6 +456,7 @@ func (o *openAIProfitControlObserver) maybeLog(groupID int64, platform string, t
 		return
 	}
 	slog.Info("profit_control_activity",
+		"veto_floor_total", s.vetoFloor.Load(),
 		"group_id", groupID,
 		"platform", platform,
 		"threshold", threshold,

@@ -120,7 +120,7 @@ func TestGatewayProfitControlGroupLoadFailureClearsForeignGate(t *testing.T) {
 	}
 	targetGroupID := int64(212)
 	ctx := gatewayProfitTestContext(billingGroup)
-	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		groupID:   210,
 		platform:  PlatformAnthropic,
 		threshold: 0.1,
@@ -329,7 +329,7 @@ func TestGatewayProfitControlTerminalRefreshUsesReplacementObject(t *testing.T) 
 		nil,
 		nil,
 	)
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		groupID:   1,
 		platform:  PlatformGemini,
 		threshold: 0.5,
@@ -355,7 +355,7 @@ func TestGatewayProfitControlTerminalRefreshFallsBackFromCacheToDatabase(t *test
 		nil,
 		nil,
 	)
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		groupID:   1,
 		platform:  PlatformAnthropic,
 		threshold: 0.5,
@@ -376,7 +376,7 @@ func TestGatewayProfitControlTerminalRefreshFailureFallsBackToSelectedObject(t *
 		nil,
 		nil,
 	)
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		groupID:   1,
 		platform:  PlatformAntigravity,
 		threshold: 0.5,
@@ -448,7 +448,7 @@ func TestGatewayProfitControlAfterAdmissionBindSemantics(t *testing.T) {
 		// mock 的 miss 返回非 sentinel 错误，等价于 Redis 读失败：门下保守不写。
 		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}}
 		svc := &GatewayService{cache: cache}
-		gate := &openAIProfitControlGate{groupID: groupID, platform: PlatformAnthropic, threshold: 0.5}
+		gate := &openAIProfitControlGate{ceilingOn: true, groupID: groupID, platform: PlatformAnthropic, threshold: 0.5}
 		gateCtx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, gate)
 		require.NoError(t, svc.BindStickySessionAfterProfitAdmission(gateCtx, &groupID, "absent", cheapID))
 		require.NotContains(t, cache.sessionBindings, "absent")
@@ -457,7 +457,7 @@ func TestGatewayProfitControlAfterAdmissionBindSemantics(t *testing.T) {
 	t.Run("gated sentinel miss binds", func(t *testing.T) {
 		cache := &sentinelMissGatewayCache{mockGatewayCacheForPlatform: &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}}}
 		svc := &GatewayService{cache: cache}
-		gate := &openAIProfitControlGate{groupID: groupID, platform: PlatformAnthropic, threshold: 0.5}
+		gate := &openAIProfitControlGate{ceilingOn: true, groupID: groupID, platform: PlatformAnthropic, threshold: 0.5}
 		gateCtx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, gate)
 		require.NoError(t, svc.BindStickySessionAfterProfitAdmission(gateCtx, &groupID, "fresh", cheapID))
 		require.Equal(t, cheapID, cache.sessionBindings["fresh"], "门下无既有绑定（sentinel miss）应建立粘性")

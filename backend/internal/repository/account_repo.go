@@ -337,15 +337,18 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 	if len(groups) > 0 {
+		pins := make([]bool, len(groups))
 		for i := range groups {
 			groups[i].AccountID = account.ID
+			pins[i] = groups[i].Pinned
 		}
 		if _, err := txClient.ExecContext(ctx,
-			`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
-			account.ID, pq.Array(groupIDs)); err != nil {
+			`INSERT INTO account_groups (account_id, group_id, pinned, created_at) SELECT $1, group_id, pinned, NOW() FROM unnest($2::bigint[], $3::boolean[]) AS m(group_id, pinned)`,
+			account.ID, pq.Array(groupIDs), pq.Array(pins)); err != nil {
 			return err
 		}
 	}
+
 	account.GroupIDs = groupIDs
 	account.AccountGroups = append([]service.AccountGroup(nil), groups...)
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
@@ -2185,32 +2188,29 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
-	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
+	groupIDs = uniquePositiveInt64s(groupIDs)
+	deletion := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID))
+	if len(groupIDs) > 0 {
+		deletion = deletion.Where(dbaccountgroup.GroupIDNotIn(groupIDs...))
+	}
+	if _, err := deletion.Exec(ctx); err != nil {
 		return err
 	}
-
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
-	}
-
-	if _, err := txClient.ExecContext(ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
-		accountID, pq.Array(groupIDs)); err != nil {
-		return err
-	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	if len(groupIDs) > 0 {
+		if _, err := txClient.ExecContext(ctx,
+			`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW() ON CONFLICT (account_id, group_id) DO NOTHING`,
+			accountID, pq.Array(groupIDs)); err != nil {
 			return err
 		}
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
 	}
+	if tx != nil {
+		return tx.Commit()
+	}
+
 	return nil
 }
 
@@ -3804,7 +3804,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 	}
 
 	groups, err := q.
-		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 		Order(
 			dbaccountgroup.ByAccountField(dbaccount.FieldPriority),
 			dbaccountgroup.ByAccountID(),
@@ -3954,7 +3954,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			end = len(accountIDs)
 		}
 		entries, err := r.client.AccountGroup.Query().
-			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 			Where(dbaccountgroup.AccountIDIn(accountIDs[start:end]...)).
 			Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByGroupID()).
 			All(ctx)
@@ -3975,6 +3975,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			agSvc := service.AccountGroup{
 				AccountID: ag.AccountID,
 				GroupID:   ag.GroupID,
+				Pinned:    ag.Pinned,
 				CreatedAt: ag.CreatedAt,
 				Group:     groupSvc,
 			}

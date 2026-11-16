@@ -895,6 +895,7 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		filtered = append(filtered, service.AccountGroup{
 			AccountID: ag.AccountID,
 			GroupID:   ag.GroupID,
+			Pinned:    ag.Pinned,
 			CreatedAt: ag.CreatedAt,
 		})
 	}

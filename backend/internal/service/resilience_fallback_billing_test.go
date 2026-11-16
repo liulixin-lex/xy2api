@@ -494,7 +494,7 @@ func TestFallbackProfitTerminalUsesPricingAt(t *testing.T) {
 			selected.RateMultiplier = floatPtr(0.1)
 			repo := &upstreamCostCountingAccountRepo{accounts: map[int64]*Account{1: latest}}
 			snapshot := NewSchedulerSnapshotService(nil, nil, repo, nil, nil)
-			ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0.5, pricingAt: at})
+			ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true, threshold: 0.5, pricingAt: at})
 			refreshed, vetoed, _ := profitControlVetoLatest(ctx, &selected, snapshot)
 			require.Equal(t, 1, repo.calls())
 			require.Equal(t, latest.Extra, refreshed.Extra)

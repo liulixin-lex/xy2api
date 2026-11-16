@@ -173,7 +173,7 @@ func TestProfitControl_PostSlotRecheckVetoes(t *testing.T) {
 		require.True(t, ok)
 		snapshotCache.accountsByID[61] = &expensive
 	}
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0.5, pricingAt: now})
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true, threshold: 0.5, pricingAt: now})
 	selection, err := svc.selectAccountWithLoadAwareness(ctx, nil, PlatformOpenAI, "", "", nil, false, "", true)
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
 	require.Nil(t, selection)
@@ -296,7 +296,7 @@ func TestProfitControl_CompositeUsesBillingGroupRate(t *testing.T) {
 // legacy 引擎与 DB recheck 共用的资格判定直接覆盖利润门。
 func TestProfitControl_EligibilityFunctionVetoes(t *testing.T) {
 	now := time.Now()
-	gateCtx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	gateCtx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		threshold: 0.5,
 		pricingAt: now,
 	})

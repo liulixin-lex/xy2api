@@ -114,7 +114,7 @@ func resilienceGateRows() []resilienceGateRow {
 		{name: "profit_gate", reason: "profit_gate",
 			account: func(a *Account, _ time.Time) { rate := 5.0; a.RateMultiplier = &rate },
 			ctx: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 					groupID: selectionTestGroupID, platform: PlatformAnthropic, threshold: 1, pricingAt: time.Now()})
 			}},
 		{name: "quota", reason: "quota_exceeded", unlisted: true,
@@ -337,7 +337,7 @@ func resilienceOpenAIGateRows() []resilienceOpenAIGateRow {
 		{name: "profit_gate",
 			account: func(a *Account) { rate := 5.0; a.RateMultiplier = &rate },
 			ctx: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 					groupID: selectionTestGroupID, platform: PlatformOpenAI, threshold: 1, pricingAt: time.Now()})
 			}},
 		{name: "compact_unsupported", compact: true,

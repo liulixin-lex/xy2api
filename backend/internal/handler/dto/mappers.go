@@ -155,6 +155,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		FreeOpenAIFast:              g.FreeOpenAIFast,
 		AvailabilityFallbackGroupID: g.AvailabilityFallbackGroupID,
 		ProfitControlEnabled:        g.ProfitControlEnabled,
+		MinUpstreamRate:             g.MinUpstreamRate,
 		ProfitMinMargin:             g.ProfitMinMargin,
 		ProfitSafetyBuffer:          g.ProfitSafetyBuffer,
 		ModelPricing:                g.ModelPricing,
@@ -530,6 +531,7 @@ func AccountGroupFromService(ag *service.AccountGroup) *AccountGroup {
 	return &AccountGroup{
 		AccountID: ag.AccountID,
 		GroupID:   ag.GroupID,
+		Pinned:    ag.Pinned,
 		CreatedAt: ag.CreatedAt,
 		Account:   AccountFromServiceShallow(ag.Account),
 		Group:     GroupFromServiceShallow(ag.Group),

@@ -18,6 +18,7 @@ const (
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
 // later websocket turn and client cancellation without consulting mutable state.
 type GatewayRequestMetadata struct {
+	ProfitBasis        *ProfitBasis
 	RequestScope       GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool
@@ -39,6 +40,7 @@ type GatewayRequestMetadata struct {
 }
 
 type gatewayRequestTrace struct {
+	profit             *profitTrace
 	RequestScope       GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool
@@ -240,6 +242,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
+			ProfitBasis:   r.profit.snapshot(r.lastAccount),
 			UsageObserved: r.UsageObserved, UsageSource: r.UsageSource, TerminalEventSeen: r.TerminalEventSeen,
 			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing
@@ -254,6 +257,7 @@ func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
 		return nil
 	}
 	v := *in
+	v.ProfitBasis = CloneProfitBasis(in.ProfitBasis)
 	copyInt := func(p *int) *int {
 		if p == nil {
 			return nil
