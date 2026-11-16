@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-11-16
+
+网关在 Chat、Responses、Messages、Gemini 之间转换时保留更多参数与工具，流式收尾和报错更可靠，重试与调度遵守上游等待时间和账号能力，用量按实际发送的档位与实际观测计费；管理员可分别控制 MCP 的接入权限与菜单。升级会执行迁移 312，为用量、未计费和错误记录新增 16 个可空列，不回填数据。
+
 ### 管理 MCP
 
 - 根管理员可分别控制普通管理员和普通用户的 MCP 接入权限及菜单显示；普通管理员沿用后台模块与资源权限。
@@ -2320,7 +2324,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/liulixin-lex/xy2api/compare/v0.6.5...v0.6.6
 [0.6.1]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...v0.6.1
