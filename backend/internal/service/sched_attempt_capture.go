@@ -351,7 +351,7 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		}
 		// First sends and in-service repairs already have their own admission.
 		// Recheck handler retries without overriding those existing grants.
-		if st.LastUpstreamFailure() != nil && !st.Budget().CanAttempt(now) || req.Context().Err() != nil {
+		if st.LastUpstreamFailure() != nil && !st.Budget().CanAttempt(now) {
 			return nil, schedHTTPPreDispatchFailure(ctx)
 		}
 	}

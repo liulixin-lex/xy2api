@@ -162,3 +162,47 @@ func TestM8PreDispatchHeaderTimeoutPreservesFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestM8HeaderTimerBeforeDispatchRemainsSwitchable(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, previousFailure := range []bool{false, true} {
+			name := "native"
+			if passthrough {
+				name = "passthrough"
+			}
+			if previousFailure {
+				name += "/after_failure"
+			}
+			t.Run(name, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				req := newWebSearchReplayRequest(t)
+				st := resilience.StateFrom(req.ctx)
+				st.SetBudget(nil)
+				if previousFailure {
+					st.SetLastUpstreamFailure(&UpstreamFailoverError{StatusCode: 429})
+				}
+				account := webSearchReplayAccount(passthrough)
+				account.Type = AccountTypeOAuth
+				parentID := int64(379)
+				account.ParentAccountID = &parentID
+				repo := &m8LateCredentialRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI,
+					Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}}}
+				upstream := &httpUpstreamRecorder{err: context.Canceled}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
+				svc.accountRepo = repo
+
+				_, err := svc.Forward(req.ctx, req.c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+
+				require.True(t, repo.expired)
+				var timeout *UpstreamFailoverError
+				require.ErrorAs(t, err, &timeout)
+				require.Equal(t, http.StatusGatewayTimeout, timeout.StatusCode)
+				require.Contains(t, string(timeout.ResponseBody), "first_output_timeout")
+				require.True(t, timeout.ShouldRetryNextAccount())
+				require.False(t, timeout.PreDispatchSelectionInvalidated)
+				require.Len(t, upstream.requests, 1)
+			})
+		}
+	}
+}
