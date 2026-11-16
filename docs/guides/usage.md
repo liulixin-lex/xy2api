@@ -110,8 +110,6 @@ Anthropic 的 5m/1h 创建桶是 `cache_creation_tokens` 的明细，不应再�
 
 原生非流式 Images 按实际返回的有效图片数收费：同一对象的非空字符串 `url` 或 `b64_json` 只计一张，不沿用请求的 `n`。零张图片不收按图或按次组件，已观测的真实 token 用量仍独立结算；空产物按失败记录，不重放生图。
 
-使用记录、未计费请求记录与错误记录中的 `degradations` 保存本次请求省略或改写的字段路径与动作：`omit` 为省略，`map` 为映射，不含参数值。具体含义见[降级记录说明](gateway-resilience-observability.md)。
-
 ## 用量与完成证据
 
 用量行与无账单请求行保存 `usage_observed`、`usage_source`、`terminal_event_seen`、`terminal_event_valid`、`response_body_type`。这些是上游原始响应的内部证据，不改变发给客户端的用量字段、计数或原有合计。
