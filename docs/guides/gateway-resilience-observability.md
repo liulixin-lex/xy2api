@@ -170,6 +170,8 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 Responses 拒参修复（包括流内修复）在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
 
+转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
+
 通用 Chat/Responses、Images、Responses 生图和 Embeddings 均在准入后关联 `gateway_request_id`；`request_scope=text/image/embedding` 独立于文本统计资格，图片及 embedding 不进入文本成功率分母。
 
 用量与无账单请求的 `usage_observed/usage_source`、`terminal_event_seen/terminal_event_valid`、`response_body_type` 分别对应运行时的用量存在性、来源、原始终态证据和 JSON/SSE 正文类型；未观测的事实为 `NULL`。`degradations` 保存请求级字段名与 `omit/map/default` 动作，错误记录同步保存同一份列表。具体语义见[用量与完成证据](usage.md#用量与完成证据)。
@@ -193,5 +195,3 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 3. 会话搬动看 `sched_quality.takeover`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发改绑的那条请求（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
-
-转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
