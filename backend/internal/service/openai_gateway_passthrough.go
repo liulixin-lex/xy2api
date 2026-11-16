@@ -1285,8 +1285,8 @@ type openaiStreamingResultPassthrough struct {
 	responseID       string
 	imageCount       int
 	imageOutputSizes []string
-	// clientSawOutput: semantic output was written, or a write failed; a
-	// stream that broke afterwards is billed for its usage so far.
+	// clientSawOutput reports whether nonzero semantic bytes reached the client;
+	// only then can a failed stream retain its partial usage for billing.
 	clientSawOutput  bool
 	upstreamAccepted bool
 }
@@ -3358,17 +3358,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if present {
 		usageSource = "upstream_json"
 	}
-	if openAIResponsesJSONFailed(body) {
+	failedResponse := openAIResponsesJSONFailed(body)
+	if failedResponse {
 		schedCapture.noteUsage(usage)
 		observedUsage = nil
 		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, body, time.Now())
-		message := extractUpstreamErrorMessage(body)
-		if strings.TrimSpace(message) == "" {
-			message = "Upstream response failed"
-		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, message)
+	} else {
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 	}
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -3386,6 +3383,19 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	body, err = restoreOpenAIResponsesClientToolPayload(c, body)
 	if err != nil {
 		return nil, fmt.Errorf("restore OpenAI Responses client tools: %w", err)
+	}
+	if failedResponse {
+		if !writeOpenAICompactSSEBridge(c, http.StatusBadGateway, body) {
+			c.Data(resp.StatusCode, contentType, body)
+		}
+		// Preserve the upstream envelope and normal client-name restoration,
+		// while keeping failed JSON out of successful billing ownership.
+		message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+		if message == "" {
+			message = "Upstream response failed"
+		}
+		setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)

@@ -920,17 +920,27 @@ func TestM6ReviewFailoverResultIsNil(t *testing.T) {
 
 func TestM6ReviewFailedJSONIsNotSuccessfulUsage(t *testing.T) {
 	for _, pass := range []bool{false, true} {
-		for _, usage := range []string{"", `,"usage":{"input_tokens":1200,"output_tokens":0}`} {
-			t.Run(fmt.Sprintf("pass=%t/usage=%t", pass, usage != ""), func(t *testing.T) {
-				body := []byte(`{"model":"gpt-5.5","input":"hi"}`)
-				c := newOpenAIRejectedFieldTestContext(body)
-				a := newOpenAIRejectedFieldTestAccount()
-				a.Extra["openai_passthrough"] = pass
-				up := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","status":"failed","error":{"code":"server_error","message":"synthetic"}`+usage+`}`)}
-				r, err := newOpenAIRejectedFieldTestService(up).Forward(c.Request.Context(), c, a, body)
-				require.Error(t, err)
-				require.Nil(t, r)
-			})
+		for _, compact := range []bool{false, true} {
+			for _, usage := range []string{"", `,"usage":{"input_tokens":1200,"output_tokens":0}`} {
+				t.Run(fmt.Sprintf("pass=%t/compact=%t/usage=%t", pass, compact, usage != ""), func(t *testing.T) {
+					body := []byte(`{"model":"gpt-5.5","input":"hi"}`)
+					w := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(w)
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+					if compact {
+						MarkOpenAICompactClientStream(c)
+					}
+					a := newOpenAIRejectedFieldTestAccount()
+					a.Extra["openai_passthrough"] = pass
+					responseBody := `{"id":"r1","status":"failed","error":{"code":"server_error","message":"synthetic","param":"input"}` + usage + `}`
+					up := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, responseBody)}
+					r, err := newOpenAIRejectedFieldTestService(up).Forward(c.Request.Context(), c, a, body)
+					require.Error(t, err)
+					require.Nil(t, r)
+					require.Equal(t, http.StatusOK, w.Code)
+					require.JSONEq(t, responseBody, w.Body.String())
+				})
+			}
 		}
 	}
 }

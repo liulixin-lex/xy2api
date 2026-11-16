@@ -2113,17 +2113,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if present {
 		usageSource = "upstream_json"
 	}
-	if openAIResponsesJSONFailed(body) {
+	failedResponse := openAIResponsesJSONFailed(body)
+	if failedResponse {
 		schedCapture.noteUsage(usage)
 		observedUsage = nil
 		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, body, time.Now())
-		message := extractUpstreamErrorMessage(body)
-		if strings.TrimSpace(message) == "" {
-			message = "Upstream response failed"
-		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, message)
+	} else {
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 	}
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -2155,6 +2152,19 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	c.Writer.Header().Set("Content-Type", contentType)
 	c.Writer.Header().Del("Content-Length")
 
+	if failedResponse {
+		if !writeOpenAICompactSSEBridge(c, http.StatusBadGateway, body) {
+			c.Data(resp.StatusCode, contentType, body)
+		}
+		// Preserve the upstream envelope and normal client-name restoration,
+		// while keeping failed JSON out of successful billing ownership.
+		message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+		if message == "" {
+			message = "Upstream response failed"
+		}
+		setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+		return nil, fmt.Errorf("upstream response failed: %s", message)
+	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
 	}
