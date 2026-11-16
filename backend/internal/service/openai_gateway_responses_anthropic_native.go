@@ -150,7 +150,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(schedResult, schedErr)
+		_ = resp.Body.Close()
+	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -243,7 +247,6 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -263,7 +266,6 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -536,7 +538,6 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -554,7 +555,6 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}

@@ -70,7 +70,10 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	var input, read, creation *int
 	if in.Usage != nil {
-		input, read, creation = &in.Usage.InputTokens, &in.Usage.CacheReadTokens, &in.Usage.CacheCreationTokens
+		input, creation = &in.Usage.InputTokens, &in.Usage.CacheCreationTokens
+		if in.Usage.CacheReadTokensPresent {
+			read = &in.Usage.CacheReadTokens
+		}
 	}
 	a.state.NoteGatewayAttempt(in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
 	a.attempt.Finish(in)
@@ -97,10 +100,11 @@ func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 	}
 	read, creation := max(u.CacheReadInputTokens, 0), max(u.CacheCreationInputTokens, 0)
 	return &SchedAttemptUsage{
-		PromptTokens:        u.InputTokens,
-		InputTokens:         max(u.InputTokens-read-creation, 0),
-		CacheReadTokens:     read,
-		CacheCreationTokens: creation,
+		PromptTokens:           u.InputTokens,
+		InputTokens:            max(u.InputTokens-read-creation, 0),
+		CacheReadTokens:        read,
+		CacheReadTokensPresent: u.CacheReadInputTokensPresent,
+		CacheCreationTokens:    creation,
 	}
 }
 
@@ -142,6 +146,14 @@ func (a *schedAttemptCapture) observe(data []byte) {
 		var terminal openAIRawStreamTerminalState
 		terminal.ObserveDataLine(strings.TrimSpace(string(data)))
 		if terminal.Terminated() {
+			a.markTerminal()
+		}
+	} else if typ == "message_delta" {
+		// Native Anthropic readers also accept a valid stop_reason without
+		// message_stop. Use their protocol evidence, not transport EOF.
+		var terminal anthropicBufferedEvidence
+		terminal.observe(typ, string(data))
+		if terminal.stopped {
 			a.markTerminal()
 		}
 	}

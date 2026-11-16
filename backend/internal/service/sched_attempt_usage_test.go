@@ -18,9 +18,9 @@ func TestSchedUsagePreservesAllInputBuckets(t *testing.T) {
 		{"unknown", nil, nil},
 		{"no input evidence", &OpenAIUsage{}, nil},
 		{"uncached", &OpenAIUsage{InputTokens: 1000}, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 1000}},
-		{"read and write", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 300, CacheCreationInputTokens: 100}, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheCreationTokens: 100}},
-		{"all cached", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 700, CacheCreationInputTokens: 300}, &SchedAttemptUsage{PromptTokens: 1000, CacheReadTokens: 700, CacheCreationTokens: 300}},
-		{"cache evidence without total", &OpenAIUsage{CacheReadInputTokens: 300, CacheCreationInputTokens: 100}, nil},
+		{"read and write", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 300, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 100}, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheReadTokensPresent: true, CacheCreationTokens: 100}},
+		{"all cached", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 700, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 300}, &SchedAttemptUsage{PromptTokens: 1000, CacheReadTokens: 700, CacheReadTokensPresent: true, CacheCreationTokens: 300}},
+		{"cache evidence without total", &OpenAIUsage{CacheReadInputTokens: 300, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 100}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, schedUsage(tc.usage))
@@ -35,7 +35,7 @@ func TestSchedCaptureUsageKeepsRawBucketsThroughTerminal(t *testing.T) {
 	} {
 		a, _ := newClassificationCapture()
 		a.observe([]byte(payload))
-		want := &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheCreationTokens: 100}
+		want := &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheReadTokensPresent: true, CacheCreationTokens: 100}
 		require.Equal(t, want, a.usage)
 		// A terminal result with no reported usage must not erase prior evidence.
 		a.finish(&OpenAIForwardResult{}, nil)
@@ -44,7 +44,7 @@ func TestSchedCaptureUsageKeepsRawBucketsThroughTerminal(t *testing.T) {
 	// Non-streaming forwarding supplies the same normalized usage on the result.
 	a, _ := newClassificationCapture()
 	a.finish(&OpenAIForwardResult{Usage: OpenAIUsage{
-		InputTokens: 1000, CacheReadInputTokens: 300, CacheCreationInputTokens: 100,
+		InputTokens: 1000, CacheReadInputTokens: 300, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 100,
 	}}, nil)
-	require.Equal(t, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheCreationTokens: 100}, a.usage)
+	require.Equal(t, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheReadTokensPresent: true, CacheCreationTokens: 100}, a.usage)
 }

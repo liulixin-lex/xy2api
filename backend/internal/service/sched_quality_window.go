@@ -132,15 +132,20 @@ func (x schedPredecessorIndex) sort() {
 func (x schedPredecessorIndex) before(current q.AttemptSample) *q.AttemptSample {
 	rows := x[schedSessionOf(current)]
 	i := sort.Search(len(rows), func(i int) bool { return !rows[i].StartedAt.Before(current.StartedAt) })
-	if i == 0 {
-		return nil
+	for i > 0 {
+		i--
+		// The ledger rounds timestamps to microseconds. Its copy of this
+		// attempt can sort before the nanosecond-precision observed copy.
+		if rows[i].AttemptID != current.AttemptID {
+			return &rows[i]
+		}
 	}
-	return &rows[i-1]
+	return nil
 }
 
 // closerPredecessor uses the same strict dispatch ordering and tie-break as PG.
 func closerPredecessor(current, candidate q.AttemptSample, previous *q.AttemptSample) bool {
-	if current.SessionKey == "" || current.SessionKey != candidate.SessionKey || current.GroupID != candidate.GroupID || current.Model != candidate.Model || !candidate.StartedAt.Before(current.StartedAt) || candidate.StartedAt.Before(current.StartedAt.Add(-q.LedgerRetention)) {
+	if current.AttemptID == candidate.AttemptID || current.SessionKey == "" || current.SessionKey != candidate.SessionKey || current.GroupID != candidate.GroupID || current.Model != candidate.Model || !candidate.StartedAt.Before(current.StartedAt) || candidate.StartedAt.Before(current.StartedAt.Add(-q.LedgerRetention)) {
 		return false
 	}
 	return previous == nil || candidate.StartedAt.After(previous.StartedAt) || candidate.StartedAt.Equal(previous.StartedAt) && candidate.AttemptID > previous.AttemptID
@@ -172,6 +177,9 @@ func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader sc
 		}
 		for _, row := range missing {
 			p := found[row.AttemptID]
+			if p != nil && !closerPredecessor(row, *p, nil) {
+				p = nil
+			}
 			if p != nil {
 				copy := schedQualityCloneSample(*p)
 				p = &copy
