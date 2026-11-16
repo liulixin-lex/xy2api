@@ -126,8 +126,6 @@
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
 
-- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
-
 - Gemini API Key 兼容请求的工具 schema 自动清理空 enum，并记录敏感条件整段省略造成的约束损失。
 
 - Gemini API Key 兼容请求保留工具选择和历史，无法表达的 builtin 强制调用、禁并行控制会记录降级。
@@ -146,8 +144,6 @@
 
 - Gemini 分组的 `tool_choice` 生效；选了未声明的工具或并行控制类型不对时返回 400，无法表达的强制内置工具与禁并行控制省略并记录。
 
-- Gemini 工具历史按轮次与调用顺序配对，重复使用 ID 的后轮结果不再覆盖前轮。
-
 - Gemini 缓存读取不再产生负输入用量，流中的缺失字段与明确修正值分别处理。
 
 - Gemini 分组的响应保留截断与内容过滤原因，不再显示为正常结束；上游生成的工具调用无效时以错误结束，保留已读用量。
@@ -157,22 +153,6 @@
 - Gemini AI Studio 请求携带搜索工具时，输出 schema 中的大整数保持原值。
 
 - Gemini 兼容入口返回的思考文本与普通正文分开，JSON 和流式响应均保留思考内容；下一轮带回的思考块不再被当作正文发回 Gemini。
-
-### 流式传输与报错
-
-### 重试、调度与续接
-
-### 重试、调度与续接
-
-- 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。
-
-- 加密推理项被上游拒绝后，同号重试只去掉被上游指出的那一项，其他推理与压缩历史保留；上游没指出是哪一项、或重试后又有别的项被拒时，照旧去掉全部密文重试一次；仍无法修复时返回 400 `encrypted_content_rejected` 并附恢复说明。
-
-- 同一会话里一个账号的密文被拒，不再让换账号或换 API Key 之后的请求被提前删去密文；旧版本的拒绝记录不再沿用。
-
-- 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
-
-### 用量记录与计费
 
 ### 流式传输与报错
 
@@ -193,6 +173,18 @@
 - 非流式 Responses 的文本与工具混合输出不再只剩工具结果，结束事件只给出部分输出时，其余文本与工具结果也会补齐。
 
 - 非流式 Responses 的 JSON 响应被上游标成 SSE 时，用量不再记为 0；SSE 拼成的 JSON 响应改用 JSON 响应头。
+
+### 重试、调度与续接
+
+- 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。
+
+- 加密推理项被上游拒绝后，同号重试只去掉被上游指出的那一项，其他推理与压缩历史保留；上游没指出是哪一项、或重试后又有别的项被拒时，照旧去掉全部密文重试一次；仍无法修复时返回 400 `encrypted_content_rejected` 并附恢复说明。
+
+- 同一会话里一个账号的密文被拒，不再让换账号或换 API Key 之后的请求被提前删去密文；旧版本的拒绝记录不再沿用。
+
+- 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
+
+### 用量记录与计费
 
 ## [0.6.7] - 2026-11-15
 
