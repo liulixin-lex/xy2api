@@ -377,8 +377,10 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 		if d.peers == nil || !d.peers.at.Equal(bucket) {
 			d.peers = freezePeers(at, rows)
 		}
-		fiveMin := at.Equal(bucket)
-		minute := at.Equal(at.Truncate(time.Minute))
+		// Overdue timers must not synthesize historical regular/minute ticks
+		// for newly discovered keys outside this cycle's replay window.
+		fiveMin := at.After(after) && at.Equal(bucket)
+		minute := at.After(after) && at.Equal(at.Truncate(time.Minute))
 		for _, k := range keys {
 			prev := rows[k]
 			if !at.After(prev.EvaluatedAt) || !at.After(resets[k.AccountID]) {
