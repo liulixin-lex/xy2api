@@ -14,6 +14,32 @@ import (
 	"testing"
 )
 
+// Columns keep the selected reference inputs small without rounding timestamps.
+// The converter verifies that nanoseconds round-trip to the original float64s.
+type ruleBVectorSamples struct {
+	AccountID, GroupID                         []int64
+	Model, SessionKey                          []string
+	AvailableDeltaNS, StartedBeforeAvailableNS []int64
+	TTFOMs, CensoredMs                         []float64
+	Stream, SwitchedAccount                    []bool
+	Outcome                                    []Outcome
+}
+
+func (s ruleBVectorSamples) expand() []RuleBSample {
+	rows := make([]RuleBSample, len(s.AccountID))
+	var availableNS int64
+	for i := range rows {
+		availableNS += s.AvailableDeltaNS[i]
+		rows[i] = RuleBSample{
+			AccountID: s.AccountID[i], GroupID: s.GroupID[i], Model: s.Model[i], SessionKey: s.SessionKey[i],
+			AvailableAt: float64(availableNS) / 1e9, StartedAt: float64(availableNS-s.StartedBeforeAvailableNS[i]) / 1e9,
+			TTFOMs: s.TTFOMs[i], CensoredMs: s.CensoredMs[i], Stream: s.Stream[i],
+			Outcome: s.Outcome[i], SwitchedAccount: s.SwitchedAccount[i],
+		}
+	}
+	return rows
+}
+
 func TestRuleBVectors(t *testing.T) {
 	file, err := os.Open("testdata/rule_b_vectors.json.gz")
 	if err != nil {
@@ -26,7 +52,7 @@ func TestRuleBVectors(t *testing.T) {
 	}
 	defer reader.Close()
 	var fixture struct {
-		Samples []RuleBSample
+		Samples ruleBVectorSamples
 		Cases   []struct {
 			Name                   string
 			Params                 RuleBParams
@@ -45,19 +71,37 @@ func TestRuleBVectors(t *testing.T) {
 	if err := json.NewDecoder(reader).Decode(&fixture); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.Cases) != 138 {
-		t.Fatalf("assessments = %d, want 3*44 + 2*3", len(fixture.Cases))
+	counts, seen := make(map[string]int), make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		if seen[tc.Name] {
+			t.Fatalf("duplicate vector %s", tc.Name)
+		}
+		seen[tc.Name] = true
+		group, _, _ := strings.Cut(tc.Name, "/")
+		counts[group]++
 	}
+	if !reflect.DeepEqual(counts, map[string]int{"default": 20, "wide": 10, "narrow": 10, "three_states": 6}) {
+		t.Fatalf("assessment counts = %v, want 20 + 10 + 10 + 2*3", counts)
+	}
+	for i := 1; i <= 2; i++ {
+		for _, group := range []string{"default", "wide", "narrow"} {
+			if name := fmt.Sprintf("three_states/%d/%s", i, group); !seen[name] {
+				t.Fatalf("missing fixed-context assessment %s", name)
+			}
+		}
+	}
+	samples := fixture.Samples.expand()
 	resolve := func(refs []int) []RuleBSample {
 		rows := make([]RuleBSample, len(refs))
 		for i, ref := range refs {
-			rows[i] = fixture.Samples[ref]
+			rows[i] = samples[ref]
 		}
 		return rows
 	}
 	var maxAbs, maxRel float64
 	var maxAbsField, maxRelField string
 	passed := 0
+	coverage := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			in := RuleBInput{Scope: tc.Scope, Now: tc.Now, Cut: tc.Cut, LimitSeconds: tc.LimitSeconds,
@@ -80,6 +124,34 @@ func TestRuleBVectors(t *testing.T) {
 			if strings.HasPrefix(tc.Name, "three_states/") && strings.HasSuffix(tc.Name, "/narrow") &&
 				!slices.Contains(got.UnknownReasons, RuleBRelativeVeto) {
 				t.Errorf("good base with relative confirmation must report relative veto: %v", got.UnknownReasons)
+			}
+			for _, reason := range got.UnknownReasons {
+				coverage[string(reason)] = true
+			}
+			own, peers, group, local := got.Counts, got.PeerCounts, got.PriorGroupCounts, got.PriorLocalCounts
+			for feature, applies := range map[string]bool{
+				"good": got.State == RuleBGood, "bad": got.State == RuleBBad,
+				"no_peer_evidence":         peers.N-peers.X == 0 && got.U == nil,
+				"single_slow_session_veto": got.State == RuleBUnknown && got.Absolute && got.Relative && own.D == 1,
+				"unknown_blocks_good": got.State == RuleBUnknown && own.N >= 20-1e-8 && own.S >= 3 && !got.Relative &&
+					got.WorstMean > tc.Params.Tolerance && (own.K+5*got.Prior)/(own.N+5) <= tc.Params.Tolerance,
+				"prior_fallback":      (group.N-local.N)-(group.X-local.X) <= 0 && got.Prior == .1,
+				"prior_clipped":       got.Prior == .001 || got.Prior == .999,
+				"peer_unknown_as_bad": peers.X > 0 && got.PeerA != nil,
+			} {
+				coverage[feature] = coverage[feature] || applies
+			}
+			if own.N > 0 && own.N < 20 && got.RelativeThreshold != nil {
+				unpaddedB := got.B - (20 - own.N)
+				if 1-ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance) != got.AbsoluteProbability &&
+					1-ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold) != *got.RelativeProbability {
+					coverage["padding_changes_both_probabilities"] = true
+				}
+			}
+			for _, sample := range in.Samples {
+				if sample.TTFOMs <= 0 && sample.CensoredMs/1000 >= in.LimitSeconds {
+					coverage["proven_censor"] = true
+				}
 			}
 			check := func(field string, actual, expected float64) {
 				abs := math.Abs(actual - expected)
@@ -140,6 +212,16 @@ func TestRuleBVectors(t *testing.T) {
 				passed++
 			}
 		})
+	}
+	for _, feature := range []string{
+		"good", "bad", "no_peer_evidence", "peer_known_insufficient", "no_samples", "mass_insufficient",
+		"sessions_insufficient", "single_slow_session_veto", "absolute_unconfirmed", "relative_unconfirmed",
+		"unknown_blocks_good", "prior_fallback", "prior_clipped", "padding_changes_both_probabilities",
+		"proven_censor", "peer_unknown_as_bad", "relative_veto",
+	} {
+		if !coverage[feature] {
+			t.Errorf("retained vectors do not cover %s", feature)
+		}
 	}
 	t.Logf("vectors %d/%d; max absolute error %.17g (%s); max relative error %.17g (%s)",
 		passed, len(fixture.Cases), maxAbs, maxAbsField, maxRel, maxRelField)
