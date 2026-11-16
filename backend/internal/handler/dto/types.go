@@ -439,6 +439,7 @@ type AccountListItem struct {
 }
 
 type AccountGroup struct {
+	Pinned    bool      `json:"pinned"`
 	AccountID int64     `json:"account_id"`
 	GroupID   int64     `json:"group_id"`
 	CreatedAt time.Time `json:"created_at"`
