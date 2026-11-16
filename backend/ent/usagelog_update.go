@@ -993,33 +993,6 @@ func (_u *UsageLogUpdate) ClearDurationMs() *UsageLogUpdate {
 	return _u
 }
 
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (_u *UsageLogUpdate) SetFirstOutputMs(v int) *UsageLogUpdate {
-	_u.mutation.ResetFirstOutputMs()
-	_u.mutation.SetFirstOutputMs(v)
-	return _u
-}
-
-// SetNillableFirstOutputMs sets the "first_output_ms" field if the given value is not nil.
-func (_u *UsageLogUpdate) SetNillableFirstOutputMs(v *int) *UsageLogUpdate {
-	if v != nil {
-		_u.SetFirstOutputMs(*v)
-	}
-	return _u
-}
-
-// AddFirstOutputMs adds value to the "first_output_ms" field.
-func (_u *UsageLogUpdate) AddFirstOutputMs(v int) *UsageLogUpdate {
-	_u.mutation.AddFirstOutputMs(v)
-	return _u
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (_u *UsageLogUpdate) ClearFirstOutputMs() *UsageLogUpdate {
-	_u.mutation.ClearFirstOutputMs()
-	return _u
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (_u *UsageLogUpdate) SetEndToEndFirstOutputMs(v int64) *UsageLogUpdate {
 	_u.mutation.ResetEndToEndFirstOutputMs()
@@ -2293,15 +2266,6 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
-	}
-	if value, ok := _u.mutation.FirstOutputMs(); ok {
-		_spec.SetField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.AddedFirstOutputMs(); ok {
-		_spec.AddField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
-	}
-	if _u.mutation.FirstOutputMsCleared() {
-		_spec.ClearField(usagelog.FieldFirstOutputMs, field.TypeInt)
 	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
@@ -3682,33 +3646,6 @@ func (_u *UsageLogUpdateOne) ClearDurationMs() *UsageLogUpdateOne {
 	return _u
 }
 
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (_u *UsageLogUpdateOne) SetFirstOutputMs(v int) *UsageLogUpdateOne {
-	_u.mutation.ResetFirstOutputMs()
-	_u.mutation.SetFirstOutputMs(v)
-	return _u
-}
-
-// SetNillableFirstOutputMs sets the "first_output_ms" field if the given value is not nil.
-func (_u *UsageLogUpdateOne) SetNillableFirstOutputMs(v *int) *UsageLogUpdateOne {
-	if v != nil {
-		_u.SetFirstOutputMs(*v)
-	}
-	return _u
-}
-
-// AddFirstOutputMs adds value to the "first_output_ms" field.
-func (_u *UsageLogUpdateOne) AddFirstOutputMs(v int) *UsageLogUpdateOne {
-	_u.mutation.AddFirstOutputMs(v)
-	return _u
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (_u *UsageLogUpdateOne) ClearFirstOutputMs() *UsageLogUpdateOne {
-	_u.mutation.ClearFirstOutputMs()
-	return _u
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (_u *UsageLogUpdateOne) SetEndToEndFirstOutputMs(v int64) *UsageLogUpdateOne {
 	_u.mutation.ResetEndToEndFirstOutputMs()
@@ -5012,15 +4949,6 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.DurationMsCleared() {
 		_spec.ClearField(usagelog.FieldDurationMs, field.TypeInt)
-	}
-	if value, ok := _u.mutation.FirstOutputMs(); ok {
-		_spec.SetField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
-	}
-	if value, ok := _u.mutation.AddedFirstOutputMs(); ok {
-		_spec.AddField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
-	}
-	if _u.mutation.FirstOutputMsCleared() {
-		_spec.ClearField(usagelog.FieldFirstOutputMs, field.TypeInt)
 	}
 	if value, ok := _u.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
