@@ -100,6 +100,10 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 		if e != nil {
 			return e
 		}
+		for group, record := range s.policies {
+			record.Version = result.Version
+			s.policies[group] = record
+		}
 		s.policies[groupID] = result.SchedPolicyRecord
 		states, e = tx.States()
 		if e != nil {

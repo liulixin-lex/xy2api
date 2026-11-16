@@ -107,10 +107,11 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			grouped[groupKey] = row
 		}
 		lv := q.LineView{Identity: r.Identity, Trial: r.Trial, Level: r.Level, Until: r.Until, TrialUntil: r.TrialUntil}
-		_, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
+		verdict, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
 		switch key.Line {
 		case q.DimensionTTFO:
 			row.View.TTFO = lv
+			row.TTFTVerdict = verdict
 			if basis.TTFT != nil {
 				row.TTFT = *basis.TTFT
 			}

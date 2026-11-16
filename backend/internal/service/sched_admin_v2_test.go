@@ -208,7 +208,7 @@ func TestSchedAdminAccountFilterNormalUsesSummaryConditions(t *testing.T) {
 func TestSchedAdminDetailEvidenceAndEmptyLists(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	p := e.snapshot
-	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear, Level: 2, Until: s.d.Now().Add(time.Minute)}}, SourceGroups: []int64{2}, TTFT: schedquality.RuleBResult{State: schedquality.RuleBBad, Counts: schedquality.RuleBCounts{N: 20, K: 8}}, Error: schedquality.ErrorAssessment{Verdict: schedquality.VerdictUnknown}}}
+	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear, Level: 2, Until: s.d.Now().Add(time.Minute)}}, SourceGroups: []int64{2}, TTFT: schedquality.TTFTEvidence{N: 20, K: 8}, TTFTVerdict: schedquality.VerdictFail, Error: schedquality.ErrorAssessment{Verdict: schedquality.VerdictUnknown}}}
 
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)

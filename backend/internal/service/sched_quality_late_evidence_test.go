@@ -91,3 +91,16 @@ func TestEngineFailedCommitKeepsWatermarkAndPendingReplay(t *testing.T) {
 	require.Len(t, f.store.Decisions, decisions)
 	require.True(t, f.e.window.newFinishedAt.IsZero())
 }
+
+func TestEngineStartupRetainsOldCompletionWithRecentInsertion(t *testing.T) {
+	f := newQualityFixture(t)
+	recent := engineSamples(1, f.now.Add(-time.Minute), true)[0]
+	recent.InsertedAt = f.now
+	delayed := engineSamples(1, f.now.Add(-6*time.Hour), true)[0]
+	delayed.InsertedAt = f.now.Add(-time.Hour)
+	f.ledger.Rows = []q.AttemptSample{recent, delayed}
+	f.cycle()
+	rows := f.e.window.samples[SchedAccountModel{1, "synthetic-model"}]
+	require.Len(t, rows, 2)
+	require.Equal(t, f.now, f.e.insertedAt)
+}

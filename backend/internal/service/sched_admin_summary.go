@@ -260,14 +260,8 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailGroupsByModel {
 	out := SchedAdminAccountDetailGroupsByModel{Model: r.Model, Failing: len(schedRearLines(r.View)) > 0, Dims: schedRearLines(r.View), OtherGroupIDs: r.SourceGroups, Exempt: exempt, Level: max(r.View.TTFO.Level, max(r.View.Error.Level, r.View.Cache.Level))}
 	out.Until = schedAdminTime(schedStateUntil(r.View))
-	verdict := schedquality.VerdictUnknown
-	if r.TTFT.State == schedquality.RuleBGood {
-		verdict = schedquality.VerdictPass
-	}
-	if r.TTFT.State == schedquality.RuleBBad {
-		verdict = schedquality.VerdictFail
-	}
-	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 240, N: int(r.TTFT.Counts.N), Verdict: verdict.String()}, Bad: int(r.TTFT.Counts.K)}
+	verdict := r.TTFTVerdict
+	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 240, N: int(r.TTFT.N), Verdict: verdict.String()}, Bad: int(r.TTFT.K)}
 	out.Error = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 60, N: r.Error.Clear, LCB: schedAdminFloat(r.Error.LowerFail), Verdict: r.Error.Verdict.String()}, Bad: r.Error.Failed}
 	out.Cache = SchedAdminCacheDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 30, N: r.Cache.Turns, Verdict: r.Cache.Verdict.String()}, Ratio: schedAdminFloat(r.Cache.Ratio)}
 	return out

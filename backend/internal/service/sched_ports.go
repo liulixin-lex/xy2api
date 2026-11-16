@@ -126,7 +126,8 @@ type SchedGroupRow struct {
 	GroupID      int64
 	Model        string
 	View         schedquality.StateView
-	TTFT         schedquality.RuleBResult
+	TTFT         schedquality.TTFTEvidence
+	TTFTVerdict  schedquality.Verdict
 	Error        schedquality.ErrorAssessment
 	Cache        schedquality.CacheAssessment
 	SourceGroups []int64

@@ -70,7 +70,7 @@ func TestRuntimeQualityUsesSnapshotAndPolicy(t *testing.T) {
 	q, err = newReaderQuery(req, now)
 	require.NoError(t, err)
 	require.ErrorIs(t, r.qualityState(context.Background(), q), ErrInvalidInput)
-	require.True(t, snapshot.GroupRows[1][0].View.Failing)
+	require.Equal(t, schedquality.IdentityRear, snapshot.GroupRows[1][0].View.TTFO.Identity)
 }
 
 type qualityBalanceStub struct {

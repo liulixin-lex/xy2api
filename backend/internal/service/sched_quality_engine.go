@@ -146,11 +146,9 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		}
 		cursor = now.Add(-schedEvidenceRetention)
 		s.window.merge(rows, now)
-		for _, row := range rows {
-			if row.InsertedAt.After(cursor) {
-				cursor = row.InsertedAt
-			}
-		}
+		// A recently inserted attempt may have finished before the completion
+		// window. Scan the entire insertion window on boot, not just the newest
+		// completion's overlap, because availability is max(finished, inserted).
 	}
 	maxSeen := cursor
 	after := cursor.Add(-schedquality.LedgerReloadOverlap)

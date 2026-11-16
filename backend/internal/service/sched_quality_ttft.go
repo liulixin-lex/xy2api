@@ -102,13 +102,11 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		if !schedAvailableAt(a).After(at) {
 			samples = append(samples, a)
 		} else if !a.StartedAt.After(at) && a.FinishedAt.After(at) {
-			a.FinishedAt = time.Time{}
 			running = append(running, a)
 		}
 	}
 	for _, a := range d.running {
 		if a.AccountID == r.AccountID && a.Model == r.Model && !a.StartedAt.After(at) && (a.FinishedAt.IsZero() || a.FinishedAt.After(at)) {
-			a.FinishedAt = time.Time{}
 			running = append(running, a)
 		}
 	}
@@ -121,7 +119,7 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 			slog.Warn("sched_quality.ttft_assessment", "component", "sched_quality", "account_id", r.AccountID, "model", r.Model, "group_id", r.GroupID, "error", err)
 		}
 		if err == nil {
-			basis.TTFT = &result
+			basis.TTFT = q.NewTTFTEvidence(result, p.TTFTSeconds)
 			switch result.State {
 			case q.RuleBGood:
 				verdict = q.VerdictPass
@@ -170,14 +168,12 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 			basis.AttemptIDs = basis.AttemptIDs[:50]
 		}
 	case q.DimensionError:
-		for _, a := range schedErrorEvidence(samples, running, cut, at) {
-			sources[a.GroupID] = true
+		for _, group := range basis.Error.SourceGroups {
+			sources[group] = true
 		}
 	case q.DimensionCache:
-		for _, a := range samples {
-			if q.AssessCache([]q.AttemptSample{a}, p.MinCacheRatio, cut, at).Turns > 0 {
-				sources[a.GroupID] = true
-			}
+		for _, group := range basis.Cache.SourceGroups {
+			sources[group] = true
 		}
 	}
 	for g := range sources {
@@ -195,52 +191,4 @@ func schedSlow(a q.AttemptSample, limit float64) bool {
 		return float64(*a.TTFOMs) > limit*1000
 	}
 	return a.Outcome == q.OutcomeTimeout && a.CensoredMs != nil && float64(*a.CensoredMs) >= limit*1000
-}
-
-// Provenance follows the same final-request and slot selection as AssessError;
-// it includes successful and unknown units, not just the returned bad IDs.
-func schedErrorEvidence(samples, running []q.AttemptSample, cut, now time.Time) []q.AttemptSample {
-	type key struct {
-		id       string
-		fallback bool
-	}
-	latest := make(map[key]q.AttemptSample)
-	for _, rows := range [][]q.AttemptSample{samples, running} {
-		for _, a := range rows {
-			if a.StartedAt.After(now) || a.FinishedAt.After(now) || !a.FinishedAt.IsZero() && a.FinishedAt.Before(a.StartedAt) {
-				continue
-			}
-			k := key{a.RequestID, a.RequestID == ""}
-			if k.fallback {
-				k.id = a.AttemptID
-			}
-			old, ok := latest[k]
-			if !ok || a.StartedAt.After(old.StartedAt) || a.StartedAt.Equal(old.StartedAt) && (a.AttemptID > old.AttemptID || a.AttemptID == old.AttemptID && a.FinishedAt.After(old.FinishedAt)) {
-				latest[k] = a
-			}
-		}
-	}
-	at := func(a q.AttemptSample) time.Time {
-		if a.FinishedAt.IsZero() {
-			return a.StartedAt
-		}
-		return a.FinishedAt
-	}
-	var out []q.AttemptSample
-	for _, a := range latest {
-		if a.StartedAt.After(cut) && !at(a).Before(now.Add(-q.ErrorWindow)) && (a.FinishedAt.IsZero() || a.Outcome == q.OutcomeOK || a.Class.Counted() || a.Class == q.ClassUnknown) {
-			out = append(out, a)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if !at(a).Equal(at(b)) {
-			return at(a).After(at(b))
-		}
-		if !a.StartedAt.Equal(b.StartedAt) {
-			return a.StartedAt.After(b.StartedAt)
-		}
-		return a.AttemptID > b.AttemptID
-	})
-	return out[:min(len(out), q.ErrorSlots)]
 }
