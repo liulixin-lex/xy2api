@@ -169,7 +169,7 @@ func applyChatResponsesFields(req *ChatCompletionsRequest, out *ResponsesRequest
 		var values []json.RawMessage
 		valid := json.Unmarshal(include, &values) == nil
 		var included []string
-		seen := make(map[string]bool, len(values)+1)
+		seen := make(map[string]bool)
 		for _, raw := range values {
 			var value string
 			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
