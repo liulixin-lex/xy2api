@@ -142,12 +142,13 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			require.False(t, observed.Valid || source.Valid || seen.Valid || valid.Valid || kind.Valid)
 			ops := &opsRepository{db: db}
 			input := &service.OpsInsertErrorLogInput{RequestID: row.RequestID, GatewayRequestID: row.RequestID, CreatedAt: row.CreatedAt, ConversionNotices: notices}
-			opsArgs := make([]driver.Value, 45)
+			opsArgs := make([]driver.Value, 47)
 			for i := range opsArgs {
 				opsArgs[i] = sqlmock.AnyArg()
 			}
 			opsCapture := &noticeArgument{}
 			opsArgs[44] = opsCapture
+			opsArgs[45], opsArgs[46] = nil, nil // Unknown provenance and wire status stay NULL.
 			mock.ExpectQuery("INSERT INTO ops_error_logs").WithArgs(opsArgs...).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
 			id, err := ops.InsertErrorLog(context.Background(), input)
 			require.NoError(t, err)
