@@ -448,7 +448,8 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	streamInterval := s.anthropicNativeStreamInterval()
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
 	pump.firstEvent = openAICompatFirstEventOf(resp)
-	pump.outputStarted = func() bool { return !firstChunk }
+	outputStarted := false
+	pump.outputStarted = func() bool { return outputStarted }
 	defer pump.stop()
 
 	logReadErr := func(err error) {
