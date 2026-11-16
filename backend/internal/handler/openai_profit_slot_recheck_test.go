@@ -53,6 +53,7 @@ func profitSlotTestAccount(id int64, rate float64) *service.Account {
 	now := time.Now()
 	return &service.Account{
 		ID:             id,
+		GroupIDs:       []int64{50},
 		Platform:       service.PlatformOpenAI,
 		Type:           service.AccountTypeAPIKey,
 		Status:         service.StatusActive,
@@ -151,7 +152,9 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 		c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(profitSlotTestContext(t, gw, groupID, true))
 		streamStarted := false
 
-		release, result := h.acquireResponsesAccountSlot(c, &groupID, "", newSelection(profitSlotTestAccount(3, 0.8)), false, &streamStarted, zap.NewNop())
+		account := profitSlotTestAccount(3, 0.8)
+		account.GroupIDs = nil // suppressed standalone fixture has no captured scheduling group
+		release, result := h.acquireResponsesAccountSlot(c, &groupID, "", newSelection(account), false, &streamStarted, zap.NewNop())
 		require.Equal(t, openAISlotAcquireOK, result, "生图意图跳门：过贵账号照常获取（图片边界不装门）")
 		require.NotNil(t, release)
 		release()

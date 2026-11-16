@@ -14,18 +14,17 @@ type SchedulerOutboxEvent struct {
 	CreatedAt time.Time
 }
 
-// SchedulerOutboxRepository 提供调度 outbox 的读取接口。
+// SchedulerOutboxRepository is a shared pending queue. Event IDs identify rows;
+// they do not imply commit visibility. Consumers must hold the lease from read
+// through acknowledgement and replay the batch on any handling/ack error.
 type SchedulerOutboxRepository interface {
-	ListAfterAndReleaseDedup(ctx context.Context, afterID int64, limit int) ([]SchedulerOutboxEvent, error)
-	// FirstCreatedAtAfter 返回指定水位之后第一条待消费事件的创建时间，不领取事件或修改去重键。
-	FirstCreatedAtAfter(ctx context.Context, afterID int64) (time.Time, bool, error)
-	MaxID(ctx context.Context) (int64, error)
-	DeleteConsumedUpTo(ctx context.Context, watermark int64, limit int) (int64, error)
-	TryAcquireCleanupLock(ctx context.Context) (SchedulerOutboxCleanupLease, bool, error)
+	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
+	OldestPendingCreatedAt(ctx context.Context) (time.Time, bool, error)
+	PendingCount(ctx context.Context) (int64, error)
+	DeleteProcessed(ctx context.Context, ids []int64) error
+	TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error)
 }
 
-// SchedulerOutboxCleanupLease holds the PostgreSQL advisory lock used by
-// scheduler outbox cleanup.
-type SchedulerOutboxCleanupLease interface {
-	Release()
-}
+// SchedulerOutboxConsumerLease serializes shared Redis snapshot writes across
+// instances. PostgreSQL releases the session lock when the connection exits.
+type SchedulerOutboxConsumerLease interface{ Release() }
