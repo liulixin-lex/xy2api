@@ -76,8 +76,14 @@ type AttemptSample struct {
 	Model                            string
 	Stream                           bool
 	ClientCanceled, Continuation     bool
+	Switched                         bool
 	TTFOMs, CensoredMs               *int
+	FirstEventMs, FirstAnswerMs      *int
 	Outcome                          Outcome
+	Class                            ErrorClass
+	HTTPStatus                       *int
+	StatusOrigin                     StatusOrigin
+	OutputBytes                      *int
 	Detail                           string
 	PromptTokens, CacheReadTokens    *int
 	InputTokens, CacheCreationTokens *int // Uncached input and cache writes; PromptTokens remains total input.
