@@ -375,11 +375,19 @@ func (s *OpenAIGatewayService) scanCCStream(
 				st.FirstTokenMs = &ms
 			}
 			st.Err = emitRaw[0]([]byte(payload))
+			if st.Err != nil && !c.Writer.Written() {
+				_ = resp.Body.Close()
+				return true
+			}
 			return false
 		}
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"}
+			if !c.Writer.Written() {
+				_ = resp.Body.Close()
+				return true
+			}
 			return false
 		}
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {

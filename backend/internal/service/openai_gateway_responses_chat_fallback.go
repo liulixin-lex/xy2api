@@ -294,7 +294,11 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	if scan.Err != nil {
+		noUsageBeforeOutput := !c.Writer.Written() && state.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
 		writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
+		if noUsageBeforeOutput {
+			return nil, scan.Err
+		}
 		return &OpenAIForwardResult{
 			ResponseFactsKnown: scan.ResponseFactsKnown,
 			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,

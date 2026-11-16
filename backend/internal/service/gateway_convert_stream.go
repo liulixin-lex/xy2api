@@ -353,7 +353,8 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 	frames := st.hooks.convert(&event, payload, hold)
 	if st.hooks.conversionError != nil {
 		if err := st.hooks.conversionError(); err != nil {
-			return st.conversionFailed(err), st.sawStop
+			stop := !st.c.Writer.Written() || st.sawStop
+			return st.conversionFailed(err), stop
 		}
 	}
 	if hold {
@@ -746,6 +747,7 @@ func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcom
 	if st.conversionErr != nil {
 		return gatewayConvertOutcome{err: st.conversionErr}
 	}
+	beforeOutput := !st.c.Writer.Written()
 	st.conversionErr = err
 	st.stopFirstEvent()
 	st.stopCancel()
@@ -753,5 +755,8 @@ func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcom
 	st.held = nil
 	st.sawFailure = true
 	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
-	return gatewayConvertOutcome{err: err}
+	if beforeOutput {
+		_ = st.resp.Body.Close()
+	}
+	return gatewayConvertOutcome{err: err, noResult: beforeOutput && !st.evidence.usagePresent}
 }

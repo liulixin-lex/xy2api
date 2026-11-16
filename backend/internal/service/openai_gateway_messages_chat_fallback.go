@@ -274,7 +274,11 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	}
 
 	if scan.Err != nil {
+		noUsageBeforeOutput := !c.Writer.Written() && anthropicState.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
 		writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
+		if noUsageBeforeOutput {
+			return nil, scan.Err
+		}
 		// Broken upstream read: skip finalization so no synthetic message_stop
 		// masks the truncation, and surface the error to flag usage incomplete
 		// (mirrors forwardResponsesViaRawChatCompletions).
