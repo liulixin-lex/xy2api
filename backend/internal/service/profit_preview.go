@@ -46,6 +46,7 @@ const (
 
 // ProfitPreviewAccountVerdict 是单账号的预演结论。
 type ProfitPreviewAccountVerdict struct {
+	Pinned      bool     `json:"pinned"`
 	AccountID   int64    `json:"account_id"`
 	Name        string   `json:"name"`
 	Platform    string   `json:"platform"`
@@ -63,11 +64,13 @@ type ProfitPreviewAccountVerdict struct {
 
 // ProfitPreviewGroupReport 是单分组的预演报告。
 type ProfitPreviewGroupReport struct {
-	GroupID        int64  `json:"group_id"`
-	GroupName      string `json:"group_name"`
-	Platform       string `json:"platform"`
-	EffectiveGate  bool   `json:"effective_gate"`
-	AssumedEnabled bool   `json:"assumed_enabled,omitempty"`
+	Floor          float64 `json:"floor"`
+	CeilingEnabled bool    `json:"ceiling_enabled"`
+	GroupID        int64   `json:"group_id"`
+	GroupName      string  `json:"group_name"`
+	Platform       string  `json:"platform"`
+	EffectiveGate  bool    `json:"effective_gate"`
+	AssumedEnabled bool    `json:"assumed_enabled,omitempty"`
 	// DefaultD / MinEffectiveD：分组默认 D 与最低有效 D（含 evalAt 高峰因子；
 	// MinEffectiveD = min(分组默认, 全部非空用户覆盖) × 高峰因子）。
 	DefaultD      float64 `json:"default_d"`
@@ -95,6 +98,8 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 		effectiveGate := ceilingOn || floor > 0
 		report := ProfitPreviewGroupReport{
 			GroupID:              group.ID,
+			Floor:                floor,
+			CeilingEnabled:       ceilingOn,
 			GroupName:            group.Name,
 			Platform:             group.Platform,
 			EffectiveGate:        effectiveGate,
@@ -166,6 +171,7 @@ func previewAccountProfitAdmission(
 ) ProfitPreviewAccountVerdict {
 	verdict := ProfitPreviewAccountVerdict{
 		AccountID:  account.ID,
+		Pinned:     pinned,
 		Name:       account.Name,
 		Platform:   account.Platform,
 		RateSource: ProfitPreviewRateSourceManual,

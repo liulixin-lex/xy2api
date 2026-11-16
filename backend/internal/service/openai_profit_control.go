@@ -7,7 +7,10 @@ package service
 //
 // 准入条件：
 //
-//	U(pricingAt) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
+//	MinUpstreamRate <= U(pricingAt) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
+//
+// 下限仅在 OpenAI 分组设置后独立生效；上限由利润开关控制。组内固定号免检两端，
+// 其余可调度性和质量规则照常应用。
 //
 //   - D（用户售价倍率）固定在请求开始的 pricingAt：同一请求的全部 failover 与
 //     最终扣费共用同一 D（RecordUsage 的高峰因子同样取 pricingAt），一个请求
@@ -55,7 +58,7 @@ package service
 // 可用性优先"的显式取舍——该异常窗口内利润保证不成立，靠 WARN 与采样观测
 // 暴露，绝不把瞬时 DB 抖动放大成全站不可调度。
 //
-// 可观测性：按分组和平台累计装门/threshold 否决/invalid-rate 否决/终检刷新
+// 可观测性：按分组和平台累计装门/floor 否决/threshold 否决/invalid-rate 否决/终检刷新
 // 失败计数，≥5 分钟采样输出一条 Info（profit_control_activity），无逐请求日志。
 
 import (
@@ -313,7 +316,7 @@ func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionRe
 }
 
 // openAIProfitControlVetoReason 报告利润门是否否决该账号。ctx 中没有门
-// （分组未启用利润控制或本请求跳门）或账号为 nil 时一律放行。
+// （上下限都未启用或本请求跳门）或账号为 nil 时一律放行。
 func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool, string) {
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || account == nil {

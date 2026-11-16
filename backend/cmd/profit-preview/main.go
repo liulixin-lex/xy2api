@@ -96,8 +96,8 @@ func main() {
 	fmt.Printf("利润门预演 @ %s（U=账号倍率；探测状态仅告警）\n", evalAt.Format(time.RFC3339))
 	for _, report := range reports {
 		fmt.Printf("\n== 分组 %d %s [%s] ==\n", report.GroupID, report.GroupName, report.Platform)
-		fmt.Printf("  利润门生效=%v 假定启用=%v | 默认 D=%.4f 阈值=%.4f | 最低有效 D=%.4f 阈值=%.4f\n",
-			report.EffectiveGate, report.AssumedEnabled,
+		fmt.Printf("  利润门生效=%v 假定启用=%v 下限=%.4f 上限启用=%v | 默认 D=%.4f 阈值=%.4f | 最低有效 D=%.4f 阈值=%.4f\n",
+			report.EffectiveGate, report.AssumedEnabled, report.Floor, report.CeilingEnabled,
 			report.DefaultD, report.ThresholdDefault, report.MinEffectiveD, report.ThresholdMinD)
 		counts := map[string]int{}
 		for _, v := range report.Verdicts {
@@ -107,6 +107,9 @@ func main() {
 				rate = fmt.Sprintf("%.4f", *v.AccountRate)
 			}
 			flags := make([]string, 0, 2)
+			if v.Pinned {
+				flags = append(flags, "固定号免倍率区间")
+			}
 			if v.RejectedUnderMinD {
 				flags = append(flags, "最低有效D下拒绝")
 			}
@@ -120,8 +123,9 @@ func main() {
 			fmt.Printf("  账号 %-4d %-24s 平台=%-12s U=%-8s 来源=%-19s %s%s\n",
 				v.AccountID, v.Name, v.Platform, rate, v.RateSource, v.Class, suffix)
 		}
-		fmt.Printf("  分类合计: 准入=%d 利润不足=%d 倍率非法=%d\n",
+		fmt.Printf("  分类合计: 准入=%d 低于下限=%d 利润不足=%d 倍率非法=%d\n",
 			counts[service.ProfitPreviewClassAdmitted],
+			counts[service.ProfitPreviewClassRejectedFloor],
 			counts[service.ProfitPreviewClassRejectedThreshold],
 			counts[service.ProfitPreviewClassRejectedInvalidRate])
 		models := make([]string, 0, len(report.RemainingByModel))
