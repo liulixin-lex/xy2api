@@ -25,6 +25,7 @@ type openAIRawStreamTerminalState struct {
 	sawUsage                 bool
 	sawFinishReason          bool
 	sawMalformed             bool
+	pendingMalformed         bool
 	sawUnfinishedGeneration  bool
 	sawCompleteTrailingUsage bool
 }
@@ -36,13 +37,15 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	}
 	t.sawDataLine = true
 	if payload == "[DONE]" {
+		t.pendingMalformed = false
 		t.sawDone = true
 		return
 	}
 	if !gjson.Valid(payload) || !gjson.Parse(payload).IsObject() {
-		t.sawMalformed = true
+		t.pendingMalformed = true
 		return
 	}
+	t.pendingMalformed = false
 	root := gjson.Parse(payload)
 	if resilience.ChatErrorField(root) || root.Get("type").String() == "error" {
 		if t.failurePayload == "" {
@@ -82,14 +85,14 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 }
 
 func (t *openAIRawStreamTerminalState) Terminated() bool {
-	return t != nil && t.failurePayload == "" && !t.sawMalformed && (t.sawDone || t.sawFinishReason)
+	return t != nil && t.failurePayload == "" && !t.sawMalformed && !t.pendingMalformed && (t.sawDone || t.sawFinishReason)
 }
 
 func (t *openAIRawStreamTerminalState) IsTruncated(clientOutputStarted bool) bool {
 	if t == nil {
 		return false
 	}
-	if t.failurePayload != "" || t.sawMalformed {
+	if t.failurePayload != "" || t.sawMalformed || t.pendingMalformed {
 		return true
 	}
 	if t.Terminated() || t.sawCompleteTrailingUsage {

@@ -351,6 +351,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid or failed Chat Completions stream frame", SourceProtocol: "chat"}
 			return true
 		}
+		if terminal.pendingMalformed {
+			return false // A later valid event can resolve a non-JSON keepalive.
+		}
 		if payload == "[DONE]" {
 			st.SawDone = true
 			return true
