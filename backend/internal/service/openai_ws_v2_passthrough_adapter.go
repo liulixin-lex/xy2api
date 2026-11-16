@@ -308,8 +308,9 @@ type openAIWSPassthroughFirstOutputDeadlineState struct {
 }
 
 type openAIWSPassthroughTurnLifecycle struct {
-	mu       sync.Mutex
-	inFlight bool
+	mu                sync.Mutex
+	inFlight          bool
+	terminalWriteDone atomic.Pointer[chan struct{}]
 }
 
 func newOpenAIWSPassthroughTurnLifecycle(inFlight bool) *openAIWSPassthroughTurnLifecycle {
@@ -344,6 +345,8 @@ func (l *openAIWSPassthroughTurnLifecycle) cancelResponseCreate() {
 func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() {
 	if l != nil {
 		l.mu.Lock()
+		done := make(chan struct{})
+		l.terminalWriteDone.Store(&done)
 	}
 }
 
@@ -357,7 +360,18 @@ func (l *openAIWSPassthroughTurnLifecycle) finishTerminalWrite(succeeded bool, o
 		}
 		l.inFlight = false
 	}
+	close(*l.terminalWriteDone.Load())
+	l.terminalWriteDone.Store(nil)
 	l.mu.Unlock()
+}
+
+// A close may arrive after the client receives the terminal but before its
+// turn callback settles the attempt and claims usage. Let that write and its
+// callback finish before connection cleanup can cancel the attempt.
+func (l *openAIWSPassthroughTurnLifecycle) waitTerminalWrite() {
+	if done := l.terminalWriteDone.Load(); done != nil {
+		<-*done
+	}
 }
 
 type openAIWSPassthroughFirstOutputFrameConn struct {
@@ -1373,6 +1387,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
+				turnLifecycle.waitTerminalWrite()
 				var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 				if errors.As(exit.Err, &timeoutErr) {
 					_ = recordFirstOutputTimeout(timeoutErr)
