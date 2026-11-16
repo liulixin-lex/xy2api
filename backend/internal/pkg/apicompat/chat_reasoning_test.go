@@ -24,7 +24,7 @@ func TestChatReasoningUnionConversion(t *testing.T) {
 		{"array", `[]`, "", "", ""},
 		{"number", `42`, "", "", ""},
 		{"boolean", `true`, "high", "high", "auto"},
-		{"unknown string", `"future"`, "", "future", "auto"},
+		{"unknown string", `"future"`, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, decoded := range []bool{false, true} {
