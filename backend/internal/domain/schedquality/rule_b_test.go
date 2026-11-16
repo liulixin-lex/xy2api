@@ -143,8 +143,15 @@ func TestRuleBVectors(t *testing.T) {
 			}
 			if own.N > 0 && own.N < 20 && got.RelativeThreshold != nil {
 				unpaddedB := got.B - (20 - own.N)
-				if 1-ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance) != got.AbsoluteProbability &&
-					1-ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold) != *got.RelativeProbability {
+				absoluteCDF, err := ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance)
+				if err != nil {
+					t.Fatal(err)
+				}
+				relativeCDF, err := ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if 1-absoluteCDF != got.AbsoluteProbability && 1-relativeCDF != *got.RelativeProbability {
 					coverage["padding_changes_both_probabilities"] = true
 				}
 			}
@@ -479,11 +486,113 @@ func TestRuleBPriorsPosteriorsAndPurity(t *testing.T) {
 func TestRuleBBetaBoundaries(t *testing.T) {
 	for _, x := range []float64{-1, 0, .001, .2, .5, .8, .999, 1, 2} {
 		want := math.Min(1, math.Max(0, x)) // Beta(1,1) is uniform.
-		if got := ruleBBetaCDF(1, 1, x); math.Abs(got-want) > 1e-14 {
-			t.Fatalf("CDF(%g) = %.17g", x, got)
+		if got, err := ruleBBetaCDF(1, 1, x); err != nil || math.Abs(got-want) > 1e-14 {
+			t.Fatalf("CDF(%g) = %.17g, err = %v", x, got, err)
 		}
 	}
-	if got := ruleBBetaQuantile(1, 1, .5); got != .5-math.Exp2(-25) {
-		t.Fatalf("24 bisections with equality moving upper bound: %.17g", got)
+	if got, err := ruleBBetaQuantile(1, 1, .5); err != nil || got != .5-math.Exp2(-25) {
+		t.Fatalf("24 bisections with equality moving upper bound: %.17g, err = %v", got, err)
+	}
+}
+
+func TestRuleBBetaLargeSymmetricCounts(t *testing.T) {
+	for _, a := range []float64{1e3, 1e4, 1e5, 1e6} {
+		t.Run(fmt.Sprintf("%g", a), func(t *testing.T) {
+			got, err := ruleBBetaCDF(a, a, .5)
+			if err != nil || math.IsNaN(got) || math.Abs(got-.5) > 1e-8 {
+				t.Fatalf("CDF(%g, %g, 0.5) = %.17g, err = %v", a, a, got, err)
+			}
+		})
+	}
+}
+
+func TestRuleBLargeCountsDoNotFalselyFail(t *testing.T) {
+	in := ruleBTestInput(400000, 42, false)
+	for i := range in.Samples {
+		in.Samples[i].GroupID = 2
+		if i < 200000 {
+			in.Samples[i].TTFOMs = 11000
+		}
+	}
+	// The target-group prior is 1/2, while peers across both groups have
+	// only one slow sample out of 42, making the relative gate decisive.
+	in.Peers[0].Samples[0].TTFOMs = 11000
+	for i := 2; i < len(in.Peers[0].Samples); i++ {
+		in.Peers[0].Samples[i].GroupID = 2
+	}
+	in.GroupSamples = in.Peers[0].Samples[:2]
+	p := RuleBParams{Confidence: .5000001, Tolerance: math.Nextafter(.5, 0), PeerMargin: 0}
+	got := evaluateRuleBTest(t, in, p)
+	if got.Counts != (RuleBCounts{N: 400000, K: 200000, S: 3, D: 2}) ||
+		got.Prior != .5 || got.A != 200002.5 || got.B != 200002.5 {
+		t.Fatalf("unexpected reproduction evidence: %+v", got)
+	}
+	if got.State != RuleBUnknown || got.Absolute || !got.Relative ||
+		!slices.Contains(got.UnknownReasons, RuleBAbsoluteUnconfirmed) {
+		t.Fatalf("large symmetric posterior must remain unknown: %+v", got)
+	}
+	t.Logf("state=%d p_abs=%.17g p_rel=%.17g", got.State, got.AbsoluteProbability, *got.RelativeProbability)
+}
+
+func TestRuleBBetaNonConvergence(t *testing.T) {
+	previous := ruleBBetaMaxIterations
+	ruleBBetaMaxIterations = 1
+	t.Cleanup(func() { ruleBBetaMaxIterations = previous })
+	for _, tc := range []struct {
+		name string
+		call func() (float64, error)
+	}{
+		{"fraction", func() (float64, error) { return ruleBBetaFraction(1000, 1000, .5) }},
+		{"cdf-lower", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .49) }},
+		{"cdf-upper", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .5) }},
+		{"quantile", func() (float64, error) { return ruleBBetaQuantile(1000, 1000, .8) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.call(); err == nil {
+				t.Fatal("unconverged fraction must return an error")
+			}
+		})
+	}
+	// A tiny tolerance lets the absolute CDF converge in one iteration so
+	// failures deeper in the evaluation cannot be masked by that first call.
+	peerParams := DefaultRuleBParams()
+	peerParams.Tolerance = 1e-12
+	relativeInput := ruleBTestInput(20, 20, false)
+	for i := range relativeInput.Samples {
+		relativeInput.Samples[i].GroupID = 2
+		if i < 10 {
+			relativeInput.Samples[i].TTFOMs = 11000
+		}
+	}
+	for i := range relativeInput.Peers[0].Samples {
+		relativeInput.Peers[0].Samples[i].GroupID = 2
+	}
+	relativeInput.GroupSamples = ruleBTestInput(0, 5, false).Peers[0].Samples
+	for i := range relativeInput.GroupSamples {
+		relativeInput.GroupSamples[i].AccountID = 3
+	}
+	relativeInput.GroupSamples[0].TTFOMs = 11000
+	// Beta(1,24)'s .99 quantile uses only the terminating upper CDF branch.
+	// The own posterior's CDF at that quantile still needs more than one step.
+	for _, tc := range []struct {
+		name   string
+		input  RuleBInput
+		params RuleBParams
+	}{
+		{"absolute CDF", ruleBTestInput(20, 20, false), DefaultRuleBParams()},
+		{"peer quantile", ruleBTestInput(20, 20, true), peerParams},
+		{"relative CDF", relativeInput, RuleBParams{Confidence: .99, Tolerance: 1e-12}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ruleBBetaMaxIterations = previous
+			if _, err := EvaluateRuleB(tc.input, tc.params); err != nil {
+				t.Fatalf("normal iteration limit: %v", err)
+			}
+			ruleBBetaMaxIterations = 1
+			got, err := EvaluateRuleB(tc.input, tc.params)
+			if err == nil || !strings.Contains(err.Error(), tc.name) || got.State != RuleBUnknown {
+				t.Fatalf("unconverged evaluation: state=%d err=%v", got.State, err)
+			}
+		})
 	}
 }

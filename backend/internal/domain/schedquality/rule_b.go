@@ -235,7 +235,10 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 	r.PeerPrior = ruleBPrior(g.K, g.N-g.X)
 	r.A = own.K + r.Prior*RuleBPriorStrength
 	r.B = math.Max(own.N, 20) - own.K + (1-r.Prior)*RuleBPriorStrength
-	absoluteCDF := ruleBBetaCDF(r.A, r.B, p.Tolerance)
+	absoluteCDF, err := ruleBBetaCDF(r.A, r.B, p.Tolerance)
+	if err != nil {
+		return r, fmt.Errorf("rule B absolute CDF: %w", err)
+	}
 	r.AbsoluteProbability = 1 - absoluteCDF
 	// Compare the CDF itself, not the rounded/reconstructed tail probability.
 	r.Absolute = absoluteCDF <= 1-p.Confidence
@@ -269,9 +272,15 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 		peers := r.PeerCounts
 		a := peers.K + peers.X + r.PeerPrior*RuleBPriorStrength
 		b := math.Max(0, peers.N-peers.K-peers.X) + (1-r.PeerPrior)*RuleBPriorStrength
-		u := ruleBBetaQuantile(a, b, p.Confidence)
+		u, err := ruleBBetaQuantile(a, b, p.Confidence)
+		if err != nil {
+			return r, fmt.Errorf("rule B peer quantile: %w", err)
+		}
 		z := math.Min(.999999, u+p.PeerMargin)
-		cdf := ruleBBetaCDF(r.A, r.B, z)
+		cdf, err := ruleBBetaCDF(r.A, r.B, z)
+		if err != nil {
+			return r, fmt.Errorf("rule B relative CDF: %w", err)
+		}
 		probability := 1 - cdf
 		r.PeerA, r.PeerB, r.U = &a, &b, &u
 		r.RelativeThreshold, r.RelativeProbability = &z, &probability
