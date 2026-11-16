@@ -516,7 +516,9 @@ retryMessagesResponsesWire:
 	}
 	defer func(a *schedAttemptCapture) {
 		// Completion belongs to the consumer, before transport cleanup.
-		a.finish(forwardResult, forwardErr)
+		if a == schedCapture {
+			a.finish(forwardResult, forwardErr)
+		}
 		_ = resp.Body.Close()
 	}(schedCapture)
 
