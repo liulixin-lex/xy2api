@@ -14,16 +14,18 @@ const (
 )
 
 type AccountSummary struct {
-	From, To                                       time.Time
-	FirstEventP50Ms, FirstOutputP50Ms, GapP50Ms    *int     // 流式且两种时间都有的样本；Gap 是逐条差值的中位数
-	ErrorN, ErrorBad, CacheTurns, CacheAllRequests int      // 报错按请求单位、口径同报错线（不填补）
-	CacheRatio, CacheAllRatio                      *float64 // 判定口径（续接轮）、全部成功请求口径
+	From, To                                       time.Time `json:",omitzero"`
+	FirstEventP50Ms, FirstOutputP50Ms, GapP50Ms    *int      // 流式且两种时间都有的样本；Gap 是逐条差值的中位数
+	ErrorN, ErrorBad, CacheTurns, CacheAllRequests int       // 报错按请求单位、口径同报错线（不填补）
+	CacheRatio, CacheAllRatio                      *float64  // 判定口径（续接轮）、全部成功请求口径
 }
 
 // SummarizeAccount is display-only: all models and requests in the past hour,
 // without the assessment's 100-slot cap or padding. Unknowns are not in ErrorN.
 // CacheAllRatio deduplicates final request results; CacheRatio uses successful
 // continuation attempts, over this hour rather than the line's 30-minute window.
+// Request totals apply reset to the first request start, not to a retry's start;
+// attempt-based continuation and latency totals retain their attempt cutoffs.
 // The three latency medians use the same paired streaming samples; GapP50Ms is
 // the median of per-attempt differences, not a subtraction of the two medians.
 func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.Time) AccountSummary {
@@ -53,8 +55,9 @@ func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.
 			}
 		}
 	}
-	for _, s := range finalRequests(account, nil, now) {
-		if s.FinishedAt.IsZero() || s.FinishedAt.Before(out.From) || !s.StartedAt.After(reset) {
+	for _, unit := range finalRequests(account, nil, now) {
+		s := unit.final
+		if s.FinishedAt.IsZero() || s.FinishedAt.Before(out.From) || !unit.startedAt.After(reset) {
 			continue
 		}
 		if s.Outcome == OutcomeOK {

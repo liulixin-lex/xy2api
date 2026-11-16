@@ -118,7 +118,7 @@ func TestAssessErrorSlotsAndExclusions(t *testing.T) {
 	}
 	// Excluded classes do not consume slots.
 	rows = machineSamples(150)
-	excluded := []ErrorClass{ClassNone, ClassRequest, ClassMigration400, ClassCapability, ClassFirstOutputTimeout, ClassGateway, ClassClientCancel, ClassRepairStep}
+	excluded := []ErrorClass{ClassRequest, ClassMigration400, ClassCapability, ClassFirstOutputTimeout, ClassGateway, ClassClientCancel, ClassRepairStep}
 	for i := 50; i < len(rows); i++ {
 		rows[i].Outcome = OutcomeOther
 		rows[i].Class = excluded[i%len(excluded)]

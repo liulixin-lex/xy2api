@@ -24,23 +24,27 @@ type ErrorAssessment struct {
 	AttemptIDs []string `json:"-"`
 }
 
-// 请求单位按 RequestID（为空时用 AttemptID）分组，StartedAt 最晚的一次尝试是最终结果：
-// Outcome==OK 为成功；Class.Counted() 为失败；ClassUnknown 或在途为未知；其余类别不占名额。
-// 排序时刻：完成的用 FinishedAt，在途的用 StartedAt。只取 [now-60m, now] 内、StartedAt>cut 的单位中最近 100 个，不从更早的补位。
+// 请求单位按 RequestID（为空时用 AttemptID）分组，保留最早开始时间与最终尝试。
+// 最终尝试按 (StartedAt, FinishedAt, AttemptID) 排序；同起点的不同尝试，在途排在完成之后。
+// Outcome==OK 为成功；Class.Counted() 为失败；ClassUnknown、失败却 ClassNone 或在途为未知；其余类别不占名额。
+// 排序时刻：完成的用最终 FinishedAt，在途的用请求最早开始时间；cut 也比较请求最早开始时间。
+// 只取 [now-60m, now] 内、请求起点>cut 的单位中最近 100 个，不从更早的补位。
 // Fail：LowerFail>Limit。Pass：k≥50 且 LowerPass≤Limit。其余 Unknown。
 func AssessError(samples, running []AttemptSample, limit float64, cut, now time.Time) ErrorAssessment {
 	out := ErrorAssessment{Limit: max(limit, ErrorRateFloor)}
 	rows := finalRequests(samples, running, now)
 	selected := rows[:0]
-	for _, s := range rows {
-		if !s.StartedAt.After(cut) || requestTime(s).Before(now.Add(-ErrorWindow)) {
+	for _, unit := range rows {
+		if !unit.startedAt.After(cut) || unit.at().Before(now.Add(-ErrorWindow)) {
 			continue
 		}
-		if s.FinishedAt.IsZero() || s.Outcome == OutcomeOK || s.Class.Counted() || s.Class == ClassUnknown {
-			selected = append(selected, s)
+		s := unit.final
+		if s.FinishedAt.IsZero() || s.Outcome == OutcomeOK || s.Class.Counted() || s.Class == ClassUnknown || s.Class == ClassNone {
+			selected = append(selected, unit)
 		}
 	}
-	for _, s := range selected[:min(ErrorSlots, len(selected))] {
+	for _, unit := range selected[:min(ErrorSlots, len(selected))] {
+		s := unit.final
 		switch {
 		case s.FinishedAt.IsZero():
 			out.Unknown++
@@ -68,20 +72,43 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 	return out
 }
 
-// finalRequests groups before eligibility filtering, so an excluded final retry
-// cannot expose an older failure. Account/model and fallback keys are distinct.
-func finalRequests(samples, running []AttemptSample, now time.Time) []AttemptSample {
+type requestUnit struct {
+	startedAt time.Time
+	final     AttemptSample
+}
+
+func (u requestUnit) at() time.Time {
+	if u.final.FinishedAt.IsZero() {
+		return u.startedAt
+	}
+	return u.final.FinishedAt
+}
+
+// finalRequests groups before cut/window/class filtering. A retry never changes
+// the request's first start or revives an older result excluded by its successor.
+// Reconcile Begin/Finish per attempt first: otherwise an old Begin arriving after
+// another attempt's Finish could incorrectly become the final unfinished retry.
+func finalRequests(samples, running []AttemptSample, now time.Time) []requestUnit {
 	type key struct {
 		account   int64
 		model, id string
 		fallback  bool
 	}
-	latest := make(map[key]AttemptSample)
+	type attemptKey struct {
+		request key
+		id      string
+	}
+	attempts := make(map[attemptKey]AttemptSample)
 	for _, rows := range [][]AttemptSample{samples, running} {
 		for _, s := range rows {
-			if s.StartedAt.After(now) || s.FinishedAt.After(now) ||
+			if s.StartedAt.After(now) ||
 				(!s.FinishedAt.IsZero() && s.FinishedAt.Before(s.StartedAt)) {
 				continue
+			}
+			// Replaying before completion must not expose the eventual outcome or
+			// resurrect an earlier retry's failure. s is a copy of the input row.
+			if s.FinishedAt.After(now) {
+				s.FinishedAt = time.Time{}
 			}
 			id := s.RequestID
 			fallback := id == ""
@@ -89,21 +116,57 @@ func finalRequests(samples, running []AttemptSample, now time.Time) []AttemptSam
 				id = s.AttemptID
 			}
 			k := key{s.AccountID, s.Model, id, fallback}
-			old, exists := latest[k]
-			if !exists || s.StartedAt.After(old.StartedAt) ||
-				(s.StartedAt.Equal(old.StartedAt) && (s.AttemptID > old.AttemptID ||
-					(s.AttemptID == old.AttemptID && s.FinishedAt.After(old.FinishedAt)))) {
-				latest[k] = s
+			ak := attemptKey{k, s.AttemptID}
+			old, exists := attempts[ak]
+			if !exists || (old.FinishedAt.IsZero() && !s.FinishedAt.IsZero()) ||
+				(old.FinishedAt.IsZero() == s.FinishedAt.IsZero() && laterAttempt(s, old)) {
+				attempts[ak] = s
 			}
 		}
 	}
-	out := make([]AttemptSample, 0, len(latest))
-	for _, s := range latest {
-		out = append(out, s)
+	units := make(map[key]requestUnit)
+	for k, s := range attempts {
+		u, exists := units[k.request]
+		if !exists {
+			u = requestUnit{startedAt: s.StartedAt, final: s}
+		} else {
+			if s.StartedAt.Before(u.startedAt) {
+				u.startedAt = s.StartedAt
+			}
+			if laterAttempt(s, u.final) {
+				u.final = s
+			}
+		}
+		units[k.request] = u
 	}
-	sort.Slice(out, func(i, j int) bool { return newerRequest(out[i], out[j]) })
+	out := make([]requestUnit, 0, len(units))
+	for _, u := range units {
+		out = append(out, u)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].at().Equal(out[j].at()) {
+			return out[i].at().After(out[j].at())
+		}
+		return newerRequest(out[i].final, out[j].final)
+	})
 	return out
 }
+
+// Distinct attempts are ordered by start, finish (unfinished is last), then ID.
+// Same-attempt Begin/Finish precedence is resolved before this comparison.
+func laterAttempt(a, b AttemptSample) bool {
+	if !a.StartedAt.Equal(b.StartedAt) {
+		return a.StartedAt.After(b.StartedAt)
+	}
+	if a.FinishedAt.IsZero() != b.FinishedAt.IsZero() {
+		return a.FinishedAt.IsZero()
+	}
+	if !a.FinishedAt.Equal(b.FinishedAt) {
+		return a.FinishedAt.After(b.FinishedAt)
+	}
+	return a.AttemptID > b.AttemptID
+}
+
 func requestTime(s AttemptSample) time.Time {
 	if s.FinishedAt.IsZero() {
 		return s.StartedAt

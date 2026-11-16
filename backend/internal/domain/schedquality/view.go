@@ -6,7 +6,7 @@ type LineView struct {
 	Identity          Identity
 	Trial             bool
 	Level             int
-	Until, TrialUntil time.Time
+	Until, TrialUntil time.Time `json:",omitzero"`
 }
 type StateView struct {
 	TTFO, Error, Cache         LineView

@@ -103,3 +103,24 @@ func TestStepAuditF3QuietClearRequiresLastRear(t *testing.T) {
 		}
 	}
 }
+
+func TestStepFirstAdmissionClearsAfterGoodEvidence(t *testing.T) {
+	rear, _ := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
+	releasedAt := rear.Until
+	s, _ := machineStep(rear, EventReview, VerdictPass, releasedAt)
+	for tick := 1; tick <= 6; tick++ {
+		next, action := machineStep(s, EventRegular, VerdictPass, releasedAt.Add(time.Duration(tick)*RegularInterval))
+		if tick < 6 && (next.Level != 0 || next.Admissions != 1 || action != "") {
+			t.Fatalf("first-admission history cleared before 30 minutes: %+v / %s", next, action)
+		}
+		if tick == 6 && (next.Level != 0 || next.Admissions != 0 || action != ActionClear) {
+			t.Fatalf("level-zero admission did not clear with 30 minutes of good evidence: %+v / %s", next, action)
+		}
+		s = next
+	}
+	at := s.EvaluatedAt.Add(RegularInterval)
+	next, action := machineStep(s, EventRegular, VerdictFail, at)
+	if action != ActionEnter || next.Level != 0 || next.Admissions != 1 || next.Until.Sub(at) != 20*time.Minute {
+		t.Fatalf("cleared first admission escalated on re-entry: %+v / %s", next, action)
+	}
+}
