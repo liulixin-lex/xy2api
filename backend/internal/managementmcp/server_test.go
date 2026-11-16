@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -70,6 +71,72 @@ func TestMCPAdminDispatchPreservesServiceActor(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.False(t, rpcObject(t, result["result"])["isError"] == true)
 	require.Contains(t, fmt.Sprint(result), `"http_status":200`)
+}
+
+func TestMCPOperatorCatalogAndDispatchUseCurrentPermissions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inner := gin.New()
+	calls := 0
+	inner.GET("/api/v1/admin/accounts", DispatchAuth(true), middleware.AdminPermission(), func(c *gin.Context) {
+		calls++
+		scope := operatoraccess.ScopeFrom(c.Request.Context())
+		require.NotNil(t, scope)
+		require.Equal(t, operatoraccess.Actor{Kind: operatoraccess.ActorOperator, UserID: 7}, operatoraccess.ActorFrom(c.Request.Context()))
+		got, ok := c.Get(operatoraccess.GinKey)
+		require.True(t, ok)
+		require.Same(t, scope, got)
+		c.JSON(http.StatusOK, gin.H{"data": []any{}})
+	})
+	endpoint, auth := newTestEndpoint(inner)
+	principal := &service.MCPPrincipal{UserID: 7, Role: service.RoleOperator, Scope: service.MCPScopeAdmin, GrantID: "operator-grant",
+		OperatorScope: &operatoraccess.Scope{UserID: 7, Perms: operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView}}}}
+	auth.principals["operator"] = principal
+	_, listed := rpc(t, endpoint, "operator", "tools/list", map[string]any{})
+	names := toolNames(t, listed)
+	require.Contains(t, names, "admin_list_accounts")
+	require.Contains(t, names, "user_get_profile")
+	require.NotContains(t, names, "admin_update_account")
+	require.NotContains(t, names, "admin_list_users")
+	_, result := rpc(t, endpoint, "operator", "tools/call", map[string]any{"name": "admin_list_accounts", "arguments": map[string]any{}})
+	require.Contains(t, fmt.Sprint(result), `"http_status":200`)
+	require.Equal(t, 1, calls)
+	// The same OAuth grant must immediately lose the tool when permissions change.
+	principal.OperatorScope = &operatoraccess.Scope{UserID: 7, Perms: operatoraccess.Permissions{}}
+	_, listed = rpc(t, endpoint, "operator", "tools/list", map[string]any{})
+	require.NotContains(t, toolNames(t, listed), "admin_list_accounts")
+	_, result = rpc(t, endpoint, "operator", "tools/call", map[string]any{"name": "admin_list_accounts", "arguments": map[string]any{}})
+	requireMCPRejected(t, result)
+	require.Equal(t, 1, calls)
+	// A missing scope is never treated as root, even on an admin grant.
+	principal.OperatorScope = nil
+	_, listed = rpc(t, endpoint, "operator", "tools/list", map[string]any{})
+	require.NotContains(t, toolNames(t, listed), "admin_list_accounts")
+}
+
+type mcpOperatorGuard struct{ targetCalls int }
+
+func (g *mcpOperatorGuard) CheckTarget(context.Context, *operatoraccess.Scope, operatoraccess.TargetRule, operatoraccess.Request) error {
+	g.targetCalls++
+	return infraerrors.Forbidden("ADMIN_TARGET_FORBIDDEN", "Target is not allowed")
+}
+
+func (g *mcpOperatorGuard) CheckFields(context.Context, *operatoraccess.Scope, operatoraccess.FieldRule, operatoraccess.Request) ([]byte, error) {
+	return nil, nil
+}
+
+func TestMCPOperatorRetainsTargetGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inner := gin.New()
+	never := func(c *gin.Context) { t.Error("operator bypassed the guard"); c.Status(200) }
+	inner.GET("/api/v1/admin/users/:id", DispatchAuth(true), middleware.AdminPermission(), never)
+	endpoint, auth := newTestEndpoint(inner)
+	guard := &mcpOperatorGuard{}
+	auth.principals["operator"] = &service.MCPPrincipal{UserID: 7, Role: service.RoleOperator, Scope: service.MCPScopeAdmin,
+		OperatorScope: &operatoraccess.Scope{UserID: 7, Guard: guard, Perms: operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleUsers: operatoraccess.LevelView}}}}
+	_, target := rpc(t, endpoint, "operator", "tools/call", map[string]any{"name": "admin_get_user", "arguments": map[string]any{"id": 3}})
+	require.Contains(t, fmt.Sprint(target), `"http_status":403`)
+	require.Contains(t, fmt.Sprint(target), "ADMIN_TARGET_FORBIDDEN")
+	require.Equal(t, 1, guard.targetCalls)
 }
 
 func rpc(t *testing.T, handler http.Handler, token, method string, params any) (int, map[string]any) {

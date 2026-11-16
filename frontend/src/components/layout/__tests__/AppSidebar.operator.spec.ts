@@ -80,6 +80,7 @@ function setup(
   const simple = options.simple ?? false
   getActivePinia()!.state.value.auth = { user: { id: 5, role }, runMode: simple ? 'simple' : 'standard' }
   stores.auth = reactive({
+    user: { id: 5, role },
     isAdmin: role === 'admin',
     canAccessAdmin: true,
     isSimpleMode: simple,
@@ -156,6 +157,30 @@ describe('AppSidebar for operators', () => {
     getMeAccessMock.mockReset()
     commandEntries.getter = null
     routeState.path = '/admin/channels/pricing'
+  })
+
+  it('reacts to MCP role access and menu switches in the sidebar and command palette', async () => {
+    const wrapper = setup('operator')
+    await flushPromises()
+    const settings = { mcp_enabled: true, mcp_operator_enabled: false, mcp_operator_menu_visible: true }
+    stores.app!.cachedPublicSettings = settings
+    await flushPromises()
+    expect(wrapper.find('a[href="/settings/mcp"]').exists()).toBe(false)
+    stores.app!.cachedPublicSettings = { ...settings, mcp_operator_enabled: true }
+    await flushPromises()
+    expect(wrapper.find('a[href="/settings/mcp"]').exists()).toBe(true)
+    expect(commandEntries.getter?.().some(item => item.path === '/settings/mcp')).toBe(true)
+    stores.app!.cachedPublicSettings = { ...settings, mcp_operator_enabled: true, mcp_operator_menu_visible: false }
+    await flushPromises()
+    expect(wrapper.find('a[href="/settings/mcp"]').exists()).toBe(false)
+    expect(commandEntries.getter?.().some(item => item.path === '/settings/mcp')).toBe(false)
+  })
+
+  it('keeps an enabled MCP menu visible in simple mode', async () => {
+    const wrapper = setup('operator', { simple: true })
+    stores.app!.cachedPublicSettings = { mcp_enabled: true, mcp_operator_enabled: true, mcp_operator_menu_visible: true }
+    await flushPromises()
+    expect(adminHrefs(wrapper)).toContain('/settings/mcp')
   })
 
   it('shows operators only permitted entries and drops empty groups', async () => {

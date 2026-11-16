@@ -71,3 +71,43 @@ func TestManagementMCPSettingsFailClosed(t *testing.T) {
 		require.False(t, public.MCPEnabled, raw)
 	}
 }
+
+func TestManagementMCPRoleAccessAndPublicMenus(t *testing.T) {
+	ctx := context.Background()
+	repo := &panelRateLimitSettingRepo{}
+	svc := NewSettingService(repo, &config.Config{ManagementMCP: config.ManagementMCPConfig{PublicURL: "https://api.example/api/v1/mcp"}})
+	// Deployment defaults and existing saved settings grant access only to root.
+	for _, raw := range []string{"", `{"enabled":true,"public_url":"https://api.example/api/v1/mcp"}`} {
+		if raw != "" {
+			repo.values = map[string]string{SettingKeyManagementMCP: raw}
+		}
+		settings, err := svc.GetManagementMCPSettings(ctx)
+		require.NoError(t, err)
+		require.True(t, settings.AllowsRole(RoleAdmin))
+		require.False(t, settings.AllowsRole(RoleOperator))
+		require.False(t, settings.AllowsRole(RoleUser))
+		require.False(t, settings.AllowsRole("unknown"))
+	}
+	for _, allowOperators := range []bool{false, true} {
+		for _, allowUsers := range []bool{false, true} {
+			for _, showMenu := range []bool{false, true} {
+				settings, err := svc.SetManagementMCPSettings(ctx, ManagementMCPSettings{Enabled: true, PublicURL: "https://api.example/api/v1/mcp", AllowOperators: allowOperators, AllowUsers: allowUsers, ShowOperatorMenu: showMenu, ShowUserMenu: showMenu})
+				require.NoError(t, err)
+				reader := NewSettingService(repo, &config.Config{})
+				stored, err := reader.GetManagementMCPSettings(ctx)
+				require.NoError(t, err)
+				require.Equal(t, settings, stored)
+				public, err := reader.GetPublicSettings(ctx)
+				require.NoError(t, err)
+				require.Equal(t, allowOperators, public.MCPOperatorEnabled)
+				require.Equal(t, allowUsers, public.MCPUserEnabled)
+				require.Equal(t, allowOperators && showMenu, public.MCPOperatorMenuVisible)
+				require.Equal(t, allowUsers && showMenu, public.MCPUserMenuVisible)
+				injected, err := reader.GetPublicSettingsForInjection(ctx)
+				require.NoError(t, err)
+				require.Equal(t, public.MCPOperatorMenuVisible, injected.(*PublicSettingsInjectionPayload).MCPOperatorMenuVisible)
+				require.Equal(t, public.MCPUserMenuVisible, injected.(*PublicSettingsInjectionPayload).MCPUserMenuVisible)
+			}
+		}
+	}
+}

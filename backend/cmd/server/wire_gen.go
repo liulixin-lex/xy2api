@@ -228,7 +228,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	promoCodeRepository := repository.NewPromoCodeRepository(client)
 	promoService := service.NewPromoService(promoCodeRepository, userRepository, billingCacheService, client, apiKeyAuthCacheInvalidator)
 	mcpoAuthRepository := repository.NewMCPOAuthRepository(client, db)
-	mcpoAuthService := service.NewMCPOAuthService(mcpoAuthRepository, userRepository)
+	mcpoAuthService := service.NewMCPOAuthService(mcpoAuthRepository, userRepository, settingService, operatorAccessService)
 	authService := service.ProvideAuthService(client, userRepository, redeemCodeRepository, refreshTokenCache, configConfig, settingService, emailService, turnstileService, tencentCaptchaService, aliyunCaptchaService, emailQueueService, promoService, subscriptionService, affiliateService, serviceUserPlatformQuotaRepository, mcpoAuthService)
 	usageExportHandler := handler.NewUsageExportHandler(engine, usageHandler, adminUsageHandler, authService, userService, refreshTokenCache, settingService, operatorAccessService)
 	totpCache := repository.NewTotpCache(redisClient)

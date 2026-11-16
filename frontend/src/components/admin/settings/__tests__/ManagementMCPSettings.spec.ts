@@ -14,6 +14,8 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ fetchPublicSettings: mock
 vi.mock('@/composables/useStepUp', () => ({ useStepUp: () => ({ run: mocks.stepUp }), isStepUpCancelled: () => false }))
 vi.mock('@/components/auth/TotpStepUpDialog.vue', () => ({ default: { template: '<div />' } }))
 
+const roleDefaults = { allow_operators: false, allow_users: false, show_operator_menu: false, show_user_menu: false }
+
 const render = () => mount(ManagementMCPSettings, {
   global: {
     plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh: { managementMcp: zh } } })],
@@ -23,7 +25,7 @@ const render = () => mount(ManagementMCPSettings, {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.get.mockResolvedValue({ enabled: false, public_url: '' })
+  mocks.get.mockResolvedValue({ ...roleDefaults, enabled: false, public_url: '' })
   mocks.update.mockImplementation(async input => input)
 })
 
@@ -54,19 +56,31 @@ describe('management MCP admin settings', () => {
     await wrapper.get('[data-test="save"]').trigger('click')
     await flushPromises()
     expect(mocks.stepUp).toHaveBeenCalledOnce()
-    expect(mocks.update).toHaveBeenCalledWith({ enabled: true, public_url: 'https://api.example/api/v1/mcp' })
+    expect(mocks.update).toHaveBeenCalledWith({ ...roleDefaults, enabled: true, public_url: 'https://api.example/api/v1/mcp' })
     expect(mocks.refresh).toHaveBeenCalledWith(true)
     expect(wrapper.find('a').exists()).toBe(true)
   })
 
+  it('saves role access separately from menu visibility', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-test="allow-operators"]').setValue(true)
+    await wrapper.get('[data-test="operator-menu"]').setValue(false)
+    await wrapper.get('[data-test="allow-users"]').setValue(false)
+    await wrapper.get('[data-test="user-menu"]').setValue(true)
+    await wrapper.get('[data-test="save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenCalledWith({ enabled: false, public_url: '', allow_operators: true, allow_users: false, show_operator_menu: false, show_user_menu: true })
+  })
+
   it('retains the configured URL when disabling', async () => {
-    mocks.get.mockResolvedValue({ enabled: true, public_url: 'https://api.example/api/v1/mcp' })
+    mocks.get.mockResolvedValue({ ...roleDefaults, enabled: true, public_url: 'https://api.example/api/v1/mcp' })
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-test="enabled"]').setValue(false)
     await wrapper.get('[data-test="save"]').trigger('click')
     await flushPromises()
-    expect(mocks.update).toHaveBeenCalledWith({ enabled: false, public_url: 'https://api.example/api/v1/mcp' })
+    expect(mocks.update).toHaveBeenCalledWith({ ...roleDefaults, enabled: false, public_url: 'https://api.example/api/v1/mcp' })
     // Disabling calls must still allow the administrator to revoke old grants.
     expect(wrapper.find('a').exists()).toBe(true)
   })

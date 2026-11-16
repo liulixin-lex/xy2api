@@ -1,4 +1,11 @@
 export default {
+  roleAccessTitle: 'Role access and menus',
+  roleAccessHint: 'Root administrators retain access and configuration rights. Other roles are disabled by default. Disabling access immediately blocks existing tokens and refreshes. Menus appear only when both access and menu visibility are enabled.',
+  operators: 'Administrators',
+  users: 'Users',
+  allowAccess: 'Allow MCP access',
+  showMenu: 'Show MCP connection menu',
+  operatorAccessHint: 'Can authorize personal or management access. Management tools remain subject to current module, resource and field permissions.',
   adminTitle: 'Management MCP (OAuth)',
   adminDescription: 'Let AI assistants connect through browser OAuth consent. Saved changes take effect immediately without restarting.',
   adminEnabled: 'Enable management MCP',

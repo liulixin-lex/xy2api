@@ -92,6 +92,10 @@ func setSubject(c *gin.Context, principal *service.MCPPrincipal) {
 	if principal.Scope == service.MCPScopeAdmin && principal.Role == service.RoleAdmin {
 		c.Request = c.Request.WithContext(operatoraccess.WithSuperAdmin(c.Request.Context(), principal.UserID))
 	}
+	if principal.Role == service.RoleOperator && principal.OperatorScope != nil {
+		c.Set(operatoraccess.GinKey, principal.OperatorScope)
+		c.Request = c.Request.WithContext(operatoraccess.WithScope(c.Request.Context(), principal.OperatorScope))
+	}
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: principal.UserID, Concurrency: principal.Concurrency})
 	c.Set(string(middleware.ContextKeyUserRole), principal.Role)
 	c.Set(middleware.ContextKeyAuthEmail, principal.Email)
@@ -101,10 +105,23 @@ func setSubject(c *gin.Context, principal *service.MCPPrincipal) {
 }
 
 func toolAllowed(p *service.MCPPrincipal, spec ToolSpec) bool {
-	return p != nil && p.UserID > 0 &&
-		(p.Scope == service.MCPScopeUser || p.Scope == service.MCPScopeAdmin) &&
-		(!spec.Admin || (p.Scope == service.MCPScopeAdmin && p.Role == service.RoleAdmin)) &&
-		(!p.ReadOnly || spec.ReadOnly)
+	if p == nil || p.UserID <= 0 || (p.Scope != service.MCPScopeUser && p.Scope != service.MCPScopeAdmin) || (p.ReadOnly && !spec.ReadOnly) {
+		return false
+	}
+	if !spec.Admin {
+		return true
+	}
+	if p.Scope != service.MCPScopeAdmin {
+		return false
+	}
+	if p.Role == service.RoleAdmin {
+		return true
+	}
+	if p.Role != service.RoleOperator || p.OperatorScope == nil {
+		return false
+	}
+	entry, found := operatoraccess.Lookup(operatoraccess.Key(spec.Method, spec.Path))
+	return operatoraccess.Decide(entry, found, p.OperatorScope.Perms).Reason == ""
 }
 
 func originAllowed(r *http.Request, origins []string) bool {

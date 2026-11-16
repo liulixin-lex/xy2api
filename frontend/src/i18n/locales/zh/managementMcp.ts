@@ -1,4 +1,11 @@
 export default {
+  roleAccessTitle: '角色接入与菜单',
+  roleAccessHint: '根管理员始终保留接入和配置权限。其他角色默认关闭；关闭接入后，已有令牌和刷新立即受限。菜单仅在接入已开放且勾选显示时出现。',
+  operators: '普通管理员',
+  users: '普通用户',
+  allowAccess: '允许 MCP 接入',
+  showMenu: '显示 MCP 接入菜单',
+  operatorAccessHint: '可授权个人或平台管理范围；管理工具仍受当前模块、资源和字段权限限制。',
   adminTitle: '管理 MCP（OAuth）',
   adminDescription: '允许 AI 助手通过浏览器 OAuth 授权接入平台。保存后立即生效，无需重启服务。',
   adminEnabled: '启用管理 MCP',

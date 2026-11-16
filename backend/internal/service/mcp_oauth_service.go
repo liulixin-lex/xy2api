@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 )
 
 const (
@@ -114,14 +115,15 @@ type MCPOAuthGrant struct {
 }
 
 type MCPPrincipal struct {
-	GrantID     string
-	UserID      int64
-	Role        string
-	Scope       string
-	ReadOnly    bool
-	Concurrency int
-	Email       string
-	Resource    string
+	GrantID       string
+	UserID        int64
+	Role          string
+	Scope         string
+	ReadOnly      bool
+	Concurrency   int
+	Email         string
+	Resource      string
+	OperatorScope *operatoraccess.Scope
 }
 
 type MCPOAuthTokenInput struct {
@@ -175,12 +177,22 @@ type MCPOAuthRepository interface {
 }
 
 type MCPOAuthService struct {
-	repo  MCPOAuthRepository
-	users UserRepository
+	repo           MCPOAuthRepository
+	users          UserRepository
+	settings       *SettingService
+	operatorAccess *OperatorAccessService
 }
 
-func NewMCPOAuthService(repo MCPOAuthRepository, users UserRepository) *MCPOAuthService {
-	return &MCPOAuthService{repo: repo, users: users}
+func NewMCPOAuthService(repo MCPOAuthRepository, users UserRepository, settings *SettingService, operatorAccess *OperatorAccessService) *MCPOAuthService {
+	return &MCPOAuthService{repo: repo, users: users, settings: settings, operatorAccess: operatorAccess}
+}
+
+func (s *MCPOAuthService) allowsUser(ctx context.Context, user *User) (bool, error) {
+	settings, err := s.settings.GetManagementMCPSettings(ctx)
+	if err != nil {
+		return false, errors.New("management MCP configuration is unavailable")
+	}
+	return user != nil && settings.AllowsRole(user.Role), nil
 }
 
 func (s *MCPOAuthService) Register(ctx context.Context, input MCPOAuthRegisterInput) (*MCPOAuthClient, error) {
@@ -403,6 +415,13 @@ func (s *MCPOAuthService) validateAuthorization(ctx context.Context, userID int6
 	if err != nil {
 		return nil, nil, err
 	}
+	allowed, err := s.allowsUser(ctx, user)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !allowed {
+		return nil, nil, infraerrors.Forbidden("MCP_ACCESS_DENIED", "MCP access is disabled for your role")
+	}
 	return client, user, nil
 }
 
@@ -440,7 +459,7 @@ func (s *MCPOAuthService) Decide(ctx context.Context, userID int64, input MCPOAu
 	if input.Scope != MCPScopeUser && input.Scope != MCPScopeAdmin {
 		return "", mcpOAuthError("invalid_scope", "Management permission must be user or admin")
 	}
-	if input.Scope == MCPScopeAdmin && !user.IsAdmin() {
+	if input.Scope == MCPScopeAdmin && !user.CanAccessAdmin() {
 		return "", mcpOAuthError("access_denied", "Only administrators can authorize admin access")
 	}
 	id, err := mcpOAuthSecret("")
@@ -603,11 +622,18 @@ func (s *MCPOAuthService) validateGrant(ctx context.Context, grant *MCPOAuthGran
 	if mcpGrantInvalidated(grant, user) {
 		return nil, ErrMCPOAuthInvalidToken
 	}
+	allowed, err := s.allowsUser(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrMCPOAuthInvalidToken
+	}
 	return user, nil
 }
 
 func mcpGrantInvalidated(grant *MCPOAuthGrant, user *User) bool {
-	return user == nil || !user.IsActive() || user.DeletedAt != nil || grant.TokenVersion != resolvedTokenVersion(user) || (grant.Scope == MCPScopeAdmin && !user.IsAdmin())
+	return user == nil || !user.IsActive() || user.DeletedAt != nil || grant.TokenVersion != resolvedTokenVersion(user) || (grant.Scope == MCPScopeAdmin && !user.CanAccessAdmin())
 }
 
 func (s *MCPOAuthService) Authenticate(ctx context.Context, raw string) (*MCPPrincipal, error) {
@@ -636,6 +662,16 @@ func (s *MCPOAuthService) Authenticate(ctx context.Context, raw string) (*MCPPri
 	if err != nil {
 		return nil, err
 	}
+	var scope *operatoraccess.Scope
+	if user.Role == RoleOperator && grant.Scope == MCPScopeAdmin {
+		if s.operatorAccess == nil {
+			return nil, errors.New("operator permissions are unavailable")
+		}
+		scope, err = s.operatorAccess.LoadScope(ctx, user)
+		if err != nil || scope == nil {
+			return nil, errors.New("operator permissions are unavailable")
+		}
+	}
 	if grant.LastUsedAt == nil || !now.Before(grant.LastUsedAt.Add(MCPOAuthTouchInterval)) {
 		if err := s.repo.TouchGrant(ctx, grant.ID, now); err != nil {
 			if errors.Is(err, ErrMCPOAuthNotFound) {
@@ -645,7 +681,7 @@ func (s *MCPOAuthService) Authenticate(ctx context.Context, raw string) (*MCPPri
 		}
 	}
 	return &MCPPrincipal{GrantID: grant.ID, UserID: user.ID, Role: user.Role, Scope: grant.Scope,
-		ReadOnly: grant.ReadOnly, Concurrency: user.Concurrency, Email: user.Email, Resource: grant.Resource}, nil
+		ReadOnly: grant.ReadOnly, Concurrency: user.Concurrency, Email: user.Email, Resource: grant.Resource, OperatorScope: scope}, nil
 }
 
 func (s *MCPOAuthService) ListGrants(ctx context.Context, userID int64) ([]*MCPOAuthGrant, error) {

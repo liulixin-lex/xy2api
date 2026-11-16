@@ -15,8 +15,79 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMCPOAuthRoleDisableGatesCodesTokensAndRefresh(t *testing.T) {
+	for _, role := range []string{RoleAdmin, RoleOperator, RoleUser} {
+		t.Run(role, func(t *testing.T) {
+			f := newMCPOAuthFixture(t)
+			f.u.user.Role = role
+			ctx := context.Background()
+			tokens := f.tokens(t)
+			pending := f.code(t, MCPScopeUser, nil)
+			// Menu switches have no influence on authorization.
+			settings := ManagementMCPSettings{Enabled: true, PublicURL: mcpTestResource, ShowOperatorMenu: true, ShowUserMenu: true}
+			_, err := f.s.settings.SetManagementMCPSettings(ctx, settings)
+			require.NoError(t, err)
+			_, previewErr := f.s.Preview(ctx, 7, f.authorize, mcpTestResource)
+			_, decideErr := f.s.Decide(ctx, 7, MCPOAuthConsentInput{Authorization: f.authorize, Approved: true}, mcpTestResource)
+			_, codeErr := f.s.Token(ctx, pending, mcpTestResource)
+			_, authErr := f.s.Authenticate(ctx, tokens.AccessToken)
+			refresh := MCPOAuthTokenInput{GrantType: "refresh_token", ClientID: f.client.ClientID, RefreshToken: tokens.RefreshToken}
+			_, refreshErr := f.s.Token(ctx, refresh, mcpTestResource)
+			if role == RoleAdmin {
+				require.NoError(t, previewErr)
+				require.NoError(t, decideErr)
+				require.NoError(t, codeErr)
+				require.NoError(t, authErr)
+				require.NoError(t, refreshErr)
+				return
+			}
+			require.ErrorContains(t, previewErr, "MCP access is disabled")
+			require.ErrorContains(t, decideErr, "MCP access is disabled")
+			requireMCPOAuthError(t, codeErr, "invalid_grant")
+			require.ErrorIs(t, authErr, ErrMCPOAuthInvalidToken)
+			requireMCPOAuthError(t, refreshErr, "invalid_grant")
+			// Re-enabling does not consume or enlarge the denied grant.
+			settings.AllowOperators, settings.AllowUsers = true, true
+			_, err = f.s.settings.SetManagementMCPSettings(ctx, settings)
+			require.NoError(t, err)
+			_, err = f.s.Token(ctx, pending, mcpTestResource)
+			require.NoError(t, err)
+			_, err = f.s.Token(ctx, refresh, mcpTestResource)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMCPOAuthOperatorReloadsCurrentPermissions(t *testing.T) {
+	f := newMCPOAuthFixture(t)
+	f.u.user.Role = RoleOperator
+	repo := &operatorPermissionRepoStub{found: true, raw: []byte(`{"modules":{"accounts":"view"},"flags":[]}`)}
+	f.s.operatorAccess = &OperatorAccessService{repo: repo, userRepo: f.u}
+	ctx := context.Background()
+	tokens, err := f.s.Token(ctx, f.code(t, MCPScopeAdmin, nil), mcpTestResource)
+	require.NoError(t, err)
+	p, err := f.s.Authenticate(ctx, tokens.AccessToken)
+	require.NoError(t, err)
+	require.Equal(t, RoleOperator, p.Role)
+	require.True(t, p.OperatorScope.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelView))
+	require.False(t, p.OperatorScope.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelManage))
+	repo.raw = []byte(`{"modules":{},"flags":[]}`)
+	p, err = f.s.Authenticate(ctx, tokens.AccessToken)
+	require.NoError(t, err)
+	require.False(t, p.OperatorScope.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelView))
+	repo.err = errors.New("private database detail")
+	_, err = f.s.Authenticate(ctx, tokens.AccessToken)
+	require.ErrorContains(t, err, "operator permissions are unavailable")
+	require.NotContains(t, err.Error(), "private database detail")
+	// A settings failure must never fall back to permission granted earlier.
+	f.s.settings = NewSettingService(managementMCPUnavailableRepo{}, nil)
+	_, err = f.s.Authenticate(ctx, tokens.AccessToken)
+	require.ErrorContains(t, err, "configuration is unavailable")
+}
 
 type mcpOAuthMemoryRepo struct {
 	mu          sync.Mutex
@@ -202,7 +273,8 @@ func newMCPOAuthFixture(t *testing.T) *mcpOAuthFixture {
 	t.Helper()
 	r := &mcpOAuthMemoryRepo{grants: map[string]*MCPOAuthGrant{}, codes: map[string]*MCPOAuthCode{}, credentials: map[string]*MCPOAuthCredential{}}
 	u := &mcpOAuthUserRepo{user: &User{ID: 7, Role: RoleUser, Status: StatusActive, Email: "user@example.com", PasswordHash: "original", Concurrency: 3}}
-	s := NewMCPOAuthService(r, u)
+	settings := NewSettingService(&panelRateLimitSettingRepo{values: map[string]string{SettingKeyManagementMCP: `{"enabled":true,"public_url":"https://platform.example/api/v1/mcp","allow_operators":true,"allow_users":true}`}}, nil)
+	s := NewMCPOAuthService(r, u, settings, nil)
 	client, err := s.Register(context.Background(), MCPOAuthRegisterInput{ClientName: "My MCP client", RedirectURIs: []string{"http://127.0.0.1:2345/callback?existing=1", "https://client.example/callback"}})
 	require.NoError(t, err)
 	verifier := strings.Repeat("a", 43)
@@ -593,7 +665,7 @@ func TestMCPOAuthRegistrationIsStatelessAndSigned(t *testing.T) {
 	require.NoError(t, err)
 	renamed := strings.Replace(string(raw), `"n":"My MCP client"`, `"n":"Trusted client"`, 1)
 	require.NotEqual(t, string(raw), renamed)
-	foreign, err := NewMCPOAuthService(&mcpOAuthMemoryRepo{clientIDKey: []byte("another-deployment-client-id-key")}, f.u).
+	foreign, err := NewMCPOAuthService(&mcpOAuthMemoryRepo{clientIDKey: []byte("another-deployment-client-id-key")}, f.u, f.s.settings, nil).
 		Register(context.Background(), MCPOAuthRegisterInput{ClientName: f.client.ClientName, RedirectURIs: f.client.RedirectURIs})
 	require.NoError(t, err)
 	tampered := []byte(f.client.ClientID)
@@ -638,7 +710,7 @@ func TestMCPOAuthLargestRegistrationFitsClientIDLimit(t *testing.T) {
 func TestMCPOAuthClientIDKeyErrorIsNotUnknownClient(t *testing.T) {
 	f := newMCPOAuthFixture(t)
 	unavailable := errors.New("database unavailable")
-	s := NewMCPOAuthService(&mcpOAuthKeyErrorRepo{mcpOAuthMemoryRepo: f.r, err: unavailable}, f.u)
+	s := NewMCPOAuthService(&mcpOAuthKeyErrorRepo{mcpOAuthMemoryRepo: f.r, err: unavailable}, f.u, f.s.settings, nil)
 	_, err := s.Register(context.Background(), MCPOAuthRegisterInput{RedirectURIs: []string{"https://client.example/cb"}})
 	require.ErrorIs(t, err, unavailable)
 	_, err = s.Preview(context.Background(), 7, f.authorize, mcpTestResource)

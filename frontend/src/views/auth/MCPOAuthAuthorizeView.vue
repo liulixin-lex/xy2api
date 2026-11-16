@@ -43,7 +43,7 @@
           <label for="mcp-consent-scope" class="input-label">{{ t('managementMcp.scope') }}</label>
           <select id="mcp-consent-scope" v-model="scope" class="input" :disabled="submitting" aria-describedby="mcp-scope-hint">
             <option value="user">{{ t('managementMcp.userScope') }}</option>
-            <option v-if="authStore.isAdmin" value="admin">{{ t('managementMcp.adminScope') }}</option>
+            <option v-if="authStore.canAccessAdmin" value="admin">{{ t('managementMcp.adminScope') }}</option>
           </select>
           <p id="mcp-scope-hint" class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ scope === 'admin' ? t('managementMcp.adminScopeHint') : t('managementMcp.userScopeHint') }}</p>
         </div>
@@ -158,7 +158,7 @@ async function decide(approved: boolean): Promise<void> {
   const input = {
     authorization: { ...authorization },
     approved,
-    scope: approved && authStore.isAdmin ? scope.value : 'user' as const,
+    scope: approved && authStore.canAccessAdmin ? scope.value : 'user' as const,
     read_only: approved ? readOnly.value : true
   }
   submitting.value = true

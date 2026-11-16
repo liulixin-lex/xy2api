@@ -5,7 +5,7 @@ import MCPOAuthAuthorizeView from '../MCPOAuthAuthorizeView.vue'
 import type { MCPAuthorization, MCPConsent } from '@/api/mcp'
 
 const { auth, previewAuthorization, authorize, routeState, assign } = vi.hoisted(() => ({
-  auth: { isAdmin: false, user: { email: 'user@example.com' } },
+  auth: { isAdmin: false, isOperator: false, get canAccessAdmin() { return this.isAdmin || this.isOperator }, user: { email: 'user@example.com' } },
   previewAuthorization: vi.fn(), authorize: vi.fn(), assign: vi.fn(),
   routeState: { current: {} as { fullPath: string; query: Record<string, unknown> } }
 }))
@@ -39,6 +39,7 @@ function render() {
 beforeEach(() => {
   vi.clearAllMocks()
   auth.isAdmin = false
+  auth.isOperator = false
   routeState.current = reactive({ fullPath: '/oauth/management-mcp/authorize?request=1', query: { ...request } })
   previewAuthorization.mockResolvedValue({ ...consent })
   authorize.mockResolvedValue({ redirect_url: redirectURL })
@@ -225,4 +226,15 @@ describe('MCP OAuth consent', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="client-name"]').text()).toBe('Second client')
   })
+  it('lets an operator choose the management scope after the server permits consent', async () => {
+    auth.isOperator = true
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('#mcp-consent-scope option[value="admin"]').exists()).toBe(true)
+    await wrapper.get('#mcp-consent-scope').setValue('admin')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({ approved: true, scope: 'admin', read_only: true }))
+  })
+
 })

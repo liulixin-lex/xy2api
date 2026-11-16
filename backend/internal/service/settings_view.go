@@ -367,6 +367,10 @@ type PublicSettings struct {
 	WeChatOAuthMobileEnabled bool
 	BackendModeEnabled       bool
 	MCPEnabled               bool // 后台管理 MCP 设置优先于部署默认配置
+	MCPOperatorEnabled       bool `json:"mcp_operator_enabled"`
+	MCPUserEnabled           bool `json:"mcp_user_enabled"`
+	MCPOperatorMenuVisible   bool `json:"mcp_operator_menu_visible"`
+	MCPUserMenuVisible       bool `json:"mcp_user_menu_visible"`
 	PaymentEnabled           bool
 	PaymentBalanceDisabled   bool
 	OIDCOAuthEnabled         bool

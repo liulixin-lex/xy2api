@@ -33,7 +33,7 @@ func newMCPOAuthIntegrationFixture(t *testing.T, ctx context.Context) mcpOAuthIn
 	t.Helper()
 	user := mustCreateUser(t, testEntClient(t), &service.User{})
 	repo := NewMCPOAuthRepository(integrationEntClient, integrationDB)
-	oauth := service.NewMCPOAuthService(repo, NewUserRepository(integrationEntClient, integrationDB))
+	oauth := service.NewMCPOAuthService(repo, NewUserRepository(integrationEntClient, integrationDB), service.NewSettingService(mcpOAuthIntegrationSettings{}, nil), nil)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -266,8 +266,15 @@ func TestMCPOAuthIntegrationClientIDKeyConvergesAcrossInstances(t *testing.T) {
 
 	// A client registered by one instance is accepted by another.
 	users := NewUserRepository(integrationEntClient, integrationDB)
-	client, err := service.NewMCPOAuthService(NewMCPOAuthRepository(integrationEntClient, integrationDB), users).Register(ctx, service.MCPOAuthRegisterInput{RedirectURIs: []string{"https://client.example/cb"}})
+	client, err := service.NewMCPOAuthService(NewMCPOAuthRepository(integrationEntClient, integrationDB), users, nil, nil).Register(ctx, service.MCPOAuthRegisterInput{RedirectURIs: []string{"https://client.example/cb"}})
 	require.NoError(t, err)
-	_, err = service.NewMCPOAuthService(NewMCPOAuthRepository(integrationEntClient, integrationDB), users).Token(ctx, service.MCPOAuthTokenInput{GrantType: "authorization_code", ClientID: client.ClientID}, mcpIntegrationResource)
+	_, err = service.NewMCPOAuthService(NewMCPOAuthRepository(integrationEntClient, integrationDB), users, nil, nil).Token(ctx, service.MCPOAuthTokenInput{GrantType: "authorization_code", ClientID: client.ClientID}, mcpIntegrationResource)
 	requireMCPIntegrationInvalidGrant(t, err)
+}
+
+// Keep OAuth repository tests independent of the database-wide admin settings.
+type mcpOAuthIntegrationSettings struct{ service.SettingRepository }
+
+func (mcpOAuthIntegrationSettings) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeyManagementMCP: `{"enabled":true,"public_url":"https://platform.example/api/v1/mcp","allow_users":true}`}, nil
 }

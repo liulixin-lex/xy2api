@@ -226,7 +226,7 @@ func (h *MCPOAuthHandler) Decide(c *gin.Context) {
 	}
 	if input.Approved && input.Scope == service.MCPScopeAdmin {
 		role, _ := middleware.GetUserRoleFromContext(c)
-		if role != service.RoleAdmin {
+		if !service.CanAccessAdminRole(role) {
 			response.Forbidden(c, "Only administrators can authorize admin MCP access")
 			return
 		}
@@ -272,6 +272,20 @@ func (h *MCPOAuthHandler) ConnectionConfig(c *gin.Context) {
 	}
 	resource, ok := h.resource(c, false)
 	if !ok {
+		return
+	}
+	settingsService := h.settings
+	if settingsService == nil {
+		settingsService = service.NewSettingService(nil, h.cfg)
+	}
+	settings, err := settingsService.GetManagementMCPSettings(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "management MCP configuration is unavailable")
+		return
+	}
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if !settings.AllowsRole(role) {
+		response.Forbidden(c, "MCP access is disabled for your role")
 		return
 	}
 	response.Success(c, gin.H{"resource": resource})

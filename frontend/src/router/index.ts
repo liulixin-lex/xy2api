@@ -16,6 +16,7 @@ import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { applyDocumentTitle, resolveRouteDocumentTitle } from './title'
 import { isChunkLoadError, recoverFromChunkLoadError } from '@/utils/chunkLoadError'
 import { routeHidesSupportWidget } from '@/features/support-widget/supportWidgetVisibility'
+import { canAccessManagementMCP } from '@/utils/managementMcpAccess'
 
 /**
  * Route definitions with lazy loading
@@ -1012,6 +1013,24 @@ router.beforeEach(async (to, _from, next) => {
       query: { redirect: to.fullPath } // Save intended destination
     })
     return
+  }
+
+  // MCP pages use the same role gate as the sidebar and backend OAuth service.
+  if (to.name === 'MCP' || to.name === 'MCPOAuthAuthorize') {
+    if (!appStore.publicSettingsLoaded) {
+      try {
+        await appStore.fetchPublicSettings()
+      } catch {
+        // Unknown role access fails closed until the backend settings load.
+      }
+    }
+    // Keep grant revocation reachable when role access is disabled. The
+    // connection config endpoint still denies access, and OAuth consent remains gated.
+    const canManageExistingGrants = to.name === 'MCP' && appStore.cachedPublicSettings?.mcp_enabled === true
+    if (!(to.name === 'MCP' && authStore.isAdmin) && !canManageExistingGrants && !canAccessManagementMCP(appStore.cachedPublicSettings, authStore.user?.role)) {
+      next(await resolveLandingPath(authStore, to.path))
+      return
+    }
   }
 
   // Check admin requirement

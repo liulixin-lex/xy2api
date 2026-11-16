@@ -200,7 +200,9 @@ func newMCPRouteOAuthService(role string) (*service.MCPOAuthService, *mcpOAuthRo
 		credentials: map[string]*service.MCPOAuthCredential{},
 	}
 	users := &mcpOAuthRouteUsers{user: &service.User{ID: 7, Role: role, Status: service.StatusActive, PasswordHash: "test-password", Email: "mcp@example.com"}}
-	return service.NewMCPOAuthService(repo, users), repo, users
+	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{}}, nil)
+	_, _ = settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: "https://platform.example/api/v1/mcp", AllowOperators: true, AllowUsers: true})
+	return service.NewMCPOAuthService(repo, users, settings, nil), repo, users
 }
 
 const mcpOAuthRouteVerifier = "a-valid-43-character-pkce-verifier-for-testing-only"
@@ -257,6 +259,9 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 	cfg.JWT.Secret = "test-jwt-secret-at-least-thirty-two-bytes"
 	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{service.SettingKeyStepUpEnabled: "false"}}, cfg)
 	oauth, repo, users := newMCPRouteOAuthService(role)
+	_, err := settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: cfg.ManagementMCP.PublicURL, AllowOperators: true, AllowUsers: true})
+	require.NoError(t, err)
+	oauth = service.NewMCPOAuthService(repo, users, settings, nil)
 	// Administrator write grants always pass the real step-up gate.
 	users.user.TotpEnabled = true
 	totp := service.NewTotpService(users, nil, mcpOAuthRouteStepUpCache{}, settings, nil, nil)
@@ -464,6 +469,46 @@ func TestManagementMCPAdminSettingsImmediatelyGateOAuthAndTools(t *testing.T) {
 	_, err = f.settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: f.resource})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+}
+
+func TestManagementMCPRoleSettingsImmediatelyGateHTTPAccess(t *testing.T) {
+	for _, role := range []string{service.RoleOperator, service.RoleUser} {
+		t.Run(role, func(t *testing.T) {
+			f := newMCPOAuthHTTPFixture(t, role)
+			client, tokens := f.authorize(t, service.MCPScopeUser, true)
+			require.Equal(t, http.StatusOK, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+			settings := service.ManagementMCPSettings{Enabled: true, PublicURL: f.resource, ShowOperatorMenu: true, ShowUserMenu: true}
+			_, err := f.settings.SetManagementMCPSettings(context.Background(), settings)
+			require.NoError(t, err)
+			config := f.request(t, http.MethodGet, "/api/v1/user/mcp/config", "browser-session", "", nil, false)
+			require.Equal(t, http.StatusForbidden, config.status)
+			authorization := mcpOAuthRouteAuthorization(client.ClientID, f.resource)
+			encoded, err := json.Marshal(authorization)
+			require.NoError(t, err)
+			var params map[string]string
+			require.NoError(t, json.Unmarshal(encoded, &params))
+			query := url.Values{}
+			for key, value := range params {
+				query.Set(key, value)
+			}
+			preview := f.request(t, http.MethodGet, "/api/v1/user/mcp/authorize?"+query.Encode(), "browser-session", "", nil, false)
+			require.Equal(t, http.StatusForbidden, preview.status)
+			decision := f.json(t, http.MethodPost, "/api/v1/user/mcp/authorize", "browser-session", service.MCPOAuthConsentInput{Authorization: authorization, Approved: true, Scope: service.MCPScopeUser})
+			require.Equal(t, http.StatusForbidden, decision.status)
+			require.Equal(t, http.StatusUnauthorized, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+			refresh := f.form(t, "/api/v1/mcp/oauth/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {client.ClientID}, "refresh_token": {tokens.RefreshToken}})
+			require.Equal(t, http.StatusBadRequest, refresh.status)
+			require.Contains(t, string(refresh.body), "invalid_grant")
+			// Grant cleanup remains available while the role cannot connect.
+			grants := f.request(t, http.MethodGet, "/api/v1/user/mcp/grants", "browser-session", "", nil, false)
+			require.Equal(t, http.StatusOK, grants.status)
+			settings.AllowOperators, settings.AllowUsers = true, true
+			settings.ShowOperatorMenu, settings.ShowUserMenu = false, false
+			_, err = f.settings.SetManagementMCPSettings(context.Background(), settings)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, f.rpc(t, tokens.AccessToken, "tools/list", map[string]any{}).status)
+		})
+	}
 }
 
 func TestMCPOAuthHTTPPermissionAndCredentialBoundaries(t *testing.T) {
