@@ -18,7 +18,7 @@ OpenAI 分组的每次选号都按下表逐项比较，前一项分出先后就�
 
 | 序 | 比较项 | 规则 |
 |---|---|---|
-| 0 | 硬准入 | 不通过的账号不进候选：账号状态与调度开关、模型与能力、额度、限流与各类运行时阻断、利润门、智商门（见 [罚则与选号](gateway-resilience-routing.md#软罚与硬罚)）；带 `tools` 或 `functions` 的 Chat 请求按最终模型与档位选择协议：GPT-6.1 Sol、Terra 必须走 Responses；GPT-6 Sol、Luna 只在档位为 `none` 时可走 Chat |
+| 0 | 硬准入 | 不通过的账号不进候选：账号状态与调度开关、模型与能力、额度、限流与各类运行时阻断、利润门、智商门（见 [罚则与选号](gateway-resilience-routing.md#软罚与硬罚)）；带 `tools` 或 `functions` 的 Chat 请求按最终模型与实际发送的档位选择协议：GPT-6.1 Sol、Terra 必须走 Responses；GPT-6 Sol、Luna 只在实际发送 `none` 时可走 Chat。仅由 `thinking.type=disabled` 或模型名 `-none` 后缀推导、未写入请求正文的档位按缺省处理，选择支持 Responses 的账号 |
 | 1 | 层 | 正常在前，不达标在后。不达标 = 该账号在本组、本模型上过不了门槛且未被豁免（见 [分组质量门槛](group-quality-gate.md)） |
 | 2 | 优先级 | 账号编辑页的“优先级”，数字越小越先用 |
 | 3 | 倍率 | 调度倍率低的在前。OAuth 账号取“OAuth 倍率”（未设置时用账号倍率）；API Key 账号取仍在有效期内的“上游倍率自动探测”结果，否则用账号倍率。不按 Token 计费的请求不比较倍率 |

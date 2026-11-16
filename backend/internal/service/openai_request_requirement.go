@@ -76,8 +76,11 @@ func WithChatRequestRequirementFromBody(ctx context.Context, body []byte, dispat
 	} else if len(gjson.GetBytes(body, "functions").Array()) > 0 {
 		req.HasTools, req.ToolField = true, "functions"
 	}
-	if effort := CanonicalRequestedReasoningEffort(body); effort != nil {
-		req.ReasoningEffort = *effort
+	// Preserve M1's distinction between explicit wire fields and derived intent.
+	// An unchanged thinking mode or model suffix does not write a wire effort.
+	effort := newFinalReasoningRequest(body)
+	if effort.field != "" && effort.field != "thinking.type" {
+		req.ReasoningEffort = effort.original
 	}
 	ctx = WithChatRequestRequirement(ctx, req)
 	inbound := APIProtocolChatCompletions
