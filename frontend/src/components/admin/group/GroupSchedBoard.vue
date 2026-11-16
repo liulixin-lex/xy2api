@@ -24,6 +24,19 @@
       />
     </template>
 
+    <!-- The group over all its models (H.9): identities of its account × model keys, the users' waits, migration 400s. -->
+    <dl v-if="data" class="mb-4 grid gap-1 text-[13px]" data-sq-board-summary>
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <dt class="sq-text-3">{{ t('admin.schedQuality.board.summaryTitle') }}</dt>
+        <dd v-tip="t('admin.schedQuality.board.summaryCountsTip')" class="sq-num sq-text" tabindex="0" data-sq-summary="accounts">{{ summaryText.counts }}</dd>
+      </div>
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <dt class="sq-text-3">{{ summaryText.wait }}</dt>
+        <dd class="sq-num sq-text" data-sq-summary="e2e">{{ summaryText.e2e }}</dd>
+        <dd class="sq-num sq-text" data-sq-summary="body">{{ summaryText.body }}</dd>
+        <dd class="sq-num sq-text" data-sq-summary="migration">{{ summaryText.migration }}</dd>
+      </div>
+    </dl>
     <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
     </div>
@@ -81,7 +94,13 @@
                 />
                 <span v-else-if="row.pinned" data-sq-pinned>{{ t('admin.schedQuality.board.pinned') }}</span>
                 <span v-else class="sq-text-3">{{ DASH }}</span>
-                <span v-if="pinFailed.has(row.account_id)" class="sq-fail-word text-xs">{{ t('admin.schedQuality.result.failed') }}</span>
+                <span
+                  v-if="pinFailed.has(row.account_id)"
+                  v-tip="pinFailed.get(row.account_id)"
+                  class="sq-fail-word inline-block max-w-[200px] truncate text-xs"
+                  role="status"
+                  :data-sq-pin-failed="row.account_id"
+                >{{ [t('admin.schedQuality.result.failed'), pinFailed.get(row.account_id)].filter(Boolean).join(' · ') }}</span>
               </span>
             </td>
             <td class="sq-r sq-num">{{ row.priority }}</td>
@@ -93,8 +112,8 @@
                 v-if="!stopped(row)"
                 role="img"
                 tabindex="0"
-                :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${t(`admin.schedQuality.identity.${row.lines[dim]}`)}`"
-                v-tip="`${t(`admin.schedQuality.dim.${dim}`)} · ${t(`admin.schedQuality.identity.${row.lines[dim]}`)}`"
+                :aria-label="`${t(`admin.schedQuality.dim.${dim}`)} ${word('identity', row.lines[dim])}`"
+                v-tip="`${t(`admin.schedQuality.dim.${dim}`)} · ${word('identity', row.lines[dim])}`"
                 :class="['sq-focus', IDENTITY_SHAPES[row.lines[dim]]]"
                 :data-sq-line="dim"
                 :data-identity="row.lines[dim]"
@@ -121,7 +140,9 @@ import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayer
 import { useLiveClock } from '@/composables/useLiveClock'
 import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { DASH, fmtCountdown, rejectName, SCHED_DIMS, secondsUntil } from '@/utils/schedQualityFormat'
+import { DASH, fmtCountdown, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
+import { extractApiErrorMessage } from '@/utils/apiError'
+import { formatRecentSeconds } from '@/components/admin/account/table/accountRecent'
 import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
@@ -131,6 +152,7 @@ import { vTip } from '@/utils/tip'
 // with the reason. Each line shows its identity; a rear or trial row counts down to its end. Pinning needs
 // groups:manage and is saved at once (PUT /admin/groups/:id/members/:account_id).
 const { t, te } = useI18n()
+const word = (table: string, value: string) => schedWord(table, value, t, te)
 const { board } = useSchedLayers()
 const { board: boardData, boardKey, retry } = useSchedLayerData()
 // The account link needs accounts:view; the name is plain text otherwise.
@@ -150,6 +172,26 @@ watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { f
 
 const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
 
+// The summary line: a missing summary or field reads "—".
+const summaryText = computed(() => {
+  const summary = boardData.summary?.group_id === board.groupId ? boardData.summary : null
+  const count = (value: number | null | undefined) => (value == null ? DASH : String(value))
+  const wait = (value: number | null | undefined) => (value == null ? DASH : formatRecentSeconds(value))
+  const accounts = summary?.accounts
+  const last60 = summary?.last60
+  return {
+    counts: t('admin.schedQuality.board.summaryCounts', {
+      pass: count(accounts?.pass), unknown: count(accounts?.unknown), trial: count(accounts?.trial), rear: count(accounts?.rear)
+    }),
+    wait: last60?.requests == null
+      ? t('admin.schedQuality.board.summaryWait')
+      : t('admin.schedQuality.board.summaryWaitRequests', { n: last60.requests }, last60.requests),
+    e2e: t('admin.schedQuality.board.summaryFromGateway', { p50: wait(last60?.e2e_first_output_p50_ms), p90: wait(last60?.e2e_first_output_p90_ms) }),
+    body: t('admin.schedQuality.board.summaryFromBody', { p50: wait(last60?.body_first_output_p50_ms), p90: wait(last60?.body_first_output_p90_ms) }),
+    migration: t('admin.schedQuality.board.summaryMigration', { n: count(last60?.migration_400) })
+  }
+})
+
 const IDENTITY_SHAPES: Record<BackendIdentity, string> = {
   pass: 'sq-shape sq-shape--pass',
   rear: 'sq-shape sq-shape--fail',
@@ -158,26 +200,34 @@ const IDENTITY_SHAPES: Record<BackendIdentity, string> = {
 }
 
 const stopped = (row: BackendOrderRow) => row.layer === 'stopped'
-/** Takes no part in the group: stopped, or outside the rate range. */
-const unused = (row: BackendOrderRow) => stopped(row) || row.excluded !== null
+/** Takes no part in the group: stopped, or outside the rate range (`excluded` is absent or null otherwise). */
+const unused = (row: BackendOrderRow) => stopped(row) || !!row.excluded
 
 function stateOf(row: BackendOrderRow): { text: string; cls: string } {
   const left = secondsUntil(row.until, now.value)
-  const timed = (word: string) => (left ? `${word} ${fmtCountdown(left)}` : word)
+  const timed = (text: string) => (left ? `${text} ${fmtCountdown(left)}` : text)
   if (stopped(row)) return { text: timed(rejectName('not_schedulable', t, te)), cls: '' }
-  if (row.excluded !== null) return { text: t('admin.schedQuality.board.excluded', { reason: rejectName(row.excluded, t, te) }), cls: '' }
+  if (row.excluded) return { text: t('admin.schedQuality.board.excluded', { reason: rejectName(row.excluded, t, te) }), cls: '' }
   if (row.exempt) return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
-  const word = t(`admin.schedQuality.layer.${row.layer}`)
-  if (row.layer === 'rear') return { text: timed(word), cls: 'sq-cool' }
-  if (row.layer === 'trial' || row.layer === 'trial_full') return { text: timed(word), cls: 'sq-trial' }
-  return { text: word, cls: 'sq-text' }
+  const layer = word('layer', row.layer)
+  if (row.layer === 'rear') return { text: timed(layer), cls: 'sq-cool' }
+  if (row.layer === 'trial' || row.layer === 'trial_full') return { text: timed(layer), cls: 'sq-trial' }
+  return { text: layer, cls: 'sq-text' }
 }
 
-// ---- Pinning: saved at once; the switch shows the new state until the board's next answer ----
+// ---- Pinning: saved at once. The board reads the scheduler's snapshot, which follows a change a few seconds later,
+// so the switch keeps the saved state until an answer agrees (not just the next one). A failure shows the backend's
+// reason (not a member, not an OpenAI group) until the next try.
 const pinBusy = reactive(new Set<number>())
-const pinFailed = reactive(new Set<number>())
+const pinFailed = reactive(new Map<number, string>())
 const pinShown = reactive(new Map<number, boolean>())
-watch(() => boardData.data, () => pinShown.clear())
+watch(() => boardData.data, (value) => {
+  for (const row of value?.rows ?? []) if (pinShown.get(row.account_id) === row.pinned) pinShown.delete(row.account_id)
+})
+watch(() => board.groupId, () => {
+  pinShown.clear()
+  pinFailed.clear()
+})
 const pinnedOf = (row: BackendOrderRow) => pinShown.get(row.account_id) ?? row.pinned
 
 async function setPinned(row: BackendOrderRow, pinned: boolean) {
@@ -189,9 +239,8 @@ async function setPinned(row: BackendOrderRow, pinned: boolean) {
     const result = await adminAPI.groups.setMemberPinned(groupId, row.account_id, pinned)
     pinShown.set(row.account_id, result.pinned)
     void markSchedChanged()
-  } catch {
-    pinFailed.add(row.account_id)
-    setTimeout(() => pinFailed.delete(row.account_id), 2000)
+  } catch (error) {
+    pinFailed.set(row.account_id, extractApiErrorMessage(error, ''))
   } finally {
     pinBusy.delete(row.account_id)
   }

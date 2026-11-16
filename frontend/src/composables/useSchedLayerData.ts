@@ -19,7 +19,7 @@
  */
 import { onScopeDispose, shallowReactive, watch } from 'vue'
 import schedQualityAPI, { backendSummary } from '@/api/admin/schedQuality'
-import type { BackendAccountDetail, BackendAccountSummary, BackendOrder } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountDetail, BackendAccountSummary, BackendGroupSummary, BackendOrder } from '@/api/admin/schedQualityTypes'
 import type { LiveTable, LiveTask } from '@/composables/useLiveTable'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import type { Account } from '@/types'
@@ -47,11 +47,13 @@ const board = shallowReactive({
   /** `group id:model` of the data. */
   key: null as string | null,
   data: null as BackendOrder | null,
+  /** The group over all its models (POST …/groups/summary); null when it did not load. */
+  summary: null as BackendGroupSummary | null,
   failedKey: null as string | null
 })
 let refreshTask: ((name: string) => Promise<void>) | null = null
 const forgetPanel = () => Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
-const forgetBoard = () => Object.assign(board, { key: null, data: null, failedKey: null })
+const forgetBoard = () => Object.assign(board, { key: null, data: null, summary: null, failedKey: null })
 
 const { drawer, board: boardRequest, changed } = useSchedLayers()
 const boardKey = () => (boardRequest.groupId === null ? null : `${boardRequest.groupId}:${boardRequest.model ?? ''}`)
@@ -89,9 +91,14 @@ export function useSchedLayerTasks() {
         const key = boardKey()
         if (key === null) return
         try {
-          const data = await schedQualityAPI.groupBoard(boardRequest.groupId!, boardRequest.model ?? undefined, { signal })
+          const groupId = boardRequest.groupId!
+          // The group's summary comes with each beat; without it the board still shows, its line reads "—".
+          const summary = schedQualityAPI.groupsSummary([groupId], { signal })
+            .then((value) => value.groups.find((group) => group.group_id === groupId) ?? null, () => null)
+          const data = await schedQualityAPI.groupBoard(groupId, boardRequest.model ?? undefined, { signal })
+          const groupSummary = await summary
           if (signal.aborted || boardKey() !== key) return
-          Object.assign(board, { key, data, failedKey: null })
+          Object.assign(board, { key, data, summary: groupSummary, failedKey: null })
         } catch (error) {
           if (signal.aborted || boardKey() !== key) return
           board.failedKey = key

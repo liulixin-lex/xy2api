@@ -11,6 +11,7 @@ import type {
   BackendDecision,
   BackendGroupPolicy,
   BackendGroupPolicySaved,
+  BackendGroupsSummary,
   BackendOrder,
   BackendPolicyPreview,
   BackendResetResult,
@@ -81,12 +82,18 @@ export async function updateGroupPolicy(groupId: number, update: SchedGroupPolic
 }
 
 /**
- * What the policy would do if saved: the group's normal / substandard counts now and after, and the
- * accounts it would turn substandard. Same body as the update; nothing is stored.
+ * What the policy would say on the current evidence: per line the verdicts with the saved and the new thresholds, the
+ * keys whose verdict turns, and the lines it relaxes. Same body as the update; nothing is stored.
  */
 export async function previewGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate, options?: RequestOptions): Promise<BackendPolicyPreview> {
   const { data } = await apiClient.post<BackendPolicyPreview>(`${base}/groups/${groupId}/policy/preview`, update, { signal: options?.signal })
-  return { now: data.now, after: data.after, changed: data.changed ?? [] }
+  return { relaxed_lines: data.relaxed_lines ?? [], lines: data.lines, changed: data.changed ?? [] }
+}
+
+/** Groups over all their models: identities of their account × model keys and the users' waits of the last hour. */
+export async function groupsSummary(groupIds: number[], options?: RequestOptions): Promise<BackendGroupsSummary> {
+  const { data } = await apiClient.post<BackendGroupsSummary>(`${base}/groups/summary`, { group_ids: groupIds }, { signal: options?.signal })
+  return data
 }
 
 /**
@@ -124,6 +131,7 @@ export const schedQualityAPI = {
   updateGroupPolicy,
   previewGroupPolicy,
   groupBoard,
+  groupsSummary,
   getTTFTRule,
   updateTTFTRule
 }

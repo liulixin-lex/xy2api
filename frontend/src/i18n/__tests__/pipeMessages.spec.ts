@@ -16,7 +16,8 @@ const pluralKeys = new Set([
   'admin.groups.profitControl.pinnedCount',
   'admin.accounts.table.tip.turns',
   'admin.accounts.table.tip.turnsShort',
-  'admin.schedQuality.panel.allRequests'
+  'admin.schedQuality.panel.allRequests',
+  'admin.schedQuality.board.summaryWaitRequests'
 ])
 
 function pipeMessages(node: unknown, prefix = ''): Array<[string, string]> {

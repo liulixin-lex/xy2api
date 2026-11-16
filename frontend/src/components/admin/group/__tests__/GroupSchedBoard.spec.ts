@@ -7,7 +7,7 @@ import GroupSchedBoard from '../GroupSchedBoard.vue'
 import { closeSchedBoard, markSchedChanged, openSchedBoard, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
 import { withSchedHost } from '@/components/admin/account/quality/__tests__/schedLayerHost'
 
-const api = vi.hoisted(() => ({ groupBoard: vi.fn() }))
+const api = vi.hoisted(() => ({ groupBoard: vi.fn(), groupsSummary: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 const groupsApi = vi.hoisted(() => ({ setMemberPinned: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { groups: groupsApi } }))
@@ -25,7 +25,7 @@ vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key),
-    te: (key: string) => key !== 'admin.schedQuality.reject.brand_new'
+    te: (key: string) => !key.endsWith('.brand_new')
   })
 }))
 
@@ -59,6 +59,7 @@ beforeEach(() => {
   perms.granted = ['accounts:view', 'groups:view']
   document.documentElement.dataset.motion = 'reduced'
   api.groupBoard.mockReset().mockResolvedValue(board())
+  api.groupsSummary.mockReset().mockResolvedValue({ at: '', stale: false, groups: [] })
   groupsApi.setMemberPinned.mockReset()
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
@@ -159,12 +160,89 @@ describe('GroupSchedBoard', () => {
     expect(api.groupBoard.mock.calls.length).toBeGreaterThan(asked)
     expect(pin(7).getAttribute('aria-checked')).toBe('true')
 
-    // A failed request leaves the switch as it was and says so next to it.
+    // A failed request leaves the switch as it was and says why, in the backend's words.
+    groupsApi.setMemberPinned.mockReset().mockRejectedValueOnce({ status: 400, message: 'account 5 is not a member of group 53' })
     pin(5).click()
     await flushPromises()
     expect(groupsApi.setMemberPinned).toHaveBeenLastCalledWith(53, 5, true)
     expect(pin(5).getAttribute('aria-checked')).toBe('false')
-    expect(rows()[1].textContent).toContain('admin.schedQuality.result.failed')
+    expect(document.querySelector('[data-sq-pin-failed="5"]')!.textContent).toBe('admin.schedQuality.result.failed · account 5 is not a member of group 53')
+  })
+
+  it('keeps a saved pin through board answers that still show the old state, until one agrees', async () => {
+    perms.granted = ['accounts:view', 'groups:view', 'groups:manage']
+    groupsApi.setMemberPinned.mockResolvedValue({ group_id: 53, account_id: 7, pinned: true })
+    // The scheduler's snapshot follows a few seconds later: fresh answers that still say "not pinned".
+    api.groupBoard.mockImplementation(async () => board())
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    const pin = () => document.querySelector<HTMLButtonElement>('[data-sq-pin="7"]')!
+    pin().click()
+    await flushPromises()
+    markSchedChanged()
+    await flushPromises()
+    expect(pin().getAttribute('aria-checked')).toBe('true')
+
+    // Then the board agrees; a later unpin by someone else shows as it is.
+    api.groupBoard.mockImplementation(async () => ({ ...board(), rows: board().rows.map((r) => (r.account_id === 7 ? { ...r, pinned: true } : r)) }))
+    markSchedChanged()
+    await flushPromises()
+    expect(pin().getAttribute('aria-checked')).toBe('true')
+    api.groupBoard.mockImplementation(async () => board())
+    markSchedChanged()
+    await flushPromises()
+    expect(pin().getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('reads a row without `excluded` as used, and shows 其他 for a layer or identity it does not know', async () => {
+    const { excluded: _absent, ...plain } = row(7, { rank: 1 })
+    api.groupBoard.mockResolvedValue({
+      ...board(),
+      rows: [plain as BackendOrderRow, row(4, { rank: 2, layer: 'brand_new' as never, lines: { ttfo: 'brand_new' as never, error: 'pass', cache: 'pass' } })]
+    })
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    const [first, odd] = rows()
+    expect(first.classList.contains('sq-weak')).toBe(false)
+    expect(first.querySelector('td')!.textContent).toBe('1')
+    expect(first.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.layer.front')
+    expect(odd.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.unknown')
+    expect(odd.querySelector('[data-sq-line="ttfo"]')!.getAttribute('aria-label')).toBe('admin.schedQuality.dim.ttfo admin.schedQuality.unknown')
+  })
+
+  it('heads the board with the group over all models: identities, the users\' waits from the gateway and from the body, migration 400s', async () => {
+    api.groupsSummary.mockResolvedValue({
+      at: '', stale: false,
+      groups: [{
+        group_id: 53,
+        accounts: { pass: 5, unknown: 2, trial: 1, rear: 1 },
+        last60: { e2e_first_output_p50_ms: 3200, e2e_first_output_p90_ms: 8100, body_first_output_p50_ms: 2900, body_first_output_p90_ms: null, requests: 420, migration_400: 3 }
+      }]
+    })
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await flushPromises()
+    expect(api.groupsSummary).toHaveBeenCalledWith([53], expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    const text = (key: string) => document.querySelector(`[data-sq-summary="${key}"]`)!.textContent
+    expect(document.querySelector('[data-sq-board-summary] dt')!.textContent).toBe('admin.schedQuality.board.summaryTitle')
+    expect(text('accounts')).toBe('admin.schedQuality.board.summaryCounts:{"pass":"5","unknown":"2","trial":"1","rear":"1"}')
+    expect(text('e2e')).toBe('admin.schedQuality.board.summaryFromGateway:{"p50":"3.2s","p90":"8.1s"}')
+    expect(text('body')).toBe('admin.schedQuality.board.summaryFromBody:{"p50":"2.9s","p90":"—"}')
+    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":"3"}')
+  })
+
+  it('shows "—" in the summary when it has no data or did not load, and still shows the board', async () => {
+    api.groupsSummary.mockRejectedValue(new Error('down'))
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(rows()).toHaveLength(5)
+    const text = (key: string) => document.querySelector(`[data-sq-summary="${key}"]`)!.textContent
+    expect(text('accounts')).toBe('admin.schedQuality.board.summaryCounts:{"pass":"—","unknown":"—","trial":"—","rear":"—"}')
+    expect(text('e2e')).toBe('admin.schedQuality.board.summaryFromGateway:{"p50":"—","p90":"—"}')
+    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":"—"}')
   })
 
   it('shows a pinned account as text without groups:manage', async () => {

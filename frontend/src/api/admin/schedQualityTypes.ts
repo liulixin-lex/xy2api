@@ -306,11 +306,48 @@ export interface SchedGroupPolicyUpdate {
   policy: BackendPolicy
 }
 
-/** What a policy would do to the group's accounts if saved: counts now and after, and the accounts it would turn. */
+/** Verdicts of one line over the group's account × model keys. */
+export interface BackendVerdictCounts {
+  pass: number
+  unknown: number
+  fail: number
+}
+
+/**
+ * What the thresholds would say on the evidence in the current windows: each line assessed once with the saved and
+ * once with the new thresholds. Not a forecast of identities (a tightened line keeps them; a relaxed one is cleared
+ * and judged again on saving).
+ */
 export interface BackendPolicyPreview {
-  now: { normal: number; below: number }
-  after: { normal: number; below: number }
-  changed: { account_id: number; name: string; model: string; dims: BackendDim[] }[]
+  relaxed_lines: BackendDim[]
+  lines: Record<BackendDim, { now: BackendVerdictCounts; after: BackendVerdictCounts }>
+  /** At most 50. */
+  changed: { account_id: number; name: string; model: string; line: BackendDim; from: BackendVerdict; to: BackendVerdict }[]
+}
+
+// ---- POST /groups/summary ----
+
+/** One group over all its models. Fields without data are null. */
+export interface BackendGroupSummary {
+  group_id: number
+  /** Account × model keys by the identity their lines add up to. */
+  accounts: { pass: number; unknown: number; trial: number; rear: number }
+  last60: {
+    /** Users' wait for the first useful output, from entering the gateway and from the end of the request body. */
+    e2e_first_output_p50_ms: number | null
+    e2e_first_output_p90_ms: number | null
+    body_first_output_p50_ms: number | null
+    body_first_output_p90_ms: number | null
+    requests: number | null
+    /** Attempts counted as 400s caused by migrating a session. */
+    migration_400: number | null
+  }
+}
+
+export interface BackendGroupsSummary {
+  at: string
+  stale: boolean
+  groups: BackendGroupSummary[]
 }
 
 // ---- GET /groups/:id/order?model= (the group board) ----
@@ -331,8 +368,8 @@ export interface BackendOrderRow {
   exempt: boolean
   /** Pinned in this group: first in its layer, outside the rate range. */
   pinned: boolean
-  /** Why the account is not used at all (profit_floor, profit_threshold …); null when it is. */
-  excluded: string | null
+  /** Why the account is not used at all (profit_floor, profit_threshold …); null or absent when it is. */
+  excluded?: string | null
   priority: number
   rate: number
   load_rate: number
