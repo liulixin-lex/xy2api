@@ -60,14 +60,21 @@ func TestM7AnthropicBufferedRequiresStop(t *testing.T) {
 					svc := &OpenAIGatewayService{}
 					var result *OpenAIForwardResult
 					if target == "native_chat" {
-						result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, "fixture", "fixture", "fixture", nil, time.Now())
+						result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, &Account{ID: 1}, "fixture", "fixture", "fixture", nil, time.Now())
 					} else {
-						result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "fixture", "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+						result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, &Account{ID: 1}, "fixture", "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 					}
-					require.NotNil(t, result)
-					known, present, seen, valid = result.ResponseFactsKnown, result.UsagePresent, result.TerminalSeen, result.TerminalValid
-					tokens = result.Usage.InputTokens
-					require.Equal(t, tc.failed, result.PartialFailure)
+					if tc.failed && !tc.usage {
+						require.Nil(t, result, "facts alone must not create a billable result")
+					} else {
+						require.NotNil(t, result)
+						tokens = result.Usage.InputTokens
+						require.Equal(t, tc.failed, result.PartialFailure)
+					}
+					meta, _ := state.ClaimGatewayRequest(false)
+					require.NotNil(t, meta)
+					require.NotNil(t, meta.UsageObserved)
+					known, present, seen, valid = true, *meta.UsageObserved, *meta.TerminalEventSeen, *meta.TerminalEventValid
 				} else {
 					svc := &GatewayService{}
 					var result *ForwardResult
