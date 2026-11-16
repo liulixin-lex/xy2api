@@ -70,7 +70,9 @@ func TestM5GeminiOutputLimitReservation(t *testing.T) {
 			rec, _ := f.serve(t, "/v1beta/models/*modelAction", "/v1beta/models/gemini-2.5-flash:generateContent", body, f.handler.GeminiV1BetaModels)
 			if tt.invalid {
 				// E22: an unreadable limit uses the old estimate and the native body still goes out.
-				require.Error(t, err)
+				require.NoError(t, err)
+				require.Equal(t, tokenInflightEstimate("gemini-2.5-flash", []byte(body)), estimate)
+				require.Equal(t, 8192, estimate.MaxTokens)
 				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 				require.Equal(t, 1, upstream.calls)
 				require.JSONEq(t, body, string(upstream.body))
