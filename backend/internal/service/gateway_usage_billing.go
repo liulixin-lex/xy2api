@@ -1218,7 +1218,7 @@ func (s *GatewayService) calculateTokenCost(
 		InputTokens:                  result.Usage.InputTokens,
 		OutputTokens:                 result.Usage.OutputTokens,
 		CacheCreationTokens:          result.Usage.CacheCreationInputTokens,
-		CacheCreationTokensPresent:   result.Usage.CacheCreationInputTokensPresent,
+		CacheCreationTokensPresent:   result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
 		CacheReadTokens:              result.Usage.CacheReadInputTokens,
 		CacheCreation5mTokens:        result.Usage.CacheCreation5mTokens,
 		CacheCreation1hTokens:        result.Usage.CacheCreation1hTokens,
