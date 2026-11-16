@@ -20,8 +20,6 @@ type fullRebuildLifecycleCache struct {
 	captureAttempts []SchedulerBucket
 	captureErrors   map[string]error
 	lockBusyOnce    map[string]bool
-	watermark       int64
-	watermarkWrites []int64
 }
 
 func newFullRebuildLifecycleCache(buckets ...SchedulerBucket) *fullRebuildLifecycleCache {
@@ -72,30 +70,10 @@ func (c *fullRebuildLifecycleCache) TryLockBucket(ctx context.Context, bucket Sc
 	return c.groupLifecycleTestCache.TryLockBucket(ctx, bucket, ttl)
 }
 
-func (c *fullRebuildLifecycleCache) GetOutboxWatermark(context.Context) (int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.watermark, nil
-}
-
-func (c *fullRebuildLifecycleCache) SetOutboxWatermark(_ context.Context, id int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.watermark = id
-	c.watermarkWrites = append(c.watermarkWrites, id)
-	return nil
-}
-
 func (c *fullRebuildLifecycleCache) captureAttemptCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.captureAttempts)
-}
-
-func (c *fullRebuildLifecycleCache) currentWatermark() int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.watermark
 }
 
 func (c *fullRebuildLifecycleCache) totalSetAttempts() int {

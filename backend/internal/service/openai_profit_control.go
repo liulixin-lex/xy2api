@@ -299,7 +299,7 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 
 // ContextWithSelectionProfitGate 把选号时真实生效的利润门重放到 ctx 上。
 // handler 在拿到选号结果后必须用返回的 ctx 做抢槽后终检
-// （ProfitControlVetoLatest / GatewayProfitControlVetoLatest）与准入后粘性
+// （SelectionAdmissionForResult / GatewayProfitControlVetoLatest）与准入后粘性
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
 	ctx = contextWithSelectionContext(ctx, sel)
@@ -338,17 +338,6 @@ func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool,
 // 请求上下文，否则视为无门放行。
 func OpenAIProfitControlVeto(ctx context.Context, account *Account) (bool, string) {
 	return openAIProfitControlVetoReason(ctx, account)
-}
-
-// ProfitControlVetoLatest performs the handler-side terminal check after a
-// concurrency slot is actually acquired. The latest cached account replaces
-// the selection snapshot when available, so a probe/manual rate change during
-// wait time cannot pass on a stale pointer.
-func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, selected *Account) (*Account, bool, string) {
-	if s == nil {
-		return selected, false, ""
-	}
-	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
 }
 
 // bindOpenAIStickySessionDuringSelection preserves the official eager binding

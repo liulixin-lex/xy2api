@@ -259,6 +259,15 @@ func transientCooldownStartedAt(reason string) time.Time {
 	return time.Unix(0, nanos)
 }
 
+// DisplayTempUnschedulableReason removes internal cooldown version metadata
+// only at presentation boundaries; repository/CAS values remain unchanged.
+func DisplayTempUnschedulableReason(reason string) string {
+	if strings.HasPrefix(reason, resilience.ReasonPrefixTransient) && !transientCooldownStartedAt(reason).IsZero() {
+		return reason[:strings.LastIndex(reason, " [set_at=")]
+	}
+	return reason
+}
+
 // applyBalancePause pauses an account whose relay reported an exhausted
 // balance for balance.pause_seconds (design §3.2). It is a hard penalty while
 // it lasts; real traffic retries the account afterwards, and a balance
@@ -384,7 +393,9 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	// A last-resort account that served successfully has recovered: lift its
 	// transient cooldown so normal selection uses it again (design §4.3).
 	if v, ok := r.lastResortUsed.Load(account.ID); ok {
-		if at, _ := v.(time.Time); now.Sub(at) < 10*time.Minute && profile.AccountID == account.ID {
+		if at, _ := v.(time.Time); now.Sub(at) >= 10*time.Minute {
+			r.lastResortUsed.CompareAndDelete(account.ID, v)
+		} else if profile.AccountID == account.ID {
 			if r.rateLimit.liftTransientCooldown(ctx, account.ID, profile.AttemptStart) {
 				r.lastResortUsed.CompareAndDelete(account.ID, v)
 			}
@@ -423,6 +434,7 @@ func (s *RateLimitService) liftBalancePause(ctx context.Context, accountID int64
 // was read is cleared: a pause written in between (balance, credentials, an
 // administrator) stays (review R02). The successful attempt must have started
 // after this cooldown was set; missing timing evidence leaves it to expire.
+// True means the recovery marker can be consumed (cleared or no soft pause).
 func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID int64, attemptStart time.Time) bool {
 	if s == nil || s.accountRepo == nil || attemptStart.IsZero() {
 		return false
@@ -430,9 +442,14 @@ func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID 
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	fresh, err := s.accountRepo.GetByID(stateCtx, accountID)
-	if err != nil || fresh == nil || fresh.TempUnschedulableUntil == nil ||
-		!strings.HasPrefix(fresh.TempUnschedulableReason, resilience.ReasonPrefixTransient) {
+	if err != nil {
 		return false
+	}
+	// No recoverable cooldown remains: consume the marker instead of reading
+	// the account again on every subsequent successful request.
+	if fresh == nil || fresh.TempUnschedulableUntil == nil || !time.Now().Before(*fresh.TempUnschedulableUntil) ||
+		!strings.HasPrefix(fresh.TempUnschedulableReason, resilience.ReasonPrefixTransient) {
+		return true
 	}
 	startedAt := transientCooldownStartedAt(fresh.TempUnschedulableReason)
 	if startedAt.IsZero() || !attemptStart.After(startedAt) {
