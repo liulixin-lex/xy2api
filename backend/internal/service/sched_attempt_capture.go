@@ -83,16 +83,23 @@ func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {
 	return a
 }
 func (a *schedAttemptCapture) MarkFirstOutput(at time.Time) {
+	// RequestState's dependency-free AttemptMarker uses the valid-output bridge.
+	a.MarkOutput(OutputValid, at)
+}
+
+func (a *schedAttemptCapture) MarkOutput(kind SchedOutputKind, at time.Time) {
 	if a == nil {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.done || a.first {
+	if a.done || (kind == OutputValid && a.first) {
 		return
 	}
-	a.first = true
-	a.attempt.MarkFirstOutput(at)
+	if kind == OutputValid {
+		a.first = true
+	}
+	a.attempt.MarkOutput(kind, at)
 }
 func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 	if u == nil || u.InputTokens <= 0 {
@@ -339,7 +346,7 @@ func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 	typ := strings.TrimSpace(root.Get("type").String())
 	disposition := resilience.ResponsesEventOutputDisposition(typ, payload)
 	if disposition.Visible || semanticJSONOutput(root) {
-		a.MarkFirstOutput(time.Now())
+		a.MarkOutput(OutputValid, time.Now())
 	}
 }
 

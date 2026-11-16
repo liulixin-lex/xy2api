@@ -42,18 +42,33 @@ type SchedAttemptUsage struct {
 	CacheReadTokensPresent bool
 }
 type SchedAttemptFinish struct {
-	Outcome schedquality.Outcome
-	Detail  string
-	Waited  time.Duration
-	Usage   *SchedAttemptUsage
+	Outcome      schedquality.Outcome
+	Class        schedquality.ErrorClass
+	HTTPStatus   int // Zero means no status was observed.
+	StatusOrigin schedquality.StatusOrigin
+	Detail       string
+	Waited       time.Duration
+	OutputBytes  int
+	Usage        *SchedAttemptUsage
 }
+
+type SchedOutputKind uint8
+
+const (
+	OutputFirstEvent SchedOutputKind = iota
+	OutputValid
+	OutputAnswer
+)
+
 type SchedAttempt interface {
-	MarkFirstOutput(at time.Time)
+	MarkOutput(kind SchedOutputKind, at time.Time)
 	Finish(SchedAttemptFinish)
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
-	SetObserver(fn func(schedquality.AttemptSample)) // wired once by WP0 to the engine's Observe
+	// Observe Begin (FinishedAt zero) and Finish, once each, for in-flight tracking.
+	// Completed evidence enters the engine only through LoadInsertedAfter.
+	SetObserver(fn func(schedquality.AttemptSample))
 	Flush(ctx context.Context) error
 }
 type SchedAttemptStore interface {

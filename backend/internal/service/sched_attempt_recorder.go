@@ -111,13 +111,23 @@ func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
 		SessionKey: in.SessionKey, RequestID: in.RequestID,
 	}
+	s.observe(row)
 	return &schedAttemptHandle{recorder: s, row: row}
+}
+
+func (s *SchedAttemptRecorderService) observe(row schedquality.AttemptSample) {
+	s.observerMu.RLock()
+	observer := s.observer
+	s.observerMu.RUnlock()
+	if observer != nil {
+		observer(row)
+	}
 }
 
 type schedAttemptNoop struct{}
 
-func (schedAttemptNoop) MarkFirstOutput(time.Time) {}
-func (schedAttemptNoop) Finish(SchedAttemptFinish) {}
+func (schedAttemptNoop) MarkOutput(SchedOutputKind, time.Time) {}
+func (schedAttemptNoop) Finish(SchedAttemptFinish)             {}
 
 type schedAttemptHandle struct {
 	recorder *SchedAttemptRecorderService
@@ -126,12 +136,26 @@ type schedAttemptHandle struct {
 	row      schedquality.AttemptSample
 }
 
-func (h *schedAttemptHandle) MarkFirstOutput(at time.Time) {
+func (h *schedAttemptHandle) MarkOutput(kind SchedOutputKind, at time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.finished.Load() && h.row.TTFOMs == nil {
+	if h.finished.Load() {
+		return
+	}
+	var target **int
+	switch kind {
+	case OutputFirstEvent:
+		target = &h.row.FirstEventMs
+	case OutputValid:
+		target = &h.row.TTFOMs
+	case OutputAnswer:
+		target = &h.row.FirstAnswerMs
+	default:
+		return
+	}
+	if *target == nil {
 		ms := int(at.Sub(h.row.StartedAt).Milliseconds())
-		h.row.TTFOMs = &ms
+		*target = &ms
 	}
 }
 
@@ -145,6 +169,13 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	row := h.row
 	h.mu.Unlock()
 	row.FinishedAt, row.Outcome = h.recorder.now(), outcome
+	row.Class, row.StatusOrigin = in.Class, in.StatusOrigin
+	if in.HTTPStatus != 0 {
+		status := in.HTTPStatus
+		row.HTTPStatus = &status
+	}
+	outputBytes := in.OutputBytes
+	row.OutputBytes = &outputBytes
 	if r := []rune(detail); len(r) > 32 {
 		detail = string(r[:32])
 	}
@@ -162,12 +193,7 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 		}
 	}
 	s := h.recorder
-	s.observerMu.RLock()
-	observer := s.observer
-	s.observerMu.RUnlock()
-	if observer != nil {
-		observer(row)
-	}
+	s.observe(row)
 	s.enqueue(row)
 }
 
