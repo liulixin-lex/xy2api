@@ -20,11 +20,12 @@ type anthropicBufferedEvidence struct {
 }
 
 func (e *anthropicBufferedEvidence) observe(name, payload string) {
-	if !gjson.Valid(payload) {
-		if !e.stopped {
-			e.err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "malformed Anthropic frame", SourceProtocol: "anthropic"}
-		}
+	if payload == "[DONE]" {
+		e.terminalSeen, e.terminalValid, e.stopped = true, true, true
 		return
+	}
+	if !gjson.Valid(payload) {
+		return // Non-JSON keepalives do not invalidate a later authoritative stop.
 	}
 	root := gjson.Parse(payload)
 	kind := root.Get("type").String()

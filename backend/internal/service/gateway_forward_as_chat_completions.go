@@ -289,6 +289,10 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		line := scanner.Text()
 		// SSE 规范允许 `event:xxx`（冒号后无空格）：Kimi 等 Anthropic 兼容上游
 		// 返回紧凑格式，严格匹配 "event: " 会丢弃全部事件（#4653 同根因）。
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
 		eventType, ok := extractOpenAISSEEventLine(line)
 		if !ok {
 			continue

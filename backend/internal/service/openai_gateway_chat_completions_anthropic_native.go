@@ -246,6 +246,10 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		}
 		// SSE 规范允许 `event:xxx`（冒号后无空格）：Kimi 等 Anthropic 兼容上游
 		// 返回紧凑格式，严格匹配 "event: " 会丢弃全部事件（#4653 同根因）。
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
 		eventType, ok := extractOpenAISSEEventLine(line)
 		if !ok {
 			continue
@@ -547,6 +551,10 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			logReadErr(rerr)
 			break
 		}
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
 		eventType, ok := extractOpenAISSEEventLine(line)
 		if !ok {
 			continue
@@ -568,6 +576,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		}
 
 		evidence.observe(eventType, payload)
+		outputStarted = outputStarted || semanticSSEBlock([]byte("event: "+eventType+"\ndata: "+payload))
 		if evidence.err != nil {
 			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream Anthropic stream")
 			return resultWithUsage(), evidence.err

@@ -451,6 +451,10 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
 		eventType, ok := parseAnthropicSSEField(line, "event")
 		if !ok {
 			continue
