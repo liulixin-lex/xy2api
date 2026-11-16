@@ -258,10 +258,10 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 	cfg.Server.FrontendURL = base
 	cfg.JWT.Secret = "test-jwt-secret-at-least-thirty-two-bytes"
 	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{service.SettingKeyStepUpEnabled: "false"}}, cfg)
-	oauth, repo, users := newMCPRouteOAuthService(role)
+	_, repo, users := newMCPRouteOAuthService(role)
 	_, err := settings.SetManagementMCPSettings(context.Background(), service.ManagementMCPSettings{Enabled: true, PublicURL: cfg.ManagementMCP.PublicURL, AllowOperators: true, AllowUsers: true})
 	require.NoError(t, err)
-	oauth = service.NewMCPOAuthService(repo, users, settings, nil)
+	oauth := service.NewMCPOAuthService(repo, users, settings, nil)
 	// Administrator write grants always pass the real step-up gate.
 	users.user.TotpEnabled = true
 	totp := service.NewTotpService(users, nil, mcpOAuthRouteStepUpCache{}, settings, nil, nil)

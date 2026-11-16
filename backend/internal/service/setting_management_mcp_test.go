@@ -105,8 +105,10 @@ func TestManagementMCPRoleAccessAndPublicMenus(t *testing.T) {
 				require.Equal(t, allowUsers && showMenu, public.MCPUserMenuVisible)
 				injected, err := reader.GetPublicSettingsForInjection(ctx)
 				require.NoError(t, err)
-				require.Equal(t, public.MCPOperatorMenuVisible, injected.(*PublicSettingsInjectionPayload).MCPOperatorMenuVisible)
-				require.Equal(t, public.MCPUserMenuVisible, injected.(*PublicSettingsInjectionPayload).MCPUserMenuVisible)
+				payload, ok := injected.(*PublicSettingsInjectionPayload)
+				require.True(t, ok)
+				require.Equal(t, public.MCPOperatorMenuVisible, payload.MCPOperatorMenuVisible)
+				require.Equal(t, public.MCPUserMenuVisible, payload.MCPUserMenuVisible)
 			}
 		}
 	}
