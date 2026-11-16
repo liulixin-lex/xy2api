@@ -71,6 +71,7 @@ func TestM8LegacyModelDiagnosisPreserves404(t *testing.T) {
 		{"legacy_supported", service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}, 503},
 		{"unknown", service.ModelAvailabilityDiagnosis{}, 503},
 		{"dependency_error", service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, Err: fmt.Errorf("scan failed")}, 503},
+		{"typed_empty", service.ModelAvailabilityDiagnosis{Known: true}, 503},
 		{"typed_missing", service.ModelAvailabilityDiagnosis{Known: true, Members: 1}, 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -339,7 +340,7 @@ func TestM8SelectionFailureMapping(t *testing.T) {
 		code   string
 	}{
 		{"unknown", service.SelectionExhaustion{}, 503, ""},
-		{"empty", service.SelectionExhaustion{Known: true, Reasons: map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}}, 404, "model_not_found"},
+		{"empty", service.SelectionExhaustion{Known: true, Reasons: map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}}, 503, ""},
 		{"model", service.SelectionExhaustion{Known: true, Members: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonModelNotSupported: 2}}, 404, "model_not_found"},
 		{"responses", service.SelectionExhaustion{Known: true, Members: 2, ModelSupported: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonResponsesRequired: 2}}, 400, "responses_required"},
 		{"capacity", service.SelectionExhaustion{Known: true, Members: 2, ModelSupported: 2, RequestSupported: 2, Reasons: map[service.SelectionReason]int{service.SelectionReasonRateLimited: 1, service.SelectionReasonQueueFull: 1}}, 429, ""},

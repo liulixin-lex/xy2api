@@ -139,7 +139,7 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 			capacityOnly = false
 		}
 	}
-	if persistentOnly && (e.Members == 0 || e.ModelSupported == 0 && len(e.Reasons) > 0) {
+	if persistentOnly && e.Members > 0 && e.ModelSupported == 0 && len(e.Reasons) > 0 {
 		result.Status, result.ErrType, result.Code, result.ModelNotFound = 404, "model_not_found", "model_not_found", true
 		result.Message = "Model is not supported by any configured account in this group"
 		if fallback.ModelNotFound {
@@ -219,7 +219,8 @@ func classifyNoAccountError(
 	}
 
 	result := diag.DiagnoseModelAvailabilityForPlatform(ctx, apiKey.GroupID, routingModel, platform)
-	missingModel := result.Known && (result.Members == 0 || result.ModelSupported == 0)
+	// An empty pool is unavailable; only a populated pool can reject a model.
+	missingModel := result.Known && result.Members > 0 && result.ModelSupported == 0
 	// Legacy diagnosers report a successful scan through these two booleans.
 	// Preserve their 404 until all producers also populate the typed counts.
 	if !result.Known {

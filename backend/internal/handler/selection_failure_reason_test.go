@@ -24,7 +24,7 @@ func TestSelectionExhaustionClassification(t *testing.T) {
 		status                    int
 		errType                   string
 	}{
-		{"empty", 0, 0, 0, true, map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}, nil, 404, "model_not_found"},
+		{"empty", 0, 0, 0, true, map[service.SelectionReason]int{service.SelectionReasonNoMembers: 1}, nil, 503, "api_error"},
 		{"model", 2, 0, 0, true, map[service.SelectionReason]int{service.SelectionReasonModelNotSupported: 2}, nil, 404, "model_not_found"},
 		{"responses", 2, 2, 0, true, map[service.SelectionReason]int{service.SelectionReasonResponsesRequired: 2}, nil, 400, "invalid_request_error"},
 		{"rate", 2, 2, 2, true, map[service.SelectionReason]int{service.SelectionReasonRateLimited: 2}, nil, 429, "rate_limit_error"},
