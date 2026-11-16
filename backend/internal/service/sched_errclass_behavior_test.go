@@ -110,6 +110,26 @@ func TestErrclassFinishFailurePaths(t *testing.T) {
 			a.finish(nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("synthetic connection refused")})
 		}, schedquality.ClassUpstream},
 		{"unfinished", func(a *schedAttemptCapture) { a.finishUnfinished() }, schedquality.ClassUnknown},
+		{"missing_terminal", func(a *schedAttemptCapture) { a.expectTerminal = true; a.finish(nil, nil) }, schedquality.ClassUnknown},
+		{"timeout_after_output", func(a *schedAttemptCapture) {
+			a.MarkOutput(OutputValid, time.Now())
+			a.timeout(resilience.TimeoutPlan{})
+		}, schedquality.ClassInterrupted},
+		{"timeout_client_cancel", func(a *schedAttemptCapture) {
+			ctx, cancel := context.WithCancel(context.Background())
+			a.state.InitDelivery(ctx, time.Now(), nil)
+			cancel()
+			a.timeout(resilience.TimeoutPlan{})
+		}, schedquality.ClassClientCancel},
+		{"timeout_budget_cut", func(a *schedAttemptCapture) {
+			cfg := resilience.Defaults()
+			cfg.Budget.BudgetCutAttribution = resilience.BudgetAttributionEnforce
+			start := time.Now().Add(-235 * time.Second)
+			budget := resilience.NewBudget(context.Background(), &cfg, resilience.KindText, start)
+			plan := budget.PlanAttemptTimeout(30*time.Second, false, start.Add(235*time.Second))
+			require.True(t, plan.Applied())
+			a.timeout(plan)
+		}, schedquality.ClassGateway},
 		{"unknown_projected_502", func(a *schedAttemptCapture) { a.finish(nil, &UpstreamFailoverError{StatusCode: 502}) }, schedquality.ClassUnknown},
 		{"projected_502_after_http_200", func(a *schedAttemptCapture) {
 			a.httpStatus = 200
@@ -176,6 +196,7 @@ func TestErrclassRepairResendSharesRequest(t *testing.T) {
 			require.Equal(t, schedquality.OriginUpstream, rec.finishes[0].StatusOrigin)
 			require.Equal(t, 400, rec.finishes[0].HTTPStatus)
 			require.Equal(t, schedquality.OutcomeOK, rec.finishes[1].Outcome)
+			require.Equal(t, schedquality.ClassNone, rec.finishes[1].Class)
 			require.Equal(t, rec.starts[0].RequestID, rec.starts[1].RequestID)
 			require.NotEmpty(t, rec.starts[0].RequestID)
 			st.CompleteGatewayForward(true, false)
