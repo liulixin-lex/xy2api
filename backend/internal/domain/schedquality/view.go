@@ -21,10 +21,31 @@ const (
 )
 
 // 豁免生效或 !auto → Front；任一线 Rear → Rear；任一线 Trial → Trial；其余 Front。
-func (v StateView) Placement(auto bool, now time.Time) Placement { return PlaceFront }
+func (v StateView) Placement(auto bool, now time.Time) Placement {
+	ref, _ := v.EffectiveOverride(now)
+	if !auto || ref.Mode == OverrideExempt {
+		return PlaceFront
+	}
+	lines := [...]LineView{v.TTFO, v.Error, v.Cache}
+	for _, line := range lines {
+		if line.Identity == IdentityRear {
+			return PlaceRear
+		}
+	}
+	for _, line := range lines {
+		if line.Trial {
+			return PlaceTrial
+		}
+	}
+	return PlaceFront
+}
 
 // 豁免或 !auto → false；Error 线后排 → true；TTFO 线后排且 slowTwice → true；只有 Cache 线后排 → false。
-func (v StateView) MigrateOwner(auto bool, now time.Time, slowTwice bool) bool { return false }
+func (v StateView) MigrateOwner(auto bool, now time.Time, slowTwice bool) bool {
+	ref, _ := v.EffectiveOverride(now)
+	return auto && ref.Mode != OverrideExempt &&
+		(v.Error.Identity == IdentityRear || (v.TTFO.Identity == IdentityRear && slowTwice))
+}
 
 type View interface {
 	Version() int64

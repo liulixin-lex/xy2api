@@ -3,155 +3,302 @@
 package schedquality
 
 import (
+	"encoding/json"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 )
 
-func evaluationState() StateRow {
-	return StateRow{AccountID: evaluationScope.AccountID, GroupID: evaluationScope.GroupID, Model: evaluationScope.Model}
+func machineState(line Dimension) LineState {
+	return Relaxed(LineKey{AccountID: 1, Model: "synthetic-model", GroupID: 10, Line: line})
+}
+func machineStep(s LineState, kind EventKind, v Verdict, at time.Time) (LineState, Action) {
+	return Step(s, kind, v, Basis{RuleVersion: RuleVersion, Line: s.Line, Threshold: .05}, at)
 }
 
-func slowEvaluationSamples(n int, group int64, age time.Duration) []AttemptSample {
-	rows := evaluationSamples(n, group, age)
-	for i := range rows {
-		rows[i].TTFOMs = sampleInt(2000)
-	}
-	return rows
-}
-
-func TestAdvanceCooldownLadder(t *testing.T) {
-	for _, tc := range []struct {
-		level, wantLevel int
-		duration         time.Duration
-	}{
-		{0, 1, 20 * time.Minute}, {1, 2, 40 * time.Minute}, {2, 3, 60 * time.Minute},
-		{3, 4, 90 * time.Minute}, {4, 5, 120 * time.Minute}, {5, 5, 120 * time.Minute},
-	} {
-		prev := evaluationState()
-		prev.Level = tc.level
-		prev.EvidenceSince = evaluationNow.Add(-15 * time.Minute)
-		next, _ := AdvanceAt(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow, EvaluateDeadline)
-		if next.State != StateCooling || next.Level != tc.wantLevel || next.Until.Sub(evaluationNow) != tc.duration || next.EvidenceSince != prev.EvidenceSince {
-			t.Fatalf("level %d: %+v", tc.level, next)
-		}
-	}
-}
-
-func TestAdvanceNormalDecayBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		normal   time.Duration
-		level    int
-		duration time.Duration
-	}{
-		{29 * time.Minute, 5, 120 * time.Minute}, {30 * time.Minute, 1, 20 * time.Minute},
-	} {
-		prev := evaluationState()
-		prev.Level, prev.EvidenceSince = 4, evaluationNow.Add(-tc.normal)
-		next, _ := AdvanceAt(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow, EvaluateDeadline)
-		if next.Level != tc.level || next.Until.Sub(evaluationNow) != tc.duration {
-			t.Fatalf("normal %v: %+v", tc.normal, next)
-		}
-	}
-}
-
-func TestAdvanceDeadlineException(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		rows  func() []AttemptSample
-		renew bool
-	}{
-		{"local-failures-do-not-extend", func() []AttemptSample { return slowEvaluationSamples(20, 10, 10*time.Minute) }, false},
-		{"fresh-foreign-failures", func() []AttemptSample { return slowEvaluationSamples(20, 20, 10*time.Minute) }, true},
-		{"old-foreign-failures", func() []AttemptSample { return slowEvaluationSamples(20, 20, 30*time.Minute) }, false},
-		{"old-batch-plus-one-new-failure", func() []AttemptSample {
-			return append(slowEvaluationSamples(20, 20, 30*time.Minute), slowEvaluationSamples(1, 20, time.Minute)...)
-		}, true},
-		{"old-batch-plus-one-new-success", func() []AttemptSample {
-			return append(slowEvaluationSamples(20, 20, 30*time.Minute), evaluationSamples(1, 20, time.Minute)...)
-		}, true},
-		{"foreign-slow-under-target-line", func() []AttemptSample { return evaluationSamples(20, 20, 10*time.Minute) }, false},
-		{"new-foreign-fast-path", func() []AttemptSample { return slowEvaluationSamples(6, 20, time.Minute) }, true},
-		{"completed-at-round-start-is-old", func() []AttemptSample {
-			rows := slowEvaluationSamples(20, 20, 20*time.Minute)
-			for i := range rows {
-				rows[i].FinishedAt = evaluationNow.Add(-20 * time.Minute)
-				rows[i].StartedAt = rows[i].FinishedAt.Add(-time.Second)
-			}
-			return rows
-		}, false},
-		{"started-before-round-completed-during-round", func() []AttemptSample {
-			rows := slowEvaluationSamples(20, 20, 10*time.Minute)
-			for i := range rows {
-				rows[i].StartedAt = evaluationNow.Add(-30 * time.Minute)
-			}
-			return rows
-		}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			prev := evaluationState()
-			prev.State, prev.Level = StateCooling, 5
-			prev.Since, prev.Until, prev.EvidenceSince = evaluationNow.Add(-20*time.Minute), evaluationNow, evaluationNow.Add(-2*time.Hour)
-			next, e := AdvanceAt(prev, evaluationPolicy(), tc.rows(), evaluationNow, EvaluateDeadline)
-			if tc.renew {
-				if next.State != StateCooling || next.Level != 5 || next.Until.Sub(evaluationNow) != 120*time.Minute || next.EvidenceSince != prev.EvidenceSince || e.Speed.Source != EvidenceOther {
-					t.Fatalf("expected renewal: %+v / %+v", next, e)
-				}
-			} else if next.State != StateNormal || next.Level != 5 || next.EvidenceSince != evaluationNow || !next.Until.IsZero() {
-				t.Fatalf("expected timed release: %+v", next)
+func TestStepOrdinaryConfirmation(t *testing.T) {
+	for _, line := range []Dimension{DimensionTTFO, DimensionError, DimensionCache} {
+		t.Run(string(line), func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				verdicts []Verdict
+				minutes  []int
+				wantRear bool
+			}{
+				{"first", []Verdict{VerdictFail}, []int{0}, line == DimensionTTFO},
+				{"adjacent", []Verdict{VerdictFail, VerdictFail}, []int{0, 5}, true},
+				{"unknown-breaks", []Verdict{VerdictFail, VerdictUnknown, VerdictFail}, []int{0, 5, 10}, line == DimensionTTFO},
+				{"pass-breaks", []Verdict{VerdictFail, VerdictPass, VerdictFail}, []int{0, 5, 10}, line == DimensionTTFO},
+				{"missing-tick", []Verdict{VerdictFail, VerdictFail}, []int{0, 10}, line == DimensionTTFO},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					s := machineState(line)
+					s.Identity = IdentityPass
+					s.GoodSince = machineNow.Add(-20 * time.Minute)
+					for i, v := range tc.verdicts {
+						s, _ = machineStep(s, EventRegular, v, machineNow.Add(time.Duration(tc.minutes[i])*time.Minute))
+					}
+					if (s.Identity == IdentityRear) != tc.wantRear {
+						t.Fatalf("state %+v", s)
+					}
+					if !tc.wantRear && (s.Identity != IdentityUnknown || s.PendingAt.IsZero() || !s.GoodSince.IsZero()) {
+						t.Fatalf("pending state %+v", s)
+					}
+				})
 			}
 		})
 	}
 }
 
-func TestAdvancePreservesEvidenceAndCannotReuseRenewal(t *testing.T) {
-	prev := evaluationState()
-	prev.EvidenceSince = evaluationNow.Add(-2 * time.Hour)
-	rows := slowEvaluationSamples(20, 20, 10*time.Minute)
-	entered, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow.Add(-5*time.Minute), EvaluateDeadline)
-	if entered.State != StateCooling {
-		t.Fatal("fixture must enter")
+func TestStepCooldownAndReview(t *testing.T) {
+	s, action := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
+	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != 20*time.Minute {
+		t.Fatalf("first entry: %+v/%s", s, action)
 	}
-	// Old evidence still contributes to ordinary evaluation while cooling.
-	current, e := AdvanceAt(entered, evaluationPolicy(), rows, evaluationNow, EvaluateDeadline)
-	if current != entered || e.Speed.N != 20 {
-		t.Fatal("entry cleared evidence")
+	frozen := s
+	if early, a := machineStep(s, EventReview, VerdictPass, s.Until.Add(-time.Nanosecond)); a != "" || !reflect.DeepEqual(early, s) {
+		t.Fatal("early release")
 	}
-	fresh := slowEvaluationSamples(20, 20, time.Minute)
-	renewed, _ := AdvanceAt(entered, evaluationPolicy(), fresh, entered.Until, EvaluateDeadline)
-	if renewed.Level != 2 || renewed.EvidenceSince != prev.EvidenceSince {
-		t.Fatalf("renewal = %+v", renewed)
+	for _, tc := range []struct {
+		v      Verdict
+		action Action
+		id     Identity
+		trial  bool
+		level  int
+	}{
+		{VerdictFail, ActionRenew, IdentityRear, false, 1},
+		{VerdictPass, ActionRelease, IdentityPass, false, 0},
+		{VerdictUnknown, ActionTrial, IdentityUnknown, true, 0},
+	} {
+		next, a := machineStep(frozen, EventReview, tc.v, frozen.Until)
+		if a != tc.action || next.Identity != tc.id || next.Trial != tc.trial || next.Level != tc.level {
+			t.Fatalf("review: %+v/%s", next, a)
+		}
+		if tc.trial && (!next.Epoch.Equal(frozen.Until) || !next.TrialUntil.Equal(frozen.Until.Add(TrialDuration))) {
+			t.Fatal("trial cut/deadline")
+		}
+		if tc.v == VerdictFail && (!next.Entry.Equal(frozen.Until) || !next.LastRear.Equal(frozen.Until)) {
+			t.Fatal("renewal did not restart evidence")
+		}
 	}
-	released, _ := AdvanceAt(renewed, evaluationPolicy(), fresh, renewed.Until, EvaluateDeadline)
-	if released.State != StateNormal {
-		t.Fatalf("same evidence renewed twice: %+v", released)
+	for level := 1; level <= 6; level++ {
+		at := s.Until
+		s, action = machineStep(s, EventReview, VerdictFail, at)
+		want := min(level, 4)
+		if action != ActionRenew || s.Level != want || s.Until.Sub(at) != CooldownLadder[want] {
+			t.Fatalf("ladder: %+v", s)
+		}
+	}
+	s, _ = machineStep(s, EventReview, VerdictPass, s.Until)
+	s, action = machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
+	if action != ActionEnter || s.Level != 4 || s.Admissions != 2 {
+		t.Fatal("later entry must escalate and count")
 	}
 }
 
-func TestAdvanceTimedReleaseClearsEvidence(t *testing.T) {
-	prev := evaluationState()
-	prev.State, prev.Level = StateCooling, 3
-	prev.Since, prev.Until = evaluationNow.Add(-time.Hour), evaluationNow
-	prev.EvidenceSince = evaluationNow.Add(-time.Hour)
-	rows := slowEvaluationSamples(20, 10, time.Minute)
-	before, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow.Add(-time.Nanosecond), EvaluateDeadline)
-	if before != prev {
-		t.Fatal("released before deadline")
+func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
+	rear, _ := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
+	trial, _ := machineStep(rear, EventReview, VerdictUnknown, rear.Until)
+	for _, line := range []Dimension{DimensionTTFO, DimensionError, DimensionCache} {
+		for _, tc := range []struct {
+			v  Verdict
+			a  Action
+			id Identity
+		}{
+			{VerdictFail, ActionTrialFail, IdentityRear}, {VerdictPass, ActionTrialPass, IdentityPass}, {VerdictUnknown, ActionTrialTimeout, IdentityUnknown},
+		} {
+			prev := trial
+			prev.Line = line
+			next, a := machineStep(prev, EventTrial, tc.v, prev.TrialUntil)
+			if a != tc.a || next.Identity != tc.id || next.Trial || !next.Epoch.Equal(prev.Epoch) {
+				t.Fatalf("deadline %+v/%s", next, a)
+			}
+			if tc.v == VerdictUnknown && (next.Level != prev.Level || next.Admissions != prev.Admissions) {
+				t.Fatal("timeout lost history")
+			}
+			if tc.v == VerdictFail && (next.Level != 1 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
+				t.Fatal("trial failed to escalate")
+			}
+		}
 	}
-	released, _ := AdvanceAt(prev, evaluationPolicy(), rows, evaluationNow, EvaluateDeadline)
-	if released.State != StateNormal || released.EvidenceSince != evaluationNow || !released.Until.IsZero() {
-		t.Fatalf("timed release = %+v", released)
-	}
-	next, _ := AdvanceAt(released, evaluationPolicy(), rows, evaluationNow.Add(time.Second), EvaluateDeadline)
-	if next.State != StateNormal || next.EvidenceSince != evaluationNow {
-		t.Fatal("old evidence survived timed release")
+	s, a := machineStep(trial, EventTrial, VerdictUnknown, trial.EvaluatedAt.Add(time.Minute))
+	if a != "" || !s.Trial {
+		t.Fatal("unknown ended trial early")
 	}
 }
 
-func TestAdvanceExemptionOnlyChangesPlacement(t *testing.T) {
-	next, e := AdvanceAt(evaluationState(), evaluationPolicy(), slowEvaluationSamples(6, 10, time.Minute), evaluationNow, EvaluateDeadline)
-	v := StateView{Failing: next.State == StateCooling, Level: next.Level,
-		GroupOverride: OverrideRef{Mode: OverrideExempt, Expires: evaluationNow.Add(time.Minute)}}
-	if next.State != StateCooling || e.Verdicts.Speed != VerdictFail || StandingOf(v, true, evaluationNow) != StandFront || StandingOf(v, true, evaluationNow.Add(time.Minute)) != StandBack {
-		t.Fatal("exemption must preserve internal state and expire at its deadline")
+func TestStepLevelClearBoundaries(t *testing.T) {
+	s := machineState(DimensionTTFO)
+	s.Level = 2
+	s.Admissions = 3
+	s.LastRear = machineNow.Add(-time.Hour)
+	for i := 0; i <= 6; i++ {
+		next, a := machineStep(s, EventRegular, VerdictPass, machineNow.Add(time.Duration(i)*RegularInterval))
+		if i < 6 && (next.Level != 2 || a != "") {
+			t.Fatal("cleared before 30m")
+		}
+		if i == 6 && (next.Level != 0 || next.Admissions != 0 || a != ActionClear) {
+			t.Fatalf("good clear: %+v/%s", next, a)
+		}
+		s = next
+	}
+	s, a := machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
+	if a != ActionEnter || s.Level != 0 || s.Admissions != 1 {
+		t.Fatal("cleared history escalated")
+	}
+	// Unknown interrupts the good run.
+	s = machineState(DimensionTTFO)
+	s.Level = 1
+	s.Admissions = 1
+	s.LastRear = machineNow.Add(-time.Hour)
+	s, _ = machineStep(s, EventRegular, VerdictPass, machineNow)
+	s, _ = machineStep(s, EventRegular, VerdictUnknown, machineNow.Add(25*time.Minute))
+	s, a = machineStep(s, EventRegular, VerdictPass, machineNow.Add(30*time.Minute))
+	if s.Level != 1 || a != "" || !s.GoodSince.Equal(machineNow.Add(30*time.Minute)) {
+		t.Fatal("broken good streak cleared")
+	}
+	for _, level := range []int{0, 3} {
+		s = machineState(DimensionTTFO)
+		s.Level = level
+		s.Admissions = 1
+		s.LastRear = machineNow
+		s.Epoch = machineNow.Add(-time.Minute)
+		deadline := machineNow.Add(LevelClearQuiet)
+		if _, due := Due(s, deadline.Add(-time.Nanosecond), false, false); due {
+			t.Fatal("early quiet clock")
+		}
+		kind, due := Due(s, deadline, false, false)
+		if !due || kind != EventClock {
+			t.Fatal("missing quiet clock, including level zero")
+		}
+		next, a := machineStep(s, kind, VerdictUnknown, deadline)
+		if a != ActionClear || next.Level != 0 || next.Admissions != 0 || !next.Epoch.Equal(s.Epoch) {
+			t.Fatal("quiet clear lost epoch")
+		}
+		next, a = machineStep(next, EventRegular, VerdictFail, deadline.Add(RegularInterval))
+		if a != ActionEnter || next.Level != 0 {
+			t.Fatal("quiet clear retained escalation")
+		}
+		// A regular event shares the quiet deadline; evidence must run first.
+		next, a = machineStep(s, EventRegular, VerdictFail, deadline)
+		if a != ActionEnter || next.Level != min(level+1, 4) || !next.LastRear.Equal(deadline) {
+			t.Fatal("clock took priority over failure")
+		}
+		next, a = machineStep(s, EventRegular, VerdictUnknown, deadline)
+		if a != ActionClear || next.Admissions != 0 {
+			t.Fatal("regular tick swallowed quiet clear")
+		}
+	}
+}
+
+func TestDueCutAndIdempotence(t *testing.T) {
+	base := machineState(DimensionTTFO)
+	rear, _ := machineStep(base, EventRegular, VerdictFail, machineNow)
+	trial, _ := machineStep(rear, EventReview, VerdictUnknown, rear.Until)
+	for _, tc := range []struct {
+		s           LineState
+		at          time.Time
+		five, touch bool
+		kind        EventKind
+		due         bool
+	}{
+		{base, machineNow, false, true, EventClock, false}, {base, machineNow, true, false, EventRegular, true},
+		{rear, rear.Until.Add(-time.Second), true, true, EventReview, false}, {rear, rear.Until, true, true, EventReview, true},
+		{trial, trial.EvaluatedAt.Add(time.Second), false, false, EventTrial, false}, {trial, trial.EvaluatedAt.Add(time.Second), false, true, EventTrial, true},
+		{trial, trial.TrialUntil, false, false, EventTrial, true},
+	} {
+		kind, due := Due(tc.s, tc.at, tc.five, tc.touch)
+		if due != tc.due || (due && kind != tc.kind) {
+			t.Fatalf("due %v/%v", kind, due)
+		}
+	}
+	for _, at := range []time.Time{rear.EvaluatedAt, rear.EvaluatedAt.Add(-time.Second)} {
+		if _, due := Due(rear, at, true, true); due {
+			t.Fatal("duplicate timestamp due")
+		}
+		if next, a := machineStep(rear, EventReview, VerdictPass, at); a != "" || !reflect.DeepEqual(next, rear) {
+			t.Fatal("duplicate step changed state")
+		}
+	}
+	if !rear.Cut(EventReview).Equal(rear.Entry) || !trial.Cut(EventTrial).Equal(trial.Epoch) {
+		t.Fatal("cut mapping")
+	}
+	relaxed := Relaxed(rear.LineKey)
+	if relaxed.LineKey != rear.LineKey || !reflect.DeepEqual(relaxed, base) {
+		t.Fatal("relax retained history")
+	}
+	// Front identity changes persist with no decision action.
+	pass, a := machineStep(base, EventRegular, VerdictPass, machineNow)
+	if a != "" || pass.Identity != IdentityPass {
+		t.Fatal("front transition emitted action")
+	}
+	unknown, a := machineStep(pass, EventRegular, VerdictUnknown, machineNow.Add(RegularInterval))
+	if a != "" || unknown.Identity != IdentityUnknown || unknown.Basis == nil {
+		t.Fatal("front unknown transition")
+	}
+}
+
+func TestStepFrozenRuleBVectors(t *testing.T) {
+	data, err := os.ReadFile("testdata/machine/states.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name              string
+		At                float64
+		FiveMin           bool `json:"five_min"`
+		Verdict, Identity int
+		Before            struct {
+			Identity            int
+			Trial               bool
+			Epoch, Entry, Until float64
+			TrialUntil          float64 `json:"trial_until"`
+		}
+	}
+	if err = json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) != 132 {
+		t.Fatalf("vectors %d", len(cases))
+	}
+	stamp := func(v float64) time.Time {
+		if v <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(0, int64(v*1e9)).UTC()
+	}
+	identity := func(v int) Identity {
+		switch v {
+		case 0:
+			return IdentityPass
+		case 1:
+			return IdentityRear
+		}
+		return IdentityUnknown
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			s := machineState(DimensionTTFO)
+			s.Identity = identity(tc.Before.Identity)
+			s.Trial = tc.Before.Trial
+			s.Epoch = stamp(tc.Before.Epoch)
+			s.Entry = stamp(tc.Before.Entry)
+			s.Until = stamp(tc.Before.Until)
+			s.TrialUntil = stamp(tc.Before.TrialUntil)
+			v := VerdictUnknown
+			if tc.Verdict == 0 {
+				v = VerdictPass
+			} else if tc.Verdict == 1 {
+				v = VerdictFail
+			}
+			at := stamp(tc.At)
+			if kind, due := Due(s, at, tc.FiveMin, true); due {
+				s, _ = machineStep(s, kind, v, at)
+			}
+			if s.Identity != identity(tc.Identity) {
+				t.Fatalf("identity %d, want %d (raw=%d)", s.Identity, identity(tc.Identity), tc.Verdict)
+			}
+		})
 	}
 }
