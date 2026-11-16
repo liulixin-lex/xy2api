@@ -137,6 +137,8 @@ type SchedulerSnapshotService struct {
 	outboxRebuildRetryReason     string
 	outboxLagWarningActive       bool
 	outboxCountErrorLastLoggedAt time.Time
+	outboxLockBusySince          time.Time
+	outboxLockWarnedAt           time.Time
 
 	fullRebuildRunMu     sync.Mutex
 	fullRebuildStateMu   sync.Mutex
@@ -375,20 +377,30 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	if s.outboxRepo == nil || s.cache == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	// All event effects target the shared Redis snapshot, not process-local
 	// state. Serialize consumers until the exact successful batch is deleted.
 	lease, acquired, err := s.outboxRepo.TryAcquireConsumerLock(ctx)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lock failed: %v", err)
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.inspectOutboxLag(healthCtx, false)
+		healthCancel()
 		return
 	}
 	if !acquired {
+		if s.noteOutboxLockContention(time.Now(), true) {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lock unavailable for at least 30s")
+		}
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.inspectOutboxLag(healthCtx, false)
+		healthCancel()
 		return
 	}
+	s.noteOutboxLockContention(time.Now(), false)
 	defer lease.Release()
-	events, err := s.outboxRepo.ListPendingAndReleaseDedup(ctx, 200)
+	events, err := lease.ListPendingAndReleaseDedup(ctx, 200)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox poll failed: %v", err)
 		return
@@ -400,7 +412,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	seen := make(map[batchSeenKey]struct{})
 	ids := make([]int64, 0, len(events))
 	for _, event := range events {
-		eventCtx, eventCancel := context.WithTimeout(context.Background(), outboxEventTimeout)
+		eventCtx, eventCancel := context.WithTimeout(ctx, outboxEventTimeout)
 		err := s.handleOutboxEvent(eventCtx, event, seen)
 		eventCancel()
 		if err != nil {
@@ -409,13 +421,18 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		}
 		ids = append(ids, event.ID)
 	}
-	ackCtx, ackCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	err = s.outboxRepo.DeleteProcessed(ackCtx, ids)
+	ackCtx, ackCancel := context.WithTimeout(ctx, 10*time.Second)
+	err = lease.DeleteProcessed(ackCtx, ids)
 	ackCancel()
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox acknowledgement failed: %v", err)
 		return
 	}
+	if err := lease.Commit(); err != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox commit failed: %v", err)
+		return
+	}
+	lease.Release() // end the transaction before a potentially slow rebuild
 	// Only pending rows contribute to lag/backlog, including late small IDs.
 	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	s.checkOutboxLag(lagCtx)
@@ -1065,7 +1082,7 @@ func (s *SchedulerSnapshotService) rebuildFullSnapshot(ctx context.Context, reas
 
 		// A prior full_rebuild event can observe the active state committed for a
 		// later group_changed event. Recover here under fresh authority so the
-		// earlier event cannot block the outbox watermark before that event runs.
+		// earlier event cannot block acknowledgement before that event runs.
 		knownHistorical := registeredByGroup[groupID]
 		if knownHistorical == nil {
 			knownHistorical = []SchedulerBucket{}
@@ -1241,7 +1258,27 @@ func (s *SchedulerSnapshotService) coalesceFullRebuild(run func() error) error {
 	return err
 }
 
-func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context) {
+func (s *SchedulerSnapshotService) noteOutboxLockContention(now time.Time, busy bool) bool {
+	s.lagMu.Lock()
+	defer s.lagMu.Unlock()
+	if !busy {
+		s.outboxLockBusySince = time.Time{}
+		s.outboxLockWarnedAt = time.Time{}
+		return false
+	}
+	if s.outboxLockBusySince.IsZero() {
+		s.outboxLockBusySince = now
+	}
+	if now.Sub(s.outboxLockBusySince) < 30*time.Second || !s.outboxLockWarnedAt.IsZero() && now.Sub(s.outboxLockWarnedAt) < time.Minute {
+		return false
+	}
+	s.outboxLockWarnedAt = now
+	return true
+}
+
+func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context) { s.inspectOutboxLag(ctx, true) }
+
+func (s *SchedulerSnapshotService) inspectOutboxLag(ctx context.Context, allowRebuild bool) {
 	if s.cfg == nil || s.outboxRepo == nil {
 		return
 	}
@@ -1279,6 +1316,12 @@ func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context) {
 		}
 	}
 	backlogDegraded := backlogKnown && backlogThreshold > 0 && backlog >= int64(backlogThreshold)
+	if !allowRebuild {
+		if s.shouldLogOutboxLagWarning(lagWarning || backlogDegraded) {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox pending while consumer busy: lag=%s backlog=%d", lag, backlog)
+		}
+		return
+	}
 
 	// A successful rebuild latches the degraded episode until recovery. A failed
 	// rebuild remains retryable, but only after an exponentially backed-off

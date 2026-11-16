@@ -127,14 +127,6 @@ func (s *schedulerCacheRecorder) ListBuckets(ctx context.Context) ([]service.Sch
 	return nil, nil
 }
 
-func (s *schedulerCacheRecorder) GetOutboxWatermark(ctx context.Context) (int64, error) {
-	return 0, nil
-}
-
-func (s *schedulerCacheRecorder) SetOutboxWatermark(ctx context.Context, id int64) error {
-	return nil
-}
-
 func (s *AccountRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())

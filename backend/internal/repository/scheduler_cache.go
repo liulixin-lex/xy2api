@@ -16,7 +16,6 @@ import (
 
 const (
 	schedulerBucketSetKey          = "sched:buckets"
-	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
 	schedulerAccountPrefix         = "sched:acc:v2:"
 	schedulerAccountMetaPrefix     = "sched:meta:v2:"
 	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
@@ -679,25 +678,6 @@ func (c *schedulerCache) ListBuckets(ctx context.Context) ([]service.SchedulerBu
 		out = append(out, bucket)
 	}
 	return out, nil
-}
-
-func (c *schedulerCache) GetOutboxWatermark(ctx context.Context) (int64, error) {
-	val, err := c.rdb.Get(ctx, schedulerOutboxWatermarkKey).Result()
-	if err == redis.Nil {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	id, err := strconv.ParseInt(val, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return id, nil
-}
-
-func (c *schedulerCache) SetOutboxWatermark(ctx context.Context, id int64) error {
-	return c.rdb.Set(ctx, schedulerOutboxWatermarkKey, strconv.FormatInt(id, 10), 0).Err()
 }
 
 func schedulerBucketKey(prefix string, bucket service.SchedulerBucket) string {
