@@ -144,6 +144,11 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 }
 
 func (s *RequestState) noteGatewaySendLocked(accountID int64) {
+	// A later send (including a WebSocket turn) cannot inherit HTTP headers
+	// from the preceding attempt, even when request statistics are disabled.
+	if accountID > 0 {
+		s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, 0
+	}
 	r := s.gatewayRecord
 	if r == nil || r.final != nil || accountID <= 0 {
 		return

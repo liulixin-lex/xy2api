@@ -294,3 +294,21 @@ func TestGatewayRequestRescueRequiresEarlierFailedSend(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewaySendClearsPreviousHTTPStatus(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		st := NewRequestState()
+		if enabled {
+			st.EnableGatewayRequest(time.Now())
+		}
+		st.NoteUpstreamHTTPStatus(1, 502)
+		require.Equal(t, 502, st.UpstreamHTTPStatus(1))
+		st.NoteGatewaySend(2)
+		require.Zero(t, st.UpstreamHTTPStatus(0))
+		st.NoteUpstreamHTTPStatus(2, 200)
+		require.Zero(t, st.UpstreamHTTPStatus(1))
+		require.Equal(t, 200, st.UpstreamHTTPStatus(2))
+		st.NoteGatewaySend(2)
+		require.Zero(t, st.UpstreamHTTPStatus(2))
+	}
+}
