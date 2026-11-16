@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -502,8 +503,12 @@ func ValidateMinUpstreamRate(platform string, rate *float64) error {
 		return fmt.Errorf("min_upstream_rate only supports OpenAI groups")
 	}
 	v := *rate
-	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || (v > 0 && v < 0.0001) || v >= 1000000 || math.Abs(v*10000-math.Round(v*10000)) > 1e-6 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || (v > 0 && v < 0.0001) || v >= 1000000 {
 		return fmt.Errorf("min_upstream_rate must be finite, nonnegative, below 1000000 and have at most 4 decimal places")
+	}
+	decimal := strconv.FormatFloat(v, 'f', -1, 64)
+	if dot := strings.IndexByte(decimal, '.'); dot >= 0 && len(decimal)-dot-1 > 4 {
+		return fmt.Errorf("min_upstream_rate must have at most 4 decimal places")
 	}
 	return nil
 }

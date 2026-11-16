@@ -229,13 +229,15 @@ func TestRatefloorQueuedOwnerUsesSuccessfulReplacement(t *testing.T) {
 }
 
 func TestRatefloorConfigValidationAndClear(t *testing.T) {
-	for _, rate := range []float64{math.NaN(), math.Inf(1), -1, 0.12345, 1000000} {
+	for _, rate := range []float64{math.NaN(), math.Inf(1), -1, 0.12345, 0.12340000004, 0.00001, 1000000} {
 		require.Error(t, ValidateMinUpstreamRate(PlatformOpenAI, &rate))
 	}
 	for _, platform := range []string{PlatformGrok, PlatformAnthropic, PlatformGemini, PlatformComposite} {
 		require.Error(t, ValidateMinUpstreamRate(platform, floatPtr(0.4)))
 	}
-	require.NoError(t, ValidateMinUpstreamRate(PlatformOpenAI, floatPtr(0.1234)))
+	for _, v := range []float64{0, 0.0001, 0.0071, 0.1234, 999999.9999} {
+		require.NoError(t, ValidateMinUpstreamRate(PlatformOpenAI, floatPtr(v)))
+	}
 	repo := &groupRepoStubForAdmin{getByID: &Group{ID: 7, Platform: PlatformOpenAI, MinUpstreamRate: floatPtr(0.4)}}
 	svc := &adminServiceImpl{groupRepo: repo}
 	group, err := svc.UpdateGroup(context.Background(), 7, &UpdateGroupInput{})
