@@ -33,8 +33,6 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 ## 对外端点
 
-固定 Chat 与 Grok API-key 上游会在发送前将误投到 Chat 入口的 Responses 形状转换为 Chat 请求，保留可表达的多模态和工具历史；仅非法或目标无法表达的字段返回带 param 的 400。
-
 鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`。
 
 | 端点 | 说明 |
@@ -53,6 +51,9 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
 
 API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
+
+`/v1/chat/completions` 收到 Responses 格式的正文、而账号上游只支持 Chat Completions（含 Grok API Key）时，网关在发送前把它转换为 Chat 请求，保留能表达的多模态内容与工具历史；字段非法或目标确实无法表达时返回 400，`param` 指向该字段。
+
 
 ### Chat Completions 转 Responses
 
