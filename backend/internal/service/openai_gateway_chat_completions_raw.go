@@ -465,7 +465,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		return nil
 	}
-	var parser openAICompatSSEFrameParser
+	var parser m7CompatSSEFrameParser
 	var frameLines []string
 
 	for scanner.Scan() {
@@ -478,6 +478,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			releaseFrame = true
 			writeLine(line)
 			continue
+		}
+		if parser.separates(line) {
+			frame, _ := parser.Finish()
+			if err := processFrame(frame, frameLines); err != nil {
+				return nil, err
+			}
+			frameLines = nil
+			if terminal.sawDone || terminal.failurePayload != "" || terminal.sawMalformed {
+				break
+			}
 		}
 		frameLines = append(frameLines, line)
 		frame, complete := parser.AddLine(line)

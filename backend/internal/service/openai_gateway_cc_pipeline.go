@@ -327,7 +327,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 ) ccStreamScanState {
 	st := ccStreamScanState{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	var terminal openAIRawStreamTerminalState
-	var parser openAICompatSSEFrameParser
+	var parser m7CompatSSEFrameParser
 	defer func() {
 		if c != nil && c.Request != nil && account != nil {
 			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, st.ResponseFactsKnown, st.UsagePresent, st.UsageSource, st.TerminalSeen, st.TerminalValid, st.ResponseBodyKind)
