@@ -40,7 +40,8 @@ func TestOpenAIBodyLimitFailoverExhausted_ReturnsRedactedResponsesSSE(t *testing
 	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, bodyLimitFailoverTestError(), true)
 
 	body := rec.Body.String()
-	require.True(t, strings.HasPrefix(body, "event: response.failed\n"))
+	require.True(t, strings.HasPrefix(body, "event: response.created\n"))
+	require.Equal(t, 1, strings.Count(body, "event: response.failed\n"))
 	require.Contains(t, body, `"code":"invalid_request"`)
 	require.Contains(t, body, `"message":"Request payload is too large"`)
 	require.NotContains(t, body, "must-not-leak")

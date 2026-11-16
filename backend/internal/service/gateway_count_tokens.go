@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
@@ -403,7 +404,14 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, err
 		}
-		targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
+		parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages/count_tokens"))
+		if err != nil {
+			return nil, err
+		}
+		query := parsedURL.Query()
+		query.Set("beta", "true")
+		parsedURL.RawQuery = query.Encode()
+		targetURL = parsedURL.String()
 	}
 	body = sanitizeCountTokensRequestBody(body)
 
@@ -476,7 +484,14 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			if err != nil {
 				return nil, nil, err
 			}
-			targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
+			parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages/count_tokens"))
+			if err != nil {
+				return nil, nil, err
+			}
+			query := parsedURL.Query()
+			query.Set("beta", "true")
+			parsedURL.RawQuery = query.Encode()
+			targetURL = parsedURL.String()
 		}
 	} else if account.IsCustomBaseURLEnabled() {
 		customURL := account.GetCustomBaseURL()

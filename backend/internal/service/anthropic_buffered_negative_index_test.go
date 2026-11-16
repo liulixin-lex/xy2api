@@ -50,28 +50,28 @@ func TestAnthropicBufferedAggregators_IgnoreNegativeBlockIndex(t *testing.T) {
 		{
 			name: "gateway chat completions",
 			run: func(resp *http.Response, c *gin.Context) error {
-				_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
+				_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
 				return err
 			},
 		},
 		{
 			name: "gateway responses",
 			run: func(resp *http.Response, c *gin.Context) error {
-				_, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				_, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, nil, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 				return err
 			},
 		},
 		{
 			name: "openai native anthropic chat completions",
 			run: func(resp *http.Response, c *gin.Context) error {
-				_, err := newNativeAnthropicHangTestService(5).handleCCBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
+				_, err := newNativeAnthropicHangTestService(5).handleCCBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
 				return err
 			},
 		},
 		{
 			name: "openai native anthropic responses",
 			run: func(resp *http.Response, c *gin.Context) error {
-				_, err := newNativeAnthropicHangTestService(5).handleResponsesBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				_, err := newNativeAnthropicHangTestService(5).handleResponsesBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 				return err
 			},
 		},

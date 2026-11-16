@@ -176,8 +176,8 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_CapacityShedReturnsRequestScope
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.True(t, failoverErr.RetryableOnSameAccount)
 	require.True(t, failoverErr.RequestScopedTransient)
-	require.Zero(t, repo.modelRateLimitAccountID, "request-scoped capacity shedding must not change account health")
-	require.Empty(t, repo.modelRateLimitKey)
+	require.Equal(t, account.ID, repo.modelRateLimitAccountID, "explicit capacity rules apply only to the known model")
+	require.Equal(t, "gpt-5.4", repo.modelRateLimitKey)
 	require.False(t, IsResponseCommitted(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Empty(t, rec.Body.String())
@@ -1859,7 +1859,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputReturnsFailover(t *testing.T) 
 			`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"An error occurred while processing your request."}}`,
+			`data: {"type":"response.failed","error":{"message":"An error occurred while processing your request."},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-failed"}},
@@ -1901,7 +1901,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 			`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`,
+			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-capacity-failed"}},
@@ -2221,7 +2221,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null}}`,
+			`data: {"type":"response.failed","error":{"type":"upstream_error","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","code":null},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-context-window-failed"}},
@@ -2406,7 +2406,8 @@ func TestOpenAIStreamingNormalizesTerminalOutputFromDeltas(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	terminalType, _, terminalPayload, ok := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminal, _, terminalPayload := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminalType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "response.completed", terminalType)
 	output := gjson.GetBytes(terminalPayload, "response.output")
@@ -2443,7 +2444,8 @@ func TestOpenAIStreamingNormalizesTerminalOutputToEmptyArray(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	terminalType, _, terminalPayload, ok := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminal, _, terminalPayload := extractOpenAISSETerminalEvent(rec.Body.String())
+	terminalType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "response.completed", terminalType)
 	output := gjson.GetBytes(terminalPayload, "response.output")
@@ -2473,7 +2475,7 @@ func TestOpenAIStreamingPolicyResponseFailedBeforeOutputPassesThrough(t *testing
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."}}`,
+			`data: {"type":"response.failed","error":{"type":"safety_error","message":"This request has been flagged for potentially high-risk cyber activity."},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-policy-failed"}},
@@ -2671,7 +2673,7 @@ func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *
 			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"message":"upstream processing failed"}}`,
+			`data: {"type":"response.failed","error":{"message":"upstream processing failed"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid-passthrough-failed"}},
@@ -2845,7 +2847,7 @@ func TestOpenAIStreamingPassthroughResponseDoneWithoutDoneMarkerStillSucceeds(t 
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		_, _ = pw.Write([]byte("data: {\"type\":\"response.done\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.done\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n"))
 	}()
 
 	result, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")
@@ -2959,8 +2961,8 @@ func TestOpenAINonStreamingContentTypePassThrough(t *testing.T) {
 		t.Fatalf("handleNonStreamingResponse error: %v", err)
 	}
 
-	if !strings.Contains(rec.Header().Get("Content-Type"), "application/vnd.test+json") {
-		t.Fatalf("expected Content-Type passthrough, got %q", rec.Header().Get("Content-Type"))
+	if rec.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("expected JSON Content-Type, got %q", rec.Header().Get("Content-Type"))
 	}
 }
 
@@ -3963,7 +3965,7 @@ func TestHandleNonStreamingResponse_OAuthJSONBodyWithDataEventTextKeepsJSONUsage
 	require.Equal(t, 22, result.OutputTokens)
 	// Response must remain the original JSON body (not routed through the SSE
 	// path, which would rewrite/lose the body or usage).
-	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
 	require.Equal(t, "resp_oauth_compact", gjson.Get(rec.Body.String(), "id").String())
 	require.Equal(t, int64(33), gjson.Get(rec.Body.String(), "usage.total_tokens").Int())
 	require.Contains(t, rec.Body.String(), "processing data: 1,2,3 then event: click finished")
@@ -4023,7 +4025,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
 }
 
-func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
+func TestHandleSSEToJSON_NoFinalResponseReturnsJSONError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -4037,14 +4039,15 @@ func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {
 	body := []byte(strings.Join([]string{
 		`data: {"type":"response.in_progress","response":{"id":"resp_3"}}`,
 		`data: [DONE]`,
-	}, "\n"))
+	}, "\n\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 0, usage.InputTokens)
-	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
-	require.Contains(t, rec.Body.String(), `data: {"type":"response.in_progress"`)
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, OpenAIUpstreamStreamTruncatedCode, gjson.Get(rec.Body.String(), "error.code").String())
 }
 
 // 无账号时没有可换的对象：newOpenAIStreamFailoverError 要拿 account 记录 ops 归属与
@@ -4062,12 +4065,13 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.failed","error":{"message":"upstream rejected request"}}`,
+		`data: {"type":"response.failed","response":{"id":"r_failed","status":"failed"},"error":{"message":"upstream rejected request"}}`,
 		`data: [DONE]`,
-	}, "\n"))
+	}, "\n\n"))
 
 	usage, err := svc.handleSSEToJSON(resp, c, nil, body, "gpt-4o", "gpt-4o")
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.True(t, usage.ResponseFactsKnown)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Contains(t, rec.Body.String(), "upstream rejected request")
@@ -4145,7 +4149,7 @@ func TestHandleStreamingResponseCyberPolicyMarks(t *testing.T) {
 			`data: {"type":"response.created","response":{"id":"r1"}}`,
 			"",
 			"event: response.failed",
-			`data: {"type":"response.failed","error":{"code":"cyber_policy","message":"flagged"}}`,
+			`data: {"type":"response.failed","error":{"code":"cyber_policy","message":"flagged"},"response":{"status":"failed"}}`,
 			"",
 		}, "\n"))),
 		Header: http.Header{"X-Request-Id": []string{"rid"}},
@@ -4204,4 +4208,8 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.Contains(t, gotMsg, "flagged for cyber policy")
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
+}
+
+func (r stubOpenAIAccountRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	return (schedulerTestOpenAIAccountRepo{accounts: r.accounts}).ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
 }

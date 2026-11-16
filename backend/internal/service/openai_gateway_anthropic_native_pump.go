@@ -10,14 +10,18 @@ package service
 //
 // 与 handleAnthropicStreamingResponse / readOpenAICompatBufferedTerminal 的
 // 同类排水一致，本泵用 gateway.stream_data_interval_timeout（默认 180s）作为
-// 逐行读间隔上限，超时即向调用方返回 errAnthropicNativeStreamIdle，由调用方
+// 业务进展间隔上限，注释与 ping 不续期；超时返回 errAnthropicNativeStreamIdle，由调用方
 // 关闭 resp.Body 解除阻塞的读并结束排水。
 
 import (
 	"bufio"
 	"errors"
 	"io"
+	"sync/atomic"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/tidwall/gjson"
 )
 
 // errAnthropicNativeStreamIdle 表示上游流读间隔超时（见上方文件注释）。
@@ -30,13 +34,45 @@ type anthropicNativeLineEvent struct {
 	err  error
 }
 
-// anthropicNativeLinePump 以独立 goroutine 泵送 scanner 的行，并对逐行到达
-// 间隔施加 interval 上限（<=0 表示禁用，保持无界读的旧行为）。
+// anthropicNativeLinePump 以独立 goroutine 泵送原始行，对完整业务帧的
+// 到达间隔应用既有读取/停滞期限；首输出 guard 生效时不提前截断。
 type anthropicNativeLinePump struct {
-	events   chan anthropicNativeLineEvent
-	done     chan struct{}
-	timer    *time.Timer
-	interval time.Duration
+	events        chan anthropicNativeLineEvent
+	done          chan struct{}
+	timer         *time.Timer
+	interval      time.Duration
+	progress      anthropicNativeProgress
+	firstEvent    *openAICompatFirstEvent
+	outputStarted func() bool
+}
+
+// The reader owns the parser; deadlines read the arrival timestamps atomically.
+// Consuming buffered lines must never make old traffic look like new progress.
+type anthropicNativeProgress struct {
+	parser         openAICompatSSEFrameParser
+	lastReadAt     atomic.Int64
+	lastProgressAt atomic.Int64
+}
+
+func (p *anthropicNativeProgress) start() {
+	now := time.Now().UnixNano()
+	p.lastReadAt.Store(now)
+	p.lastProgressAt.Store(now)
+}
+
+func (p *anthropicNativeProgress) observeLine(line string) {
+	now := time.Now().UnixNano()
+	p.lastReadAt.Store(now)
+	frame, complete := p.parser.AddLine(line)
+	if !complete || !gjson.Valid(frame.Data) || !gjson.Parse(frame.Data).IsObject() {
+		return
+	}
+	if effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType) == "ping" {
+		return
+	}
+	if resilience.ClassifyStreamEvent("messages", frame.EventType, []byte(frame.Data)).Kind != resilience.Unknown {
+		p.lastProgressAt.Store(now)
+	}
 }
 
 // newAnthropicNativeLinePump 启动泵 goroutine；调用方 defer pump.stop()。
@@ -46,12 +82,14 @@ func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) 
 		done:     make(chan struct{}),
 		interval: interval,
 	}
+	p.progress.start()
 	if interval > 0 {
 		p.timer = time.NewTimer(interval)
 	}
 	go func() {
 		defer close(p.events)
 		for scanner.Scan() {
+			p.progress.observeLine(scanner.Text())
 			select {
 			case p.events <- anthropicNativeLineEvent{line: scanner.Text()}:
 			case <-p.done:
@@ -69,28 +107,48 @@ func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) 
 }
 
 // next 阻塞返回下一行。返回 io.EOF 表示上游正常收流；errAnthropicNativeStreamIdle
-// 表示 interval 内无任何数据到达（计时从收到上一行时起算，事件处理耗时不算入，
-// 与 readOpenAICompatBufferedTerminal 的 resetTimeout 语义一致）。
+// 表示期限内没有完整业务帧到达。期限从读取时起算，包含排队和事件处理耗时。
 func (p *anthropicNativeLinePump) next() (string, error) {
-	var timeoutCh <-chan time.Time
-	if p.timer != nil {
-		timeoutCh = p.timer.C
-	}
-	select {
-	case ev, ok := <-p.events:
-		if !ok {
-			return "", io.EOF
+	for {
+		remaining, bounded := p.remaining()
+		if bounded && remaining <= 0 {
+			return "", errAnthropicNativeStreamIdle
 		}
-		p.resetTimer()
-		return ev.line, ev.err
-	case <-timeoutCh:
-		return "", errAnthropicNativeStreamIdle
+		var timeoutCh <-chan time.Time
+		if bounded {
+			p.resetTimer(remaining)
+			timeoutCh = p.timer.C
+		}
+		select {
+		case ev, ok := <-p.events:
+			if remaining, bounded := p.remaining(); bounded && remaining <= 0 {
+				return "", errAnthropicNativeStreamIdle
+			}
+			if !ok {
+				return "", io.EOF
+			}
+			return ev.line, ev.err
+		case <-timeoutCh:
+			// A business frame may have advanced the deadline while next waited.
+		}
 	}
 }
 
-// resetTimer 在收到一行后重启间隔计时器。
-func (p *anthropicNativeLinePump) resetTimer() {
+func (p *anthropicNativeLinePump) remaining() (time.Duration, bool) {
+	started := p.outputStarted != nil && p.outputStarted()
+	if !started && p.firstEvent != nil && !p.firstEvent.disarmed.Load() {
+		return 0, false
+	}
+	interval := resilienceStallThreshold(p.interval, started)
+	if interval <= 0 {
+		return 0, false
+	}
+	return time.Until(time.Unix(0, p.progress.lastProgressAt.Load()).Add(interval)), true
+}
+
+func (p *anthropicNativeLinePump) resetTimer(remaining time.Duration) {
 	if p.timer == nil {
+		p.timer = time.NewTimer(remaining)
 		return
 	}
 	if !p.timer.Stop() {
@@ -99,7 +157,7 @@ func (p *anthropicNativeLinePump) resetTimer() {
 		default:
 		}
 	}
-	p.timer.Reset(p.interval)
+	p.timer.Reset(remaining)
 }
 
 // stop 终止泵 goroutine。注意：goroutine 若正阻塞在 scanner.Read 上，需由

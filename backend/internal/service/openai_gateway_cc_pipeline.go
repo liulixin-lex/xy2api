@@ -16,7 +16,9 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -209,6 +211,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	bearerToken string,
 	userAgent string,
 	grokCacheIdentity string,
+	actualEffort **string,
 	captureOwner ...**schedAttemptCapture,
 ) (*http.Response, error) {
 	var schedCapture *schedAttemptCapture
@@ -268,6 +271,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header, body)
 	s.prepareQualityHTTP(ctx, c, account, upstreamReq, body)
 	s.captureCacheRequestDiagnostic(c, upstreamReq)
+	if actualEffort != nil {
+		*actualEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -313,67 +319,135 @@ func (s *OpenAIGatewayService) scanCCStream(
 	c *gin.Context,
 	resp *http.Response,
 	account *Account,
+	protocol string,
 	logPrefix string,
 	requestID string,
 	startTime time.Time,
 	emit func(*apicompat.ChatCompletionsChunk),
+	emitRaw ...func([]byte) error,
 ) ccStreamScanState {
-	var st ccStreamScanState
-
-	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
-	for scanner.Scan() {
-		line := scanner.Text()
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok {
-			continue
+	st := ccStreamScanState{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
+	var terminal openAIRawStreamTerminalState
+	var parser m7CompatSSEFrameParser
+	defer func() {
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, st.ResponseFactsKnown, st.UsagePresent, st.UsageSource, st.TerminalSeen, st.TerminalValid, st.ResponseBodyKind)
 		}
-		payload = strings.TrimSpace(payload)
-		if payload == "" {
-			continue
+	}()
+	latchConversionError := func(err error) bool {
+		st.Err = err
+		if !c.Writer.Written() {
+			_ = resp.Body.Close()
+			return true
+		}
+		// Deliver the terminal before waiting for the remaining upstream usage.
+		writeCCStreamReadError(c, protocol, err)
+		return false
+	}
+	processFrame := func(frame openAICompatSSEFrame) bool {
+		payload := strings.TrimSpace(frame.Data)
+		terminal.ObserveDataLine(payload)
+		if frame.EventType == "error" && gjson.Valid(payload) {
+			terminal.failurePayload = payload
+		}
+		st.TerminalSeen = terminal.sawDone || terminal.sawFinishReason || terminal.failurePayload != ""
+		st.TerminalValid = st.TerminalSeen && !terminal.sawMalformed
+		observeSchedPayload(c, []byte(payload))
+		if u := extractCCStreamUsage(payload); u != nil {
+			st.Usage = *u
+			st.UsagePresent = true
+			st.UsageSource = "upstream_sse_progressive"
+		}
+		// After conversion fails, later frames only contribute usage.
+		if st.Err != nil {
+			if payload == "[DONE]" {
+				st.SawDone = true
+				return true
+			}
+			return false
+		}
+		if terminal.sawMalformed || terminal.failurePayload != "" {
+			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid or failed Chat Completions stream frame", SourceProtocol: "chat"}
+			return true
+		}
+		if terminal.pendingMalformed {
+			return false // A later valid event can resolve a non-JSON keepalive.
 		}
 		if payload == "[DONE]" {
-			observeSchedPayload(c, []byte(payload))
 			st.SawDone = true
-			break
+			return true
 		}
-		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
-		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
-		// 事件与无类型 body 报告实际处理档位）。
-		observeSchedPayload(c, []byte(payload))
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
-
-		if u := extractCCStreamUsage(payload); u != nil {
-			st.Usage = *u
+		if len(emitRaw) > 0 && emitRaw[0] != nil {
+			if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && (gjson.Get(payload, "choices.0.delta.content").String() != "" || gjson.Get(payload, "choices.0.delta.reasoning_content").String() != "" || len(gjson.Get(payload, "choices.0.delta.tool_calls").Array()) > 0) {
+				ms := int(time.Since(startTime).Milliseconds())
+				st.FirstTokenMs = &ms
+			}
+			if err := emitRaw[0]([]byte(payload)); err != nil {
+				return latchConversionError(err)
+			}
+			return false
 		}
-
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			logger.L().Warn(logPrefix+": failed to parse chat stream chunk",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-			continue
+			return latchConversionError(&apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"})
 		}
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
 		}
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil {
+				recordConvertedTerminalMapping(c.Request.Context(), "chat", "responses", "", *choice.FinishReason)
+			}
+		}
 		emit(&chunk)
+		return false
 	}
-
-	if err := scanner.Err(); err != nil {
+	scanner := s.newUpstreamSSEScanner(resp.Body, relayLivenessFor(c, account))
+	for scanner.Scan() {
+		if frame, complete := parser.AddLine(scanner.Text()); complete && processFrame(frame) {
+			break
+		}
+	}
+	if !st.SawDone {
+		if frame, complete := parser.Finish(); complete {
+			processFrame(frame)
+		}
+	}
+	if err := scanner.Err(); err != nil && st.Err == nil && !terminal.Terminated() {
 		noteSchedError(c, err)
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn(logPrefix+": stream read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
+			logger.L().Warn(logPrefix+": stream read error", zap.Error(err), zap.String("request_id", requestID))
 		}
 		st.Err = err
 	}
+	// The existing empty/role/meter-only answer remains eligible. An active
+	// generation needs finish, DONE, or a complete trailing meter and clean EOF.
+	if st.Err == nil && terminal.IsTruncated(true) {
+		st.Err = ErrOpenAIUpstreamStreamTruncated
+	}
+
+	if st.Err == nil && terminal.sawCompleteTrailingUsage {
+		currentSchedAttempt(c.Request.Context()).markTerminal()
+	}
+
 	return st
+}
+
+func writeCCStreamReadError(c *gin.Context, protocol string, err error) {
+	code, message := classifyOpenAIUpstreamStreamReadError(err)
+	var conversion *apicompat.UpstreamConversionError
+	if errors.As(err, &conversion) {
+		code, message = OpenAIUpstreamProtocolErrorCode, "Invalid upstream Chat Completions stream"
+	}
+	errType := "server_error"
+	if protocol == PreOutputProtocolAnthropic {
+		errType = "api_error"
+	}
+	WriteTargetProtocolError(c, protocol, http.StatusBadGateway, errType, code, "", message)
 }
 
 // logCCStreamMissingDoneSentinel 记录"上游未发 [DONE] 哨兵即结束"的 debug 日志。
@@ -389,7 +463,14 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	c *gin.Context,
 	resp *http.Response,
 	writeError compatErrorWriter,
+	factsOut ...*OpenAIForwardResult,
 ) (_ *apicompat.ChatCompletionsResponse, _ OpenAIUsage, retErr error) {
+	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "json"}
+	defer func() {
+		if len(factsOut) > 0 && factsOut[0] != nil {
+			*factsOut[0] = facts
+		}
+	}()
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		classified := nonstreamReadError(c.Request.Context(), resp, err)
@@ -403,6 +484,10 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		return nil, OpenAIUsage{}, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	if _, present := openAIResponsesUsageEvidence(respBody, "upstream_json"); present {
+		facts.UsagePresent = true
+		facts.UsageSource = "upstream_json"
+	}
 	var ccResp apicompat.ChatCompletionsResponse
 	if err := json.Unmarshal(respBody, &ccResp); err != nil {
 		writeError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
@@ -422,15 +507,10 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	return &ccResp, usage, nil
 }
 
-// writeOpenAIResponsesFallbackError 以 /v1/responses 回退路径的既有错误格式回写
-// （裸 error 对象；不调用 MarkResponseCommitted，与原内联写法保持一致）。
+// writeOpenAIResponsesFallbackError 保留回退路径的旧入口，按实际提交状态
+// 写 Responses JSON 错误或一次 SSE 失败终态。
 func writeOpenAIResponsesFallbackError(c *gin.Context, statusCode int, errType, message string) {
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	WriteTargetProtocolError(c, PreOutputProtocolResponses, statusCode, errType, "", "", message)
 }
 
 // WriteTargetProtocolError finishes an inbound protocol once, after stopping its
@@ -449,7 +529,8 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	if ProtocolTerminalClaimed(c) {
 		return false
 	}
-	if c.Request != nil && c.Request.Context().Err() != nil || GatewayDeliveryFailed(c) {
+	if c.Request != nil && c.Request.Context().Err() != nil &&
+		(!errors.Is(c.Request.Context().Err(), context.DeadlineExceeded) || status != http.StatusRequestTimeout || errType != "invalid_request_error" || code != "request_upload_timeout") || GatewayDeliveryFailed(c) {
 		return false
 	}
 	written := c.Writer.Written()
@@ -461,6 +542,9 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 		return false
 	}
 	errorBody := gin.H{"type": errType, "message": message}
+	if errType == "" {
+		delete(errorBody, "type")
+	}
 	if code != "" {
 		errorBody["code"] = code
 	}
@@ -469,7 +553,6 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 	}
 	payload := gin.H{"error": errorBody}
 	if protocol == PreOutputProtocolAnthropic {
-		delete(errorBody, "code")
 		delete(errorBody, "param")
 		payload["type"] = "error"
 	}
@@ -492,8 +575,7 @@ func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errTy
 		id, model, createdAt, sequence := "", "", time.Now().Unix(), int64(0)
 		opened := false
 		var usage json.RawMessage
-		if w := deliveryWriterFrom(c); w != nil {
-			s := &w.terminal
+		if s := convertedResponsesErrorState(c); s != nil {
 			s.mu.Lock()
 			id, model, sequence, opened = s.id, s.model, s.nextSequence, s.opened
 			if s.createdAt != 0 {

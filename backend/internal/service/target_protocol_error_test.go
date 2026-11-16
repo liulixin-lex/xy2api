@@ -31,7 +31,7 @@ func TestM7ServiceErrorAfterHeartbeat(t *testing.T) {
 				}
 				body := rec.Body.String()
 				if protocol == PreOutputProtocolAnthropic {
-					if strings.Contains(body, `"param"`) || strings.Contains(body, `"code"`) {
+					if strings.Contains(body, `"param"`) || !strings.Contains(body, `"code":"bad_field"`) {
 						t.Fatal(body)
 					}
 				} else if !strings.Contains(body, `"param":"input[1]"`) {

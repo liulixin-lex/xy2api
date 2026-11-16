@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -55,6 +56,20 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	upstreamModel = xai.ResolveGrokTextResponsesModelID(upstreamModel, grokDefaultResponsesModel)
 	if isGrokImageGenerationModel(upstreamModel) {
 		return nil, fmt.Errorf("model %s is an image model and is not available on the Responses endpoint; use /v1/images/generations instead", upstreamModel)
+	}
+	if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		policy, _ := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+		if policy.maxEffort == "" && len(policy.mappings) == 0 && c != nil && c.Request != nil {
+			policy, _ = c.Request.Context().Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+		}
+		// With no group policy, keep Grok's existing field shape and normalization.
+		if policy.maxEffort != "" || len(policy.mappings) > 0 {
+			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, upstreamModel, "responses")
+			if policyErr != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			body = policyBody
+		}
 	}
 	patchedBody, clientToolMapping, err := patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 	if err != nil {
@@ -110,10 +125,23 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 
 	upstreamStart := time.Now()
 	var resp *http.Response
+	var reasoningEffort *string
 	for attempt := 0; ; attempt++ {
 		upstreamReq, buildErr := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, cacheIdentity, s.cfg, s.settingService)
 		if buildErr != nil {
 			return nil, buildErr
+		}
+
+		if account.Type == AccountTypeAPIKey {
+			reasoningEffort = nil
+			// The builder can modify the body; freeze only an effort actually sent.
+			if reader, readErr := upstreamReq.GetBody(); readErr == nil {
+				wireBody, readErr := io.ReadAll(reader)
+				_ = reader.Close()
+				if readErr == nil {
+					reasoningEffort = extractOpenAIReasoningEffortFromBody(wireBody)
+				}
+			}
 		}
 
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
@@ -216,6 +244,8 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	stateCtx := withGrokTeamRateLimitModel(ctx, upstreamModel)
 	s.updateGrokUsageFromResponse(stateCtx, account, resp.Header, resp.StatusCode)
 
+	var partialErr error
+	var responseFacts OpenAIForwardResult
 	var usage *OpenAIUsage
 	var firstTokenMs *int
 	responseID := ""
@@ -232,8 +262,20 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, clientToolMapping, maxLineSize)
 		}
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, upstreamModel)
+		if streamResult != nil {
+			responseFacts.ResponseFactsKnown = streamResult.ResponseFactsKnown
+			responseFacts.UsagePresent = streamResult.UsagePresent
+			responseFacts.UsageSource = streamResult.UsageSource
+			responseFacts.TerminalSeen = streamResult.TerminalSeen
+			responseFacts.TerminalValid = streamResult.TerminalValid
+			responseFacts.ResponseBodyKind = streamResult.ResponseBodyKind
+		}
 		if err != nil {
-			return nil, err
+			var failoverErr *UpstreamFailoverError
+			if account.Type != AccountTypeAPIKey || streamResult == nil || streamResult.usage == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr) {
+				return nil, err
+			}
+			partialErr = err
 		}
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
@@ -243,8 +285,20 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		imageOutputSizes = streamResult.imageOutputSizes
 	} else {
 		nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+		if nonStreamResult != nil {
+			responseFacts.ResponseFactsKnown = nonStreamResult.ResponseFactsKnown
+			responseFacts.UsagePresent = nonStreamResult.UsagePresent
+			responseFacts.UsageSource = nonStreamResult.UsageSource
+			responseFacts.TerminalSeen = nonStreamResult.TerminalSeen
+			responseFacts.TerminalValid = nonStreamResult.TerminalValid
+			responseFacts.ResponseBodyKind = nonStreamResult.ResponseBodyKind
+		}
 		if err != nil {
-			return nil, err
+			var failoverErr *UpstreamFailoverError
+			if account.Type != AccountTypeAPIKey || nonStreamResult == nil || nonStreamResult.usage == nil || errors.As(err, &failoverErr) {
+				return nil, err
+			}
+			partialErr = err
 		}
 		usage = nonStreamResult.usage
 		responseID = strings.TrimSpace(nonStreamResult.responseID)
@@ -256,8 +310,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if usage == nil {
 		usage = &OpenAIUsage{}
 	}
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
+	if account.Type != AccountTypeAPIKey {
+		reasoningEffort = extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
+	}
 	result := &OpenAIForwardResult{
+		PartialFailure:  partialErr != nil,
 		RequestID:       firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 		UpstreamHeaders: resp.Header,
 		ResponseID:      responseID,
@@ -280,7 +337,15 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		result.ImageCount = imageCount
 		result.ImageOutputSizes = imageOutputSizes
 	}
-	return result, nil
+	result.ResponseFactsKnown = responseFacts.ResponseFactsKnown
+	result.UsagePresent = responseFacts.UsagePresent
+	result.UsageSource = responseFacts.UsageSource
+	result.TerminalSeen = responseFacts.TerminalSeen
+	result.TerminalValid = responseFacts.TerminalValid
+	result.ResponseBodyKind = responseFacts.ResponseBodyKind
+	result.UpstreamRecoveryHint = resilience.StateFrom(ctx).UpstreamRecoveryHint()
+
+	return result, partialErr
 }
 
 func isGrokInvalidEncryptedContentResponse(statusCode int, body []byte) bool {

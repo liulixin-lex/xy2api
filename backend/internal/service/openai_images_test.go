@@ -2231,3 +2231,88 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingDrainsAfterClientDiscon
 	require.Equal(t, 9, result.Usage.OutputTokens)
 	require.Equal(t, 4, result.Usage.ImageOutputTokens)
 }
+
+func TestNativeImagesActualBillableCount(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		count       int
+		tokens      bool
+	}{
+		{"one_of_three", `{"data":[{"b64_json":"ZmFrZQ=="}]}`, 1, false},
+		{"only_one_valid", `{"data":[{}, {"url":""}, {"url":"https://fixture.invalid/image"}]}`, 1, false},
+		{"both_fields", `{"data":[{"url":"https://fixture.invalid/image","b64_json":"ZmFrZQ=="}]}`, 1, false},
+		{"non_string", `{"data":[{"url":12,"b64_json":{}}]}`, 0, false},
+		{"empty", `{"data":[]}`, 0, false},
+		{"bad_json", `{`, 0, false},
+		{"error_in_200", `{"error":{"message":"fixture"},"data":[{"b64_json":"ZmFrZQ=="}]}`, 0, false},
+		{"empty_with_tokens", `{"data":[],"usage":{"input_tokens":7,"output_tokens":11}}`, 0, true},
+	} {
+		for _, committed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/committed=%t", tc.name, committed), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-image-2","prompt":"fixture","n":3,"response_format":"url"}`)
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest("POST", "/v1/images/generations", bytes.NewReader(body))
+				c.Request.Header.Set("Content-Type", "application/json")
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.reply))}}}
+				parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+				require.NoError(t, err)
+				var heartbeat *openAIImagesJSONKeepalive
+				if committed {
+					stop := StartOpenAIImagesJSONKeepalive(c, time.Hour)
+					defer stop()
+					heartbeat = openAIImagesJSONKeepaliveFromContext(c)
+					require.True(t, heartbeat.beat())
+				}
+				result, err := svc.ForwardImages(context.Background(), c, &Account{ID: 6, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://image-upstream.example/v1"}}, body, parsed, "")
+				require.NotNil(t, result)
+				require.True(t, result.ImageCountObserved)
+				require.Equal(t, tc.count, result.ImageCount)
+				if tc.count > 0 {
+					require.NoError(t, err)
+					require.Equal(t, 200, rec.Code)
+				} else {
+					require.Error(t, err)
+					require.True(t, result.PartialFailure)
+					status := 502
+					if committed {
+						status = 200
+						require.False(t, heartbeat.beat(), "invalid response must stop further heartbeats")
+					}
+					require.Equal(t, status, rec.Code)
+					require.Equal(t, "invalid_image_response", gjson.Get(rec.Body.String(), "error.code").String())
+					require.Equal(t, "data", gjson.Get(rec.Body.String(), "error.param").String())
+				}
+				if tc.tokens {
+					require.Equal(t, 7, result.Usage.InputTokens)
+					require.Equal(t, 11, result.Usage.OutputTokens)
+				}
+			})
+		}
+	}
+	for _, mode := range []BillingMode{BillingModeImage, BillingModePerRequest, BillingModeToken} {
+		for _, metered := range []bool{false, true} {
+			t.Run(fmt.Sprintf("billing/%s/metered=%t", mode, metered), func(t *testing.T) {
+				catalog := newStubPricingServiceFromJSON(t, `{"fixture-image":{"input_cost_per_token":0.001,"output_cost_per_token":0.002,"output_cost_per_image":0.5}}`)
+				billing := NewBillingService(&config.Config{}, catalog)
+				svc := &OpenAIGatewayService{billingService: billing, resolver: NewModelPricingResolver(nil, billing)}
+				group := &Group{ID: 4, ModelPricing: []ChannelModelPricing{{Models: []string{"fixture-image"}, BillingMode: mode, PerRequestPrice: new(float64(999))}}}
+				key := &APIKey{GroupID: &group.ID, Group: group}
+				result := &OpenAIForwardResult{Model: "fixture-image", ImageCountObserved: true}
+				tokens := UsageTokens{}
+				if metered {
+					result.Usage = OpenAIUsage{InputTokens: 7, OutputTokens: 11}
+					tokens = UsageTokens{InputTokens: 7, OutputTokens: 11}
+				}
+				cost, err := svc.calculateOpenAIRecordUsageCost(context.Background(), result, key, []string{"fixture-image"}, 1, 1, 1, 1, tokens, "", nil, time.Now())
+				require.NoError(t, err)
+				want := 0.0
+				if metered {
+					want = 0.029
+				}
+				require.InDelta(t, want, cost.TotalCost, 1e-12)
+				require.Zero(t, svc.calculateOpenAIImageCost(context.Background(), "fixture-image", key, result, 1).TotalCost)
+			})
+		}
+	}
+}

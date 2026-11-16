@@ -357,6 +357,7 @@ func TestNormalizedCodexLimits_OnlyPrimaryData(t *testing.T) {
 func TestRateLimitService_HandleUpstreamError_403PreservesOriginalUpstreamMessage(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetOpenAI403CounterCache(&openAI403CounterCacheStub{counts: []int64{openAI403DisableThreshold}})
 	account := &Account{
 		ID:       201,
 		Platform: PlatformOpenAI,
@@ -380,6 +381,7 @@ func TestRateLimitService_HandleUpstreamError_403PreservesOriginalUpstreamMessag
 func TestRateLimitService_HandleUpstreamError_403FallsBackToRawBody(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetOpenAI403CounterCache(&openAI403CounterCacheStub{counts: []int64{openAI403DisableThreshold}})
 	account := &Account{
 		ID:       202,
 		Platform: PlatformOpenAI,

@@ -4,6 +4,7 @@ package ent
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +42,22 @@ type UsageLog struct {
 	Fallback *bool `json:"fallback,omitempty"`
 	// Takeover holds the value of the "takeover" field.
 	Takeover *bool `json:"takeover,omitempty"`
+	// RequestScope holds the value of the "request_scope" field.
+	RequestScope *string `json:"request_scope,omitempty"`
+	// UsageObserved holds the value of the "usage_observed" field.
+	UsageObserved *bool `json:"usage_observed,omitempty"`
+	// UsageSource holds the value of the "usage_source" field.
+	UsageSource *string `json:"usage_source,omitempty"`
+	// TerminalEventSeen holds the value of the "terminal_event_seen" field.
+	TerminalEventSeen *bool `json:"terminal_event_seen,omitempty"`
+	// TerminalEventValid holds the value of the "terminal_event_valid" field.
+	TerminalEventValid *bool `json:"terminal_event_valid,omitempty"`
+	// ResponseBodyType holds the value of the "response_body_type" field.
+	ResponseBodyType *string `json:"response_body_type,omitempty"`
+	// Degradations holds the value of the "degradations" field.
+	Degradations jsontext.Value `json:"degradations,omitempty"`
+	// PricingSource holds the value of the "pricing_source" field.
+	PricingSource jsontext.Value `json:"pricing_source,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
 	// RequestedModel holds the value of the "requested_model" field.
@@ -254,15 +271,15 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
+		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUsageObserved, usagelog.FieldTerminalEventSeen, usagelog.FieldTerminalEventValid, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldGatewayRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy, usagelog.FieldAnchorBasis, usagelog.FieldClientFamily, usagelog.FieldCancelStage, usagelog.FieldCdnObserved, usagelog.FieldBudgetStartMode:
+		case usagelog.FieldRequestID, usagelog.FieldGatewayRequestID, usagelog.FieldRequestScope, usagelog.FieldUsageSource, usagelog.FieldResponseBodyType, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy, usagelog.FieldAnchorBasis, usagelog.FieldClientFamily, usagelog.FieldCancelStage, usagelog.FieldCdnObserved, usagelog.FieldBudgetStartMode:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -345,6 +362,64 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Takeover = new(bool)
 				*_m.Takeover = value.Bool
+			}
+		case usagelog.FieldRequestScope:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field request_scope", values[i])
+			} else if value.Valid {
+				_m.RequestScope = new(string)
+				*_m.RequestScope = value.String
+			}
+		case usagelog.FieldUsageObserved:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field usage_observed", values[i])
+			} else if value.Valid {
+				_m.UsageObserved = new(bool)
+				*_m.UsageObserved = value.Bool
+			}
+		case usagelog.FieldUsageSource:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field usage_source", values[i])
+			} else if value.Valid {
+				_m.UsageSource = new(string)
+				*_m.UsageSource = value.String
+			}
+		case usagelog.FieldTerminalEventSeen:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field terminal_event_seen", values[i])
+			} else if value.Valid {
+				_m.TerminalEventSeen = new(bool)
+				*_m.TerminalEventSeen = value.Bool
+			}
+		case usagelog.FieldTerminalEventValid:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field terminal_event_valid", values[i])
+			} else if value.Valid {
+				_m.TerminalEventValid = new(bool)
+				*_m.TerminalEventValid = value.Bool
+			}
+		case usagelog.FieldResponseBodyType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field response_body_type", values[i])
+			} else if value.Valid {
+				_m.ResponseBodyType = new(string)
+				*_m.ResponseBodyType = value.String
+			}
+		case usagelog.FieldDegradations:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field degradations", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.Degradations); err != nil {
+					return fmt.Errorf("unmarshal field degradations: %w", err)
+				}
+			}
+		case usagelog.FieldPricingSource:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field pricing_source", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.PricingSource); err != nil {
+					return fmt.Errorf("unmarshal field pricing_source: %w", err)
+				}
 			}
 		case usagelog.FieldModel:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -878,6 +953,42 @@ func (_m *UsageLog) String() string {
 		builder.WriteString("takeover=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	if v := _m.RequestScope; v != nil {
+		builder.WriteString("request_scope=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.UsageObserved; v != nil {
+		builder.WriteString("usage_observed=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.UsageSource; v != nil {
+		builder.WriteString("usage_source=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.TerminalEventSeen; v != nil {
+		builder.WriteString("terminal_event_seen=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.TerminalEventValid; v != nil {
+		builder.WriteString("terminal_event_valid=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.ResponseBodyType; v != nil {
+		builder.WriteString("response_body_type=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("degradations=")
+	builder.WriteString(fmt.Sprintf("%v", _m.Degradations))
+	builder.WriteString(", ")
+	builder.WriteString("pricing_source=")
+	builder.WriteString(fmt.Sprintf("%v", _m.PricingSource))
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)

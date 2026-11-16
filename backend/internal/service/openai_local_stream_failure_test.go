@@ -77,6 +77,11 @@ func TestOpenAILocalStreamFailurePreservesUnterminatedVisiblePayload(t *testing.
 			svc := &OpenAIGatewayService{}
 			_, err := svc.handleStreamingResponse(c.Request.Context(), &http.Response{StatusCode: 200, Header: http.Header{}, Body: body}, c,
 				&Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
+			if tc.name == "truncated_json" {
+				require.Error(t, err)
+				require.Empty(t, rec.Body.String())
+				return
+			}
 			require.ErrorIs(t, err, cause)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr))

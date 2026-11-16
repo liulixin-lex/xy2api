@@ -32,6 +32,22 @@ const (
 	FieldFallback = "fallback"
 	// FieldTakeover holds the string denoting the takeover field in the database.
 	FieldTakeover = "takeover"
+	// FieldRequestScope holds the string denoting the request_scope field in the database.
+	FieldRequestScope = "request_scope"
+	// FieldUsageObserved holds the string denoting the usage_observed field in the database.
+	FieldUsageObserved = "usage_observed"
+	// FieldUsageSource holds the string denoting the usage_source field in the database.
+	FieldUsageSource = "usage_source"
+	// FieldTerminalEventSeen holds the string denoting the terminal_event_seen field in the database.
+	FieldTerminalEventSeen = "terminal_event_seen"
+	// FieldTerminalEventValid holds the string denoting the terminal_event_valid field in the database.
+	FieldTerminalEventValid = "terminal_event_valid"
+	// FieldResponseBodyType holds the string denoting the response_body_type field in the database.
+	FieldResponseBodyType = "response_body_type"
+	// FieldDegradations holds the string denoting the degradations field in the database.
+	FieldDegradations = "degradations"
+	// FieldPricingSource holds the string denoting the pricing_source field in the database.
+	FieldPricingSource = "pricing_source"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
 	// FieldRequestedModel holds the string denoting the requested_model field in the database.
@@ -223,6 +239,14 @@ var Columns = []string{
 	FieldSwitches,
 	FieldFallback,
 	FieldTakeover,
+	FieldRequestScope,
+	FieldUsageObserved,
+	FieldUsageSource,
+	FieldTerminalEventSeen,
+	FieldTerminalEventValid,
+	FieldResponseBodyType,
+	FieldDegradations,
+	FieldPricingSource,
 	FieldModel,
 	FieldRequestedModel,
 	FieldUpstreamModel,
@@ -426,6 +450,36 @@ func ByFallback(opts ...sql.OrderTermOption) OrderOption {
 // ByTakeover orders the results by the takeover field.
 func ByTakeover(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTakeover, opts...).ToFunc()
+}
+
+// ByRequestScope orders the results by the request_scope field.
+func ByRequestScope(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestScope, opts...).ToFunc()
+}
+
+// ByUsageObserved orders the results by the usage_observed field.
+func ByUsageObserved(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageObserved, opts...).ToFunc()
+}
+
+// ByUsageSource orders the results by the usage_source field.
+func ByUsageSource(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageSource, opts...).ToFunc()
+}
+
+// ByTerminalEventSeen orders the results by the terminal_event_seen field.
+func ByTerminalEventSeen(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTerminalEventSeen, opts...).ToFunc()
+}
+
+// ByTerminalEventValid orders the results by the terminal_event_valid field.
+func ByTerminalEventValid(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTerminalEventValid, opts...).ToFunc()
+}
+
+// ByResponseBodyType orders the results by the response_body_type field.
+func ByResponseBodyType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldResponseBodyType, opts...).ToFunc()
 }
 
 // ByModel orders the results by the model field.

@@ -19,13 +19,14 @@ func (r *usageLogRepository) CreateUnbilledRequest(ctx context.Context, row *ser
 	_, err := r.sql.ExecContext(ctx, `INSERT INTO gateway_unbilled_requests
 		(request_id, created_at, user_id, api_key_id, group_id, account_id, platform,
 		 model, stream, result, error_class, http_status, switches, fallback, takeover,
-		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens, request_type)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens, request_type, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		ON CONFLICT (request_id) DO NOTHING`,
 		row.RequestID, row.CreatedAt, row.UserID, row.APIKeyID, row.GroupID, row.AccountID,
 		row.Platform, row.Model, row.Stream, row.Result, row.ErrorClass, row.HTTPStatus,
 		row.Switches, row.Fallback, row.Takeover, row.FirstOutputMs, row.DurationMs,
-		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.RequestType)
+		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.RequestType,
+		gatewayScopeSQL(row.RequestScope), row.UsageObserved, row.UsageSource, row.TerminalEventSeen, row.TerminalEventValid, row.ResponseBodyType, gatewayNoticesSQL(row.ConversionNotices))
 	return err
 }
 
@@ -36,11 +37,11 @@ const groupLast60Query = `WITH requests AS (
 	SELECT group_id, result, end_to_end_first_output_ms AS first_output_ms,
 		input_tokens, cache_read_tokens, cache_creation_tokens
 	FROM usage_logs
-	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3 AND (request_scope IS NULL OR request_scope = 'text')
 	UNION ALL
 	SELECT group_id, result, first_output_ms, input_tokens, cache_read_tokens, cache_creation_tokens
 	FROM gateway_unbilled_requests
-	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+	WHERE group_id = ANY($1) AND created_at >= $2 AND created_at <= $3 AND (request_scope IS NULL OR request_scope = 'text')
 )
 SELECT group_id, COUNT(*),
 	percentile_disc(0.5) WITHIN GROUP (ORDER BY first_output_ms) FILTER (WHERE first_output_ms IS NOT NULL),

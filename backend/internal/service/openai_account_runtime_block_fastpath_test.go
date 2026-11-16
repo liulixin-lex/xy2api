@@ -653,7 +653,7 @@ func TestOpenAIModelTempUnschedulable_WriteFailureDoesNotRuntimeBlockWholeAccoun
 		"gpt-5.4",
 	)
 
-	require.True(t, shouldDisable)
+	require.False(t, shouldDisable)
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	require.Zero(t, repo.tempCalls)
 	require.Len(t, repo.modelRateLimitCalls, 1)

@@ -49,9 +49,7 @@ func handleOpenAIRequestRejectionExhausted(c *gin.Context, failure *service.Upst
 		return true
 	}
 	if openAIJSON && !streamStarted {
-		if beginResilienceTerminal(c) {
-			service.WriteOpenAIUpstreamClientError(c, failure.StatusCode, failure.ResponseBody, message)
-		}
+		service.WriteOpenAIUpstreamClientError(c, failure.StatusCode, failure.ResponseBody, message)
 	} else {
 		writeError(failure.StatusCode, message, streamStarted)
 	}

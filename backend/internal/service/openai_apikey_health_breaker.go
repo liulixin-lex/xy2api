@@ -26,6 +26,9 @@ func classifyOpenAIAPIKeyHealthFailure(err error) (int, []byte, bool) {
 
 	var failoverErr *UpstreamFailoverError
 	if errors.As(err, &failoverErr) {
+		if failoverErr.PreDispatchSelectionInvalidated {
+			return failoverErr.StatusCode, failoverErr.ResponseBody, false
+		}
 		if failoverErr.Reason == PlannedFirstOutputTimeoutReason || failoverErr.Reason == openAIModelUnavailableReason || failoverErr.Reason == openAIUpstreamRequestRestrictionReason {
 			return failoverErr.StatusCode, failoverErr.ResponseBody, false
 		}

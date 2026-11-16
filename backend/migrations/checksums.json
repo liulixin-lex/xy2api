@@ -356,6 +356,7 @@
     "308_sv2_ops_request_id.sql": "ea2015d9809d97f84168afff88b9e7b9a232f3ab13428cc11b9ec8396b1c95fd",
     "309_sv2_request_indexes_notx.sql": "9c344ea25598673a2631e90d0154336d89f7f03c95c58009ec9260a023042f6d",
     "310_add_group_alias.sql": "dd9895b7e29fcc6b0e68e721434a7cd43fb553a2c15e0f03ce76905be56b5f6e",
-    "311_enable_apikey_upstream_billing_probe.sql": "7f1f0f8879e921d02020b1dee95441cf9e99c478592dc1929f49b2941bb55644"
+    "311_enable_apikey_upstream_billing_probe.sql": "7f1f0f8879e921d02020b1dee95441cf9e99c478592dc1929f49b2941bb55644",
+    "312_gateway_usage_facts.sql": "ca0977857d525087fed73bd388649aa1e603d8af6b200eb8a512d52720e27d42"
   }
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -159,13 +160,23 @@ func TestOpenAIGatewayService_Forward_WSv2ErrorEventUsageLimitPersistsRateLimit(
 	}
 
 	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
+	capUntil := time.Now().Add(time.Duration(resilience.Current().Failure.RetryAfterCapSeconds) * time.Second)
 	result, err := svc.Forward(context.Background(), c, &account, body)
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.Nil(t, upstream.lastReq, "WS 限流 error event 不应回退到同账号 HTTP")
 	require.Len(t, repo.rateLimitCalls, 1)
-	require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
+	require.WithinDuration(t, capUntil, repo.rateLimitCalls[0], 2*time.Second)
+	var evidence map[string]any
+	for _, updates := range repo.updateExtra {
+		if value, ok := updates[quotaCooldownEvidenceKey].(map[string]any); ok {
+			evidence = value
+		}
+	}
+	require.NotNil(t, evidence)
+	require.Equal(t, "unknown", evidence["owner"])
+	require.Equal(t, time.Unix(resetAt, 0).UTC().Format(time.RFC3339Nano), evidence["raw_reset"])
 }
 
 func TestOpenAIGatewayService_Forward_WSv2Handshake429PersistsRateLimit(t *testing.T) {

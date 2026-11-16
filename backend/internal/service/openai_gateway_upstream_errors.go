@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -290,6 +291,17 @@ func newOpenAIUpstreamFailoverError(
 		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
 		RequestScopedTransient: requestScopedCapacity,
 	}
+	observedAt := time.Now()
+	hint, found := resilience.ParseUpstreamRecoveryHint(responseHeaders, responseBody, observedAt)
+	if statusCode >= http.StatusBadRequest {
+		if legacy := resilience.RetryAfterFrom(responseHeaders, responseBody); legacy > hint.Delay {
+			hint = resilience.UpstreamRecoveryHint{Source: "legacy_http_error", ObservedAt: observedAt, NotBefore: observedAt.Add(legacy), Delay: legacy}
+			found = true
+		}
+	}
+	if found {
+		failoverErr.UpstreamRecoveryHint = &hint
+	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, upstreamMsg, responseBody) {
 		failoverErr.RetryableOnSameAccount = false
 		failoverErr.RequestScopedTransient = false
@@ -517,6 +529,14 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	requestedModel ...string,
 ) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	if rejection := classifyHTTPContinuationError(body); rejection != nil {
+		WriteHTTPContinuationError(c, account, rejection)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
+	if rejection := upstreamEncryptedTerminalRejection(s.redactAgentIdentitySensitiveBody(ctx, account, body)); rejection != nil {
+		writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
 	defer func() {
 		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)
 	}()
@@ -718,23 +738,16 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	markContentPolicy()
 	MarkResponseCommitted(c)
 
-	// 上游 400 是确定性的请求错误：同一份请求体换账号、重试多少次都会失败。归一成
-	// 502 upstream_error 会让下游网关把它当成可重试的上游故障反复重放（#5479 实测
-	// 30 个失败请求被放大成 60 次上游调用），同时抹掉客户端定位问题所需的 code/param。
-	//
-	// 走到这里说明 shouldFailoverOpenAIUpstreamResponse 已判定该 400 不可 failover，
-	// 即 server_is_overloaded / at capacity 这类可重试的 400 不会到达此处。
-	//
-	// 兄弟路径早已这么做：handleCompatErrorResponse（ChatCompletions / Anthropic）
-	// 回真实状态码 + invalid_request_error + 真实 message；/v1/images 还额外透传
-	// code/param。原生 Responses 是唯一漏掉的一条。
+	// Explicit rules, provider recovery and account handling above retain their
+	// precedence. Preserve the final narrow HTTP status without changing health.
 	if isOpenAIDeterministicClientError(resp.StatusCode) {
 		clientMessage := SanitizeUpstreamErrorMessage(upstreamMsg)
 		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, clientMessage)
-		if upstreamMsg == "" {
-			return nil, &OpenAIRequestRejectionError{fmt.Errorf("upstream error: %d", resp.StatusCode)}
+		err := fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+		if classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError {
+			return nil, &OpenAIRequestRejectionError{err}
 		}
-		return nil, &OpenAIRequestRejectionError{fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)}
+		return nil, err
 	}
 
 	// Return appropriate error response
@@ -797,7 +810,33 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
 ) (result *OpenAIForwardResult, forwardErr error) {
+	return s.handleCompatErrorResponseWithFields(resp, c, account,
+		func(c *gin.Context, status int, errType, _, _, message string) {
+			writeError(c, status, errType, message)
+		},
+		accountErrorAlreadyHandled, requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleCompatErrorResponseWithFields(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	writeError func(c *gin.Context, status int, errType, code, param, message string),
+	accountErrorAlreadyHandled bool,
+	requestedModel ...string,
+) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	if rejection := classifyHTTPContinuationError(body); rejection != nil {
+		noteLocalHTTPContinuationRejection(c, account, rejection)
+		suppressHTTPStateRejectionRetry(c)
+		writeError(c, rejection.Status, "invalid_request_error", rejection.Code, rejection.Param, rejection.Message)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
+	if rejection := upstreamEncryptedTerminalRejection(s.redactAgentIdentitySensitiveBody(c.Request.Context(), account, body)); rejection != nil {
+		suppressHTTPStateRejectionRetry(c)
+		writeError(c, http.StatusBadRequest, "invalid_request_error", "encrypted_content_rejected", rejection.Param, rejection.Message)
+		return nil, &OpenAIRequestRejectionError{rejection}
+	}
 	defer func() {
 		s.noteOpenAITerminalRejection(c.Request.Context(), account, resp.StatusCode, resp.Header, body, forwardErr)
 	}()
@@ -819,7 +858,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		if clientMsg == "" {
 			clientMsg = "Request blocked by upstream cyber-security policy"
 		}
-		writeError(c, resp.StatusCode, "invalid_request_error", clientMsg)
+		writeError(c, resp.StatusCode, "invalid_request_error", "", "", clientMsg)
 		if cyberMsg == "" {
 			return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)}
 		}
@@ -832,7 +871,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			MarkOpsUpstreamContentPolicy(c)
 		}
 		MarkResponseCommitted(c)
-		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)
+		writeError(c, http.StatusForbidden, "invalid_request_error", "", "", clientMsg)
 		return nil, &OpenAIRequestRejectionError{fmt.Errorf("grok content policy rejection: %s", clientMsg)}
 	}
 
@@ -864,7 +903,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	); matched {
 		markContentPolicy()
 		MarkResponseCommitted(c)
-		writeError(c, status, errType, errMsg)
+		writeError(c, status, errType, "", "", errMsg)
 		if upstreamMsg == "" {
 			upstreamMsg = errMsg
 		}
@@ -895,7 +934,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		}
 		markContentPolicy()
 		MarkResponseCommitted(c)
-		writeError(c, http.StatusInternalServerError, "api_error", "Upstream gateway error")
+		writeError(c, http.StatusInternalServerError, "api_error", "", "", "Upstream gateway error")
 		if upstreamMsg == "" {
 			return nil, fmt.Errorf("upstream error: %d (not in custom error codes)", resp.StatusCode)
 		}
@@ -957,7 +996,13 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		errType = "api_error"
 	}
 
-	writeError(c, resp.StatusCode, errType, upstreamMsg)
+	if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusConflict ||
+		resp.StatusCode == http.StatusUnprocessableEntity || isToolHistoryUpstreamClientError(resp.StatusCode, body) {
+		errType, code, param, message := upstreamClientErrorFields(resp.StatusCode, body, SanitizeUpstreamErrorMessage(upstreamMsg))
+		writeError(c, resp.StatusCode, errType, code, param, message)
+	} else {
+		writeError(c, resp.StatusCode, errType, "", "", upstreamMsg)
+	}
 	err := fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	if isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError {
 		return nil, &OpenAIRequestRejectionError{err}

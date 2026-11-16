@@ -244,7 +244,11 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 	param := gjson.GetBytes(body, "error.param").String()
 	switch protocol {
 	case PreOutputProtocolAnthropic:
-		payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": errType, "message": message}})
+		errorBody := map[string]any{"type": errType, "message": message}
+		if explicitCode := gjson.GetBytes(body, "error.code").String(); explicitCode != "" {
+			errorBody["code"] = explicitCode
+		}
+		payload, _ := json.Marshal(map[string]any{"type": "error", "error": errorBody})
 		return []byte("event: error\ndata: " + string(payload) + "\n\n")
 	case PreOutputProtocolGemini:
 		payload, _ := json.Marshal(map[string]any{"error": map[string]any{
@@ -270,6 +274,10 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 		}
 		// The client has seen heartbeats only: open the response first.
 		id, createdAt := "resp_"+randomKeepaliveHex(12), time.Now().Unix()
+		errorBody := openAIResponseFailureError(ctx, status, errType, code, message)
+		if param != "" {
+			errorBody["param"] = param
+		}
 		payload, _ := json.Marshal(map[string]any{
 			"type":            "response.failed",
 			"sequence_number": 1,
@@ -279,7 +287,7 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 				"created_at": createdAt,
 				"status":     "failed",
 				"output":     []any{},
-				"error":      openAIResponseFailureError(ctx, status, errType, code, message),
+				"error":      errorBody,
 			},
 		})
 		return append(ResponsesCreatedFrame(id, "", createdAt), "event: response.failed\ndata: "+string(payload)+"\n\n"...)
@@ -342,7 +350,7 @@ func randomKeepaliveHex(n int) string {
 }
 
 // openAIResponseFailureError is shared by the three local failed-frame writers.
-// It never forwards upstream headers or computes a candidate recommendation.
+// Client advice is capped independently from the original upstream recovery time.
 func openAIResponseFailureError(ctx context.Context, status int, errType, code, message string) map[string]any {
 	errBody := map[string]any{"code": code, "message": message}
 	if resilience.Current().FailedFrameRetryAfterOn() {
@@ -352,6 +360,11 @@ func openAIResponseFailureError(ctx context.Context, status int, errType, code, 
 			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Suppress: true, Source: "non_retryable"})
 		}
 		advice := resilience.ResolveRetryAdvice(ctx)
+		if !advice.Suppress && advice.Seconds == 0 && resilience.RetryAdviceEligible(status, errType, code) {
+			if hint := resilience.StateFrom(ctx).UpstreamRecoveryHint(); hint != nil && hint.NotBefore.After(time.Now()) {
+				advice = resilience.RetryAdvice{Seconds: resilience.ClampRetryAfter(time.Until(hint.NotBefore), 2, 10), Source: "upstream_recovery"}
+			}
+		}
 		errBody["message"] = advice.Message(message)
 		if headers := advice.Headers(); len(headers) > 0 {
 			errBody["headers"] = headers

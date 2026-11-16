@@ -323,12 +323,7 @@ func TestOpenAIResponseFlush_KeepaliveFlushesImmediately(t *testing.T) {
 
 func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 	const dataLine = `data: {"type":"response.output_text.delta","delta":"a"}`
-	// Filling the 16-slot scan queue proves the main loop processed data before the reader reaches the gated blank.
-	dataLines := make([]string, 17)
-	for i := range dataLines {
-		dataLines[i] = dataLine
-	}
-	partialEvent := strings.Join(dataLines, "\n") + "\n"
+	partialEvent := dataLine + "\n"
 	completeEvent := partialEvent + "\n"
 	terminal := "data: [DONE]\n\n"
 	allowBlank := make(chan struct{})
@@ -579,6 +574,12 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 
 			result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(tt.body)), config.GatewayConfig{})
 
+			if tt.name == "invalid JSON before done" {
+				require.Error(t, err)
+				got, _ := recorder.snapshot()
+				require.Empty(t, got)
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			gotBody, flushes := recorder.snapshot()

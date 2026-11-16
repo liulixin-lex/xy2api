@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func TestOpenAIProtocolConversionRejectsBeforeUpstreamAndHealthReporting(t *test
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			upstream := &compatWriteDisconnectUpstream{}
+			upstream := &m7CompleteConversionUpstream{}
 			repo := &grokCredentialHandlerRepo{accounts: []service.Account{{ID: 801, Platform: tc.platform, Type: service.AccountTypeAPIKey,
 				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
 				Credentials: map[string]any{"api_key": "test-key", "base_url": "https://upstream.example", "api_protocol": service.APIProtocolResponses}, Extra: map[string]any{"openai_responses_supported": true}}}}
@@ -70,6 +71,15 @@ func TestOpenAIProtocolConversionRejectsBeforeUpstreamAndHealthReporting(t *test
 			})
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.endpoint, strings.NewReader(tc.body)))
+			if tc.field == "stop" {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Positive(t, upstream.calls)
+				require.Empty(t, repo.setErrorIDs)
+				require.Empty(t, repo.setTempIDs)
+				require.Empty(t, repo.rateLimitIDs)
+				require.False(t, state.AccountFailed(801))
+				return
+			}
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
 			require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), tc.field)
@@ -203,4 +213,15 @@ func TestAnthropicCommonClientDefaultsReachUpstream(t *testing.T) {
 		require.Equal(t, "adaptive", gjson.GetBytes(wire.body, "thinking.type").String())
 		require.Equal(t, "high", gjson.GetBytes(wire.body, "output_config.effort").String())
 	}
+}
+
+type m7CompleteConversionUpstream struct {
+	service.HTTPUpstream
+	calls int
+}
+
+func (u *m7CompleteConversionUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	wire := "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n"
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}, nil
 }

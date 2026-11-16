@@ -165,7 +165,7 @@ func TestCCBufferedFromNativeAnthropic_HangTimesOut(t *testing.T) {
 
 	resp, pr, pw := newHangingUpstreamResponse()
 	start := time.Now()
-	_, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, start)
+	_, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, start)
 	_ = pw.Close()
 	_ = pr.Close()
 
@@ -251,7 +251,7 @@ func TestCCBufferedFromNativeAnthropic_HappyPathStillConverts(t *testing.T) {
 	}()
 	defer func() { _ = pr.Close() }()
 
-	res, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
+	res, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestCCBufferedFromNativeAnthropic_ToolArgumentsAreValidJSON(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(toolAnthropicSSEStream())), Header: http.Header{}}
 
-	_, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
+	_, err := svc.handleCCBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestResponsesBufferedFromNativeAnthropic_ToolArgumentsAreValidJSON(t *testi
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
 	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(toolAnthropicSSEStream())), Header: http.Header{}}
 
-	_, err := svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+	_, err := svc.handleResponsesBufferedFromNativeAnthropic(resp, c, nil, "glm-4.7", "glm-4.7", "glm-4.7", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -399,8 +400,10 @@ func TestOpenAIGatewayService_ChatCompletionsRetriesRejectedTopP(t *testing.T) {
 	service := newOpenAIRejectedFieldTestService(recorderUpstream)
 	service.httpUpstream = upstream
 
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	c.Request = c.Request.WithContext(ctx)
 	result, err := service.ForwardAsChatCompletions(
-		context.Background(), c, newOpenAIRejectedFieldTestAccount(), body, "", "",
+		ctx, c, newOpenAIRejectedFieldTestAccount(), body, "", "",
 	)
 
 	require.NoError(t, err)
@@ -412,6 +415,14 @@ func TestOpenAIGatewayService_ChatCompletionsRetriesRejectedTopP(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"content":"ok"`)
 	require.NotContains(t, recorder.Body.String(), "Unsupported parameter")
+	value, exists := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, exists)
+	events, ok := value.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.NotEmpty(t, events)
+	require.Equal(t, "top_p", events[0].RejectedField)
+	require.True(t, events[0].Resent)
+
 }
 
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesExactIndexedStatus(t *testing.T) {

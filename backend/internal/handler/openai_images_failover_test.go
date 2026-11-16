@@ -216,3 +216,16 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
 }
+
+func (r openAIImagesFailoverAccountRepo) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+	var out []service.Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform && a.Status == service.StatusActive && a.Schedulable {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}

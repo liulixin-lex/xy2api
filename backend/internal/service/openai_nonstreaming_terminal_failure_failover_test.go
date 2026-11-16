@@ -69,11 +69,12 @@ func TestNonStreamingSSEToJSON_CapacityFailedEventFailsOver(t *testing.T) {
 	c, rec := newNonStreamingFailoverContext(t)
 	svc := newNonStreamingFailoverService()
 	body := sseTerminalBody("response.failed",
-		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`)
+		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"id":"r_failed","status":"failed"}}`)
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
@@ -90,7 +91,7 @@ func TestNonStreamingSSEToJSON_CapacityFailedEventFailsOver(t *testing.T) {
 func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 	c, rec := newNonStreamingFailoverContext(t)
 	svc := newNonStreamingFailoverService()
-	payload := []byte(`{"type":"response.failed","error":{"message":"upstream rejected request"}}`)
+	payload := []byte(`{"type":"response.failed","error":{"message":"upstream rejected request"},"response":{"id":"r_failed","status":"failed"}}`)
 	body := sseTerminalBody("response.failed", string(payload))
 
 	// 前提：流式分类器对同一帧的裁决就是「换号」。翻转不是新政策，是补齐。
@@ -98,7 +99,8 @@ func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.False(t, c.Writer.Written())
@@ -114,7 +116,7 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 	}{
 		{
 			name:    "invalid_request",
-			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
+			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"},"response":{"id":"r_failed","status":"failed"}}`,
 			wantMsg: "unknown parameter foo",
 		},
 		{
@@ -124,7 +126,7 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 		},
 		{
 			name:    "content_policy",
-			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
+			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"},"response":{"id":"r_failed","status":"failed"}}`,
 			wantMsg: "blocked by our content policy",
 		},
 	}
@@ -137,7 +139,8 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 			result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 				newNonStreamingFailoverAccount(), sseTerminalBody("response.failed", tc.data), "model", "model")
 
-			require.Nil(t, result)
+			require.NotNil(t, result)
+			require.True(t, result.ResponseFactsKnown)
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
@@ -163,7 +166,8 @@ func TestNonStreamingSSEToJSON_BareErrorEventUsesConservativeClassifier(t *testi
 		result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 			newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
 
-		require.Nil(t, result)
+		require.NotNil(t, result)
+		require.True(t, result.ResponseFactsKnown)
 		require.Error(t, err)
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr))
@@ -178,7 +182,8 @@ func TestNonStreamingSSEToJSON_BareErrorEventUsesConservativeClassifier(t *testi
 		result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
 			newNonStreamingFailoverAccount(), sseTerminalBody("error", data), "model", "model")
 
-		require.Nil(t, result)
+		require.NotNil(t, result)
+		require.True(t, result.ResponseFactsKnown)
 		var failoverErr *UpstreamFailoverError
 		require.ErrorAs(t, err, &failoverErr)
 		require.False(t, c.Writer.Written())
@@ -190,11 +195,12 @@ func TestNonStreamingPassthroughSSEToJSON_CapacityFailedEventFailsOver(t *testin
 	c, rec := newNonStreamingFailoverContext(t)
 	svc := newNonStreamingFailoverService()
 	body := sseTerminalBody("response.failed",
-		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`)
+		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"id":"r_failed","status":"failed"}}`)
 
 	result, err := svc.handlePassthroughSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
@@ -205,11 +211,11 @@ func TestNonStreamingPassthroughSSEToJSON_CapacityFailedEventFailsOver(t *testin
 // 不变式：非流式的裁决必须与流式分类器逐项一致。任何一边以后改了判定，这条会红。
 func TestNonStreamingSSEToJSON_MatchesStreamingClassifierVerdict(t *testing.T) {
 	payloads := []string{
-		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`,
-		`{"type":"response.failed","error":{"message":"upstream rejected request"}}`,
-		`{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
+		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"id":"r_failed","status":"failed"}}`,
+		`{"type":"response.failed","error":{"message":"upstream rejected request"},"response":{"id":"r_failed","status":"failed"}}`,
+		`{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"},"response":{"id":"r_failed","status":"failed"}}`,
 		`{"type":"response.failed","response":{"id":"r","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
-		`{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
+		`{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"},"response":{"id":"r_failed","status":"failed"}}`,
 	}
 
 	for _, data := range payloads {
@@ -236,11 +242,12 @@ func TestNonStreamingSSEToJSON_CommittedResponseKeepsProtocolError(t *testing.T)
 	svc := newNonStreamingFailoverService()
 	MarkResponseCommitted(c)
 	body := sseTerminalBody("response.failed",
-		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"}}`)
+		`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model.","type":"invalid_request_error"},"response":{"id":"r_failed","status":"failed"}}`)
 
 	result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
 
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.True(t, result.ResponseFactsKnown)
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
@@ -250,7 +257,7 @@ func TestNonStreamingSSEToJSON_CommittedResponseKeepsProtocolError(t *testing.T)
 func TestNonStreamingTerminalFailureFailover_NilAccountProposesNothing(t *testing.T) {
 	c, _ := newNonStreamingFailoverContext(t)
 	svc := newNonStreamingFailoverService()
-	payload := []byte(`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}`)
+	payload := []byte(`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model."},"response":{"id":"r_failed","status":"failed"}}`)
 
 	require.Nil(t, svc.nonStreamingTerminalFailureFailover(
 		c, newNonStreamingSSEResponse(), nil, false, "response.failed", "", payload,

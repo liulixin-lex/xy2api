@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -118,4 +119,145 @@ func TestGatewayRequestTurnClearsSelectionAndPending(t *testing.T) {
 	require.False(t, next.Takeover)
 	require.True(t, first.Fallback)
 	require.True(t, first.Takeover)
+}
+
+func TestM8GatewayMetadataFreeze(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scopes []GatewayRequestScope
+		want   GatewayRequestScope
+		text   bool
+	}{
+		{"legacy", nil, GatewayRequestScopeText, true},
+		{"text", []GatewayRequestScope{GatewayRequestScopeText}, GatewayRequestScopeText, true},
+		{"image", []GatewayRequestScope{GatewayRequestScopeImage}, GatewayRequestScopeImage, false},
+		{"embedding", []GatewayRequestScope{GatewayRequestScopeEmbedding}, GatewayRequestScopeEmbedding, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewRequestState()
+			at := time.Now().Add(-time.Second)
+			s.InitDelivery(context.Background(), at, nil)
+			s.EnableGatewayRequest(time.Now(), tc.scopes...)
+			id := s.requestID
+			s.NoteGatewaySend(7)
+			require.True(t, s.SetGatewayResponseFacts(7, true, true, "upstream_json", false, false, "json"))
+			zero := 0
+			s.NoteGatewayAttempt(true, "", &zero, nil, nil)
+			ctx := WithRequestState(context.Background(), s)
+			notice := apicompat.ConversionNotice{Field: "stop", Action: "omit"}
+			RecordConversionNotices(ctx, notice)
+			s.EnableGatewayRequest(time.Now(), GatewayRequestScopeEmbedding)
+			scope, exists := s.GatewayRequestScope()
+			require.True(t, exists)
+			require.Equal(t, tc.want, scope)
+			require.Equal(t, tc.text, s.GatewayRequestEnabled())
+			require.Equal(t, at, s.gatewayRecord.started)
+			require.Equal(t, 1, s.gatewayRecord.sends)
+			s.ExcludeGatewayRequest()
+			scope, exists = s.GatewayRequestScope()
+			require.True(t, exists)
+			if tc.text {
+				require.Empty(t, scope)
+			} else {
+				require.Equal(t, tc.want, scope)
+			}
+			require.False(t, s.GatewayRequestEnabled())
+			s.EnableGatewayRequest(time.Now())
+			require.False(t, s.GatewayRequestEnabled(), "repeated Enable must not undo exclusion")
+			meta, write := s.ClaimGatewayRequest(false)
+			require.Equal(t, !tc.text, write, "excluded text keeps correlation without creating a statistics row")
+			require.Equal(t, id, meta.RequestID)
+			require.Equal(t, scope, meta.RequestScope)
+			require.Equal(t, at, meta.StartedAt)
+			require.Equal(t, 0, *meta.InputTokens)
+			require.True(t, *meta.UsageObserved)
+			require.Equal(t, "upstream_json", *meta.UsageSource)
+			require.False(t, *meta.TerminalEventSeen)
+			require.False(t, *meta.TerminalEventValid)
+			require.Equal(t, "json", *meta.ResponseBodyType)
+			require.Equal(t, []apicompat.ConversionNotice{notice}, meta.ConversionNotices)
+			require.False(t, s.SetGatewayResponseFacts(7, true, false, "missing", false, false, "json"))
+			RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "other", Action: "omit"})
+			*meta.UsageObserved = false
+			*meta.UsageSource = "changed"
+			*meta.TerminalEventSeen = true
+			*meta.TerminalEventValid = true
+			*meta.ResponseBodyType = "sse"
+			meta.ConversionNotices[0].Field = "changed"
+			*meta.InputTokens = 99
+			frozen, write := s.ClaimGatewayRequest(false)
+			require.False(t, write)
+			require.True(t, *frozen.UsageObserved)
+			require.Equal(t, "upstream_json", *frozen.UsageSource)
+			require.False(t, *frozen.TerminalEventSeen)
+			require.False(t, *frozen.TerminalEventValid)
+			require.Equal(t, "json", *frozen.ResponseBodyType)
+			require.Equal(t, 0, *frozen.InputTokens)
+			require.Equal(t, []apicompat.ConversionNotice{notice}, frozen.ConversionNotices)
+		})
+	}
+	t.Run("unknown_missing_and_new_attempt", func(t *testing.T) {
+		for _, kind := range []string{"unknown", "missing", "same_account", "different_account"} {
+			t.Run(kind, func(t *testing.T) {
+				s := NewRequestState()
+				s.EnableGatewayRequest(time.Now())
+				s.NoteGatewaySend(7)
+				if kind != "unknown" {
+					require.True(t, s.SetGatewayResponseFacts(7, true, false, "missing", false, false, "json"))
+				}
+				switch kind {
+				case "same_account":
+					s.NoteGatewaySend(7)
+				case "different_account":
+					s.NoteGatewaySend(8)
+				}
+				meta, _ := s.ClaimGatewayRequest(false)
+				if kind == "missing" {
+					require.NotNil(t, meta.UsageObserved)
+					require.False(t, *meta.UsageObserved)
+					require.Equal(t, "missing", *meta.UsageSource)
+				} else {
+					require.Nil(t, meta.UsageObserved)
+					require.Nil(t, meta.UsageSource)
+					require.Nil(t, meta.TerminalEventSeen)
+					require.Nil(t, meta.TerminalEventValid)
+					require.Nil(t, meta.ResponseBodyType)
+				}
+			})
+		}
+	})
+	t.Run("invalid_and_unadmitted", func(t *testing.T) {
+		var absent *RequestState
+		absent.EnableGatewayRequest(time.Now(), GatewayRequestScopeText)
+		absent.ExcludeGatewayRequest()
+		require.False(t, absent.GatewayRequestEnabled())
+		meta, write := absent.ClaimGatewayRequest(false)
+		require.Nil(t, meta)
+		require.False(t, write)
+		for _, scopes := range [][]GatewayRequestScope{{""}, {"other"}, {GatewayRequestScopeText, GatewayRequestScopeImage}} {
+			s := NewRequestState()
+			s.EnableGatewayRequest(time.Now(), scopes...)
+			_, exists := s.GatewayRequestScope()
+			require.False(t, exists)
+			s.ExcludeGatewayRequest()
+			_, exists = s.GatewayRequestScope()
+			require.False(t, exists)
+			s.EnableGatewayRequest(time.Now())
+			s.EnableGatewayRequest(time.Now(), scopes...)
+			scope, exists := s.GatewayRequestScope()
+			require.True(t, exists)
+			require.Equal(t, GatewayRequestScopeText, scope)
+		}
+	})
+	t.Run("billing_claim_stays_unique", func(t *testing.T) {
+		s := NewRequestState()
+		s.EnableGatewayRequest(time.Now(), GatewayRequestScopeImage)
+		first, write := s.ClaimGatewayRequest(true)
+		require.False(t, write)
+		s.ExcludeGatewayRequest()
+		s.EnableGatewayRequest(time.Now(), GatewayRequestScopeText)
+		second, write := s.ClaimGatewayRequest(false)
+		require.False(t, write)
+		require.Equal(t, first, second)
+	})
 }

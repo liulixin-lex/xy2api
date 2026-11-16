@@ -176,7 +176,7 @@ func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.1","messages":[]}`)
 	prior := svc.beginSchedAttempt(ctx, account, body, len(body), false)
 	owned := prior
-	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", &owned)
+	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", nil, &owned)
 	require.Error(t, err)
 	require.Nil(t, owned)
 	owned.finish(nil, err)
@@ -186,4 +186,38 @@ func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
 	prior.finishUnfinished()
 	require.Len(t, rec.samples, 1)
 	require.Equal(t, string(resilience.CategoryTransient), rec.samples[0].Detail)
+}
+
+func TestM8ActualUpstreamTarget(t *testing.T) {
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	up := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: up}
+	account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://UPSTREAM.example:443"}}
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, "test")
+	require.NoError(t, err)
+	var capture *schedAttemptCapture
+	_, err = svc.sendSchedHTTP(ctx, account, req, "", body, false, &capture)
+	require.NoError(t, err)
+	require.Nil(t, capture, "target recording does not require attempt recorder")
+	first := st.UpstreamAttemptTarget()
+	require.Equal(t, &resilience.UpstreamAttemptTarget{AccountID: 11, Protocol: "responses", Origin: "https://upstream.example"}, first)
+	hint := resilience.UpstreamRecoveryHint{NotBefore: time.Now().Add(time.Minute)}
+	st.SetUpstreamRecoveryHint(&hint)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, "http://user:pass@[2001:db8::1]:8080/v1/chat/completions?token=secret", nil)
+	require.NoError(t, err)
+	account.ID = 12
+	_, err = svc.sendSchedHTTP(ctx, account, req, "", nil, false, &capture)
+	require.NoError(t, err)
+	require.Equal(t, &resilience.UpstreamAttemptTarget{AccountID: 12, Protocol: "chat", Origin: "http://[2001:db8::1]:8080"}, st.UpstreamAttemptTarget())
+	require.Nil(t, st.UpstreamRecoveryHint())
+	require.Equal(t, int64(11), first.AccountID)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, "/relative/responses", nil)
+	require.NoError(t, err)
+	_, err = svc.sendSchedHTTP(ctx, account, req, "", nil, false, &capture)
+	require.NoError(t, err)
+	require.Nil(t, st.UpstreamAttemptTarget(), "unknown target clears earlier origin")
 }

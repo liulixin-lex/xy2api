@@ -161,6 +161,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	defer inflightDone()
 
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, requestModel, parsed.Stream, h.gatewayService, resilience.GatewayRequestScopeImage)()
+
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
 
@@ -266,6 +268,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		recordOpenAIForwardUsage(c, account, result)
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.ImageCount > 0)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -276,8 +280,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
+		hasMeteredZeroImageResult := result != nil && result.ImageCountObserved && result.ImageCount == 0 &&
+			(result.Usage.InputTokens > 0 || result.Usage.OutputTokens > 0 || result.Usage.CacheReadInputTokens > 0 || result.Usage.CacheCreationInputTokens > 0 || result.Usage.ImageInputTokens > 0 || result.Usage.ImageOutputTokens > 0)
 		if err != nil {
-			if result != nil && result.ImageCount > 0 {
+			if result != nil && (result.ImageCount > 0 || hasMeteredZeroImageResult) {
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
 					zap.Int("image_count", result.ImageCount),
@@ -396,7 +402,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, result.FirstTokenMs)
+			if hasMeteredZeroImageResult && err != nil {
+				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestModel, false, result), false, result.FirstTokenMs, err)
+			} else {
+				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, result.FirstTokenMs)
+			}
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, nil)
 		}

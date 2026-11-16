@@ -52,7 +52,7 @@ func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testi
 
 // Writer 已写后 ensureForwardErrorResponse 必须把错误以 SSE 形式追加，
 // 而不是 silent EOF。非 /responses 路径走 legacy data:{"type":"error"} 分支。
-func TestGatewayEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) {
+func TestGatewayEnsureForwardErrorResponse_PreservesWrittenNonSSE(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -62,10 +62,10 @@ func TestGatewayEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) 
 	h := &GatewayHandler{}
 	wrote := h.ensureForwardErrorResponse(c, false)
 
-	require.True(t, wrote)
+	require.False(t, wrote)
 	require.Equal(t, http.StatusTeapot, w.Code)
 	assert.Contains(t, w.Body.String(), "already written")
-	assert.Contains(t, w.Body.String(), `data: {"type":"error"`)
+	assert.Equal(t, "already written", w.Body.String())
 }
 
 func TestGatewayEnsureForwardErrorResponse_SkipsCommittedSSEError(t *testing.T) {
@@ -73,6 +73,7 @@ func TestGatewayEnsureForwardErrorResponse_SkipsCommittedSSEError(t *testing.T) 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Header("Content-Type", "text/event-stream")
 	c.Header("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: error\ndata: {\"type\":\"error\"}\n\n")
 	service.MarkResponseCommitted(c)
@@ -109,6 +110,7 @@ func TestGatewayEnsureForwardErrorResponse_CanceledClientAfterStreamStartedAppen
 	ctx, cancel := context.WithCancel(context.Background())
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil).WithContext(ctx)
 	c.Header("Content-Type", "text/event-stream")
+	c.Header("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString(":\n\n")
 	cancel()
 
@@ -128,6 +130,7 @@ func TestGatewayEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespon
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Header("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString(":\n\n")
 
 	h := &GatewayHandler{}
@@ -169,6 +172,7 @@ func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
 		c.Header("Content-Type", "text/event-stream")
 		before := c.Writer.Size()
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString(":\n\n")
 
 		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error: unexpected EOF"))
@@ -214,6 +218,7 @@ func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointMessages, nil)
 		c.Header("Content-Type", "text/event-stream")
 		before := c.Writer.Size()
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString("event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
 
 		reported := gatewayForwardErrorAlreadyCommunicated(c, before, errors.New("upstream error: 400 message=version too low"))

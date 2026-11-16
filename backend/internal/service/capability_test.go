@@ -341,10 +341,10 @@ func TestCapabilityLegacyMixedExclusionsKeepGenericNoAccount(t *testing.T) {
 	selected, compactBlocked, stats := svc.selectBestAccount(context.Background(), nil, PlatformOpenAI, []Account{*a, *b}, "gpt-test", nil, false, "", false)
 	require.Nil(t, selected)
 	require.False(t, compactBlocked)
-	require.Equal(t, "pool=2, filtered: ineligible=2", stats.summary(""))
+	require.Equal(t, "pool=2, filtered: manual_disabled=1 model_rate_limited=1", stats.summary(""))
 	err := noAvailableOpenAISelectionError("gpt-test", compactBlocked, stats.summary(""))
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotContains(t, err.Error(), "model_rate_limited=", "the handler would otherwise turn a mixed 503 into 429")
+	require.Contains(t, err.Error(), "manual_disabled=1 model_rate_limited=1", "typed classification must see both causes; do not hide the model limit")
 }
 
 func TestCapabilityOnlySelectionMarkerRequiresWholePool(t *testing.T) {

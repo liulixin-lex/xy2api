@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -78,6 +80,9 @@ func writeOpenAICompactSSEBridge(c *gin.Context, statusCode int, finalResponse [
 		}
 		return false
 	}
+	if !ClaimProtocolTerminal(c) {
+		return true
+	}
 	if !committed {
 		header := c.Writer.Header()
 		header.Set("Content-Type", "text/event-stream")
@@ -113,6 +118,10 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	if c == nil {
 		return
 	}
+	StopOpenAICompactSSEKeepaliveCommitted(c)
+	if !ClaimProtocolTerminal(c) {
+		return
+	}
 	var ctx context.Context
 	if c.Request != nil {
 		ctx = c.Request.Context()
@@ -122,22 +131,36 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 		message = renderedMessage
 	}
 	MarkOpsStreamError(c, errType, message, statusCode)
+	responseID, createdAt := "resp_"+strings.ReplaceAll(uuid.NewString(), "-", ""), time.Now().Unix()
+	response := map[string]any{
+		"id":         responseID,
+		"object":     "response",
+		"created_at": createdAt,
+		"status":     "failed",
+		"output":     []any{},
+		"error":      errorBody,
+	}
+	if model := resilience.StateFrom(ctx).Model(); model != "" {
+		response["model"] = model
+	} else {
+		logger.LegacyPrintf("service.openai_gateway", "OpenAI compact failure has no observed request model")
+	}
+	sequence := int64(0)
+	var opening []byte
+	if only, tracked := DeliveryOnlyHeartbeats(c); tracked && only {
+		opening = ResponsesCreatedFrame(responseID, resilience.StateFrom(ctx).Model(), createdAt)
+		sequence = 1
+	}
 	payload, err := json.Marshal(map[string]any{
 		"type":            "response.failed",
-		"sequence_number": 0,
-		"response": map[string]any{
-			"id":     "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
-			"object": "response",
-			// 严格客户端把 created_at 当必填字段，缺失会反序列化失败，
-			// 终止事件就白发了（退化成盲重连）。与 writeResponsesFailedSSE 对齐。
-			"created_at": time.Now().Unix(),
-			"status":     "failed",
-			"output":     []any{},
-			"error":      errorBody,
-		},
+		"sequence_number": sequence,
+		"response":        response,
 	})
 	if err != nil {
 		return
+	}
+	if len(opening) > 0 {
+		_, _ = c.Writer.Write(opening)
 	}
 	_, _ = c.Writer.Write([]byte("event: response.failed\ndata: "))
 	_, _ = c.Writer.Write(payload)

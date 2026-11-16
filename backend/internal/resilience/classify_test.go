@@ -52,7 +52,7 @@ func TestClassifySpecScenarios(t *testing.T) {
 			want: CategoryRateLimit,
 		},
 		{
-			// Spec: relay timeout page with retry_after.
+			// Confirmed HTTP failures retain the legacy body hint under E17.
 			name:       "524 relay page",
 			in:         Outcome{StatusCode: 524, Body: []byte(`<html>error code: 524 ... "retry_after":120 </html>`)},
 			want:       CategoryTransient,
@@ -428,9 +428,9 @@ func TestGeminiQuotaWordingIsARateLimit(t *testing.T) {
 func TestRetryAfterFromCompoundHints(t *testing.T) {
 	for in, want := range map[string]time.Duration{
 		`{"error":{"message":"Rate limit reached. Please try again in 1m30.5s."}}`: 90500 * time.Millisecond,
-		`Please try again in 1h2m`:  62 * time.Minute,
-		`Please try again in 250ms`: 250 * time.Millisecond,
-		`Please try again in 20s.`:  20 * time.Second,
+		`{"error":{"message":"Please try again in 1h2m"}}`:                         62 * time.Minute,
+		`{"error":{"message":"Please try again in 250ms"}}`:                        250 * time.Millisecond,
+		`{"error":{"message":"Please try again in 20s."}}`:                         20 * time.Second,
 	} {
 		require.Equal(t, want, RetryAfterFrom(nil, []byte(in)), in)
 	}
@@ -581,4 +581,20 @@ func TestDecisionV2PreservesExplicitRateLimitTextOn5xx(t *testing.T) {
 	}
 	cfg.Failure.DecisionV2 = false
 	require.Equal(t, CategoryRateLimit, ClassifyWithSettings(Outcome{StatusCode: 502, Message: "The service is busy"}, &cfg).Category)
+}
+
+func TestM8LegacyHTTPRecoveryHints(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want time.Duration
+	}{
+		{`{"error":"rate limited","retry_after":30}`, 30 * time.Second},
+		{`{"message":"Please try again in 45 seconds","code":429}`, 45 * time.Second},
+		{`{"detail":{"message":"Please try again in 12s"}}`, 12 * time.Second},
+	} {
+		require.Equal(t, tc.want, RetryAfterFrom(nil, []byte(tc.body)))
+		require.Equal(t, 60*time.Second, RetryAfterFrom(http.Header{"Retry-After": {"60"}}, []byte(tc.body)))
+		got := Classify(Outcome{Source: SourceHTTP, StatusCode: 429, Body: []byte(tc.body)}, nil)
+		require.Equal(t, tc.want, got.RetryAfter)
+	}
 }

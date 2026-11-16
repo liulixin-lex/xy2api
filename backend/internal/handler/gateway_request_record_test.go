@@ -58,6 +58,7 @@ func TestRequestResultRealResponsesOwnership(t *testing.T) {
 		{"complete", captureResponseJSON, 200, 1, false},
 		{"bill_failure_keeps_owner", captureResponseJSON, 200, 1, true},
 		{"http_200_failed", `{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"synthetic"}}`, 200, 3, false},
+		{"http_200_failed_usage", `{"id":"resp_failed","status":"failed","error":{"code":"server_error","message":"synthetic"},"usage":{"input_tokens":1200,"output_tokens":0}}`, 200, 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withHandlerResilience(t, nil)

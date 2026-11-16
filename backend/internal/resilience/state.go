@@ -19,6 +19,7 @@ type RequestState struct {
 	upstreamRecoveryHint  *UpstreamRecoveryHint
 	accountRetryNotBefore map[int64]UpstreamRecoveryHint
 	upstreamAttemptTarget *UpstreamAttemptTarget
+	lastUpstreamFailure   error
 	mu                    sync.Mutex
 	conversionNotices     []apicompat.ConversionNotice
 
@@ -365,6 +366,7 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 	if s.opsUpstreamSendBoundaries == nil {
 		s.opsUpstreamSendBoundaries = make(map[int64]uint64)
 	}
+	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
 	s.mu.Unlock()

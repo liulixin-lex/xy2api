@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -20,7 +20,7 @@ import (
 // the variant separates OpenAI selections that need a different transport,
 // endpoint capability or platform, so one result never answers another.
 func selectionNegativeKey(ctx context.Context, groupID *int64, model, variant string) string {
-	scope := "select"
+	scope := "select:v2"
 	if variant != "" {
 		scope += ":" + variant
 	}
@@ -33,104 +33,123 @@ func selectionNegativeKey(ctx context.Context, groupID *int64, model, variant st
 	return resilience.NegativeKey(derefGroupID(groupID), scope, model)
 }
 
-// resilienceNoAccountIsGroupLevel reports whether a no-account result holds
-// for every request of the group and model: no account that could serve the
-// model on the request's platform is free of penalties. Otherwise the result
-// depended on the request (accounts that only serve their bound sessions past
-// an RPM or window-cost threshold, session limits) and must not answer other
-// requests (design §9.2). Without the resilience runtime (some unit tests)
-// the result counts as group level, as before.
-func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model string) bool {
-	r := Resilience()
-	if r == nil || r.fallbackAccounts == nil {
-		return true
-	}
-	accounts, err := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, groupID)
-	if err != nil {
+// Request-specific selection gates cannot share a group-wide failure cache.
+func selectionNegativeRequestAllowed(ctx context.Context, groupID int64, model string, excludedIDs map[int64]struct{}) bool {
+	if len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
 		return false
 	}
-	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
-	gate := resilienceOpenAIEligibility(ctx, groupID, model)
-	if forced == "" && gate != nil {
-		forced = gate.req.Platform
+	if req, ok := ChatRequestRequirementFromContext(ctx); ok && req.HasTools {
+		return false
 	}
-	penalty := resiliencePenaltyOf
-	if gate != nil {
-		penalty = gate.service.resilienceRecoveryPenaltyOf
+	st := resilience.StateFrom(ctx)
+	_, session := st.SessionIdentity()
+	if st.ConfigError() || st.LastResortSessionLimited() || st.StickyOwner() > 0 || session != "" {
+		return false
 	}
-	now := time.Now()
-	for i := range accounts {
-		a := &accounts[i]
-		if forced != "" && a.Platform != forced {
-			continue
-		}
-		if model != "" && !a.IsModelSupported(model) {
-			continue
-		}
-		if a.CapabilityExclusion(ctx, model, now) != nil {
-			// Capability exclusions apply to this protocol/mode, not to every
-			// request that shares the key/group/model fast-fail counters.
-			return false
-		}
-		if tier, _, _ := penalty(a, model, now); tier == resilience.TierNone {
+	if gate := resilienceOpenAIEligibility(ctx, groupID, model); gate != nil {
+		if gate.httpContinuation || gate.req.RequirePrivacySet || len(gate.req.ExcludedIDs) > 0 {
 			return false
 		}
 	}
 	return true
 }
 
-// errNegativeCached marks a no-account result replayed from the negative
-// cache.
-var errNegativeCached = errors.New("no available account (cached)")
-
-// resilienceNegativeCacheHit reports a cached "no available account" for the
-// first attempt of a request (design §9.2).
-//
-// Profit-controlled groups decide per request (the downstream rate is
-// frozen per user and request), so their results are never cached.
-func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}) error {
-	cfg := resilience.Current()
-	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
-		return nil
+// Only the actual, complete group-level verdict is evidence for caching.
+func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model string, err error) bool {
+	if !selectionNegativeRequestAllowed(ctx, groupID, model, nil) {
+		return false
 	}
-	if _, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(ctx, groupID, model, variant), time.Now()); ok {
-		resilience.StateFrom(ctx).MarkGroupNoAccount()
-		return fmt.Errorf("%w supporting model: %s (%w)", ErrNoAvailableAccounts, model, errNegativeCached)
+	e, ok := SelectionExhaustionFromError(err)
+	if !ok || !e.Known || !e.GroupLevel || e.LastCause != nil || e.OwnerID != 0 || e.Immediate != 0 {
+		return false
 	}
-	return nil
+	if e.Members < 0 || e.Eligible < 0 || e.ModelSupported < 0 || e.RequestSupported < 0 || len(e.Reasons) == 0 && e.Members > 0 {
+		return false
+	}
+	for reason, count := range e.Reasons {
+		if count <= 0 {
+			return false
+		}
+		switch reason {
+		case SelectionReasonNoMembers, SelectionReasonPlatformMismatch, SelectionReasonModelNotSupported, SelectionReasonAccountModelNotOwned,
+			SelectionReasonRateLimited, SelectionReasonModelRateLimited, SelectionReasonConcurrencyFull, SelectionReasonQueueFull, SelectionReasonQueueTimeout,
+			SelectionReasonManualDisabled, SelectionReasonAuthError, SelectionReasonExpired, SelectionReasonBalanceExhausted,
+			SelectionReasonQuotaAutoPause5h, SelectionReasonQuotaAutoPause7d, SelectionReasonQuotaAutoPause,
+			SelectionReasonAccountSchedulingThreshold, SelectionReasonRuntimeBlocked, SelectionReasonSameSiteHold, SelectionReasonProxyStreamQuarantined:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
-// profitRejectedPattern matches selection diagnostics in which profit
-// control removed accounts; the zero counters are always part of the text.
-var profitRejectedPattern = regexp.MustCompile(`profit_(?:threshold|invalid_account_rate)=[1-9]`)
+var errNegativeCached = errors.New("no available account (cached)")
 
-// resilienceNegativeCachePut stores a final no-account result of a first
-// attempt when it holds for the whole group, and marks the request so the
-// per-key fast fail may count it (design §9.3).
+// This cache payload deliberately excludes account identities and LastCause.
+type selectionNegativeRecord struct {
+	Version          int                     `json:"version"`
+	Known            bool                    `json:"known"`
+	GroupLevel       bool                    `json:"group_level"`
+	Members          int                     `json:"members"`
+	Eligible         int                     `json:"eligible"`
+	ModelSupported   int                     `json:"model_supported"`
+	RequestSupported int                     `json:"request_supported"`
+	Immediate        int                     `json:"immediate"`
+	Reasons          map[SelectionReason]int `json:"reasons"`
+}
+
+func resilienceNegativeCacheHit(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}) error {
+	if !resilience.Current().ErrorsOn() || groupID == nil || !selectionNegativeRequestAllowed(ctx, *groupID, model, excludedIDs) {
+		return nil
+	}
+	cached, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(ctx, groupID, model, variant), time.Now())
+	if !ok {
+		return nil
+	}
+	var record selectionNegativeRecord
+	if json.Unmarshal(cached.Body, &record) != nil || record.Version != 2 {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(cached.Body, &fields) != nil {
+		return nil
+	}
+	for _, field := range []string{"members", "eligible", "model_supported", "request_supported", "immediate"} {
+		if value := strings.TrimSpace(string(fields[field])); value == "" || value == "null" {
+			return nil
+		}
+	}
+	e := &SelectionExhaustion{Known: record.Known, GroupLevel: record.GroupLevel, Members: record.Members, Eligible: record.Eligible,
+		ModelSupported: record.ModelSupported, RequestSupported: record.RequestSupported, Immediate: record.Immediate, Reasons: record.Reasons}
+	if !resilienceNoAccountIsGroupLevel(ctx, *groupID, model, e) {
+		return nil
+	}
+	resilience.StateFrom(ctx).MarkGroupNoAccount()
+	return errors.Join(e, errNegativeCached)
+}
+
 func resilienceNegativeCachePut(ctx context.Context, groupID *int64, model, variant string, excludedIDs map[int64]struct{}, err error) {
 	cfg := resilience.Current()
-	if !cfg.ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || !isNoAccountSelectionError(err) || errors.Is(err, errNegativeCached) ||
-		gatewayProfitControlGateActive(ctx) || profitRejectedPattern.MatchString(err.Error()) ||
-		// Last resort failed only on the session limit of a new session: the
-		// group's bound sessions are still served (tasks F2 follow-up).
-		resilience.StateFrom(ctx).LastResortSessionLimited() ||
-		!resilienceNoAccountIsGroupLevel(ctx, derefGroupID(groupID), model) {
+	if !cfg.ErrorsOn() || groupID == nil || errors.Is(err, errNegativeCached) ||
+		!selectionNegativeRequestAllowed(ctx, *groupID, model, excludedIDs) || !resilienceNoAccountIsGroupLevel(ctx, *groupID, model, err) {
+		return
+	}
+	e, _ := SelectionExhaustionFromError(err)
+	body, marshalErr := json.Marshal(selectionNegativeRecord{Version: 2, Known: true, GroupLevel: true, Members: e.Members, Eligible: e.Eligible,
+		ModelSupported: e.ModelSupported, RequestSupported: e.RequestSupported, Immediate: e.Immediate, Reasons: e.Reasons})
+	if marshalErr != nil {
 		return
 	}
 	resilience.StateFrom(ctx).MarkGroupNoAccount()
 	ttl := time.Duration(cfg.Errors.NegativeCacheSeconds) * time.Second
-	resilience.ProcessNegativeCache().Put(selectionNegativeKey(ctx, groupID, model, variant), derefGroupID(groupID), resilience.CachedResponse{}, ttl, time.Now())
+	resilience.ProcessNegativeCache().Put(selectionNegativeKey(ctx, groupID, model, variant), *groupID, resilience.CachedResponse{Body: body}, ttl, time.Now())
 }
 
-// resilienceMarkGroupNoAccount marks a no-account result of a selection
-// that is never cached (continuations, image and compact selections) when it
-// holds for the whole group, so the per-key fast fail counts it as it counts
-// cached results (design §9.3).
-func resilienceMarkGroupNoAccount(ctx context.Context, groupID *int64, model string, excludedIDs map[int64]struct{}) {
-	if !resilience.Current().ErrorsOn() || groupID == nil || len(excludedIDs) > 0 || gatewayProfitControlGateActive(ctx) {
+func resilienceMarkGroupNoAccount(ctx context.Context, groupID *int64, model string, excludedIDs map[int64]struct{}, err error) {
+	if !resilience.Current().ErrorsOn() || groupID == nil || !selectionNegativeRequestAllowed(ctx, *groupID, model, excludedIDs) {
 		return
 	}
-	if resilienceNoAccountIsGroupLevel(ctx, derefGroupID(groupID), model) {
+	if resilienceNoAccountIsGroupLevel(ctx, *groupID, model, err) {
 		resilience.StateFrom(ctx).MarkGroupNoAccount()
 	}
 }

@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"maps"
 	"strings"
+	"time"
 )
 
 // PricingSource 定价来源标识
@@ -86,7 +86,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 			stripped.Intervals = nil
 			groupPricing = &stripped
 		}
-		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup)
+		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup, input.Purpose)
 		resolved.longContextPricingEnabled = longContextPricingEnabled
 		resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 		return resolved
@@ -109,17 +109,19 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 				resolved.longContextPricingEnabled = longContextPricingEnabled
 				resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 				r.applyRequestTierOverrides(chPricing, resolved)
+				resolved.PricingSource = configuredPricingSource(nil, chPricing, PricingSourceChannel)
 				return resolved
 			}
 		}
 	}
 
 	// 1. 获取基础定价
-	basePricing, source := r.resolveBasePricing(input.Model)
+	basePricing, source, provenance := r.resolveBasePricing(input.Model, input.Purpose)
 
 	resolved := &ResolvedPricing{
 		Mode:                   BillingModeToken,
 		BasePricing:            basePricing,
+		PricingSource:          provenance,
 		Source:                 source,
 		SupportsCacheBreakdown: basePricing != nil && basePricing.SupportsCacheBreakdown,
 	}
@@ -138,17 +140,17 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 	return resolved
 }
 
-func (r *ModelPricingResolver) resolveConfiguredPricing(config *ChannelModelPricing, model, source string) *ResolvedPricing {
+func (r *ModelPricingResolver) resolveConfiguredPricing(config *ChannelModelPricing, model, source, purpose string) *ResolvedPricing {
 	mode := config.BillingMode
 	if mode == "" {
 		mode = BillingModeToken
 	}
-	resolved := &ResolvedPricing{Mode: mode, Source: source, channelPricing: config}
+	resolved := &ResolvedPricing{Mode: mode, Source: source, channelPricing: config, PricingSource: configuredPricingSource(nil, config, source)}
 	if mode == BillingModePerRequest || mode == BillingModeImage || mode == BillingModeVideo {
 		r.applyRequestTierOverrides(config, resolved)
 		return resolved
 	}
-	resolved.BasePricing, _ = r.resolveBasePricing(model)
+	resolved.BasePricing, _, resolved.PricingSource = r.resolveBasePricing(model, purpose)
 	resolved.SupportsCacheBreakdown = resolved.BasePricing != nil && resolved.BasePricing.SupportsCacheBreakdown
 	r.applyTokenOverrides(config, resolved)
 	return resolved
@@ -178,14 +180,12 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 }
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
-func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string) {
-	pricing, err := r.billingService.GetModelPricing(model)
+func (r *ModelPricingResolver) resolveBasePricing(model, purpose string) (*ModelPricing, string, json.RawMessage) {
+	pricing, provenance, err := r.billingService.getModelPricingAtWithSource(model, time.Time{})
 	if err != nil {
-		slog.Debug("failed to get model pricing from LiteLLM, using fallback",
-			"model", model, "error", err)
-		return nil, PricingSourceFallback
+		return nil, PricingSourceFallback, nil
 	}
-	return pricing, PricingSourceLiteLLM
+	return pricing, PricingSourceLiteLLM, provenance
 }
 
 // lookupChannelPricingNormalized 查找渠道定价：先用字面模型名做精确/通配匹配，
@@ -230,12 +230,14 @@ func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupI
 	case BillingModeToken:
 		r.applyTokenOverrides(chPricing, resolved)
 	case BillingModePerRequest, BillingModeImage, BillingModeVideo:
+		resolved.PricingSource = configuredPricingSource(nil, chPricing, PricingSourceChannel)
 		r.applyRequestTierOverrides(chPricing, resolved)
 	}
 }
 
 // applyTokenOverrides 应用 token 模式的渠道覆盖
 func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricing, resolved *ResolvedPricing) {
+	resolved.PricingSource = configuredPricingSource(resolved.PricingSource, chPricing, resolved.Source)
 	if resolved.BasePricing == nil {
 		resolved.BasePricing = &ModelPricing{}
 	} else {

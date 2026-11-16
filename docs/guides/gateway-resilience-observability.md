@@ -42,6 +42,8 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 | `pre_output` | 已收到响应头、首个输出前断开 |
 | `streaming` | 输出中断开（只用于阶段统计） |
 
+上传超时且客户端仍可接收响应时返回 408，错误消息为 `Timed out reading request body`；与真正取消或断连的 499 分开。上传未完成的请求不调用上游。
+
 计数 `cdn_cut` 按耗时推断 CDN 切断：85–95 秒记 `90s`，120–130 秒记 `125s`，290–310 秒记 `300s`，其他为 `other`。某个桶持续偏高时，通常说明前面某层代理或 CDN 有对应的空闲超时，检查首包前保活是否生效、该请求是否被识别为经 CDN。未送达表的写入在后台进行，同时最多 16 个，满时丢弃并记 `resilience.undelivered_record_dropped`，计费不依赖这张表。
 
 ## 计数项
@@ -85,7 +87,7 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 | `resilience.budget_exhausted`、`resilience.capacity_switch_exhausted` | 请求预算或容量换号额度耗尽 |
 | `resilience.stall`、`resilience.fast_fail`、`resilience.turn_cap`、`resilience.abuse_guard` | 对应能力触发 |
 | `resilience.post_output_failure` | 已输出后的上游失败，含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却 |
-| `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文 |
+| `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文；HTTP 续接细分为 `continuation_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`、`upstream_continuation_expired`，本地拒绝的 `stage=local`，尚未选中账号时不伪造账号字段 |
 | `resilience.collab_plaintext` | 协作消息明文化遇到冲突、异常计数或转换后被拒 |
 | `resilience.web_search_history_rejected` | 补 web_search 声明重放后仍失败 |
 | `resilience.wrapped_error_malformed` | 识别到形似中转包装帧但字段不一致的错误帧 |
@@ -166,7 +168,13 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 访问日志（组件 `http.access`）也带 `gateway_request_id`，取同一个本地 ID；客户端传来的同名请求头不会改变它，没有经过网关的请求（如管理接口）不带这个字段，原有的 `request_id` 不变。访问日志是否写入系统日志仍由运维监控“系统日志”里的“将访问日志写入数据库”决定（默认关）。
 
-Responses 拒参修复在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
+Responses 拒参修复（包括流内修复）在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
+
+转换中省略、映射或补入默认值的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值，`default` 表示补入默认值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
+
+通用 Chat/Responses、Images、Responses 生图和 Embeddings 均在准入后关联 `gateway_request_id`；`request_scope=text/image/embedding` 独立于文本统计资格，图片及 embedding 不进入文本成功率分母。
+
+用量与无账单请求的 `usage_observed/usage_source`、`terminal_event_seen/terminal_event_valid`、`response_body_type` 分别对应运行时的用量存在性、来源、原始终态证据和 JSON/SSE 正文类型；未观测的事实为 `NULL`。具体语义见[用量与完成证据](usage.md#用量与完成证据)。
 
 ## 排障
 
@@ -187,5 +195,3 @@ Responses 拒参修复在既有上游错误事件中记录 `rejected_field` 与 
 3. 会话搬动看 `sched_quality.takeover`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发改绑的那条请求（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
-
-转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。

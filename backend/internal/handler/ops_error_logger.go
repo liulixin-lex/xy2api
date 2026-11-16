@@ -1603,6 +1603,8 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 	applyOpsLatencyFieldsFromContext(c, entry)
 	if !streamErr.RequestScoped {
 		applyOpsUpstreamFieldsFromContext(c, entry)
+	} else {
+		applyOpsConversionNoticesFromContext(c, entry)
 	}
 	if streamErr.Turn > 0 && !streamErr.RequestScoped {
 		applyOpsStreamErrorSnapshot(entry, streamErr)
@@ -1738,6 +1740,7 @@ func applyOpsUpstreamFieldsFromContext(c *gin.Context, entry *service.OpsInsertE
 	if c == nil || entry == nil {
 		return
 	}
+	applyOpsConversionNoticesFromContext(c, entry)
 	if v, ok := c.Get(service.OpsUpstreamStatusCodeKey); ok {
 		switch t := v.(type) {
 		case int:
@@ -1770,6 +1773,18 @@ func applyOpsUpstreamFieldsFromContext(c *gin.Context, entry *service.OpsInsertE
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
 			applyOpsUpstreamErrorEvents(entry, events)
 		}
+	}
+}
+
+func applyOpsConversionNoticesFromContext(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
+	if c == nil || c.Request == nil || entry == nil {
+		return
+	}
+	ctx := c.Request.Context()
+	if meta := resilience.GatewayRequestMetadataFromContext(ctx); meta != nil {
+		entry.ConversionNotices = meta.ConversionNotices
+	} else {
+		entry.ConversionNotices = resilience.SnapshotConversionNotices(ctx)
 	}
 }
 

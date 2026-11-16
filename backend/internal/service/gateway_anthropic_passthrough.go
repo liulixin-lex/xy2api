@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -60,7 +61,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	c *gin.Context,
 	account *Account,
 	input anthropicPassthroughForwardInput,
-) (*ForwardResult, error) {
+) (result *ForwardResult, forwardErr error) {
+	var actualEffort *string
+	defer func() {
+		if result != nil {
+			result.ReasoningEffort = actualEffort
+		}
+	}()
+
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -109,6 +117,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		if err != nil {
 			return nil, err
 		}
+		actualEffort = NormalizeClaudeOutputEffort(gjson.GetBytes(wireBody, "output_config.effort").String())
 		cleanBody := withoutClaudeCacheFallback(ctx, wireBody)
 		if input.Parsed != nil && !bytes.Equal(cleanBody, input.Body) {
 			// build 阶段会按 beta 能力清理 body，发送前同步到 ParsedRequest 当前视图。
@@ -330,7 +339,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	account *Account,
 	body []byte,
 	token string,
-) (*http.Request, []byte, error) {
+) (request *http.Request, wireBody []byte, retErr error) {
+	recordTarget := beginAnthropicUpstreamTarget(ctx, account)
+	defer func() { recordTarget(request) }()
 	body = stripDeferredToolCacheControl(body)
 	targetURL := claudeAPIURL
 	baseURL := account.GetBaseURL()
@@ -339,7 +350,14 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, nil, err
 		}
-		targetURL = validatedURL + "/v1/messages?beta=true"
+		parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages"))
+		if err != nil {
+			return nil, nil, err
+		}
+		query := parsedURL.Query()
+		query.Set("beta", "true")
+		parsedURL.RawQuery = query.Encode()
+		targetURL = parsedURL.String()
 	}
 
 	// 能力维度 body sanitize：透传路径上 anthropic-beta header 原样透传客户端值，

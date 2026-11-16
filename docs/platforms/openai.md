@@ -50,7 +50,15 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | `POST /v1/alpha/search` | Codex 使用的独立搜索端点 |
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
 
+所有推理 HTTP 入口拒绝重复的顶层 `model` 字段（含大小写和 JSON 转义后的同名键），返回 `400`；OpenAI 封套为 `invalid_request_error`，`code=duplicate_model`、`param=model`。嵌套 schema 中的 `model` 不受影响，multipart 文件内容不作 JSON 扫描。
+
+Responses（含 compact）的 JSON 正文必须是合法 UTF-8。非法编码在正文改写和选号前返回 `400 invalid_request_error`，`code=invalid_utf8`、`param=body`，消息包含解压后原始正文中首个非法字节的 0 起始偏移；合法 BOM、Unicode 与已有字符串控制字节兼容保持不变。
+
+API Key 原生非流式 Images 没有有效图片时返回 `invalid_image_response`（`param: data`）。响应尚未提交时为 HTTP 502；JSON 保活已提交时停止后续心跳，以 HTTP 200 返回相同错误封套。少于请求张数时按实际有效图片数收费。
+
 API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
+
+`/v1/chat/completions` 收到 Responses 格式的正文、而账号上游只支持 Chat Completions（含 Grok API Key）时，网关在发送前把它转换为 Chat 请求，保留能表达的多模态内容与工具历史；字段非法或目标确实无法表达时返回 400，`param` 指向该字段。
 
 ### Chat Completions 转 Responses
 

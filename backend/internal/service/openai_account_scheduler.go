@@ -214,6 +214,13 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx = withSelectionFailureEvidence(ctx)
+	request := OpenAIAccountScheduleRequest{
+		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), RequestedModel: requestedModel,
+		RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
+		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+	}
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
@@ -266,7 +273,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
-	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
+	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact && !openAISelectionNoWait(ctx) && !chatRequestHasTools(ctx)
 	negativeVariant := "openai:" + string(requiredTransport) + ":" + string(requiredCapability) + ":" + NormalizeOpenAICompatiblePlatform(platform)
 	negativeCtx := ctx
 	if negativeCacheable && groupID != nil && resilience.Current().ErrorsOn() {
@@ -303,6 +310,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)
 		}
 		if lr := s.resilienceOpenAILastResort(lrCtx, OpenAIAccountScheduleRequest{
+			NoWait:  openAISelectionNoWait(ctx),
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,
@@ -311,14 +319,22 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			selection, err = lr, nil
 			decision.SelectedAccountID = lr.Account.ID
 			decision.SelectedAccountType = lr.Account.Type
-		} else if negativeCacheable {
-			resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
+		} else {
+			err = s.withOpenAISelectionExhaustion(ctx, request, err)
+			if negativeCacheable {
+				resilienceNegativeCachePut(negativeCtx, groupID, requestedModel, negativeVariant, origExcluded, err)
+			}
+		}
+	}
+	if err != nil {
+		if _, found := SelectionExhaustionFromError(err); !found && (isNoAccountSelectionError(err) || selectionDependencyFailed(ctx)) {
+			err = s.withOpenAISelectionExhaustion(ctx, request, err)
 		}
 	}
 	// xy2api resilience: selections that are never cached still count for the
 	// per-key fast fail when no account of the group could serve them.
-	if !negativeCacheable && isNoAccountSelectionError(err) {
-		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded)
+	if !negativeCacheable && !openAISelectionNoWait(ctx) && !chatRequestHasTools(ctx) && isNoAccountSelectionError(err) {
+		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {
 		if sessionHash != "" {

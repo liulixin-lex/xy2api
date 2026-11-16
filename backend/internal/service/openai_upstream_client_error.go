@@ -17,15 +17,16 @@ const openAIUpstreamClientErrorFallbackType = "invalid_request_error"
 // 仍然比 "Upstream request failed" 明确：它说明拒绝来自请求本身，而不是链路故障。
 const openAIUpstreamClientErrorFallbackMessage = "Upstream rejected the request"
 
-// isOpenAIDeterministicClientError 判断上游状态码是否表示「请求本身非法」。
-//
-// 只认 400：同一份请求体换任何账号、重试多少次都会得到同样的结果。
-//   - 401/402/403 是网关运营方的凭据/账单问题，继续包成 502，不向客户端暴露上游账号状态。
-//   - 404/405 既可能是模型不存在，也可能是上游 base_url 配错，同属运营方问题，保持现状。
-//   - 429 已有独立分支映射成 429。
-//   - 413 在更上面就按 request-body-too-large 走 failover 了。
+// isOpenAIDeterministicClientError selects the narrow statuses whose final
+// response preserves upstream fields. In particular, 408 does not prove an
+// invalid request; retry and account-health classification remain independent.
 func isOpenAIDeterministicClientError(statusCode int) bool {
-	return statusCode == http.StatusBadRequest
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusRequestTimeout, http.StatusConflict, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
 }
 
 // writeOpenAIUpstreamClientError 以 OpenAI 错误体形状回写确定性客户端错误。
@@ -38,23 +39,49 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 // redactAgentIdentitySensitiveBody；这里不重复清洗，也不回落读取原始 body 的
 // message，避免绕开那两道脱敏。
 func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
-	errorPayload := gin.H{"type": openAIUpstreamClientErrorFallbackType}
-	if errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String()); errType != "" {
-		errorPayload["type"] = errType
+	errType, code, param, message := upstreamClientErrorFields(statusCode, body, upstreamMsg)
+	WriteTargetProtocolError(c, PreOutputProtocolResponses, statusCode, errType, code, param, message)
+}
+
+// upstreamClientErrorFields accepts scalar metadata only. The message comes
+// exclusively from the caller's redaction path, never from the original body.
+func upstreamClientErrorFields(status int, body []byte, upstreamMsg string) (errType, code, param, message string) {
+	errType = openAIUpstreamClientErrorFallbackType
+	switch status {
+	case http.StatusRequestTimeout:
+		errType, code = "upstream_error", "request_timeout"
+	case http.StatusConflict:
+		code = "conflict"
+	case http.StatusUnprocessableEntity:
+		code = "unprocessable_entity"
 	}
-	if code := strings.TrimSpace(extractUpstreamErrorCode(body)); code != "" {
-		errorPayload["code"] = code
+	if utf8.Valid(body) && gjson.ValidBytes(body) {
+		object := gjson.GetBytes(body, "error")
+		if value := object.Get("type"); value.Type == gjson.String && strings.TrimSpace(value.Str) != "" {
+			errType = strings.TrimSpace(value.Str)
+		}
+		if value := object.Get("param"); value.Type == gjson.String {
+			param = strings.TrimSpace(value.Str)
+		}
+		candidates := []gjson.Result{object.Get("code"), openAITopLevelStreamError(body).Get("code")}
+		inner := strings.TrimSpace(object.Get("message").String())
+		if strings.HasPrefix(inner, "{") {
+			if end := strings.LastIndex(inner, "}"); end >= 0 && gjson.Valid(inner[:end+1]) {
+				candidates = append(candidates, gjson.Get(inner[:end+1], "error.code"))
+			}
+		}
+		for _, value := range candidates {
+			if (value.Type == gjson.String || value.Type == gjson.Number) && strings.TrimSpace(value.String()) != "" {
+				code = strings.TrimSpace(value.String())
+				break
+			}
+		}
 	}
-	if param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String()); param != "" {
-		errorPayload["param"] = param
-	}
-	message := strings.TrimSpace(upstreamMsg)
+	message = strings.TrimSpace(upstreamMsg)
 	if message == "" {
 		message = openAIUpstreamClientErrorFallbackMessage
 	}
-	errorPayload["message"] = message
-
-	writeOpenAICollaborationErrorJSON(c, statusCode, gin.H{"error": errorPayload})
+	return
 }
 
 // WriteOpenAIUpstreamClientError preserves a structured deterministic upstream

@@ -21,6 +21,8 @@ OAuth 类账号的授权接口位于 `/api/v1/admin/accounts` 下：`generate-au
 2. 「分组管理」中创建平台为 Anthropic 的分组，把账号加入该分组。分组的调度、系统提示词等设置见 [分组](../guides/groups.md) 与 [账号调度](../guides/scheduling.md)。
 3. 用户在「API 密钥」中创建绑定该分组的密钥，点击「使用密钥」即可获得各客户端的配置。
 
+API Key 账号的上游 Base URL 可以填根地址、带版本前缀的地址（如 `…/v1`）或完整的端点地址；网关拼接 Messages、Token 计数与模型发现的路径时不会重复版本段，查询参数保留，`#` 之后的部分去掉。需要 `beta=true` 的请求只加一次；发往第三方的原生 Messages 不额外添加。
+
 ## 对外端点
 
 Anthropic 分组的密钥可以调用以下端点。鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`；不接受 URL 查询参数里的密钥。
@@ -33,6 +35,10 @@ Anthropic 分组的密钥可以调用以下端点。鉴权使用 `Authorization:
 | `POST /v1/responses`（别名 `/responses`） | OpenAI Responses 格式，网关转换为 Messages 后转发，见[协议转换字段表](#协议转换字段表) |
 | `GET /v1/models`、`GET /v1/models/:model` | 模型列表 |
 | `GET /v1/usage` | 当前密钥的额度与用量（供 CC Switch 等工具读取） |
+
+上述 Base URL 是账号的上游地址；客户端仍填写本页「客户端配置」规定的网关地址。
+
+各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
 
 Embeddings、图片、视频、语音等端点只对 OpenAI 或 Grok 分组开放，Anthropic 分组调用会返回 `404 not_found_error`。Kimi、DeepSeek 等其他平台的端点范围见 [其他平台](others.md)。
 
@@ -219,7 +225,7 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
-Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转换为 Anthropic Messages 后发往上游，普通账号与兼容账号的转换相同。字段语义以 Anthropic 官方 [OpenAI SDK 兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) 为准：官方支持的映射，官方忽略的忽略。标「网关扩展」的是官方文档之外网关额外提供的映射。所有字段的 JSON `null` 都视为未提供。
+Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转换为 Anthropic Messages 后发往上游，普通账号与兼容账号的转换相同。字段语义以 Anthropic 官方 [OpenAI SDK 兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) 为准：官方支持的映射，官方忽略的忽略。标「网关扩展」的是官方文档之外网关额外提供的映射。所有字段的 JSON `null` 都视为未提供。Gemini 分组的 `/v1/chat/completions` 同样先转为 Messages，但不套用本表的思考预算与 JSON 格式规则，处理方式见 [Gemini · 兼容入口参数](gemini.md#兼容入口参数)。
 
 | 字段 | 处理 | 说明 |
 |---|---|---|
@@ -247,10 +253,10 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `response_format` 的 `json_object` | 忽略（网关放宽） | Anthropic 没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema` |
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
 | `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理 |
-| `metadata`、`user` | 部分映射 | API Key 账号上，可识别的 `metadata.user_id` 作为 Anthropic 的 `metadata.user_id` 发送（兼容账号随后按 [Claude Code 请求兼容](#claude-code-请求兼容api-key-账号) 改写）；其余 `metadata` 字段与 `user` 不发送，也不把 `user` 当作身份。OAuth 账号不变 |
+| `metadata`、`user` | 部分映射 | API Key 账号上，可识别的 `metadata.user_id` 作为 Anthropic 的 `metadata.user_id` 发送（兼容账号随后按 [Claude Code 请求兼容](#claude-code-请求兼容api-key-账号) 改写）；其余 `metadata` 字段与 `user` 不发送，也不把 `user` 当作身份。OAuth 账号不变；Chat 请求中二者类型不符时照旧忽略，不报错 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
-| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
+| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities` | 忽略 | 与官方一致 |
 
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 
@@ -268,6 +274,8 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 流式响应已经开始时，Chat Completions 以流内错误事件、Responses 以 `response.failed` 事件返回，`type` 与 `code` 相同。
 
 `/v1/responses` 的流式响应中，每段 thinking 摘要依次发出 `response.reasoning_summary_part.added`、文本增量、带完整文本的 `response.reasoning_summary_text.done` 与 `response.reasoning_summary_part.done`，之后才结束该 reasoning 项；只有签名或 redacted thinking 时不生成空摘要。
+
+非流式 Chat 与 Responses 请求的上游是 Anthropic 时，网关把 Anthropic 的流拼成一个响应：收到 `message_stop`、带有效 `stop_reason` 的 `message_delta` 或兼容的 `[DONE]` 时返回成功；在此之前断流、读取出错或收到错误时返回 502，保留已读到的用量。已经正常结束后连接关闭，或者缺少结尾的用量，不影响成功。
 
 ## 限制与注意事项
 

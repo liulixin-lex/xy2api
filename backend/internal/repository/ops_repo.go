@@ -61,9 +61,10 @@ INSERT INTO ops_error_logs (
   end_to_end_first_output_ms,
   recovery_outcome,
   resilience_timing,
-  gateway_request_id
+  gateway_request_id,
+  degradations
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45
 )`
 
 func NewOpsRepository(db *sql.DB) service.OpsRepository {
@@ -179,6 +180,7 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullString(input.RecoveryOutcome),
 		opsNullString(input.ResilienceTiming),
 		opsNullString(input.GatewayRequestID),
+		gatewayNoticesSQL(input.ConversionNotices),
 	}
 }
 
@@ -477,7 +479,8 @@ SELECT
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
   ak.deleted_at,
-  COALESCE(kg.name, '')
+  COALESCE(kg.name, ''),
+  e.degradations
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
@@ -488,6 +491,7 @@ WHERE e.id = $1
 LIMIT 1`
 
 	var out service.OpsErrorLogDetail
+	var notices []byte
 	var statusCode sql.NullInt64
 	var upstreamStatusCode sql.NullInt64
 	var resolvedAt sql.NullTime
@@ -557,11 +561,17 @@ LIMIT 1`
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
 		&out.APIKeyGroupName,
+		&notices,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(notices) > 0 {
+		if err := json.Unmarshal(notices, &out.ConversionNotices); err != nil {
+			return nil, fmt.Errorf("decode degradations: %w", err)
+		}
+	}
 	out.StatusCode = int(statusCode.Int64)
 	if resolvedAt.Valid {
 		t := resolvedAt.Time

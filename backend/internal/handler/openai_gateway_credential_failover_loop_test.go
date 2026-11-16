@@ -1011,3 +1011,18 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 	}
 	return h, repo, upstream, router, cleanup
 }
+
+func (r *grokCredentialHandlerRepo) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []service.Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform && a.Status == service.StatusActive && a.Schedulable {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}

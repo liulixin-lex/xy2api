@@ -23,10 +23,14 @@
 
 几条判定规则：
 
-- 瞬时失败、首输出超时与停滞的账号冷却：上游带 `Retry-After` 时按它冷却，封顶 `failure.retry_after_cap_seconds`（默认 120 秒）；不带时，OpenAI 兼容账号冷却 `failure.transient_cooldown_seconds`（默认 30 秒），Anthropic、Gemini、Antigravity 账号改为按账号 × 模型逐级冷却（见“模型级冷却”）。
+- 瞬时失败、首输出超时与停滞的账号冷却：上游带 `Retry-After` 时按它冷却，封顶 `failure.retry_after_cap_seconds`（默认 120 秒）；这只是账号冷却的上限，同一请求内对该账号的重试仍不早于上游给出的时刻，等待超过 `upstream_retry_after_cap_seconds` 时换号；不带时，OpenAI 兼容账号冷却 `failure.transient_cooldown_seconds`（默认 30 秒），Anthropic、Gemini、Antigravity 账号改为按账号 × 模型逐级冷却（见“模型级冷却”）。
+- 第三方 API Key 的 429：冷却按 `failure.retry_after_cap_seconds` 封顶，上游给出的长配额重置时间不再把这个 key 停到窗口结束，自动暂停与平台阈值也不会再这样做；上游重试提示给出的最早重试时刻仍然遵守。上游明确指出是某个模型的配额时只冷却该模型。运营配置的停调规则仍优先执行；官方自适应账号的用量阈值保持不变。细则见[失败分类与冷却](gateway-resilience.md#失败分类与冷却-failure)。
 - 中转前面的 CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页、HTML 页面）按瞬时失败处理，即使文案提到 overloaded。
 - `failure.decision_v2` 开启时，只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded”按瞬时或限流处理，可以换到同一主机上的其他账号。余额等更强的证据优先。
-- 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`）不罚号、不换号，返回 400，运维记录标为业务限制，不计入 SLA。
+- 上游内容安全拒绝（如 `content_policy_violation`、`request_check_blocked`），以及实际错误字段中的 `session_blocked_by_cyber_policy`、`cyber_policy`，不罚号、不换号，按请求拒绝结束，运维记录标为业务限制，不计入 SLA。裸 `Access denied` 仍按未知 403 处理；请求回显里的政策码不参与判定。
+- Cloudflare WAF 1010（HTML/文本，或错误对象中同时有 1010 与 `cloudflare_error` / `browser_signature_banned`）属于线路拦截，不消耗账号的 403 计数，也不触发账号冷却或停用。中转放在错误消息里的文本 1010 与 Cloudflare 顶层 JSON 同样按线路失败处理；认证码仍按账号原有规则处理。
+- 403 计数或持久化设施故障只触发 `failure.transient_cooldown_seconds` 的本地短时回避，不升级为坏凭据，也不清除已有硬暂停；正常计数达到阈值时的停用规则保持不变。
+- HTTP 503 与流内过载命中显式临时停调规则时，若已知实际出站模型，仅按规则期限冷却该账号的这个模型；未命中、模型为空或模型限流写入失败时不扩大为整号暂停。规则匹配完整错误对象，包括 status、details 和 metadata，不匹配错误对象之外的请求回显；输出后的失败只影响后续选号。
 - 一个上游响应只罚一次。池模式账号、管理员配置的自定义错误码与临时不可调度规则在韧性处理之前生效。
 
 ## 软罚与硬罚
@@ -91,10 +95,14 @@
 
 ## 模型不可用
 
+持久配置中有账号、但均不支持请求模型时，其他模型账号的临时冷却不会改变这个结论，仍返回 404 `model_not_found`；账号池为空时返回 503。
+
 - 上游以结构化错误码（如 `model_not_found`）或明确文案（如 “model is not supported”“model not found”“unknown model”）报告模型不可用时，各平台都换号，不在同一账号上重试。
 - 400/404 上的明确模型错误让该账号对该模型 30 分钟不可用（持久化的模型限流），同账号其他模型照常服务，末位兜底在到期前不放回。
 - OpenAI 兼容网关在输出前遇到的模型不可用（含仅有泛称 “not found” 的推理 404）按账号 × 实际出站模型的瞬时屏蔽处理（见“按模型瞬时屏蔽”），不写 30 分钟限流。
 - 同一请求的模型不可用若已在另一个上游主机上出现，按请求级拒绝终止，不再继续换号；同主机的其他账号仍可尝试。候选耗尽时返回 404 模型不支持（OpenAI/Anthropic 为 `model_not_found`，Gemini 为 `NOT_FOUND`），不附重试建议。
+
+历史模型限流若以别名为键，读取时按别名当前精确指向的目标匹配，同目标的精确兄弟别名共享该限流；不展开通配模式。别名改指后，旧记录会在原重置时间前对新目标生效，到期自然解除，不迁移或回填记录。智商检测和图片等专用范围仍独立判断。
 
 ## 判慢让位与会话迁出（Claude）
 
@@ -113,6 +121,8 @@
 - 门禁与正常选号相同，只放宽软罚；超过窗口费用或 RPM 硬上限的账号不会被选中。
 - OpenAI 会话换号失败的目标在 2 分钟内始终排除，末位兜底也不重试它。
 - 候选来自 2 秒的分组快照，派发前按账号当前状态再核对一次，快照之后被停用、删除、移出分组或进入硬罚的账号不会被选中。
+- 普通选号与允许的末位兜底都失败后，才判定没有可用账号。判定模型是否有账号供给时，按账号的持久配置计算，不看临时限流、过载、余额暂停；沿用已有模型映射规则，要求声明公开别名的路由只统计明确声明该别名的账号。上游给出的重试时间未到的账号，在普通选号、粘性、末位兜底与排队后重选中都不会被选用。
+- 带工具且需要 Responses 的 Chat 请求在末位兜底中仍只选能用 Responses 服务它的账号：健康的只支持 Chat 的账号与软罚中的 Responses 账号并存时，用后者；普通文本请求仍可用全部软罚中的只支持 Chat 的账号。
 
 ## 智商检测的模型级门禁
 
@@ -128,3 +138,4 @@ OpenAI 账号的某个出站模型被 [智商检测](iq-check.md)判为降智后
 - 系统提示词用兜底组的配置。
 - 用量记录：`usage_logs.group_id` 为实际服务的兜底组，`origin_group_id` 为原分组；扣款仍针对原 Key 和用户。用户侧只显示原分组；管理端用量主标签显示原分组，下方提示“兜底 → 兜底组名”，筛选、统计、导出按服务分组。
 - 可服务数可用 `GET /api/v1/admin/groups/:id/profit-control-preview?margin=` 预览，返回 `{members, schedulable, passing, ceiling}`：成员总数、可调度成员数、其中通过利润门的成员数、价格换算上限。`margin` 取值 `[0,1)`，省略时用保存值；预览不保存配置。
+- 带工具且需要 Responses 的 Chat 请求在兜底分组里同样只选能用 Responses 服务它的账号，耗尽后不再另换分组。

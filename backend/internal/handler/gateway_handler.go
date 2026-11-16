@@ -146,11 +146,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolAnthropic)
 		return
 	}
 
@@ -370,7 +366,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				if len(fs.FailedAccountIDs) == 0 {
 					recordSelectionExhausted(c.Request.Context())
-					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini)
+					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini, err)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
@@ -535,7 +531,59 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			submitForwardUsage := func(result *service.ForwardResult) {
+				if result == nil {
+					return
+				}
+				// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				requestPayloadHash := service.HashUsageRequestPayload(body)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+
+				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
+
+				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
+				// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
+				forceCacheBilling := fs.ForceCacheBilling
+				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+				sessionID := service.ExtractClientSessionID(c)
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+						Result:             result,
+						QuotaPlatform:      quotaPlatform,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Subscription:       subscription,
+						PricingAt:          pricingAt,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						SessionID:          sessionID,
+						RequestPayloadHash: requestPayloadHash,
+						ForceCacheBilling:  forceCacheBilling,
+						APIKeyService:      h.apiKeyService,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Any("group_id", apiKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+			}
+
 			if err != nil {
+				if account.Platform == service.PlatformGemini && handleUnsupportedProtocolConversion(c, err, "messages", streamStarted) {
+					return
+				}
 				if errors.Is(err, service.ErrNoAvailableAccounts) {
 					fs.FailedAccountIDs[account.ID] = struct{}{}
 					continue
@@ -559,6 +607,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 				}
+				submitForwardUsage(result)
 				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -595,62 +644,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
-			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-
-			stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort))
-			if result.ReasoningEffort == nil {
-				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
-			}
-			// 国产模型 thinking-enabled 默认 effort 填充：Kimi/GLM/MiniMax 这些不支持 effort 档位的
-			// passback-required 上游，仅要 thinking 启用且 OutputEffort 未明确传递时，在 usage_log 写 "high"
-			// 避免该字段长期为 NULL（详见 DefaultEffortForThinkingEnabled 文档）。
-			if result.ReasoningEffort == nil && parsedReq.ThinkingEnabled {
-				protocolModel := result.UpstreamModel
-				if protocolModel == "" {
-					protocolModel = result.Model
-				}
-				result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
-			}
-
-			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
-			forceCacheBilling := fs.ForceCacheBilling
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-			sessionID := service.ExtractClientSessionID(c)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					PricingAt:          pricingAt,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					SessionID:          sessionID,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
-				}); err != nil {
-					logger.L().With(
-						zap.String("component", "handler.gateway.messages"),
-						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
-						zap.String("model", reqModel),
-						zap.Int64("account_id", account.ID),
-					).Error("gateway.record_usage_failed", zap.Error(err))
-				}
-			})
+			submitForwardUsage(result)
 			return
 		}
 	}
@@ -726,7 +720,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				if len(fs.FailedAccountIDs) == 0 {
 					recordSelectionExhausted(c.Request.Context())
-					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
+					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform, err)
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
@@ -1005,17 +999,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 				stampForwardRequestedReasoningEffort(result, service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort))
-				if result.ReasoningEffort == nil {
-					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
-				}
-				// 同上（重试路径中的对称填充）。详见非重试路径同名注释。
-				if result.ReasoningEffort == nil && attemptParsedReq.ThinkingEnabled {
-					protocolModel := result.UpstreamModel
-					if protocolModel == "" {
-						protocolModel = result.Model
-					}
-					result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
-				}
 
 				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 				// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
@@ -2099,6 +2082,9 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	if streamStarted && !c.Writer.Written() {
+		prepareHandlerErrorSSE(c)
+	}
 	applyConcurrencyRetryHint(c, status, code)
 	if !inboundIsResponses(c) && !inboundIsChatCompletions(c) {
 		errType = anthropicLocalErrorType(status, errType)
@@ -2107,52 +2093,7 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 		}
 	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	// xy2api resilience: a pre-output heartbeat may have committed 200.
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
-		streamStarted = true
-	}
-	if streamStarted {
-		// 响应状态码已固化为 200（ping/部分数据已 flush），错误只能就地以 SSE 帧回传。
-		// 标记本次流内错误，供 ops_error_logger 补记——否则该中间件按 status>=400 采集，
-		// 这类挂在 200 流上的失败（如并发限流回退）不会进错误看板。
-		service.MarkOpsStreamError(c, errType, message, status)
-
-		// /v1/responses 的严格 SDK（Codex CLI）要求终止事件必须属于
-		// response.completed/failed/incomplete/cancelled 集合。
-		// Anthropic-backed Responses 路径同样会因为通用 error 帧被拒。
-		if inboundIsResponses(c) {
-			if writeResponsesFailedSSEWithStatus(c, status, errType, code, message) {
-				return
-			}
-		}
-		if resilienceChatTerminalFrame(c) && writeChatCompletionsErrorSSE(c, errType, code, message, status) {
-			return
-		}
-		// Stream already started, send error as SSE event then close
-		flusher, ok := c.Writer.(http.Flusher)
-		if ok {
-			// SSE 错误事件固定 schema，使用 Quote 直拼可避免额外 Marshal 分配。
-			errorCode := ""
-			if code != "" {
-				errorCode = `,"code":` + strconv.Quote(code)
-			}
-			// xy2api G3: Anthropic SDKs only surface named events, so the
-			// frame carries "event: error" (off with the errors switch: the
-			// 0.3.0 frame).
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
-			if resilience.Current().ErrorsOn() {
-				errorEvent = "event: error\n" + errorEvent
-			}
-			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
-				_ = c.Error(err)
-			}
-			flusher.Flush()
-		}
-		return
-	}
-
-	// Normal case: return JSON response with proper status code
-	h.errorResponseWithCode(c, status, errType, code, message)
+	writeHandlerProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
@@ -2173,6 +2114,9 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	}
 	if c.Writer.Written() {
 		streamStarted = true
+	}
+	if service.ProtocolTerminalClaimed(c) || c.Writer.Written() && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+		return false
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true
@@ -2255,16 +2199,9 @@ func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, mess
 func (h *GatewayHandler) errorResponseWithCode(c *gin.Context, status int, errType, code, message string) {
 	errType = anthropicLocalErrorType(status, errType)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
-	errorObject := gin.H{"type": errType, "message": message}
-	if code != "" {
-		errorObject["code"] = code
-	}
-	body := gin.H{
-		"type":  "error",
-		"error": errorObject,
-	}
+	body := gin.H{"type": "error", "error": gin.H{"type": errType, "message": message}}
 	stashResilienceErrorResponse(c, status, errType, message, body)
-	c.JSON(status, body)
+	writeHandlerProtocolError(c, inboundErrorProtocol(c), status, errType, code, "", message)
 }
 
 // CountTokens handles token counting endpoint
@@ -2294,11 +2231,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolAnthropic)
 		return
 	}
 
@@ -2385,7 +2318,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model, excluded)
 		if err != nil {
 			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform, err)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 			}

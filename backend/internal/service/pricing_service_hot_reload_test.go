@@ -132,32 +132,26 @@ func TestPricingHotReload_InvalidFileKeepsCurrentDataUntilFixed(t *testing.T) {
 	require.NotEqual(t, before, svc.customFilesHash)
 }
 
-// 删除文件等于清空该层：override 补丁撤销、fallback 独有模型消失，都在下一轮比对时生效，
-// 且缺失状态被记录，之后不会每轮重建。
-func TestPricingHotReload_DeletedFileDropsItsLayer(t *testing.T) {
-	svc := newHotReloadPricingService(t,
-		`{`+hotReloadModelJSON("custom-a", 4e-6, 8e-6)+`}`,
-		`{"remote-model": {"input_cost_per_token": 7e-06}}`)
+// A configured layer disappearing keeps the last good revision until restored.
+func TestPricingHotReload_DeletedFileKeepsLastGoodLayer(t *testing.T) {
+	fallback := `{` + hotReloadModelJSON("custom-a", 4e-6, 8e-6) + `}`
+	override := `{"remote-model":{"input_cost_per_token":7e-6}}`
+	svc := newHotReloadPricingService(t, fallback, override)
+	fingerprint := svc.customFilesHash
+	for _, path := range []string{svc.cfg.Pricing.OverrideFile, svc.cfg.Pricing.FallbackFile} {
+		body, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(path))
+		svc.reloadIfCustomFilesChanged()
+		require.InDelta(t, 7e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12)
+		require.NotNil(t, svc.pricingData["custom-a"])
+		require.Equal(t, fingerprint, svc.customFilesHash)
+		require.NoError(t, os.WriteFile(path, body, 0644))
+	}
+	require.NoError(t, os.WriteFile(svc.cfg.Pricing.OverrideFile, []byte(`{}`), 0644))
+	svc.reloadIfCustomFilesChanged()
+	require.InDelta(t, 1e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12)
 	require.NotNil(t, svc.pricingData["custom-a"])
-	require.InDelta(t, 7e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12)
-
-	require.NoError(t, os.Remove(svc.cfg.Pricing.OverrideFile))
-	svc.reloadIfCustomFilesChanged()
-	require.InDelta(t, 1e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12, "删除 override 后目录条目回到原价")
-	require.NotNil(t, svc.pricingData["custom-a"], "fallback 层不受影响")
-
-	require.NoError(t, os.Remove(svc.cfg.Pricing.FallbackFile))
-	svc.reloadIfCustomFilesChanged()
-	require.Nil(t, svc.pricingData["custom-a"], "删除 fallback 后其独有模型消失")
-	require.InDelta(t, 1e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12, "目录条目不受影响")
-
-	svc.pricingData["sentinel"] = &LiteLLMModelPricing{}
-	svc.reloadIfCustomFilesChanged()
-	require.Contains(t, svc.pricingData, "sentinel", "缺失状态已记录，不得每轮重建")
-
-	require.NoError(t, os.WriteFile(svc.cfg.Pricing.FallbackFile, []byte(`{`+hotReloadModelJSON("custom-a", 4e-6, 8e-6)+`}`), 0644))
-	svc.reloadIfCustomFilesChanged()
-	require.NotNil(t, svc.pricingData["custom-a"], "文件重新出现即恢复")
 }
 
 type stubPricingRemoteClient struct{ body string }

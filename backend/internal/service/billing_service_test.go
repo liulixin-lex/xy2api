@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -144,38 +143,18 @@ func TestGetModelPricing_JevLatestInputOnlyAndChannelOverride(t *testing.T) {
 	require.Equal(t, output, pricing.OutputPricePerToken)
 }
 
-// issue #3394: fallback warn 应按模型名去重,每个模型每进程最多打一条,
-// 避免热路径每请求刷屏 ops_system_logs。
-func TestGetModelPricing_FallbackWarnLoggedOncePerModel(t *testing.T) {
+// Lookup is shared by display, estimation and reservations; only settlement warns.
+func TestGetModelPricing_FallbackLookupDoesNotWarn(t *testing.T) {
 	svc := newTestBillingService()
 	buf := captureStdLog(t)
-
-	// glm-5.2 不在 LiteLLM,经 strings.Contains 命中 glm-5 兜底价 → 触发 fallback warn。
-	for i := 0; i < 5; i++ {
-		pricing, err := svc.GetModelPricing("glm-5.2")
-		require.NoError(t, err)
-		require.NotNil(t, pricing)
+	for _, model := range []string{"glm-5.2", "GLM-5.2", "glm-4.6"} {
+		for i := 0; i < 3; i++ {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.NotNil(t, pricing)
+		}
 	}
-
-	got := strings.Count(buf.String(), "Using fallback pricing for model: glm-5.2")
-	require.Equal(t, 1, got, "同一模型的 fallback warn 应只打一条,实际日志:\n%s", buf.String())
-}
-
-// 去重按"每模型"而非全局:不同模型各打一条;大小写变体经入口 ToLower 归一,视为同一条目。
-func TestGetModelPricing_FallbackWarnPerModelNotGlobal(t *testing.T) {
-	svc := newTestBillingService()
-	buf := captureStdLog(t)
-
-	for i := 0; i < 3; i++ {
-		_, _ = svc.GetModelPricing("glm-5.2")
-		_, _ = svc.GetModelPricing("GLM-5.2") // 与上一行同模型(ToLower 后),去重后不再打
-		_, _ = svc.GetModelPricing("glm-4.6")
-	}
-
-	out := buf.String()
-	require.Equal(t, 1, strings.Count(out, "model: glm-5.2"), out)
-	require.Equal(t, 1, strings.Count(out, "model: glm-4.6"), out)
-	require.Equal(t, 0, strings.Count(out, "model: GLM-5.2"), out) // 大写经 ToLower 归一,不应单独成行
+	require.Empty(t, buf.String())
 }
 
 // 回归:glm-5.2 必须命中自己的兜底价,不能被 strings.Contains("glm-5") 抢成 glm-5 价。
@@ -301,12 +280,12 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *t
 func TestCalculateCost_OpenAIGPT54LongContextMarkerRequiresActualCostIncrease(t *testing.T) {
 	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
 
-	cost, err := svc.calculateCostWithServiceTierPolicy(
+	cost, err := svc.calculateCostInternalWithPolicy(
 		"gpt-5.4-2026-03-05",
 		UsageTokens{InputTokens: 300000},
 		0,
 		"",
-		true,
+		nil, true,
 	)
 
 	require.NoError(t, err)
@@ -887,7 +866,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pricing := svc.getFallbackPricing(tt.model)
+			pricing, _ := svc.getFallbackPricing(tt.model)
 			if tt.expectNilPricing {
 				require.Nil(t, pricing)
 				return

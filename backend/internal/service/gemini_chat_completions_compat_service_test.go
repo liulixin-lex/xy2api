@@ -1,10 +1,19 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {
@@ -108,7 +117,8 @@ func TestConvertGeminiToClaudeMessageOmitsInlineDataForAnthropicMessages(t *test
 	rawData, err := json.Marshal(geminiResp)
 	require.NoError(t, err)
 
-	withInlineData, _ := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, true)
+	withInlineData, _, err := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, true)
+	require.NoError(t, err)
 	contentWithInlineData, ok := withInlineData["content"].([]any)
 	require.True(t, ok)
 	require.Len(t, contentWithInlineData, 4)
@@ -120,7 +130,8 @@ func TestConvertGeminiToClaudeMessageOmitsInlineDataForAnthropicMessages(t *test
 	require.Equal(t, "get_weather", toolUse["name"])
 	require.Equal(t, map[string]any{"type": "text", "text": "after"}, contentWithInlineData[3])
 
-	withoutInlineData, _ := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, false)
+	withoutInlineData, _, err := convertGeminiToClaudeMessage(geminiResp, "gemini-test", rawData, false)
+	require.NoError(t, err)
 	contentWithoutInlineData, ok := withoutInlineData["content"].([]any)
 	require.True(t, ok)
 	require.Len(t, contentWithoutInlineData, 3)
@@ -160,4 +171,74 @@ func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)
 	require.Len(t, choice.Message.ToolCalls, 1)
 	require.Equal(t, "get_weather", choice.Message.ToolCalls[0].Function.Name)
 	require.JSONEq(t, `{"city":"Paris"}`, choice.Message.ToolCalls[0].Function.Arguments)
+}
+
+func TestImageDetailOmittedWithNotice(t *testing.T) {
+	for _, source := range []string{"data:image/png;base64,aW1hZ2U=", "https://example.com/a.png"} {
+		for _, detail := range []string{"", "auto", "low", "high"} {
+			t.Run(fmt.Sprintf("%s/detail=%s", source[:5], detail), func(t *testing.T) {
+				image := map[string]any{"url": source}
+				if detail != "" {
+					image["detail"] = detail
+				}
+				body, err := json.Marshal(map[string]any{"model": "gemini-2.5-flash", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "describe"}, map[string]any{"type": "image_url", "image_url": image}}}}})
+				require.NoError(t, err)
+				wire, _, notices := m5ForwardChat(t, body)
+				require.Equal(t, "describe", gjson.GetBytes(wire, "contents.0.parts.0.text").String())
+				if strings.HasPrefix(source, "data:") {
+					require.Equal(t, "aW1hZ2U=", gjson.GetBytes(wire, "contents.0.parts.1.inlineData.data").String())
+				} else {
+					// URL images go out as fileData instead of being dropped.
+					require.JSONEq(t, `{"fileData":{"fileUri":"https://example.com/a.png","mimeType":"image/png"}}`, gjson.GetBytes(wire, "contents.0.parts.1").Raw)
+				}
+				require.NotContains(t, string(wire), `"detail"`)
+				if detail == "" {
+					require.Empty(t, notices)
+				} else {
+					require.Len(t, notices, 1)
+					require.Equal(t, "omit", notices[0].Action)
+					require.Contains(t, notices[0].Field, "detail")
+				}
+			})
+		}
+	}
+	t.Run("ultra_still_rejected", func(t *testing.T) {
+		body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/a.png","detail":"ultra"}}]}]}`)
+		upstream := &queuedHTTPUpstreamStub{}
+		svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+		c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+		account := &Account{ID: 703, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+		_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, account, body)
+		var conversion *apicompat.UnsupportedConversionError
+		require.ErrorAs(t, err, &conversion)
+		require.Contains(t, conversion.Field, "detail")
+		require.Empty(t, upstream.requestBodies)
+	})
+}
+
+func m5ForwardChat(t *testing.T, body []byte, accounts ...*Account) ([]byte, *ForwardResult, []apicompat.ConversionNotice) {
+	t.Helper()
+	response := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
+	contentType := "application/json"
+	if gjson.GetBytes(body, "stream").Bool() {
+		response = "data: " + response + "\n\n"
+		contentType = "text/event-stream"
+	}
+	account := &Account{ID: 703, Name: "gemini-signal-test", Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	expectedModel := account.GetMappedModel(gjson.GetBytes(body, "model").String())
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}, onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+		require.Contains(t, req.URL.Path, "/models/"+expectedModel+":")
+	}}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	c.Request = c.Request.WithContext(ctx)
+	result, err := svc.ForwardAsChatCompletions(ctx, c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, upstream.requestBodies, 1)
+	return upstream.requestBodies[0], result, resilience.SnapshotConversionNotices(ctx)
 }

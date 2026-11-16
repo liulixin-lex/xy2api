@@ -45215,6 +45215,16 @@ type UsageLogMutation struct {
 	addswitches                   *int16
 	fallback                      *bool
 	takeover                      *bool
+	request_scope                 *string
+	usage_observed                *bool
+	usage_source                  *string
+	terminal_event_seen           *bool
+	terminal_event_valid          *bool
+	response_body_type            *string
+	degradations                  *jsontext.Value
+	appenddegradations            jsontext.Value
+	pricing_source                *jsontext.Value
+	appendpricing_source          jsontext.Value
 	model                         *string
 	requested_model               *string
 	upstream_model                *string
@@ -45856,6 +45866,430 @@ func (m *UsageLogMutation) TakeoverCleared() bool {
 func (m *UsageLogMutation) ResetTakeover() {
 	m.takeover = nil
 	delete(m.clearedFields, usagelog.FieldTakeover)
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (m *UsageLogMutation) SetRequestScope(s string) {
+	m.request_scope = &s
+}
+
+// RequestScope returns the value of the "request_scope" field in the mutation.
+func (m *UsageLogMutation) RequestScope() (r string, exists bool) {
+	v := m.request_scope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestScope returns the old "request_scope" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldRequestScope(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestScope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestScope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestScope: %w", err)
+	}
+	return oldValue.RequestScope, nil
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (m *UsageLogMutation) ClearRequestScope() {
+	m.request_scope = nil
+	m.clearedFields[usagelog.FieldRequestScope] = struct{}{}
+}
+
+// RequestScopeCleared returns if the "request_scope" field was cleared in this mutation.
+func (m *UsageLogMutation) RequestScopeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldRequestScope]
+	return ok
+}
+
+// ResetRequestScope resets all changes to the "request_scope" field.
+func (m *UsageLogMutation) ResetRequestScope() {
+	m.request_scope = nil
+	delete(m.clearedFields, usagelog.FieldRequestScope)
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (m *UsageLogMutation) SetUsageObserved(b bool) {
+	m.usage_observed = &b
+}
+
+// UsageObserved returns the value of the "usage_observed" field in the mutation.
+func (m *UsageLogMutation) UsageObserved() (r bool, exists bool) {
+	v := m.usage_observed
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageObserved returns the old "usage_observed" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUsageObserved(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageObserved is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageObserved requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageObserved: %w", err)
+	}
+	return oldValue.UsageObserved, nil
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (m *UsageLogMutation) ClearUsageObserved() {
+	m.usage_observed = nil
+	m.clearedFields[usagelog.FieldUsageObserved] = struct{}{}
+}
+
+// UsageObservedCleared returns if the "usage_observed" field was cleared in this mutation.
+func (m *UsageLogMutation) UsageObservedCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldUsageObserved]
+	return ok
+}
+
+// ResetUsageObserved resets all changes to the "usage_observed" field.
+func (m *UsageLogMutation) ResetUsageObserved() {
+	m.usage_observed = nil
+	delete(m.clearedFields, usagelog.FieldUsageObserved)
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (m *UsageLogMutation) SetUsageSource(s string) {
+	m.usage_source = &s
+}
+
+// UsageSource returns the value of the "usage_source" field in the mutation.
+func (m *UsageLogMutation) UsageSource() (r string, exists bool) {
+	v := m.usage_source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageSource returns the old "usage_source" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUsageSource(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageSource: %w", err)
+	}
+	return oldValue.UsageSource, nil
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (m *UsageLogMutation) ClearUsageSource() {
+	m.usage_source = nil
+	m.clearedFields[usagelog.FieldUsageSource] = struct{}{}
+}
+
+// UsageSourceCleared returns if the "usage_source" field was cleared in this mutation.
+func (m *UsageLogMutation) UsageSourceCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldUsageSource]
+	return ok
+}
+
+// ResetUsageSource resets all changes to the "usage_source" field.
+func (m *UsageLogMutation) ResetUsageSource() {
+	m.usage_source = nil
+	delete(m.clearedFields, usagelog.FieldUsageSource)
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (m *UsageLogMutation) SetTerminalEventSeen(b bool) {
+	m.terminal_event_seen = &b
+}
+
+// TerminalEventSeen returns the value of the "terminal_event_seen" field in the mutation.
+func (m *UsageLogMutation) TerminalEventSeen() (r bool, exists bool) {
+	v := m.terminal_event_seen
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTerminalEventSeen returns the old "terminal_event_seen" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTerminalEventSeen(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTerminalEventSeen is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTerminalEventSeen requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTerminalEventSeen: %w", err)
+	}
+	return oldValue.TerminalEventSeen, nil
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (m *UsageLogMutation) ClearTerminalEventSeen() {
+	m.terminal_event_seen = nil
+	m.clearedFields[usagelog.FieldTerminalEventSeen] = struct{}{}
+}
+
+// TerminalEventSeenCleared returns if the "terminal_event_seen" field was cleared in this mutation.
+func (m *UsageLogMutation) TerminalEventSeenCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTerminalEventSeen]
+	return ok
+}
+
+// ResetTerminalEventSeen resets all changes to the "terminal_event_seen" field.
+func (m *UsageLogMutation) ResetTerminalEventSeen() {
+	m.terminal_event_seen = nil
+	delete(m.clearedFields, usagelog.FieldTerminalEventSeen)
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (m *UsageLogMutation) SetTerminalEventValid(b bool) {
+	m.terminal_event_valid = &b
+}
+
+// TerminalEventValid returns the value of the "terminal_event_valid" field in the mutation.
+func (m *UsageLogMutation) TerminalEventValid() (r bool, exists bool) {
+	v := m.terminal_event_valid
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTerminalEventValid returns the old "terminal_event_valid" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTerminalEventValid(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTerminalEventValid is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTerminalEventValid requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTerminalEventValid: %w", err)
+	}
+	return oldValue.TerminalEventValid, nil
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (m *UsageLogMutation) ClearTerminalEventValid() {
+	m.terminal_event_valid = nil
+	m.clearedFields[usagelog.FieldTerminalEventValid] = struct{}{}
+}
+
+// TerminalEventValidCleared returns if the "terminal_event_valid" field was cleared in this mutation.
+func (m *UsageLogMutation) TerminalEventValidCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTerminalEventValid]
+	return ok
+}
+
+// ResetTerminalEventValid resets all changes to the "terminal_event_valid" field.
+func (m *UsageLogMutation) ResetTerminalEventValid() {
+	m.terminal_event_valid = nil
+	delete(m.clearedFields, usagelog.FieldTerminalEventValid)
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (m *UsageLogMutation) SetResponseBodyType(s string) {
+	m.response_body_type = &s
+}
+
+// ResponseBodyType returns the value of the "response_body_type" field in the mutation.
+func (m *UsageLogMutation) ResponseBodyType() (r string, exists bool) {
+	v := m.response_body_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseBodyType returns the old "response_body_type" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldResponseBodyType(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseBodyType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseBodyType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseBodyType: %w", err)
+	}
+	return oldValue.ResponseBodyType, nil
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (m *UsageLogMutation) ClearResponseBodyType() {
+	m.response_body_type = nil
+	m.clearedFields[usagelog.FieldResponseBodyType] = struct{}{}
+}
+
+// ResponseBodyTypeCleared returns if the "response_body_type" field was cleared in this mutation.
+func (m *UsageLogMutation) ResponseBodyTypeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldResponseBodyType]
+	return ok
+}
+
+// ResetResponseBodyType resets all changes to the "response_body_type" field.
+func (m *UsageLogMutation) ResetResponseBodyType() {
+	m.response_body_type = nil
+	delete(m.clearedFields, usagelog.FieldResponseBodyType)
+}
+
+// SetDegradations sets the "degradations" field.
+func (m *UsageLogMutation) SetDegradations(j jsontext.Value) {
+	m.degradations = &j
+	m.appenddegradations = nil
+}
+
+// Degradations returns the value of the "degradations" field in the mutation.
+func (m *UsageLogMutation) Degradations() (r jsontext.Value, exists bool) {
+	v := m.degradations
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDegradations returns the old "degradations" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldDegradations(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDegradations is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDegradations requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDegradations: %w", err)
+	}
+	return oldValue.Degradations, nil
+}
+
+// AppendDegradations adds j to the "degradations" field.
+func (m *UsageLogMutation) AppendDegradations(j jsontext.Value) {
+	m.appenddegradations = append(m.appenddegradations, j...)
+}
+
+// AppendedDegradations returns the list of values that were appended to the "degradations" field in this mutation.
+func (m *UsageLogMutation) AppendedDegradations() (jsontext.Value, bool) {
+	if len(m.appenddegradations) == 0 {
+		return nil, false
+	}
+	return m.appenddegradations, true
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (m *UsageLogMutation) ClearDegradations() {
+	m.degradations = nil
+	m.appenddegradations = nil
+	m.clearedFields[usagelog.FieldDegradations] = struct{}{}
+}
+
+// DegradationsCleared returns if the "degradations" field was cleared in this mutation.
+func (m *UsageLogMutation) DegradationsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldDegradations]
+	return ok
+}
+
+// ResetDegradations resets all changes to the "degradations" field.
+func (m *UsageLogMutation) ResetDegradations() {
+	m.degradations = nil
+	m.appenddegradations = nil
+	delete(m.clearedFields, usagelog.FieldDegradations)
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (m *UsageLogMutation) SetPricingSource(j jsontext.Value) {
+	m.pricing_source = &j
+	m.appendpricing_source = nil
+}
+
+// PricingSource returns the value of the "pricing_source" field in the mutation.
+func (m *UsageLogMutation) PricingSource() (r jsontext.Value, exists bool) {
+	v := m.pricing_source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPricingSource returns the old "pricing_source" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldPricingSource(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPricingSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPricingSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPricingSource: %w", err)
+	}
+	return oldValue.PricingSource, nil
+}
+
+// AppendPricingSource adds j to the "pricing_source" field.
+func (m *UsageLogMutation) AppendPricingSource(j jsontext.Value) {
+	m.appendpricing_source = append(m.appendpricing_source, j...)
+}
+
+// AppendedPricingSource returns the list of values that were appended to the "pricing_source" field in this mutation.
+func (m *UsageLogMutation) AppendedPricingSource() (jsontext.Value, bool) {
+	if len(m.appendpricing_source) == 0 {
+		return nil, false
+	}
+	return m.appendpricing_source, true
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (m *UsageLogMutation) ClearPricingSource() {
+	m.pricing_source = nil
+	m.appendpricing_source = nil
+	m.clearedFields[usagelog.FieldPricingSource] = struct{}{}
+}
+
+// PricingSourceCleared returns if the "pricing_source" field was cleared in this mutation.
+func (m *UsageLogMutation) PricingSourceCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldPricingSource]
+	return ok
+}
+
+// ResetPricingSource resets all changes to the "pricing_source" field.
+func (m *UsageLogMutation) ResetPricingSource() {
+	m.pricing_source = nil
+	m.appendpricing_source = nil
+	delete(m.clearedFields, usagelog.FieldPricingSource)
 }
 
 // SetModel sets the "model" field.
@@ -49658,7 +50092,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 74)
+	fields := make([]string, 0, 82)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -49685,6 +50119,30 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.takeover != nil {
 		fields = append(fields, usagelog.FieldTakeover)
+	}
+	if m.request_scope != nil {
+		fields = append(fields, usagelog.FieldRequestScope)
+	}
+	if m.usage_observed != nil {
+		fields = append(fields, usagelog.FieldUsageObserved)
+	}
+	if m.usage_source != nil {
+		fields = append(fields, usagelog.FieldUsageSource)
+	}
+	if m.terminal_event_seen != nil {
+		fields = append(fields, usagelog.FieldTerminalEventSeen)
+	}
+	if m.terminal_event_valid != nil {
+		fields = append(fields, usagelog.FieldTerminalEventValid)
+	}
+	if m.response_body_type != nil {
+		fields = append(fields, usagelog.FieldResponseBodyType)
+	}
+	if m.degradations != nil {
+		fields = append(fields, usagelog.FieldDegradations)
+	}
+	if m.pricing_source != nil {
+		fields = append(fields, usagelog.FieldPricingSource)
 	}
 	if m.model != nil {
 		fields = append(fields, usagelog.FieldModel)
@@ -49907,6 +50365,22 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Fallback()
 	case usagelog.FieldTakeover:
 		return m.Takeover()
+	case usagelog.FieldRequestScope:
+		return m.RequestScope()
+	case usagelog.FieldUsageObserved:
+		return m.UsageObserved()
+	case usagelog.FieldUsageSource:
+		return m.UsageSource()
+	case usagelog.FieldTerminalEventSeen:
+		return m.TerminalEventSeen()
+	case usagelog.FieldTerminalEventValid:
+		return m.TerminalEventValid()
+	case usagelog.FieldResponseBodyType:
+		return m.ResponseBodyType()
+	case usagelog.FieldDegradations:
+		return m.Degradations()
+	case usagelog.FieldPricingSource:
+		return m.PricingSource()
 	case usagelog.FieldModel:
 		return m.Model()
 	case usagelog.FieldRequestedModel:
@@ -50064,6 +50538,22 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldFallback(ctx)
 	case usagelog.FieldTakeover:
 		return m.OldTakeover(ctx)
+	case usagelog.FieldRequestScope:
+		return m.OldRequestScope(ctx)
+	case usagelog.FieldUsageObserved:
+		return m.OldUsageObserved(ctx)
+	case usagelog.FieldUsageSource:
+		return m.OldUsageSource(ctx)
+	case usagelog.FieldTerminalEventSeen:
+		return m.OldTerminalEventSeen(ctx)
+	case usagelog.FieldTerminalEventValid:
+		return m.OldTerminalEventValid(ctx)
+	case usagelog.FieldResponseBodyType:
+		return m.OldResponseBodyType(ctx)
+	case usagelog.FieldDegradations:
+		return m.OldDegradations(ctx)
+	case usagelog.FieldPricingSource:
+		return m.OldPricingSource(ctx)
 	case usagelog.FieldModel:
 		return m.OldModel(ctx)
 	case usagelog.FieldRequestedModel:
@@ -50265,6 +50755,62 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetTakeover(v)
+		return nil
+	case usagelog.FieldRequestScope:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestScope(v)
+		return nil
+	case usagelog.FieldUsageObserved:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageObserved(v)
+		return nil
+	case usagelog.FieldUsageSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageSource(v)
+		return nil
+	case usagelog.FieldTerminalEventSeen:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTerminalEventSeen(v)
+		return nil
+	case usagelog.FieldTerminalEventValid:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTerminalEventValid(v)
+		return nil
+	case usagelog.FieldResponseBodyType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseBodyType(v)
+		return nil
+	case usagelog.FieldDegradations:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDegradations(v)
+		return nil
+	case usagelog.FieldPricingSource:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPricingSource(v)
 		return nil
 	case usagelog.FieldModel:
 		v, ok := value.(string)
@@ -51213,6 +51759,30 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldTakeover) {
 		fields = append(fields, usagelog.FieldTakeover)
 	}
+	if m.FieldCleared(usagelog.FieldRequestScope) {
+		fields = append(fields, usagelog.FieldRequestScope)
+	}
+	if m.FieldCleared(usagelog.FieldUsageObserved) {
+		fields = append(fields, usagelog.FieldUsageObserved)
+	}
+	if m.FieldCleared(usagelog.FieldUsageSource) {
+		fields = append(fields, usagelog.FieldUsageSource)
+	}
+	if m.FieldCleared(usagelog.FieldTerminalEventSeen) {
+		fields = append(fields, usagelog.FieldTerminalEventSeen)
+	}
+	if m.FieldCleared(usagelog.FieldTerminalEventValid) {
+		fields = append(fields, usagelog.FieldTerminalEventValid)
+	}
+	if m.FieldCleared(usagelog.FieldResponseBodyType) {
+		fields = append(fields, usagelog.FieldResponseBodyType)
+	}
+	if m.FieldCleared(usagelog.FieldDegradations) {
+		fields = append(fields, usagelog.FieldDegradations)
+	}
+	if m.FieldCleared(usagelog.FieldPricingSource) {
+		fields = append(fields, usagelog.FieldPricingSource)
+	}
 	if m.FieldCleared(usagelog.FieldRequestedModel) {
 		fields = append(fields, usagelog.FieldRequestedModel)
 	}
@@ -51373,6 +51943,30 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldTakeover:
 		m.ClearTakeover()
+		return nil
+	case usagelog.FieldRequestScope:
+		m.ClearRequestScope()
+		return nil
+	case usagelog.FieldUsageObserved:
+		m.ClearUsageObserved()
+		return nil
+	case usagelog.FieldUsageSource:
+		m.ClearUsageSource()
+		return nil
+	case usagelog.FieldTerminalEventSeen:
+		m.ClearTerminalEventSeen()
+		return nil
+	case usagelog.FieldTerminalEventValid:
+		m.ClearTerminalEventValid()
+		return nil
+	case usagelog.FieldResponseBodyType:
+		m.ClearResponseBodyType()
+		return nil
+	case usagelog.FieldDegradations:
+		m.ClearDegradations()
+		return nil
+	case usagelog.FieldPricingSource:
+		m.ClearPricingSource()
 		return nil
 	case usagelog.FieldRequestedModel:
 		m.ClearRequestedModel()
@@ -51540,6 +52134,30 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldTakeover:
 		m.ResetTakeover()
+		return nil
+	case usagelog.FieldRequestScope:
+		m.ResetRequestScope()
+		return nil
+	case usagelog.FieldUsageObserved:
+		m.ResetUsageObserved()
+		return nil
+	case usagelog.FieldUsageSource:
+		m.ResetUsageSource()
+		return nil
+	case usagelog.FieldTerminalEventSeen:
+		m.ResetTerminalEventSeen()
+		return nil
+	case usagelog.FieldTerminalEventValid:
+		m.ResetTerminalEventValid()
+		return nil
+	case usagelog.FieldResponseBodyType:
+		m.ResetResponseBodyType()
+		return nil
+	case usagelog.FieldDegradations:
+		m.ResetDegradations()
+		return nil
+	case usagelog.FieldPricingSource:
+		m.ResetPricingSource()
 		return nil
 	case usagelog.FieldModel:
 		m.ResetModel()

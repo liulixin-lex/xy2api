@@ -47,11 +47,11 @@ func TestNegativeCacheOnlyForGroupLevelNoAccount(t *testing.T) {
 	require.NoError(t, resilienceNegativeCacheHit(ctx, &g31, "m", "", nil))
 	require.False(t, resilience.StateFrom(newSession).GroupNoAccount(), "the per-key fast fail must not count it")
 
-	// Every account penalised: the result holds for the group, and the
-	// requests answered from the cache count for the fast fail too.
+	// A complete typed verdict, after ordinary and last-resort selection,
+	// proves group exhaustion; penalty snapshots alone do not.
 	g32 := int64(32)
 	first := resilience.WithRequestState(ctx, resilience.NewRequestState())
-	resilienceNegativeCachePut(first, &g32, "m", "", nil, noAccount)
+	resilienceNegativeCachePut(first, &g32, "m", "", nil, &SelectionExhaustion{Known: true, GroupLevel: true, Members: 1, ModelSupported: 1, RequestSupported: 1, Reasons: map[SelectionReason]int{SelectionReasonBalanceExhausted: 1}})
 	require.True(t, resilience.StateFrom(first).GroupNoAccount())
 	next := resilience.WithRequestState(ctx, resilience.NewRequestState())
 	require.ErrorIs(t, resilienceNegativeCacheHit(next, &g32, "m", "", nil), errNegativeCached)
@@ -64,7 +64,7 @@ func TestNegativeCacheOnlyForGroupLevelNoAccount(t *testing.T) {
 	r.lastResortGroups.drop(34)
 	r.fallbackAccounts.(*groupAccountsRepo).byGroup[34] = []Account{other}
 	g34 := int64(34)
-	resilienceNegativeCachePut(ctx, &g34, "m", "", nil, noAccount)
+	resilienceNegativeCachePut(ctx, &g34, "m", "", nil, &SelectionExhaustion{Known: true, GroupLevel: true, Members: 1, Reasons: map[SelectionReason]int{SelectionReasonModelNotSupported: 1}})
 	require.ErrorIs(t, resilienceNegativeCacheHit(ctx, &g34, "m", "", nil), errNegativeCached)
 }
 
@@ -72,7 +72,7 @@ func TestNegativeCacheKeepsAForcedPlatformApart(t *testing.T) {
 	until := time.Now().Add(time.Hour)
 	withNegativeScopeRuntime(t, map[int64][]Account{33: {{ID: 3, Platform: PlatformAnthropic, Status: StatusActive, Schedulable: true,
 		TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}}})
-	noAccount := fmt.Errorf("%w supporting model: m (total=1 eligible=0)", ErrNoAvailableAccounts)
+	noAccount := &SelectionExhaustion{Known: true, GroupLevel: true, Members: 1, Reasons: map[SelectionReason]int{SelectionReasonPlatformMismatch: 1}}
 	forced := context.WithValue(context.Background(), ctxkey.ForcePlatform, PlatformAntigravity)
 	g := int64(33)
 
@@ -128,8 +128,8 @@ func newNegativeScopeOpenAIService(accounts []Account) *OpenAIGatewayService {
 }
 
 func TestUncachedOpenAISelectionStillMarksGroupNoAccount(t *testing.T) {
-	// Continuation, image and compact selections are never cached, but
-	// their group-level no-account results count for the fast fail.
+	// Continuation eligibility is request-specific; an untyped no-account
+	// result cannot mark the whole group unavailable.
 	until := time.Now().Add(time.Hour)
 	down := Account{ID: 72, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
 		TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}
@@ -139,7 +139,7 @@ func TestUncachedOpenAISelectionStillMarksGroupNoAccount(t *testing.T) {
 	st := resilience.NewRequestState()
 	_, _, err := svc.SelectAccountWithScheduler(resilience.WithRequestState(context.Background(), st), &groupID, "resp_prev", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.True(t, st.GroupNoAccount())
+	require.False(t, st.GroupNoAccount())
 }
 
 func TestUncachedOpenAISelectionIgnoresTheCacheEntirely(t *testing.T) {
@@ -151,7 +151,7 @@ func TestUncachedOpenAISelectionIgnoresTheCacheEntirely(t *testing.T) {
 	groupID := int64(10)
 	variant := "openai:" + string(OpenAIUpstreamTransportAny) + "::" + NormalizeOpenAICompatiblePlatform(PlatformOpenAI)
 	resilienceNegativeCachePut(context.Background(), &groupID, "gpt-5.5", variant, nil,
-		fmt.Errorf("%w supporting model: gpt-5.5 (total=0)", ErrNoAvailableAccounts))
+		&SelectionExhaustion{Known: true, GroupLevel: true, Reasons: map[SelectionReason]int{SelectionReasonNoMembers: 1}})
 	require.ErrorIs(t, resilienceNegativeCacheHit(context.Background(), &groupID, "gpt-5.5", variant, nil), errNegativeCached)
 
 	st := resilience.NewRequestState()

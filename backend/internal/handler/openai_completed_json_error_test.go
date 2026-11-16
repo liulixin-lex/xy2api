@@ -83,6 +83,7 @@ func TestOpenAIForwardCompletedJSONGuardPreservesFallback(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 		before := c.Writer.Size()
 		c.Header("Content-Type", "text/event-stream")
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString(": ping\n\n")
 		require.False(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error")))
 		require.True(t, (&OpenAIGatewayHandler{}).ensureForwardErrorResponse(c, true))
@@ -93,6 +94,7 @@ func TestOpenAIForwardCompletedJSONGuardPreservesFallback(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 		before := c.Writer.Size()
+		c.Header("Content-Type", "text/event-stream")
 		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString("event: response.failed\ndata: {\"type\":\"response.failed\"}\n\n")
 		require.True(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("upstream response failed: denied")))
@@ -109,15 +111,15 @@ func TestOpenAIForwardCompletedJSONGuardPreservesFallback(t *testing.T) {
 		require.Zero(t, c.Writer.Size())
 		require.False(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("local error")))
 	})
-	t.Run("successful partial JSON still needs fallback", func(t *testing.T) {
+	t.Run("partial JSON must not mix in SSE", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 		before := c.Writer.Size()
 		c.Data(http.StatusOK, "application/json", []byte("{\"id\":"))
 		require.False(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error")))
-		require.True(t, (&OpenAIGatewayHandler{}).ensureForwardErrorResponse(c, false))
-		require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed\n"))
+		require.False(t, (&OpenAIGatewayHandler{}).ensureForwardErrorResponse(c, false))
+		require.Equal(t, 0, strings.Count(w.Body.String(), "event: response.failed\n"))
 	})
 	for _, tc := range []struct {
 		name, contentType string

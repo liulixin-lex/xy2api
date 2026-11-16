@@ -88,11 +88,9 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIRespon
 		return kind
 	}
 	p, e := normalize(payloadType), normalize(eventName)
-	// A generic SSE error name may carry a specific response.failed payload.
-	// E2 has already been strictly validated above; ordinary failed envelopes
-	// still pass response/status validation below before becoming valid.
-	genericFailureEnvelope := e == "error" && p == "response.failed"
-	if p != "" && e != "" && p != e && !genericFailureEnvelope && (candidate(p) || candidate(e)) {
+	// Generic SSE names do not override an explicit payload type. Keep strict
+	// wrapper validation above and reject disagreements between response ends.
+	if p != "" && e != "" && p != e && e != "error" && candidate(p) && candidate(e) {
 		return invalid("type_status_conflict")
 	}
 	kind := p

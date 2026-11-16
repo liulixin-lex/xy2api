@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -98,37 +95,21 @@ func inboundIsChatCompletions(c *gin.Context) bool {
 	return strings.HasSuffix(p, "/chat/completions")
 }
 
-// resilienceChatTerminalFrame reports whether a committed Chat Completions
-// stream ends with the resilience terminal frame instead of the 0.3.0
-// "event: error" frame.
+// resilienceChatTerminalFrame selects the Chat terminal frame independently
+// of keepalive settings.
 func resilienceChatTerminalFrame(c *gin.Context) bool {
-	return resilience.Current().KeepaliveOn() && inboundIsChatCompletions(c)
+	return inboundIsChatCompletions(c)
 }
 
 // writeChatCompletionsErrorSSE ends a committed Chat Completions stream
 // (design §7.6): one data line with the error and its original HTTP status,
 // then [DONE].
 func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string, status int) bool {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return false
-	}
-	if !beginResilienceTerminal(c) {
+	if service.ProtocolTerminalClaimed(c) {
 		return true
 	}
-	errObj := gin.H{"type": errType, "message": message, "status": status}
-	if code != "" {
-		errObj["code"] = code
-	}
-	payload, err := json.Marshal(gin.H{"error": errObj})
-	if err != nil {
+	if !prepareHandlerErrorSSE(c) {
 		return false
 	}
-	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", payload); err != nil {
-		_ = c.Error(err)
-		return true
-	}
-	service.MarkOpsGatewayTerminalStatus(c, status)
-	flusher.Flush()
-	return true
+	return writeHandlerProtocolError(c, service.PreOutputProtocolChat, status, errType, code, "", message)
 }

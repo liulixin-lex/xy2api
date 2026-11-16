@@ -1166,11 +1166,11 @@ pricing:
   # 更新间隔（小时）
   update_interval_hours: 24
   # Hash check interval in minutes. Each check compares the remote catalog hash and
-  # the local fallback/override file contents. Deleting a local file drops its
-  # entries at the next check; a present but non-JSON file keeps the previous data
-  # and is retried next check.
+  # the local fallback/override file contents. Missing or invalid configured files
+  # keep the last valid prices. To remove overrides, replace their content with {}
+  # instead of deleting the file.
   # 哈希检查间隔（分钟）。每次检查同时比对远程目录哈希与本地 fallback/override 文件内容；
-  # 删除本地文件会在下次检查时移除其条目，文件存在但不是 JSON 时保留旧数据、下次检查再试。
+  # 已配置文件缺失或不是有效 JSON 时保留上一版价格；撤销 override 请将内容改为 {}，不要删除文件。
   hash_check_interval_minutes: 10
 
 # =============================================================================

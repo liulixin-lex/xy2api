@@ -228,6 +228,7 @@ func TestModelRejectDiagnosis503BoundariesUnchanged(t *testing.T) {
 	} {
 		for _, route := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages/count_tokens"} {
 			t.Run(tc.name+route, func(t *testing.T) {
+				withHandlerResilience(t, nil)
 				platform := service.PlatformOpenAI
 				if route == "/v1/messages/count_tokens" {
 					platform = service.PlatformGemini

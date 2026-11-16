@@ -27,9 +27,9 @@ func TestOpenAIM3DoesNotArmForMappedDeepSeek(t *testing.T) {
 	account := openaiMappedDeepSeekResponsesImageAccount()
 	require.Equal(t, PlatformOpenAI, account.Platform)
 	require.True(t, shouldAliasDeepSeekResponsesInputImages(account))
-	require.Nil(t, svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest)))
+	require.Nil(t, svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version"))
 	require.Empty(t, svc.beginOpenAIM3(req.c, nil).accounts)
-	require.NotNil(t, svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest)))
+	require.NotNil(t, svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest), "fixture-version"))
 }
 
 func TestOpenAIM3S4LearnsOnlyNamedItem(t *testing.T) {
@@ -37,13 +37,13 @@ func TestOpenAIM3S4LearnsOnlyNamedItem(t *testing.T) {
 	ctx := req.ctx
 	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	account := webSearchReplayAccount(false)
-	a := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+	a := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 	payload := []byte(`{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`)
 	err := a.learn(ctx, []byte(m3TwoItemRequest), payload, "Encrypted content could not be verified for item amsg_one", http.StatusBadRequest, 0)
 	var signal *openAIRequestRepairSignal
 	require.ErrorAs(t, err, &signal)
 	require.Len(t, a.state.replaced, 1)
-	require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, a.request.session, account.ID), 1)
+	require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), account.ID), 1)
 	derived, err := a.derive(ctx, []byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	require.Equal(t, "input_text", gjson.GetBytes(derived, "input.0.content.0.type").String())
@@ -56,13 +56,13 @@ func TestOpenAIM3BatchBadWaitsForSuccessfulReplay(t *testing.T) {
 	req := newWebSearchReplayRequest(t)
 	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	account := webSearchReplayAccount(false)
-	a := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+	a := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 	err := a.learn(req.ctx, []byte(m3TwoItemRequest), []byte(`{"error":{"message":"Encrypted content is invalid for this conversation"}}`), "Encrypted content is invalid for this conversation", http.StatusBadRequest, 0)
 	var signal *openAIRequestRepairSignal
 	require.ErrorAs(t, err, &signal)
-	require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, a.request.session, account.ID))
+	require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), account.ID))
 	a.succeeded(req.ctx)
-	require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, a.request.session, account.ID), 2)
+	require.Len(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), account.ID), 2)
 }
 
 func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
@@ -71,14 +71,14 @@ func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
 	svc := &OpenAIGatewayService{openaiWSStateStore: store}
 	account := webSearchReplayAccount(false)
 	body := []byte(`{"model":"gpt-5.5","input":[{"type":"function_call_output","call_id":"call_one","output":[{"type":"encrypted_content","encrypted_content":"cipher"}]}]}`)
-	attempt := svc.armOpenAIM3(req.c, account, body)
+	attempt := svc.armOpenAIM3(req.c, account, body, "fixture-version")
 	err := attempt.learn(req.ctx, body, []byte(`{"error":{"code":"server_error","message":"Encrypted function output content could not be decrypted"}}`), "Encrypted function output content could not be decrypted", http.StatusBadRequest, 0)
 	var signal *openAIRequestRepairSignal
 	require.ErrorAs(t, err, &signal)
 	require.Equal(t, "input_text", gjson.GetBytes(signal.next, "input.0.output.0.type").String())
-	require.Empty(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
+	require.Empty(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID))
 	attempt.succeeded(req.ctx)
-	require.Len(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID), 1)
+	require.Len(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID), 1)
 }
 
 func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
@@ -100,6 +100,7 @@ func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
 					},
 				}}
 				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.cfg.JWT.Secret = "m10-fixture-secret"
 				svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
 				_, err := svc.Forward(req.ctx, req.c, account, []byte(m3TwoItemRequest))
 				require.NoError(t, err, "nil from the reader must not commit pending Bad")
@@ -110,7 +111,7 @@ func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
 				}
 				attempt := openAIRequestRepairFrom(req.c).m3
 				require.Len(t, attempt.state.pending, 2)
-				require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
+				require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID))
 			})
 		}
 	}
@@ -138,8 +139,11 @@ func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
 func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		for _, stream := range []bool{false, true} {
-			for _, terminal := range []string{"", "response.cancelled"} {
+			for _, terminal := range []string{"", "response.cancelled", "response.completed"} {
 				for _, output := range []bool{false, true} {
+					if terminal == "response.completed" && !output {
+						continue // The success control includes delivered semantic output.
+					}
 					t.Run(fmt.Sprintf("passthrough=%t/stream=%t/terminal=%s/output=%t", passthrough, stream, terminal, output), func(t *testing.T) {
 						withResilienceSettings(t, nil)
 						req := newWebSearchReplayRequest(t)
@@ -149,13 +153,14 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 							frames += "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 						}
 						if terminal != "" {
-							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":\"cancelled\",\"output\":[]}}\n\n", terminal)
+							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":%q,\"output\":[]}}\n\n", terminal, strings.TrimPrefix(terminal, "response."))
 						}
 						upstream := &httpUpstreamRecorder{responses: []*http.Response{
 							newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
 							{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(frames))},
 						}}
 						svc := newOpenAIImageGenerationControlTestService(upstream)
+						svc.cfg.JWT.Secret = "m10-fixture-secret"
 						svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
 						body, err := sjson.Set(m3TwoItemRequest, "stream", stream)
 						require.NoError(t, err)
@@ -163,8 +168,10 @@ func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
 						require.Len(t, upstream.bodies, 2)
 						require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
 						attempt := openAIRequestRepairFrom(req.c).m3
-						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID)
-						if output {
+						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID)
+						// Partial failures do not run the M6 success hook, even
+						// after output. Only a valid completion commits batch evidence.
+						if terminal == "response.completed" {
 							require.Len(t, bad, 2)
 						} else {
 							require.Empty(t, bad)
@@ -185,6 +192,7 @@ func TestForwardOpenAIM3ReplaySendsOnlyPlaceholderInNamedSlot(t *testing.T) {
 		webSearchSuccessStream("resp_m3_replayed"),
 	}}
 	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.JWT.Secret = "m10-fixture-secret"
 	_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	require.Len(t, upstream.bodies, 2)
@@ -202,6 +210,7 @@ func TestForwardOpenAIM3NativeStreamReplaySendsPlaceholder(t *testing.T) {
 	payload := `{"type":"response.failed","response":{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}}`
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(payload), webSearchSuccessStream("resp_m3_native_stream")}}
 	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.JWT.Secret = "m10-fixture-secret"
 	_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	require.Len(t, upstream.bodies, 2)
@@ -217,6 +226,7 @@ func TestForwardOpenAIM3PassthroughHTTPReplaySendsPlaceholder(t *testing.T) {
 		webSearchSuccessStream("resp_m3_passthrough_http"),
 	}}
 	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.JWT.Secret = "m10-fixture-secret"
 	_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(true), []byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	require.Len(t, upstream.bodies, 2)
@@ -240,6 +250,7 @@ func TestForwardOpenAIM3AggregatedReplaySendsPlaceholder(t *testing.T) {
 				webSearchSuccessStream("resp_m3_aggregate"),
 			}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.JWT.Secret = "m10-fixture-secret"
 			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(passthrough), body)
 			require.NoError(t, err)
 			require.Len(t, upstream.bodies, 2)
@@ -262,6 +273,7 @@ func TestForwardOpenAIM3PassthroughReplaySendsPlaceholder(t *testing.T) {
 	payload := `{"type":"response.failed","response":{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}}`
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(payload), webSearchSuccessStream("resp_m3_passthrough")}}
 	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.JWT.Secret = "m10-fixture-secret"
 	_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(true), []byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	require.Len(t, upstream.bodies, 2)
@@ -285,12 +297,12 @@ func TestOpenAIM3AnonymousSlotsAreNeverPersisted(t *testing.T) {
 	svc := &OpenAIGatewayService{openaiWSStateStore: store}
 	account := webSearchReplayAccount(false)
 	body := []byte(`{"model":"gpt-5.5","input":[{"type":"agent_message","content":[{"type":"encrypted_content","data":"cipher"}]}]}`)
-	a := svc.armOpenAIM3(req.c, account, body)
+	a := svc.armOpenAIM3(req.c, account, body, "fixture-version")
 	err := a.learn(req.ctx, body, []byte(`{"error":{"message":"Encrypted content is invalid for this conversation"}}`), "Encrypted content is invalid for this conversation", http.StatusBadRequest, 0)
 	var signal *openAIRequestRepairSignal
 	require.ErrorAs(t, err, &signal)
 	a.succeeded(req.ctx)
-	require.Empty(t, store.GetSessionBadEncryptedSlots(a.request.groupID, a.request.session, account.ID))
+	require.Empty(t, store.GetSessionBadEncryptedSlots(a.request.groupID, openAIEncryptedLineageVersionedSession(a.request.session, a.credentialVersion), account.ID))
 }
 
 func TestResetOpenAIRepairAttemptRefreshesAttemptProfile(t *testing.T) {
@@ -316,7 +328,7 @@ func TestOpenAIM3SequentialS4AndForwardRebuild(t *testing.T) {
 	req := newWebSearchReplayRequest(t)
 	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	account := webSearchReplayAccount(false)
-	attempt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+	attempt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 	body := []byte(m3TwoItemRequest)
 	for _, item := range []string{"amsg_one", "amsg_two"} {
 		message := "Encrypted content could not be verified for item " + item
@@ -326,7 +338,7 @@ func TestOpenAIM3SequentialS4AndForwardRebuild(t *testing.T) {
 		body = signal.next
 	}
 	require.Len(t, attempt.state.replaced, 2)
-	rebuilt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+	rebuilt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 	require.Same(t, attempt.state, rebuilt.state)
 	err := rebuilt.learn(req.ctx, []byte(m3TwoItemRequest), nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
 	var failure *UpstreamFailoverError
@@ -334,7 +346,7 @@ func TestOpenAIM3SequentialS4AndForwardRebuild(t *testing.T) {
 	require.Equal(t, "no_growth", failure.M3Cause)
 	other := *account
 	other.ID++
-	require.Empty(t, svc.armOpenAIM3(req.c, &other, []byte(m3TwoItemRequest)).state.replaced)
+	require.Empty(t, svc.armOpenAIM3(req.c, &other, []byte(m3TwoItemRequest), "fixture-version").state.replaced)
 }
 
 func TestOpenAIM3SharedBadDoesNotSuppressRequestGrowth(t *testing.T) {
@@ -342,11 +354,11 @@ func TestOpenAIM3SharedBadDoesNotSuppressRequestGrowth(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
 	svc := &OpenAIGatewayService{openaiWSStateStore: store}
 	account := webSearchReplayAccount(false)
-	attempt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+	attempt := svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 	slots, _, err := openAIM3Slots([]byte(m3TwoItemRequest))
 	require.NoError(t, err)
 	// Another request learned the same evidence after this request was sent.
-	store.MarkSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID, []openAIBadEncryptedSlot{slots[0].id.openAIBadEncryptedSlot}, time.Hour)
+	store.MarkSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), account.ID, []openAIBadEncryptedSlot{slots[0].id.openAIBadEncryptedSlot}, time.Hour)
 	err = attempt.learn(req.ctx, []byte(m3TwoItemRequest), nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
 	var signal *openAIRequestRepairSignal
 	require.ErrorAs(t, err, &signal)
@@ -381,13 +393,13 @@ func TestOpenAIM3AmbiguousShapesFailClosed(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			req := newWebSearchReplayRequest(t)
 			svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
-			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body))
+			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body), "fixture-version")
 			err := attempt.learn(req.ctx, []byte(body), nil, "Encrypted content could not be verified for item amsg_one", 400, 0)
 			var failure *UpstreamFailoverError
 			require.ErrorAs(t, err, &failure)
 			require.Equal(t, "shape", failure.M3Cause)
 			require.Empty(t, attempt.state.replaced)
-			require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, attempt.account.ID))
+			require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), attempt.account.ID))
 		})
 	}
 }
@@ -421,12 +433,12 @@ func TestOpenAIM3BadReferencesAreBoundedAndDetached(t *testing.T) {
 			require.NoError(t, err)
 			slots, _, err := openAIM3Slots([]byte(body))
 			require.NoError(t, err)
-			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body))
+			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body), "fixture-version")
 			message := "Encrypted content could not be verified for item " + gjson.Get(body, "input.0.id").String()
 			var signal *openAIRequestRepairSignal
 			require.ErrorAs(t, attempt.learn(req.ctx, []byte(body), nil, message, 400, 0), &signal)
 			require.Equal(t, "input_text", gjson.GetBytes(signal.next, "input.0.content.0.type").String())
-			bad := store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, attempt.account.ID)
+			bad := store.GetSessionBadEncryptedSlots(attempt.request.groupID, openAIEncryptedLineageVersionedSession(attempt.request.session, attempt.credentialVersion), attempt.account.ID)
 			if size > openAIM3MaxRefBytes {
 				require.Empty(t, slots[0].id.ref)
 				require.Empty(t, bad)
@@ -462,7 +474,7 @@ func TestOpenAIM3WrappedStatusRoutesOnly400(t *testing.T) {
 		svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 		repair := armOpenAIRequestRepair(req.c, account, nil)
 		repair.body = []byte(m3TwoItemRequest)
-		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 		next, err, retry := svc.interceptOpenAIM3Failover(req.ctx, req.c, account, nil, nil, &UpstreamFailoverError{StatusCode: status, WrappedStatus: status, ClientMessage: "upstream rejection"})
 		if status == 400 {
 			require.NoError(t, err)
@@ -501,6 +513,7 @@ func TestForwardOpenAIM3Rewritten4xxRepairsFieldsBeforeSwitch(t *testing.T) {
 					newOpenAIUpstreamErrorResponse(tc.status, tc.payload),
 				}}
 				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.cfg.JWT.Secret = "m10-fixture-secret"
 				repo := &countTokensRuntimeStateRepo{}
 				svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 				account := webSearchReplayAccount(passthrough)
@@ -556,7 +569,7 @@ func TestOpenAIM3RewrittenFallbackPreservesRequestErrors(t *testing.T) {
 			svc := &OpenAIGatewayService{}
 			account := webSearchReplayAccount(false)
 			r := armOpenAIRequestRepair(req.c, account, nil)
-			r.m3 = svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+			r.m3 = svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest), "fixture-version")
 			r.m3.state.replaced[openAIM3SlotID{}] = struct{}{}
 			message := extractUpstreamErrorMessage([]byte(tc.payload))
 			err := r.m3.afterLocalRepairs(req.ctx, nil, []byte(tc.payload), message, tc.status, 0)
@@ -596,6 +609,7 @@ func TestForwardOpenAIM3PassthroughInbandFieldRepairScope(t *testing.T) {
 			responses = append(responses, requestRepairFailedStream(payload), webSearchSuccessStream("resp_field_repaired"))
 			upstream := &httpUpstreamRecorder{responses: responses}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.JWT.Secret = "m10-fixture-secret"
 			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), []byte(body))
 			if tc.repairs {
 				require.NoError(t, err)
@@ -643,7 +657,7 @@ func TestOpenAIM3Wrapped400LocalRepairsRetainEvidence(t *testing.T) {
 		svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 		repair := armOpenAIRequestRepair(req.c, account, nil)
 		repair.body = []byte(m3TwoItemRequest)
-		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 		payload := []byte(`{"error":{"message":"response protection is unavailable"}}`)
 		message := "response protection is unavailable"
 		if compact {
@@ -670,7 +684,7 @@ func TestOpenAIM3Wrapped400LocalRepairsRetainEvidence(t *testing.T) {
 		}
 		require.True(t, retry)
 		require.Equal(t, "input_text", gjson.GetBytes(next, "input.0.content.0.type").String())
-		require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(repair.m3.request.groupID, repair.m3.request.session, account.ID), "batch evidence waits for complete replay success")
+		require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(repair.m3.request.groupID, openAIEncryptedLineageVersionedSession(repair.m3.request.session, repair.m3.credentialVersion), account.ID), "batch evidence waits for complete replay success")
 	}
 }
 
@@ -680,7 +694,7 @@ func TestOpenAIWebSearchSignalCarriesWrapped400ToM3(t *testing.T) {
 	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	repair := armOpenAIRequestRepair(req.c, account, nil)
 	repair.body = []byte(m3TwoItemRequest)
-	repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+	repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 	webSearch := &openAIWebSearchReplay{accountID: account.ID, declared: true}
 	req.c.Set(openAIWebSearchReplayContextKey, webSearch)
 	message := "response protection is unavailable; Encrypted content could not be verified for item amsg_one"
@@ -701,7 +715,7 @@ func TestOpenAIM3FirstStateRefusalAfterWebSearchRepair(t *testing.T) {
 	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	repair := armOpenAIRequestRepair(req.c, account, nil)
 	repair.body = []byte(m3TwoItemRequest)
-	repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+	repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 	webSearch := &openAIWebSearchReplay{accountID: account.ID, declared: true}
 	req.c.Set(openAIWebSearchReplayContextKey, webSearch)
 	message := "response protection is unavailable; Encrypted content could not be verified for item amsg_one"
@@ -751,6 +765,7 @@ func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {
 				reject(failedIDs[0], first), reject(failedIDs[1], second), reject(failedIDs[2], second), webSearchSuccessStream("resp_m3_web_search"),
 			}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.JWT.Secret = "m10-fixture-secret"
 			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), body)
 			require.NoError(t, err)
 			require.Len(t, upstream.bodies, 4, "one M3 item, bounded declaration repair, then the second M3 item")
@@ -786,7 +801,7 @@ func TestOpenAIM3WebSearchExhaustionDoesNotInvent4xx(t *testing.T) {
 		svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
 		repair := armOpenAIRequestRepair(req.c, account, nil)
 		repair.body = []byte(m3TwoItemRequest)
-		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+		repair.m3 = svc.armOpenAIM3(req.c, account, repair.body, "fixture-version")
 		slots, _, err := openAIM3Slots(repair.body)
 		require.NoError(t, err)
 		repair.m3.state.replaced[slots[0].id] = struct{}{}

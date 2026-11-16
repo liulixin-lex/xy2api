@@ -36,6 +36,9 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
+	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
@@ -47,7 +50,7 @@ func (s *GatewayService) ForwardAsResponses(
 		finishClaudeCacheAttempt(cacheDecision, result)
 	}()
 
-	normalizedBody, normalized, err := normalizeConvertedResponsesLegacyIngress(body)
+	normalizedBody, normalized, err := normalizeResponsesLegacyIngressForTarget(body, false, m7ConversionOptions(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +59,7 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
-	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body)
+	adaptedBody, clientToolMapping, err := adaptResponsesClientToolsForAnthropic(body, opts)
 	if err != nil {
 		return nil, fmt.Errorf("adapt responses client tools: %w", err)
 	}
@@ -86,8 +89,15 @@ func (s *GatewayService) ForwardAsResponses(
 			mappedModel = normalized
 		}
 	}
+	adaptedBody, err = applyM7FinalReasoning(ctx, c, account, adaptedBody, mappedModel, "responses", PreOutputProtocolResponses)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(adaptedBody, &responsesReq); err != nil {
+		return nil, err
+	}
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(&responsesReq, opts)
 	if err != nil {
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
@@ -112,6 +122,10 @@ func (s *GatewayService) ForwardAsResponses(
 		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
 
+	anthropicBody, err = finalizeM7ReasoningPolicy(ctx, c, account, anthropicBody, mappedModel, "anthropic", PreOutputProtocolResponses)
+	if err != nil {
+		return nil, err
+	}
 	// 6. Apply Claude Code mimicry for OAuth accounts (non-Claude-Code endpoints).
 	// OpenAI Responses 协议进来的请求永远不是 Claude Code 客户端，所以对 OAuth 账号
 	// 必须完整执行 /v1/messages 主路径上的伪装链路（system 重写 + normalize + metadata 注入），
@@ -154,7 +168,6 @@ func (s *GatewayService) ForwardAsResponses(
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})
@@ -214,27 +227,34 @@ func (s *GatewayService) ForwardAsResponses(
 	// 13. Handle normal response (convert Anthropic → Responses)
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	}
 
 	return result, handleErr
 }
 
-func adaptResponsesClientToolsForAnthropic(body []byte) ([]byte, apicompat.ResponsesClientToolMapping, error) {
+func adaptResponsesClientToolsForAnthropic(body []byte, options ...apicompat.ConversionOptions) ([]byte, apicompat.ResponsesClientToolMapping, error) {
+	opts := m7SelectedConversionOptions(options)
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	var requestBody map[string]any
 	if err := decoder.Decode(&requestBody); err != nil {
 		return body, apicompat.ResponsesClientToolMapping{}, err
 	}
-	additionalToolsChanged, err := liftResponsesAdditionalTools(requestBody)
-	if err != nil {
-		return body, apicompat.ResponsesClientToolMapping{}, err
+	var mapping apicompat.ResponsesClientToolMapping
+	var changed, additionalToolsChanged bool
+	var err error
+	if opts.Bridge != nil {
+		mapping, changed, err = apicompat.AdaptResponsesClientToolsWithBridgeOptions(requestBody, opts)
+	} else {
+		additionalToolsChanged, err = liftResponsesAdditionalTools(requestBody)
+		if err != nil {
+			return body, mapping, err
+		}
+		mapping, changed, err = apicompat.AdaptResponsesClientTools(requestBody)
 	}
-
-	mapping, changed, err := apicompat.AdaptResponsesClientTools(requestBody)
 	if err != nil {
 		return body, apicompat.ResponsesClientToolMapping{}, err
 	}
@@ -302,6 +322,10 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 		return
 	}
 
+	dst.InputTokensPresent = dst.InputTokensPresent || src.InputTokensPresent
+	dst.OutputTokensPresent = dst.OutputTokensPresent || src.OutputTokensPresent
+	dst.CacheReadInputTokensPresent = dst.CacheReadInputTokensPresent || src.CacheReadInputTokensPresent
+	dst.CacheCreationInputTokensPresent = dst.CacheCreationInputTokensPresent || src.CacheCreationInputTokensPresent
 	cacheReadTokens := src.CacheReadInputTokens
 	if cacheReadTokens == 0 && src.CachedTokens > 0 {
 		cacheReadTokens = src.CachedTokens
@@ -391,12 +415,15 @@ func parseAnthropicSSEField(line, field string) (string, bool) {
 func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
-) (_ *ForwardResult, retErr error) {
+	options ...apicompat.ConversionOptions,
+) (result *ForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -409,9 +436,30 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	var evidence anthropicBufferedEvidence
+	var readErr error
+	defer func() {
+		facts := evidence.facts()
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		// A failed buffered response is billable only when it retained metered tokens.
+		// Keep response evidence in RequestState even when there is no partial result.
+		if result == nil && retErr != nil && usage.hasObservedTokens() {
+			result = &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}
+		}
+		if result != nil {
+			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+		}
+	}()
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
 		eventType, ok := parseAnthropicSSEField(line, "event")
 		if !ok {
 			continue
@@ -427,6 +475,15 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 			continue
 		}
 
+		evidence.observe(eventType, payload)
+		if c != nil && c.Request != nil {
+			if opts.Bridge == nil {
+				recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			}
+		}
+		if evidence.err != nil {
+			break
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			logger.L().Warn("forward_as_responses buffered: failed to parse event",
@@ -475,7 +532,8 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	readErr = scanner.Err()
+	if err := readErr; err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("forward_as_responses buffered: read error",
 				zap.Error(err),
@@ -484,9 +542,8 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 	}
 
-	if finalResp == nil {
-		err := fmt.Errorf("upstream stream ended without response")
-		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
+	if err := evidence.finish(readErr, finalResp != nil); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a complete response")
 		return nil, err
 	}
 
@@ -505,7 +562,11 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		finalResp.Model = mappedModel
 	}
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
 	responsesResp.Model = originalModel // Use original model name
 
 	if s.responseHeaderFilter != nil {
@@ -551,7 +612,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	reasoningEffort *string,
 	startTime time.Time,
 	clientToolMapping apicompat.ResponsesClientToolMapping,
+	options ...apicompat.ConversionOptions,
 ) (*ForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	state := apicompat.NewAnthropicEventToResponsesState()
@@ -585,15 +648,6 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			firstTokenMs = &ms
 		}
 
-		// Extract usage from message_delta
-		if event.Type == "message_delta" && event.Usage != nil {
-			mergeAnthropicUsage(&usage, *event.Usage)
-		}
-		// Also capture usage from message_start
-		if event.Type == "message_start" && event.Message != nil {
-			mergeAnthropicUsage(&usage, event.Message.Usage)
-		}
-
 		// Keep the terminal Responses usage aligned with the normalized billing
 		// buckets. Normalize the converter input too, so message handlers cannot
 		// restore the provider's overlapping raw input total.
@@ -602,7 +656,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 		// Convert to Responses events
 		var frames []string
-		events := apicompat.AnthropicEventToResponsesEvents(event, state)
+		events := apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, state, opts)
 		for _, evt := range events {
 			payload, err := json.Marshal(evt)
 			if err != nil {
@@ -631,7 +685,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	finalizeStream := func() []string {
 		var frames []string
-		for _, evt := range apicompat.FinalizeAnthropicResponsesStream(state) {
+		for _, evt := range apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(state, opts) {
 			sse, err := apicompat.ResponsesEventToSSE(evt)
 			if err != nil {
 				continue
@@ -645,17 +699,32 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	// stages the opening and ends a broken stream with response.failed.
 	var stream *gatewayConvertStream
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{
-		convert:  func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
-		finalize: finalizeStream,
+		observeUsage: func(event *apicompat.AnthropicStreamEvent) {
+			// Extract usage from message_delta
+			if event.Type == "message_delta" && event.Usage != nil {
+				mergeAnthropicUsage(&usage, *event.Usage)
+			}
+			// Also capture usage from message_start
+			if event.Type == "message_start" && event.Message != nil {
+				mergeAnthropicUsage(&usage, event.Message.Usage)
+			}
+		},
+		convert:                func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
+		finalize:               finalizeStream,
+		terminalMappingHandled: opts.Bridge != nil,
+		conversionError:        state.Err,
 		failure: func(source []byte) []string {
 			return gatewayResponsesFailedFrames(stream.ctx(), state, originalModel, source)
 		},
 	})
 	outcome := stream.run()
+	copyAnthropicUpstreamTarget(stream.ctx(), outcome.err)
 	if outcome.noResult {
 		return nil, outcome.err
 	}
 	result := resultWithUsage()
+	result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = outcome.ResponseFactsKnown, outcome.UsagePresent, outcome.UsageSource
+	result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = outcome.TerminalSeen, outcome.TerminalValid, outcome.ResponseBodyKind
 	result.ClientDisconnect = stream.guarded && stream.gone
 	return result, outcome.err
 }
@@ -675,13 +744,7 @@ func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
 
 // writeResponsesError writes an error response in OpenAI Responses API format.
 func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
-	MarkResponseCommitted(c)
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"code":    code,
-			"message": message,
-		},
-	})
+	WriteTargetProtocolError(c, PreOutputProtocolResponses, statusCode, "", code, "", message)
 }
 
 // mapUpstreamStatusCode maps upstream HTTP status codes to appropriate client-facing codes.

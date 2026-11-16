@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -43,6 +44,8 @@ const (
 	openAIImagesResponsesMainModel         = "gpt-5.6-luna"
 	openAIImagesVerbatimPromptInstructions = "When invoking the image_generation tool, use the user's image prompt verbatim. Do not rewrite, expand, summarize, embellish, translate, normalize punctuation, or add or remove visual details or constraints. Preserve the original language, wording, capitalization, quotes, and punctuation exactly."
 )
+
+var errInvalidOpenAIImageResponse = errors.New("invalid image response: Upstream image response contains no valid images")
 
 // openAIImagesResponsesMainModelValue selects the Responses driver independently
 // of the image_generation tool model. An environment override lets operators
@@ -745,7 +748,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	defer func() { _ = resp.Body.Close() }()
 
 	var usage OpenAIUsage
-	imageCount := parsed.N
+	var imageCount int
 	var firstTokenMs *int
 	if parsed.Stream && isEventStreamResponse(resp.Header) {
 		streamUsage, streamCount, streamSizes, ttft, err := s.handleOpenAIImagesStreamingResponse(resp, c, startTime, nil)
@@ -790,28 +793,28 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		}, nil
 	} else {
 		nonStreamUsage, nonStreamCount, nonStreamSizes, err := s.handleOpenAIImagesNonStreamingResponse(upstreamCtx, resp, c, account, parsed)
-		if err != nil {
+		if err != nil && !errors.Is(err, errInvalidOpenAIImageResponse) {
 			return nil, err
 		}
 		usage = nonStreamUsage
-		if nonStreamCount > 0 {
-			imageCount = nonStreamCount
-		}
+		imageCount = nonStreamCount
 		return &OpenAIForwardResult{
-			RequestID:        resp.Header.Get("x-request-id"),
-			UpstreamHeaders:  resp.Header,
-			Usage:            usage,
-			Model:            requestModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           parsed.Stream,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ImageCount:       imageCount,
-			ImageSize:        parsed.SizeTier,
-			ImageInputSize:   parsed.Size,
-			ImageOutputSizes: nonStreamSizes,
-		}, nil
+			RequestID:          resp.Header.Get("x-request-id"),
+			UpstreamHeaders:    resp.Header,
+			Usage:              usage,
+			Model:              requestModel,
+			UpstreamModel:      upstreamModel,
+			Stream:             parsed.Stream,
+			ResponseHeaders:    resp.Header.Clone(),
+			Duration:           time.Since(startTime),
+			FirstTokenMs:       firstTokenMs,
+			ImageCount:         imageCount,
+			ImageCountObserved: true,
+			PartialFailure:     err != nil,
+			ImageSize:          parsed.SizeTier,
+			ImageInputSize:     parsed.Size,
+			ImageOutputSizes:   nonStreamSizes,
+		}, err
 	}
 }
 
@@ -972,6 +975,24 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 	if err != nil {
 		return OpenAIUsage{}, 0, nil, nonstreamReadError(ctx, resp, err)
 	}
+	validJSON := gjson.ValidBytes(body) && gjson.ParseBytes(body).IsObject()
+	usage := OpenAIUsage{}
+	if validJSON {
+		usage, _ = extractOpenAIUsageFromJSONBytes(body)
+	}
+	imageCount := 0
+	if validJSON && !gjson.GetBytes(body, "error").IsObject() {
+		imageCount = extractOpenAIImageCountFromJSONBytes(body)
+	}
+	if imageCount == 0 {
+		status := http.StatusBadGateway
+		if StopOpenAIImagesJSONKeepaliveCommitted(c) {
+			status = http.StatusOK
+		}
+		message := "Upstream image response contains no valid images"
+		c.JSON(status, gin.H{"error": gin.H{"type": "upstream_error", "code": "invalid_image_response", "param": "data", "message": message}})
+		return usage, 0, nil, errInvalidOpenAIImageResponse
+	}
 	body = s.backfillOpenAIImagesB64JSON(ctx, account, parsed, body)
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := "application/json"
@@ -982,8 +1003,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesNonStreamingResponse(
 	}
 	c.Data(resp.StatusCode, contentType, body)
 
-	usage, _ := extractOpenAIUsageFromJSONBytes(body)
-	return usage, extractOpenAIImageCountFromJSONBytes(body), collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
+	return usage, imageCount, collectOpenAIResponseImageOutputSizesFromJSONBytes(body), nil
 }
 
 func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
@@ -1324,7 +1344,24 @@ func mergeOpenAIUsage(dst *OpenAIUsage, body []byte) {
 }
 
 func extractOpenAIImageCountFromJSONBytes(body []byte) int {
-	return countOpenAIResponseImageOutputsFromJSONBytes(body)
+	counter := newOpenAIImageOutputCounter()
+	counter.AddJSONResponse(body)
+	// Data-array outputs require an actual non-empty string, never a number or object.
+	if data := gjson.GetBytes(body, "data"); data.IsArray() {
+		count := 0
+		data.ForEach(func(_, item gjson.Result) bool {
+			if !item.IsObject() {
+				return true
+			}
+			url, b64 := item.Get("url"), item.Get("b64_json")
+			if url.Type == gjson.String && strings.TrimSpace(url.Str) != "" || b64.Type == gjson.String && strings.TrimSpace(b64.Str) != "" {
+				count++
+			}
+			return true
+		})
+		counter.maxDataCount = count
+	}
+	return counter.Count()
 }
 
 type openAIImagePointerInfo struct {

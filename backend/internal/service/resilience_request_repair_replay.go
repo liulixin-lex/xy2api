@@ -1,23 +1,19 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
 const openAIRequestRepairContextKey = "xy_resilience_request_repair"
-
-var openAIEncryptedItemPrefixPattern = regexp.MustCompile(`(?i)\bfor item\s+([a-z0-9]+)_`)
 
 // openAIRequestRepair carries one account attempt's request-local repair
 // state. body is replaced at the start of every forwarding loop iteration;
@@ -25,16 +21,22 @@ var openAIEncryptedItemPrefixPattern = regexp.MustCompile(`(?i)\bfor item\s+([a-
 type openAIRequestRepair struct {
 	accountID               int64
 	body                    []byte
+	credentialVersion       string
+	credentialRepo          AccountRepository // resolves shadow credentials for client error redaction
 	encryptedTried          bool
+	encryptedBulkTried      bool
 	passthrough             bool
 	m3                      *openAIM3Attempt
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
+	rejectedFieldEvent      *OpsUpstreamErrorEvent
+	rejectedFieldSequence   uint64
 }
 
 func armOpenAIRequestRepair(c *gin.Context, account *Account, rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState) *openAIRequestRepair {
 	if c == nil || c.Request == nil {
 		return nil
 	}
+	previous := openAIRequestRepairFrom(c)
 	c.Set(openAIRequestRepairContextKey, (*openAIRequestRepair)(nil))
 	if account == nil {
 		return nil
@@ -42,6 +44,9 @@ func armOpenAIRequestRepair(c *gin.Context, account *Account, rejectedFieldRetry
 	repair := &openAIRequestRepair{
 		accountID:               account.ID,
 		rejectedFieldRetryState: rejectedFieldRetryState,
+	}
+	if previous != nil && previous.accountID == account.ID {
+		repair.rejectedFieldEvent, repair.rejectedFieldSequence = previous.rejectedFieldEvent, previous.rejectedFieldSequence
 	}
 	c.Set(openAIRequestRepairContextKey, repair)
 	return repair
@@ -63,8 +68,10 @@ func openAIRequestRepairFrom(c *gin.Context) *openAIRequestRepair {
 }
 
 type openAIRequestRepairSignal struct {
-	kind string
-	next []byte
+	kind                 string
+	next                 []byte
+	encrypted            httpEncryptedRepairPlan
+	rejectedFieldPayload []byte
 }
 
 func (e *openAIRequestRepairSignal) Error() string {
@@ -74,32 +81,66 @@ func (e *openAIRequestRepairSignal) Error() string {
 	return "upstream request repair required: " + e.kind
 }
 
-func openAIEncryptedContentRepairBody(body []byte, message string) ([]byte, bool, error) {
-	if len(body) == 0 || strings.Contains(strings.ToLower(message), "encrypted function output") {
-		return nil, false, nil
+func openAIEncryptedContentRepairBody(body, payload []byte) (httpRejectedEncryptedItem, error) {
+	return selectHTTPRejectedEncryptedItem(body, payload)
+}
+
+// Normalization can remove an input id while the provider still names that id
+// from the ciphertext. Preserve the original identity only when its ciphertext
+// and type map to exactly one id-less wire item. Indices always refer to wire.
+func openAIRequestEncryptedContentRepairBody(c *gin.Context, body, payload []byte) (httpRejectedEncryptedItem, error) {
+	selected, err := openAIEncryptedContentRepairBody(body, payload)
+	if err != nil || selected.Changed || selected.ItemIndex >= 0 || c == nil {
+		return selected, err
 	}
-	for _, match := range openAIEncryptedItemPrefixPattern.FindAllStringSubmatch(message, -1) {
-		prefix := strings.ToLower(match[1])
-		if prefix != "rs" && prefix != "cmp" {
-			return nil, false, nil
+	for _, field := range []string{"code", "param", "message"} {
+		if httpEncryptedIndexPattern.MatchString(openAIStreamErrorField(payload, field).String()) {
+			return selected, nil
 		}
 	}
-	var decoded map[string]any
-	err := decodeOpenAIJSONUseNumber(body, &decoded)
-	if err != nil {
-		return nil, false, err
+	original, _ := c.Get(openAIStateRejectionBodyKey)
+	originalBody, _ := original.([]byte)
+	located, err := selectHTTPRejectedEncryptedItem(originalBody, payload)
+	if err != nil || !located.Changed || located.ItemID == "" || located.Digest == "" {
+		return selected, err
 	}
-	if !trimOpenAIEncryptedReasoningItems(decoded) {
-		return nil, false, nil
+	named := openAIStreamErrorField(payload, "item_id").String() == located.ItemID
+	for _, field := range []string{"code", "param", "message"} {
+		for _, match := range httpEncryptedItemPattern.FindAllStringSubmatch(openAIStreamErrorField(payload, field).String(), -1) {
+			if firstNonEmpty(match[1], match[2]) == located.ItemID {
+				named = true
+			}
+		}
 	}
-	next, err := marshalOpenAIUpstreamJSON(decoded)
-	if err != nil {
-		return nil, false, err
+	if !named {
+		return selected, nil
 	}
-	if bytes.Equal(next, body) {
-		return nil, false, nil
+	root := gjson.ParseBytes(body)
+	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUniqueObject(root) {
+		return selected, nil
 	}
-	return next, true, nil
+	input := root.Get("input")
+	items := input.Array()
+	if input.IsObject() {
+		items = []gjson.Result{input}
+	} else if !input.IsArray() {
+		return selected, nil
+	}
+	index := -1
+	for i, item := range items {
+		cipher := item.Get("encrypted_content")
+		if cipher.Type != gjson.String || openAIEncryptedContentDigest(cipher.String()) != located.Digest {
+			continue
+		}
+		if index >= 0 || item.Get("id").String() != "" || item.Get("type").String() != located.ItemType {
+			return selected, nil
+		}
+		index = i
+	}
+	if index < 0 {
+		return selected, nil
+	}
+	return repairHTTPEncryptedItem(body, input, items[index], index)
 }
 
 func openAIRequestRepairErrorObject(payload []byte) []byte {
@@ -130,7 +171,12 @@ func openAIRequestRepairErrorObject(payload []byte) []byte {
 // newOpenAIRequestRepairSignal prepares a same-account replay for an in-band
 // rejection. It performs all local validation before changing attempt state.
 func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string, wrappedStatus int) error {
-	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest {
+	r := openAIRequestRepairFrom(c)
+	if r == nil || account == nil || r.accountID != account.ID || len(r.body) == 0 {
+		return nil
+	}
+	encryptedRejection := isHTTPReasoningEncryptedRejection(r.body, payload, message)
+	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest && (wrappedStatus != http.StatusBadGateway || !encryptedRejection) {
 		return nil
 	}
 	if wrappedStatus == 0 {
@@ -140,15 +186,9 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 			return nil
 		}
 	}
-	r := openAIRequestRepairFrom(c)
-	if r == nil || account == nil || r.accountID != account.ID || len(r.body) == 0 {
-		return nil
-	}
-	if !r.encryptedTried && (isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message)) {
-		next, changed, err := openAIEncryptedContentRepairBody(r.body, message)
-		if err == nil && changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: next}
-		}
+
+	if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, r.body, payload, message, wrappedStatus, true); repairErr != nil {
+		return repairErr
 	}
 
 	_, m3Trigger := openAIM3Trigger(payload, message, wrappedStatus)
@@ -177,7 +217,8 @@ func newOpenAIRejectedFieldRepairSignal(ctx context.Context, r *openAIRequestRep
 	if len(errorObject) > 0 {
 		next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
 		if err == nil && changed && r.rejectedFieldRetryState.Allow(next) && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(r.accountID, false, time.Now()) {
-			return &openAIRequestRepairSignal{kind: reason, next: next}
+			recordOpenAIRejectedOutputLimitOmission(ctx, r.body, next)
+			return &openAIRequestRepairSignal{kind: reason, next: next, rejectedFieldPayload: errorObject}
 		}
 	}
 	return nil
@@ -195,9 +236,20 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
+	if len(signal.rejectedFieldPayload) > 0 {
+		refusal := &http.Response{StatusCode: http.StatusBadRequest}
+		if resp != nil {
+			refusal.Header = resp.Header
+		}
+		r.rejectedFieldEvent = recordOpenAIResponsesRejectedFieldRetry(c, account, refusal, signal.rejectedFieldPayload)
+		r.rejectedFieldSequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+	}
 	if signal.kind == resilience.ReasonEncryptedContent {
-		r.encryptedTried = true
+		r.noteHTTPEncryptedRepair(ctx, signal.encrypted)
 		r.rejectedFieldRetryState.remember(signal.next)
+		if lineage := s.beginOpenAIM3(c, r.body); lineage != nil {
+			s.markHTTPInvalidEncryptedContent(lineage.groupID, lineage.session, account.ID, r.credentialVersion, signal.encrypted.Digests)
+		}
 	}
 	logger.FromContext(ctx).Info("resilience.request_repair_replay",
 		zap.Int64("account_id", account.ID),
@@ -205,4 +257,16 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 		zap.String("form", "inband"),
 	)
 	return signal.next, signal.kind, true
+}
+
+// A prepared repair is not a resend until this account crossed transport.
+func noteOpenAIRequestRepairResent(ctx context.Context, c *gin.Context, account *Account) {
+	r := openAIRequestRepairFrom(c)
+	if r == nil || account == nil || r.accountID != account.ID || r.rejectedFieldEvent == nil {
+		return
+	}
+	if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && r.rejectedFieldSequence > 0 && boundary >= r.rejectedFieldSequence {
+		r.rejectedFieldEvent.Resent = true
+	}
+	r.rejectedFieldEvent = nil
 }

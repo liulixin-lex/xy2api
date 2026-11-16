@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 
@@ -284,4 +285,17 @@ func isJSONControlByte(b byte) bool {
 func appendJSONUnicodeEscape(dst []byte, b byte) []byte {
 	const hex = "0123456789abcdef"
 	return append(dst, '\\', 'u', '0', '0', hex[b>>4], hex[b&0x0f])
+}
+
+// ValidateJSONUTF8 checks the original decompressed bytes before any JSON rewrite.
+// Its byte offset includes a BOM and unescaped control bytes in the original body.
+func ValidateJSONUTF8(body []byte) error {
+	for offset := 0; offset < len(body); {
+		r, size := utf8.DecodeRune(body[offset:])
+		if r == utf8.RuneError && size == 1 {
+			return fmt.Errorf("body contains invalid UTF-8 at byte %d", offset)
+		}
+		offset += size
+	}
+	return nil
 }
