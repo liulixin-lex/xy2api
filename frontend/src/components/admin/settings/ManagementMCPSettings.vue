@@ -17,6 +17,23 @@
       </label>
       <p id="management-mcp-url-hint" class="text-sm text-gray-500 dark:text-gray-400">{{ t('managementMcp.adminURLHint') }}</p>
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('managementMcp.adminDisableHint') }}</p>
+      <div class="space-y-3 border-t border-gray-100 pt-4 dark:border-dark-700">
+        <h3 class="font-medium">{{ t('managementMcp.roleAccessTitle') }}</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('managementMcp.roleAccessHint') }}</p>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+            <h4 class="font-medium">{{ t('managementMcp.operators') }}</h4>
+            <label class="flex items-center gap-2"><input v-model="draft.allow_operators" data-test="allow-operators" type="checkbox" />{{ t('managementMcp.allowAccess') }}</label>
+            <label class="flex items-center gap-2"><input v-model="draft.show_operator_menu" data-test="operator-menu" type="checkbox" />{{ t('managementMcp.showMenu') }}</label>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('managementMcp.operatorAccessHint') }}</p>
+          </div>
+          <div class="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+            <h4 class="font-medium">{{ t('managementMcp.users') }}</h4>
+            <label class="flex items-center gap-2"><input v-model="draft.allow_users" data-test="allow-users" type="checkbox" />{{ t('managementMcp.allowAccess') }}</label>
+            <label class="flex items-center gap-2"><input v-model="draft.show_user_menu" data-test="user-menu" type="checkbox" />{{ t('managementMcp.showMenu') }}</label>
+          </div>
+        </div>
+      </div>
       <button data-test="save" type="button" class="btn btn-primary" :disabled="!loaded || saving || (draft.enabled && !draft.public_url.trim())" @click="save">{{ saving ? t('common.processing') : t('common.save') }}</button>
     </fieldset>
     <button v-if="!loaded && !loading" type="button" class="btn btn-secondary" @click="load">{{ t('common.refresh') }}</button>
@@ -40,7 +57,7 @@ import { useAppStore } from '@/stores/app'
 const { t } = useI18n()
 const app = useAppStore()
 const stepUp = useStepUp()
-const draft = ref<ManagementMCPSettings>({ enabled: false, public_url: '' })
+const draft = ref<ManagementMCPSettings>({ enabled: false, public_url: '', allow_operators: false, allow_users: false, show_operator_menu: false, show_user_menu: false })
 const loading = ref(false)
 const loaded = ref(false)
 const saving = ref(false)

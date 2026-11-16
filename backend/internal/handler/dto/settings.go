@@ -406,6 +406,10 @@ type PublicSettings struct {
 	GoogleOAuthEnabled                  bool                     `json:"google_oauth_enabled"`
 	BackendModeEnabled                  bool                     `json:"backend_mode_enabled"`
 	MCPEnabled                          bool                     `json:"mcp_enabled"`
+	MCPOperatorEnabled                  bool                     `json:"mcp_operator_enabled"`
+	MCPUserEnabled                      bool                     `json:"mcp_user_enabled"`
+	MCPOperatorMenuVisible              bool                     `json:"mcp_operator_menu_visible"`
+	MCPUserMenuVisible                  bool                     `json:"mcp_user_menu_visible"`
 	PaymentEnabled                      bool                     `json:"payment_enabled"`
 	// PaymentBalanceDisabled mirrors the payment-config BALANCE_PAYMENT_DISABLED switch so the
 	// user shell can derive the site billing mode (recharge & subscription / recharge only /

@@ -105,10 +105,10 @@ func newHandlerMCPFixture(t *testing.T) (*MCPOAuthHandler, *handlerMCPRepo, *han
 	cfg.Server.FrontendURL = "https://platform.example.com"
 	repo := &handlerMCPRepo{}
 	users := &handlerMCPUsers{user: &service.User{ID: 7, Role: service.RoleAdmin, Status: service.StatusActive, TotpEnabled: true}}
-	settings := service.NewSettingService(&handlerMCPSettings{values: map[string]string{service.SettingKeyStepUpEnabled: "true"}}, cfg)
+	settings := service.NewSettingService(&handlerMCPSettings{values: map[string]string{service.SettingKeyStepUpEnabled: "true", service.SettingKeyManagementMCP: `{"enabled":true,"public_url":"https://api.example.com/api/v1/mcp","allow_operators":true,"allow_users":true}`}}, cfg)
 	cache := &handlerMCPCache{}
 	totp := service.NewTotpService(users, nil, cache, settings, nil, nil)
-	oauth := service.NewMCPOAuthService(repo, users)
+	oauth := service.NewMCPOAuthService(repo, users, settings, nil)
 	client, err := oauth.Register(context.Background(), service.MCPOAuthRegisterInput{ClientName: "Example assistant", RedirectURIs: []string{"https://client.example.com/callback?workspace=one"}})
 	require.NoError(t, err)
 	repo.clientID, repo.reads = client.ClientID, 0

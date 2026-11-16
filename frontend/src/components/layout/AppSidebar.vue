@@ -214,6 +214,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import { showManagementMCPMenu } from '@/utils/managementMcpAccess'
 
 interface NavItem {
   path: string
@@ -744,7 +745,7 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
 const flagSupportTickets = makeSidebarFlag(FeatureFlags.supportTickets)
-const flagMCP = makeSidebarFlag(FeatureFlags.mcp)
+const flagMCP = () => showManagementMCPMenu(appStore.cachedPublicSettings, authStore.user?.role)
 
 // 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
 const purchaseNavLabel = computed(() => {
@@ -895,6 +896,11 @@ const adminNavItems = computed((): NavItem[] => {
   ]
 
   const visible = applyPermissions(applyFeatureFlags(baseItems))
+
+  // Simple mode has no personal section, so keep the permitted MCP entry here.
+  if (authStore.isSimpleMode && flagMCP()) {
+    visible.push({ path: '/settings/mcp', label: t('managementMcp.title'), icon: KeyIcon })
+  }
 
   // 简单模式下，在系统设置前插入 API密钥
   if (authStore.isSimpleMode) {

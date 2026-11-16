@@ -356,6 +356,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		WeChatOAuthMobileEnabled:            weChatMobileEnabled,
 		BackendModeEnabled:                  settings[SettingKeyBackendModeEnabled] == "true",
 		MCPEnabled:                          managementMCP.Enabled,
+		MCPOperatorEnabled:                  managementMCP.AllowsRole(RoleOperator),
+		MCPUserEnabled:                      managementMCP.AllowsRole(RoleUser),
+		MCPOperatorMenuVisible:              managementMCP.AllowsRole(RoleOperator) && managementMCP.ShowOperatorMenu,
+		MCPUserMenuVisible:                  managementMCP.AllowsRole(RoleUser) && managementMCP.ShowUserMenu,
 		PaymentEnabled:                      settings[SettingPaymentEnabled] == "true",
 		PaymentBalanceDisabled:              settings[SettingBalancePayDisabled] == "true",
 		OIDCOAuthEnabled:                    oidcEnabled,
@@ -628,6 +632,10 @@ type PublicSettingsInjectionPayload struct {
 	GoogleOAuthEnabled                  bool                     `json:"google_oauth_enabled"`
 	BackendModeEnabled                  bool                     `json:"backend_mode_enabled"`
 	MCPEnabled                          bool                     `json:"mcp_enabled"`
+	MCPOperatorEnabled                  bool                     `json:"mcp_operator_enabled"`
+	MCPUserEnabled                      bool                     `json:"mcp_user_enabled"`
+	MCPOperatorMenuVisible              bool                     `json:"mcp_operator_menu_visible"`
+	MCPUserMenuVisible                  bool                     `json:"mcp_user_menu_visible"`
 	PaymentEnabled                      bool                     `json:"payment_enabled"`
 	PaymentBalanceDisabled              bool                     `json:"payment_balance_disabled"`
 	Version                             string                   `json:"version"`
@@ -727,6 +735,10 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		GoogleOAuthEnabled:                  settings.GoogleOAuthEnabled,
 		BackendModeEnabled:                  settings.BackendModeEnabled,
 		MCPEnabled:                          settings.MCPEnabled,
+		MCPOperatorEnabled:                  settings.MCPOperatorEnabled,
+		MCPUserEnabled:                      settings.MCPUserEnabled,
+		MCPOperatorMenuVisible:              settings.MCPOperatorMenuVisible,
+		MCPUserMenuVisible:                  settings.MCPUserMenuVisible,
 		PaymentEnabled:                      settings.PaymentEnabled,
 		PaymentBalanceDisabled:              settings.PaymentBalanceDisabled,
 		Version:                             s.version,

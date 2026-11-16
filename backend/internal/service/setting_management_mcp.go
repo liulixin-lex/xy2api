@@ -15,8 +15,30 @@ const SettingKeyManagementMCP = "management_mcp_settings"
 // ManagementMCPSettings overrides deployment defaults once saved by an admin.
 // Keep the URL while disabled so enabling again does not require retyping it.
 type ManagementMCPSettings struct {
-	Enabled   bool   `json:"enabled"`
-	PublicURL string `json:"public_url"`
+	Enabled          bool   `json:"enabled"`
+	PublicURL        string `json:"public_url"`
+	AllowOperators   bool   `json:"allow_operators"`
+	AllowUsers       bool   `json:"allow_users"`
+	ShowOperatorMenu bool   `json:"show_operator_menu"`
+	ShowUserMenu     bool   `json:"show_user_menu"`
+}
+
+// Role access is opt-in, including deployments with settings saved before these
+// switches existed. Menu visibility never grants access by itself.
+func (s ManagementMCPSettings) AllowsRole(role string) bool {
+	if !s.Enabled {
+		return false
+	}
+	switch role {
+	case RoleAdmin:
+		return true
+	case RoleOperator:
+		return s.AllowOperators
+	case RoleUser:
+		return s.AllowUsers
+	default:
+		return false
+	}
 }
 
 func (s *ManagementMCPSettings) validate() error {
