@@ -332,7 +332,6 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 		delay := singleAccountBackoffDelay
 		if len(s.FailedAccountIDs) > 0 {
 			var earliest time.Time
-			var waitingAccount int64
 			hasImmediate := false
 			now := time.Now()
 			for id := range s.FailedAccountIDs {
@@ -357,18 +356,13 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 				}
 				if earliest.IsZero() || hint.NotBefore.Before(earliest) {
 					earliest = hint.NotBefore
-					waitingAccount = id
 				}
 			}
 			if !hasImmediate {
 				if earliest.IsZero() {
 					return FailoverExhausted
 				}
-				if b := requestBudget(ctx); b != nil && !b.AllowSameAccountRetry(waitingAccount) {
-					return FailoverExhausted
-				}
 				delay = max(delay, time.Until(earliest))
-				s.SameAccountRetryCount[waitingAccount]++
 			}
 		}
 		logger.FromContext(ctx).Warn("gateway.failover_single_account_backoff",

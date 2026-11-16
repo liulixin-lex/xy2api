@@ -133,3 +133,29 @@ func TestM8RetryHintReachesFinalAdvice(t *testing.T) {
 		})
 	}
 }
+
+func TestM8ShortHintPreservesReselectionAttempts(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, header := range []http.Header{nil, {"Retry-After": {"1"}}} {
+		ctx := budgetCtx(t, resilience.KindText, 7)
+		st := resilience.StateFrom(ctx)
+		fs := NewFailoverState(10, false)
+		attempts := 0
+		for attempts < 10 {
+			attempts++
+			failure := &service.UpstreamFailoverError{StatusCode: 503, ResponseHeaders: header}
+			if hint, ok := resilience.ParseUpstreamRecoveryHint(header, nil, time.Now()); ok {
+				failure.UpstreamRecoveryHint = &hint
+			}
+			st.MarkOpsUpstreamSendBoundary(11)
+			if fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 11, service.PlatformOpenAI, 1, failure) != FailoverContinue {
+				break
+			}
+			if fs.HandleSelectionExhausted(ctx) != FailoverContinue {
+				break
+			}
+		}
+		require.Equal(t, st.Budget().MaxAttempts(), attempts, "the hint must not reduce existing reselection attempts")
+		require.Zero(t, fs.SameAccountRetryCount[11], "reselection is not an extra same-account retry grant")
+	}
+}
