@@ -86,7 +86,8 @@ func TestM8ExplicitRequestErrorExits(t *testing.T) {
 					}
 					if route == "anthropic" {
 						require.Equal(t, "error", gjson.Get(output, "type").String())
-						require.False(t, gjson.Get(output, "error.code").Exists())
+						require.True(t, gjson.Get(output, "error.code").Exists())
+						require.Equal(t, tc.code, gjson.Get(output, "error.code").String())
 					} else {
 						require.Equal(t, tc.code, gjson.Get(output, "error.code").String())
 						require.Equal(t, tc.param, gjson.Get(output, "error.param").String())

@@ -441,7 +441,8 @@ func TestM8CompatStatusFieldsReachClient(t *testing.T) {
 					require.Equal(t, "The request could not be processed", gjson.Get(output, "error.message").String())
 					if path == "anthropic" {
 						require.Equal(t, "error", gjson.Get(output, "type").String())
-						require.False(t, gjson.Get(output, "error.code").Exists())
+						require.True(t, gjson.Get(output, "error.code").Exists())
+						require.Equal(t, code, gjson.Get(output, "error.code").String())
 						require.False(t, gjson.Get(output, "error.param").Exists())
 					} else {
 						require.Equal(t, code, gjson.Get(output, "error.code").String())
