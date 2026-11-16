@@ -53,3 +53,42 @@ func TestTransientCooldownRequiresTimingEvidence(t *testing.T) {
 		require.Zero(t, repo.clearCalls)
 	}
 }
+
+func TestTransientCooldownConsumesObsoleteRecoveryMarker(t *testing.T) {
+	for _, kind := range []string{"cleared", "hard", "expired"} {
+		t.Run(kind, func(t *testing.T) {
+			_, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
+			if kind == "hard" {
+				repo.tempUntil = time.Now().Add(time.Minute)
+				repo.tempReason = "manual"
+			}
+			if kind == "expired" {
+				repo.tempUntil = time.Now().Add(-time.Second)
+				repo.tempReason = transientCooldownReason("TRANSIENT", "old", time.Now().Add(-time.Minute))
+			}
+			r.lastResortUsed.Store(account.ID, time.Now())
+			st := resilience.NewRequestState()
+			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now()})
+			r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), st), account)
+			_, retained := r.lastResortUsed.Load(account.ID)
+			require.False(t, retained)
+			require.Zero(t, repo.clearCalls)
+		})
+	}
+}
+func TestTransientCooldownDisplayHidesTimestamp(t *testing.T) {
+	raw := transientCooldownReason("TRANSIENT", "synthetic", time.Unix(100, 0))
+	require.Equal(t, "transient:TRANSIENT synthetic", DisplayTempUnschedulableReason(raw))
+	require.Equal(t, raw, transientCooldownReason("TRANSIENT", "synthetic", time.Unix(100, 0)), "storage value is unchanged")
+	require.Equal(t, "manual [set_at=100]", DisplayTempUnschedulableReason("manual [set_at=100]"))
+}
+
+func TestTransientCooldownStatusHidesVersion(t *testing.T) {
+	svc, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
+	repo.tempUntil = time.Now().Add(time.Minute)
+	repo.tempReason = transientCooldownReason("TRANSIENT", "synthetic", time.Now())
+	status, err := svc.GetTempUnschedStatus(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "transient:TRANSIENT synthetic", status.ErrorMessage)
+	require.Contains(t, repo.tempReason, " [set_at=")
+}
