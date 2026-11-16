@@ -590,6 +590,9 @@ func (t *schedQualityTx) SaveTTFTRule(expected int64, p schedquality.RuleBParams
 	if old.Version != expected {
 		return result, service.ErrSchedPolicyConflict
 	}
+	if old.Params == p {
+		return old, nil
+	}
 	result = service.SchedTTFTRuleRecord{Version: old.Version + 1, Params: p}
 	encoded, err := json.Marshal(struct {
 		Version int64 `json:"version"`

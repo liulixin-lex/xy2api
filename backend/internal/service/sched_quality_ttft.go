@@ -1,6 +1,7 @@
 package service
 
 import (
+	"log/slog"
 	"math"
 	"sort"
 	"time"
@@ -116,6 +117,9 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 	case q.DimensionTTFO:
 		basis.Threshold = p.TTFTSeconds
 		result, err := q.EvaluateRuleB(ttftInput(d, r.LineKey, cut, at, p.TTFTSeconds, resets), s.rule.Params)
+		if err != nil {
+			slog.Warn("sched_quality.ttft_assessment", "component", "sched_quality", "account_id", r.AccountID, "model", r.Model, "group_id", r.GroupID, "error", err)
+		}
 		if err == nil {
 			basis.TTFT = &result
 			switch result.State {

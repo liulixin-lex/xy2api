@@ -145,6 +145,7 @@ type SchedQualityEngine interface {
 	// UpdatePolicy compares the entire setting's version, updates this group's v4,
 	// and increments the setting version; a mismatch returns ErrSchedPolicyConflict.
 	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyUpdate, error)
+	SetTrialLeases(SchedTrialLeases)
 	TTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
 	UpdateTTFTRule(ctx context.Context, expectedVersion int64, p schedquality.RuleBParams) (SchedTTFTRuleUpdate, error)
 }

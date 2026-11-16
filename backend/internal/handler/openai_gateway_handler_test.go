@@ -2093,7 +2093,7 @@ func (wsPinnedQualityView) At() time.Time                            { return ti
 func (wsPinnedQualityView) GlobalEnabled() bool                      { return true }
 func (wsPinnedQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (wsPinnedQualityView) StateOf(int64, int64, string) schedquality.StateView {
-	return schedquality.StateView{Failing: true}
+	return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 }
 
 func wsResponseAccountCacheKey(responseID string) string {
@@ -2165,7 +2165,7 @@ func (*wsTurnQualityView) GlobalEnabled() bool                      { return tru
 func (*wsTurnQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (v *wsTurnQualityView) StateOf(int64, int64, string) schedquality.StateView {
 	if v.failing.Load() {
-		return schedquality.StateView{Failing: true}
+		return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 	}
 	return schedquality.StateView{}
 }
@@ -3765,3 +3765,7 @@ func (s *openAIWSUsageHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ 
 	}
 	return nil, nil
 }
+
+func (wsPinnedQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }
+
+func (*wsTurnQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }

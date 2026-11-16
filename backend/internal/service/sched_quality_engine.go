@@ -34,6 +34,7 @@ type SchedQualityEngineService struct {
 	configAt    time.Time
 	rule        SchedTTFTRuleRecord
 	peers       *peerBucket
+	leases      SchedTrialLeases
 	policies    map[int64]SchedPolicyRecord
 	members     map[int64][]int64
 	seenResets  map[int64]time.Time
@@ -212,7 +213,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	if err != nil {
 		return err
 	}
-	var states []schedquality.LineState
+	var states, previous []schedquality.LineState
 	var overrides []SchedOverride
 	var resets map[int64]time.Time
 	var decisions []schedquality.Decision
@@ -227,11 +228,22 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 		}
 	}
 	locked, err := s.store.RunCycle(ctx, func(tx SchedQualityTx) error {
-		var err error
+		// Configuration must match the states protected by this transaction, even
+		// when another instance changed it since our last cached membership refresh.
+		policies, err := s.store.LoadPolicies(ctx)
+		if err != nil {
+			return err
+		}
+		rule, err := s.store.LoadTTFTRule(ctx)
+		if err != nil {
+			return err
+		}
+		s.policies, s.rule = policies, rule
 		states, err = tx.States()
 		if err != nil {
 			return err
 		}
+		previous = append([]schedquality.LineState(nil), states...)
 		overrides, err = tx.Overrides()
 		if err != nil {
 			return err
@@ -280,6 +292,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	} else {
 		s.processedAt = horizon
 		s.peers = d.peers
+		s.releaseEndedTrials(ctx, previous, states)
 		for _, decision := range decisions {
 			LogSchedQualityDecision(ctx, decision)
 			if decision.Action == "enter" || decision.Action == "renew" {
@@ -414,6 +427,17 @@ func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.T
 	s.mu.Lock()
 	var notifications map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(notifications) }()
+	rows, _, _, err := s.store.LoadRows(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	groups := make(map[schedQualityKey]bool)
+	for _, r := range rows {
+		if r.AccountID == id {
+			groups[schedQualityKey{r.AccountID, r.Model, r.GroupID}] = true
+		}
+	}
+	s.releaseGroups(ctx, groups)
 	at, err := s.store.RunReset(ctx, id)
 	if err != nil {
 		return time.Time{}, err
@@ -474,5 +498,37 @@ func (s *SchedQualityEngineService) cleanup(ctx context.Context) {
 		slog.ErrorContext(ctx, "sched_quality.cleanup", "kind", "decisions", "error", err)
 	} else {
 		slog.InfoContext(ctx, "sched_quality.cleanup", "kind", "decisions", "rows", decisions)
+	}
+}
+
+func (s *SchedQualityEngineService) SetTrialLeases(leases SchedTrialLeases) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.leases = leases
+}
+func (s *SchedQualityEngineService) releaseEndedTrials(ctx context.Context, before, after []schedquality.LineState) {
+	trial, present := make(map[schedQualityKey]bool), make(map[schedQualityKey]bool)
+	for _, r := range after {
+		k := schedQualityKey{r.AccountID, r.Model, r.GroupID}
+		present[k] = true
+		trial[k] = trial[k] || r.Trial
+	}
+	groups := make(map[schedQualityKey]bool)
+	for _, r := range before {
+		k := schedQualityKey{r.AccountID, r.Model, r.GroupID}
+		if (r.Trial || !present[k]) && !trial[k] {
+			groups[k] = true
+		}
+	}
+	s.releaseGroups(ctx, groups)
+}
+func (s *SchedQualityEngineService) releaseGroups(ctx context.Context, groups map[schedQualityKey]bool) {
+	if s.leases == nil {
+		return
+	}
+	for k := range groups {
+		if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
+			slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
+		}
 	}
 }

@@ -38,7 +38,7 @@ func TestRuntimeQualityPoliciesKeepAccountsViewPermission(t *testing.T) {
 
 func TestRuntimeQualityUsesSnapshotAndPolicy(t *testing.T) {
 	now := time.Now().UTC()
-	snapshot := &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, Members: map[int64][]int64{1: {2}}, GroupRows: map[int64][]service.SchedGroupRow{1: {{GroupID: 2, Model: "a", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionTTFO}}}, {GroupID: 2, Model: "b"}}}, Policies: map[int64]service.SchedPolicyRecord{2: {Version: 7, Policy: schedquality.Policy{TTFTSeconds: 15}}}}
+	snapshot := &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, Members: map[int64][]int64{1: {2}}, GroupRows: map[int64][]service.SchedGroupRow{1: {{GroupID: 2, Model: "a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear}}}, {GroupID: 2, Model: "b"}}}, Policies: map[int64]service.SchedPolicyRecord{2: {Version: 7, Policy: schedquality.Policy{TTFTSeconds: 15}}}}
 	engine := &qualitySnapshotStub{snapshot: snapshot}
 	r := &runtimeReader{quality: engine}
 	req := QueryRequest{RequireSource: func(_ context.Context, key string) error {
@@ -85,7 +85,8 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	now := time.Now().UTC()
 	amount := 12.5
 	median := 120
-	snapshot := &service.SchedQualitySnapshot{At: now, Accounts: map[int64]schedquality.AccountSummary{1: {Speed: schedquality.SpeedEvidence{N: 40, P50Ms: &median}, Error: schedquality.ErrorEvidence{N: 50, Rate: .1}, Cache: schedquality.CacheEvidence{Turns: 40, InputTokens: 100, Ratio: .9}}}}
+	ratio := .9
+	snapshot := &service.SchedQualitySnapshot{At: now, Accounts: map[int64]schedquality.AccountSummary{1: {FirstOutputP50Ms: &median, ErrorN: 50, ErrorBad: 5, CacheTurns: 40, CacheRatio: &ratio}}}
 
 	engine := &qualitySnapshotStub{snapshot: snapshot}
 	balance := &service.UpstreamBalanceEntries{Records: map[int64]*service.UpstreamBalanceRecord{1: {AmountUSD: &amount, ObservedAt: now, Fingerprint: "must-not-be-returned"}}}
@@ -102,7 +103,7 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	require.Equal(t, &amount, row["balance"].(map[string]any)["amount_usd"])
 	require.NotContains(t, row["balance"], "fingerprint")
 	require.Equal(t, []string{"process.sched_quality_snapshot", "redis.upstream_balance_snapshot"}, q.result.Source)
-	require.Equal(t, 40, snapshot.Account(1).Speed.N)
+	require.Equal(t, 40, snapshot.Account(1).CacheTurns)
 }
 
 type qualityHealthAccounts struct {

@@ -495,6 +495,13 @@ func (f *fakeSchedQualityTx) SaveTTFTRule(version int64, p schedquality.RuleBPar
 	if f.rule.Version != version {
 		return SchedTTFTRuleRecord{}, ErrSchedPolicyConflict
 	}
+	old := f.rule
+	if old.Params.Confidence == 0 {
+		old.Params = schedquality.DefaultRuleBParams()
+	}
+	if old.Params == p {
+		return old, nil
+	}
 	f.rule = SchedTTFTRuleRecord{Version: version + 1, Params: p}
 	return f.rule, nil
 }

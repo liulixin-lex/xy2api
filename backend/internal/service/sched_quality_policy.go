@@ -79,7 +79,8 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 		return result, e
 	}
 	oldPolicies := cloneSchedPolicies(s.policies)
-	var states []schedquality.LineState
+	oldRule := s.rule
+	var states, previous []schedquality.LineState
 	var overrides []SchedOverride
 	var resets map[int64]time.Time
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
@@ -89,6 +90,11 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 			return e
 		}
 		s.policies = policies
+		rule, e := s.store.LoadTTFTRule(ctx)
+		if e != nil {
+			return e
+		}
+		s.rule = rule
 		result.RelaxedLines = relaxedPolicyLines(policies[groupID].Policy, p)
 		result.SchedPolicyRecord, e = tx.SavePolicy(groupID, expectedVersion, p)
 		if e != nil {
@@ -99,6 +105,7 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 		if e != nil {
 			return e
 		}
+		previous = append([]schedquality.LineState(nil), states...)
 		overrides, e = tx.Overrides()
 		if e != nil {
 			return e
@@ -114,10 +121,12 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 	})
 	if err != nil {
 		s.policies = oldPolicies
+		s.rule = oldRule
 		return
 	}
 	s.configAt = time.Time{}
 	s.peers = d.peers
+	s.releaseEndedTrials(ctx, previous, states)
 	notifications = s.publish(d, states, overrides, resets, now)
 	return
 }
@@ -146,10 +155,16 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		return result, e
 	}
 	oldRule := s.rule
-	var states []schedquality.LineState
+	oldPolicies := cloneSchedPolicies(s.policies)
+	var states, previous []schedquality.LineState
 	var overrides []SchedOverride
 	var resets map[int64]time.Time
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
+		policies, e := s.store.LoadPolicies(ctx)
+		if e != nil {
+			return e
+		}
+		s.policies = policies
 		old, e := s.store.LoadTTFTRule(ctx)
 		if e != nil {
 			return e
@@ -167,6 +182,7 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		if e != nil {
 			return e
 		}
+		previous = append([]schedquality.LineState(nil), states...)
 		overrides, e = tx.Overrides()
 		if e != nil {
 			return e
@@ -182,10 +198,12 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 	})
 	if err != nil {
 		s.rule = oldRule
+		s.policies = oldPolicies
 		return
 	}
 	s.configAt = time.Time{}
 	s.peers = d.peers
+	s.releaseEndedTrials(ctx, previous, states)
 	notifications = s.publish(d, states, overrides, resets, now)
 	return
 }
@@ -201,7 +219,7 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 	var deleted []schedquality.LineKey
 	cleared := 0
 	for _, r := range states {
-		if remove(r.LineKey) {
+		if remove(r.LineKey) || relax(r.LineKey) && (!s.isMember(r.GroupID, r.AccountID) || !s.policies[r.GroupID].Policy.Enabled) {
 			deleted = append(deleted, r.LineKey)
 			delete(rows, r.LineKey)
 		} else if relax(r.LineKey) {
@@ -209,14 +227,20 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 	}
 	for _, k := range keys {
-		if remove(k) {
+		if remove(k) || !s.policies[k.GroupID].Policy.Enabled {
 			continue
 		}
 		if relax(k) {
 			rows[k] = schedquality.Relaxed(k)
 		}
 	}
-	d.peers = freezePeers(d.now, rows)
+	peerRows := make(map[schedquality.LineKey]schedquality.LineState)
+	for _, k := range keys {
+		if r, ok := rows[k]; ok && s.policies[k.GroupID].Policy.Enabled {
+			peerRows[k] = r
+		}
+	}
+	d.peers = freezePeers(d.now, peerRows)
 	var changed []schedquality.LineState
 	var decisions []schedquality.Decision
 	for _, k := range keys {

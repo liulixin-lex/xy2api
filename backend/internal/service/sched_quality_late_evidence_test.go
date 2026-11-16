@@ -73,6 +73,9 @@ func TestEngineFailedCommitKeepsWatermarkAndPendingReplay(t *testing.T) {
 	processed := f.e.processedAt
 	f.badTTFT()
 	f.now = f.now.Add(5 * time.Minute)
+	for i := range f.ledger.Rows {
+		f.ledger.Rows[i].InsertedAt = f.now.Add(-10 * time.Second)
+	}
 	f.store.CommitErr = errors.New("synthetic commit failure")
 	require.ErrorIs(t, f.e.cycle(context.Background()), f.store.CommitErr)
 	require.Same(t, original, f.e.Snapshot())

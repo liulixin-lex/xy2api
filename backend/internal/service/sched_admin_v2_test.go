@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestSchedAdminSummaryAllModelsMarksAndStatus(t *testing.T) {
 	a := out.Accounts[0]
 	require.Equal(t, "normal", a.Status)
 	require.Equal(t, 120, *a.TTFO.P50Ms)
-	require.True(t, a.TTFO.Short)
+	require.False(t, a.TTFO.Short)
 	require.False(t, a.TTFO.Red)
 	require.True(t, a.Error.Red)
 	require.False(t, a.Error.Short)
@@ -299,7 +300,7 @@ func TestSchedAdminGroupCountsAndPreview(t *testing.T) {
 	require.EqualValues(t, 7, out.Groups[0].Last60.Requests)
 	require.Equal(t, 1, usage.calls)
 	require.Equal(t, now, usage.at)
-	e.changes = []SchedPolicyChange{{AccountID: 2, Model: "c"}, {AccountID: 3, Model: "c"}, {AccountID: 4, Model: "a", Dims: []schedquality.Dimension{schedquality.DimensionError}}, {AccountID: 4, Model: "b", Dims: []schedquality.Dimension{schedquality.DimensionCache}}}
+	e.changes = []SchedPolicyChange{{AccountID: 2, Model: "c"}, {AccountID: 3, Model: "c"}, {AccountID: 4, Model: "a", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionError: schedquality.VerdictFail}}, {AccountID: 4, Model: "b", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionCache: schedquality.VerdictFail}}}
 	before := append([]SchedGroupRow(nil), p.GroupRows[1]...)
 	preview, err := s.PreviewPolicy(context.Background(), 1, 7, policy)
 	require.NoError(t, err)
@@ -320,7 +321,7 @@ func TestSchedAdminOrderUsesBoardFieldsAndDefaultModel(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	now := s.d.Now()
 	e.snapshot.GroupModels = map[int64][]SchedModelCount{1: {{Model: "popular", Requests: 10}, {Model: "other", Requests: 2}}}
-	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Name: "synthetic", Rank: 1, Layer: "below", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionTTFO: schedquality.VerdictFail}, LoadRate: 80, LastUsedAt: &now}}}
+	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Name: "synthetic", Rank: 1, Layer: "below", Dims: []schedquality.Dimension{schedquality.DimensionTTFO}, LoadRate: 80, LastUsedAt: &now}}}
 	s.d.Board = board
 	out, err := s.Order(context.Background(), 1, "")
 	require.NoError(t, err)
@@ -347,10 +348,11 @@ func TestSchedAdminPreviewMatchesEngineWithoutMutation(t *testing.T) {
 	f.badTTFT()
 	f.ledger.Rows = f.ledger.Rows[80:]
 
-	rows := engineSamples(20, f.now.Add(-time.Minute), true)
+	rows := engineSamples(80, f.now.Add(-time.Minute), true)
 	for i := range rows {
 		value := 500
 		rows[i].TTFOMs = &value
+		rows[i].SessionKey = fmt.Sprintf("preview-%d", i%3)
 	}
 	require.NoError(t, f.ledger.InsertBatch(context.Background(), rows))
 	f.now = f.now.Add(time.Minute)
