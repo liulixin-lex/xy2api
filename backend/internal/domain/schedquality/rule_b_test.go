@@ -143,11 +143,11 @@ func TestRuleBVectors(t *testing.T) {
 			}
 			if own.N > 0 && own.N < 20 && got.RelativeThreshold != nil {
 				unpaddedB := got.B - (20 - own.N)
-				absoluteCDF, err := ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance)
+				absoluteCDF, err := ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance, ruleBBetaMaxIterations)
 				if err != nil {
 					t.Fatal(err)
 				}
-				relativeCDF, err := ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold)
+				relativeCDF, err := ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold, ruleBBetaMaxIterations)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -486,11 +486,11 @@ func TestRuleBPriorsPosteriorsAndPurity(t *testing.T) {
 func TestRuleBBetaBoundaries(t *testing.T) {
 	for _, x := range []float64{-1, 0, .001, .2, .5, .8, .999, 1, 2} {
 		want := math.Min(1, math.Max(0, x)) // Beta(1,1) is uniform.
-		if got, err := ruleBBetaCDF(1, 1, x); err != nil || math.Abs(got-want) > 1e-14 {
+		if got, err := ruleBBetaCDF(1, 1, x, ruleBBetaMaxIterations); err != nil || math.Abs(got-want) > 1e-14 {
 			t.Fatalf("CDF(%g) = %.17g, err = %v", x, got, err)
 		}
 	}
-	if got, err := ruleBBetaQuantile(1, 1, .5); err != nil || got != .5-math.Exp2(-25) {
+	if got, err := ruleBBetaQuantile(1, 1, .5, ruleBBetaMaxIterations); err != nil || got != .5-math.Exp2(-25) {
 		t.Fatalf("24 bisections with equality moving upper bound: %.17g, err = %v", got, err)
 	}
 }
@@ -498,7 +498,7 @@ func TestRuleBBetaBoundaries(t *testing.T) {
 func TestRuleBBetaLargeSymmetricCounts(t *testing.T) {
 	for _, a := range []float64{1e3, 1e4, 1e5, 1e6} {
 		t.Run(fmt.Sprintf("%g", a), func(t *testing.T) {
-			got, err := ruleBBetaCDF(a, a, .5)
+			got, err := ruleBBetaCDF(a, a, .5, ruleBBetaMaxIterations)
 			if err != nil || math.IsNaN(got) || math.Abs(got-.5) > 1e-8 {
 				t.Fatalf("CDF(%g, %g, 0.5) = %.17g, err = %v", a, a, got, err)
 			}
@@ -535,17 +535,14 @@ func TestRuleBLargeCountsDoNotFalselyFail(t *testing.T) {
 }
 
 func TestRuleBBetaNonConvergence(t *testing.T) {
-	previous := ruleBBetaMaxIterations
-	ruleBBetaMaxIterations = 1
-	t.Cleanup(func() { ruleBBetaMaxIterations = previous })
 	for _, tc := range []struct {
 		name string
 		call func() (float64, error)
 	}{
-		{"fraction", func() (float64, error) { return ruleBBetaFraction(1000, 1000, .5) }},
-		{"cdf-lower", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .49) }},
-		{"cdf-upper", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .5) }},
-		{"quantile", func() (float64, error) { return ruleBBetaQuantile(1000, 1000, .8) }},
+		{"fraction", func() (float64, error) { return ruleBBetaFraction(1000, 1000, .5, 1) }},
+		{"cdf-lower", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .49, 1) }},
+		{"cdf-upper", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .5, 1) }},
+		{"quantile", func() (float64, error) { return ruleBBetaQuantile(1000, 1000, .8, 1) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := tc.call(); err == nil {
@@ -584,12 +581,10 @@ func TestRuleBBetaNonConvergence(t *testing.T) {
 		{"relative CDF", relativeInput, RuleBParams{Confidence: .99, Tolerance: 1e-12}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ruleBBetaMaxIterations = previous
 			if _, err := EvaluateRuleB(tc.input, tc.params); err != nil {
 				t.Fatalf("normal iteration limit: %v", err)
 			}
-			ruleBBetaMaxIterations = 1
-			got, err := EvaluateRuleB(tc.input, tc.params)
+			got, err := evaluateRuleB(tc.input, tc.params, 1)
 			if err == nil || !strings.Contains(err.Error(), tc.name) || got.State != RuleBUnknown {
 				t.Fatalf("unconverged evaluation: state=%d err=%v", got.State, err)
 			}
