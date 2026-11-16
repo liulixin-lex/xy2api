@@ -174,7 +174,7 @@
 
 - 非流式 Responses 的 JSON 响应被上游标成 SSE 时，用量不再记为 0；SSE 拼成的 JSON 响应改用 JSON 响应头。
 
-- Chat、Messages 转 Responses 的请求，加密推理项被上游拒绝时会按已有修复规则重试；无法修复或重试后仍被拒时返回 400 `encrypted_content_rejected`，已经输出时按入站协议结束。
+- Chat、Messages 转 Responses 的密文拒绝沿用原生修复规则，已输出时不重放；最终报错保留安全定位与部分用量，不回显密文或凭据。
 
 - 账号只支持 Chat Completions（含 Grok API Key）时，发到 `/v1/chat/completions` 的 Responses 格式请求会先转换再发送，只有非法或确实无法表达的字段返回 400。
 

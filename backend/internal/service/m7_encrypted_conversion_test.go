@@ -55,6 +55,9 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 						second = newOpenAIUpstreamErrorResponse(400, errorBody)
 					}
 					up := &httpUpstreamRecorder{responses: []*http.Response{first, second}}
+					if target == "messages" && mode == "rejected_again" {
+						up.responses = append(up.responses, newOpenAIUpstreamErrorResponse(400, errorBody))
+					}
 					if mode == "encrypted_then_field" {
 						up.responses = []*http.Response{first, newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"unsupported_parameter","param":"top_p","message":"Unsupported parameter: top_p"}}`), second}
 					}
@@ -67,7 +70,7 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 					} else {
 						result, err = svc.ForwardAsAnthropic(req.ctx, req.c, webSearchReplayAccount(false), body, "", "")
 					}
-					if mode == "http_repair" || mode == "sse_repair" || mode == "encrypted_then_field" {
+					if mode == "http_repair" || mode == "sse_repair" || mode == "encrypted_then_field" || mode == "ambiguous" {
 						require.NoError(t, err)
 						if mode == "encrypted_then_field" {
 							require.Len(t, up.bodies, 3)
@@ -78,7 +81,11 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 							require.Len(t, up.bodies, 2)
 						}
 						require.NotContains(t, string(up.bodies[1]), "bad-A")
-						require.Contains(t, string(up.bodies[1]), "good-B")
+						if mode == "ambiguous" {
+							require.NotContains(t, string(up.bodies[1]), "good-B")
+						} else {
+							require.Contains(t, string(up.bodies[1]), "good-B")
+						}
 						require.True(t, gjson.GetBytes(up.bodies[1], "input").Exists())
 						require.False(t, gjson.GetBytes(up.bodies[1], "messages").Exists())
 					} else {
@@ -89,6 +96,9 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 						sends := 1
 						if mode == "rejected_again" {
 							sends = 2
+							if target == "messages" {
+								sends = 3
+							}
 						}
 						require.Len(t, up.bodies, sends)
 						if target == "chat" {

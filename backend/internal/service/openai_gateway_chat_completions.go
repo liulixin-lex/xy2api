@@ -417,9 +417,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 6. Build upstream request
-	if m7EncryptedRepairEligible(account) && requestRepair != nil {
-		requestRepair.credentialVersion = s.UpstreamCredentialVersion(account, token)
-	}
+	s.prepareM7EncryptedRepair(c, account, requestRepair, responsesBody, token)
 retryChatResponsesWire:
 	requestRepair.setBody(body)
 	if requestRepair != nil && requestRepair.encryptedTried {

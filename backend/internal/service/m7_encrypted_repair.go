@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 const m7ResponsesWireBodyKey = "xy_m7_responses_wire_body"
@@ -43,17 +44,36 @@ func (s *OpenAIGatewayService) handleM7EncryptedFailure(ctx context.Context, c *
 	if !isHTTPEncryptedContentFailure(wire, payload, message, status) {
 		return nil
 	}
-	if repair := openAIRequestRepairFrom(c); repair != nil {
-		repair.setBody(wire)
-	}
-	var failure error
+	repair := openAIRequestRepairFrom(c)
+	repair.setBody(wire)
+	var selected httpRejectedEncryptedItem
 	if outputStarted {
-		failure = terminateHTTPEncryptedContent(ctx, c, account, wire, payload, message, status, true, sse)
+		// Selection retains the locator; do not consume a replay budget after output.
+		selected, _ = openAIRequestEncryptedContentRepairBody(c, wire, payload)
 	} else {
-		failure = newHTTPEncryptedContentRepairSignal(ctx, c, account, wire, payload, message, status, sse)
+		plan, replay := planHTTPEncryptedContentRepair(ctx, c, account, repair, wire, payload)
+		if replay {
+			// AfterSignal records the same plan once, including bulk state and digests.
+			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: plan.Next, encrypted: plan}
+		}
+		selected = plan.Selected
 	}
-	if _, repairing := failure.(*openAIRequestRepairSignal); failure != nil && !repairing {
+	// M10 forwards this exact selection to its final rejection constructor.
+	failure := terminateHTTPEncryptedContentWith(ctx, c, account, wire, payload, message, status, outputStarted, sse, selected)
+	if failure != nil {
 		s.recordOpenAIStreamUpstreamError(c, account, false, "", "terminal_rejection", payload, message, status)
 	}
 	return failure
+}
+
+// Keep the converted original before builder normalization and any replay. The
+// M10 constructor needs both removed ciphertext and original item identities;
+// an inbound Messages body contains signatures rather than Responses input.
+func (s *OpenAIGatewayService) prepareM7EncryptedRepair(c *gin.Context, account *Account, repair *openAIRequestRepair, responsesBody []byte, token string) {
+	if !m7EncryptedRepairEligible(account) || repair == nil {
+		return
+	}
+	repair.credentialVersion = s.UpstreamCredentialVersion(account, token)
+	repair.credentialRepo = s.accountRepo
+	c.Set(openAIStateRejectionBodyKey, append([]byte(nil), responsesBody...))
 }

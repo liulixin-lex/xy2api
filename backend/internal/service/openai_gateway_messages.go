@@ -383,9 +383,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	var requestRepair *openAIRequestRepair
 	if m7EncryptedRepairEligible(account) {
 		requestRepair = armOpenAIRequestRepair(c, account, openAIResponsesRejectedFieldRetryStateForRequest(c, responsesBody))
-		if requestRepair != nil {
-			requestRepair.credentialVersion = s.UpstreamCredentialVersion(account, token)
-		}
+		s.prepareM7EncryptedRepair(c, account, requestRepair, responsesBody, token)
 	}
 retryMessagesResponsesWire:
 	requestRepair.setBody(responsesBody)
