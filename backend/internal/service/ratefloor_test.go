@@ -245,3 +245,30 @@ func TestRatefloorConfigValidationAndClear(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, group.MinUpstreamRate)
 }
+
+func TestRatefloorQueuedUnpinDoesNotRestoreStaleCache(t *testing.T) {
+	gid := int64(7)
+	owner := profitControlWSAccount(1, 0.1, time.Now())
+	owner.Extra = nil
+	owner.GroupIDs = []int64{gid}
+	owner.AccountGroups = []AccountGroup{{AccountID: 1, GroupID: gid, Pinned: true}}
+	owner.UpdatedAt = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	cached := owner
+	cached.AccountGroups = append([]AccountGroup(nil), owner.AccountGroups...)
+	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{owner}}
+	bindings := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:queued-unpin": 1}}
+	svc := &OpenAIGatewayService{accountRepo: repo, cache: bindings, schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{accountsByID: map[int64]*Account{1: &cached}}, nil, repo, nil, nil)}
+	group := profitControlTestGroup(gid, 0.2, 0)
+	group.MinUpstreamRate = floatPtr(0.4)
+	ctx := profitControlTestCtx(group)
+	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, platform: PlatformOpenAI, floor: 0.4, pricingAt: time.Now()})
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "queued-unpin", RequestedModel: "m"})
+	granted := make(chan struct{})
+	result := make(chan string)
+	go func() { <-granted; _, _, reason := svc.SelectionAdmissionVetoLatest(ctx, &cached); result <- reason }()
+	repo.accounts[0].AccountGroups[0].Pinned = false
+	close(granted)
+	require.Equal(t, openAIProfitFilterReasonFloor, <-result)
+	require.True(t, cached.PinnedIn(gid), "outbox has not refreshed the cached projection yet")
+	require.Zero(t, bindings.sessionBindings["openai:queued-unpin"])
+}

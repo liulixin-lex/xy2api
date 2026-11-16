@@ -1765,13 +1765,19 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 // SelectionAdmissionVeto evaluates the account just read by selection without
 // repeating authoritative reads on an immediate slot acquisition.
 func (s *OpenAIGatewayService) SelectionAdmissionVeto(ctx context.Context, account *Account) (*Account, bool, string) {
+	return s.selectionAdmissionVeto(ctx, account, true)
+}
+
+// A post-wait database read already owns the newest membership projection.
+// Only immediate admission refreshes its cost/account snapshot from cache.
+func (s *OpenAIGatewayService) selectionAdmissionVeto(ctx context.Context, account *Account, refreshCache bool) (*Account, bool, string) {
 	if account == nil {
 		return nil, true, "account_nil"
 	}
 	// Preserve the existing profit-gate refresh from shared cache, without the
 	// snapshot service's DB fallback. An immediate request must never repeat
 	// its authoritative read just because a cache entry is missing.
-	if s != nil && gatewayProfitControlGateActive(ctx) && s.schedulerSnapshot != nil && s.schedulerSnapshot.cache != nil {
+	if refreshCache && s != nil && gatewayProfitControlGateActive(ctx) && s.schedulerSnapshot != nil && s.schedulerSnapshot.cache != nil {
 		cached, err := s.schedulerSnapshot.cache.GetAccount(ctx, account.ID)
 		if err == nil && cached != nil && !cached.UpdatedAt.Before(account.UpdatedAt) {
 			account = cached
@@ -1821,7 +1827,7 @@ func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context,
 			return account, true, string(SelectionReasonDependencyError)
 		}
 	}
-	latest, vetoed, reason := s.SelectionAdmissionVeto(ctx, latest)
+	latest, vetoed, reason := s.selectionAdmissionVeto(ctx, latest, false)
 	if reason == openAIProfitFilterReasonFloor {
 		if req, known := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); known && req.SessionHash != "" {
 			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
