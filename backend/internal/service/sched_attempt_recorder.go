@@ -156,7 +156,10 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	row.ClientCanceled = outcome == schedquality.Outcome(5)
 	if u != nil {
 		prompt, input, cached, creation := u.PromptTokens, u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens
-		row.PromptTokens, row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens = &prompt, &input, &cached, &creation
+		row.PromptTokens, row.InputTokens, row.CacheCreationTokens = &prompt, &input, &creation
+		if u.CacheReadTokensPresent {
+			row.CacheReadTokens = &cached
+		}
 	}
 	s := h.recorder
 	s.observerMu.RLock()

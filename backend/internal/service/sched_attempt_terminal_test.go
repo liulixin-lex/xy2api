@@ -45,7 +45,7 @@ func TestSchedAttemptTerminalRetainsEvidence(t *testing.T) {
 			recorder.SetObserver(func(row schedquality.AttemptSample) { rows = append(rows, row) })
 			svc := &OpenAIGatewayService{schedAttemptRecorder: recorder}
 			a := svc.beginSchedAttempt(resilience.WithRequestState(context.Background(), st), &Account{ID: 1, Platform: PlatformOpenAI}, nil, 0, true)
-			a.noteUsage(&OpenAIUsage{InputTokens: 100, CacheReadInputTokens: 80, CacheCreationInputTokens: 20})
+			a.noteUsage(&OpenAIUsage{InputTokens: 100, CacheReadInputTokens: 80, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 20})
 			if tc.first {
 				a.MarkFirstOutput(a.started.Add(10 * time.Millisecond))
 			}

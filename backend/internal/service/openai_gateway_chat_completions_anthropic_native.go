@@ -149,7 +149,11 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(schedResult, schedErr)
+		_ = resp.Body.Close()
+	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -244,7 +248,6 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -265,7 +268,6 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -552,7 +554,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -571,7 +572,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 				return onIdle()
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
