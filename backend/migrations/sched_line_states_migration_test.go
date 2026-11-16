@@ -11,6 +11,10 @@ func TestSchedLineStatesMigration(t *testing.T) {
 	require.NoError(t, err)
 	sql := strings.Join(strings.Fields(string(data)), " ")
 	require.NotContains(t, strings.ToUpper(sql), "DROP TABLE")
+	require.Contains(t, sql, "SET LOCAL lock_timeout = '5s';")
+	require.Contains(t, sql, "LOCK TABLE sched_decisions IN ACCESS EXCLUSIVE MODE;")
+	require.NotContains(t, sql, "NOWAIT")
+	require.Less(t, strings.Index(sql, "LOCK TABLE sched_decisions"), strings.Index(sql, "ALTER TABLE sched_decisions"))
 	require.Contains(t, sql, "PRIMARY KEY (account_id,model,group_id,line)")
 	require.Contains(t, sql, "identity IN (0,1,2)")
 	for _, field := range []string{"pending_at", "epoch", "entry", "until", "trial_until", "good_since", "last_rear", "evaluated_at"} {

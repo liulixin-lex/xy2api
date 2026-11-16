@@ -1,3 +1,7 @@
+-- Wait briefly for the existing ledger, without repeatedly losing to vacuum.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE sched_decisions IN ACCESS EXCLUSIVE MODE;
+
 -- Preserve the legacy tables so a previous binary can still be rolled back.
 CREATE TABLE IF NOT EXISTS sched_line_states (
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
