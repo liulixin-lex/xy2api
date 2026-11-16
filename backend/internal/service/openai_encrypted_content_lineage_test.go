@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
@@ -213,4 +214,109 @@ func TestOpenAIWSStateStoreInvalidEncryptedContentLineage(t *testing.T) {
 		digests := store.GetSessionInvalidEncryptedContentDigests(1, "session-c")
 		require.Len(t, digests, openAIWSInvalidEncryptedDigestsPerSession)
 	})
+}
+
+func TestHTTPEncryptedRepairUniqueItem(t *testing.T) {
+	const multi = `{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad","content":null,"summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good","content":[{"type":"reasoning_text","text":"keep"}]},{"type":"compaction","id":"cmp_good","encrypted_content":"compact"}]}`
+	const single = `{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad","content":null,"summary":[]}]}`
+	for _, tc := range []struct {
+		name, body, detail string
+		index              int
+		changed            bool
+	}{
+		{"item_id", multi, `"message":"Encrypted content could not be verified for item rs_bad"`, 0, true},
+		{"structured_index", multi, `"param":"input[0].encrypted_content"`, 0, true},
+		{"matching_locators", multi, `"param":"input.0.encrypted_content","message":"for item rs_bad"`, 0, true},
+		{"duplicate_locator", multi, `"param":"input[0].encrypted_content","param":"input[1].encrypted_content"`, -1, false},
+		{"conflicting_locators", multi, `"param":"input[0].encrypted_content","message":"for item rs_good"`, -1, false},
+		{"out_of_range", multi, `"param":"input[9].encrypted_content"`, -1, false},
+		{"duplicate_id", `{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"a"},{"type":"reasoning","id":"rs_bad","encrypted_content":"b"}]}`, `"message":"for item rs_bad"`, -1, false},
+		{"single_without_locator", single, `"message":"Encrypted content could not be verified"`, 0, true},
+		{"multiple_without_locator", multi, `"message":"Encrypted content could not be verified"`, -1, false},
+		{"single_with_compaction", `{"input":[{"type":"reasoning","encrypted_content":"a"},{"type":"compaction","encrypted_content":"b"}]}`, `"message":"Encrypted content could not be verified"`, -1, false},
+		{"compaction_id", multi, `"message":"for item cmp_good"`, 2, true},
+		{"wrong_type", `{"input":[{"type":"message","id":"rs_bad","encrypted_content":"bad"}]}`, `"message":"for item rs_bad"`, -1, false},
+		{"nested_function_output", single, `"message":"encrypted function output content could not be decrypted"`, -1, false},
+		{"id_substring", multi, `"message":"for item rs_bad_extra"`, -1, false},
+		{"plaintext_reasoning_is_not_a_candidate", `{"input":[{"type":"reasoning","encrypted_content":"a"},{"type":"reasoning","summary":[]}]}`, `"message":"Encrypted content could not be verified"`, 0, true},
+		{"unmapped_name_sole_reasoning", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"role":"user","content":"q"}]}`, `"param":null,"message":"The encrypted content for item rs_0db2ab9550c3ef08 could not be verified."`, 0, true},
+		{"unmapped_name_sole_compaction", `{"input":[{"type":"compaction","encrypted_content":"gAAA"},{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`, `"message":"The encrypted content for item cmp_ag_compact_1 could not be verified."`, 0, true},
+		{"sole_compaction_without_locator", `{"input":[{"id":"cmp_stale","type":"compaction","encrypted_content":"gAAA"}]}`, `"message":"bad encrypted content"`, 0, true},
+		{"unmapped_name_multiple_items", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"},{"type":"reasoning","summary":[],"encrypted_content":"cipher-B"}]}`, `"message":"The encrypted content for item rs_0db2ab9550c3ef08 could not be verified."`, -1, false},
+		{"unmapped_name_other_kind", `{"input":[{"type":"reasoning","summary":[],"encrypted_content":"cipher-A"}]}`, `"message":"The encrypted content for item cmp_ag_compact_1 could not be verified."`, -1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(tc.body)
+			original := append([]byte(nil), body...)
+			for _, envelope := range []string{`{"error":{%s}}`, `{"type":"response.failed","response":{"error":{%s}}}`} {
+				result, err := selectHTTPRejectedEncryptedItem(body, []byte(fmt.Sprintf(envelope, tc.detail)))
+				require.NoError(t, err)
+				require.Equal(t, tc.changed, result.Changed)
+				require.Equal(t, tc.index, result.ItemIndex)
+				require.Equal(t, original, body)
+				if !tc.changed {
+					require.Equal(t, body, result.Body)
+					continue
+				}
+				require.NotEmpty(t, result.Digest)
+				if tc.body == multi && tc.index == 0 {
+					require.False(t, gjson.GetBytes(result.Body, "input.0.encrypted_content").Exists())
+					require.False(t, gjson.GetBytes(result.Body, "input.0.content").Exists())
+					require.Equal(t, gjson.GetBytes(body, "input.1").Raw, gjson.GetBytes(result.Body, "input.1").Raw)
+					require.Equal(t, gjson.GetBytes(body, "input.2").Raw, gjson.GetBytes(result.Body, "input.2").Raw)
+					require.Equal(t, "rs_bad", gjson.GetBytes(result.Body, "input.0.id").String())
+				}
+				if tc.index == 2 {
+					require.Len(t, gjson.GetBytes(result.Body, "input").Array(), 2)
+					require.Equal(t, "good", gjson.GetBytes(result.Body, "input.1.encrypted_content").String())
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPEncryptedLineageCredentialScope(t *testing.T) {
+	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	body := []byte(`{"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad","summary":[]},{"type":"reasoning","id":"rs_good","encrypted_content":"good"},{"type":"compaction","id":"cmp_good","encrypted_content":"compact"}]}`)
+	selected, err := selectHTTPRejectedEncryptedItem(body, []byte(`{"error":{"param":"input[0].encrypted_content"}}`))
+	require.NoError(t, err)
+	svc.markHTTPInvalidEncryptedContent(1, "session", 10, "version-a", []string{selected.Digest})
+	for _, tc := range []struct {
+		name, session, version string
+		group, account         int64
+		count                  int
+	}{
+		{"same", "session", "version-a", 1, 10, 1},
+		{"other_account", "session", "version-a", 1, 11, 0},
+		{"rotated_credential", "session", "version-b", 1, 10, 0},
+		{"missing_version", "session", "", 1, 10, 0},
+		{"other_group", "session", "version-a", 2, 10, 0},
+		{"other_session", "other-session", "version-a", 1, 10, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next, count := svc.stripHTTPInvalidEncryptedContent(body, tc.group, tc.session, tc.account, tc.version)
+			require.Equal(t, tc.count, count)
+			if count == 0 {
+				require.Equal(t, body, next)
+			} else {
+				require.False(t, gjson.GetBytes(next, "input.0.encrypted_content").Exists())
+				require.Equal(t, "good", gjson.GetBytes(next, "input.1.encrypted_content").String())
+				require.Equal(t, "compact", gjson.GetBytes(next, "input.2.encrypted_content").String())
+			}
+		})
+	}
+	duplicate := []byte(`{"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"bad"},{"type":"reasoning","id":"rs_2","encrypted_content":"bad"}]}`)
+	next, count := svc.stripHTTPInvalidEncryptedContent(duplicate, 1, "session", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, duplicate, next)
+	svc.markOpenAIWSInvalidEncryptedContentLineage(1, "old", []string{selected.Digest})
+	next, count = svc.stripHTTPInvalidEncryptedContent(body, 1, "old", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, body, next)
+	other := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	next, count = other.stripHTTPInvalidEncryptedContent(body, 1, "session", 10, "version-a")
+	require.Zero(t, count)
+	require.Equal(t, body, next)
+	require.Empty(t, httpEncryptedLineageKey("session", 10, ""))
+	require.Empty(t, openAIEncryptedLineageVersionedSession("session", ""))
 }

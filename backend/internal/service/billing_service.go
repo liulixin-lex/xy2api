@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"maps"
 	"math"
 	"strings"
@@ -226,6 +225,7 @@ func applyCostBreakdownMultiplier(cost *CostBreakdown, multiplier float64) {
 	cost.ImageOutputCost *= multiplier
 	cost.CacheCreationCost *= multiplier
 	cost.CacheReadCost *= multiplier
+	scalePricingSource(cost, multiplier)
 	cost.TotalCost *= multiplier
 	cost.ActualCost *= multiplier
 }
@@ -1017,74 +1017,74 @@ func (s *BillingService) initFallbackPricing() {
 }
 
 // getFallbackPricing 根据模型系列获取回退价格
-func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
+func (s *BillingService) getFallbackPricing(model string) (*ModelPricing, string) {
 	modelLower := strings.ToLower(model)
 	if modelLower == "jev-latest" {
-		return s.fallbackPrices["jev-latest"]
+		return s.fallbackPrices["jev-latest"], "jev-latest"
 	}
 
 	// 按模型系列匹配
 	if isClaudeFable51Model(modelLower) {
-		return s.fallbackPrices["claude-fable-5-1"]
+		return s.fallbackPrices["claude-fable-5-1"], "claude-fable-5-1"
 	}
 	if strings.Contains(modelLower, "fable-5") || strings.Contains(modelLower, "fable5") {
-		return s.fallbackPrices["claude-fable-5"]
+		return s.fallbackPrices["claude-fable-5"], "claude-fable-5"
 	}
 	if claude.IsOpus55(modelLower) {
-		return s.fallbackPrices["claude-opus-5-5"]
+		return s.fallbackPrices["claude-opus-5-5"], "claude-opus-5-5"
 	}
 	if claude.IsSonnet55(modelLower) {
-		return s.fallbackPrices["claude-sonnet-5-5"]
+		return s.fallbackPrices["claude-sonnet-5-5"], "claude-sonnet-5-5"
 	}
 	if modelLower == "claude-haiku-5-5" {
-		return s.fallbackPrices["claude-haiku-5-5"]
+		return s.fallbackPrices["claude-haiku-5-5"], "claude-haiku-5-5"
 	}
 	if strings.Contains(modelLower, "opus") {
 		// "opus-5" 必须先判：不能用裸 "5" 匹配，否则 claude-opus-4-5 会被误判。
 		if strings.Contains(modelLower, "opus-5") || strings.Contains(modelLower, "opus5") {
-			return s.fallbackPrices["claude-opus-5"]
+			return s.fallbackPrices["claude-opus-5"], "claude-opus-5"
 		}
 		if strings.Contains(modelLower, "4.8") || strings.Contains(modelLower, "4-8") {
-			return s.fallbackPrices["claude-opus-4.8"]
+			return s.fallbackPrices["claude-opus-4.8"], "claude-opus-4.8"
 		}
 		if strings.Contains(modelLower, "4.7") || strings.Contains(modelLower, "4-7") {
-			return s.fallbackPrices["claude-opus-4.7"]
+			return s.fallbackPrices["claude-opus-4.7"], "claude-opus-4.7"
 		}
 		if strings.Contains(modelLower, "4.6") || strings.Contains(modelLower, "4-6") {
-			return s.fallbackPrices["claude-opus-4.6"]
+			return s.fallbackPrices["claude-opus-4.6"], "claude-opus-4.6"
 		}
 		if strings.Contains(modelLower, "4.5") || strings.Contains(modelLower, "4-5") {
-			return s.fallbackPrices["claude-opus-4.5"]
+			return s.fallbackPrices["claude-opus-4.5"], "claude-opus-4.5"
 		}
-		return s.fallbackPrices["claude-3-opus"]
+		return s.fallbackPrices["claude-3-opus"], "claude-3-opus"
 	}
 	if strings.Contains(modelLower, "sonnet") {
 		if strings.Contains(modelLower, "4") && !strings.Contains(modelLower, "3") {
-			return s.fallbackPrices["claude-sonnet-4"]
+			return s.fallbackPrices["claude-sonnet-4"], "claude-sonnet-4"
 		}
-		return s.fallbackPrices["claude-3-5-sonnet"]
+		return s.fallbackPrices["claude-3-5-sonnet"], "claude-3-5-sonnet"
 	}
 	if strings.Contains(modelLower, "haiku") {
 		if strings.Contains(modelLower, "3-5") || strings.Contains(modelLower, "3.5") {
-			return s.fallbackPrices["claude-3-5-haiku"]
+			return s.fallbackPrices["claude-3-5-haiku"], "claude-3-5-haiku"
 		}
-		return s.fallbackPrices["claude-3-haiku"]
+		return s.fallbackPrices["claude-3-haiku"], "claude-3-haiku"
 	}
 	// Claude 未知型号统一回退到 Sonnet，避免计费中断。
 	if strings.Contains(modelLower, "claude") {
-		return s.fallbackPrices["claude-sonnet-4"]
+		return s.fallbackPrices["claude-sonnet-4"], "claude-sonnet-4"
 	}
 	if strings.Contains(modelLower, "gemini-3.1-pro") || strings.Contains(modelLower, "gemini-3-1-pro") {
-		return s.fallbackPrices["gemini-3.1-pro"]
+		return s.fallbackPrices["gemini-3.1-pro"], "gemini-3.1-pro"
 	}
 	if strings.Contains(modelLower, "gemini-3.6-flash") || strings.Contains(modelLower, "gemini-3-6-flash") {
-		return s.fallbackPrices["gemini-3.6-flash"]
+		return s.fallbackPrices["gemini-3.6-flash"], "gemini-3.6-flash"
 	}
 	if strings.Contains(modelLower, "gemini-3.7-flash") || strings.Contains(modelLower, "gemini-3-7-flash") {
-		return s.fallbackPrices["gemini-3.7-flash"]
+		return s.fallbackPrices["gemini-3.7-flash"], "gemini-3.7-flash"
 	}
 	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
-		return s.fallbackPrices["gemini-3.8-flash"]
+		return s.fallbackPrices["gemini-3.8-flash"], "gemini-3.8-flash"
 	}
 
 	// DeepSeek 系列：官方模型 V4 Pro/Flash（含 vision-exp）按各自价卡；
@@ -1093,16 +1093,16 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// （每模型每进程一条）暴露，运营者据此更新价卡。
 	// "deepseek-v4-flash-vision-exp" 含 "deepseek-v4-flash" 子串，显式分支置于 flash 之前，语义清晰。
 	if strings.Contains(modelLower, "deepseek-v4-flash-vision-exp") {
-		return s.fallbackPrices["deepseek-v4-flash-vision-exp"]
+		return s.fallbackPrices["deepseek-v4-flash-vision-exp"], "deepseek-v4-flash-vision-exp"
 	}
 	if strings.Contains(modelLower, "deepseek-v4-flash") {
-		return s.fallbackPrices["deepseek-v4-flash"]
+		return s.fallbackPrices["deepseek-v4-flash"], "deepseek-v4-flash"
 	}
 	if strings.Contains(modelLower, "deepseek-v4-pro") {
-		return s.fallbackPrices["deepseek-v4-pro"]
+		return s.fallbackPrices["deepseek-v4-pro"], "deepseek-v4-pro"
 	}
 	if strings.HasPrefix(modelLower, "deepseek-") {
-		return s.fallbackPrices["deepseek-v4-flash"]
+		return s.fallbackPrices["deepseek-v4-flash"], "deepseek-v4-flash"
 	}
 
 	// ---- 国产 LLM 兜底匹配 ----
@@ -1114,52 +1114,52 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 注意：带小数点的型号必须排在裸 "glm-5" 之前，否则会被 strings.Contains 抢走；
 	// glm-5.3-flash 必须排在 glm-5.3 之前（前者包含后者子串）。
 	if strings.Contains(modelLower, "glm-5.3-flash") || strings.Contains(modelLower, "glm-5.3flash") {
-		return s.fallbackPrices["glm-5.3-flash"]
+		return s.fallbackPrices["glm-5.3-flash"], "glm-5.3-flash"
 	}
 	if strings.Contains(modelLower, "glm-5.3") {
-		return s.fallbackPrices["glm-5.3"]
+		return s.fallbackPrices["glm-5.3"], "glm-5.3"
 	}
 	if strings.Contains(modelLower, "glm-5.2") {
-		return s.fallbackPrices["glm-5.2"]
+		return s.fallbackPrices["glm-5.2"], "glm-5.2"
 	}
 	if strings.Contains(modelLower, "glm-5.1") {
-		return s.fallbackPrices["glm-5.1"]
+		return s.fallbackPrices["glm-5.1"], "glm-5.1"
 	}
 	if strings.Contains(modelLower, "glm-5-turbo") || strings.Contains(modelLower, "glm-5turbo") {
-		return s.fallbackPrices["glm-5-turbo"]
+		return s.fallbackPrices["glm-5-turbo"], "glm-5-turbo"
 	}
 	if strings.Contains(modelLower, "glm-5") {
-		return s.fallbackPrices["glm-5"]
+		return s.fallbackPrices["glm-5"], "glm-5"
 	}
 	if strings.Contains(modelLower, "glm-4.7-flashx") {
-		return s.fallbackPrices["glm-4.7-flashx"]
+		return s.fallbackPrices["glm-4.7-flashx"], "glm-4.7-flashx"
 	}
 	if strings.Contains(modelLower, "glm-4.7-flash") {
-		return s.fallbackPrices["glm-4.7-flash"]
+		return s.fallbackPrices["glm-4.7-flash"], "glm-4.7-flash"
 	}
 	if strings.Contains(modelLower, "glm-4.7") {
-		return s.fallbackPrices["glm-4.7"]
+		return s.fallbackPrices["glm-4.7"], "glm-4.7"
 	}
 	if strings.Contains(modelLower, "glm-4.6") {
-		return s.fallbackPrices["glm-4.6"]
+		return s.fallbackPrices["glm-4.6"], "glm-4.6"
 	}
 	if strings.Contains(modelLower, "glm-4.5-flash") {
-		return s.fallbackPrices["glm-4.5-flash"]
+		return s.fallbackPrices["glm-4.5-flash"], "glm-4.5-flash"
 	}
 	if strings.Contains(modelLower, "glm-4.5-x") || strings.Contains(modelLower, "glm-4.5x") {
-		return s.fallbackPrices["glm-4.5-x"]
+		return s.fallbackPrices["glm-4.5-x"], "glm-4.5-x"
 	}
 	if strings.Contains(modelLower, "glm-4.5-airx") || strings.Contains(modelLower, "glm-4.5airx") {
-		return s.fallbackPrices["glm-4.5-airx"]
+		return s.fallbackPrices["glm-4.5-airx"], "glm-4.5-airx"
 	}
 	if strings.Contains(modelLower, "glm-4.5-air") || strings.Contains(modelLower, "glm-4.5air") {
-		return s.fallbackPrices["glm-4.5-air"]
+		return s.fallbackPrices["glm-4.5-air"], "glm-4.5-air"
 	}
 	if strings.Contains(modelLower, "glm-4.5") {
-		return s.fallbackPrices["glm-4.5"]
+		return s.fallbackPrices["glm-4.5"], "glm-4.5"
 	}
 	if strings.Contains(modelLower, "glm-4-32b") {
-		return s.fallbackPrices["glm-4-32b-0414-128k"]
+		return s.fallbackPrices["glm-4-32b-0414-128k"], "glm-4-32b-0414-128k"
 	}
 
 	// 月之暗面 Kimi（kimi-k3 / k3 / k3-256k / kimi-k2.6 / kimi-for-coding / kimi-k2.5 / kimi-k2-thinking / kimi-k2）
@@ -1168,113 +1168,113 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// Code bare aliases 仅精确 k3 / k3-256k 或 /k3|/k3-256k 后缀，避免 kimi-k30 等未知型号误命中。
 	// 注意：kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不进入 fallback。
 	if strings.Contains(modelLower, "kimi-for-coding") {
-		return s.fallbackPrices["kimi-for-coding"]
+		return s.fallbackPrices["kimi-for-coding"], "kimi-for-coding"
 	}
 	if modelLower == "kimi-k3" || strings.HasSuffix(modelLower, "/kimi-k3") ||
 		modelLower == "k3" || modelLower == "k3-256k" ||
 		strings.HasSuffix(modelLower, "/k3") || strings.HasSuffix(modelLower, "/k3-256k") {
-		return s.fallbackPrices["kimi-k3"]
+		return s.fallbackPrices["kimi-k3"], "kimi-k3"
 	}
 	if strings.Contains(modelLower, "kimi-k2.6") || strings.Contains(modelLower, "kimi-k2-6") {
-		return s.fallbackPrices["kimi-k2.6"]
+		return s.fallbackPrices["kimi-k2.6"], "kimi-k2.6"
 	}
 	if strings.Contains(modelLower, "kimi-k2.5") || strings.Contains(modelLower, "kimi-k2-5") {
-		return s.fallbackPrices["kimi-k2.5"]
+		return s.fallbackPrices["kimi-k2.5"], "kimi-k2.5"
 	}
 	if strings.Contains(modelLower, "kimi-k2-thinking") || strings.Contains(modelLower, "kimi-k2-thinking-") {
-		return s.fallbackPrices["kimi-k2-thinking"]
+		return s.fallbackPrices["kimi-k2-thinking"], "kimi-k2-thinking"
 	}
 	if strings.Contains(modelLower, "kimi-k2") || strings.Contains(modelLower, "kimi/k2") {
-		return s.fallbackPrices["kimi-k2"]
+		return s.fallbackPrices["kimi-k2"], "kimi-k2"
 	}
 
 	// MiniMax M 系列（M3 / M2.7 / M2.5 / M2.1 / M2；含 highspeed 变体）
 	if strings.Contains(modelLower, "minimax-m3") {
-		return s.fallbackPrices["minimax-m3"]
+		return s.fallbackPrices["minimax-m3"], "minimax-m3"
 	}
 	if strings.Contains(modelLower, "minimax-m2.7-highspeed") || strings.Contains(modelLower, "minimax-m2-7-highspeed") {
-		return s.fallbackPrices["minimax-m2.7-highspeed"]
+		return s.fallbackPrices["minimax-m2.7-highspeed"], "minimax-m2.7-highspeed"
 	}
 	if strings.Contains(modelLower, "minimax-m2.7") || strings.Contains(modelLower, "minimax-m2-7") {
-		return s.fallbackPrices["minimax-m2.7"]
+		return s.fallbackPrices["minimax-m2.7"], "minimax-m2.7"
 	}
 	if strings.Contains(modelLower, "minimax-m2.5") || strings.Contains(modelLower, "minimax-m2-5") {
-		return s.fallbackPrices["minimax-m2.5"]
+		return s.fallbackPrices["minimax-m2.5"], "minimax-m2.5"
 	}
 	if strings.Contains(modelLower, "minimax-m2.1") || strings.Contains(modelLower, "minimax-m2-1") {
-		return s.fallbackPrices["minimax-m2.1"]
+		return s.fallbackPrices["minimax-m2.1"], "minimax-m2.1"
 	}
 	if strings.Contains(modelLower, "minimax-m2") || strings.Contains(modelLower, "minimax-m-2") {
-		return s.fallbackPrices["minimax-m2"]
+		return s.fallbackPrices["minimax-m2"], "minimax-m2"
 	}
 
 	// 火山方舟 豆包 Embedding（多模态向量化）。
 	// most-specific-first：放在未来任何 doubao-embedding / doubao 宽匹配之前。
 	// 覆盖带版本后缀的别名（如 doubao-embedding-vision-251215）。
 	if strings.Contains(modelLower, "doubao-embedding-vision") {
-		return s.fallbackPrices["doubao-embedding-vision"]
+		return s.fallbackPrices["doubao-embedding-vision"], "doubao-embedding-vision"
 	}
 
 	// OpenAI（GPT-5 / Codex 族）：仅匹配已知型号，避免未知 OpenAI 型号误计价。
 	if normalized := normalizeKnownOpenAICodexModel(modelLower); normalized != "" {
 		switch normalized {
 		case "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
-			return s.fallbackPrices[normalized]
+			return s.fallbackPrices[normalized], normalized
 		case "gpt-6-astra":
-			return s.fallbackPrices["gpt-6-astra"]
+			return s.fallbackPrices["gpt-6-astra"], "gpt-6-astra"
 		case "gpt-5.6-sol":
-			return s.fallbackPrices["gpt-5.6-sol"]
+			return s.fallbackPrices["gpt-5.6-sol"], "gpt-5.6-sol"
 		case "gpt-5.6-terra":
-			return s.fallbackPrices["gpt-5.6-terra"]
+			return s.fallbackPrices["gpt-5.6-terra"], "gpt-5.6-terra"
 		case "gpt-5.6-luna":
-			return s.fallbackPrices["gpt-5.6-luna"]
+			return s.fallbackPrices["gpt-5.6-luna"], "gpt-5.6-luna"
 		case "gpt-5.5-pro":
-			return s.fallbackPrices["gpt-5.5-pro"]
+			return s.fallbackPrices["gpt-5.5-pro"], "gpt-5.5-pro"
 		case "gpt-5.5":
-			return s.fallbackPrices["gpt-5.5"]
+			return s.fallbackPrices["gpt-5.5"], "gpt-5.5"
 		case "gpt-5.4-mini":
-			return s.fallbackPrices["gpt-5.4-mini"]
+			return s.fallbackPrices["gpt-5.4-mini"], "gpt-5.4-mini"
 		case "gpt-5.4-nano":
-			return s.fallbackPrices["gpt-5.4-nano"]
+			return s.fallbackPrices["gpt-5.4-nano"], "gpt-5.4-nano"
 		case "gpt-5.4":
-			return s.fallbackPrices["gpt-5.4"]
+			return s.fallbackPrices["gpt-5.4"], "gpt-5.4"
 		case "gpt-5.2":
-			return s.fallbackPrices["gpt-5.2"]
+			return s.fallbackPrices["gpt-5.2"], "gpt-5.2"
 		case "gpt-5.3-codex", "gpt-5.3-codex-spark":
-			return s.fallbackPrices["gpt-5.3-codex"]
+			return s.fallbackPrices["gpt-5.3-codex"], "gpt-5.3-codex"
 		}
 	}
 
 	switch modelLower {
 	case "grok", "grok-latest", "grok-4.6", "grok-4.6-latest":
-		return s.fallbackPrices["grok-4.6"]
+		return s.fallbackPrices["grok-4.6"], "grok-4.6"
 	case "grok-4.7", "grok-4.7-latest":
-		return s.fallbackPrices["grok-4.7"]
+		return s.fallbackPrices["grok-4.7"], "grok-4.7"
 	case "grok-4.5", "grok-4.5-latest":
-		return s.fallbackPrices["grok-4.5"]
+		return s.fallbackPrices["grok-4.5"], "grok-4.5"
 	case "grok-3-mini":
-		return s.fallbackPrices["grok-3-mini"]
+		return s.fallbackPrices["grok-3-mini"], "grok-3-mini"
 	case "grok-3-mini-fast":
-		return s.fallbackPrices["grok-3-mini-fast"]
+		return s.fallbackPrices["grok-3-mini-fast"], "grok-3-mini-fast"
 	case "grok-4.3":
-		return s.fallbackPrices["grok-4.3"]
+		return s.fallbackPrices["grok-4.3"], "grok-4.3"
 	case "grok-4.20-0309-reasoning",
 		"grok-4.20-0309-non-reasoning",
 		"grok-4.20-multi-agent-0309",
 		"grok-4.20-reasoning",
 		"grok-4.20-non-reasoning":
-		return s.fallbackPrices["grok-4.20"]
+		return s.fallbackPrices["grok-4.20"], "grok-4.20"
 	case "grok-build", "grok-build-latest", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast", "composer-2.5":
-		return s.fallbackPrices["grok-build-0.1"]
+		return s.fallbackPrices["grok-build-0.1"], "grok-build-0.1"
 	}
 
 	// Unknown Grok text IDs (grok-5, dated snapshots, provider-prefixed) inherit
 	// the current default text card so a new model cannot ship unbilled.
 	if pricing := s.grokUnknownTextFamilyFallback(modelLower); pricing != nil {
-		return pricing
+		return pricing, "grok-4.6"
 	}
 
-	return nil
+	return nil, ""
 }
 
 func (s *BillingService) grokUnknownTextFamilyFallback(model string) *ModelPricing {
@@ -1351,12 +1351,19 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 // 驱动 DeepSeek pro→Flash 切换判定（切换点前 Pro 价、之后 Flash 价），使
 // 展示/估算路径可与历史补账同刻复算，测试也能用固定时点钉住断言。
 func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*ModelPricing, error) {
+	pricing, _, err := s.getModelPricingAtWithSource(model, pricingAt)
+	return pricing, err
+}
+func (s *BillingService) getModelPricingAtWithSource(model string, pricingAt time.Time) (*ModelPricing, json.RawMessage, error) {
+	if pricingAt.IsZero() {
+		pricingAt = timezone.Now()
+	}
 	// 标准化模型名称（转小写）
 	model = strings.ToLower(model)
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
-		litellmPricing := s.pricingService.GetModelPricing(model)
+		litellmPricing, provenance := s.pricingService.lookupModelPricingWithSource(model)
 		// 仅有图片价、无 token 价的条目（如 LiteLLM 的 imagen 类模型）不能用于
 		// token 计费：直接返回会把 token 流量按 $0 计费。跳过后走 fallback，
 		// 无 fallback 则 fail-closed（ErrModelPricingUnavailable）。
@@ -1393,33 +1400,31 @@ func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*
 				ImageInputPricePerToken:       litellmPricing.InputCostPerImageToken,
 				ImageCacheReadPricePerToken:   litellmPricing.CacheReadInputImageTokenCost,
 				ImageOutputPricePerToken:      litellmPricing.OutputCostPerImageToken,
-			}, true, pricingAt), nil
+			}, true, pricingAt), pricingSourceJSON(provenance), nil
 		}
 	}
 
-	// 2. 使用硬编码回退价格
-	fallback := s.getFallbackPricing(model)
+	// 2. 使用硬编码回退价格；查价本身不告警，最终入账才报告回退。
+	fallback, key := s.getFallbackPricing(model)
 	if fallback != nil {
-		// 按模型名去重:每个模型每进程最多打一条 warn,避免热路径每请求刷屏（issue #3394）。
-		// model 在函数入口已 ToLower,故 GLM-5.2 / glm-5.2 视为同一条目。
-		if _, seen := s.fallbackWarnSeen.LoadOrStore(model, struct{}{}); !seen {
-			log.Printf("[Billing] Using fallback pricing for model: %s", model)
-		}
-		return s.applyModelSpecificPricingPolicyEx(model, fallback, true, pricingAt), nil
+		return s.applyModelSpecificPricingPolicyEx(model, fallback, true, pricingAt), pricingSourceJSON(PricingProvenance{ModelKey: key, Source: "builtin", Match: "fallback", Revision: pricingContentRevision(fallback)}), nil
 	}
-
-	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+	return nil, nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
 }
 
 // GetModelPricingWithChannel 获取模型定价，渠道配置的价格覆盖默认值。
 // 与其他 token 字段一致，渠道留空的图片输入/输出价沿用目录价，见 applyChannelImagePriceOverrides。
 func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing *ChannelModelPricing) (*ModelPricing, error) {
-	pricing, err := s.GetModelPricing(model)
+	pricing, _, err := s.modelPricingWithChannelSource(model, channelPricing)
+	return pricing, err
+}
+func (s *BillingService) modelPricingWithChannelSource(model string, channelPricing *ChannelModelPricing) (*ModelPricing, json.RawMessage, error) {
+	pricing, provenance, err := s.getModelPricingAtWithSource(model, timezone.Now())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if channelPricing == nil {
-		return pricing, nil
+		return pricing, provenance, nil
 	}
 	// 防止修改 fallbackPrices 中的共享指针
 	cloned := *pricing
@@ -1429,7 +1434,8 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 	pricing.FlexMultiplier = channelPricing.FlexMultiplier
 	pricing.ReasoningEffortMultipliers = maps.Clone(channelPricing.ReasoningEffortMultipliers)
 	applyChannelImagePriceOverrides(channelPricing, pricing)
-	return pricing, nil
+	provenance = configuredPricingSource(provenance, channelPricing, PricingSourceChannel)
+	return pricing, provenance, nil
 }
 
 // channelTierOverridePrice applies a Standard-tier override while preserving
@@ -1508,11 +1514,12 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	if input.Resolver == nil {
 		// 无 Resolver，回退到旧路径
 		applyLongContextBilling := longContextPricingEnabledForRequest(input.Group, input.Model, input.LongContextBillingEnabled)
-		pricing, err := s.GetModelPricing(input.Model)
+		pricing, provenance, err := s.getModelPricingAtWithSource(input.Model, input.PricingAt)
 		if err != nil {
 			return nil, err
 		}
 		breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongContextBilling)
+		attachPricingSource(breakdown, provenance)
 		applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 		return breakdown, nil
 	}
@@ -1521,6 +1528,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	resolved := input.Resolved
 	if resolved == nil {
 		resolved = input.Resolver.Resolve(input.Ctx, PricingInput{
+			Purpose: input.Purpose,
 			Model:   input.Model,
 			GroupID: input.GroupID,
 			Group:   input.Group,
@@ -1602,6 +1610,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	applyLongCtx := len(resolved.Intervals) == 0 && contextTierPricingEnabled
 
 	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
+	attachPricingSource(breakdown, intervalPricingSource(resolved, pricingContext))
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
 	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 	return breakdown, nil
@@ -1720,6 +1729,7 @@ func (s *BillingService) computeTokenBreakdown(
 		bd.CacheCreationCost + bd.CacheReadCost
 	bd.ActualCost = bd.TotalCost * rateMultiplier
 	bd.LongContextBillingApplied = baselineCost != nil && bd.ActualCost > baselineCost.ActualCost
+	bd.PricingSource = tokenEffectivePrices(pricing, inputPrice, outputPrice, cacheReadPrice, cacheCreationPrice, cacheCreationMultiplier, tierMultiplier)
 
 	return bd
 }
@@ -1801,8 +1811,9 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 	actualCost := totalCost * input.RateMultiplier
 
 	return &CostBreakdown{
-		TotalCost:  totalCost,
-		ActualCost: actualCost,
+		TotalCost:     totalCost,
+		ActualCost:    actualCost,
+		PricingSource: pricingSourceJSON(requestPricingProvenance(resolved, input, unitPrice)),
 	}, nil
 }
 
@@ -1813,16 +1824,6 @@ func (s *BillingService) CalculateCost(model string, tokens UsageTokens, rateMul
 
 func (s *BillingService) CalculateCostWithServiceTier(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string) (*CostBreakdown, error) {
 	return s.calculateCostInternal(model, tokens, rateMultiplier, serviceTier, nil)
-}
-
-func (s *BillingService) calculateCostWithServiceTierPolicy(
-	model string,
-	tokens UsageTokens,
-	rateMultiplier float64,
-	serviceTier string,
-	longContextBillingEnabled bool,
-) (*CostBreakdown, error) {
-	return s.calculateCostInternalWithPolicy(model, tokens, rateMultiplier, serviceTier, nil, longContextBillingEnabled)
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
@@ -1837,18 +1838,13 @@ func (s *BillingService) calculateCostInternalWithPolicy(
 	channelPricing *ChannelModelPricing,
 	longContextBillingEnabled bool,
 ) (*CostBreakdown, error) {
-	var pricing *ModelPricing
-	var err error
-	if channelPricing != nil {
-		pricing, err = s.GetModelPricingWithChannel(model, channelPricing)
-	} else {
-		pricing, err = s.GetModelPricing(model)
-	}
+	pricing, provenance, err := s.modelPricingWithChannelSource(model, channelPricing)
 	if err != nil {
 		return nil, err
 	}
-
-	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
+	cost := s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled)
+	attachPricingSource(cost, provenance)
+	return cost, nil
 }
 
 // applyModelSpecificPricingPolicy 对目录数据做模型特定修正：DeepSeek 官方价
@@ -2213,7 +2209,7 @@ func (s *BillingService) CalculateImageCost(model string, imageSize string, imag
 	imageSize = NormalizeImageBillingTierOrDefault(imageSize)
 
 	// 获取单价
-	unitPrice := s.getImageUnitPrice(model, imageSize, groupConfig)
+	unitPrice, provenance := s.getImageUnitPrice(model, imageSize, groupConfig)
 
 	// 计算总费用
 	totalCost := unitPrice * float64(imageCount)
@@ -2225,9 +2221,10 @@ func (s *BillingService) CalculateImageCost(model string, imageSize string, imag
 	actualCost := totalCost * rateMultiplier
 
 	return &CostBreakdown{
-		TotalCost:   totalCost,
-		ActualCost:  actualCost,
-		BillingMode: string(BillingModeImage),
+		TotalCost:     totalCost,
+		ActualCost:    actualCost,
+		BillingMode:   string(BillingModeImage),
+		PricingSource: pricingSourceJSON(provenance),
 	}
 }
 
@@ -2261,27 +2258,27 @@ func (s *BillingService) CalculateVideoCost(model string, resolution string, vid
 }
 
 // getImageUnitPrice 获取图片单价
-func (s *BillingService) getImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig) float64 {
+func (s *BillingService) getImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig) (float64, PricingProvenance) {
 	// 优先使用分组配置的价格
 	if groupConfig != nil {
 		switch imageSize {
 		case "1K":
 			if groupConfig.Price1K != nil {
-				return *groupConfig.Price1K
+				return *groupConfig.Price1K, PricingProvenance{ModelKey: model, Source: PricingSourceGroup, Match: "configured", Revision: pricingContentRevision(groupConfig), EffectivePrices: map[string]float64{"per_image": *groupConfig.Price1K}}
 			}
 		case "2K":
 			if groupConfig.Price2K != nil {
-				return *groupConfig.Price2K
+				return *groupConfig.Price2K, PricingProvenance{ModelKey: model, Source: PricingSourceGroup, Match: "configured", Revision: pricingContentRevision(groupConfig), EffectivePrices: map[string]float64{"per_image": *groupConfig.Price2K}}
 			}
 		case "4K":
 			if groupConfig.Price4K != nil {
-				return *groupConfig.Price4K
+				return *groupConfig.Price4K, PricingProvenance{ModelKey: model, Source: PricingSourceGroup, Match: "configured", Revision: pricingContentRevision(groupConfig), EffectivePrices: map[string]float64{"per_image": *groupConfig.Price4K}}
 			}
 		}
 	}
 
 	// 回退到 LiteLLM 默认价格
-	return s.getDefaultImagePrice(model, imageSize)
+	return s.defaultImagePriceWithSource(model, imageSize)
 }
 
 func (s *BillingService) getVideoUnitPrice(model string, resolution string, groupConfig *VideoPriceConfig) float64 {
@@ -2311,34 +2308,34 @@ func (s *BillingService) getVideoUnitPrice(model string, resolution string, grou
 
 // getDefaultImagePrice 获取 LiteLLM 默认图片价格
 func (s *BillingService) getDefaultImagePrice(model string, imageSize string) float64 {
+	unit, _ := s.defaultImagePriceWithSource(model, imageSize)
+	return unit
+}
+func (s *BillingService) defaultImagePriceWithSource(model string, imageSize string) (float64, PricingProvenance) {
 	if price, ok := getDefaultGrokImagineImagePrice(model, imageSize); ok {
-		return price
+		return price, PricingProvenance{ModelKey: model, Source: "builtin", Match: "static", Revision: pricingContentRevision(price), EffectivePrices: map[string]float64{"per_image": price}}
 	}
-
 	basePrice := 0.0
-
-	// 从 PricingService 获取 output_cost_per_image
+	source := PricingProvenance{}
 	if s.pricingService != nil {
-		pricing := s.pricingService.GetModelPricing(model)
+		pricing, provenance := s.pricingService.lookupModelPricingWithSource(model)
 		if pricing != nil && pricing.OutputCostPerImage > 0 {
 			basePrice = pricing.OutputCostPerImage
+			source = provenance
 		}
 	}
-
-	// 如果没有找到价格，使用硬编码默认值（$0.134，来自 gemini-3-pro-image-preview）
 	if basePrice <= 0 {
 		basePrice = defaultImageGenerationPrice
+		source = PricingProvenance{ModelKey: "default_image_generation", Source: "builtin", Match: "default", Revision: pricingContentRevision(basePrice)}
 	}
-
-	// 2K 尺寸 1.5 倍，4K 尺寸翻倍
 	if imageSize == "2K" {
-		return basePrice * 1.5
+		basePrice *= 1.5
 	}
 	if imageSize == "4K" {
-		return basePrice * 2
+		basePrice *= 2
 	}
-
-	return basePrice
+	source.EffectivePrices = map[string]float64{"per_image": basePrice}
+	return basePrice, source
 }
 
 func (s *BillingService) getDefaultVideoPrice(model string, resolution string) float64 {

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,11 +48,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	// Read request body
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolResponses)
 		return
 	}
 
@@ -195,6 +192,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	requestCtx = service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash)
 	c.Request = c.Request.WithContext(requestCtx)
 
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, resilience.GatewayRequestScopeText)()
+	requestCtx = c.Request.Context()
+
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 
@@ -213,7 +213,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 			if len(fs.FailedAccountIDs) == 0 {
 				recordSelectionExhausted(c.Request.Context())
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey), err)
 				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -316,6 +316,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		}
 
+		recordGatewayForwardUsage(c, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -446,7 +447,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if message, matched := inferenceNotFoundExhaustedMessage(c, lastErr); matched {
 		if streamStarted {
 			service.MarkOpsStreamError(c, "model_not_found", message, http.StatusNotFound)
-			if c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+			if !service.ProtocolTerminalClaimed(c) {
 				writeResponsesFailedSSEWithOpeningStatus(c, http.StatusNotFound, "invalid_request_error", "model_not_found", message, gatewayStreamHasOnlyHeartbeats(c))
 			}
 		} else {
@@ -483,8 +484,11 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
 		status, code, message = http.StatusBadRequest, codeContentPolicyViolation, msg
 	}
-	if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+	if service.ProtocolTerminalClaimed(c) {
 		service.MarkOpsStreamError(c, code, message, status)
+		return
+	}
+	if writePostOutputExhaustion(c, service.PreOutputProtocolResponses, status, code, "", message, streamStarted) {
 		return
 	}
 	if lastErr != nil {
@@ -492,12 +496,10 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	}
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	if streamStarted {
-		// A slot-wait heartbeat commits HTTP 200 before any upstream response.
-		// In that case a terminal frame is still required; once any semantic or
-		// official terminal bytes exist, preserve them without appending a second
-		// generic response.failed.
+		// Committed content still needs a terminal. The shared writer prevents
+		// a second failure after an already delivered terminal.
 		service.MarkOpsStreamError(c, code, message, status)
-		if c != nil && c.Writer != nil && (c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c)) {
+		if c != nil && c.Writer != nil && !service.ProtocolTerminalClaimed(c) {
 			errType, explicitCode, translatedMessage := resilienceTranslateError(c, status, code, "", message)
 			writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))
 		}

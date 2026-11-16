@@ -116,18 +116,19 @@ func sortedCallsiteKeys(callsites map[string]int) []string {
 func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 	want := map[string]map[string]int{
 		"CanAttempt": {
-			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted": 1,
-			"internal/handler/resilience_budget.go:resilienceAttemptFailed":            2,
-			"internal/handler/resilience_recovery_outcome.go:recordSelectionExhausted": 1,
+			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":  2,
+			"internal/handler/failover_loop.go:FailoverState.HandleFailoverError":       1,
+			"internal/handler/resilience_budget.go:resilienceAttemptFailed":             2,
+			"internal/handler/resilience_recovery_outcome.go:recordSelectionExhausted":  1,
+			"internal/handler/openai_queue_reselection.go:canTryOpenAIQueueReselection": 1,
 		},
 		"ConsumeInPlaceRetry": {
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.antigravityRetryLoop":      3,
-			"internal/service/openai_gateway_forward.go:OpenAIGatewayService.Forward":                           1,
+			"internal/service/openai_encrypted_content_http.go:planHTTPEncryptedContentRepair":                  1,
 			"internal/service/openai_m3.go:openAIM3Attempt.learn":                                               1,
 			"internal/service/openai_messages_continuation.go:resilienceContinuationReplayAllowed":              1,
 			"internal/service/resilience_budget.go:resilienceInServiceRetryAllowed":                             1,
 			"internal/service/resilience_request_repair_replay.go:newOpenAIRejectedFieldRepairSignal":           1,
-			"internal/service/resilience_request_repair_replay.go:newOpenAIRequestRepairSignal":                 1,
 			"internal/service/resilience_web_search_replay.go:OpenAIGatewayService.openAIWebSearchReplayDecide": 1,
 		},
 		"ConsumeInPlaceRetryWithTimer": {
@@ -147,6 +148,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/resilience/timeout_plan.go:RequestState.ResponseStagePlan":    1,
 		},
 		"ClampWait": {
+			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":                 1,
 			"internal/handler/resilience_budget.go:resilienceRetryDelay":                               1,
 			"internal/handler/resilience_budget.go:sameAccountRetryAllowedCtx":                         1,
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.handleSmartRetry": 1,

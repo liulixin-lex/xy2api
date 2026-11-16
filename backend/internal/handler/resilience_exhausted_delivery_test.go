@@ -4,6 +4,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -29,7 +30,15 @@ func TestCompatibleExhaustionAfterOutputDoesNotCountTurn(t *testing.T) {
 			} else {
 				(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, true)
 			}
-			require.Equal(t, before, w.Body.String())
+			require.True(t, strings.HasPrefix(w.Body.String(), before))
+			require.True(t, service.ProtocolTerminalClaimed(c))
+			if endpoint == EndpointResponses {
+				require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
+			} else if endpoint == EndpointChatCompletions {
+				require.Equal(t, 1, strings.Count(w.Body.String(), "[DONE]"))
+			} else {
+				require.Equal(t, 1, strings.Count(w.Body.String(), "event: error"))
+			}
 			require.False(t, c.GetBool(ginKeyResilienceTurnCounted))
 			require.False(t, resilience.StateFrom(c.Request.Context()).TurnFailed())
 			require.Empty(t, c.Writer.Header().Get("Retry-After"))

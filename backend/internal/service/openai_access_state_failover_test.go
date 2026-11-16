@@ -370,9 +370,11 @@ func TestOpenAIStream403PostOutputAccountSideEffectsIgnoreRequestPermissionError
 }
 
 func TestOpenAIStream403ExplicitCredentialAuthAppliesAccountSideEffects(t *testing.T) {
-	repo := &openAIStream403AccountRepo{}
-	rateLimits := &RateLimitService{accountRepo: repo}
+	repo := &openAIAuthPolicyAccountRepo{}
+	counter := &openAIAuthPolicy403Counter{counts: []int64{1}}
+	rateLimits := &RateLimitService{accountRepo: repo, openAI403CounterCache: counter}
 	svc := &OpenAIGatewayService{rateLimitService: rateLimits}
+	rateLimits.SetAccountRuntimeBlocker(svc)
 	account := &Account{ID: 917, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	payload := []byte(`{"type":"error","error":{"type":"permission_error","code":"invalid_api_key","status_code":403,"message":"credential rejected"}}`)
 
@@ -380,18 +382,25 @@ func TestOpenAIStream403ExplicitCredentialAuthAppliesAccountSideEffects(t *testi
 
 	require.Equal(t, http.StatusForbidden, status)
 	require.True(t, disabled)
-	require.Equal(t, 1, repo.setErrorCalls)
+	require.Empty(t, counter.counts)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Zero(t, repo.setErrorCalls)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestOpenAIWSStandaloneFailedStructured403AppliesAccountSideEffectsOnce(t *testing.T) {
-	repo := &openAIStream403AccountRepo{}
-	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	repo := &openAIAuthPolicyAccountRepo{}
+	counter := &openAIAuthPolicy403Counter{counts: []int64{1}}
+	rateLimits := &RateLimitService{accountRepo: repo, openAI403CounterCache: counter}
+	svc := &OpenAIGatewayService{rateLimitService: rateLimits}
+	rateLimits.SetAccountRuntimeBlocker(svc)
 	account := &Account{ID: 923, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	failed := []byte(`{"type":"response.failed","response":{"error":{"type":"permission_error","code":"invalid_api_key","status_code":403,"message":"credential rejected"}}}`)
 
 	require.True(t, svc.handleOpenAIWSFailureAccountSideEffects(context.Background(), account, "gpt-5", nil, failed))
-	require.Equal(t, 1, repo.setErrorCalls)
+	require.Empty(t, counter.counts)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Zero(t, repo.setErrorCalls)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 

@@ -240,15 +240,16 @@ var authCodes = map[string]struct{}{
 }
 
 var clientErrorCodes = map[string]struct{}{
-	"context_length_exceeded":  {},
-	"string_above_max_length":  {},
-	"invalid_prompt":           {},
-	"cyber_policy":             {},
-	"bio_policy":               {},
-	"content_policy_violation": {},
-	"content_filter":           {},
-	"invalid_request_error":    {},
-	"request_too_large":        {},
+	"encrypted_content_rejected": {},
+	"context_length_exceeded":    {},
+	"string_above_max_length":    {},
+	"invalid_prompt":             {},
+	"cyber_policy":               {},
+	"bio_policy":                 {},
+	"content_policy_violation":   {},
+	"content_filter":             {},
+	"invalid_request_error":      {},
+	"request_too_large":          {},
 }
 
 // IsKnownClientErrorCode identifies explicit client-fault codes, not the
@@ -460,6 +461,41 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 		return Result{Category: CategoryTransient, Reason: networkReason(o.Err)}
 	}
 
+	if o.Source == SourceHTTP || o.Source == SourceStreamEvent {
+		if o.StatusCode == http.StatusForbidden && IsCloudflareBotBlockResponse(o.Body) {
+			return Result{Category: CategoryTransient, Reason: "edge_error_page"}
+		}
+		var envelope struct {
+			Error    json.RawMessage `json:"error"`
+			Response struct {
+				Error json.RawMessage `json:"error"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(o.Body, &envelope) == nil {
+			active := envelope.Response.Error
+			if len(active) == 0 || string(active) == "null" {
+				active = envelope.Error
+			}
+			var fields struct {
+				Code      json.RawMessage `json:"code"`
+				ErrorCode json.RawMessage `json:"error_code"`
+				Type      string          `json:"type"`
+				Name      string          `json:"error_name"`
+				Message   string          `json:"message"`
+			}
+			if len(active) > 0 && json.Unmarshal(active, &fields) == nil {
+				code := strings.ToLower(strings.Trim(string(fields.Code), `"`))
+				if code == "null" {
+					code = ""
+				}
+				if contentPolicyCode(code, strings.ToLower(fields.Type), "") {
+					o.Code, o.Type, o.Message = code, fields.Type, fields.Message
+				}
+
+			}
+		}
+	}
+
 	code := strings.ToLower(strings.TrimSpace(o.Code))
 	typ := strings.ToLower(strings.TrimSpace(o.Type))
 	msg := strings.ToLower(strings.TrimSpace(o.Message))
@@ -474,9 +510,14 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if strings.TrimSpace(text) == "" {
 		text = lowerBody
 	}
-	retryAfter := RetryAfterFrom(o.Headers, body)
+	hint, _ := ParseUpstreamRecoveryHint(o.Headers, body, time.Now())
+	retryAfter := hint.Delay
+	if o.StatusCode >= http.StatusBadRequest && o.Source != SourceStreamEvent {
+		retryAfter = max(retryAfter, RetryAfterFrom(o.Headers, body))
+	}
 	if retryAfter == 0 && o.Message != "" {
-		retryAfter = RetryAfterFrom(nil, []byte(o.Message))
+		messageBody, _ := json.Marshal(map[string]any{"error": map[string]string{"message": o.Message}})
+		retryAfter = RetryAfterFrom(nil, messageBody)
 	}
 	status := o.StatusCode
 	isEvent := o.Source == SourceStreamEvent
@@ -679,16 +720,21 @@ func containsAnyFold(text string, keywords []string) bool {
 }
 
 // contentPolicyCode reports a content-safety refusal by its code or type.
-// Relays that put the code at the top level ({"code":...}) are matched on
-// the quoted value in the body.
+// Relays that put the code at the top level ({"code":...}) are read from
+// those fields only; a request echo cannot turn an unknown refusal into policy.
 func contentPolicyCode(code, typ, lowerBody string) bool {
+	if code == "session_blocked_by_cyber_policy" || code == "cyber_policy" || typ == "cyber_policy" {
+		return true
+	}
 	if _, ok := contentPolicyCodes[code]; ok {
 		return true
 	}
 	if _, ok := contentPolicyCodes[typ]; ok {
 		return true
 	}
-	return strings.Contains(lowerBody, `"request_check_blocked"`)
+	var top struct{ Code, Type string }
+	return json.Unmarshal([]byte(lowerBody), &top) == nil &&
+		(top.Code == "request_check_blocked" || top.Type == "request_check_blocked")
 }
 
 // contentPolicyText reports a content-safety refusal by its wording on a
@@ -722,37 +768,40 @@ func looksLikeHTMLBlock(lowerBody string) bool {
 		strings.Contains(lowerBody, "just a moment...")
 }
 
-// RetryAfterFrom extracts the delay an upstream asked for from response
-// headers (Retry-After seconds or HTTP date, retry-after-ms) or the body
-// (`"retry_after":60` in JSON or relay error pages, "try again in Ns").
-// It returns zero when nothing was found.
+// RetryAfterFrom is the compatibility entry point for confirmed upstream
+// failures. E17 retains the legacy error-body hint as another lower bound;
+// callers inspecting arbitrary SSE payloads use ParseUpstreamRecoveryHint.
 func RetryAfterFrom(h http.Header, body []byte) time.Duration {
-	if d := retryAfterHeader(h, time.Now()); d > 0 {
-		return d
-	}
+	now := time.Now()
 	if len(body) == 0 {
-		return 0
+		return retryAfterHeader(h, now)
 	}
+	hint, _ := ParseUpstreamRecoveryHint(h, body, now)
+	return max(hint.Delay, legacyUpstreamRetryDelay(body))
+}
+
+func legacyUpstreamRetryDelay(body []byte) time.Duration {
 	if len(body) > inspectLimit {
 		body = body[:inspectLimit]
 	}
-	s := string(body)
-	if m := reRetryAfterJSON.FindStringSubmatch(s); m != nil {
-		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 {
-			return secondsDuration(v)
+	text := string(body)
+	var delay time.Duration
+	for _, match := range reRetryAfterJSON.FindAllStringSubmatch(text, -1) {
+		if d, ok := recoveryDelay(match[1], time.Second); ok {
+			delay = max(delay, d)
 		}
 	}
-	if m := reTryAgainInCompound.FindStringSubmatch(s); m != nil {
-		if d, err := time.ParseDuration(strings.ToLower(m[1])); err == nil && d > 0 {
-			return d
+	for _, match := range reTryAgainInCompound.FindAllStringSubmatch(text, -1) {
+		if d, err := time.ParseDuration(strings.ToLower(match[1])); err == nil && d > 0 {
+			delay = max(delay, d)
 		}
 	}
-	if m := reTryAgainIn.FindStringSubmatch(s); m != nil {
-		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 {
-			return unitDuration(v, m[2])
+	for _, match := range reTryAgainIn.FindAllStringSubmatch(text, -1) {
+		if d, ok := recoveryDelay(match[1], recoveryUnit(match[2])); ok {
+			delay = max(delay, d)
 		}
 	}
-	return 0
+	return delay
 }
 
 // resetFrom extracts a rate-limit reset distance: Retry-After, the body
@@ -770,44 +819,70 @@ func resetFrom(h http.Header, body []byte) time.Duration {
 }
 
 func retryAfterHeader(h http.Header, now time.Time) time.Duration {
-	if h == nil {
+	hint, ok := ParseUpstreamRecoveryHint(h, nil, now)
+	if !ok {
 		return 0
 	}
-	if v := strings.TrimSpace(h.Get("retry-after-ms")); v != "" {
-		if ms, err := strconv.ParseFloat(v, 64); err == nil && ms > 0 {
-			return time.Duration(ms * float64(time.Millisecond))
-		}
-	}
-	v := strings.TrimSpace(h.Get("Retry-After"))
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.ParseFloat(v, 64); err == nil {
-		if secs > 0 {
-			return secondsDuration(secs)
-		}
-		return 0
-	}
-	if t, err := http.ParseTime(v); err == nil && t.After(now) {
-		return t.Sub(now)
-	}
-	return 0
+	return hint.Delay
 }
 
-func secondsDuration(v float64) time.Duration {
-	return time.Duration(v * float64(time.Second))
-}
-
-func unitDuration(v float64, unit string) time.Duration {
-	unit = strings.ToLower(unit)
-	switch {
-	case strings.HasPrefix(unit, "ms") || strings.HasPrefix(unit, "milli"):
-		return time.Duration(v * float64(time.Millisecond))
-	case strings.HasPrefix(unit, "h"):
-		return time.Duration(v * float64(time.Hour))
-	case strings.HasPrefix(unit, "m"):
-		return time.Duration(v * float64(time.Minute))
-	default:
-		return secondsDuration(v)
+// IsCloudflareBotBlockResponse recognizes only the active failure and Cloudflare's
+// top-level 1010 envelope. Request echoes cannot turn an auth failure into WAF.
+func IsCloudflareBotBlockResponse(body []byte) bool {
+	if !json.Valid(body) {
+		return strings.Contains(strings.ToLower(string(body)), "error code: 1010")
 	}
+	type fields struct {
+		Code       json.RawMessage `json:"code"`
+		ErrorCode  json.RawMessage `json:"error_code"`
+		Type       string          `json:"type"`
+		Name       string          `json:"error_name"`
+		Cloudflare bool            `json:"cloudflare_error"`
+		Message    string          `json:"message"`
+	}
+	var envelope struct {
+		Error    json.RawMessage `json:"error"`
+		Response struct {
+			Error json.RawMessage `json:"error"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return false
+	}
+	active := envelope.Response.Error
+	if len(active) == 0 || string(active) == "null" {
+		active = envelope.Error
+	}
+	root := fields{}
+	if json.Unmarshal(body, &root) != nil {
+		return false
+	}
+	candidates := []fields{root}
+	if len(active) > 0 {
+		var failure fields
+		if json.Unmarshal(active, &failure) == nil {
+			candidates = append(candidates, failure)
+		}
+	}
+	value := func(raw json.RawMessage) string {
+		return strings.ToLower(strings.Trim(strings.TrimSpace(string(raw)), `"`))
+	}
+	for _, f := range candidates {
+		if _, ok := authCodes[value(f.Code)]; ok {
+			return false
+		}
+		if _, ok := authCodes[strings.ToLower(strings.TrimSpace(f.Type))]; ok {
+			return false
+		}
+	}
+	for i, f := range candidates {
+		if (value(f.Code) == "1010" || value(f.ErrorCode) == "1010") &&
+			(f.Type == "cloudflare_error" || f.Name == "browser_signature_banned" || f.Cloudflare) {
+			return true
+		}
+		if i > 0 && strings.Contains(strings.ToLower(f.Message), "error code: 1010") {
+			return true
+		}
+	}
+	return false
 }

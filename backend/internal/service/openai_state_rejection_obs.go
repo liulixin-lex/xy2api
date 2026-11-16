@@ -63,6 +63,11 @@ func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byt
 		return
 	}
 	rej := openAIStateRejection(payload, message)
+	if path != "ws" && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		if continuation := classifyHTTPContinuationError(payload); continuation != nil {
+			rej = resilience.StateRejection{Family: continuation.Family}
+		}
+	}
 	stage := "pre_output"
 	if outputStarted {
 		stage = "post_output"
@@ -151,7 +156,7 @@ func (s *OpenAIGatewayService) finishOpenAIStreamStateRejection(ctx context.Cont
 }
 
 func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Account, rej resilience.StateRejection, path, stage string, body, attemptBody []byte) {
-	if !rej.RequestScoped() || account == nil {
+	if !rej.RequestScoped() {
 		return
 	}
 	st := resilience.StateFrom(ctx)
@@ -175,7 +180,7 @@ func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Acco
 	census := openAIEncryptedFragmentCensus(body)
 	attemptCensus := openAIEncryptedFragmentCensus(attemptBody)
 	fields := append(resilience.EventFields(ctx),
-		"group_id", st.GroupID(), "account_id", account.ID, "family", string(rej.Family), "encrypted", rej.Encrypted,
+		"group_id", st.GroupID(), "family", string(rej.Family), "encrypted", rej.Encrypted,
 		"path", path, "stage", stage, "error_ms", errorMS,
 		"collab_plaintext", stats.Applied, "collab_calls", stats.Calls,
 		"collab_efa_absent", stats.EFAAbsent, "collab_efa_empty", stats.EFAEmpty, "collab_efa_nonempty", stats.EFANonEmpty,
@@ -201,8 +206,24 @@ func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Acco
 		}
 		fields = append(fields, "rule_id", ruleID)
 	}
-	resilience.Count(resilience.MetricStateRejection, st.GroupID(), account.ID, string(rej.Family))
+	var accountID int64
+	if account != nil {
+		accountID = account.ID
+		fields = append(fields, "account_id", accountID)
+	}
+	resilience.Count(resilience.MetricStateRejection, st.GroupID(), accountID, string(rej.Family))
 	slog.WarnContext(ctx, "resilience.state_rejection", fields...)
+}
+
+func noteLocalHTTPContinuationRejection(c *gin.Context, account *Account, rejection *HTTPContinuationError) {
+	if rejection == nil {
+		return
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	noteOpenAIStateRejection(ctx, c, account, resilience.StateRejection{Family: rejection.Family}, "native_http", "local", nil, nil)
 }
 
 type openAIEncryptedFragments struct{ AgentMessage, FunctionOutput, Reasoning, Compaction, Other, OpaqueLike, TextLike int }

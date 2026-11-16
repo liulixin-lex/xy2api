@@ -18,19 +18,26 @@ type gatewayRequestWriter interface {
 // Admission excludes authentication, malformed bodies and local policy rejects.
 // The closure reads the final API key because failover may change its group.
 func beginGatewayRequest(c *gin.Context, key func() *service.APIKey, model string, stream bool, writer gatewayRequestWriter) func() {
+	return beginGatewayRequestWithScope(c, key, model, stream, writer, resilience.GatewayRequestScopeText)
+}
+
+func beginGatewayRequestWithScope(c *gin.Context, key func() *service.APIKey, model string, stream bool, writer gatewayRequestWriter, scope resilience.GatewayRequestScope) func() {
 	st := resilience.StateFrom(c.Request.Context())
 	if st == nil {
 		st = resilience.NewRequestState()
 		st.InitDelivery(c.Request.Context(), time.Now(), nil)
 		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), st))
 	}
-	st.EnableGatewayRequest(time.Now())
+	st.EnableGatewayRequest(time.Now(), scope)
 	return func() { finishUnbilledGatewayRequest(c, key(), model, stream, false, writer) }
 }
 
 func gatewayBillingContext(ctx context.Context) context.Context {
 	st := resilience.StateFrom(ctx)
-	if st == nil || !st.GatewayRequestEnabled() {
+	scope, exists := st.GatewayRequestScope()
+	// Keep excluded legacy turns out of the billing metadata while preserving
+	// non-text scopes that still require financial correlation.
+	if !exists || scope == "" && !st.GatewayRequestEnabled() {
 		return ctx
 	}
 	meta, _ := st.ClaimGatewayRequest(true)
@@ -50,6 +57,7 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 	requestType := int16(service.RequestTypeFromLegacy(stream, ws))
 	status := c.Writer.Status()
 	row := &service.GatewayUnbilledRequest{
+		RequestScope: meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
 		RequestID: meta.RequestID, CreatedAt: meta.StartedAt, UserID: key.UserID, APIKeyID: key.ID, GroupID: key.GroupID,
 		Model: model, Stream: stream, RequestType: &requestType, Result: meta.Result, ErrorClass: meta.ErrorClass,
 		HTTPStatus: &status, Switches: meta.Switches, Fallback: meta.Fallback, Takeover: meta.Takeover,
@@ -81,6 +89,7 @@ func recordGatewayForwardUsage(c *gin.Context, result *service.ForwardResult) {
 	if result == nil {
 		return
 	}
+	resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(c.GetInt64(opsAccountIDKey), result.ResponseFactsKnown, result.UsagePresent, result.UsageSource, result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind)
 	u := result.Usage
 	if u.InputTokens+u.CacheReadInputTokens+u.CacheCreationInputTokens <= 0 {
 		return
@@ -89,7 +98,11 @@ func recordGatewayForwardUsage(c *gin.Context, result *service.ForwardResult) {
 }
 func recordOpenAIForwardUsage(c *gin.Context, account *service.Account, result *service.OpenAIForwardResult) {
 	// OpenAI's send capture already records each send, including failed sends.
-	if result == nil || account == nil || account.Platform == service.PlatformOpenAI || result.Usage.InputTokens <= 0 {
+	if result == nil || account == nil {
+		return
+	}
+	resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource, result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind)
+	if account.Platform == service.PlatformOpenAI || result.Usage.InputTokens <= 0 {
 		return
 	}
 	u := result.Usage

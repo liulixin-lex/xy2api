@@ -44,6 +44,7 @@ func (s *BillingService) CalculateTokenCostForRequest(req TokenCostRequest) (*Co
 
 func (s *BillingService) tokenCostInput(req TokenCostRequest, resolved *ResolvedPricing) CostInput {
 	input := CostInput{
+		Purpose:         req.Purpose,
 		Ctx:             req.Ctx,
 		Model:           req.Model,
 		Group:           req.Group,

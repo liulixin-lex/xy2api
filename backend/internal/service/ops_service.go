@@ -504,6 +504,8 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		return nil, false, nil
 	}
 
+	entry.ConversionNotices = copyConversionNotices(entry.ConversionNotices)
+
 	// Ensure timestamps are always populated.
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()

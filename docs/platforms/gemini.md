@@ -120,9 +120,26 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 
 `/v1/chat/completions` 中图片的 `image_url.detail` 为 `auto`、`low`、`high` 时，Gemini 没有对应参数，网关去掉该提示并记录降级，图片照常发送；其他值返回 400。质量与费用不保证与指定 `detail` 时相同。
 
+各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
+
 `/v1beta` 端点的密钥读取顺序为 `x-goog-api-key` 请求头、`Authorization: Bearer`、`x-api-key`，最后是查询参数 `key`（只在 `/v1beta` 与 `/antigravity/v1beta` 下接受）；查询参数 `api_key` 已弃用，会返回 400。
 
 开启了混合调度的 Antigravity 账号也会参与 Gemini 分组的调度，见 [Antigravity](antigravity.md)。排查上游问题时可短时开启 `gateway.gemini_debug_response_headers`（默认 `false`）记录上游响应头，排障后关闭。
+
+### 兼容入口参数
+
+兼容入口指 Gemini 分组的 `/v1/chat/completions` 与 `/v1/messages`。API Key 账号的兼容请求按最终映射后的模型转换；Chat 请求会先转为 Anthropic 格式，这一步不套用 Claude 的最小思考预算，也不添加默认 thinking，输出上限保持原值，到生成 Gemini 请求时才按实际模型校验和映射：
+
+- **思考控制**：没有显式意图时保留模型默认。优先级为 `disabled`/`none`、显式 effort、数值预算、单独的 `adaptive`；中间对象中的 adaptive 不覆盖 effort。Gemini 2.5 Flash 的 low/medium/high 分别映射为 1024/8192/24576，none 为 0；2.5 Pro 不能完全关闭，最低预算为 128。已确认接受 level 的型号采用最近的支持档位，不能保证原请求的思考强度或完全关闭；未知能力省略并记录。已收录的型号为 2.0 Flash、2.5 系列、3 Pro、3.1 Pro、3 Flash、3.5 Flash 与 3.8 Flash，其他型号（包括 gemini-4 系列）的思考控制与 JSON 输出都按未知能力处理。计费只读取最终实际发出的 `thinkingLevel`，预算与默认模式不推断收费档位。
+- **JSON 输出**：Chat 的 `response_format` / `text.format` 和 Messages 的 `output_config.format` 为 `json_object` 时写入 `application/json`，`json_schema` 另外保留原始 `responseJsonSchema`；text/缺省不设置格式。仅支持 MIME 的型号省略 schema 并记录，不能保证 schema；未知 JSON 能力省略格式并记录，不能保证 JSON。请求带工具时同样省略格式并记录（Gemini 2.x 不接受工具与 JSON 输出同时出现），工具照常发送，不能保证 JSON。图片和正文仍保留，输出 schema 不经过工具 schema 清理。
+- **工具 schema**：仅处理 `tools[*].functionDeclarations[*].parameters`。普通 schema 位置删除 enum 中恰为空串的成员，空数组或删完为空才移除 enum；空白串与其他成员保留。not、条件组 if/then/else、oneOf、contains 内命中时省略整个受影响操作符（contains 同时省略 minContains/maxContains），保留兄弟约束；因此可能失去否定、条件、唯一分支或匹配计数约束。每次省略记录字段路径及 omit，不把 default、const、examples 或属性名称当 schema 递归。
+- **工具选择**：auto/none/any 映射为 AUTO/NONE/ANY，指定函数映射为 ANY 与 allowedFunctionNames。none 移除当前 builtin 声明，保留历史；强制 builtin 保留声明并记录 map，不能保证本轮必调用。禁并行控制省略并记录 omit，不能保证只返回一个调用。畸形选择、非布尔并行控制或未声明的工具名返回指出字段的错误。
+- **工具历史**：按轮次与调用出现顺序配对结果，旧式同名调用继续按 FIFO 消费；不新增历史闭合校验，缺结果、孤儿结果与同轮重复 ID 沿原有转换方式处理。
+- **结束原因**：正常停止保留为自然结束或工具调用；MAX_TOKENS 优先保留长度截断，工具存在也不改成正常工具结束。安全过滤映射为 Messages refusal 或 Chat content_filter；OTHER 与未列出的非空停因沿用自然结束/完整工具的兼容映射，并记录 map；明确的坏工具停因返回上游转换错误，流式错误后不再追加成功结束帧。已读用量保留，完整工具参数必须是 JSON 对象。
+- **缓存用量**：未缓存输入为 `max(promptTokenCount - cachedContentTokenCount, 0)`，缓存读取保留原值；输出只加一次 candidates 与 thoughts。流中按字段保留最近一次有效计数，缺字段不覆盖已知值，显式零或修正值正常覆盖。返回给客户端的用量字段与原来相同，不新增缓存字段；缺 prompt 与缓存大于 prompt 只在用量记录里区分。
+- **思考文本**：上游 `thought: true` 的文本放进 Messages 的 `thinking` 块或 Chat 的 `reasoning_content`，普通正文单独输出；非流式与流式相同。之后的请求在 assistant 历史里带回的 `thinking`、`redacted_thinking` 块不发给 Gemini（只有思考块的那一轮照原方式转换），工具调用的签名不受影响。
+- **URL 图片**：http(s) 链接的图片作为 `fileData.fileUri` 发给 Gemini，由 Gemini 读取，链接需要能公开访问；`mimeType` 取来源给出的类型或 png、jpg、jpeg、webp、heic、heif 扩展名，其他情况不填。
+- **AI Studio 搜索工具**：只调整搜索工具的字段拼写，输出 schema 原样保留，大整数不丢精度。
 
 ## 客户端配置
 

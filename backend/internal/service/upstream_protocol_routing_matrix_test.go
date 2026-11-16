@@ -310,6 +310,16 @@ func matchesKnownZhipuNonAPIKeyDifference(tc routingMatrixCase, want, got routin
 		reflect.DeepEqual(got, routingObservation{Error: "account 801 missing api_key", Status: http.StatusOK})
 }
 
+// T1F-05 changes only the body shape at the existing fixed Chat destination.
+func matchesM7FixedChatShape(tc routingMatrixCase, want, got routingObservation) bool {
+	if tc.accountType != AccountTypeAPIKey || tc.ingress.name != "chat_responses_shape" || len(want.Requests) != 1 || want.Requests[0].BodyKind != "input" || !strings.HasSuffix(want.Requests[0].URL, "/chat/completions") {
+		return false
+	}
+	want.Requests = append([]routingUpstreamRequest(nil), want.Requests...)
+	want.Requests[0].BodyKind = "messages"
+	return reflect.DeepEqual(want, got)
+}
+
 func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	data, err := os.ReadFile(routingMatrixGoldenPath)
@@ -325,6 +335,7 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 	var differences []string
 	mismatched := 0
 	knownDifferences := 0
+	shapeDifferences := 0
 	for i, tc := range cases {
 		index := golden.Results[i]
 		require.GreaterOrEqual(t, index, 0)
@@ -338,11 +349,16 @@ func TestUpstreamProtocolRoutingMatrixMatchesMainGolden(t *testing.T) {
 			knownDifferences++
 			continue
 		}
+		if matchesM7FixedChatShape(tc, want, got) {
+			shapeDifferences++
+			continue
+		}
 		mismatched++
 		if len(differences) < 12 {
 			differences = append(differences, fmt.Sprintf("%s\nmain: %s\ncurrent: %s", tc.key(), want, got))
 		}
 	}
+	require.Equal(t, 1296, shapeDifferences, "only the fixed API-key Chat input shape changes")
 	require.Zero(t, mismatched, "routing differs from main %s in %d cases:\n%s", golden.SourceRevision, mismatched, strings.Join(differences, "\n"))
 	// 2 account types × 4 modes × 3 probe states × 4 address configurations ×
 	// 2 model spellings. A disappeared or expanded exception requires review.

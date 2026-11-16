@@ -32,14 +32,17 @@ func newGinContextForEndpoint(t *testing.T, endpoint string) (*gin.Context, *htt
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, endpoint, nil)
+	c.Header("Content-Type", "text/event-stream")
 	return c, w
 }
 
 // parseResponsesFailedSSE 抽出 SSE 中 data 行的 JSON，返回 (response 对象, error 对象)。
 func parseResponsesFailedSSE(t *testing.T, body string) (map[string]any, map[string]any) {
 	t.Helper()
-	require.True(t, strings.HasPrefix(body, "event: response.failed\n"),
-		"expect event: response.failed prefix, got: %q", body)
+	require.Equal(t, 1, strings.Count(body, "event: response.failed\n"), "expect one failure, got: %q", body)
+	if i := strings.Index(body, "event: response.failed\n"); i >= 0 {
+		body = body[i:]
+	}
 	require.True(t, strings.HasSuffix(body, "\n\n"))
 
 	lines := strings.SplitN(strings.TrimSuffix(body, "\n\n"), "\n", 2)
@@ -124,7 +127,8 @@ func TestOpenAIAdmissionError_StreamingNonResponsesIncludesGatewayCode(t *testin
 		gatewayQueueFullCode, "Too many pending requests, please retry later", true, false)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\n"))
+	assert.True(t, strings.HasPrefix(body, "data: "))
+	assert.Contains(t, body, "data: [DONE]\n\n")
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
 	assert.Equal(t, gatewayQueueFullCode, gjson.Get(payload, "error.code").String())
@@ -206,7 +210,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingJSONEscaping(t *testi
 
 // OpenAI handler: /v1/chat/completions streaming keeps the legacy event: error format
 // (out of scope for this fix; covered to prevent regression of unrelated paths).
-func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *testing.T) {
+func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingUsesProtocolTerminal(t *testing.T) {
 	// xy2api resilience off: the 0.3.0 "event: error" frame.
 	withHandlerResilience(t, func(s *resilience.Settings) { s.Keepalive.Enabled = false })
 	c, w := newGinContextForEndpoint(t, EndpointChatCompletions)
@@ -214,7 +218,9 @@ func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+	require.True(t, strings.HasPrefix(body, "data: "))
+	require.Equal(t, 1, strings.Count(body, "data: [DONE]"))
+	require.NotContains(t, body, "event: error")
 }
 
 func TestChatCompletionsStreamingTerminalFrame(t *testing.T) {
@@ -254,7 +260,7 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	require.Equal(t, http.StatusBadGateway, status)
 }
 
-func TestGatewayAdmissionError_SynchronousIncludesGatewayCode(t *testing.T) {
+func TestGatewayAdmissionError_SynchronousKeepsAnthropicShape(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -266,7 +272,7 @@ func TestGatewayAdmissionError_SynchronousIncludesGatewayCode(t *testing.T) {
 	assert.Equal(t, gatewayQueueFullCode, gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 }
 
-func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T) {
+func TestGatewayAdmissionError_MessagesStreamingKeepsAnthropicShape(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointMessages)
 	h := &GatewayHandler{}
 	h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error",
@@ -274,7 +280,7 @@ func TestGatewayAdmissionError_MessagesStreamingIncludesGatewayCode(t *testing.T
 
 	body := w.Body.String()
 	// xy2api G3: Anthropic SDKs drop data frames without an event line.
-	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: "), "got: %q", body)
 	payload := body[strings.Index(body, "{"):]
 	assert.Equal(t, "rate_limit_error", gjson.Get(payload, "error.type").String())
 	assert.Equal(t, gatewayConcurrencyLimitCode, gjson.Get(payload, "error.code").String())
@@ -299,7 +305,7 @@ func TestGatewayHandleStreamingAwareError_MessagesStreamingKeepsLegacy(t *testin
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
 	body := w.Body.String()
-	assert.True(t, strings.HasPrefix(body, "event: error\ndata: {\"type\":\"error\""), "got: %q", body)
+	assert.True(t, strings.HasPrefix(body, "event: error\ndata: "), "got: %q", body)
 }
 
 // 项目里 /responses 注册在多组路由：/v1/responses（gateway）、裸 /responses（top-level）、
@@ -360,7 +366,7 @@ func TestOpenAIHandleStreamingAwareError_ResponsesStreamingCarriesSequenceNumber
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "boom", true)
 
-	require.True(t, strings.HasPrefix(w.Body.String(), "event: response.failed\n"))
+	require.Contains(t, w.Body.String(), "event: response.failed\n")
 	_, payload, found := strings.Cut(w.Body.String(), "data: ")
 	require.True(t, found)
 	require.True(t, gjson.Get(payload, "sequence_number").Exists(), "response.failed 必须带 sequence_number")
@@ -435,6 +441,7 @@ func TestCommittedFailureCarriesRetryHint(t *testing.T) {
 			withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.FailedFrameRetryAfter = enabled })
 			c, w := newGinContextForEndpoint(t, EndpointResponses)
 			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+			c.Header("Content-Type", "text/event-stream")
 			_, _ = c.Writer.WriteString(":\n\n")
 			applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
 			(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable", true)
@@ -457,6 +464,7 @@ func TestCommittedFailurePreservesOriginalPunctuation(t *testing.T) {
 		t.Run(original, func(t *testing.T) {
 			c, w := newGinContextForEndpoint(t, EndpointResponses)
 			c.Request = c.Request.WithContext(resilience.WithRetryAdvice(c.Request.Context(), resilience.RetryAdvice{}))
+			c.Header("Content-Type", "text/event-stream")
 			_, err := c.Writer.WriteString(":\n\n")
 			require.NoError(t, err)
 			c.Set(ginKeyResilienceRetryAfter, 30)

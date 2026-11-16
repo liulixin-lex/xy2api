@@ -35,6 +35,8 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
 	startTime := time.Now()
 
 	// 1. Parse Anthropic request
@@ -51,6 +53,18 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	clientStream := anthropicReq.Stream
 
+	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
+	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	var projectionErr error
+	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if err := json.Unmarshal(body, &anthropicReq); err != nil {
+		return nil, err
+	}
+
+	anthropicReq.Model = upstreamModel
 	// 2. Anthropic → Chat Completions (direct, no Responses intermediary)
 	chatReq, err := apicompat.AnthropicToChatCompletionsRequest(&anthropicReq)
 	if err != nil {
@@ -58,14 +72,12 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return nil, fmt.Errorf("convert anthropic to chat completions: %w", err)
 	}
 
-	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && len(anthropicReq.Tools) > 0 {
-		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
+	if openai.RequiresResponsesForToolCalls(upstreamModel) && len(anthropicReq.Tools) > 0 {
+		err := fmt.Errorf("%s requires Responses for tool calls; this account only supports Chat Completions", upstreamModel)
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -85,7 +97,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
 		chatBody = normalizedBody
 	}
-	if account.Platform == PlatformOpenAI {
+	if account.Platform == PlatformOpenAI && account.Type != AccountTypeAPIKey {
 		policyBody, changed, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, chatBody)
 		if policyErr != nil {
 			if IsReasoningEffortPolicyDenied(policyErr) {
@@ -98,10 +110,13 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 			chatBody = policyBody
 		}
 	}
+	chatBody, err = finalizeM7ReasoningPolicy(ctx, c, account, chatBody, upstreamModel, "chat", PreOutputProtocolAnthropic)
+	if err != nil {
+		return nil, err
+	}
 	// Provider normalization and policy caps can both change the converted effort.
 	// Use the final outbound value for usage logs and billing.
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(chatBody, upstreamModel, billingModel, originalModel)
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, chatBody, upstreamModel)
+	var reasoningEffort *string
 	// Unlike forwardResponsesViaRawChatCompletions, applyOpenAIFastPolicyToBody
 	// is intentionally skipped: Anthropic Messages bodies carry no service_tier,
 	// so the converted Chat Completions body never contains one and the policy
@@ -121,7 +136,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return nil, err
 	}
 	var schedCapture *schedAttemptCapture
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &schedCapture)
+	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &reasoningEffort, &schedCapture)
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err
@@ -142,27 +157,36 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 
 	// 5. Convert response
 	if clientStream {
-		return s.streamChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, opts)
 	}
-	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, opts)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+	options ...apicompat.ConversionOptions,
+) (result *OpenAIForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
+	facts := OpenAIForwardResult{}
+	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
 	requestID := resp.Header.Get("x-request-id")
-	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeAnthropicError)
+	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeAnthropicError, &facts)
 	if err != nil {
 		return nil, err
 	}
-	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, originalModel)
+	anthropicResp, err := apicompat.ChatCompletionsResponseToAnthropicWithBridgeOptions(ccResp, originalModel, opts)
+	if err != nil {
+		writeCCStreamReadError(c, PreOutputProtocolAnthropic, err)
+		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier), Duration: time.Since(startTime)}, err
+	}
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -194,20 +218,28 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (*OpenAIForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
 	anthropicState := apicompat.NewChatCompletionsToAnthropicStreamState(originalModel)
+	anthropicState.Bridge = opts.Bridge
+	anthropicState.SetConversionRecorder(opts.Record)
 	clientDisconnected := false
 
 	// 与 responses 兄弟不同：客户端断开后仍继续做事件转换（喂 anthropicState），
 	// 仅跳过写出，保证 finalize 阶段的 usage 汇总不受断开影响。
-	emitChunk := func(chunk *apicompat.ChatCompletionsChunk) {
+	emitChunk := func(raw []byte) error {
+		m7RecordLegacyChatTerminal(c.Request.Context(), raw, opts)
 		// CC chunk → Anthropic events (direct, single state machine)
-		anthropicEvents := apicompat.ChatCompletionsChunkToAnthropicEvents(chunk, anthropicState)
+		anthropicEvents := apicompat.ChatCompletionsChunkToAnthropicEventsWithBridgeOptions(raw, anthropicState)
+		if err := anthropicState.Err(); err != nil {
+			return err
+		}
 		if clientDisconnected {
-			return
+			return nil
 		}
 		for _, aEvt := range anthropicEvents {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(aEvt)
@@ -224,16 +256,41 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		if !clientDisconnected && len(anthropicEvents) > 0 {
 			c.Writer.Flush()
 		}
+		return nil
 	}
 
-	scan := s.scanCCStream(c, resp, account, "openai messages chat fallback", requestID, startTime, emitChunk)
+	scan := s.scanCCStream(c, resp, account, PreOutputProtocolAnthropic, "openai messages chat fallback", requestID, startTime, nil, emitChunk)
 	usage := scan.Usage
 
+	// Completion eligibility comes from the scanner, not from JSON validity.
+	// This is only the local target projection; do not alter upstream facts.
+	if scan.Err == nil && opts.Bridge != nil && anthropicState.FinishReason == "" && anthropicState.HasToolCall {
+		anthropicState.FinishReason = "tool_calls"
+	}
+	var finalEvents []apicompat.AnthropicStreamEvent
+	if scan.Err == nil {
+		finalEvents = apicompat.FinalizeChatCompletionsAnthropicStream(anthropicState)
+		scan.Err = anthropicState.Err()
+	}
+
 	if scan.Err != nil {
+		noUsageBeforeOutput := !c.Writer.Written() && anthropicState.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
+		if !ProtocolTerminalClaimed(c) {
+			writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
+		}
+		if noUsageBeforeOutput {
+			return nil, scan.Err
+		}
 		// Broken upstream read: skip finalization so no synthetic message_stop
 		// masks the truncation, and surface the error to flag usage incomplete
 		// (mirrors forwardResponsesViaRawChatCompletions).
 		return &OpenAIForwardResult{
+			ResponseFactsKnown: scan.ResponseFactsKnown,
+			UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+			TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+			ResponseBodyKind: scan.ResponseBodyKind,
+			PartialFailure:   scan.Err != nil,
+
 			RequestID:                   requestID,
 			UpstreamHeaders:             resp.Header,
 			Usage:                       usage,
@@ -250,8 +307,6 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 
-	// Finalize: close open blocks + emit message_delta/message_stop.
-	finalEvents := apicompat.FinalizeChatCompletionsAnthropicStream(anthropicState)
 	if !clientDisconnected {
 		for _, aEvt := range finalEvents {
 			sse, err := apicompat.ResponsesAnthropicEventToSSE(aEvt)
@@ -267,11 +322,20 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		}
 		c.Writer.Flush()
 	}
+	if !clientDisconnected {
+		ClaimProtocolTerminal(c)
+	}
 	if !scan.SawDone {
 		logCCStreamMissingDoneSentinel("openai messages chat fallback", requestID)
 	}
 
 	return &OpenAIForwardResult{
+		ResponseFactsKnown: scan.ResponseFactsKnown,
+		UsagePresent:       scan.UsagePresent, UsageSource: scan.UsageSource,
+		TerminalSeen: scan.TerminalSeen, TerminalValid: scan.TerminalValid,
+		ResponseBodyKind: scan.ResponseBodyKind,
+		PartialFailure:   scan.Err != nil,
+
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,

@@ -302,7 +302,7 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 		wantBalance bool
 	}{
 		{name: "payment required", status: http.StatusPaymentRequired, wantError: 0, wantBalance: true},
-		{name: "forbidden", status: http.StatusForbidden, wantError: 1},
+		{name: "forbidden", status: http.StatusForbidden, wantError: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{ID: 22, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "http://typesafe.test", "api_key": "ts-secret"}}

@@ -4,6 +4,7 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"time"
@@ -118,6 +119,102 @@ func (_c *UsageLogCreate) SetNillableTakeover(v *bool) *UsageLogCreate {
 	if v != nil {
 		_c.SetTakeover(*v)
 	}
+	return _c
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (_c *UsageLogCreate) SetRequestScope(v string) *UsageLogCreate {
+	_c.mutation.SetRequestScope(v)
+	return _c
+}
+
+// SetNillableRequestScope sets the "request_scope" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestScope(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestScope(*v)
+	}
+	return _c
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (_c *UsageLogCreate) SetUsageObserved(v bool) *UsageLogCreate {
+	_c.mutation.SetUsageObserved(v)
+	return _c
+}
+
+// SetNillableUsageObserved sets the "usage_observed" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUsageObserved(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetUsageObserved(*v)
+	}
+	return _c
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (_c *UsageLogCreate) SetUsageSource(v string) *UsageLogCreate {
+	_c.mutation.SetUsageSource(v)
+	return _c
+}
+
+// SetNillableUsageSource sets the "usage_source" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUsageSource(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetUsageSource(*v)
+	}
+	return _c
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (_c *UsageLogCreate) SetTerminalEventSeen(v bool) *UsageLogCreate {
+	_c.mutation.SetTerminalEventSeen(v)
+	return _c
+}
+
+// SetNillableTerminalEventSeen sets the "terminal_event_seen" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTerminalEventSeen(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetTerminalEventSeen(*v)
+	}
+	return _c
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (_c *UsageLogCreate) SetTerminalEventValid(v bool) *UsageLogCreate {
+	_c.mutation.SetTerminalEventValid(v)
+	return _c
+}
+
+// SetNillableTerminalEventValid sets the "terminal_event_valid" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTerminalEventValid(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetTerminalEventValid(*v)
+	}
+	return _c
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (_c *UsageLogCreate) SetResponseBodyType(v string) *UsageLogCreate {
+	_c.mutation.SetResponseBodyType(v)
+	return _c
+}
+
+// SetNillableResponseBodyType sets the "response_body_type" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableResponseBodyType(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetResponseBodyType(*v)
+	}
+	return _c
+}
+
+// SetDegradations sets the "degradations" field.
+func (_c *UsageLogCreate) SetDegradations(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetDegradations(v)
+	return _c
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (_c *UsageLogCreate) SetPricingSource(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetPricingSource(v)
 	return _c
 }
 
@@ -1374,6 +1471,38 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldTakeover, field.TypeBool, value)
 		_node.Takeover = &value
 	}
+	if value, ok := _c.mutation.RequestScope(); ok {
+		_spec.SetField(usagelog.FieldRequestScope, field.TypeString, value)
+		_node.RequestScope = &value
+	}
+	if value, ok := _c.mutation.UsageObserved(); ok {
+		_spec.SetField(usagelog.FieldUsageObserved, field.TypeBool, value)
+		_node.UsageObserved = &value
+	}
+	if value, ok := _c.mutation.UsageSource(); ok {
+		_spec.SetField(usagelog.FieldUsageSource, field.TypeString, value)
+		_node.UsageSource = &value
+	}
+	if value, ok := _c.mutation.TerminalEventSeen(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventSeen, field.TypeBool, value)
+		_node.TerminalEventSeen = &value
+	}
+	if value, ok := _c.mutation.TerminalEventValid(); ok {
+		_spec.SetField(usagelog.FieldTerminalEventValid, field.TypeBool, value)
+		_node.TerminalEventValid = &value
+	}
+	if value, ok := _c.mutation.ResponseBodyType(); ok {
+		_spec.SetField(usagelog.FieldResponseBodyType, field.TypeString, value)
+		_node.ResponseBodyType = &value
+	}
+	if value, ok := _c.mutation.Degradations(); ok {
+		_spec.SetField(usagelog.FieldDegradations, field.TypeJSON, value)
+		_node.Degradations = value
+	}
+	if value, ok := _c.mutation.PricingSource(); ok {
+		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
+		_node.PricingSource = value
+	}
 	if value, ok := _c.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
@@ -1910,6 +2039,150 @@ func (u *UsageLogUpsert) UpdateTakeover() *UsageLogUpsert {
 // ClearTakeover clears the value of the "takeover" field.
 func (u *UsageLogUpsert) ClearTakeover() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldTakeover)
+	return u
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (u *UsageLogUpsert) SetRequestScope(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestScope, v)
+	return u
+}
+
+// UpdateRequestScope sets the "request_scope" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestScope() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestScope)
+	return u
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (u *UsageLogUpsert) ClearRequestScope() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRequestScope)
+	return u
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (u *UsageLogUpsert) SetUsageObserved(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldUsageObserved, v)
+	return u
+}
+
+// UpdateUsageObserved sets the "usage_observed" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUsageObserved() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUsageObserved)
+	return u
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (u *UsageLogUpsert) ClearUsageObserved() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUsageObserved)
+	return u
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (u *UsageLogUpsert) SetUsageSource(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldUsageSource, v)
+	return u
+}
+
+// UpdateUsageSource sets the "usage_source" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUsageSource() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUsageSource)
+	return u
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (u *UsageLogUpsert) ClearUsageSource() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUsageSource)
+	return u
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (u *UsageLogUpsert) SetTerminalEventSeen(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldTerminalEventSeen, v)
+	return u
+}
+
+// UpdateTerminalEventSeen sets the "terminal_event_seen" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTerminalEventSeen() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTerminalEventSeen)
+	return u
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (u *UsageLogUpsert) ClearTerminalEventSeen() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTerminalEventSeen)
+	return u
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (u *UsageLogUpsert) SetTerminalEventValid(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldTerminalEventValid, v)
+	return u
+}
+
+// UpdateTerminalEventValid sets the "terminal_event_valid" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTerminalEventValid() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTerminalEventValid)
+	return u
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (u *UsageLogUpsert) ClearTerminalEventValid() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTerminalEventValid)
+	return u
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (u *UsageLogUpsert) SetResponseBodyType(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldResponseBodyType, v)
+	return u
+}
+
+// UpdateResponseBodyType sets the "response_body_type" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateResponseBodyType() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldResponseBodyType)
+	return u
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (u *UsageLogUpsert) ClearResponseBodyType() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldResponseBodyType)
+	return u
+}
+
+// SetDegradations sets the "degradations" field.
+func (u *UsageLogUpsert) SetDegradations(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldDegradations, v)
+	return u
+}
+
+// UpdateDegradations sets the "degradations" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateDegradations() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldDegradations)
+	return u
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (u *UsageLogUpsert) ClearDegradations() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldDegradations)
+	return u
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (u *UsageLogUpsert) SetPricingSource(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldPricingSource, v)
+	return u
+}
+
+// UpdatePricingSource sets the "pricing_source" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdatePricingSource() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldPricingSource)
+	return u
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (u *UsageLogUpsert) ClearPricingSource() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldPricingSource)
 	return u
 }
 
@@ -3372,6 +3645,174 @@ func (u *UsageLogUpsertOne) UpdateTakeover() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearTakeover() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearTakeover()
+	})
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (u *UsageLogUpsertOne) SetRequestScope(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestScope(v)
+	})
+}
+
+// UpdateRequestScope sets the "request_scope" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestScope() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestScope()
+	})
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (u *UsageLogUpsertOne) ClearRequestScope() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestScope()
+	})
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (u *UsageLogUpsertOne) SetUsageObserved(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageObserved(v)
+	})
+}
+
+// UpdateUsageObserved sets the "usage_observed" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUsageObserved() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageObserved()
+	})
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (u *UsageLogUpsertOne) ClearUsageObserved() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageObserved()
+	})
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (u *UsageLogUpsertOne) SetUsageSource(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageSource(v)
+	})
+}
+
+// UpdateUsageSource sets the "usage_source" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUsageSource() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageSource()
+	})
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (u *UsageLogUpsertOne) ClearUsageSource() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageSource()
+	})
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (u *UsageLogUpsertOne) SetTerminalEventSeen(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTerminalEventSeen(v)
+	})
+}
+
+// UpdateTerminalEventSeen sets the "terminal_event_seen" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTerminalEventSeen() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTerminalEventSeen()
+	})
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (u *UsageLogUpsertOne) ClearTerminalEventSeen() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTerminalEventSeen()
+	})
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (u *UsageLogUpsertOne) SetTerminalEventValid(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTerminalEventValid(v)
+	})
+}
+
+// UpdateTerminalEventValid sets the "terminal_event_valid" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTerminalEventValid() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTerminalEventValid()
+	})
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (u *UsageLogUpsertOne) ClearTerminalEventValid() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTerminalEventValid()
+	})
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (u *UsageLogUpsertOne) SetResponseBodyType(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResponseBodyType(v)
+	})
+}
+
+// UpdateResponseBodyType sets the "response_body_type" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateResponseBodyType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResponseBodyType()
+	})
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (u *UsageLogUpsertOne) ClearResponseBodyType() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResponseBodyType()
+	})
+}
+
+// SetDegradations sets the "degradations" field.
+func (u *UsageLogUpsertOne) SetDegradations(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDegradations(v)
+	})
+}
+
+// UpdateDegradations sets the "degradations" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateDegradations() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDegradations()
+	})
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (u *UsageLogUpsertOne) ClearDegradations() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDegradations()
+	})
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (u *UsageLogUpsertOne) SetPricingSource(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPricingSource(v)
+	})
+}
+
+// UpdatePricingSource sets the "pricing_source" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdatePricingSource() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePricingSource()
+	})
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (u *UsageLogUpsertOne) ClearPricingSource() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPricingSource()
 	})
 }
 
@@ -5207,6 +5648,174 @@ func (u *UsageLogUpsertBulk) UpdateTakeover() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearTakeover() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearTakeover()
+	})
+}
+
+// SetRequestScope sets the "request_scope" field.
+func (u *UsageLogUpsertBulk) SetRequestScope(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestScope(v)
+	})
+}
+
+// UpdateRequestScope sets the "request_scope" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestScope() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestScope()
+	})
+}
+
+// ClearRequestScope clears the value of the "request_scope" field.
+func (u *UsageLogUpsertBulk) ClearRequestScope() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestScope()
+	})
+}
+
+// SetUsageObserved sets the "usage_observed" field.
+func (u *UsageLogUpsertBulk) SetUsageObserved(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageObserved(v)
+	})
+}
+
+// UpdateUsageObserved sets the "usage_observed" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUsageObserved() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageObserved()
+	})
+}
+
+// ClearUsageObserved clears the value of the "usage_observed" field.
+func (u *UsageLogUpsertBulk) ClearUsageObserved() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageObserved()
+	})
+}
+
+// SetUsageSource sets the "usage_source" field.
+func (u *UsageLogUpsertBulk) SetUsageSource(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageSource(v)
+	})
+}
+
+// UpdateUsageSource sets the "usage_source" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUsageSource() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageSource()
+	})
+}
+
+// ClearUsageSource clears the value of the "usage_source" field.
+func (u *UsageLogUpsertBulk) ClearUsageSource() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageSource()
+	})
+}
+
+// SetTerminalEventSeen sets the "terminal_event_seen" field.
+func (u *UsageLogUpsertBulk) SetTerminalEventSeen(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTerminalEventSeen(v)
+	})
+}
+
+// UpdateTerminalEventSeen sets the "terminal_event_seen" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTerminalEventSeen() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTerminalEventSeen()
+	})
+}
+
+// ClearTerminalEventSeen clears the value of the "terminal_event_seen" field.
+func (u *UsageLogUpsertBulk) ClearTerminalEventSeen() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTerminalEventSeen()
+	})
+}
+
+// SetTerminalEventValid sets the "terminal_event_valid" field.
+func (u *UsageLogUpsertBulk) SetTerminalEventValid(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTerminalEventValid(v)
+	})
+}
+
+// UpdateTerminalEventValid sets the "terminal_event_valid" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTerminalEventValid() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTerminalEventValid()
+	})
+}
+
+// ClearTerminalEventValid clears the value of the "terminal_event_valid" field.
+func (u *UsageLogUpsertBulk) ClearTerminalEventValid() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTerminalEventValid()
+	})
+}
+
+// SetResponseBodyType sets the "response_body_type" field.
+func (u *UsageLogUpsertBulk) SetResponseBodyType(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResponseBodyType(v)
+	})
+}
+
+// UpdateResponseBodyType sets the "response_body_type" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateResponseBodyType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResponseBodyType()
+	})
+}
+
+// ClearResponseBodyType clears the value of the "response_body_type" field.
+func (u *UsageLogUpsertBulk) ClearResponseBodyType() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResponseBodyType()
+	})
+}
+
+// SetDegradations sets the "degradations" field.
+func (u *UsageLogUpsertBulk) SetDegradations(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDegradations(v)
+	})
+}
+
+// UpdateDegradations sets the "degradations" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateDegradations() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDegradations()
+	})
+}
+
+// ClearDegradations clears the value of the "degradations" field.
+func (u *UsageLogUpsertBulk) ClearDegradations() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDegradations()
+	})
+}
+
+// SetPricingSource sets the "pricing_source" field.
+func (u *UsageLogUpsertBulk) SetPricingSource(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPricingSource(v)
+	})
+}
+
+// UpdatePricingSource sets the "pricing_source" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdatePricingSource() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePricingSource()
+	})
+}
+
+// ClearPricingSource clears the value of the "pricing_source" field.
+func (u *UsageLogUpsertBulk) ClearPricingSource() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPricingSource()
 	})
 }
 

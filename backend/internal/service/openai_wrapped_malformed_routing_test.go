@@ -11,6 +11,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -44,18 +45,24 @@ func TestOpenAIWrappedMalformedFrameIsProtocolFailure(t *testing.T) {
 				case "passthrough aggregate":
 					_, err = svc.handlePassthroughSSEToJSON(resp, c, account, []byte(body), "model", "model")
 				}
-				var failure *UpstreamFailoverError
-				require.ErrorAs(t, err, &failure, "must bypass repair signals and passthrough rules")
-				require.Equal(t, http.StatusBadGateway, failure.StatusCode)
-				require.Zero(t, failure.WrappedStatus)
-				require.False(t, failure.IsCredentialFailure())
-				require.Contains(t, string(failure.ResponseBody), openAIMalformedWrappedErrorMessage)
-				require.NotContains(t, string(failure.ResponseBody), "rejected")
-				require.NotContains(t, string(failure.ResponseBody), "conversation_invalid")
+				if strings.Contains(path, "aggregate") {
+					require.Error(t, err)
+					require.Equal(t, http.StatusBadGateway, recorder.Code)
+					require.Equal(t, OpenAIUpstreamProtocolErrorCode, gjson.Get(recorder.Body.String(), "error.code").String())
+				} else {
+					var failure *UpstreamFailoverError
+					require.ErrorAs(t, err, &failure, "must bypass repair signals and passthrough rules")
+					require.Equal(t, http.StatusBadGateway, failure.StatusCode)
+					require.Zero(t, failure.WrappedStatus)
+					require.False(t, failure.IsCredentialFailure())
+					require.Contains(t, string(failure.ResponseBody), openAIMalformedWrappedErrorMessage)
+					require.NotContains(t, string(failure.ResponseBody), "rejected")
+					require.NotContains(t, string(failure.ResponseBody), "conversation_invalid")
+					require.Empty(t, recorder.Body.String())
+				}
 				require.Zero(t, repo.setErrorCalls, "invalid wrapper cannot disable credentials")
 				require.Zero(t, repo.tempCalls, "invalid wrapper cannot trigger authentication cooldown")
 				require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
-				require.Empty(t, recorder.Body.String())
 				require.Len(t, logs.FilterMessage("resilience.wrapped_error_malformed").All(), 1)
 			})
 		}

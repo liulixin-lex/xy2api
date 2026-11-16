@@ -124,7 +124,33 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 			keys = append(keys, walletKey)
 		}
 	}
-	return keys
+	// Old records may use the requested alias. Read exact aliases against the
+	// current mapping; never expand patterns or rewrite the historical record.
+	seen := make(map[string]bool, len(keys))
+	unique := keys[:0]
+	appendKey := func(key string) {
+		if key != "" && !seen[key] {
+			seen[key] = true
+			unique = append(unique, key)
+		}
+	}
+	for _, key := range keys {
+		appendKey(key)
+	}
+	appendKey(requestedModel)
+	for alias := range a.GetModelMapping() {
+		if strings.Contains(alias, "*") {
+			continue
+		}
+		target := a.GetMappedModel(alias)
+		if a.Platform == PlatformAntigravity {
+			target = resolveFinalAntigravityModelKey(ctx, a, alias)
+		}
+		if strings.TrimSpace(target) == modelKey {
+			appendKey(alias)
+		}
+	}
+	return unique
 }
 
 // isAnthropicFableModel 判断是否为 Fable 模型家族（claude-fable-5、claude-fable-5[1m] 等变体）

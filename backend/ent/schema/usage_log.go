@@ -2,6 +2,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"time"
 
 	"entgo.io/ent"
@@ -43,6 +44,14 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int16("switches").Optional().Nillable(),
 		field.Bool("fallback").Optional().Nillable(),
 		field.Bool("takeover").Optional().Nillable(),
+		field.String("request_scope").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.Bool("usage_observed").Optional().Nillable(),
+		field.String("usage_source").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.Bool("terminal_event_seen").Optional().Nillable(),
+		field.Bool("terminal_event_valid").Optional().Nillable(),
+		field.String("response_body_type").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.JSON("degradations", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+		field.JSON("pricing_source", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.String("model").
 			MaxLen(100).
 			NotEmpty(),

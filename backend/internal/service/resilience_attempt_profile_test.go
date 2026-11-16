@@ -167,9 +167,9 @@ func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache(t *testing.T
 	t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(group.ID) })
 	_, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, &group.ID, "", "", model, nil,
 		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, false)
-	require.ErrorIs(t, err, errNegativeCached)
-	require.Zero(t, repo.reads, "negative-cache hits return before privacy reads")
-	require.Nil(t, resilienceOpenAIEligibility(ctx, group.ID, model))
+	require.NoError(t, err, "legacy empty cache records are misses")
+	require.Equal(t, 1, repo.reads, "invalid cache entries do not skip privacy eligibility")
+	require.NotNil(t, resilienceOpenAIEligibility(ctx, group.ID, model))
 }
 
 func TestFirstOutputWarmToColdUsesSameAttemptStartAndColdFloor(t *testing.T) {

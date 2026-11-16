@@ -3,13 +3,13 @@
 package service
 
 import (
+	"github.com/tidwall/gjson"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 func TestEffectiveOpenAISSEEventTypeKeepsPayloadTerminalAuthoritative(t *testing.T) {
@@ -27,7 +27,8 @@ func TestExtractOpenAISSETerminalEventUsesEventField(t *testing.T) {
 	body := "event: error\n" +
 		"data: {\"error\":{\"message\":\"provider failed\"}}\n\n" +
 		"data: [DONE]\n\n"
-	eventType, _, payload, ok := extractOpenAISSETerminalEvent(body)
+	terminal, _, payload := extractOpenAISSETerminalEvent(body)
+	eventType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "error", eventType)
 	require.Equal(t, "provider failed", extractOpenAISSEErrorMessage(payload))
@@ -38,9 +39,11 @@ func TestExtractOpenAISSETerminalEventUsesFinalAuthoritativeTerminal(t *testing.
 
 	body := "data: {\"type\":\"error\",\"error\":{\"message\":\"recovering\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n"
-	eventType, _, payload, ok := extractOpenAISSETerminalEvent(body)
+	terminal, _, payload := extractOpenAISSETerminalEvent(body)
+	eventType, ok := terminal.EventType, terminal.Seen && terminal.Valid
 	require.True(t, ok)
 	require.Equal(t, "response.completed", eventType)
+	require.True(t, terminal.Success)
 	require.Equal(t, "resp_1", gjson.GetBytes(payload, "response.id").String())
 }
 
@@ -52,9 +55,9 @@ func TestExtractOpenAISSETerminalEventPreservesRawEventForWrapperValidation(t *t
 		{"completed error event", "error", `{"type":"response.completed","response":{"output":[]}}`, "response.completed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			terminal, sseEvent, payload, ok := extractOpenAISSETerminalEvent("event: " + tc.event + "\ndata: " + tc.payload + "\n\n")
-			require.True(t, ok)
-			require.Equal(t, tc.terminal, terminal)
+			terminal, sseEvent, payload := extractOpenAISSETerminalEvent("event: " + tc.event + "\ndata: " + tc.payload + "\n\n")
+			require.True(t, terminal.Seen)
+			require.Equal(t, tc.terminal, terminal.EventType)
 			require.Equal(t, tc.event, sseEvent)
 			require.Equal(t, tc.payload, string(payload))
 		})
@@ -68,13 +71,13 @@ func TestParseSSEUsageEffectiveTerminalRules(t *testing.T) {
 	usage := &OpenAIUsage{}
 	svc.parseSSEUsageBytesWithType([]byte(`{"usage":{"input_tokens":17,"output_tokens":5,"input_tokens_details":{"cached_tokens":3}}}`), "response.in_progress", usage)
 	svc.parseSSEUsageBytesWithType([]byte(`{"response":{"id":"resp_1"}}`), "response.completed", usage)
-	require.Equal(t, OpenAIUsage{InputTokens: 17, OutputTokens: 5, CacheReadInputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
+	require.Equal(t, OpenAIUsage{InputTokensPresent: true, OutputTokensPresent: true, CacheReadInputTokensPresent: true, InputTokens: 17, OutputTokens: 5, CacheReadInputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
 
 	svc.parseSSEUsageBytesWithType([]byte(`{"response":{"usage":{"input_tokens":0,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", usage)
-	require.Equal(t, OpenAIUsage{InputTokens: 17, OutputTokens: 5, CacheReadInputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
+	require.Equal(t, OpenAIUsage{InputTokensPresent: true, OutputTokensPresent: true, CacheReadInputTokensPresent: true, InputTokens: 17, OutputTokens: 5, CacheReadInputTokens: 3, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
 
 	svc.parseSSEUsageBytesWithType([]byte(`{"response":{"usage":{"input_tokens":2,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", usage)
-	require.Equal(t, OpenAIUsage{InputTokens: 2, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
+	require.Equal(t, OpenAIUsage{InputTokensPresent: true, OutputTokensPresent: true, CacheReadInputTokensPresent: true, InputTokens: 2, CacheReadSource: "input_tokens_details.cached_tokens"}, *usage)
 }
 
 func BenchmarkParseSSEUsageNoUsageDelta(b *testing.B) {

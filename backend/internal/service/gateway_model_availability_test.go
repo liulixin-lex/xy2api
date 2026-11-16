@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,8 +17,8 @@ func TestDiagnoseModelAvailabilityForPlatform_NoModel_AlwaysAvailable(t *testing
 
 	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), nil, "", PlatformOpenAI)
 
-	require.True(t, diag.HasAccountsInPool, "empty model must return HasAccountsInPool=true so caller stays on 503")
-	require.True(t, diag.HasModelSupport, "empty model must return HasModelSupport=true so caller stays on 503")
+	require.False(t, diag.Known)
+	require.Zero(t, diag.ModelSupported)
 }
 
 func TestDiagnoseModelAvailabilityForPlatform_EmptyPlatform_AlwaysAvailable(t *testing.T) {
@@ -26,8 +27,8 @@ func TestDiagnoseModelAvailabilityForPlatform_EmptyPlatform_AlwaysAvailable(t *t
 
 	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), nil, "gpt-5", "")
 
-	require.True(t, diag.HasAccountsInPool)
-	require.True(t, diag.HasModelSupport, "empty platform must fall back to {true,true} so caller stays on 503")
+	require.False(t, diag.Known)
+	require.Zero(t, diag.ModelSupported)
 }
 
 func TestDiagnoseModelAvailabilityForPlatform_NilReceiver(t *testing.T) {
@@ -35,8 +36,8 @@ func TestDiagnoseModelAvailabilityForPlatform_NilReceiver(t *testing.T) {
 
 	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), nil, "gpt-5", PlatformOpenAI)
 
-	require.True(t, diag.HasAccountsInPool)
-	require.True(t, diag.HasModelSupport)
+	require.False(t, diag.Known)
+	require.Zero(t, diag.ModelSupported)
 }
 
 func TestDiagnoseModelAvailabilityForPlatform_NoAccountsInPool(t *testing.T) {
@@ -248,4 +249,56 @@ func TestDiagnoseModelAvailabilityForPlatform_WrongPlatformFiltersOut(t *testing
 
 	require.False(t, diag.HasAccountsInPool, "OpenAI route must not see Anthropic accounts in pool")
 	require.False(t, diag.HasModelSupport)
+}
+
+type genericDiagnosisErrorRepo struct {
+	AccountRepository
+	err error
+}
+
+func (r genericDiagnosisErrorRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	return nil, r.err
+}
+
+func TestGenericModelAvailabilityCompleteDiagnosis(t *testing.T) {
+	for _, mode := range []string{"complete", "empty", "mixed", "database_error", "compat_error"} {
+		t.Run(mode, func(t *testing.T) {
+			future := time.Now().Add(time.Hour)
+			accounts := []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, RateLimitResetAt: &future},
+				{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+				{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"model_mapping": map[string]any{"other": "other"}}},
+			}
+			members, supported := 3, 2
+			switch mode {
+			case "empty":
+				accounts = nil
+				members, supported = 0, 0
+			case "mixed":
+				accounts = append(accounts, Account{ID: 4, Platform: PlatformAntigravity, Status: StatusActive, Schedulable: true, Extra: map[string]any{"mixed_scheduling": false}})
+			case "compat_error":
+				accounts[2].Extra = map[string]any{AnthropicCompatProfileExtraKey: 12}
+			}
+			svc := &GatewayService{accountRepo: &mockAccountRepoForPlatform{accounts: accounts}, cfg: testConfig()}
+			cause := errors.New("availability database unavailable")
+			if mode == "database_error" {
+				svc.accountRepo = genericDiagnosisErrorRepo{err: cause}
+				members, supported = 0, 0
+			}
+			diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), nil, "claude-fixture", PlatformAnthropic)
+			require.Equal(t, members, diag.Members)
+			require.Equal(t, supported, diag.ModelSupported)
+			require.Equal(t, diag.ModelSupported, diag.RequestSupported)
+			require.Equal(t, mode != "database_error" && mode != "compat_error", diag.Known)
+			require.Equal(t, members > 0, diag.HasAccountsInPool)
+			require.Equal(t, supported > 0, diag.HasModelSupport)
+			if mode == "database_error" {
+				require.ErrorIs(t, diag.Err, cause)
+			} else if mode == "compat_error" {
+				require.Error(t, diag.Err)
+			} else {
+				require.NoError(t, diag.Err)
+			}
+		})
+	}
 }

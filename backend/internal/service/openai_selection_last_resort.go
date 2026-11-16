@@ -50,6 +50,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	}
 	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *req.GroupID)
 	if err != nil {
+		observeSelectionFailure(ctx, 0, "dependency_error", err)
 		slog.Warn("resilience.last_resort_list_failed", "group_id", *req.GroupID, "error", err)
 		return nil
 	}
@@ -129,10 +130,16 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	for _, c := range cands {
 		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundForFresh)
 		if !ok {
+			observeSelectionFailure(ctx, c.account.ID, "dependency_error", nil)
 			meta.addReason("verify_failed")
 			continue
 		}
-		if !s.isAccountRequestCompatible(gateCtx, acc, req) || !s.isAccountTransportCompatible(acc, req.RequiredTransport) {
+		if !s.isAccountRequestCompatible(gateCtx, acc, req) {
+			meta.addReason("verify_failed")
+			continue
+		}
+		if !s.isAccountTransportCompatible(acc, req.RequiredTransport) {
+			observeSelectionFailure(ctx, acc.ID, "transport_incompatible", nil)
 			meta.addReason("verify_failed")
 			continue
 		}
@@ -152,7 +159,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		}
 		meta.addReason("capacity")
 	}
-	if len(verified) == 0 {
+	if len(verified) == 0 || req.NoWait || openAISelectionNoWait(ctx) {
 		return nil
 	}
 	cfg := s.schedulingConfig()

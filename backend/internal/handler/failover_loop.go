@@ -58,22 +58,22 @@ const (
 const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group admission policy"
 
 func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryCount int) time.Duration {
+	delay := sameAccountRetryDelay
 	if failoverErr == nil {
-		return sameAccountRetryDelay
+		return delay
 	}
 	if failoverErr.SameAccountRetryDelay > 0 {
-		return failoverErr.SameAccountRetryDelay
-	}
-	if !failoverErr.RequestScopedTransient || retryCount <= 1 {
-		return sameAccountRetryDelay
-	}
-
-	delay := sameAccountRetryDelay
-	for i := 1; i < retryCount; i++ {
-		if delay >= maxRequestScopedRetryDelay/2 {
-			return maxRequestScopedRetryDelay
+		delay = failoverErr.SameAccountRetryDelay
+	} else if failoverErr.RequestScopedTransient {
+		for i := 1; i < retryCount; i++ {
+			delay = min(delay*2, maxRequestScopedRetryDelay)
+			if delay == maxRequestScopedRetryDelay {
+				break
+			}
 		}
-		delay *= 2
+	}
+	if hint := failoverErr.UpstreamRecoveryHint; hint != nil {
+		delay = max(delay, time.Until(hint.NotBefore))
 	}
 	return delay
 }
@@ -236,6 +236,12 @@ func (s *FailoverState) HandleFailoverError(
 		if !sleepWithContext(ctx, retryDelay) {
 			return FailoverCanceled
 		}
+		if b := requestBudget(ctx); b != nil && !b.CanAttempt(time.Now()) {
+			return FailoverExhausted
+		}
+		if hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(accountID); ok && time.Now().Before(hint.NotBefore) {
+			return FailoverExhausted
+		}
 		return FailoverContinue
 	}
 
@@ -323,19 +329,64 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 			return FailoverExhausted
 		}
 
+		delay := singleAccountBackoffDelay
+		if len(s.FailedAccountIDs) > 0 {
+			var earliest time.Time
+			hasImmediate := false
+			now := time.Now()
+			for id := range s.FailedAccountIDs {
+				if _, vetoed := s.profitVetoedAccountIDs[id]; vetoed {
+					continue
+				}
+				hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(id)
+				if !ok || !hint.NotBefore.After(now) {
+					hasImmediate = true
+					break
+				}
+				wait := max(singleAccountBackoffDelay, hint.NotBefore.Sub(now))
+				cap := time.Duration(resilience.Current().Budget.UpstreamRetryAfterCapSeconds) * time.Second
+				if cap > 0 && wait > cap {
+					continue
+				}
+				if deadline, ok := ctx.Deadline(); ok && deadline.Sub(now) <= wait {
+					continue
+				}
+				if b := requestBudget(ctx); b != nil && b.ClampWait(wait, now) < wait {
+					continue
+				}
+				if earliest.IsZero() || hint.NotBefore.Before(earliest) {
+					earliest = hint.NotBefore
+				}
+			}
+			if !hasImmediate {
+				if earliest.IsZero() {
+					return FailoverExhausted
+				}
+				delay = max(delay, time.Until(earliest))
+			}
+		}
 		logger.FromContext(ctx).Warn("gateway.failover_single_account_backoff",
-			zap.Duration("backoff_delay", singleAccountBackoffDelay),
+			zap.Duration("backoff_delay", delay),
 			zap.Int("switch_count", s.SwitchCount),
 			zap.Int("max_switches", s.MaxSwitches),
 		)
-		if !sleepWithContext(ctx, singleAccountBackoffDelay) {
+		if !sleepWithContext(ctx, delay) {
 			return FailoverCanceled
 		}
 		logger.FromContext(ctx).Warn("gateway.failover_single_account_retry",
 			zap.Int("switch_count", s.SwitchCount),
 			zap.Int("max_switches", s.MaxSwitches),
 		)
-		s.FailedAccountIDs = make(map[int64]struct{})
+		if b := requestBudget(ctx); b != nil && !b.CanAttempt(time.Now()) {
+			return FailoverExhausted
+		}
+		stillWaiting := make(map[int64]struct{})
+		for id := range s.FailedAccountIDs {
+			if hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(id); ok && time.Now().Before(hint.NotBefore) {
+				stillWaiting[id] = struct{}{}
+			}
+		}
+		s.FailedAccountIDs = stillWaiting
 		// 利润门否决的账号不参与退避重试的解除：判定依据（冻结的下游倍率）在
 		// 同一请求内不变，放它们回池只会被再次否决。
 		for id := range s.profitVetoedAccountIDs {

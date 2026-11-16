@@ -1,49 +1,14 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
-
-// responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
-type responsesFailedError struct {
-	Code    string            `json:"code"`
-	Message string            `json:"message"`
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
-// responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
-// Output 用空 slice（不是 nil）确保 marshal 为 `[]` 而非 `null`。
-// CreatedAt 不带 omitempty：严格客户端把它当必填字段，缺失会以
-// `missing field 'created_at'` 反序列化失败——那正是本文件要避免的"客户端读不懂终止事件"。
-type responsesFailedBody struct {
-	ID        string               `json:"id"`
-	Object    string               `json:"object"`
-	CreatedAt int64                `json:"created_at"`
-	Model     string               `json:"model,omitempty"`
-	Status    string               `json:"status"`
-	Output    []any                `json:"output"`
-	Error     responsesFailedError `json:"error"`
-}
-
-// responsesFailedEvent 是写入 SSE data 行的顶层结构。
-// SequenceNumber 不带 omitempty：grok-build 等 Rust serde 客户端把它当必填字段，
-// 缺失即 `missing field 'sequence_number'`。拿不到上一帧序号时写 0——这是终止事件，
-// 后面不会再续流。
-type responsesFailedEvent struct {
-	Type           string              `json:"type"`
-	SequenceNumber int                 `json:"sequence_number"`
-	Response       responsesFailedBody `json:"response"`
-}
 
 // writeResponsesFailedSSEWithStatus emits a `response.failed` SSE event in the OpenAI
 // Responses API protocol after the stream has already started.
@@ -68,60 +33,25 @@ func writeResponsesFailedSSEWithStatus(c *gin.Context, status int, errType, code
 // forceOpening covers queue pings on compatible ingress, including when
 // resilience is disabled or delivery tracking was not installed.
 func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errType, code, message string, forceOpening bool) bool {
-	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
-	if wrote {
-		service.MarkOpsGatewayTerminalStatus(c, status)
+	if service.ProtocolTerminalClaimed(c) {
+		return true
 	}
-	return handled
+	if !prepareHandlerErrorSSE(c) {
+		return false
+	}
+	return writeHandlerProtocolError(c, service.PreOutputProtocolResponses, status, errType, code, "", message)
 }
 
+//nolint:unused // Retains the legacy wrapper signature for handler integrations.
 func writeResponsesFailedSSEWithOpeningResult(c *gin.Context, errType, code, message string, forceOpening bool) (bool, bool) {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
+	if service.ProtocolTerminalClaimed(c) {
+		return true, false
+	}
+	if !prepareHandlerErrorSSE(c) {
 		return false, false
 	}
-	if !beginResilienceTerminal(c) {
-		return true, false
-	}
-
-	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
-	opening, sequence := resilienceResponsesOpening(c, id, model, createdAt)
-	if forceOpening && opening == "" {
-		opening, sequence = string(service.ResponsesCreatedFrame(id, model, createdAt)), 1
-	}
-	failedError := responsesFailedError{Code: mapResponsesErrorCode(errType, code), Message: message}
-	if resilience.Current().FailedFrameRetryAfterOn() && c.Request != nil {
-		advice := responsesFailedRetryAdvice(c, errType, code)
-		failedError.Headers = advice.Headers()
-		failedError.Message = advice.Message(message)
-		if advice.Suppress && advice.Source == "turn_cap" {
-			failedError.Code = codeServerIsOverloaded
-		}
-	}
-	payload, err := json.Marshal(responsesFailedEvent{
-		Type:           "response.failed",
-		SequenceNumber: sequence,
-		Response: responsesFailedBody{
-			ID:        id,
-			Object:    "response",
-			CreatedAt: createdAt,
-			Model:     model,
-			Status:    "failed",
-			Output:    []any{},
-			Error:     failedError,
-		},
-	})
-	if err != nil {
-		_ = c.Error(err)
-		return true, false
-	}
-
-	if _, err := fmt.Fprintf(c.Writer, "%sevent: response.failed\ndata: %s\n\n", opening, payload); err != nil {
-		_ = c.Error(err)
-		return true, false
-	}
-	flusher.Flush()
-	return true, true
+	wrote := writeHandlerProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, errType, code, "", message)
+	return wrote, wrote
 }
 
 // inboundIsResponses 判断当前请求是否落在任意 Responses 路由上

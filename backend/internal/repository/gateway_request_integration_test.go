@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,15 @@ func TestGatewayRequestsExperienceUnionAndIdempotence(t *testing.T) {
 	for _, when := range []time.Time{at.Add(-time.Hour - time.Microsecond), at.Add(time.Microsecond)} {
 		require.NoError(t, repo.CreateUnbilledRequest(ctx, &service.GatewayUnbilledRequest{
 			RequestID: uuid.NewString(), CreatedAt: when, GroupID: &g.ID, Result: 3}))
+	}
+	for _, scope := range []resilience.GatewayRequestScope{resilience.GatewayRequestScopeImage, resilience.GatewayRequestScopeEmbedding} {
+		copy := *usage
+		copy.ID = 0
+		copy.RequestID = uuid.NewString()
+		copy.RequestScope = scope
+		_, err := repo.Create(ctx, &copy)
+		require.NoError(t, err)
+		require.NoError(t, repo.CreateUnbilledRequest(ctx, &service.GatewayUnbilledRequest{RequestID: uuid.NewString(), CreatedAt: at, GroupID: &g.ID, Result: 3, RequestScope: scope}))
 	}
 	got, err := repo.GroupLast60(ctx, []int64{g.ID, -1}, at)
 	require.NoError(t, err)

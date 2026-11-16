@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,11 +48,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	// Read request body
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.chatCompletionsErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return
-		}
-		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolChat)
 		return
 	}
 
@@ -193,6 +190,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
 		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, resilience.GatewayRequestScopeText)()
+
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 	if groupPlatform == service.PlatformGemini {
@@ -214,7 +213,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 			if len(fs.FailedAccountIDs) == 0 {
 				recordSelectionExhausted(c.Request.Context())
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform, err)
 				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -332,6 +331,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
 
+		recordGatewayForwardUsage(c, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -460,7 +460,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if message, matched := inferenceNotFoundExhaustedMessage(c, lastErr); matched {
 		if streamStarted {
 			service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusNotFound)
-			if c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+			if !service.ProtocolTerminalClaimed(c) {
 				writeChatCompletionsErrorSSE(c, "invalid_request_error", "model_not_found", message, http.StatusNotFound)
 			}
 		} else {
@@ -475,8 +475,11 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		return
 	}
 	write := func(status int, errType, code, message string) {
-		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+		if service.ProtocolTerminalClaimed(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
+			return
+		}
+		if writePostOutputExhaustion(c, service.PreOutputProtocolChat, status, errType, code, message, streamStarted) {
 			return
 		}
 		if lastErr != nil {

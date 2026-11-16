@@ -156,8 +156,9 @@ func TestRawChatStrictTerminalSwitchOffAndSuccess(t *testing.T) {
 				body := `data: {"error":{"code":"server_is_overloaded"}}` + "\n\ndata: [DONE]\n\n"
 				resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
 				_, err := compatStreamService(nil, 0, 0, 0).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "model", "model", "model", nil, nil, time.Now(), 0)
-				require.NoError(t, err)
-				require.Contains(t, rec.Body.String(), "[DONE]")
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				require.Empty(t, rec.Body.String())
 			}
 		})
 	}

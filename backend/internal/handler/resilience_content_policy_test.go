@@ -65,6 +65,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 
 	// OpenAI routes (Chat Completions, Responses, images...).
 	c, w := newResilienceTestContext(t)
+	c.Request.URL.Path = EndpointResponses
 	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), false)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
@@ -79,6 +80,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "error", gjson.GetBytes(w.Body.Bytes(), "type").String())
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
+	require.Equal(t, "content_policy_violation", gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 	require.Equal(t, zhipuPreflightMessage, gjson.GetBytes(w.Body.Bytes(), "error.message").String())
 
 	// Anthropic gateway.
@@ -86,6 +88,7 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 	(&GatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), service.PlatformAnthropic, false)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
+	require.Equal(t, "content_policy_violation", gjson.GetBytes(w.Body.Bytes(), "error.code").String())
 	require.Equal(t, zhipuPreflightMessage, gjson.GetBytes(w.Body.Bytes(), "error.message").String())
 
 	// Gateway Chat Completions and Responses.
@@ -106,9 +109,11 @@ func TestContentRefusalAnswersClientWith400(t *testing.T) {
 
 	// A committed stream gets the refusal as its error frame.
 	c, w = newResilienceTestContext(t)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: ping\ndata: {}\n\n")
 	(&GatewayHandler{}).handleFailoverExhausted(c, contentRefusal(), service.PlatformAnthropic, true)
-	require.Contains(t, w.Body.String(), `"type":"invalid_request_error","code":"content_policy_violation"`)
+	require.Contains(t, w.Body.String(), `"type":"invalid_request_error"`)
+	require.Contains(t, w.Body.String(), `"code":"content_policy_violation"`)
 }
 
 func TestContentRefusalMessageIsScrubbed(t *testing.T) {

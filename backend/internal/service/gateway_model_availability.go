@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -45,9 +46,8 @@ type ModelAvailabilityDiagnoser interface {
 // bypasses scheduler snapshots and deliberately ignores transient rate-limit,
 // overload, temporary-unschedulable, expiry, quota, and runtime-block state.
 //
-// Safe to call on the error path: returns {true,true} on any internal failure
-// or when the inputs preclude meaningful diagnosis (empty model, etc.), so
-// callers stay on the 503 fallback branch.
+// Incomplete inputs or dependency failures remain unknown. Only a complete
+// persistent configuration scan can establish model availability.
 func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	ctx context.Context,
 	groupID *int64,
@@ -55,21 +55,21 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	platform string,
 ) ModelAvailabilityDiagnosis {
 	if s == nil {
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+		return ModelAvailabilityDiagnosis{}
 	}
 	requestedModel = strings.TrimSpace(requestedModel)
 	if requestedModel == "" {
-		// No model specified — cannot decide model_not_found. Caller falls back to 503.
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+		// No model specified: availability is unknown.
+		return ModelAvailabilityDiagnosis{}
 	}
 	if strings.TrimSpace(platform) == "" {
 		// Without a platform we cannot scope the lookup; bail out to the
 		// 503 branch rather than make an unscoped scan.
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+		return ModelAvailabilityDiagnosis{}
 	}
 
 	if s.accountRepo == nil {
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+		return ModelAvailabilityDiagnosis{Err: errors.New("account repository unavailable")}
 	}
 
 	useMixed := platform == PlatformAnthropic || platform == PlatformGemini
@@ -93,18 +93,15 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 
 	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, platforms, includeGrouped)
 	if err != nil {
-		// Conservative fallback: pretend everything is fine so the caller
-		// returns 503 (we don't want to flip to 404 just because a lookup
-		// hiccup'd).
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+		return ModelAvailabilityDiagnosis{Err: err}
 	}
 
-	diag := ModelAvailabilityDiagnosis{}
+	diag := ModelAvailabilityDiagnosis{Known: true}
 	for i := range accounts {
 		if useMixed && accounts[i].Platform == PlatformAntigravity && !accounts[i].IsMixedSchedulingEnabled() {
 			continue
 		}
-		diag.HasAccountsInPool = true
+		diag.Members++
 		account := &accounts[i]
 		profile, profileErr := configuredAnthropicCompatProfile(account)
 		supported := false
@@ -114,13 +111,18 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 		} else if profileErr == nil {
 			supported = s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)
 		} else {
-			// Malformed readiness must never turn a configured model into a 404.
-			supported = account.IsModelSupported(anthropicCompatDispatchModel(ctx, requestedModel))
+			diag.Err = errors.Join(diag.Err, profileErr)
+			diag.Known = false
+			continue
 		}
 		if supported {
-			diag.HasModelSupport = true
-			return diag
+			diag.ModelSupported++
 		}
 	}
+	// Generic routing has no separate OpenAI Chat capability gate. Its static
+	// request support is exactly the model/compatibility scope counted above.
+	diag.RequestSupported = diag.ModelSupported
+	diag.HasAccountsInPool = diag.Members > 0
+	diag.HasModelSupport = diag.ModelSupported > 0
 	return diag
 }

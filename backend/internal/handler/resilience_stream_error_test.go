@@ -42,6 +42,7 @@ func TestStreamRateLimitSwitchesAndAnswersRateLimited(t *testing.T) {
 	// After output: the stream ends with a rate-limit error frame that tells
 	// the client when to retry.
 	c, w = newResilienceTestContext(t)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString("event: message_start\ndata: {}\n\n")
 	(&GatewayHandler{}).handleFailoverExhausted(c, relayConcurrencyLimit(), service.PlatformAnthropic, true)
 	require.Contains(t, w.Body.String(), `"type":"rate_limit_error"`)

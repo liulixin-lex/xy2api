@@ -250,7 +250,14 @@ func TestCompatPreludeFailureBeforeContent(t *testing.T) {
 					result, err := runPreludeCompat(t, c, messages, body, 0, interval)
 					var failover *UpstreamFailoverError
 					require.ErrorAs(t, err, &failover)
-					require.Nil(t, result, "failed attempt usage must be discarded")
+					if ending == "failed" {
+						require.NotNil(t, result)
+						require.Equal(t, 999, result.Usage.InputTokens)
+						require.True(t, result.UsagePresent)
+						require.True(t, result.PartialFailure)
+					} else {
+						require.Nil(t, result)
+					}
 					require.Empty(t, rec.Body.String())
 				})
 			}

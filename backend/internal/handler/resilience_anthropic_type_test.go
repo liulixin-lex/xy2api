@@ -122,7 +122,7 @@ func TestAnthropicModelUnavailableExhaustionMatchesLocalType(t *testing.T) {
 	(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	local := classifyNoAccountError(c.Request.Context(),
-		&fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true}},
+		&fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{Known: true, Members: 1, HasAccountsInPool: true}},
 		&service.APIKey{GroupID: ptrInt64(1)}, "model", "model", service.PlatformAnthropic)
 	require.True(t, local.ModelNotFound)
 	require.Equal(t, local.Status, rec.Code)

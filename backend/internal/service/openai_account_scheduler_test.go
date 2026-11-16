@@ -3247,3 +3247,16 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyAccountModelRoute
 		selection.ReleaseFunc()
 	}
 }
+
+func (r schedulerTestOpenAIAccountRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	var out []Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform && a.IsActive() && a.Schedulable {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}

@@ -34,7 +34,8 @@ import (
 // of the attempt runs until then. With stream.strict_terminal a stream that
 // breaks after output ends with the inbound protocol's terminal frame
 // (response.failed, or data:{error} and [DONE]) and is never reported as a
-// success. With both switches off the conversions keep the 0.4.4 behavior.
+// success. The switches control staging and timeout behavior; explicit failure
+// and missing completion evidence never qualify for synthetic success.
 //
 // A client that leaves before the first output cancels the attempt: no
 // switch, no charge, no account failure. After output the upstream is read
@@ -58,17 +59,23 @@ func gatewayConvertGuarded() bool {
 
 // gatewayConvertHooks are the protocol conversion of one attempt.
 type gatewayConvertHooks struct {
+	// observeUsage runs after conversion failure without emitting frames.
+	observeUsage func(*apicompat.AnthropicStreamEvent)
 	// convert turns one Anthropic event into wire frames. hold is set while
 	// the opening is staged; the driver keeps the frames until it ends.
 	convert func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string
 	// finalize returns the frames that end a stream treated as complete.
-	finalize func() []string
+	finalize               func() []string
+	conversionError        func() error
+	terminalMappingHandled bool
 	// failure returns the inbound protocol's terminal frames; source is an
 	// Anthropic error event body.
 	failure func(source []byte) []string
 }
 
 type gatewayConvertStream struct {
+	conversionErr     error
+	evidence          anthropicBufferedEvidence
 	s                 *GatewayService
 	c                 *gin.Context
 	resp              *http.Response
@@ -137,7 +144,18 @@ func (st *gatewayConvertStream) ctx() context.Context {
 }
 
 // run reads the attempt to its end.
-func (st *gatewayConvertStream) run() gatewayConvertOutcome {
+func (st *gatewayConvertStream) run() (out gatewayConvertOutcome) {
+	defer func() {
+		facts := st.evidence.facts()
+		out.ResponseFactsKnown, out.UsagePresent, out.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+		out.TerminalSeen, out.TerminalValid, out.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+		if st.account != nil {
+			resilience.StateFrom(st.ctx()).SetGatewayResponseFacts(st.account.ID, true, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		if out.err == nil && !st.gone {
+			ClaimProtocolTerminal(st.c)
+		}
+	}()
 	if !st.guarded {
 		st.headers(true)
 	} else {
@@ -277,11 +295,22 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 }
 
 func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOutcome, bool) {
+	st.evidence.observe(name, payload)
+	if !st.hooks.terminalMappingHandled {
+		recordAnthropicTerminalMapping(st.ctx(), payload)
+	}
 	var event apicompat.AnthropicStreamEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		logger.L().Warn("gateway convert stream: failed to parse event", zap.Error(err),
 			zap.String("request_id", st.requestID), zap.String("protocol", st.protocol), zap.String("event_type", name))
 		return gatewayConvertOutcome{}, false
+	}
+	if st.hooks.observeUsage != nil {
+		st.hooks.observeUsage(&event)
+	}
+	if st.conversionErr != nil {
+		terminal := event.Type == "message_stop" || event.Type == "error" || (event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "")
+		return gatewayConvertOutcome{err: st.conversionErr}, terminal
 	}
 	if st.canceledBeforeOutput() {
 		return gatewayConvertOutcome{err: st.ctx().Err(), noResult: true}, true
@@ -313,7 +342,7 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 			releaseOpenAIPrelude(st.preludeLog, event.Type, []byte(payload))
 		}
 	}
-	if st.guarded && class.Kind == resilience.TerminalFailure {
+	if class.Kind == resilience.TerminalFailure {
 		return st.onErrorEvent(&event, payload, class.Retryable)
 	}
 	// A stop_reason already ends the message; some compatible upstreams
@@ -322,6 +351,12 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 		st.sawStop = true
 	}
 	frames := st.hooks.convert(&event, payload, hold)
+	if st.hooks.conversionError != nil {
+		if err := st.hooks.conversionError(); err != nil {
+			stop := !st.c.Writer.Written() || st.sawStop
+			return st.conversionFailed(err), stop
+		}
+	}
 	if hold {
 		st.held = append(st.held, frames...)
 		return gatewayConvertOutcome{}, false
@@ -343,11 +378,9 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 		return gatewayConvertOutcome{err: &UpstreamFailoverError{StatusCode: status, ResponseBody: body}, noResult: true}, true
 	}
 	if !st.strict {
-		// 0.4.4: the event is dropped and the stream goes on. Its end is
-		// then no reason to replay (review DELTA-P2-1).
 		st.sawFailure = true
-		st.write(st.hooks.convert(event, payload, false))
-		return gatewayConvertOutcome{}, false
+		st.terminal(body)
+		return gatewayConvertOutcome{err: fmt.Errorf("upstream stream error: %s", extractUpstreamErrorMessage(body))}, true
 	}
 	outputStarted := st.outputStarted()
 	st.recordStreamError(body, outputStarted)
@@ -365,7 +398,10 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 
 // onEnd handles the end of the upstream: EOF (cause nil) or a read error.
 func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
-	if st.sawStop || st.sawFailure || !st.guarded {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
+	if st.sawStop {
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 			logger.L().Warn("gateway convert stream: read error", zap.Error(cause),
 				zap.String("request_id", st.requestID), zap.String("protocol", st.protocol))
@@ -394,7 +430,8 @@ func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
 		return gatewayConvertOutcome{err: fmt.Errorf("stream usage incomplete: %w", st.ctx().Err())}
 	}
 	if !st.strict {
-		return st.finish()
+		st.terminal(gatewayConvertErrorSource("api_error", "upstream_disconnected", "Upstream stream ended without a terminal event"))
+		return gatewayConvertOutcome{err: errors.New("stream usage incomplete: missing terminal event")}
 	}
 	if st.gone || canceled {
 		MarkResponseCommitted(st.c)
@@ -415,6 +452,9 @@ func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
 }
 
 func (st *gatewayConvertStream) onStall(threshold time.Duration) gatewayConvertOutcome {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
 	if st.gone {
 		MarkResponseCommitted(st.c)
 		return gatewayConvertOutcome{err: errors.New("stream usage incomplete after timeout")}
@@ -495,18 +535,25 @@ func (st *gatewayConvertStream) recordStreamError(body []byte, outputWritten boo
 // finish ends a stream treated as complete: the held opening, then the
 // protocol's closing frames.
 func (st *gatewayConvertStream) finish() gatewayConvertOutcome {
+	frames := st.hooks.finalize()
+	if st.hooks.conversionError != nil {
+		if err := st.hooks.conversionError(); err != nil {
+			return st.conversionFailed(err)
+		}
+	}
 	st.release()
-	st.write(st.hooks.finalize())
+	st.write(frames)
 	return gatewayConvertOutcome{}
 }
 
 // terminal writes the inbound protocol's failure frames after the held
 // opening and keeps the handler from appending another terminal.
 func (st *gatewayConvertStream) terminal(source []byte) {
-	st.release()
-	st.write(st.hooks.failure(source))
 	errType := strings.TrimSpace(gjson.GetBytes(source, "error.type").String())
-	MarkOpsStreamError(st.c, errType, strings.TrimSpace(gjson.GetBytes(source, "error.message").String()), http.StatusBadGateway)
+	code := extractUpstreamErrorCode(source)
+	param := gjson.GetBytes(source, "error.param").String()
+	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(source)))
+	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, errType, code, param, message)
 	MarkResponseCommitted(st.c)
 }
 
@@ -559,7 +606,7 @@ func (st *gatewayConvertStream) write(frames []string) {
 	}
 	st.headers(true)
 	for _, frame := range frames {
-		n, err := st.c.Writer.Write([]byte(frame))
+		n, err := writeConvertedResponsesFrame(st.c, frame)
 		if n > 0 && !st.written {
 			st.written = true
 			// After the first output a departed client no longer stops the
@@ -694,4 +741,22 @@ func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Co
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: started})
 	timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, started)
 	return newFirstEventGuard(upstreamCtx, timeout, plan)
+}
+
+func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcome {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
+	beforeOutput := !st.c.Writer.Written()
+	st.conversionErr = err
+	st.stopFirstEvent()
+	st.stopCancel()
+	st.released = true
+	st.held = nil
+	st.sawFailure = true
+	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+	if beforeOutput {
+		_ = st.resp.Body.Close()
+	}
+	return gatewayConvertOutcome{err: err, noResult: beforeOutput && !st.evidence.usagePresent}
 }

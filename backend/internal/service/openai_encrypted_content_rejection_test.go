@@ -36,19 +36,19 @@ func TestIsOpenAIEncryptedContentRejectionPayloadCoversHTTPAndInband(t *testing.
 
 func TestOpenAIEncryptedContentRepairBodyHonorsPrefixesAndPreservesOpaqueItems(t *testing.T) {
 	body := []byte(`{"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"cipher"},{"type":"function_call_output","call_id":"call_1","output":"keep"},{"type":"agent_message","content":[{"type":"encrypted_content","data":"keep"}]}]}`)
-	next, changed, err := openAIEncryptedContentRepairBody(body, "encrypted content could not be verified")
+	selected, err := openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted content could not be verified"}}`))
 	require.NoError(t, err)
-	require.True(t, changed)
-	require.NotContains(t, string(next), `"encrypted_content":"cipher"`)
-	require.Contains(t, string(next), `"call_id":"call_1"`)
-	require.Contains(t, string(next), `"agent_message"`)
+	require.True(t, selected.Changed)
+	require.NotContains(t, string(selected.Body), `"encrypted_content":"cipher"`)
+	require.Contains(t, string(selected.Body), `"call_id":"call_1"`)
+	require.Contains(t, string(selected.Body), `"agent_message"`)
 
-	_, changed, err = openAIEncryptedContentRepairBody(body, "encrypted content could not be verified for item amsg_1")
+	selected, err = openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted content could not be verified for item amsg_1"}}`))
 	require.NoError(t, err)
-	require.False(t, changed)
-	_, changed, err = openAIEncryptedContentRepairBody(body, "encrypted function output content could not be decrypted")
+	require.False(t, selected.Changed)
+	selected, err = openAIEncryptedContentRepairBody(body, []byte(`{"error":{"message":"encrypted function output content could not be decrypted"}}`))
 	require.NoError(t, err)
-	require.False(t, changed)
+	require.False(t, selected.Changed)
 }
 
 func TestOpenAIEncryptedContentRoutingAndOpsCategory(t *testing.T) {
@@ -213,7 +213,8 @@ func TestForwardAsChatCompletions_EncryptedContentDoesNotFailoverOrTempUnschedul
 	require.Zero(t, repo.modelRateLimitAccountID)
 	require.Len(t, upstream.bodies, 1)
 	require.Empty(t, svc.getOpenAIAccountModelTransientState().entries)
-	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "encrypted_content_rejected")
 	events, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	require.Len(t, events.([]*OpsUpstreamErrorEvent), 1)
@@ -244,6 +245,7 @@ func TestForwardOpenAIRequestRepairReplaysInbandRejection(t *testing.T) {
 			req := newWebSearchReplayRequest(t)
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(tc.payload), webSearchSuccessStream("resp_repaired")}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.cfg.JWT.Secret = "m10-fixture-secret"
 			account := webSearchReplayAccount(false)
 			result, err := svc.Forward(req.ctx, req.c, account, []byte(tc.body))
 			require.NoError(t, err)
@@ -260,7 +262,7 @@ func TestForwardOpenAIRequestRepairReplaysInbandRejection(t *testing.T) {
 				require.Equal(t, "keep output", gjson.GetBytes(upstream.bodies[1], "input.1.output").String())
 				require.Equal(t, "resp_parent", gjson.GetBytes(upstream.bodies[1], "previous_response_id").String())
 				require.True(t, openAIRequestRepairFrom(req.c).encryptedTried)
-				require.Contains(t, svc.sessionInvalidEncryptedContentDigests(getOpenAIGroupIDFromContext(req.c), svc.GenerateSessionHash(req.c, []byte(tc.body))), openAIEncryptedContentDigest("cipher"))
+				require.Contains(t, svc.sessionInvalidEncryptedContentDigests(getOpenAIGroupIDFromContext(req.c), httpEncryptedLineageKey(svc.GenerateSessionHash(req.c, []byte(tc.body)), account.ID, svc.UpstreamCredentialVersion(account, account.GetCredential("api_key")))), openAIEncryptedContentDigest("cipher"))
 			} else {
 				require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_breakpoint").Exists())
 			}
@@ -298,7 +300,8 @@ func TestForwardOpenAIRequestRepairDoesNotReplayUnrepairableOrExhausted(t *testi
 			}
 			require.Len(t, upstream.bodies, 1)
 			if failoverErr == nil {
-				require.Contains(t, req.rec.Body.String(), "response.failed")
+				require.Equal(t, http.StatusBadRequest, req.rec.Code)
+				require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
 				require.Contains(t, req.rec.Body.String(), tc.message)
 			}
 			repair := openAIRequestRepairFrom(req.c)
@@ -326,7 +329,8 @@ func TestForwardOpenAIRequestRepairHTTPAndInbandShareEncryptedRetry(t *testing.T
 	require.NotErrorAs(t, err, &failoverErr)
 	require.Len(t, upstream.bodies, 2)
 	require.True(t, openAIRequestRepairFrom(req.c).encryptedTried)
-	require.Contains(t, req.rec.Body.String(), "response.failed")
+	require.Equal(t, http.StatusBadRequest, req.rec.Code)
+	require.Equal(t, "encrypted_content_rejected", gjson.GetBytes(req.rec.Body.Bytes(), "error.code").String())
 	require.Empty(t, req.session.failures)
 }
 

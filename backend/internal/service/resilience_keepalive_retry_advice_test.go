@@ -120,8 +120,12 @@ func TestSyntheticFailedFramesResolveRetryAdvice(t *testing.T) {
 					}
 				}
 				require.True(t, failed.Exists(), rec.Body.String())
-				require.Equal(t, advice.Headers()["retry-after"], failed.Get("response.error.headers.retry-after").String())
-				require.Equal(t, advice.Message(message), failed.Get("response.error.message").String())
+				expectedAdvice := advice
+				if advice.Source == "unknown" && (kind == "native" || kind == "passthrough") {
+					expectedAdvice = resilience.RetryAdvice{Seconds: 10}
+				}
+				require.Equal(t, expectedAdvice.Headers()["retry-after"], failed.Get("response.error.headers.retry-after").String())
+				require.Equal(t, expectedAdvice.Message(message), failed.Get("response.error.message").String())
 			})
 		}
 	}

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -16,7 +17,15 @@ import (
 // cache skips selection.
 type countingPlatformRepo struct {
 	groupListingRepo
-	lists int
+	lists        int
+	diagnosisErr error
+}
+
+func (r *countingPlatformRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	if r.diagnosisErr != nil {
+		return nil, r.diagnosisErr
+	}
+	return r.groupListingRepo.ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
 }
 
 func (r *countingPlatformRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
@@ -40,30 +49,53 @@ func (r *countingPlatformRepo) ListSchedulableByPlatforms(ctx context.Context, p
 }
 
 func TestNegativeCacheBurstOfRetries(t *testing.T) {
-	// Spec: 50 requests within 2 s after a no-account result -> only the
-	// first performs account selection.
-	until := time.Now().Add(time.Hour)
-	svc, _ := newLastResortGatewayFixture(t, []Account{{
-		ID: 81, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1,
-		TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x",
-	}})
-	counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo)}
-	svc.accountRepo = counting
-	groupID := int64(7)
-	for i := 0; i < 50; i++ {
-		_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
-		require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	}
-	require.Equal(t, 1, counting.lists)
+	t.Run("unknown_evidence", func(t *testing.T) {
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(7) })
+		// A failed persistent diagnosis is unknown and cannot populate the cache.
+		until := time.Now().Add(time.Hour)
+		svc, _ := newLastResortGatewayFixture(t, []Account{{
+			ID: 81, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1,
+			TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x",
+		}})
+		counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo), diagnosisErr: errors.New("fixture persistent diagnosis read failed")}
+		svc.accountRepo = counting
+		groupID := int64(7)
+		diagnosis := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4", PlatformAnthropic)
+		require.False(t, diagnosis.Known)
+		require.ErrorIs(t, diagnosis.Err, counting.diagnosisErr)
+		for i := 0; i < 50; i++ {
+			_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		}
+		require.Equal(t, 50, counting.lists, "unknown selection evidence must not cache")
 
-	// Failover attempts (with exclusions) never use the cache.
-	_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", map[int64]struct{}{99: {}}, "", 0)
-	require.Equal(t, 2, counting.lists)
+		// Failover attempts (with exclusions) never use the cache.
+		_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", map[int64]struct{}{99: {}}, "", 0)
+		require.Equal(t, 51, counting.lists)
 
-	// Account recovery invalidates the entry.
-	resilience.ProcessNegativeCache().InvalidateGroup(7)
-	_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
-	require.Equal(t, 3, counting.lists)
+		// Account recovery invalidates the entry.
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+		require.Equal(t, 52, counting.lists)
+	})
+	t.Run("known_empty_pool", func(t *testing.T) {
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(7) })
+		svc, _ := newLastResortGatewayFixture(t, nil)
+		counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo)}
+		svc.accountRepo = counting
+		groupID := int64(7)
+		diagnosis := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4", PlatformAnthropic)
+		require.True(t, diagnosis.Known)
+		require.NoError(t, diagnosis.Err)
+		require.Zero(t, diagnosis.Members)
+		for i := 0; i < 50; i++ {
+			_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		}
+		require.Equal(t, 1, counting.lists, "complete evidence for an empty pool may be negatively cached")
+	})
 }
 
 func TestNegativeCacheOffWhenErrorsDisabled(t *testing.T) {
@@ -94,7 +126,7 @@ func TestNegativeCacheSkipsConfigAndProfitResults(t *testing.T) {
 		resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, err)
 		require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "m", "", nil), err.Error())
 	}
-	resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, fmt.Errorf("%w supporting model: m (total=1 profit_threshold=0 profit_invalid_account_rate=0)", ErrNoAvailableAccounts))
+	resilienceNegativeCachePut(ctx, &groupID, "m", "", nil, &SelectionExhaustion{Known: true, GroupLevel: true, Members: 1, ModelSupported: 1, RequestSupported: 1, Reasons: map[SelectionReason]int{SelectionReasonBalanceExhausted: 1}})
 	require.ErrorIs(t, resilienceNegativeCacheHit(ctx, &groupID, "m", "", nil), ErrNoAvailableAccounts)
 	require.NoError(t, resilienceNegativeCacheHit(ctx, &groupID, "other-model", "", nil))
 }
@@ -103,7 +135,7 @@ func TestNegativeCacheHitIsRecognisedAndScopedByVariant(t *testing.T) {
 	withResilienceSettings(t, nil)
 	groupID := int64(19)
 	ctx := context.Background()
-	noAccount := fmt.Errorf("%w supporting model: m (total=1 profit_threshold=0 profit_invalid_account_rate=0)", ErrNoAvailableAccounts)
+	noAccount := &SelectionExhaustion{Known: true, GroupLevel: true, Members: 1, ModelSupported: 1, RequestSupported: 1, Reasons: map[SelectionReason]int{SelectionReasonBalanceExhausted: 1}}
 
 	// A replayed result must be recognisable, or the selection epilogue
 	// stores it again and the entry never expires under steady traffic.
@@ -206,7 +238,7 @@ func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
 		require.False(t, projection.healthy)
 		require.InDelta(t, expected.Sub(now).Seconds(), svc.NoAccountRetryAfter(ctx, &group, model).Seconds(), 1)
 		require.Equal(t, resilience.RetryAdvice{Seconds: 10, Source: "recovery"}, svc.RetryAdvice(ctx, &group, model))
-		require.True(t, resilienceNoAccountIsGroupLevel(ctx, group, model))
+		require.False(t, resilienceNoAccountIsGroupLevel(ctx, group, model, nil), "penalty snapshots do not prove a complete selection failure")
 	}
 	check(breakerEnd)
 
@@ -232,7 +264,8 @@ func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
 	accounts = append(accounts, nominal)
 	repo.byGroup[group] = accounts
 	r.lastResortGroups.drop(group)
-	require.False(t, resilienceNoAccountIsGroupLevel(ctx, group, model))
+	require.False(t, resilienceNoAccountIsGroupLevel(ctx, group, model, nil))
+	require.Positive(t, svc.NoAccountRetryAfter(ctx, &group, model), "the group-level proof no longer performs snapshot I/O")
 	require.Equal(t, 10, svc.RetryAdvice(ctx, &group, model).Seconds)
 }
 
@@ -349,4 +382,53 @@ func TestRetryAdviceFiltersModelPlatformAndCapability(t *testing.T) {
 	ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
 	resilience.NoteCapabilityExcluded(ctx, 1)
 	require.Zero(t, svc.RetryAdvice(ctx, &group, "model").Seconds)
+}
+
+func TestM8SelectionNegativeCache(t *testing.T) {
+	withResilienceSettings(t, nil)
+	group := int64(8881)
+	newCtx := func() context.Context {
+		return resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	}
+	ctx := newCtx()
+	verdict := &SelectionExhaustion{Known: true, GroupLevel: true, Members: 2, ModelSupported: 2, RequestSupported: 2, Reasons: map[SelectionReason]int{SelectionReasonRateLimited: 2}}
+	resilienceNegativeCachePut(ctx, &group, "model", "openai", nil, verdict)
+	hit := resilienceNegativeCacheHit(newCtx(), &group, "model", "openai", nil)
+	require.ErrorIs(t, hit, ErrNoAvailableAccounts)
+	require.ErrorIs(t, hit, errNegativeCached)
+	got, ok := SelectionExhaustionFromError(hit)
+	require.True(t, ok)
+	require.Equal(t, *verdict, got)
+	got.Reasons[SelectionReasonRateLimited] = 99
+	again, _ := SelectionExhaustionFromError(resilienceNegativeCacheHit(newCtx(), &group, "model", "openai", nil))
+	require.Equal(t, 2, again.Reasons[SelectionReasonRateLimited])
+	tools := WithChatRequestRequirement(newCtx(), ChatRequestRequirement{HasTools: true})
+	require.NoError(t, resilienceNegativeCacheHit(tools, &group, "model", "openai", nil))
+	resilienceNegativeCachePut(tools, &group, "tools-only", "", nil, verdict)
+	resilienceMarkGroupNoAccount(tools, &group, "model", nil, verdict)
+	require.False(t, resilience.StateFrom(tools).GroupNoAccount())
+	require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, "tools-only", "", nil))
+	for _, reason := range []SelectionReason{SelectionReasonOwnerFixed, SelectionReasonPrivacyNotSet, SelectionReasonProfitThreshold, SelectionReasonChannelUpstreamRestricted, SelectionReasonExcluded, SelectionReasonResponsesRequired, SelectionReason("session_limited")} {
+		request := newCtx()
+		e := verdict.Snapshot()
+		e.Reasons = map[SelectionReason]int{reason: 2}
+		resilienceNegativeCachePut(request, &group, string(reason), "", nil, e)
+		resilienceMarkGroupNoAccount(request, &group, string(reason), nil, e)
+		require.False(t, resilience.StateFrom(request).GroupNoAccount())
+		require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, string(reason), "", nil))
+	}
+	cause := errors.New("private upstream failure")
+	e := verdict.Snapshot()
+	e.LastCause = cause
+	resilienceNegativeCachePut(newCtx(), &group, "cause", "", nil, e)
+	require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, "cause", "", nil))
+	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"version":1}`), []byte(`{"version":2,"known":true,"group_level":true}`), []byte(`not-json`)} {
+		key := selectionNegativeKey(ctx, &group, "bad", "")
+		resilience.ProcessNegativeCache().Put(key, group, resilience.CachedResponse{Body: raw}, time.Minute, time.Now())
+		require.NoError(t, resilienceNegativeCacheHit(newCtx(), &group, "bad", "", nil))
+	}
+	cached, ok := resilience.ProcessNegativeCache().Get(selectionNegativeKey(ctx, &group, "model", "openai"), time.Now())
+	require.True(t, ok)
+	require.NotContains(t, string(cached.Body), "LastCause")
+	require.NotContains(t, string(cached.Body), "OwnerID")
 }

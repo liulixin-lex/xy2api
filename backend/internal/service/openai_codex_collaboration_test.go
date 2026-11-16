@@ -566,12 +566,11 @@ func TestCodexCollabErrorEnvelopeExits(t *testing.T) {
 				response.Header.Set("Content-Type", "text/event-stream")
 				_, err = newOpenAIRejectedFieldTestService(nil).handleStreamingResponse(context.Background(), response, c, account, time.Now(), "gpt-5.4", "gpt-5.4")
 			}
+			require.Error(t, err)
 			if route == "json_failed" {
-				require.NoError(t, err)
+				require.Equal(t, "invalid_function", gjson.Get(rec.Body.String(), "error.code").String())
 				require.Equal(t, "Unknown collaboration.send_message", gjson.Get(rec.Body.String(), "error.message").String())
 				require.Equal(t, "collaboration.send_message", gjson.Get(rec.Body.String(), "error.param").String())
-			} else {
-				require.Error(t, err)
 			}
 			var failover *UpstreamFailoverError
 			require.False(t, errors.As(err, &failover))

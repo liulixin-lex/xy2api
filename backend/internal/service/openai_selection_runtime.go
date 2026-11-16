@@ -58,10 +58,12 @@ func (s *OpenAIGatewayService) selectionCandidates(ctx context.Context, req Open
 		a := &members[i]
 		if _, excluded := req.ExcludedIDs[a.ID]; excluded {
 			stats.exclude("excluded")
+			observeSelectionFailure(ctx, a.ID, "excluded", nil)
 			continue
 		}
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, a) {
 			stats.exclude("account_scheduling_threshold")
+			observeSelectionFailure(ctx, a.ID, "account_scheduling_threshold", nil)
 			continue
 		}
 		if reason := openAICompatibleAccountEligibilityFailureReason(ctx, a, req.Platform, req.RequestedModel, false, req.RequiredCapability, s); reason != "" {
@@ -74,8 +76,10 @@ func (s *OpenAIGatewayService) selectionCandidates(ctx context.Context, req Open
 		}
 		if !s.isAccountTransportCompatible(a, req.RequiredTransport) {
 			stats.exclude("transport_incompatible")
+			observeSelectionFailure(ctx, a.ID, "transport_incompatible", nil)
 			continue
 		}
+		observeSelectionReady(ctx, a.ID)
 		candidates = append(candidates, a)
 	}
 	if req.Platform == PlatformGrok {
@@ -83,6 +87,9 @@ func (s *OpenAIGatewayService) selectionCandidates(ctx context.Context, req Open
 		for _, a := range candidates {
 			if len(s.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*a})) > 0 {
 				candidatesOut = append(candidatesOut, a)
+			} else {
+				stats.exclude("quota_auto_pause")
+				observeSelectionFailure(ctx, a.ID, "quota_auto_pause", nil)
 			}
 		}
 		candidates = candidatesOut
@@ -95,6 +102,7 @@ func (s *OpenAIGatewayService) recheckSelectionAccount(ctx context.Context, req 
 		return nil
 	}
 	if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+		observeSelectionFailure(ctx, account.ID, "excluded", nil)
 		return nil
 	}
 	fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
@@ -102,7 +110,11 @@ func (s *OpenAIGatewayService) recheckSelectionAccount(ctx context.Context, req 
 		return nil
 	}
 	fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+	if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) {
+		return nil
+	}
+	if !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		observeSelectionFailure(ctx, fresh.ID, "transport_incompatible", nil)
 		return nil
 	}
 	return fresh
@@ -116,12 +128,14 @@ func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {
 	return requests
 }
 
-func (s *OpenAIGatewayService) selectionAvailable(accounts []*Account, loads map[int64]*AccountLoadInfo) []*Account {
+func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts []*Account, loads map[int64]*AccountLoadInfo) []*Account {
 	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	available := make([]*Account, 0, len(accounts))
 	for _, a := range accounts {
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
 			available = append(available, a)
+		} else {
+			observeSelectionFailure(ctx, a.ID, "concurrency_full", nil)
 		}
 	}
 	return available
@@ -171,7 +185,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if s.concurrencyService != nil && s.schedulingConfig().LoadBatchEnabled {
 		loads, _ = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(candidates))
 	}
-	candidates = s.selectionAvailable(candidates, loads)
+	candidates = s.selectionAvailable(ctx, candidates, loads)
 	session.recheck = func(ctx context.Context, a *Account) *Account {
 		fresh := s.recheckSelectionAccount(ctx, req, a)
 		if fresh == nil {
@@ -195,6 +209,7 @@ func (s *OpenAIGatewayService) listSelectionMembers(ctx context.Context, groupID
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, false)
 		if err != nil {
+			observeSelectionFailure(ctx, 0, "dependency_error", err)
 			return accounts, err
 		}
 		return accounts, nil
@@ -209,6 +224,7 @@ func (s *OpenAIGatewayService) listSelectionMembers(ctx context.Context, groupID
 		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, platform)
 	}
 	if err != nil {
+		observeSelectionFailure(ctx, 0, "dependency_error", err)
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 	return accounts, nil

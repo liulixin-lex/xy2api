@@ -75,23 +75,17 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			c.Request = httptest.NewRequest(http.MethodPost, EndpointChatCompletions, nil)
 
 			h := &OpenAIGatewayHandler{}
 			h.handleStreamingAwareError(c, http.StatusBadGateway, tt.errType, tt.message, true)
 
 			body := w.Body.String()
 
-			// 验证 SSE 格式：event: error\ndata: {JSON}\n\n
-			assert.True(t, strings.HasPrefix(body, "event: error\n"), "应以 'event: error\\n' 开头")
-			assert.True(t, strings.HasSuffix(body, "\n\n"), "应以 '\\n\\n' 结尾")
-
-			// 提取 data 部分
-			lines := strings.Split(strings.TrimSuffix(body, "\n\n"), "\n")
-			require.Len(t, lines, 2, "应有 event 行和 data 行")
-			dataLine := lines[1]
-			require.True(t, strings.HasPrefix(dataLine, "data: "), "第二行应以 'data: ' 开头")
-			jsonStr := strings.TrimPrefix(dataLine, "data: ")
+			require.True(t, strings.HasPrefix(body, "data: "))
+			require.Equal(t, 1, strings.Count(body, "data: [DONE]"))
+			firstFrame := strings.SplitN(body, "\n\n", 2)[0]
+			jsonStr := strings.TrimPrefix(firstFrame, "data: ")
 
 			// 验证 JSON 合法性
 			var parsed map[string]any
@@ -126,7 +120,8 @@ func TestOpenAIHandleStreamingAwareErrorWithCode_EmitsStableClassification(t *te
 	)
 
 	body := w.Body.String()
-	require.Contains(t, body, "event: error\n")
+	require.NotContains(t, body, "event: error\n")
+	require.Contains(t, body, "data: [DONE]")
 	require.Equal(t, "upstream_error", gjson.Get(body[strings.Index(body, "{"):], "error.type").String())
 	require.Equal(t, service.OpenAIUpstreamHTTP2StreamErrorCode, gjson.Get(body[strings.Index(body, "{"):], "error.code").String())
 	require.NotContains(t, body, "stream ID")
@@ -314,7 +309,7 @@ func TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testin
 // 形式追加给客户端（streamStarted 强制 true）。
 // 这是 case B 修复：旧实现遇到 Writer.Written 直接 return false，
 // 客户端只能拿到 silent EOF；Codex CLI 报 "stream closed before response.completed"。
-func TestOpenAIEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) {
+func TestOpenAIEnsureForwardErrorResponse_PreservesWrittenNonSSE(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -324,12 +319,12 @@ func TestOpenAIEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 	wrote := h.ensureForwardErrorResponse(c, false)
 
-	require.True(t, wrote, "must attempt to communicate the failure to the client via SSE")
+	require.False(t, wrote)
 	// 状态码改不了（headers 已 flush），但 body 应该追加 SSE 错误事件。
 	require.Equal(t, http.StatusTeapot, w.Code)
 	assert.Contains(t, w.Body.String(), "already written")
 	// 非 /responses 路径走 legacy event: error 分支。
-	assert.Contains(t, w.Body.String(), "event: error\n")
+	assert.Equal(t, "already written", w.Body.String())
 }
 
 // case B 回归测试：/responses 路径，Writer 已被写过（模拟 ping flushed），
@@ -340,6 +335,7 @@ func TestOpenAIEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespons
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 	// 模拟 ping 已 flush 的状态：Writer 已写过 1 个字节
+	c.Header("Content-Type", "text/event-stream")
 	_, _ = c.Writer.WriteString(":\n\n")
 
 	h := &OpenAIGatewayHandler{}
@@ -380,7 +376,10 @@ func TestOpenAIEnsureForwardErrorResponse_AfterDeltaAppendsSingleValidResponseFa
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	service.InstallDeliveryTracking(c, time.Now())
 	delta := `{"type":"response.output_text.delta","delta":"ok","sequence_number":1}`
+	c.Header("Content-Type", "text/event-stream")
 	_, err := c.Writer.WriteString("event: response.output_text.delta\ndata: " + delta + "\n\n")
 	require.NoError(t, err)
 
@@ -621,7 +620,9 @@ func TestOpenAIRecoverResponsesPanic_AppendsResponseFailedAfterWritten(t *testin
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c.String(http.StatusTeapot, "already written")
+	c.Header("Content-Type", "text/event-stream")
+	c.Status(http.StatusTeapot)
+	_, _ = c.Writer.WriteString("already written")
 
 	h := &OpenAIGatewayHandler{}
 	streamStarted := false
@@ -3524,6 +3525,7 @@ data: {"type":"response.failed","error":{"message":"This content was flagged"}}
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 		before := c.Writer.Size()
+		c.Header("Content-Type", "text/event-stream")
 		_, _ = c.Writer.WriteString(":\n\n")
 
 		reported := openAIForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error: unexpected EOF"))
@@ -3725,3 +3727,41 @@ func (wsPinnedQualityView) ResetAt(int64) time.Time { return time.Time{} }
 
 func (*wsTurnQualityView) GroupEnabled(int64) bool { return true }
 func (*wsTurnQualityView) ResetAt(int64) time.Time { return time.Time{} }
+
+func (r *openAIWSFailoverHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+
+	var out []service.Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform && a.Status == service.StatusActive && a.Schedulable {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r *openAIWSFailoverHandlerAccountRepoStub) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			if r.accounts[i].Extra == nil {
+				r.accounts[i].Extra = map[string]any{}
+			}
+			for key, value := range updates {
+				r.accounts[i].Extra[key] = value
+			}
+			break
+		}
+	}
+	return nil
+}
+
+func (s *openAIWSUsageHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+	for _, platform := range platforms {
+		if s.account.Platform == platform && s.account.Status == service.StatusActive && s.account.Schedulable {
+			return []service.Account{s.account}, nil
+		}
+	}
+	return nil, nil
+}

@@ -21,6 +21,7 @@ func TestOpenAIStreamForbiddenExhaustedResponse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c, recorder := newGinContextForEndpoint(t, EndpointResponses)
 			if tc.committed {
+				c.Header("Content-Type", "text/event-stream")
 				_, err := c.Writer.WriteString(":\n\n")
 				require.NoError(t, err)
 			}

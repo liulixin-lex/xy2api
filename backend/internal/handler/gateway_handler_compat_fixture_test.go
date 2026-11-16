@@ -38,13 +38,15 @@ func (*handlerCompatStore) DeleteSessionAccountID(context.Context, int64, string
 
 type handlerCompatUsage struct {
 	service.UsageLogRepository
-	logs []*service.UsageLog
+	logs      []*service.UsageLog
+	unbilled  []*service.GatewayUnbilledRequest
+	billError error
 }
 
 func (r *handlerCompatUsage) Create(_ context.Context, log *service.UsageLog) (bool, error) {
 	copy := *log
 	r.logs = append(r.logs, &copy)
-	return true, nil
+	return r.billError == nil, r.billError
 }
 
 type handlerCompatAccounts struct {
@@ -79,7 +81,8 @@ func (r *handlerCompatAccounts) SetOverloaded(context.Context, int64, time.Time)
 
 type handlerCompatHTTP struct{ client *http.Client }
 
-func (u *handlerCompatHTTP) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *handlerCompatHTTP) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
 	return u.client.Do(req)
 }
 func (u *handlerCompatHTTP) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {

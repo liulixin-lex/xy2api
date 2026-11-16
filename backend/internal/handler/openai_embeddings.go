@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strconv"
 	"strings"
@@ -120,6 +121,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 	defer inflightDone()
 
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, false, h.gatewayService, resilience.GatewayRequestScopeEmbedding)()
+
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -213,6 +216,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			return h.gatewayService.ForwardEmbeddings(c.Request.Context(), c, account, forwardBody, "")
 		}()
 
+		recordOpenAIForwardUsage(c, account, result)
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs

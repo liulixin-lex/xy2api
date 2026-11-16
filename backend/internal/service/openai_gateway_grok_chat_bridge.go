@@ -541,7 +541,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
-	responsesReq, err := apicompat.ChatCompletionsToResponses(&chatReq)
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&chatReq, m7ConversionOptions(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("convert grok chat completions to responses: %w", err)
 	}
@@ -556,6 +556,11 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 	responsesReq.Include = nil
 	responsesReq.Store = nil
 
+	prepared, prepareErr := apicompat.PrepareNativeResponsesRequest(*responsesReq, m7ConversionOptions(ctx))
+	if prepareErr != nil {
+		return nil, fmt.Errorf("prepare Responses request: %w", prepareErr)
+	}
+	*responsesReq = prepared
 	responsesBody, err := json.Marshal(responsesReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal grok responses bridge request: %w", err)

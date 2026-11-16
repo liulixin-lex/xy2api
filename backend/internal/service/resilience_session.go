@@ -421,8 +421,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
 		sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 		if err != nil {
-			result.ReleaseFunc()
-			return nil
+			return nil // newSelectionResult already released the acquired slot.
 		}
 		return sel
 	}

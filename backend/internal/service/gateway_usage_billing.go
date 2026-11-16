@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log/slog"
@@ -1034,7 +1035,7 @@ func (s *GatewayService) calculateRecordUsageCost(
 		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
 			resolved.Mode == BillingModePerRequest {
 			gid := apiKey.Group.ID
-			cost, err := s.billingService.CalculateCostUnified(CostInput{
+			cost, err := s.billingService.CalculateCostUnified(CostInput{Purpose: "billing",
 				Ctx: ctx, Model: billingModel, GroupID: &gid, Group: apiKey.Group,
 				UsageUnits: result.AudioUsage.DurationOrUnits, SizeTier: result.AudioUsage.Mode,
 				RateMultiplier: multiplier, Resolver: s.resolver, Resolved: resolved,
@@ -1140,7 +1141,7 @@ func (s *GatewayService) resolveChannelPricing(ctx context.Context, billingModel
 		return nil
 	}
 	gid := apiKey.Group.ID
-	resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid, Group: apiKey.Group})
+	resolved := s.resolver.Resolve(ctx, PricingInput{Purpose: "billing", Model: billingModel, GroupID: &gid, Group: apiKey.Group})
 	if resolved.Source == PricingSourceGroup || resolved.Source == PricingSourceChannel {
 		return resolved
 	}
@@ -1159,7 +1160,7 @@ func (s *GatewayService) calculateImageCost(
 	resolved := s.resolveChannelPricing(ctx, billingModel, apiKey)
 	if resolved != nil && resolved.Source == PricingSourceGroup {
 		gid := apiKey.Group.ID
-		cost, err := s.billingService.CalculateCostUnified(CostInput{
+		cost, err := s.billingService.CalculateCostUnified(CostInput{Purpose: "billing",
 			Ctx: ctx, Model: billingModel, GroupID: &gid, Group: apiKey.Group,
 			RequestCount: result.ImageCount, SizeTier: sizeTier,
 			RateMultiplier: multiplier, Resolver: s.resolver, Resolved: resolved,
@@ -1180,7 +1181,7 @@ func (s *GatewayService) calculateImageCost(
 			ImageOutputTokens: result.Usage.ImageOutputTokens,
 		}
 		gid := apiKey.Group.ID
-		cost, err := s.billingService.CalculateCostUnified(CostInput{
+		cost, err := s.billingService.CalculateCostUnified(CostInput{Purpose: "billing",
 			Ctx:             ctx,
 			Model:           billingModel,
 			GroupID:         &gid,
@@ -1214,23 +1215,25 @@ func (s *GatewayService) calculateTokenCost(
 	pricingAt time.Time,
 ) *CostBreakdown {
 	tokens := UsageTokens{
-		InputTokens:                result.Usage.InputTokens,
-		OutputTokens:               result.Usage.OutputTokens,
-		CacheCreationTokens:        result.Usage.CacheCreationInputTokens,
-		CacheCreationTokensPresent: result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
-		CacheReadTokens:            result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens:      result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens:      result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:          result.Usage.ImageOutputTokens,
+		InputTokens:                  result.Usage.InputTokens,
+		OutputTokens:                 result.Usage.OutputTokens,
+		CacheCreationTokens:          result.Usage.CacheCreationInputTokens,
+		CacheCreationTokensPresent:   result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
+		CacheReadTokens:              result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:        result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:        result.Usage.CacheCreation1hTokens,
+		CacheCreation5mTokensPresent: result.Usage.CacheCreation5mTokensPresent,
+		CacheCreation1hTokensPresent: result.Usage.CacheCreation1hTokensPresent,
+		ImageOutputTokens:            result.Usage.ImageOutputTokens,
 	}
 
 	var resolved *ResolvedPricing
 	if s.resolver != nil && apiKey.Group != nil {
 		gid := apiKey.Group.ID
-		resolved = s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid, Group: apiKey.Group})
+		resolved = s.resolver.Resolve(ctx, PricingInput{Purpose: "billing", Model: billingModel, GroupID: &gid, Group: apiKey.Group})
 	}
 
-	cost, err := s.billingService.CalculateTokenCostForRequest(TokenCostRequest{
+	cost, err := s.billingService.CalculateTokenCostForRequest(TokenCostRequest{Purpose: "billing",
 		Ctx:             ctx,
 		Model:           billingModel,
 		Group:           apiKey.Group,
@@ -1330,10 +1333,13 @@ func (s *GatewayService) buildRecordUsageLog(
 		CreatedAt:                time.Now(),
 	}
 	applyGatewayRequestMetadata(ctx, usageLog)
+	applyUsageResponseFacts(usageLog, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource, result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind)
 	if result.ImageCount > 0 && (cost == nil || cost.BillingMode != string(BillingModeToken)) {
 		usageLog.RateMultiplier = imageMultiplier
 	}
 	if cost != nil {
+		usageLog.PricingSource = append(json.RawMessage(nil), cost.PricingSource...)
+		s.billingService.warnBillingPricingFallback(cost.PricingSource)
 		usageLog.InputCost = cost.InputCost
 		usageLog.OutputCost = cost.OutputCost
 		usageLog.ImageOutputCost = cost.ImageOutputCost

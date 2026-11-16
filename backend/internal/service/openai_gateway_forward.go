@@ -65,7 +65,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "", err.Error())
 			return nil, err
 		}
 	} else {
@@ -107,12 +107,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	logCodexCLIOnlyDetection(ctx, c, account, apiKeyID, restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": gin.H{
-				"type":    "forbidden_error",
-				"message": CodexClientRestrictionMessage(restrictionResult),
-			},
-		})
+		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusForbidden, "forbidden_error", "", "", CodexClientRestrictionMessage(restrictionResult))
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
@@ -124,7 +119,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body = normalizedBody
 	}
 	legacyUsesNativeResponses := s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, upstreamRoutingModel(account, body, "")) == APIProtocolResponses
-	legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeResponsesLegacyIngressForTarget(body, legacyUsesNativeResponses)
+	legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeResponsesLegacyIngressForTarget(body, legacyUsesNativeResponses, m7ConversionOptions(ctx))
 	if legacyIngressErr != nil {
 		return nil, legacyIngressErr
 	}
@@ -158,9 +153,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				param = validationErr.param
 			}
 			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": liteErr.Error(), "param": param,
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", param, liteErr.Error())
 			return nil, liteErr
 		}
 		if changed {
@@ -176,9 +169,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
 		if err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": err.Error(), "param": "tools",
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "tools", err.Error())
 			return nil, err
 		}
 	}
@@ -189,9 +180,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, err = stripOpenAIResponsesInputNamespaces(body, keepToolCallNamespaces)
 		if err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": err.Error(), "param": "input",
-			}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "input", err.Error())
 			return nil, err
 		}
 	}
@@ -329,7 +318,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
-		// Passthrough keeps the baseline reading for its first-output budget until its final-wire actual is wired.
 		reasoningEffort := extractOpenAIWSLegacyReasoningEffort(body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
 		reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
@@ -354,7 +342,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		body = policyBody
 		if err := validateGPT61FinalCompatRequest(body, validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "reasoning.effort", err.Error())
 			return nil, err
 		}
 		requestView = newOpenAIRequestView(body)
@@ -517,7 +505,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateOpenAIResponsesImageModel(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "model"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "model", err.Error())
 			return nil, err
 		}
 		if hasOpenAIImageGenerationTool(decoded) {
@@ -540,7 +528,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateCodexSparkInput(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "input"}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "input", err.Error())
 			return nil, err
 		}
 	}
@@ -590,7 +578,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			})
 		}
 		if codexResult.Error != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": codexResult.Error.Error()}})
+			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "", codexResult.Error.Error())
 			return nil, codexResult.Error
 		}
 		setCodexToolNameReverse(c, codexResult.ToolNameReverse)
@@ -810,7 +798,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	lineageGroupID := getOpenAIGroupIDFromContext(c)
 	lineageEntryBody := body
 	lineageSessionHash := ""
-	if stateStore := s.getOpenAIWSStateStore(); stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
+	credentialVersion := ""
+	if stateStore := s.getOpenAIWSStateStore(); wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 && stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
 		lineageSessionHash = s.GenerateSessionHash(c, body)
 		if invalidDigests := stateStore.GetSessionInvalidEncryptedContentDigests(lineageGroupID, lineageSessionHash); len(invalidDigests) > 0 {
 			strippedBody, strippedCount := s.stripSessionInvalidEncryptedContentLogged(
@@ -823,15 +812,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
-	markEncryptedLineage := func(src []byte) {
-		invalidDigests := collectOpenAIEncryptedContentDigestsRaw(src)
-		if len(invalidDigests) == 0 {
-			return
-		}
-		if lineageSessionHash == "" {
-			lineageSessionHash = s.GenerateSessionHash(c, lineageEntryBody)
-		}
-		s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, invalidDigests)
+	markEncryptedLineage := func(digests []string) {
+		s.markHTTPInvalidEncryptedContent(lineageGroupID, lineageSessionHash, account.ID, credentialVersion, digests)
 	}
 	imageBillingModel := ""
 	imageSizeTier := ""
@@ -857,6 +839,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
+	}
+	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+		// Freeze the credential used by this HTTP attempt before reading evidence.
+		credentialVersion = s.UpstreamCredentialVersion(account, token)
+		if lineage := s.beginOpenAIM3(c, lineageEntryBody); lineage != nil {
+			lineageSessionHash = lineage.session
+		}
+		if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
+			body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+		}
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 
@@ -1119,7 +1111,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if !bytes.Equal(collabBody, body) {
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	var reasoningEffort *string
 	defer func() {
 		if result != nil {
 			result.ReasoningEffort = reasoningEffort
@@ -1143,7 +1135,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
-	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	requestRepair.credentialVersion, requestRepair.credentialRepo = credentialVersion, s.accountRepo
+	requestRepair.m3 = s.armOpenAIM3(c, account, body, credentialVersion)
 	replayAttempt := false
 	for {
 		if replayAttempt {
@@ -1199,6 +1192,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		noteOpenAIRequestRepairResent(ctx, c, account)
 		if rejectedFieldRetryEvent != nil {
 			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
 				rejectedFieldRetryEvent.Resent = true
@@ -1212,7 +1206,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
-		if headerGuard != nil && headerGuard.stopHeaderWait() {
+		var preDispatchErr *UpstreamFailoverError
+		if headerGuard != nil && headerGuard.stopHeaderWait() &&
+			(!errors.As(err, &preDispatchErr) || !preDispatchErr.PreDispatchSelectionInvalidated) {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -1260,25 +1256,24 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				continue
 			}
+			encryptedErrorPayload := respBody
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			invalidEncryptedContentError := isOpenAIEncryptedContentRejectionPayload(respBody) || resilience.IsEncryptedContentRejection(upstreamCode, upstreamMsg)
-			if requestRepair != nil && !requestRepair.encryptedTried &&
-				(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&
-				invalidEncryptedContentError {
-				nextBody, changed, repairErr := openAIEncryptedContentRepairBody(body, upstreamMsg)
-				if repairErr != nil {
-					return nil, fmt.Errorf("prepare invalid_encrypted_content retry body: %w", repairErr)
-				}
-				if changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-					markEncryptedLineage(body)
-					body, requestView, reqBody = nextBody, newOpenAIRequestView(nextBody), nil
-					requestRepair.encryptedTried = true
+			if (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) && isHTTPReasoningEncryptedRejection(body, encryptedErrorPayload, upstreamMsg) {
+				plan, ok := planHTTPEncryptedContentRepair(ctx, c, account, requestRepair, body, encryptedErrorPayload)
+				if ok {
+					markEncryptedLineage(plan.Digests)
+					body, requestView, reqBody = plan.Next, newOpenAIRequestView(plan.Next), nil
+					requestRepair.noteHTTPEncryptedRepair(ctx, plan)
 					rejectedFieldRetryState.remember(body)
 					logger.FromContext(ctx).Info("resilience.request_repair_replay",
 						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))
 					continue
 				}
+				rejection := newOpenAIEncryptedContentRejection(ctx, c, account, body, encryptedErrorPayload, plan.Selected)
+				captureOpenAIStateRejection(c, account, encryptedErrorPayload, upstreamMsg, "native_http", false, body)
+				writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
+				return nil, &OpenAIRequestRejectionError{rejection}
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account, resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
@@ -1389,9 +1384,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		searchCount := 0
 		var imageOutputSizes []string
 		var partialErr error
+		var responseFacts OpenAIForwardResult
 		upstreamAccepted := false
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, attemptStart, originalModel, upstreamModel, reasoningEffortValue)
+			if streamResult != nil {
+				responseFacts.ResponseFactsKnown = streamResult.ResponseFactsKnown
+				responseFacts.UsagePresent = streamResult.UsagePresent
+				responseFacts.UsageSource = streamResult.UsageSource
+				responseFacts.TerminalSeen = streamResult.TerminalSeen
+				responseFacts.TerminalValid = streamResult.TerminalValid
+				responseFacts.ResponseBodyKind = streamResult.ResponseBodyKind
+			}
 			if err != nil {
 				schedCapture.finish(nil, err)
 			}
@@ -1402,10 +1406,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
 				}
-				if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
-					if kind == resilience.ReasonEncryptedContent {
-						markEncryptedLineage(body)
-					}
+				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
 				}
@@ -1475,6 +1476,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = streamResult.searchCount
 		} else {
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+			if nonStreamResult != nil {
+				responseFacts.ResponseFactsKnown = nonStreamResult.ResponseFactsKnown
+				responseFacts.UsagePresent = nonStreamResult.UsagePresent
+				responseFacts.UsageSource = nonStreamResult.UsageSource
+				responseFacts.TerminalSeen = nonStreamResult.TerminalSeen
+				responseFacts.TerminalValid = nonStreamResult.TerminalValid
+				responseFacts.ResponseBodyKind = nonStreamResult.ResponseBodyKind
+			}
 			if err != nil {
 				schedCapture.finish(nil, err)
 			}
@@ -1509,7 +1518,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						return nil, repairErr
 					}
 				}
-				return nil, err
+				var failoverErr *UpstreamFailoverError
+				if nonStreamResult == nil || errors.As(err, &failoverErr) {
+					return nil, err
+				}
+				partialErr = err
 			}
 			upstreamAccepted = nonStreamResult.upstreamAccepted
 			usage = nonStreamResult.usage
@@ -1518,7 +1531,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
-		if upstreamAccepted {
+		if partialErr == nil && upstreamAccepted {
 			requestRepair.m3.succeeded(ctx)
 		}
 		if partialErr == nil {
@@ -1573,6 +1586,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.SearchCount = searchCount
 		}
 		stampOpenAIResponsesUpstreamEndpoint(c, forwardResult)
+		forwardResult.ResponseFactsKnown = responseFacts.ResponseFactsKnown
+		forwardResult.UsagePresent = responseFacts.UsagePresent
+		forwardResult.UsageSource = responseFacts.UsageSource
+		forwardResult.TerminalSeen = responseFacts.TerminalSeen
+		forwardResult.TerminalValid = responseFacts.TerminalValid
+		forwardResult.ResponseBodyKind = responseFacts.ResponseBodyKind
+		forwardResult.UpstreamRecoveryHint = resilience.StateFrom(ctx).UpstreamRecoveryHint()
+
 		return forwardResult, partialErr
 	}
 }

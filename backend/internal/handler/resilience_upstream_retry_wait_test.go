@@ -247,6 +247,10 @@ func TestUpstreamRetryWaitIgnoresUnprovenAndCanceledHints(t *testing.T) {
 			}
 			status := applyExhaustedRetryHint(c, &upstreamWaitAdvisor{}, http.StatusServiceUnavailable)
 			(&OpenAIGatewayHandler{}).handleStreamingAwareError(c, status, "server_error", "Busy", true)
+			if kind == "canceled" {
+				require.NotContains(t, rec.Body.String(), "event: response.failed")
+				return
+			}
 			failed := upstreamWaitFailure(t, rec.Body.String())
 			require.False(t, failed.Get("headers").Exists())
 			require.Equal(t, "Busy", failed.Get("message").String())

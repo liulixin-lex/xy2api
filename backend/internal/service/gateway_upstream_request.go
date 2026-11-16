@@ -18,7 +18,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
+func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (request *http.Request, wireBody []byte, retErr error) {
+	recordTarget := beginAnthropicUpstreamTarget(ctx, account)
+	defer func() { recordTarget(request) }()
 	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr
@@ -37,7 +39,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, nil, err
 			}
-			targetURL = validatedURL + "/v1/messages?beta=true"
+			parsedURL, err := url.Parse(buildOpenAIEndpointURL(validatedURL, "/v1/messages"))
+			if err != nil {
+				return nil, nil, err
+			}
+			query := parsedURL.Query()
+			query.Set("beta", "true")
+			parsedURL.RawQuery = query.Encode()
+			targetURL = parsedURL.String()
 		}
 	} else if account.IsCustomBaseURLEnabled() {
 		customURL := account.GetCustomBaseURL()

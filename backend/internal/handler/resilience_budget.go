@@ -39,6 +39,32 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // attempt or the upstream refused the request content. Every failover loop
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
+	st := resilience.StateFrom(ctx)
+	if failoverErr != nil && failoverErr.PreDispatchSelectionInvalidated {
+		return true
+	}
+	if failoverErr != nil {
+		st.SetLastUpstreamFailure(failoverErr)
+		hint := failoverErr.UpstreamRecoveryHint
+		if hint == nil {
+			hint = st.UpstreamRecoveryHint()
+		}
+		if hint != nil {
+			st.NoteAccountRetryNotBefore(accountID, *hint)
+			if latest, ok := st.AccountRetryNotBefore(accountID); ok {
+				hint = &latest
+			}
+			st.SetUpstreamRecoveryHint(hint)
+			if st != nil {
+				failoverErr.UpstreamRecoveryHint = st.UpstreamRecoveryHint()
+			} else {
+				failoverErr.UpstreamRecoveryHint = hint
+			}
+		}
+		if target := st.UpstreamAttemptTarget(); target != nil && target.AccountID == accountID {
+			failoverErr.UpstreamTarget = target
+		}
+	}
 	if failoverErr != nil && failoverErr.Reason == service.OpenAIStateRepairReason {
 		b := requestBudget(ctx)
 		now := time.Now()
@@ -109,6 +135,9 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 // waits beyond the cap or the remaining budget switch instead, and each
 // account gets at most budget.same_account_retry_max retries.
 func sameAccountRetryAllowedCtx(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError, retryCount, retryLimit int) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
 	if !sameAccountRetryAllowed(failoverErr, retryCount, retryLimit) {
 		return false
 	}
@@ -118,6 +147,24 @@ func sameAccountRetryAllowedCtx(ctx context.Context, accountID int64, failoverEr
 			return false
 		}
 	}
+	now := time.Now()
+	wait := sameAccountRetryDelayFor(failoverErr, retryCount+1)
+	hasHint := failoverErr.UpstreamRecoveryHint != nil && !failoverErr.UpstreamRecoveryHint.NotBefore.IsZero()
+	if hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(accountID); ok {
+		hasHint = true
+		wait = max(wait, hint.NotBefore.Sub(now))
+	}
+	if hasHint {
+		cap := time.Duration(resilience.Current().Budget.UpstreamRetryAfterCapSeconds) * time.Second
+		if cap > 0 && wait > cap {
+			return false
+		}
+		if ctx != nil {
+			if deadline, ok := ctx.Deadline(); ok && deadline.Sub(now) <= wait {
+				return false
+			}
+		}
+	}
 	b := requestBudget(ctx)
 	if b == nil {
 		return true
@@ -125,7 +172,7 @@ func sameAccountRetryAllowedCtx(ctx context.Context, accountID int64, failoverEr
 	if resilienceAccountLevelFailure(failoverErr, b.LastAttemptDuration()) {
 		return false
 	}
-	if wait := failoverErr.SameAccountRetryDelay; wait > 0 {
+	if hasHint || failoverErr.SameAccountRetryDelay > 0 {
 		if (b.RetryAfterCap() > 0 && wait > b.RetryAfterCap()) || b.ClampWait(wait, time.Now()) < wait {
 			return false
 		}
@@ -154,6 +201,13 @@ func resilienceAccountLevelFailure(failoverErr *service.UpstreamFailoverError, a
 // resilienceRetryDelay jitters a back-off by ±20 % and bounds it by the
 // remaining budget.
 func resilienceRetryDelay(ctx context.Context, d time.Duration) time.Duration {
+	if hint := resilience.StateFrom(ctx).UpstreamRecoveryHint(); hint != nil && !hint.NotBefore.IsZero() {
+		// The admission gate already checked the cap/budget. Never turn an
+		// upstream lower bound into an earlier send by clamping or jittering it.
+		if wait := time.Until(hint.NotBefore); wait > 0 {
+			return max(d, wait)
+		}
+	}
 	b := requestBudget(ctx)
 	if b == nil || d <= 0 {
 		return d

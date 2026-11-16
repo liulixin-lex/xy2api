@@ -100,6 +100,36 @@ func Takeover(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldTakeover, v))
 }
 
+// RequestScope applies equality check predicate on the "request_scope" field. It's identical to RequestScopeEQ.
+func RequestScope(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestScope, v))
+}
+
+// UsageObserved applies equality check predicate on the "usage_observed" field. It's identical to UsageObservedEQ.
+func UsageObserved(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageObserved, v))
+}
+
+// UsageSource applies equality check predicate on the "usage_source" field. It's identical to UsageSourceEQ.
+func UsageSource(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageSource, v))
+}
+
+// TerminalEventSeen applies equality check predicate on the "terminal_event_seen" field. It's identical to TerminalEventSeenEQ.
+func TerminalEventSeen(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTerminalEventSeen, v))
+}
+
+// TerminalEventValid applies equality check predicate on the "terminal_event_valid" field. It's identical to TerminalEventValidEQ.
+func TerminalEventValid(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTerminalEventValid, v))
+}
+
+// ResponseBodyType applies equality check predicate on the "response_body_type" field. It's identical to ResponseBodyTypeEQ.
+func ResponseBodyType(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResponseBodyType, v))
+}
+
 // Model applies equality check predicate on the "model" field. It's identical to ModelEQ.
 func Model(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))
@@ -758,6 +788,311 @@ func TakeoverIsNil() predicate.UsageLog {
 // TakeoverNotNil applies the NotNil predicate on the "takeover" field.
 func TakeoverNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldTakeover))
+}
+
+// RequestScopeEQ applies the EQ predicate on the "request_scope" field.
+func RequestScopeEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestScope, v))
+}
+
+// RequestScopeNEQ applies the NEQ predicate on the "request_scope" field.
+func RequestScopeNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRequestScope, v))
+}
+
+// RequestScopeIn applies the In predicate on the "request_scope" field.
+func RequestScopeIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRequestScope, vs...))
+}
+
+// RequestScopeNotIn applies the NotIn predicate on the "request_scope" field.
+func RequestScopeNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRequestScope, vs...))
+}
+
+// RequestScopeGT applies the GT predicate on the "request_scope" field.
+func RequestScopeGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRequestScope, v))
+}
+
+// RequestScopeGTE applies the GTE predicate on the "request_scope" field.
+func RequestScopeGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRequestScope, v))
+}
+
+// RequestScopeLT applies the LT predicate on the "request_scope" field.
+func RequestScopeLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRequestScope, v))
+}
+
+// RequestScopeLTE applies the LTE predicate on the "request_scope" field.
+func RequestScopeLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRequestScope, v))
+}
+
+// RequestScopeContains applies the Contains predicate on the "request_scope" field.
+func RequestScopeContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldRequestScope, v))
+}
+
+// RequestScopeHasPrefix applies the HasPrefix predicate on the "request_scope" field.
+func RequestScopeHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldRequestScope, v))
+}
+
+// RequestScopeHasSuffix applies the HasSuffix predicate on the "request_scope" field.
+func RequestScopeHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldRequestScope, v))
+}
+
+// RequestScopeIsNil applies the IsNil predicate on the "request_scope" field.
+func RequestScopeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRequestScope))
+}
+
+// RequestScopeNotNil applies the NotNil predicate on the "request_scope" field.
+func RequestScopeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRequestScope))
+}
+
+// RequestScopeEqualFold applies the EqualFold predicate on the "request_scope" field.
+func RequestScopeEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldRequestScope, v))
+}
+
+// RequestScopeContainsFold applies the ContainsFold predicate on the "request_scope" field.
+func RequestScopeContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldRequestScope, v))
+}
+
+// UsageObservedEQ applies the EQ predicate on the "usage_observed" field.
+func UsageObservedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageObserved, v))
+}
+
+// UsageObservedNEQ applies the NEQ predicate on the "usage_observed" field.
+func UsageObservedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUsageObserved, v))
+}
+
+// UsageObservedIsNil applies the IsNil predicate on the "usage_observed" field.
+func UsageObservedIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldUsageObserved))
+}
+
+// UsageObservedNotNil applies the NotNil predicate on the "usage_observed" field.
+func UsageObservedNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldUsageObserved))
+}
+
+// UsageSourceEQ applies the EQ predicate on the "usage_source" field.
+func UsageSourceEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageSource, v))
+}
+
+// UsageSourceNEQ applies the NEQ predicate on the "usage_source" field.
+func UsageSourceNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUsageSource, v))
+}
+
+// UsageSourceIn applies the In predicate on the "usage_source" field.
+func UsageSourceIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldUsageSource, vs...))
+}
+
+// UsageSourceNotIn applies the NotIn predicate on the "usage_source" field.
+func UsageSourceNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldUsageSource, vs...))
+}
+
+// UsageSourceGT applies the GT predicate on the "usage_source" field.
+func UsageSourceGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldUsageSource, v))
+}
+
+// UsageSourceGTE applies the GTE predicate on the "usage_source" field.
+func UsageSourceGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldUsageSource, v))
+}
+
+// UsageSourceLT applies the LT predicate on the "usage_source" field.
+func UsageSourceLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldUsageSource, v))
+}
+
+// UsageSourceLTE applies the LTE predicate on the "usage_source" field.
+func UsageSourceLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldUsageSource, v))
+}
+
+// UsageSourceContains applies the Contains predicate on the "usage_source" field.
+func UsageSourceContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldUsageSource, v))
+}
+
+// UsageSourceHasPrefix applies the HasPrefix predicate on the "usage_source" field.
+func UsageSourceHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldUsageSource, v))
+}
+
+// UsageSourceHasSuffix applies the HasSuffix predicate on the "usage_source" field.
+func UsageSourceHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldUsageSource, v))
+}
+
+// UsageSourceIsNil applies the IsNil predicate on the "usage_source" field.
+func UsageSourceIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldUsageSource))
+}
+
+// UsageSourceNotNil applies the NotNil predicate on the "usage_source" field.
+func UsageSourceNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldUsageSource))
+}
+
+// UsageSourceEqualFold applies the EqualFold predicate on the "usage_source" field.
+func UsageSourceEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldUsageSource, v))
+}
+
+// UsageSourceContainsFold applies the ContainsFold predicate on the "usage_source" field.
+func UsageSourceContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldUsageSource, v))
+}
+
+// TerminalEventSeenEQ applies the EQ predicate on the "terminal_event_seen" field.
+func TerminalEventSeenEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTerminalEventSeen, v))
+}
+
+// TerminalEventSeenNEQ applies the NEQ predicate on the "terminal_event_seen" field.
+func TerminalEventSeenNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTerminalEventSeen, v))
+}
+
+// TerminalEventSeenIsNil applies the IsNil predicate on the "terminal_event_seen" field.
+func TerminalEventSeenIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTerminalEventSeen))
+}
+
+// TerminalEventSeenNotNil applies the NotNil predicate on the "terminal_event_seen" field.
+func TerminalEventSeenNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTerminalEventSeen))
+}
+
+// TerminalEventValidEQ applies the EQ predicate on the "terminal_event_valid" field.
+func TerminalEventValidEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTerminalEventValid, v))
+}
+
+// TerminalEventValidNEQ applies the NEQ predicate on the "terminal_event_valid" field.
+func TerminalEventValidNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTerminalEventValid, v))
+}
+
+// TerminalEventValidIsNil applies the IsNil predicate on the "terminal_event_valid" field.
+func TerminalEventValidIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTerminalEventValid))
+}
+
+// TerminalEventValidNotNil applies the NotNil predicate on the "terminal_event_valid" field.
+func TerminalEventValidNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTerminalEventValid))
+}
+
+// ResponseBodyTypeEQ applies the EQ predicate on the "response_body_type" field.
+func ResponseBodyTypeEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeNEQ applies the NEQ predicate on the "response_body_type" field.
+func ResponseBodyTypeNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeIn applies the In predicate on the "response_body_type" field.
+func ResponseBodyTypeIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldResponseBodyType, vs...))
+}
+
+// ResponseBodyTypeNotIn applies the NotIn predicate on the "response_body_type" field.
+func ResponseBodyTypeNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldResponseBodyType, vs...))
+}
+
+// ResponseBodyTypeGT applies the GT predicate on the "response_body_type" field.
+func ResponseBodyTypeGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeGTE applies the GTE predicate on the "response_body_type" field.
+func ResponseBodyTypeGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeLT applies the LT predicate on the "response_body_type" field.
+func ResponseBodyTypeLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeLTE applies the LTE predicate on the "response_body_type" field.
+func ResponseBodyTypeLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeContains applies the Contains predicate on the "response_body_type" field.
+func ResponseBodyTypeContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeHasPrefix applies the HasPrefix predicate on the "response_body_type" field.
+func ResponseBodyTypeHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeHasSuffix applies the HasSuffix predicate on the "response_body_type" field.
+func ResponseBodyTypeHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeIsNil applies the IsNil predicate on the "response_body_type" field.
+func ResponseBodyTypeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldResponseBodyType))
+}
+
+// ResponseBodyTypeNotNil applies the NotNil predicate on the "response_body_type" field.
+func ResponseBodyTypeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldResponseBodyType))
+}
+
+// ResponseBodyTypeEqualFold applies the EqualFold predicate on the "response_body_type" field.
+func ResponseBodyTypeEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldResponseBodyType, v))
+}
+
+// ResponseBodyTypeContainsFold applies the ContainsFold predicate on the "response_body_type" field.
+func ResponseBodyTypeContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldResponseBodyType, v))
+}
+
+// DegradationsIsNil applies the IsNil predicate on the "degradations" field.
+func DegradationsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldDegradations))
+}
+
+// DegradationsNotNil applies the NotNil predicate on the "degradations" field.
+func DegradationsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldDegradations))
+}
+
+// PricingSourceIsNil applies the IsNil predicate on the "pricing_source" field.
+func PricingSourceIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldPricingSource))
+}
+
+// PricingSourceNotNil applies the NotNil predicate on the "pricing_source" field.
+func PricingSourceNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSource))
 }
 
 // ModelEQ applies the EQ predicate on the "model" field.

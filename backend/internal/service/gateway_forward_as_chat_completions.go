@@ -34,6 +34,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	body []byte,
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
+	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	opts := m7BridgeConversionOptions(ctx, account)
+	defer func() { copyAnthropicUpstreamTarget(ctx, err) }()
 	startTime := time.Now()
 	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
@@ -53,12 +56,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	originalModel := ccReq.Model
 	clientStream := ccReq.Stream
 
-	// 2. Convert CC → Responses → Anthropic (chained conversion)
-	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
-	if err != nil {
-		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
-	}
-
 	// Resolve the final upstream model before model-specific conversion.
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -75,13 +72,28 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			mappedModel = normalized
 		}
 	}
+	body, err = applyM7FinalReasoning(ctx, c, account, body, mappedModel, "chat", PreOutputProtocolChat)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, &ccReq); err != nil {
+		return nil, err
+	}
+	ccReq.Model = mappedModel
+	// 2. Convert CC → Responses → Anthropic (chained conversion)
+	responsesReq, err := apicompat.ChatCompletionsToResponsesWithOptions(&ccReq, opts)
+	if err != nil {
+		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
+	}
+
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	anthropicReq, err := m7ResponsesToAnthropicRequest(responsesReq, opts)
 	if err != nil {
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 
 	// 3. Force upstream streaming
+	m7ForwardChatMetadata(responsesReq, anthropicReq, opts)
 	anthropicReq.Stream = true
 	reqStream := true
 
@@ -101,6 +113,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
 
+	anthropicBody, err = finalizeM7ReasoningPolicy(ctx, c, account, anthropicBody, mappedModel, "anthropic", PreOutputProtocolChat)
+	if err != nil {
+		return nil, err
+	}
 	// 6. Apply Claude Code mimicry for OAuth accounts.
 	// Chat Completions 协议进来的请求永远不是 Claude Code 客户端，所以对 OAuth 账号
 	// 必须完整执行 /v1/messages 主路径上的伪装链路（system 重写 + normalize + metadata 注入），
@@ -143,7 +159,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
 	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})
@@ -203,9 +218,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	}
 
 	return result, handleErr
@@ -238,11 +253,14 @@ func extractCCReasoningEffortFromBody(body []byte, modelCandidates ...string) *s
 func (s *GatewayService) handleCCBufferedFromAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
-) (_ *ForwardResult, retErr error) {
+	options ...apicompat.ConversionOptions,
+) (result *ForwardResult, retErr error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -254,12 +272,34 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	var evidence anthropicBufferedEvidence
+	var readErr error
+	defer func() {
+		facts := evidence.facts()
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		// A failed buffered response is billable only when it retained metered tokens.
+		// Keep response evidence in RequestState even when there is no partial result.
+		if result == nil && retErr != nil && usage.hasObservedTokens() {
+			result = &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}
+		}
+		if result != nil {
+			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
+			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
+		}
+	}()
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		// SSE 规范允许 `event:xxx`（冒号后无空格）：Kimi 等 Anthropic 兼容上游
 		// 返回紧凑格式，严格匹配 "event: " 会丢弃全部事件（#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
+		if data, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(data) == "[DONE]" {
+			evidence.observe("", "[DONE]")
+			continue
+		}
+		eventType, ok := extractOpenAISSEEventLine(line)
+		if !ok {
 			continue
 		}
 
@@ -271,6 +311,15 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 			continue
 		}
 
+		evidence.observe(eventType, payload)
+		if c != nil && c.Request != nil {
+			if opts.Bridge == nil {
+				recordAnthropicTerminalMapping(c.Request.Context(), payload)
+			}
+		}
+		if evidence.err != nil {
+			break
+		}
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
@@ -310,7 +359,8 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	readErr = scanner.Err()
+	if err := readErr; err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("forward_as_cc buffered: read error",
 				zap.Error(err),
@@ -319,9 +369,8 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 	}
 
-	if finalResp == nil {
-		err := fmt.Errorf("upstream stream ended without response")
-		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
+	if err := evidence.finish(readErr, finalResp != nil); err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a complete response")
 		return nil, err
 	}
 
@@ -337,7 +386,18 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	// Chain: Anthropic → Responses → Chat Completions
 
-	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
+	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
+	if conversionErr != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		return nil, conversionErr
+	}
+	if err := m7RestoreBridgeResponse(responsesResp, opts); err != nil {
+		return nil, err
+	}
+	if err := apicompat.ValidateResponsesForChat(responsesResp); opts.Bridge != nil && err != nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		return nil, err
+	}
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
 
 	if s.responseHeaderFilter != nil {
@@ -380,10 +440,13 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	options ...apicompat.ConversionOptions,
 ) (*ForwardResult, error) {
+	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
 	// Use Anthropic→Responses state machine, then convert Responses→CC
+	bridgeRestorer := m7BridgeStreamRestorer(opts)
 	anthState := apicompat.NewAnthropicEventToResponsesState()
 	anthState.Model = originalModel
 	ccState := apicompat.NewResponsesEventToChatState()
@@ -417,6 +480,10 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		} else {
 			ccChunks = apicompat.ResponsesEventToChatChunks(resEvt, ccState)
 		}
+		if err := ccState.Err(); err != nil {
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			return nil
+		}
 		var frames []string
 		for _, chunk := range ccChunks {
 			sse, err := apicompat.ChatChunkToSSE(chunk)
@@ -440,15 +507,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			firstTokenMs = &ms
 		}
 
-		// Extract usage from message_delta
-		if event.Type == "message_delta" && event.Usage != nil {
-			mergeAnthropicUsage(&usage, *event.Usage)
-		}
-		// Also capture usage from message_start (carries cache fields)
-		if event.Type == "message_start" && event.Message != nil {
-			mergeAnthropicUsage(&usage, event.Message.Usage)
-		}
-
 		// Keep the outward Responses/Chat usage on the same normalized buckets used
 		// for billing, including converter handlers that consume event usage.
 		syncAnthropicResponsesUsage(anthState, usage)
@@ -456,7 +514,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 
 		// Chain: Anthropic event → Responses events → CC chunks
 		var frames []string
-		for _, resEvt := range apicompat.AnthropicEventToResponsesEvents(event, anthState) {
+		for _, resEvt := range m7RestoreBridgeEvents(apicompat.AnthropicEventToResponsesEventsWithBridgeOptions(event, anthState, opts), bridgeRestorer) {
 			frames = append(frames, chunkFrames(&resEvt, hold)...)
 		}
 		return frames
@@ -464,14 +522,22 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 
 	// Finalize both state machines, then the [DONE] marker.
 	finalizeStream := func() []string {
+		if !stream.sawStop || stream.sawFailure {
+			apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, false)
+			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a terminal event")
+			return nil
+		}
 		var frames []string
-		for _, resEvt := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
+		for _, resEvt := range m7RestoreBridgeEvents(apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(anthState, opts), bridgeRestorer) {
 			frames = append(frames, chunkFrames(&resEvt, false)...)
 		}
-		for _, chunk := range apicompat.FinalizeResponsesChatStream(ccState) {
+		for _, chunk := range apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, stream.sawStop && !stream.sawFailure) {
 			if sse, err := apicompat.ChatChunkToSSE(chunk); err == nil {
 				frames = append(frames, string(reverseToolNamesIfPresent(c, []byte(sse))))
 			}
+		}
+		if ccState.Err() != nil {
+			return nil
 		}
 		return append(frames, "data: [DONE]\n\n")
 	}
@@ -479,15 +545,39 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	// xy2api resilience (W1.1, W1.2): the driver reads the Anthropic stream,
 	// stages the role chunk and ends a broken stream with an error chunk.
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{
-		convert:  processAnthropicEvent,
+		observeUsage: func(event *apicompat.AnthropicStreamEvent) {
+			// Extract usage from message_delta
+			if event.Type == "message_delta" && event.Usage != nil {
+				mergeAnthropicUsage(&usage, *event.Usage)
+			}
+			// Also capture usage from message_start (carries cache fields)
+			if event.Type == "message_start" && event.Message != nil {
+				mergeAnthropicUsage(&usage, event.Message.Usage)
+			}
+		},
+		convert:                processAnthropicEvent,
+		terminalMappingHandled: opts.Bridge != nil,
+		conversionError: func() error {
+			if err := anthState.Err(); err != nil {
+				return err
+			}
+			return ccState.Err()
+		},
 		finalize: finalizeStream,
 		failure:  gatewayChatFailureFrames,
 	})
 	outcome := stream.run()
+	copyAnthropicUpstreamTarget(stream.ctx(), outcome.err)
 	if outcome.noResult {
 		return nil, outcome.err
 	}
 	result := resultWithUsage()
+	result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = outcome.ResponseFactsKnown, outcome.UsagePresent, outcome.UsageSource
+	result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = outcome.TerminalSeen, outcome.TerminalValid, outcome.ResponseBodyKind
+	if err := ccState.Err(); err != nil && outcome.err == nil {
+		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		outcome.err = err
+	}
 	result.ClientDisconnect = stream.guarded && stream.gone
 	return result, outcome.err
 }
@@ -495,13 +585,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 // writeGatewayCCError writes an error in OpenAI Chat Completions format for
 // the Anthropic-upstream CC forwarding path.
 func writeGatewayCCError(c *gin.Context, statusCode int, errType, message string) {
-	MarkResponseCommitted(c)
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	WriteTargetProtocolError(c, PreOutputProtocolChat, statusCode, errType, "", "", message)
 }
 
 // anthropicChatStreamHasUsage distinguishes an explicit zero-valued usage object

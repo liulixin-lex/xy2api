@@ -1,9 +1,13 @@
 package service
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -464,6 +468,7 @@ func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
 	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
 		"remote-model": {
 			"input_cost_per_token": 0.000001,
+ "output_cost_per_token": 0.000002,
 			"litellm_provider": "test",
 			"mode": "chat"
 		},
@@ -479,13 +484,15 @@ func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
 	remoteData, err := svc.parsePricingData([]byte(`{
 		"remote-model": {
 			"input_cost_per_token": 0.000002,
+ "output_cost_per_token": 0.000004,
 			"litellm_provider": "test",
 			"mode": "chat"
 		}
 	}`))
 	require.NoError(t, err)
 
-	merged := svc.mergeFallbackPricingData(remoteData)
+	merged, err := svc.mergeFallbackPricingData(remoteData)
+	require.NoError(t, err)
 	require.InDelta(t, 0.000002, merged["remote-model"].InputCostPerToken, 1e-12)
 	require.NotNil(t, merged["gemini-3.1-flash-lite-image"])
 	require.InDelta(t, 0.034, merged["gemini-3.1-flash-lite-image"].OutputCostPerImage, 1e-12)
@@ -519,7 +526,7 @@ func TestGetModelPricing_Gpt53CodexFallbackStillUsesGpt52Codex(t *testing.T) {
 	require.Same(t, gpt52CodexPricing, got)
 }
 
-func TestGetModelPricing_OpenAIFallbackMatchedLoggedAsInfo(t *testing.T) {
+func TestGetModelPricing_OpenAIFallbackLookupDoesNotLog(t *testing.T) {
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 
@@ -533,7 +540,7 @@ func TestGetModelPricing_OpenAIFallbackMatchedLoggedAsInfo(t *testing.T) {
 	got := svc.GetModelPricing("gpt-5.3-codex")
 	require.Same(t, gpt52CodexPricing, got)
 
-	require.True(t, logSink.ContainsMessageAtLevel("[Pricing] OpenAI fallback matched gpt-5.3-codex -> gpt-5.2-codex", "info"))
+	require.False(t, logSink.ContainsMessageAtLevel("[Pricing] OpenAI fallback matched gpt-5.3-codex -> gpt-5.2-codex", "info"))
 	require.False(t, logSink.ContainsMessageAtLevel("[Pricing] OpenAI fallback matched gpt-5.3-codex -> gpt-5.2-codex", "warn"))
 }
 
@@ -1190,4 +1197,221 @@ func TestCalculateCost_ClaudeSonnetCatalogLadderIsDataDriven(t *testing.T) {
 	cost, err = svc.CalculateCost("claude-sonnet-4-5", under, 1.0)
 	require.NoError(t, err)
 	require.False(t, cost.LongContextBillingApplied, "恰好 200000 不进高档（严格大于）")
+}
+
+// pricingHashRemote models independently published catalog and hash responses.
+type pricingHashRemote struct {
+	body, hash string
+	err        error
+	downloads  int
+}
+
+func (c *pricingHashRemote) FetchPricingJSON(context.Context, string) ([]byte, error) {
+	c.downloads++
+	return []byte(c.body), c.err
+}
+
+func (c *pricingHashRemote) FetchHashText(context.Context, string) (string, error) {
+	return c.hash, nil
+}
+
+func TestPricingRemoteHashAheadOfBody(t *testing.T) {
+	oldBody := `{"fixture":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`
+	newBody := `{"fixture":{"input_cost_per_token":0.000003,"output_cost_per_token":0.000004}}`
+	oldHash := fmt.Sprintf("%x", sha256.Sum256([]byte(oldBody)))
+	newHash := fmt.Sprintf("%x", sha256.Sum256([]byte(newBody)))
+	for _, mode := range []string{"ahead", "equal", "no_hash", "download_failure", "override_change"} {
+		t.Run(mode, func(t *testing.T) {
+			remote := &pricingHashRemote{body: oldBody, hash: oldHash}
+			cfg := &config.Config{Pricing: config.PricingConfig{DataDir: t.TempDir(), RemoteURL: "https://example.com/pricing.json", HashURL: "https://example.com/pricing.sha256"}}
+			svc := NewPricingService(cfg, remote)
+			require.NoError(t, svc.downloadPricingData())
+			switch mode {
+			case "ahead", "override_change":
+				remote.hash = newHash
+			case "equal":
+				remote.hash = strings.ToUpper(oldHash)
+			case "no_hash":
+				cfg.Pricing.HashURL = ""
+				remote.hash = ""
+			case "download_failure":
+				remote.hash = newHash
+				remote.err = fmt.Errorf("fixture download failure")
+			}
+			if mode == "override_change" {
+				cfg.Pricing.OverrideFile = filepath.Join(cfg.Pricing.DataDir, "override.json")
+				require.NoError(t, os.WriteFile(cfg.Pricing.OverrideFile, []byte(`{"fixture":{"input_cost_per_token":0.000005}}`), 0600))
+			}
+			err := svc.downloadPricingData()
+			if mode == "download_failure" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			hashFile, err := os.ReadFile(svc.getHashFilePath())
+			require.NoError(t, err)
+			t.Logf("first download: actual=%s anchor=%s file=%s", oldHash, svc.localHash, strings.TrimSpace(string(hashFile)))
+			require.Equal(t, oldHash, svc.localHash)
+			require.Equal(t, oldHash, strings.TrimSpace(string(hashFile)))
+			if mode == "ahead" || mode == "override_change" {
+				remote.body = newBody
+				before := remote.downloads
+				require.NoError(t, svc.syncWithRemote())
+				require.Equal(t, before+1, remote.downloads)
+				require.Equal(t, newHash, svc.localHash)
+				hashFile, err = os.ReadFile(svc.getHashFilePath())
+				require.NoError(t, err)
+				require.Equal(t, newHash, strings.TrimSpace(string(hashFile)))
+				wantInput := 3e-6
+				if mode == "override_change" {
+					wantInput = 5e-6
+					require.Equal(t, svc.customPricingFilesFingerprint(), svc.customFilesHash)
+				}
+				require.InDelta(t, wantInput, svc.pricingData["fixture"].InputCostPerToken, 1e-12)
+				t.Logf("second download: anchor=%s downloads=%d", svc.localHash, remote.downloads)
+			}
+		})
+	}
+}
+
+func TestPricingImportKeepsLastGoodRevision(t *testing.T) {
+	t.Run("cache_only_and_bundled_catalog", func(t *testing.T) {
+		bundled, err := os.ReadFile("../../resources/model-pricing/model_prices_and_context_window.json")
+		require.NoError(t, err)
+		dir := t.TempDir()
+		fallback := filepath.Join(dir, "fallback.json")
+		require.NoError(t, os.WriteFile(fallback, bundled, 0600))
+		svc := NewPricingService(&config.Config{Pricing: config.PricingConfig{FallbackFile: fallback}}, nil)
+		for _, body := range [][]byte{bundled, []byte(`{"gemini-3-pro-preview":{"cache_creation_input_token_cost":0.000001},"gpt-image-1":{"input_cost_per_token":0.000005,"output_cost_per_image_token":0.00004}}`)} {
+			data, _, err := svc.buildPricingData(body)
+			require.NoError(t, err)
+			baseline, err := (&PricingService{}).parsePricingData(bundled)
+			require.NoError(t, err)
+			require.Len(t, data, len(baseline))
+			require.Equal(t, baseline["gemini-3-pro-preview"], data["gemini-3-pro-preview"])
+			require.Equal(t, 5e-6, data["gpt-image-1"].InputCostPerToken)
+			require.Equal(t, 4e-5, data["gpt-image-1"].OutputCostPerImageToken)
+		}
+		_, _, err = svc.buildPricingData([]byte(`{"cache-only":{"cache_creation_input_token_cost":-1}}`))
+		require.Error(t, err)
+	})
+
+	cases := []struct {
+		name, layer, body string
+		valid             bool
+	}{
+		{"main_negative", "main", `{"fixture":{"input_cost_per_token":-1,"output_cost_per_token":1}}`, false},
+		{"main_one_sided", "main", `{"fixture":{"input_cost_per_token":1}}`, false},
+		{"main_overflow", "main", `{"fixture":{"input_cost_per_token":1e999,"output_cost_per_token":1}}`, false},
+		{"fallback_malformed", "fallback", `{`, false},
+		{"fallback_negative", "fallback", `{"fallback":{"input_cost_per_token":-1,"output_cost_per_token":1}}`, false},
+		{"override_missing_dimension", "override", `{"new":{"input_cost_per_token":1}}`, false},
+		{"override_scalar", "override", `{"fixture":1}`, false},
+		{"override_malformed", "override", `{`, false},
+		{"override_null_root", "override", `null`, false},
+		{"partial_override", "override", `{"remote-model":{"input_cost_per_token":3e-6}}`, true},
+		{"explicit_zero", "override", `{"remote-model":{"input_cost_per_token":0,"output_cost_per_token":0}}`, true},
+	}
+	for _, tc := range cases {
+		for _, operation := range []string{"download", "reload", "local"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				svc := newHotReloadPricingService(t, "", "")
+				require.NoError(t, os.WriteFile(svc.getHashFilePath(), []byte(svc.localHash+"\n"), 0644))
+				beforeHash, beforeCustom, beforeUpdated := svc.localHash, svc.customFilesHash, svc.lastUpdated
+				beforeData, err := json.Marshal(svc.pricingData)
+				require.NoError(t, err)
+				beforeFile, err := os.ReadFile(svc.getPricingFilePath())
+				require.NoError(t, err)
+				beforeHashFile, err := os.ReadFile(svc.getHashFilePath())
+				require.NoError(t, err)
+				body := hotReloadCatalogJSON
+				switch tc.layer {
+				case "main":
+					body = tc.body
+				case "fallback":
+					svc.cfg.Pricing.FallbackFile = filepath.Join(svc.cfg.Pricing.DataDir, "fallback.json")
+					require.NoError(t, os.WriteFile(svc.cfg.Pricing.FallbackFile, []byte(tc.body), 0644))
+				case "override":
+					svc.cfg.Pricing.OverrideFile = filepath.Join(svc.cfg.Pricing.DataDir, "override.json")
+					require.NoError(t, os.WriteFile(svc.cfg.Pricing.OverrideFile, []byte(tc.body), 0644))
+				}
+				switch operation {
+				case "download":
+					svc.cfg.Pricing.RemoteURL = "https://example.com/pricing.json"
+					svc.remoteClient = &pricingHashRemote{body: body}
+					err = svc.downloadPricingData()
+				case "reload":
+					if tc.layer == "main" {
+						require.NoError(t, os.WriteFile(svc.getPricingFilePath(), []byte(body), 0644))
+						beforeFile = []byte(body)
+					}
+					err = svc.reloadCustomPricingLayers()
+				case "local":
+					candidate := filepath.Join(svc.cfg.Pricing.DataDir, "candidate.json")
+					require.NoError(t, os.WriteFile(candidate, []byte(body), 0644))
+					err = svc.loadPricingData(candidate)
+				}
+				if tc.valid {
+					require.NoError(t, err)
+					if tc.name == "explicit_zero" {
+						require.Zero(t, svc.pricingData["remote-model"].InputCostPerToken)
+						require.Zero(t, svc.pricingData["remote-model"].OutputCostPerToken)
+					} else {
+						require.InDelta(t, 3e-6, svc.pricingData["remote-model"].InputCostPerToken, 1e-12)
+						require.InDelta(t, 2e-6, svc.pricingData["remote-model"].OutputCostPerToken, 1e-12)
+					}
+					return
+				}
+				require.Error(t, err)
+				afterData, err := json.Marshal(svc.pricingData)
+				require.NoError(t, err)
+				require.JSONEq(t, string(beforeData), string(afterData))
+				require.Equal(t, beforeHash, svc.localHash)
+				require.Equal(t, beforeCustom, svc.customFilesHash)
+				require.Equal(t, beforeUpdated, svc.lastUpdated)
+				afterFile, err := os.ReadFile(svc.getPricingFilePath())
+				require.NoError(t, err)
+				require.Equal(t, beforeFile, afterFile)
+				afterHashFile, err := os.ReadFile(svc.getHashFilePath())
+				require.NoError(t, err)
+				require.Equal(t, beforeHashFile, afterHashFile)
+			})
+		}
+	}
+}
+
+func TestPricingStartupFallbackIsAtomic(t *testing.T) {
+	t.Run("write_failure_keeps_cache", func(t *testing.T) {
+		svc := newHotReloadPricingService(t, "", "")
+		before, err := os.ReadFile(svc.getPricingFilePath())
+		require.NoError(t, err)
+		hash := svc.localHash
+		require.NoError(t, os.Mkdir(svc.getHashFilePath(), 0755))
+		svc.cfg.Pricing.FallbackFile = filepath.Join(svc.cfg.Pricing.DataDir, "fallback.json")
+		require.NoError(t, os.WriteFile(svc.cfg.Pricing.FallbackFile, []byte(`{"new":{"input_cost_per_token":0,"output_cost_per_token":0}}`), 0644))
+		require.Error(t, svc.useFallbackPricing())
+		after, err := os.ReadFile(svc.getPricingFilePath())
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		require.Equal(t, hash, svc.localHash)
+	})
+	for _, fallback := range []string{`{`, `{"fixture":{"input_cost_per_token":-1,"output_cost_per_token":1}}`} {
+		t.Run(fallback, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &config.Config{Pricing: config.PricingConfig{DataDir: dir, RemoteURL: "https://example.com/pricing.json", FallbackFile: filepath.Join(dir, "fallback.json")}}
+			svc := NewPricingService(cfg, &pricingHashRemote{err: fmt.Errorf("fixture offline")})
+			require.NoError(t, os.WriteFile(svc.getPricingFilePath(), []byte("previous cache"), 0644))
+			require.NoError(t, os.WriteFile(svc.getHashFilePath(), []byte("previous hash"), 0644))
+			require.NoError(t, os.WriteFile(cfg.Pricing.FallbackFile, []byte(fallback), 0644))
+			require.Error(t, svc.Initialize())
+			data, err := os.ReadFile(svc.getPricingFilePath())
+			require.NoError(t, err)
+			require.Equal(t, "previous cache", string(data))
+			hash, err := os.ReadFile(svc.getHashFilePath())
+			require.NoError(t, err)
+			require.Equal(t, "previous hash", string(hash))
+			require.Empty(t, svc.pricingData)
+			require.Empty(t, svc.localHash)
+		})
+	}
 }

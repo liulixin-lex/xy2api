@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -331,6 +333,31 @@ func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 
 // sendSchedHTTP is used only by the enumerated text forwarding paths.
 func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, body []byte, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
+	st := resilience.StateFrom(ctx)
+	*owner = nil
+	if st != nil {
+		// Legacy service calls may carry state only for stream accounting and
+		// deliberately detach their first send. Revalidate admitted requests
+		// and handler retries without changing that existing behavior.
+		if err := ctx.Err(); err != nil && (st.Budget() != nil || st.LastUpstreamFailure() != nil) {
+			if !errors.Is(err, context.Canceled) {
+				return nil, schedHTTPPreDispatchFailure(ctx)
+			}
+			return nil, err
+		}
+		now := time.Now()
+		if hint, ok := st.AccountRetryNotBefore(account.ID); ok && now.Before(hint.NotBefore) {
+			return nil, schedHTTPPreDispatchFailure(ctx)
+		}
+		// Handler retries are admitted after their wait. In-service repairs
+		// have a separate grant, including encrypted repair on the last attempt;
+		// do not revoke that grant by checking the handler attempt count again.
+	}
+	st.SetUpstreamRecoveryHint(nil)
+	st.SetUpstreamAttemptTarget(nil)
+	if target := schedHTTPAttemptTarget(account, req); target != nil {
+		st.SetUpstreamAttemptTarget(target)
+	}
 	// Builders may add group prompts or normalize cache fields after the caller's
 	// payload is prepared; ContentLength is the final wire length without a reread.
 	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
@@ -342,6 +369,64 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	}
 	return resp, err
 }
+
+func schedHTTPPreDispatchFailure(ctx context.Context) *UpstreamFailoverError {
+	previous := resilience.StateFrom(ctx).LastUpstreamFailure()
+	var failure *UpstreamFailoverError
+	if errors.As(previous, &failure) && failure != nil {
+		copy := *failure
+		copy.PreDispatchSelectionInvalidated = true
+		copy.NextAccountAction = NextAccountStop
+		copy.cause = previous
+		return &copy
+	}
+	return &UpstreamFailoverError{
+		StatusCode: http.StatusServiceUnavailable, ClientStatusCode: http.StatusServiceUnavailable,
+		ClientMessage: "Service temporarily unavailable", NextAccountAction: NextAccountStop,
+		PreDispatchSelectionInvalidated: true, cause: previous,
+	}
+}
+
+// schedHTTPAttemptTarget describes the actual built endpoint, without request
+// credentials or path/query data. Unknown endpoint shapes keep protocol unknown.
+func schedHTTPAttemptTarget(account *Account, req *http.Request) *resilience.UpstreamAttemptTarget {
+	if account == nil || account.ID <= 0 || req == nil || req.URL == nil {
+		return nil
+	}
+	u := req.URL
+	scheme, host := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname())
+	if (scheme != "http" && scheme != "https") || host == "" {
+		return nil
+	}
+	port := u.Port()
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n <= 0 || n > 65535 {
+			return nil
+		}
+		port = strconv.Itoa(n)
+	}
+	if scheme == "http" && port == "80" || scheme == "https" && port == "443" {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	protocol := ""
+	path := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/responses"), strings.HasSuffix(path, "/responses/compact"):
+		protocol = PreOutputProtocolResponses
+	case strings.HasSuffix(path, "/chat/completions"):
+		protocol = PreOutputProtocolChat
+	case strings.HasSuffix(path, "/messages"):
+		protocol = PreOutputProtocolAnthropic
+	}
+	return &resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: protocol, Origin: scheme + "://" + host}
+}
+
 func (a *schedAttemptCapture) noteError(err error) {
 	if a == nil || err == nil {
 		return

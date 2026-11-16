@@ -165,6 +165,9 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	if !account.IsActive() || !account.Schedulable {
 		return false
 	}
+	if !rawQuotaAppliesToTarget(ctx, account) {
+		return false
+	}
 
 	now := time.Now().UTC()
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
@@ -338,6 +341,10 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
 		return false
 	}
+	if statusCode == http.StatusForbidden && resilience.Current().FailureOn() &&
+		classifyUpstreamHTTP(statusCode, headers, responseBody, "").ContentPolicy() {
+		return false
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
@@ -409,11 +416,21 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 		fableCreditsRequired := s.persistAnthropicFableCreditsRequired(ctx, account, headers, responseBody, firstRequestedModel(requestedModel))
 		// 7d_oi 是 Fable 模型专属的 7d 窗口：只标记模型级限流，账号对其他模型仍可调度。
 		fableLimited := s.persistAnthropicFableWindowLimit(ctx, account, headers)
-		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+		// An explicit model entitlement/window must not become a relay key limit.
+		if (fableCreditsRequired || fableLimited) && selectAnthropicExhaustedWindow(headers, time.Now()) == nil {
 			return false
 		}
-		if fableCreditsRequired || fableLimited {
-			return false
+		target, known := cooldownAttemptTarget(ctx, account)
+		relay := known && !cooldownTargetOfficial(account, target)
+		// Relay windows cannot override configured rules. handle429 applies the
+		// capped fallback only after the ordinary rule path has had its turn.
+		if !relay {
+			if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+				return false
+			}
+			if fableCreditsRequired || fableLimited {
+				return false
+			}
 		}
 	}
 
@@ -1088,6 +1105,10 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 }
 
 func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte, reasonPrefix string) (shouldDisable bool) {
+	classified := classifyUpstreamHTTP(http.StatusForbidden, nil, responseBody, upstreamMsg)
+	if resilience.Current().FailureOn() && classified.ContentPolicy() {
+		return false
+	}
 	// 上游代理 / CDN 在请求到达 OpenAI API 之前就拦下时，回的是 HTML 403 页面而不是
 	// {"error":{...}} 结构化错误。这类响应描述的是「这条链路 / 这个端点被挡了」，
 	// 不构成账号凭据或权限失效的证据——例如无效的 /v1/responses 子路径（#5334）。
@@ -1127,15 +1148,15 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 	)
 
 	if s.openAI403CounterCache == nil {
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "counter_missing")
+		return false
 	}
 
 	count, err := s.openAI403CounterCache.IncrementOpenAI403Count(ctx, account.ID, openAI403CounterWindowMinutes)
 	if err != nil {
 		slog.Warn("openai_403_increment_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "counter_failed")
+		return false
 	}
 
 	if count >= openAI403DisableThreshold {
@@ -1146,12 +1167,12 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 
 	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
 	reason := fmt.Sprintf("%s (%d/%d): %s", reasonPrefix, count, openAI403DisableThreshold, msg)
-	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
 	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
-		return true
+		s.handle403InfrastructureFailure(account, msg, "persistence_failed")
+		return false
 	}
+	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
 
 	slog.Warn(
 		"openai_403_temp_unschedulable",
@@ -1163,12 +1184,17 @@ func (s *RateLimitService) handleCounted403WithReason(ctx context.Context, accou
 	return true
 }
 
+func (s *RateLimitService) handle403InfrastructureFailure(account *Account, upstreamMsg, reason string) {
+	until := time.Now().Add(time.Duration(resilience.Current().Failure.TransientCooldownSeconds) * time.Second)
+	slog.Warn("openai_403_infrastructure_failure", "account_id", account.ID, "reason", reason, "upstream_message", upstreamMsg, "until", until)
+	s.notifyAccountSchedulingBlocked(account, until, "openai_403_infrastructure")
+}
+
 // isCloudflareBotBlockResponse reports Cloudflare's WAF bot-signature response
 // (error code 1010). The upstream never reached the account API, so this is a
 // request/edge-level failure and must not consume the account 403 strike budget.
 func isCloudflareBotBlockResponse(body []byte) bool {
-	normalized := strings.ToLower(strings.TrimSpace(string(body)))
-	return strings.Contains(normalized, "error code: 1010")
+	return resilience.IsCloudflareBotBlockResponse(body)
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
@@ -1258,6 +1284,9 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 再调度异步 probe 学习真实重置点（详见 ratelimit_service_ollama_429.go）。
 	if account != nil && IsOllamaCloudUsageAccount(account) {
 		s.handleOllamaCloudUsage429(ctx, account, headers)
+		return
+	}
+	if s.applyThirdParty429(ctx, account, headers, responseBody) {
 		return
 	}
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
@@ -1632,6 +1661,7 @@ func (s *RateLimitService) persistAnthropicFableCreditsRequired(ctx context.Cont
 		// persistence failure into an account-level rate limit.
 		return true
 	}
+	s.persistRelayModelQuotaEvidence(ctx, account, resetAt, anthropicFableCreditsRequiredReason)
 	slog.Info("anthropic_fable_credits_required_model_rate_limited",
 		"account_id", account.ID,
 		"scope", anthropicFableRateLimitKey,
@@ -1700,6 +1730,7 @@ func (s *RateLimitService) persistAnthropicFableWindowLimit(ctx context.Context,
 			"error", err)
 		return true
 	}
+	s.persistRelayModelQuotaEvidence(ctx, account, limit.resetAt, limit.reason)
 	slog.Info("anthropic_fable_window_model_rate_limited",
 		"account_id", account.ID,
 		"scope", anthropicFableRateLimitKey,
@@ -1824,6 +1855,19 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	updates := buildCodexUsageExtraUpdates(snapshot, time.Now())
 	if len(updates) == 0 {
 		return
+	}
+	if account.Type == AccountTypeAPIKey {
+		evidence := QuotaCooldownEvidence{Owner: "unknown", Source: "unknown_target"}
+		if target, known := cooldownAttemptTarget(ctx, account); known {
+			evidence.Protocol, evidence.OriginDigest = target.Protocol, cooldownOriginDigest(target.Origin)
+			evidence.Source = "quota_snapshot"
+			if cooldownTargetOfficial(account, target) {
+				evidence.Owner, evidence.Source = "key", "official_quota"
+			}
+		}
+		// Every new raw snapshot replaces its provenance too. Otherwise a missing
+		// target can leave an old official tag attached to a different attempt.
+		updates[quotaCooldownEvidenceKey] = evidence.extra()
 	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
@@ -2358,6 +2402,35 @@ func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account 
 	return s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel))
 }
 
+// applyConfiguredModelCooldown distinguishes a matching rule from a successful
+// write, so a storage failure cannot turn a model rule into an account block.
+func (s *RateLimitService) applyConfiguredModelCooldown(ctx context.Context, account *Account, statusCode int, responseBody []byte, canonicalModel string) (matched, applied bool) {
+	canonicalModel = strings.TrimSpace(canonicalModel)
+	if s == nil || s.accountRepo == nil || account == nil || canonicalModel == "" || statusCode == http.StatusUnauthorized ||
+		(account.IsPoolMode() && !account.IsCustomErrorCodesEnabled()) || !account.ShouldHandleErrorCode(statusCode) {
+		return false, false
+	}
+	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if match.rule.DurationMinutes <= 0 {
+			continue
+		}
+		now := time.Now()
+		until := now.Add(time.Duration(match.rule.DurationMinutes) * time.Minute)
+		state := TempUnschedState{
+			UntilUnix: until.Unix(), TriggeredAtUnix: now.Unix(), StatusCode: statusCode,
+			MatchedKeyword: match.matchedKeyword, RuleIndex: match.ruleIndex,
+			ErrorMessage: truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
+		}
+		raw, _ := json.Marshal(state)
+		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, canonicalModel, until, string(raw)); err != nil {
+			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", canonicalModel, "error", err)
+			return true, false
+		}
+		return true, true
+	}
+	return false, false
+}
+
 func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
@@ -2699,6 +2772,10 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 		return nil
 	}
 	body := responseBody
+	if active := openAIStreamErrorObject(responseBody); active.IsObject() {
+		// Preserve provider status/details/metadata while excluding request echoes.
+		body = []byte(active.Raw)
+	}
 	if len(body) > tempUnschedBodyMaxBytes {
 		body = body[:tempUnschedBodyMaxBytes]
 	}

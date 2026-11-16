@@ -87,6 +87,21 @@ func prepareResilienceRetryAdvice(c *gin.Context, diag any, apiKey *service.APIK
 }
 
 func upstreamRecoverySeconds(c *gin.Context) int {
+	if c == nil || c.Writer == nil {
+		return 0
+	}
+	if c.Request != nil {
+		ctx := c.Request.Context()
+		if resilience.RetryAdviceFrom(ctx).Suppress {
+			return 0
+		}
+		if hint := resilience.StateFrom(ctx).UpstreamRecoveryHint(); hint != nil {
+			if wait := time.Until(hint.NotBefore); wait > 0 {
+				return resilience.ClampRetryAfter(wait, 2, 10)
+			}
+			return 0
+		}
+	}
 	value := c.GetString(ginKeyResilienceUpstreamRetryAfter)
 	if value == "" || value != c.Writer.Header().Get("Retry-After") {
 		return 0

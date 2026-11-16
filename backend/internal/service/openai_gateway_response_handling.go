@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -88,6 +89,21 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (schedResult *openaiStreamingResult, schedErr error) {
+	usageSource := "missing"
+	responsesObserved := false
+	var currentTerminal, observedTerminal OpenAIResponsesTerminal
+	typedBareErrorRecoverable := false
+	defer func() {
+		if !responsesObserved {
+			return
+		}
+		if schedResult != nil {
+			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
+			schedResult.TerminalSeen, schedResult.TerminalValid, schedResult.ResponseBodyKind = observedTerminal.Seen, observedTerminal.Valid, "sse"
+		}
+		noteOpenAIResponsesFacts(c, account, usageSource, observedTerminal, "sse")
+	}()
+
 	schedCapture := currentSchedAttempt(ctx)
 	defer func() {
 		if schedResult != nil {
@@ -221,6 +237,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	usage := &OpenAIUsage{}
+	tailMetered := false
+	var finishResponsesFrame func()
+	var releaseFrameScan func()
+	responsesEOF := false
+	responsesEOFUnterminated := false
+	responsesFrameBytes := 0
+	responseCreatedAt := int64(0)
 	imageCounter := newOpenAIImageOutputCounter()
 	// xy2api resilience: image generation keeps the image stall threshold.
 	imageGenerationSeen := false
@@ -399,14 +422,18 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			eventInProgress = false
 		}
+		if !claimOpenAIResponsesTerminal(c) {
+			return
+		}
 		errorEventSent = true
 		applyAttemptResponseHeaders()
 		source, _ := json.Marshal(gin.H{
 			"sequence_number": nextFailureSequence,
 			"error":           gin.H{"type": "server_error", "code": "server_error", "status_code": http.StatusInternalServerError},
+			"response":        openAIResponsesFailureMetadata(usage, responseCreatedAt),
 		})
 		frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, source, message)
-		if eventInProgress {
+		if eventInProgress || responsesEOFUnterminated {
 			frame = "\n" + frame
 		}
 		if _, err := writePendingString(frame); err != nil {
@@ -436,6 +463,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	cleanEOF := false
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
+			TerminalSeen:     observedTerminal.Seen,
+			TerminalValid:    observedTerminal.Valid,
 			usage:            usage,
 			firstTokenMs:     relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),
 			responseID:       responseID,
@@ -460,6 +489,17 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		responsesObserved = responsesObserved || cleanEOF
+		if finishResponsesFrame != nil {
+			finishResponsesFrame()
+		}
+		if streamEarlyErr != nil {
+			return resultWithUsage(), streamEarlyErr
+		}
+		if cleanEOF && tailMetered && !sawFailedEvent {
+			sawTerminalEvent = true
+			terminalEventType = "usage_eof"
+		}
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
@@ -468,9 +508,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, bareErrorPayload, failedMessage, mappedModel, bareErrorWrappedStatus)
 			bareErrorAccountSideEffectsPending = false
 		}
-		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected {
+		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected && claimOpenAIResponsesTerminal(c) {
 			applyAttemptResponseHeaders()
-			clientErrorPayload := bareErrorPayload
+			clientErrorPayload := openAIResponsesFailureSource(bareErrorPayload, usage, responseCreatedAt, nextFailureSequence)
 			if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientErrorPayload); changed {
 				clientErrorPayload = rewritten
 			}
@@ -504,12 +544,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if sawFailedEvent {
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
-		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected)
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected, usageSource != "missing")
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
 		if scanErr == nil {
 			return nil, nil, false
+		}
+		if finishResponsesFrame != nil {
+			finishResponsesFrame()
 		}
 		if errors.Is(scanErr, errOpenAIFirstOutputScannerLimit) && !firstOutputProgressObserved {
 			logger.LegacyPrintf("service.openai_gateway", "SSE token exceeded guarded first-output limit: account=%d limit=%d error=%v", account.ID, openAIFirstOutputStageMaxBytes+openAIFirstOutputScannerFramingAllowance, scanErr)
@@ -570,7 +613,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		sendErrorEvent(message)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
-	processSSELine := func(line string, queueDrained bool) {
+	processResponseLine := func(line string, queueDrained bool) {
 		if streamEarlyErr != nil {
 			return
 		}
@@ -588,6 +631,34 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				nextFailureSequence = seq.Int() + 1
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			if currentTerminal.Valid {
+				eventType = currentTerminal.EventType
+			}
+			if sawFailedEvent && !currentTerminal.Failure {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				suppressCurrentEvent = true
+				return
+			}
+			if created := gjson.GetBytes(dataBytes, "response.created_at"); created.Exists() {
+				responseCreatedAt = created.Int()
+			}
+			if currentTerminal.Failure && !currentTerminal.Valid {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				sawFailedEvent = true
+				failedMessage = "Upstream returned an invalid Responses terminal event"
+				if currentTerminal.Reason == "malformed_wrapped_error" {
+					logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
+					failedMessage = openAIMalformedWrappedErrorMessage
+				}
+				if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
+					streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, nil, failedMessage, mappedModel, resp.Header)
+				} else {
+					sendErrorEvent(failedMessage)
+					streamEarlyErr = errors.New(failedMessage)
+				}
+				return
+			}
+
 			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
 			if malformedWrapped {
 				logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
@@ -608,26 +679,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventHasBlankPlaceholder = true
 			}
 			observeOpenAIPreludeCreated(preludeTrace, eventType)
-			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
-				(eventType == "response.completed" || eventType == "response.done") {
-				// A later successful terminal is authoritative over a pending bare
-				// error. Keep its usage and terminal visible to the client.
-				sawBareError = false
-				sawFailedEvent = false
-				terminalFailurePending = false
-				suppressCurrentEvent = false
-				bareErrorPayload = nil
-				bareErrorWrappedStatus = 0
-				bareErrorAccountSideEffectsPending = false
-				failedMessage = ""
-			}
+
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
 			observeSchedPayload(c, dataBytes, eventType)
 			observer.ObserveOpenAI(dataBytes, eventType)
 			// 初始上游 data 的 type 只解析一次：原始值保持终止事件的精确匹配，规范化值供后续分支复用。
-			if openAIStreamEventIsTerminalWithType(data, eventType) {
+			if currentTerminal.Seen && currentTerminal.Valid || strings.TrimSpace(data) == "[DONE]" {
 				sawTerminalEvent = true
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
@@ -660,7 +719,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventHasBlankPlaceholder = false
 			}
 			cyberHit := false
-			if eventType == "response.failed" || eventType == "error" {
+			if currentTerminal.Failure {
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
@@ -841,6 +900,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(sanitizedData)
 				line = "data: " + data
 			}
+			if currentTerminal.Failure && currentTerminal.EventType == "error" && !codexFailureTerminal && strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String()) == "" {
+				frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, openAIResponsesFailureSource(dataBytes, usage, responseCreatedAt, nextFailureSequence), failedMessage)
+				line = strings.TrimSuffix(frame, "\n\n")
+			}
 			// Replace model in response if needed.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -873,6 +936,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+				if currentTerminal.Seen && currentTerminal.Valid && !claimOpenAIResponsesTerminal(c) {
+					suppressCurrentEvent = true
+					return
+				}
 				// The pre-output reset also removed this failure's event line.
 				// Restore only the current failure header, never the old prelude.
 				if restoreFailureEventLine {
@@ -939,7 +1006,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventShouldFlush = false
 				return
 			}
-			if !clientDisconnected {
+			if !clientDisconnected && !responsesEOF {
 				if _, err := writePendingString("\n"); err != nil {
 					handlePendingWriteError(err)
 				}
@@ -973,9 +1040,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+			suffix := "\n"
+			if responsesEOF && line == "" {
+				suffix = ""
+			}
 			if _, err := writePendingString(line); err != nil {
 				handlePendingWriteError(err)
-			} else if _, err := writePendingString("\n"); err != nil {
+			} else if _, err := writePendingString(suffix); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				eventInProgress = line != ""
@@ -994,6 +1065,135 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				terminalFailurePending = false
 				failureDelivered = true
 			}
+		}
+	}
+
+	var responsesParser openAICompatSSEFrameParser
+	var frameExtras []string
+	var frameDataLine, frameEventLine string
+	frameDataCount := 0
+	processSingleFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
+		defer func() {
+			frameDataLine, frameEventLine, frameDataCount = "", "", 0
+			frameExtras = nil
+			responsesFrameBytes = 0
+		}()
+		currentTerminal = ClassifyOpenAIResponsesTerminal(frame.EventType, []byte(frame.Data))
+		if currentTerminal.Failure {
+			if !observedTerminal.Failure {
+				typedBareErrorRecoverable = currentTerminal.Valid && openAIResponsesTypedBareError([]byte(frame.Data))
+			} else if !currentTerminal.Valid || !openAIResponsesTypedBareError([]byte(frame.Data)) {
+				typedBareErrorRecoverable = false
+			}
+		}
+		if codexFailureTerminal && typedBareErrorRecoverable && sawBareError && !sawResponseFailed && currentTerminal.Success {
+			// Codex may report a provisional typed error before recovering.
+			sawBareError, sawFailedEvent, terminalFailurePending, suppressCurrentEvent = false, false, false, false
+			bareErrorPayload, bareErrorWrappedStatus, bareErrorAccountSideEffectsPending = nil, 0, false
+			failedMessage = ""
+			observedTerminal = currentTerminal
+			typedBareErrorRecoverable = false
+			resilience.StateFrom(ctx).SetUpstreamRecoveryHint(nil)
+		}
+		if !currentTerminal.Failure && openAIStreamDataStartsClientOutput(frame.Data, effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)) {
+			firstOutputScanGuard.Store(false)
+			if releaseFrameScan != nil {
+				releaseFrameScan()
+			}
+		}
+		if currentTerminal.Failure && currentTerminal.Valid && !observedTerminal.Failure {
+			noteOpenAIResponsesRecoveryHint(c, account, resp.Header, []byte(frame.Data), time.Now())
+		}
+		if source := s.parseSSEUsageBytesWithType([]byte(frame.Data), currentTerminal.EventType, usage); source != "" {
+			usageSource = source
+		}
+		tailMetered = openAIResponsesTailUsageCandidate(tailMetered, frame.EventType, []byte(frame.Data), currentTerminal)
+		if !observedTerminal.Failure && (currentTerminal.Seen || currentTerminal.Failure) {
+			observedTerminal = currentTerminal
+		}
+		if currentTerminal.Valid && currentTerminal.Failure {
+			if rejection := s.handleHTTPEncryptedContentFrame(ctx, c, account, []byte(frame.Data), currentTerminal.WrappedStatus, openAIStreamClientOutputStarted(c, clientOutputStarted), flushBuffered, upstreamRequestID); rejection != nil {
+				sawFailedEvent, streamEarlyErr = true, rejection
+				return
+			}
+		}
+		if currentTerminal.Failure && !currentTerminal.Valid {
+			pendingSSEEventType, pendingSSEEventLine = frame.EventType, ""
+			processResponseLine("data: "+frame.Data, queueDrained)
+			return
+		}
+		if frame.EventType != "" {
+			processResponseLine(frameEventLine, queueDrained)
+		}
+		for _, extra := range frameExtras {
+			processResponseLine(extra, queueDrained)
+		}
+		wireData := frameDataLine
+		if frameDataCount != 1 {
+			wireData = "data: " + compactOpenAIResponsesFrameData(frame.Data)
+		}
+		processResponseLine(wireData, queueDrained)
+		processResponseLine("", queueDrained)
+	}
+	processFrame := func(frame openAICompatSSEFrame, queueDrained bool) {
+		frames := splitOpenAIResponsesFrame(frame)
+		if len(frames) == 1 {
+			processSingleFrame(frame, queueDrained)
+			return
+		}
+		eventLine, eof := frameEventLine, responsesEOF
+		for i, event := range frames {
+			frameEventLine, frameDataLine, frameDataCount = eventLine, "data: "+event.Data, 1
+			responsesEOF = eof && i == len(frames)-1
+			processSingleFrame(event, queueDrained && i == len(frames)-1)
+			if streamEarlyErr != nil {
+				break
+			}
+		}
+		responsesEOF = eof
+	}
+	processSSELine := func(line string, queueDrained bool) {
+		responsesObserved = true
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "data:") {
+			frameDataCount++
+			frameDataLine = line
+		}
+		if strings.HasPrefix(line, "event:") {
+			frameEventLine = line
+		}
+		responsesFrameBytes += len(line) + 1
+		if stageFirstOutput && !clientOutputStarted && responsesFrameBytes > openAIFirstOutputStageMaxBytes {
+			failure := s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, nil, "OpenAI first-output staging limit exceeded")
+			failure.SafeToFailoverAfterWrite = true
+			streamEarlyErr = failure
+			return
+		}
+		if strings.HasPrefix(line, ":") && len(responsesParser.dataLines) == 0 && responsesParser.eventType == "" {
+			processResponseLine(line, queueDrained)
+			return
+		}
+		if frame, ok := responsesParser.AddLine(line); ok {
+			processFrame(frame, queueDrained)
+			return
+		}
+		if line == "" {
+			for _, extra := range frameExtras {
+				processResponseLine(extra, queueDrained)
+			}
+			frameExtras = nil
+			responsesFrameBytes = 0
+			processResponseLine("", queueDrained)
+		} else if !strings.HasPrefix(line, "data:") && !strings.HasPrefix(line, "event:") {
+			frameExtras = append(frameExtras, line)
+		}
+	}
+	finishResponsesFrame = func() {
+		if frame, ok := responsesParser.Finish(); ok {
+			responsesEOF = true
+			processFrame(frame, true)
+			responsesEOFUnterminated = clientOutputStarted && !failureDelivered && !sawTerminalEvent
+			responsesEOF = false
 		}
 	}
 
@@ -1086,7 +1286,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				markEventProcessed(ev)
 				return result, err
 			}
+			releaseFrameScan = func() { markEventProcessed(ev); ev.processed = nil }
 			processSSELine(ev.line, len(events) == 0)
+			releaseFrameScan = nil
 			markEventProcessed(ev)
 			if keepalivePending && !eventInProgress {
 				keepalivePending = false
@@ -1178,7 +1380,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				keepaliveCh = nil
 				continue
 			}
-			if eventInProgress {
+			if eventInProgress || responsesFrameBytes > 0 {
 				keepalivePending = true
 				continue
 			}
@@ -1449,31 +1651,76 @@ func (s *OpenAIGatewayService) parseSSEUsage(data string, usage *OpenAIUsage) {
 }
 
 func (s *OpenAIGatewayService) parseSSEUsageBytes(data []byte, usage *OpenAIUsage) {
+	if usage == nil {
+		return
+	}
+	// Legacy consumers do not authenticate count presence through this adapter.
+	input, output, read, write := usage.InputTokensPresent, usage.OutputTokensPresent, usage.CacheReadInputTokensPresent, usage.CacheCreationInputTokensPresent
 	s.parseSSEUsageBytesWithType(data, "", usage)
+	usage.InputTokensPresent, usage.OutputTokensPresent, usage.CacheReadInputTokensPresent, usage.CacheCreationInputTokensPresent = input, output, read, write
 }
 
-func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType string, usage *OpenAIUsage) {
-	if usage == nil || len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-		return
+func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType string, usage *OpenAIUsage) string {
+	if usage == nil || len(data) == 0 || !bytes.Contains(data, []byte(`"usage"`)) {
+		return ""
 	}
-	// Usage is absent from nearly every delta event. Avoid full JSON validation
-	// and four gjson path scans on that hot path while retaining progressive
-	// usage from compatible upstreams on any event type.
-	if !bytes.Contains(data, []byte(`"usage"`)) {
-		return
-	}
-	parsedUsage, ok := extractOpenAIUsageFromJSONBytes(data)
-	if !ok {
-		return
-	}
+	source := "upstream_sse_progressive"
 	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
+		source = "upstream_sse_terminal"
+	}
+	parsedUsage, present := openAIResponsesUsageEvidence(data, source)
+	if !present {
+		return ""
+	}
+	if source == "upstream_sse_terminal" {
 		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
-			return
+			return ""
 		}
 		*usage = parsedUsage
+		return source
+	}
+	retained := openAIUsageHasTokens(&parsedUsage) || !openAIUsageHasTokens(usage)
+	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	usage.InputTokensPresent = usage.InputTokensPresent || parsedUsage.InputTokensPresent
+	usage.OutputTokensPresent = usage.OutputTokensPresent || parsedUsage.OutputTokensPresent
+	usage.CacheReadInputTokensPresent = usage.CacheReadInputTokensPresent || parsedUsage.CacheReadInputTokensPresent
+	usage.CacheCreationInputTokensPresent = usage.CacheCreationInputTokensPresent || parsedUsage.CacheCreationInputTokensPresent
+	if retained {
+		return source
+	}
+	return ""
+}
+
+// Parse only the first authenticated failure, before any client/ops rewriting.
+func noteOpenAIResponsesRecoveryHint(c *gin.Context, account *Account, headers http.Header, payload []byte, observedAt time.Time) {
+	if c == nil || c.Request == nil {
 		return
 	}
-	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	state := resilience.StateFrom(c.Request.Context())
+	if hint, ok := resilience.ParseUpstreamRecoveryHint(headers, payload, observedAt); ok {
+		state.SetUpstreamRecoveryHint(&hint)
+		if account != nil {
+			state.NoteAccountRetryNotBefore(account.ID, hint)
+		}
+	}
+}
+
+func noteOpenAIResponsesFacts(c *gin.Context, account *Account, source string, terminal OpenAIResponsesTerminal, kind string) {
+	if c == nil || c.Request == nil || account == nil {
+		return
+	}
+	resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, true, source != "missing", source, terminal.Seen, terminal.Valid, kind)
+}
+
+func (s *OpenAIGatewayService) openAIResponsesUsageFromBody(body string) (*OpenAIUsage, string) {
+	usage, source := &OpenAIUsage{}, "missing"
+	forEachOpenAIResponsesFrame(body, func(event string, data []byte) {
+		terminal := ClassifyOpenAIResponsesTerminal(event, data)
+		if observed := s.parseSSEUsageBytesWithType(data, terminal.EventType, usage); observed != "" {
+			source = observed
+		}
+	})
+	return usage, source
 }
 
 // Compatible Responses upstreams may report usage before the terminal event.
@@ -1540,12 +1787,16 @@ func (s *openAIMissingUsageLogSampler) sample(now time.Time) (logNow bool, total
 	}
 }
 
-func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usage *OpenAIUsage, terminalEvent string, clientDisconnected bool) {
-	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || openAIUsageHasTokens(usage) {
+func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, usage *OpenAIUsage, terminalEvent string, clientDisconnected bool, presence ...bool) {
+	usagePresent := openAIUsageHasTokens(usage)
+	if len(presence) > 0 {
+		usagePresent = presence[0]
+	}
+	if resp == nil || resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || usagePresent {
 		return
 	}
 	terminalEvent = strings.TrimSpace(terminalEvent)
-	if terminalEvent != "response.completed" && terminalEvent != "response.done" && terminalEvent != "[DONE]" && terminalEvent != "json" {
+	if terminalEvent != "response.completed" && terminalEvent != "response.incomplete" && terminalEvent != "response.done" && terminalEvent != "[DONE]" && terminalEvent != "json" {
 		return
 	}
 	logNow, total, suppressed := openAIMissingUsageSampler.sample(time.Now())
@@ -1803,6 +2054,23 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 }
 
 func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, originalModel, mappedModel string) (schedResult *openaiNonStreamingResult, schedErr error) {
+	bodyKind, usageSource := "", "missing"
+	var observedUsage *OpenAIUsage
+	observedBody := false
+	defer func() {
+		if !observedBody {
+			return
+		}
+		if schedResult == nil && observedUsage != nil {
+			schedResult = &openaiNonStreamingResult{OpenAIUsage: observedUsage, usage: observedUsage}
+		}
+		if schedResult != nil {
+			schedResult.ResponseFactsKnown, schedResult.UsagePresent, schedResult.UsageSource = true, usageSource != "missing", usageSource
+			schedResult.ResponseBodyKind = bodyKind
+		}
+		noteOpenAIResponsesFacts(c, account, usageSource, OpenAIResponsesTerminal{}, bodyKind)
+	}()
+
 	schedCapture := currentSchedAttempt(ctx)
 	defer func() {
 		if schedResult != nil {
@@ -1815,6 +2083,8 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, nonstreamReadError(ctx, resp, err)
 	}
 
+	observedBody = true
+
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -1826,27 +2096,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		observer.ObserveOpenAI(body, strings.TrimSpace(gjson.GetBytes(body, "type").String()))
 	}
 
-	// Detect SSE responses for ALL account types via Content-Type header.
-	// Some OpenAI-compatible upstreams (including other XY2API-compatible relay instances)
-	// may return SSE even when stream=false was requested.
-	if isEventStreamResponse(resp.Header) {
-		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
-	}
-	// bodyLooksLikeSSE is a line-level heuristic: real SSE framing requires
-	// "data:"/"event:" field names at the very start of a physical line. A
-	// plain bytes.Contains scan would also match ordinary JSON responses
-	// whose string content merely echoes the literal text "data:" or
-	// "event:" (e.g. compact tool output), causing those JSON bodies to be
-	// misrouted into handleSSEToJSON and lose their usage accounting.
+	// A complete JSON object is authoritative even when the upstream labels it SSE.
 	bodyLooksLikeSSE := bodyHasSSEFraming(body)
-
-	// For OAuth accounts, also fall back to a body-content heuristic because
-	// the upstream may omit the Content-Type header while still sending SSE.
-	// This heuristic is NOT applied to API-key accounts to avoid false
-	// positives on JSON responses that coincidentally contain "data:" or
-	// "event:" in their text content.
-	if account.Type == AccountTypeOAuth && bodyLooksLikeSSE {
-		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+	if !isOpenAIResponseJSONObject(body) {
+		if bodyLooksLikeSSE || isEventStreamResponse(resp.Header) {
+			observedBody = false
+			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+		}
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid non-streaming response")
 	}
 	if account != nil && account.IsGrok() && isOpenAIResponsesCompactPath(c) {
 		body, err = convertGrokResponseToOpenAICompact(body)
@@ -1855,19 +2112,21 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	usageValue, usageOK := extractOpenAIUsageFromJSONBytes(body)
-	if !usageOK {
-		if bodyLooksLikeSSE {
-			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
-		}
-		if attempt := openAICollaborationAttempt(c); attempt != nil && attempt.applied {
-			attempt.restoreFailed = true
-			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
-		}
-		return nil, fmt.Errorf("parse response: invalid json response")
-	}
+	bodyKind = "json"
+	usageValue, present := openAIResponsesUsageEvidence(body, "upstream_json")
 	usage := &usageValue
-	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
+	observedUsage = usage
+	if present {
+		usageSource = "upstream_json"
+	}
+	failedResponse := openAIResponsesJSONFailed(body)
+	if failedResponse {
+		schedCapture.noteUsage(usage)
+		observedUsage = nil
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, body, time.Now())
+	} else {
+		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false, usageSource != "missing")
+	}
 
 	// Replace model in response if needed
 	if originalModel != mappedModel {
@@ -1895,13 +2154,23 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
-	contentType := "application/json"
-	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
-		if upstreamType := resp.Header.Get("Content-Type"); upstreamType != "" {
-			contentType = upstreamType
-		}
-	}
+	contentType := "application/json; charset=utf-8"
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 
+	if failedResponse {
+		if !writeOpenAICompactSSEBridge(c, http.StatusBadGateway, body) {
+			c.Data(resp.StatusCode, contentType, body)
+		}
+		// Preserve the upstream envelope and normal client-name restoration,
+		// while keeping failed JSON out of successful billing ownership.
+		message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+		if message == "" {
+			message = "Upstream response failed"
+		}
+		setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+		return nil, fmt.Errorf("upstream response failed: %s", message)
+	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
 	}
@@ -1915,6 +2184,21 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
 	}, nil
+}
+
+// A complete JSON document can still describe a failed response. It must not
+// enter the successful no-usage path or acquire billing ownership.
+func openAIResponsesJSONFailed(body []byte) bool {
+	switch gjson.GetBytes(body, "status").String() {
+	case "failed", "cancelled", "canceled":
+		return true
+	}
+	terminal := ClassifyOpenAIResponsesTerminal("", body)
+	return terminal.Valid && terminal.Failure
+}
+
+func isOpenAIResponseJSONObject(body []byte) bool {
+	return utf8.Valid(body) && json.Valid(body) && gjson.ParseBytes(body).IsObject()
 }
 
 func isEventStreamResponse(header http.Header) bool {
@@ -1938,8 +2222,19 @@ func bodyHasSSEFraming(body []byte) bool {
 	return false
 }
 
-func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (result *openaiNonStreamingResult, resultErr error) {
 	bodyText := string(body)
+	usage, usageSource := s.openAIResponsesUsageFromBody(bodyText)
+	terminal, terminalSSEEvent, terminalPayload := extractOpenAISSETerminalEvent(bodyText)
+	defer func() {
+		if result == nil {
+			result = &openaiNonStreamingResult{OpenAIUsage: usage, usage: usage}
+		}
+		result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = true, usageSource != "missing", usageSource
+		result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = terminal.Seen, terminal.Valid, "sse"
+		noteOpenAIResponsesFacts(c, account, usageSource, terminal, "sse")
+	}()
+
 	// Observe earlier markers before reconstructing the terminal response.
 	// Keep the raw frames for aggregation; only the final JSON is delivered.
 	var collabErr error
@@ -1953,9 +2248,18 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
 		}
 	}
-	terminalType, terminalSSEEvent, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
+	terminalType := terminal.EventType
 	observeSchedPayload(c, terminalPayload, terminalType)
-	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
+	if terminal.Failure && terminal.Valid {
+		noteOpenAIResponsesRecoveryHint(c, account, resp.Header, terminalPayload, time.Now())
+	}
+	if terminal.Failure {
+		if !terminal.Valid {
+			if terminal.Reason == "malformed_wrapped_error" {
+				logOpenAIWrappedErrorMalformed(c.Request.Context(), account, "native_sse_aggregate")
+			}
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid Responses terminal event", OpenAIUpstreamProtocolErrorCode)
+		}
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {
 			msg = "Upstream compact response failed"
@@ -1963,29 +2267,25 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
+		} else if repairErr := newHTTPEncryptedContentRepairSignal(httpEncryptedRepairContext(c), c, account, openAIHTTPRepairBody(c), terminalPayload, msg, wrappedStatus, true); repairErr != nil {
+			return nil, repairErr
 		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg, wrappedStatus); compactErr != nil {
 			return nil, compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalSSEEvent, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, openAIStreamErrorField(terminalPayload, "code").String())
 	}
-	finalResponse, ok := extractCodexFinalResponse(bodyText)
+	finalResponse, ok := openAIResponsesTerminalResponse(terminal, terminalPayload)
+	if !ok {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream response stream ended before a valid terminal event", OpenAIUpstreamStreamTruncatedCode)
+	}
 
-	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
-		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
-			*usage = parsedUsage
-		}
-		// When the terminal event has an empty output array, reconstruct
-		// output from accumulated delta events so the client gets full content.
-		// gjson Array() returns empty slice for null, missing, or empty arrays.
-		if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
-			if outputJSON, reconstructed := reconstructResponseOutputFromSSE(bodyText); reconstructed {
-				if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
-					finalResponse = patched
-				}
+		if outputJSON, reconstructed := mergeResponsesOutputFromSSE(finalResponse, bodyText); reconstructed {
+			if patched, err := sjson.SetRawBytes(finalResponse, "output", outputJSON); err == nil {
+				finalResponse = patched
 			}
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
@@ -2013,28 +2313,15 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
 		}
 		body = restoredBody
-	} else {
-		if attempt := openAICollaborationAttempt(c); attempt != nil && attempt.applied {
-			attempt.restoreFailed = true
-			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
-		}
-		if originalModel != mappedModel {
-			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
-		}
-		body = []byte(bodyText)
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
+	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false, usageSource != "missing")
 	s.relayOpenAICodexTurnState(c, account, resp.Header)
 
 	contentType := "application/json; charset=utf-8"
-	if !ok {
-		contentType = resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "text/event-stream"
-		}
-	}
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("Content-Length")
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
 	}
@@ -2050,25 +2337,70 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}, nil
 }
 
-func extractOpenAISSETerminalEvent(body string) (string, string, []byte, bool) {
-	var terminalType, terminalSSEEvent string
-	var terminalPayload []byte
-	forEachOpenAISSEFrameWithRawEvent(body, func(sseEvent string, data []byte) {
-		eventType := effectiveOpenAISSEEventType(data, sseEvent)
-		if _, wrapped, malformed := openAIWrappedUpstreamErrorStatus(sseEvent, data); (wrapped || malformed) && eventType != "response.failed" {
-			eventType = "error"
+// forEachOpenAIResponsesFrame dispatches the complete SSE event, including EOF.
+// Complete adjacent JSON records retain the legacy missing-separator handling.
+// Legacy relays may omit the blank separator between complete JSON objects.
+// A valid multiline JSON document remains one event; any partial line fails.
+func splitOpenAIResponsesFrame(frame openAICompatSSEFrame) []openAICompatSSEFrame {
+	if !strings.Contains(frame.Data, "\n") || json.Valid([]byte(frame.Data)) {
+		return []openAICompatSSEFrame{frame}
+	}
+	lines := strings.Split(frame.Data, "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "[DONE]" && !isOpenAIResponseJSONObject([]byte(line)) {
+			return []openAICompatSSEFrame{frame}
 		}
-		switch eventType {
-		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "error":
-			terminalType = eventType
-			terminalSSEEvent = sseEvent
-			terminalPayload = append([]byte(nil), data...)
+	}
+	frames := make([]openAICompatSSEFrame, 0, len(lines))
+	for _, line := range lines {
+		frames = append(frames, openAICompatSSEFrame{EventType: frame.EventType, Data: line})
+	}
+	return frames
+}
+
+func forEachOpenAIResponsesFrame(body string, visit func(string, []byte)) {
+	var parser openAICompatSSEFrameParser
+	emit := func(frame openAICompatSSEFrame, ok bool) {
+		if ok {
+			for _, event := range splitOpenAIResponsesFrame(frame) {
+				visit(event.EventType, []byte(event.Data))
+			}
+		}
+	}
+	for _, line := range strings.Split(body, "\n") {
+		emit(parser.AddLine(strings.TrimSuffix(line, "\r")))
+	}
+	emit(parser.Finish())
+}
+
+// A3's untyped error never takes the Codex provisional-error recovery path.
+func openAIResponsesTypedBareError(payload []byte) bool {
+	kind := gjson.GetBytes(payload, "type")
+	return isOpenAIResponseJSONObject(payload) && kind.Type == gjson.String && kind.String() == "error"
+}
+
+func extractOpenAISSETerminalEvent(body string) (OpenAIResponsesTerminal, string, []byte) {
+	var terminal OpenAIResponsesTerminal
+	var rawEvent string
+	var payload []byte
+	forEachOpenAIResponsesFrame(body, func(event string, data []byte) {
+		observed := ClassifyOpenAIResponsesTerminal(event, data)
+		if (!terminal.Failure || terminal.Valid && openAIResponsesTypedBareError(payload) && (observed.Success || observed.Failure)) && (observed.Seen || observed.Failure) {
+			terminal, rawEvent, payload = observed, event, append([]byte(nil), data...)
 		}
 	})
-	if terminalPayload != nil {
-		return terminalType, terminalSSEEvent, terminalPayload, true
+	return terminal, rawEvent, payload
+}
+
+func openAIResponsesTerminalResponse(terminal OpenAIResponsesTerminal, payload []byte) ([]byte, bool) {
+	if !terminal.Valid || terminal.Failure || (terminal.Status != "completed" && terminal.Status != "incomplete") {
+		return nil, false
 	}
-	return "", "", nil, false
+	if normalized, changed := normalizeCompletedImageGenerationStatus(payload); changed {
+		payload = normalized
+	}
+	response := gjson.GetBytes(payload, "response")
+	return []byte(response.Raw), response.IsObject()
 }
 
 func extractOpenAISSEErrorMessage(payload []byte) string {
@@ -2140,16 +2472,36 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model
 	}
+	createdAt := time.Now().Unix()
+	if at := gjson.GetBytes(source, "response.created_at"); at.Exists() {
+		createdAt = at.Int()
+	}
+	response["created_at"] = createdAt
+	for _, path := range []string{"response.usage", "usage"} {
+		if value := gjson.GetBytes(source, path); value.IsObject() {
+			if normalized := targetProtocolFailureUsage(json.RawMessage(value.Raw)); len(normalized) > 0 {
+				response["usage"] = normalized
+			}
+			break
+		}
+	}
 	frame := gin.H{"type": "response.failed", "response": response}
 	if sequence := gjson.GetBytes(source, "sequence_number"); sequence.Exists() {
 		frame["sequence_number"] = sequence.Int()
+	}
+	var opening []byte
+	if only, tracked := DeliveryOnlyHeartbeats(c); tracked && only {
+		opening = ResponsesCreatedFrame(responseID, model, createdAt)
+		if sequence := gjson.GetBytes(source, "sequence_number").Int(); sequence < 1 {
+			frame["sequence_number"] = int64(1)
+		}
 	}
 	payload, err := marshalOpenAIUpstreamJSON(frame)
 	if err != nil {
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
-	return "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
+	return string(opening) + "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
 }
 
 func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {
@@ -2224,7 +2576,7 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	return updated, !bytes.Equal(updated, payload)
 }
 
-func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string) error {
+func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string, code ...string) error {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
@@ -2238,34 +2590,18 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	writeOpenAICollaborationErrorJSON(c, http.StatusBadGateway, gin.H{
-		"error": gin.H{
-			"type":    "upstream_error",
-			"message": message,
-		},
-	})
+	c.Writer.Header().Del("Content-Length")
+	errType, errorCode := "upstream_error", ""
+	if len(code) > 0 && code[0] != "" {
+		errType, errorCode = "server_error", code[0]
+	}
+	WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, errType, errorCode, "", message)
 	return fmt.Errorf("non-streaming openai protocol error: %s", message)
 }
 
 func extractCodexFinalResponse(body string) ([]byte, bool) {
-	var finalResponse []byte
-	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
-		if finalResponse != nil {
-			return
-		}
-		if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
-			data = normalized
-		}
-		if eventType == "response.done" || eventType == "response.completed" {
-			if response := gjson.GetBytes(data, "response"); response.Exists() && response.Type == gjson.JSON && response.Raw != "" {
-				finalResponse = []byte(response.Raw)
-			}
-		}
-	})
-	if finalResponse != nil {
-		return finalResponse, true
-	}
-	return nil, false
+	terminal, _, payload := extractOpenAISSETerminalEvent(body)
+	return openAIResponsesTerminalResponse(terminal, payload)
 }
 
 func normalizeCompletedImageGenerationStatus(data []byte) ([]byte, bool) {
@@ -2441,67 +2777,10 @@ func responsesStreamEventMayContributeToOutput(eventType string) bool {
 	}
 }
 
-// collectRawResponsesOutputItemsFromSSE 按到达顺序收集 SSE 流中
-// response.output_item.done 携带的原始 item。除已产生结果但仍停留在进行中
-// 的图片状态外，item 以 raw JSON 逐字节保留，
-// 避免经窄结构体重建时丢弃 encrypted_content/summary/opaque 等 compact
-// 专属或未来新增字段（#3777 问题 2）。若整条流没有任何 done 事件，退回
-// 收集 output_item.added 中的 compaction 类 item——compaction 结果没有
-// delta 事件，部分上游只在 added 事件中携带完整 item。
+// collectRawResponsesOutputItemsFromSSE keeps raw done items and added-only
+// compaction items in the same output-index order as nonstream reconstruction.
 func collectRawResponsesOutputItemsFromSSE(bodyText string) ([]byte, bool) {
-	var items []json.RawMessage
-	seen := make(map[string]struct{})
-	hasCompactionItem := false
-	appendItem := func(item gjson.Result) {
-		if !item.Exists() || !item.IsObject() {
-			return
-		}
-		key := strings.TrimSpace(item.Get("id").String())
-		if key == "" {
-			key = item.Raw
-		}
-		if _, dup := seen[key]; dup {
-			return
-		}
-		seen[key] = struct{}{}
-		if isResponsesCompactionItemType(item.Get("type").String()) {
-			hasCompactionItem = true
-		}
-		items = append(items, json.RawMessage(item.Raw))
-	}
-	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
-		if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
-			data = normalized
-		}
-		if eventType != "response.output_item.done" {
-			return
-		}
-		appendItem(gjson.GetBytes(data, "item"))
-	})
-	// done 事件未携带 compaction item 时再看 added：覆盖"其他 item 有 done、
-	// compaction 只在 added 中"的混合形态；done 已含 compaction 时跳过，
-	// 避免同一 item 在无 id 可去重时被收集两份（Codex 要求恰好一个）。
-	if !hasCompactionItem {
-		forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-			if eventType != "response.output_item.added" {
-				return
-			}
-			item := gjson.GetBytes(data, "item")
-			if !isResponsesCompactionItemType(item.Get("type").String()) {
-				return
-			}
-			appendItem(item)
-		})
-	}
-	if len(items) == 0 {
-		return nil, false
-	}
-	outputJSON, err := json.Marshal(items)
-	if err != nil {
-		return nil, false
-	}
-	return outputJSON, true
+	return mergeResponsesOutputItems(nil, bodyText, true)
 }
 
 // isResponsesCompactionItemType reports whether the item type is the Codex
@@ -2580,34 +2859,9 @@ func findRawCompactionItemFromSSE(bodyText string) (json.RawMessage, bool) {
 	return found, found != nil
 }
 
-// reconstructResponseOutputFromSSE scans raw SSE body text and returns a
-// JSON-encoded output array for a terminal event whose output is empty.
-// Raw output_item.done items are preferred: per the Responses protocol they
-// are the authoritative final form of each item. Delta accumulation only
-// covers text/function_call/reasoning content and silently drops unknown
-// item types such as compaction — Codex remote compact v2 then fails with
-// "expected exactly one compaction output item, got 0" (#3887).
-// Returns (nil, false) if nothing could be reconstructed.
+// reconstructResponseOutputFromSSE merges each item's done and delta evidence.
 func reconstructResponseOutputFromSSE(bodyText string) ([]byte, bool) {
-	if outputJSON, ok := collectRawResponsesOutputItemsFromSSE(bodyText); ok {
-		return outputJSON, true
-	}
-	acc := apicompat.NewBufferedResponseAccumulator()
-	imageOutputs := make([]json.RawMessage, 0, 1)
-	seenImages := make(map[string]struct{})
-	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
-		if imageOutput, ok := extractImageGenerationOutputFromSSEData(data, seenImages); ok {
-			imageOutputs = append(imageOutputs, imageOutput)
-		}
-		if responsesStreamEventMayContributeToOutput(eventType) {
-			var event apicompat.ResponsesStreamEvent
-			if err := json.Unmarshal(data, &event); err == nil {
-				acc.ProcessEvent(&event)
-			}
-		}
-	})
-	return buildResponsesOutputJSON(acc, imageOutputs)
+	return mergeResponsesOutputFromSSE(nil, bodyText)
 }
 
 func buildResponsesOutputJSON(acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {
@@ -2660,14 +2914,6 @@ func extractImageGenerationOutputFromSSEData(data []byte, seen map[string]struct
 	return json.RawMessage(item.Raw), true
 }
 
-func (s *OpenAIGatewayService) parseSSEUsageFromBody(body string) *OpenAIUsage {
-	usage := &OpenAIUsage{}
-	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
-		s.parseSSEUsageBytesWithType(data, eventType, usage)
-	})
-	return usage
-}
-
 func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel string) string {
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
@@ -2677,4 +2923,79 @@ func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel st
 		lines[i] = s.replaceModelInSSELine(line, fromModel, toModel)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func compactOpenAIResponsesFrameData(data string) string {
+	var compact bytes.Buffer
+	if json.Compact(&compact, []byte(data)) == nil {
+		return compact.String()
+	}
+	return data
+}
+
+func claimOpenAIResponsesTerminal(c *gin.Context) bool {
+	if keepalive := keepaliveFrom(c); keepalive != nil {
+		keepalive.Stop()
+	}
+	return ClaimProtocolTerminal(c)
+}
+
+func openAIResponsesFailureMetadata(usage *OpenAIUsage, createdAt int64) gin.H {
+	metadata := gin.H{}
+	if createdAt > 0 {
+		metadata["created_at"] = createdAt
+	}
+	if usage != nil && (openAIUsageHasTokens(usage) || usage.InputTokensPresent || usage.OutputTokensPresent) {
+		wireUsage := gin.H{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
+		inputDetails := gin.H{}
+		if usage.CacheReadInputTokens > 0 || usage.CacheReadInputTokensPresent {
+			inputDetails["cached_tokens"] = usage.CacheReadInputTokens
+		}
+		if usage.CacheCreationInputTokens > 0 || usage.CacheCreationInputTokensPresent {
+			inputDetails["cache_write_tokens"] = usage.CacheCreationInputTokens
+		}
+		if usage.ImageInputTokens > 0 {
+			inputDetails["image_tokens"] = usage.ImageInputTokens
+		}
+		if len(inputDetails) > 0 {
+			wireUsage["input_tokens_details"] = inputDetails
+		}
+		if usage.ImageOutputTokens > 0 {
+			wireUsage["output_tokens_details"] = gin.H{"image_tokens": usage.ImageOutputTokens}
+		}
+		metadata["usage"] = wireUsage
+	}
+	return metadata
+}
+
+func openAIResponsesFailureSource(payload []byte, usage *OpenAIUsage, createdAt, nextSequence int64) []byte {
+	if !gjson.GetBytes(payload, "sequence_number").Exists() {
+		if patched, err := sjson.SetBytes(payload, "sequence_number", nextSequence); err == nil {
+			payload = patched
+		}
+	}
+	for key, value := range openAIResponsesFailureMetadata(usage, createdAt) {
+		if gjson.GetBytes(payload, "response."+key).Exists() || key == "usage" && gjson.GetBytes(payload, "usage").IsObject() {
+			continue
+		}
+		if patched, err := sjson.SetBytes(payload, "response."+key, value); err == nil {
+			payload = patched
+		}
+	}
+	return payload
+}
+
+func openAIResponsesTailUsageCandidate(previous bool, rawEvent string, data []byte, terminal OpenAIResponsesTerminal) bool {
+	if terminal.Failure {
+		return false
+	}
+	event := effectiveOpenAISSEEventType(data, rawEvent)
+	if resilience.ResponsesEventOutputDisposition(event, data).SemanticOutput {
+		return false
+	}
+	usage, present := openAIResponsesUsageEvidence(data, "upstream_sse_progressive")
+	if present && usage.InputTokensPresent && usage.OutputTokensPresent {
+		return true
+	}
+	return previous
 }

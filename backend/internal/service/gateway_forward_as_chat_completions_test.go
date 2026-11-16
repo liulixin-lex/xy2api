@@ -38,7 +38,7 @@ func TestHandleCCBufferedFromAnthropic_ToolArgumentsAreValidJSON(t *testing.T) {
 		``,
 	}, "\n")))}
 
-	_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
+	_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
 	require.NoError(t, err)
 
 	var body struct {
@@ -124,7 +124,7 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now())
+	result, err := svc.handleCCBufferedFromAnthropic(resp, c, nil, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 12, result.Usage.InputTokens)
@@ -160,7 +160,7 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCBufferedFromAnthropic(resp, c, "k3", "k3", nil, time.Now())
+	result, err := svc.handleCCBufferedFromAnthropic(resp, c, nil, "k3", "k3", nil, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 15, result.Usage.InputTokens)
