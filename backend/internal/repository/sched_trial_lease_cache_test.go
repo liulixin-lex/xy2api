@@ -1,0 +1,236 @@
+//go:build unit
+
+package repository
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+)
+
+func newTrialLeaseTestCache(t *testing.T) (service.SchedTrialLeases, *redis.Client, *miniredis.Miniredis, time.Time) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	now := time.Unix(10000, 0).UTC()
+	mr.SetTime(now)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return NewSchedTrialLeaseCache(rdb), rdb, mr, now
+}
+
+func requireTrialAcquire(t *testing.T, cache service.SchedTrialLeases, groupID int64, member string, now time.Time) {
+	t.Helper()
+	ok, err := cache.Acquire(context.Background(), 1, "model-a", groupID, member, now)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+func TestSchedTrialLeaseConcurrentAcquire(t *testing.T) {
+	cache, rdb, _, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	type result struct {
+		ok  bool
+		err error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 20)
+	for i := 0; i < 20; i++ {
+		go func() {
+			<-start
+			ok, err := cache.Acquire(ctx, 1, "model-a", int64(i%2+1), service.TrialLeaseSessionMember(fmt.Sprintf("session-%d", i)), now)
+			results <- result{ok: ok, err: err}
+		}()
+	}
+	close(start)
+	successes := 0
+	for i := 0; i < 20; i++ {
+		r := <-results
+		require.NoError(t, r.err)
+		if r.ok {
+			successes++
+		}
+	}
+	require.Equal(t, 3, successes, "groups share exactly three atomic reservations")
+	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 3, count)
+}
+
+func TestSchedTrialLeaseSharedCapacityAndRenewal(t *testing.T) {
+	cache, rdb, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	member := service.TrialLeaseSessionMember("same-session")
+	for _, group := range []int64{1, 10, 100} {
+		requireTrialAcquire(t, cache, group, member, now)
+	}
+	ok, err := cache.Room(ctx, 1, "model-a", 1, member, now)
+	require.NoError(t, err)
+	require.True(t, ok, "an existing holder has room when full")
+	ok, err = cache.Room(ctx, 1, "model-a", 2, member, now)
+	require.NoError(t, err)
+	require.False(t, ok)
+	ok, err = cache.Acquire(ctx, 1, "model-a", 2, member, now)
+	require.NoError(t, err)
+	require.False(t, ok)
+	for _, scope := range []struct {
+		account int64
+		model   string
+	}{{2, "model-a"}, {1, "model-b"}} {
+		ok, err = cache.Acquire(ctx, scope.account, scope.model, 2, member, now)
+		require.NoError(t, err)
+		require.True(t, ok, "different account/model has its own capacity")
+	}
+	mr.FastForward(5 * time.Minute)
+	requireTrialAcquire(t, cache, 1, member, now.Add(5*time.Minute))
+	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 3, count, "reacquisition must not consume another slot")
+	require.Equal(t, time.Hour, mr.TTL(schedTrialLeaseKey(1, "model-a")))
+	// At the original idle deadline only the reacquired holder remains.
+	_, err = cache.Room(ctx, 1, "model-a", 1, member, now.Add(service.TrialLeaseIdle))
+	require.NoError(t, err)
+	members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{"1:" + member}, members)
+}
+
+func TestSchedTrialLeaseIdleBoundaryAndRoomDoesNotRenew(t *testing.T) {
+	cache, rdb, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		requireTrialAcquire(t, cache, 1, service.TrialLeaseSessionMember(fmt.Sprint(i)), now)
+	}
+	mr.FastForward(service.TrialLeaseIdle - time.Millisecond)
+	before := now.Add(service.TrialLeaseIdle - time.Millisecond)
+	ok, err := cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("new"), before)
+	require.NoError(t, err)
+	require.False(t, ok)
+	ok, err = cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("0"), before)
+	require.NoError(t, err)
+	require.True(t, ok)
+	mr.FastForward(time.Millisecond)
+	ok, err = cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("new"), now.Add(service.TrialLeaseIdle))
+	require.NoError(t, err)
+	require.True(t, ok)
+	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
+	require.NoError(t, err)
+	require.Zero(t, count, "idle >= 600s is expired, even after Room")
+	requireTrialAcquire(t, cache, 1, service.TrialLeaseSessionMember("new"), now.Add(service.TrialLeaseIdle))
+	mr.FastForward(time.Hour)
+	require.False(t, mr.Exists(schedTrialLeaseKey(1, "model-a")), "unused keys must expire")
+}
+
+func TestSchedTrialLeaseTouchOnlyLiveMembers(t *testing.T) {
+	cache, rdb, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	a, b := service.TrialLeaseSessionMember("a"), service.TrialLeaseSessionMember("b")
+	requireTrialAcquire(t, cache, 1, a, now)
+	requireTrialAcquire(t, cache, 1, b, now)
+	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(5*time.Minute)))
+	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("missing"), now.Add(5*time.Minute)))
+	// Delayed activity must not move a lease's last activity backwards.
+	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(4*time.Minute)))
+	requireTrialAcquire(t, cache, 1, a, now.Add(3*time.Minute))
+	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, b, now.Add(service.TrialLeaseIdle)))
+	members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{"1:" + a}, members, "Touch must not resurrect expired or missing members")
+	_, err = cache.Room(ctx, 1, "model-a", 1, a, now.Add(15*time.Minute-time.Millisecond))
+	require.NoError(t, err)
+	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(15*time.Minute)))
+	require.False(t, mr.Exists(schedTrialLeaseKey(1, "model-a")))
+}
+
+func TestSchedTrialLeaseReleaseAndRequestNamespace(t *testing.T) {
+	cache, rdb, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	request := service.TrialLeaseRequestMember("request-1")
+	session := service.TrialLeaseSessionMember("request-1")
+	lookalike := service.TrialLeaseSessionMember(request)
+	requireTrialAcquire(t, cache, 1, request, now)
+	requireTrialAcquire(t, cache, 1, session, now)
+	requireTrialAcquire(t, cache, 10, lookalike, now)
+	ok, err := cache.Acquire(ctx, 1, "model-a", 1, service.TrialLeaseRequestMember("request-2"), now)
+	require.NoError(t, err)
+	require.False(t, ok, "sessionless requests count towards capacity")
+	require.NoError(t, cache.Release(ctx, 1, "model-a", 1, request))
+	require.NoError(t, cache.Release(ctx, 1, "model-a", 1, request))
+	members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"1:" + session, "10:" + lookalike}, members)
+	requireTrialAcquire(t, cache, 1, request, now)
+	require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 1))
+	require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 1))
+	members, err = rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{"10:" + lookalike}, members, "group 1 cannot release group 10")
+	require.NoError(t, cache.Release(ctx, 1, "model-a", 10, lookalike))
+	require.False(t, mr.Exists(schedTrialLeaseKey(1, "model-a")))
+	// Even a real session equal to the encoded request identity stays distinct
+	// when all three members belong to the same group.
+	for _, member := range []string{request, session, lookalike} {
+		requireTrialAcquire(t, cache, 1, member, now)
+	}
+	require.NoError(t, cache.Release(ctx, 1, "model-a", 1, request))
+	members, err = rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"1:" + session, "1:" + lookalike}, members)
+}
+
+func TestSchedTrialLeaseEveryOperationPrunesIdle(t *testing.T) {
+	for _, operation := range []string{"room", "acquire", "touch", "release", "release_group"} {
+		t.Run(operation, func(t *testing.T) {
+			cache, rdb, mr, now := newTrialLeaseTestCache(t)
+			ctx := context.Background()
+			old := service.TrialLeaseSessionMember("old")
+			live := service.TrialLeaseSessionMember("live")
+			requireTrialAcquire(t, cache, 10, old, now)
+			requireTrialAcquire(t, cache, 10, live, now.Add(time.Second))
+			at := now.Add(service.TrialLeaseIdle)
+			mr.FastForward(service.TrialLeaseIdle)
+			mr.SetTime(at) // FastForward updates TTLs, not the TIME command.
+			var err error
+			switch operation {
+			case "room":
+				_, err = cache.Room(ctx, 1, "model-a", 1, "s:new", at)
+			case "acquire":
+				_, err = cache.Acquire(ctx, 1, "model-a", 1, "s:new", at)
+			case "touch":
+				err = cache.Touch(ctx, 1, "model-a", 1, "s:missing", at)
+			case "release":
+				err = cache.Release(ctx, 1, "model-a", 1, "s:missing")
+			case "release_group":
+				err = cache.ReleaseGroup(ctx, 1, "model-a", 1)
+			}
+			require.NoError(t, err)
+			_, err = rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "10:"+old).Result()
+			require.ErrorIs(t, err, redis.Nil, "all operations must prune the boundary")
+			_, err = rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "10:"+live).Result()
+			require.NoError(t, err, "a live member in another group must survive")
+		})
+	}
+}
+
+func TestSchedTrialLeaseRedisErrors(t *testing.T) {
+	cache, _, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	mr.SetError("ERR synthetic storage failure")
+	ok, err := cache.Room(ctx, 1, "model-a", 1, "s:a", now)
+	require.False(t, ok)
+	require.ErrorContains(t, err, "synthetic storage failure")
+	ok, err = cache.Acquire(ctx, 1, "model-a", 1, "s:a", now)
+	require.False(t, ok)
+	require.ErrorContains(t, err, "synthetic storage failure")
+	require.ErrorContains(t, cache.Touch(ctx, 1, "model-a", 1, "s:a", now), "synthetic storage failure")
+	require.ErrorContains(t, cache.Release(ctx, 1, "model-a", 1, "s:a"), "synthetic storage failure")
+	require.ErrorContains(t, cache.ReleaseGroup(ctx, 1, "model-a", 1), "synthetic storage failure")
+}
