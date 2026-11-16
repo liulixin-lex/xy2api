@@ -66,10 +66,8 @@ type SchedAttempt interface {
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
-	// Report Begin (FinishedAt zero) and Finish once each. Engine integration
-	// must adopt F7: use observations only for in-flight tracking and admit
-	// completed evidence through LoadInsertedAfter. The legacy engine on this
-	// branch still adds Finish observations directly to its window.
+	// Report Begin (FinishedAt zero) and Finish once each for in-flight tracking.
+	// Completed evidence enters the engine only through LoadInsertedAfter (F7).
 	SetObserver(fn func(schedquality.AttemptSample))
 	Flush(ctx context.Context) error
 }
