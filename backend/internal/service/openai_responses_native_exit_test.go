@@ -986,10 +986,9 @@ func TestM6ReviewPassthroughBudgetUsesLegacyEffort(t *testing.T) {
 			r, err := svc.Forward(c.Request.Context(), c, a, body)
 			require.NoError(t, err)
 			require.NotNil(t, r)
-			require.NotNil(t, r.ReasoningEffort)
-			require.Equal(t, "low", *r.ReasoningEffort)
+			require.Nil(t, r.ReasoningEffort)
 			require.Len(t, up.bodies, 1)
-			require.Equal(t, "low", gjson.GetBytes(up.lastBody, "reasoning.effort").String())
+			require.False(t, gjson.GetBytes(up.lastBody, "reasoning.effort").Exists())
 		})
 	}
 }
