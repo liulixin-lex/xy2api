@@ -67,7 +67,7 @@ func TestCaptureSelectedGroupWithoutSession(t *testing.T) {
 			st := resilience.NewRequestState()
 			st.SetGroup(10) // The API key's group differs from the selected fallback group.
 			ctx := resilience.WithRequestState(context.Background(), st)
-			svc := newOpenAICompactionSchedulerTestService([]Account{{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}}, advanced)
+			svc := newOpenAICompactionSchedulerTestService([]Account{{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{20, 30}}}, advanced)
 			rec := &captureServiceRecorder{}
 			svc.SetSchedAttemptRecorder(rec)
 			for _, groupID := range []int64{20, 30} {
