@@ -53,12 +53,19 @@ func TestM8LastResortCannotSendBeforeRecovery(t *testing.T) {
 	require.NotNil(t, original.UpstreamRecoveryHint)
 	st.SetLastUpstreamFailure(original)
 	st.NoteAccountRetryNotBefore(71, *original.UpstreamRecoveryHint)
-	second := selectAccount()
-	_, err = svc.Forward(ctx, c, second.Account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
-	if second.ReleaseFunc != nil {
-		second.ReleaseFunc()
+	second, _, selectionErr := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.5", nil, OpenAIUpstreamTransportAny, false)
+	if selectionErr == nil {
+		require.Equal(t, int64(71), st.LastResort())
+		_, err = svc.Forward(ctx, c, second.Account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
+		if second.ReleaseFunc != nil {
+			second.ReleaseFunc()
+		}
+		require.ErrorIs(t, err, original)
+	} else {
+		// M9 may reject this candidate during selection; both gates must
+		// preserve the same no-send boundary until the original hint is due.
+		require.ErrorIs(t, selectionErr, ErrNoAvailableAccounts)
 	}
-	require.ErrorIs(t, err, original)
 	require.Len(t, upstream.requests, 1, "last resort must not bypass the send boundary")
 	require.Empty(t, rec.Body.String())
 	time.Sleep(time.Until(original.UpstreamRecoveryHint.NotBefore))
