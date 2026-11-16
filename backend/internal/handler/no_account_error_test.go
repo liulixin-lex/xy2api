@@ -61,6 +61,32 @@ func TestClassifyNoAccountError_NilDiagnoser_Falls503(t *testing.T) {
 	require.False(t, cls.ModelNotFound)
 }
 
+func TestM8LegacyModelDiagnosisPreserves404(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result service.ModelAvailabilityDiagnosis
+		status int
+	}{
+		{"legacy_missing", service.ModelAvailabilityDiagnosis{HasAccountsInPool: true}, 404},
+		{"legacy_supported", service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}, 503},
+		{"unknown", service.ModelAvailabilityDiagnosis{}, 503},
+		{"dependency_error", service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, Err: fmt.Errorf("scan failed")}, 503},
+		{"typed_missing", service.ModelAvailabilityDiagnosis{Known: true, Members: 1}, 404},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestGinContextWithRequest()
+			classification := classifyNoAccountErrorFromGin(c, &fakeDiagnoser{resp: tc.result},
+				&service.APIKey{GroupID: ptrInt64(42)}, "gpt-5.1-codex-mini", "gpt-5.1-codex-mini", service.PlatformOpenAI)
+			require.Equal(t, tc.status, classification.Status)
+			if tc.status == 404 {
+				require.True(t, classification.ModelNotFound)
+				require.Equal(t, "model_not_found", classification.ErrType)
+				require.Contains(t, classification.Message, "gpt-5.1-codex-mini")
+			}
+		})
+	}
+}
+
 func TestClassifySelectionFailureError_RateLimitedPool(t *testing.T) {
 	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "Service temporarily unavailable"}
 

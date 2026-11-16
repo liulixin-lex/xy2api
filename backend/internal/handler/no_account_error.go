@@ -219,7 +219,13 @@ func classifyNoAccountError(
 	}
 
 	result := diag.DiagnoseModelAvailabilityForPlatform(ctx, apiKey.GroupID, routingModel, platform)
-	if result.Known && result.Err == nil && (result.Members == 0 || result.ModelSupported == 0) {
+	missingModel := result.Known && (result.Members == 0 || result.ModelSupported == 0)
+	// Legacy diagnosers report a successful scan through these two booleans.
+	// Preserve their 404 until all producers also populate the typed counts.
+	if !result.Known {
+		missingModel = result.HasAccountsInPool && !result.HasModelSupport
+	}
+	if result.Err == nil && missingModel {
 		return noAccountErrorClassification{
 			Status:        http.StatusNotFound,
 			ErrType:       "model_not_found",
