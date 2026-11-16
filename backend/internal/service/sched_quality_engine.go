@@ -326,7 +326,7 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 	keys = enabled
 	events := make(map[time.Time]map[SchedAccountModel]bool)
 	add := func(at time.Time) {
-		if !at.IsZero() && !at.After(horizon) && at.After(after) {
+		if !at.IsZero() && !at.After(horizon) {
 			if events[at] == nil {
 				events[at] = make(map[SchedAccountModel]bool)
 			}
@@ -338,6 +338,9 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 	for pair, samples := range d.samples {
 		for _, r := range samples {
 			at := schedAvailableAt(r)
+			if !at.After(after) {
+				continue
+			}
 			add(at)
 			if events[at] != nil {
 				events[at][pair] = true
@@ -345,15 +348,19 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 		}
 	}
 	schedule := func(r schedquality.LineState) {
-		for _, at := range []time.Time{r.Until, r.TrialUntil, r.LastRear.Add(schedquality.LevelClearQuiet)} {
+		deadlines := []time.Time{r.Until, r.TrialUntil}
+		if !r.LastRear.IsZero() && (r.Level > 0 || r.Admissions > 0) {
+			deadlines = append(deadlines, r.LastRear.Add(schedquality.LevelClearQuiet))
+		}
+		for _, at := range deadlines {
+			// Recover overdue persisted timers at their original instant. Moving a
+			// review to the restart watermark would grant a fresh hour of trial.
 			if at.After(r.EvaluatedAt) {
-				if !at.After(after) {
-					at = after.Add(time.Nanosecond)
-				}
 				add(at)
 			}
 		}
 	}
+
 	for _, r := range rows {
 		schedule(r)
 	}

@@ -150,3 +150,22 @@ func TestEngineSlowBoundaryMatchesRuleB(t *testing.T) {
 	ms = 1000
 	require.False(t, schedSlow(a, 1.001))
 }
+
+func TestEngineRestartReplaysOverdueDeadlinesWithoutExtendingTrial(t *testing.T) {
+	f := newQualityFixture(t)
+	until := f.now.Add(-2 * time.Hour).Truncate(time.Minute)
+	entry := until.Add(-20 * time.Minute)
+	f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Admissions: 1, Entry: entry, LastRear: entry, Until: until, EvaluatedAt: entry}}
+	f.cycle()
+	require.False(t, f.view().TTFO.Trial)
+	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
+	require.Equal(t, until, f.line(q.DimensionTTFO).Epoch)
+	require.Len(t, f.store.Decisions, 2)
+	require.Equal(t, q.ActionTrial, f.store.Decisions[0].Action)
+	require.Equal(t, until, f.store.Decisions[0].At)
+	require.Equal(t, q.ActionTrialTimeout, f.store.Decisions[1].Action)
+	require.Equal(t, until.Add(q.TrialDuration), f.store.Decisions[1].At)
+	f.e.processedAt = time.Time{}
+	f.cycle()
+	require.Len(t, f.store.Decisions, 2)
+}
