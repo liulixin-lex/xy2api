@@ -110,8 +110,8 @@ describe('AccountsToolbar', () => {
   it('emits the filters with the one that changed, as the list request takes them (7d-12)', async () => {
     const wrapper = mountToolbar({ platform: 'openai', iq_status: '' })
     await flushPromises()
-    await pick(wrapper, '[data-filter="quality"]', 'admin.accounts.table.quality.substandard')
-    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: '', sched_quality: 'substandard' }])
+    await pick(wrapper, '[data-filter="quality"]', 'admin.accounts.table.quality.trial')
+    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: '', sched_quality: 'trial' }])
     // A tag's close button clears its filter only.
     await wrapper.get('[data-test="filter-tags"] .tb-tag[data-key="platform"] .tb-tag__x').trigger('click')
     expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: '', iq_status: '' }])

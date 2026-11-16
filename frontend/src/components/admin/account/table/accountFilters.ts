@@ -18,36 +18,37 @@ export interface AccountListFilters {
   search?: string
 }
 
-/** Quality filter values, as the backend takes them. */
-export type QualityFilter = 'normal' | 'substandard' | 'exempt' | 'observing'
-export const QUALITY_FILTERS: QualityFilter[] = ['normal', 'substandard', 'exempt', 'observing']
+/** Quality filter values, as the backend takes them (H.11). */
+export type QualityFilter = 'normal' | 'rear' | 'trial' | 'unknown' | 'exempt'
+export const QUALITY_FILTERS: QualityFilter[] = ['normal', 'rear', 'trial', 'unknown', 'exempt']
 
 export const UNGROUPED_GROUP_FILTER = 'ungrouped'
 export const PRIVACY_UNSET_FILTER = '__unset__'
 
 /**
- * The quality filter against the account's summary, as the backend's filter decides it (sched_admin_summary.go,
- * attention): only OpenAI accounts take part in any of the four; observing by the summary status, exempt by any
- * exemption, back of queue by a substandard record in effect while the account is not stopped, normal by status
- * normal (not stopped, not observed) with no exemption and no record in effect. An account the summary answered
- * without (`null`) matches none. Before the first summary of the row is in (`undefined`) nothing is judged: it matches,
- * so the rows of a fresh page do not dim for the moment the summary takes.
+ * The quality filter against the account's summary, as the backend's filter decides it (H.11): only OpenAI accounts
+ * take part in any of them. rear: not stopped, some group at the rear; trial / unknown: some group with that identity;
+ * exempt: any exemption; normal: not stopped and every group passing (an account the summary names no group for is
+ * not normal; exemptions do not count here). An account the summary answered without (`null`) matches none. Before
+ * the first summary of the row is in (`undefined`) nothing is judged: it matches, so the rows of a fresh page do not
+ * dim for the moment the summary takes.
  */
 export function qualityMatches(platform: string, quality: AccountQualityView | null | undefined, filter: string): boolean {
   if (!filter) return true
   if (platform !== 'openai') return false
   if (quality === undefined) return true
   if (quality === null) return false
-  const back = !quality.stop && quality.substandard.some((item) => item.effective)
+  const statuses = Object.values(quality.group_status ?? {})
   switch (filter) {
-    case 'observing':
-      return quality.status === 'observing'
+    case 'rear':
+      return !quality.stop && statuses.includes('rear')
+    case 'trial':
+    case 'unknown':
+      return statuses.includes(filter)
     case 'exempt':
       return quality.exemptions.length > 0
-    case 'substandard':
-      return back
     case 'normal':
-      return quality.status === 'normal' && quality.exemptions.length === 0 && !back
+      return !quality.stop && statuses.length > 0 && statuses.every((status) => status === 'pass')
     default:
       return true
   }

@@ -721,7 +721,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** normal | substandard | exempt | observing (the backend's own values). */
+    /** normal | rear | trial | unknown | exempt (the backend's own values, H.11). */
     sched_quality?: string
   }
   includeProxies?: boolean

@@ -1,5 +1,5 @@
 /**
- * Admin quality scheduling API, prefix /admin/sched-quality (backend 0.6.5). Every answer is returned as the backend
+ * Admin quality scheduling API, prefix /admin/sched-quality (quality gate v2). Every answer is returned as the backend
  * sends it; the shapes are in ./schedQualityTypes.
  */
 
@@ -8,12 +8,18 @@ import type {
   BackendAccountDetail,
   BackendAccountsSummary,
   BackendClearAutoState,
+  BackendDecision,
   BackendGroupPolicy,
+  BackendGroupPolicySaved,
+  BackendGroupsSummary,
   BackendOrder,
   BackendPolicyPreview,
   BackendResetResult,
+  BackendTTFTRule,
+  BackendTTFTRuleSaved,
   SchedGroupPolicyUpdate,
-  SchedOverrideRequest
+  SchedOverrideRequest,
+  SchedTTFTRuleUpdate
 } from './schedQualityTypes'
 
 const base = '/admin/sched-quality'
@@ -30,6 +36,18 @@ export async function backendSummary(accountIds: number[], options?: RequestOpti
 export async function accountDetail(id: number, options?: RequestOptions): Promise<BackendAccountDetail> {
   const { data } = await apiClient.get<BackendAccountDetail>(`${base}/accounts/${id}`, { signal: options?.signal })
   return data
+}
+
+/** The account's identity changes, newest first; `beforeId` pages back from a record. */
+export async function accountDecisions(
+  id: number,
+  page: { limit?: number; beforeId?: number } = {},
+  options?: RequestOptions
+): Promise<BackendDecision[]> {
+  const params: Record<string, number> = { limit: page.limit ?? 50 }
+  if (page.beforeId !== undefined) params.before_id = page.beforeId
+  const { data } = await apiClient.get<BackendDecision[]>(`${base}/accounts/${id}/decisions`, { params, signal: options?.signal })
+  return data ?? []
 }
 
 export async function reset(id: number): Promise<BackendResetResult> {
@@ -58,18 +76,24 @@ export async function getGroupPolicy(groupId: number): Promise<BackendGroupPolic
 }
 
 /** A version conflict is rejected with HTTP 409. */
-export async function updateGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate): Promise<BackendGroupPolicy> {
-  const { data } = await apiClient.put<BackendGroupPolicy>(`${base}/groups/${groupId}/policy`, update)
+export async function updateGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate): Promise<BackendGroupPolicySaved> {
+  const { data } = await apiClient.put<BackendGroupPolicySaved>(`${base}/groups/${groupId}/policy`, update)
   return data
 }
 
 /**
- * What the policy would do if saved (backend 0.6.5): the group's normal / substandard counts now and after, and the
- * accounts it would turn substandard. Same body as the update; nothing is stored.
+ * What the policy would say on the current evidence: per line the verdicts with the saved and the new thresholds, the
+ * keys whose verdict turns, and the lines it relaxes. Same body as the update; nothing is stored.
  */
 export async function previewGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate, options?: RequestOptions): Promise<BackendPolicyPreview> {
   const { data } = await apiClient.post<BackendPolicyPreview>(`${base}/groups/${groupId}/policy/preview`, update, { signal: options?.signal })
-  return { now: data.now, after: data.after, changed: data.changed ?? [] }
+  return { relaxed_lines: data.relaxed_lines ?? [], lines: data.lines, changed: data.changed ?? [] }
+}
+
+/** Groups over all their models: identities of their account × model keys and the users' waits of the last hour. */
+export async function groupsSummary(groupIds: number[], options?: RequestOptions): Promise<BackendGroupsSummary> {
+  const { data } = await apiClient.post<BackendGroupsSummary>(`${base}/groups/summary`, { group_ids: groupIds }, { signal: options?.signal })
+  return data
 }
 
 /**
@@ -84,8 +108,21 @@ export async function groupBoard(groupId: number, model?: string, options?: Requ
   return data
 }
 
+/** The first-output line's three global settings, their defaults and the replayed ranges. */
+export async function getTTFTRule(): Promise<BackendTTFTRule> {
+  const { data } = await apiClient.get<BackendTTFTRule>(`${base}/ttft-rule`)
+  return data
+}
+
+/** A version conflict is rejected with HTTP 409, an invalid value with 400 (INVALID_TTFT_RULE, nothing stored). */
+export async function updateTTFTRule(update: SchedTTFTRuleUpdate): Promise<BackendTTFTRuleSaved> {
+  const { data } = await apiClient.put<BackendTTFTRuleSaved>(`${base}/ttft-rule`, update)
+  return data
+}
+
 export const schedQualityAPI = {
   accountDetail,
+  accountDecisions,
   reset,
   setOverride,
   clearOverride,
@@ -93,7 +130,10 @@ export const schedQualityAPI = {
   getGroupPolicy,
   updateGroupPolicy,
   previewGroupPolicy,
-  groupBoard
+  groupBoard,
+  groupsSummary,
+  getTTFTRule,
+  updateTTFTRule
 }
 
 export default schedQualityAPI

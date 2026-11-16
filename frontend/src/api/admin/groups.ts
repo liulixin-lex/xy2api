@@ -473,16 +473,31 @@ export async function getCapacitySummary(): Promise<
 }
 
 /**
- * 利润门预览：按给定毛利率（小数）与当前时刻换算上游倍率上限，并统计可调度成员中能通过的数量。
+ * 利润门预览：按给定毛利率（小数）与当前时刻换算上游倍率上限，并统计可调度成员中能通过的数量；
+ * floor 是试算用的最低上游倍率（未保存的值也可以），0 表示不设。
  */
 export async function getProfitControlPreview(
   id: number,
   margin: number,
+  floor: number,
   options?: { signal?: AbortSignal }
 ): Promise<GroupProfitControlPreview> {
   const { data } = await apiClient.get<GroupProfitControlPreview>(
     `/admin/groups/${id}/profit-control-preview`,
-    { params: { margin }, signal: options?.signal }
+    { params: { margin, floor }, signal: options?.signal }
+  )
+  return { ...data, pinned_loss: data.pinned_loss ?? [] }
+}
+
+/** 分组成员的「固定」开关（仅 OpenAI 分组）。账号不是该组成员或分组不是 OpenAI 分组时返回 400。 */
+export async function setMemberPinned(
+  groupId: number,
+  accountId: number,
+  pinned: boolean
+): Promise<{ group_id: number; account_id: number; pinned: boolean }> {
+  const { data } = await apiClient.put<{ group_id: number; account_id: number; pinned: boolean }>(
+    `/admin/groups/${groupId}/members/${accountId}`,
+    { pinned }
   )
   return data
 }
@@ -516,7 +531,8 @@ export const groupsAPI = {
   updateSortOrder,
   getUsageSummary,
   getCapacitySummary,
-  getProfitControlPreview
+  getProfitControlPreview,
+  setMemberPinned
 }
 
 export default groupsAPI

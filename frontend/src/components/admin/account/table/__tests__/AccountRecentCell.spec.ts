@@ -17,9 +17,9 @@ vi.mock('vue-i18n', async () => ({
 type Quality = Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'>
 const quality = (patch: Partial<Quality> = {}): Quality => ({
   reset_at: null,
-  ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
+  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0.042 },
-  cache: { n: 40, short: false, red: false, ratio: 0.8 },
+  cache: { ratio: 0.8, turns: 40, all_ratio: 0.6, all_requests: 120 },
   ...patch
 })
 enableAutoUnmount(afterEach)
@@ -37,9 +37,11 @@ describe('AccountRecentCell', () => {
     ])
   })
 
-  // One tip card for the whole cell (12.7): the window, then a row per dimension with its value and sample count.
-  it('has one card: the last hour, each dimension\'s value and samples, muted with too few samples, "—" without a value', () => {
-    const cell = mountCell(quality({ cache: { n: 3, short: true, red: false, ratio: 0.2 }, error: { n: 0, short: true, red: false, rate: null } }))
+  // One tip card for the whole cell (12.7): the window, then each value with its samples. First token is the first
+  // useful output, with the first event and the gap under it; cache is the continuation turns, with every successful
+  // request under it (N14).
+  it('has one card: the last hour, both views of first token and cache, muted with too few samples, "—" without a value', () => {
+    const cell = mountCell(quality({ cache: { ratio: 0.2, turns: 3, all_ratio: 0.6, all_requests: 120 }, error: { n: 0, short: true, red: false, rate: null } }))
     expect(cell.findAll('.recent__v').some((value) => '__tipHandlers' in value.element)).toBe(false)
     vi.useFakeTimers()
     cell.element.dispatchEvent(new Event('mouseenter'))
@@ -48,9 +50,12 @@ describe('AccountRecentCell', () => {
     const tip = document.getElementById('sq-tip')!
     expect(tip.querySelector('.sq-tip__title')!.textContent).toBe('admin.accounts.table.tip.recentTitle')
     expect(Array.from(tip.querySelectorAll('.sq-tip__c'), (el) => el.textContent)).toEqual([
-      'admin.accounts.table.dims.ttfo', '2.8s', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.recent.firstOutput', '2.8s', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.recent.firstEvent', '1.2s', '',
+      'admin.accounts.table.recent.gap', '1.6s', '',
       'admin.accounts.table.dims.error', '—', 'admin.accounts.table.tip.countShort:{"n":0}',
-      'admin.accounts.table.dims.cache', '20%', 'admin.accounts.table.tip.countShort:{"n":3}'
+      'admin.accounts.table.recent.cacheTurns', '20%', 'admin.accounts.table.tip.turnsShort:{"n":3}',
+      'admin.accounts.table.recent.cacheAll', '60%', 'admin.accounts.table.tip.count:{"n":120}'
     ])
     expect(Array.from(tip.querySelectorAll('.sq-tip__tone--muted'), (el) => el.textContent)).toEqual(['—', '20%'])
     cell.element.dispatchEvent(new Event('mouseleave'))
@@ -75,7 +80,9 @@ describe('AccountRecentCell', () => {
   })
 
   it('reads muted with too few samples, and "—" without data', () => {
-    expect(cells(quality({ cache: { n: 3, short: true, red: true, ratio: 0.2 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['recent__v--na'] })
+    // The cache line judges from 20 continuation turns; fewer read muted.
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 19, all_ratio: 0.6, all_requests: 120 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['recent__v--na'] })
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 20, all_ratio: 0.6, all_requests: 120 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: [] })
     expect(cells(null).map((cell) => [cell.text, cell.cls])).toEqual([['—', ['recent__v--na']], ['—', ['recent__v--na']], ['—', ['recent__v--na']]])
   })
 })

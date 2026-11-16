@@ -17,7 +17,7 @@ import GroupSchedPolicyField from '@/components/admin/group/GroupSchedPolicyFiel
 import { closeSchedBoard, closeSchedDrawer, openSchedBoard } from '@/composables/useSchedLayers'
 import { withSchedHost } from './schedLayerHost'
 
-const api = vi.hoisted(() => ({ groupBoard: vi.fn(), getGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
+const api = vi.hoisted(() => ({ groupBoard: vi.fn(), groupsSummary: vi.fn(), getGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
@@ -27,7 +27,8 @@ vi.mock('@/composables/useAdminPermission', async () => {
 // Acceptance item 3 of WP7: every text the new components render (visible text and tips) is data or comes from
 // design/copy.md, and none is a sentence. Existing keys reused by the design (column "操作", close) are listed too.
 // The quality panel is not held to it any more: its copy follows the approved prototype of the redesign (spec 5),
-// which has empty states and notes.
+// which has empty states and notes. Nor is the board's group summary (ruling H.9): it carries the report's own
+// sentences ("users' wait for the first useful output, from entering the gateway …", 5.3 and N11).
 const messages = { admin: { ...zhSched, accounts: { columns: { actions: '操作' } } }, common: { close: '关闭' } }
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: messages } })
 
@@ -53,9 +54,11 @@ function rendered(): string[] {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent?.trim()
-    if (text && !node.parentElement?.closest('.sr-only')) out.push(text)
+    if (text && !node.parentElement?.closest('.sr-only, [data-sq-board-summary]')) out.push(text)
   }
-  document.querySelectorAll<HTMLElement & { __tipText?: string }>('*').forEach((el) => { if (el.__tipText) out.push(el.__tipText) })
+  document.querySelectorAll<HTMLElement & { __tipText?: string }>('*').forEach((el) => {
+    if (el.__tipText && !el.closest('[data-sq-board-summary]')) out.push(el.__tipText)
+  })
   return out
 }
 
@@ -73,7 +76,12 @@ beforeEach(() => {
   document.documentElement.dataset.motion = 'reduced'
   api.groupBoard.mockResolvedValue(board())
   api.getGroupPolicy.mockResolvedValue(policyFixture)
-  api.previewGroupPolicy.mockResolvedValue({ now: { normal: 3, below: 1 }, after: { normal: 2, below: 2 }, changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', dims: ['error'] }] })
+  api.groupsSummary.mockResolvedValue({ at: '', stale: false, groups: [] })
+  api.previewGroupPolicy.mockResolvedValue({
+    relaxed_lines: [],
+    lines: Object.fromEntries(['ttfo', 'error', 'cache'].map((line) => [line, { now: { pass: 3, unknown: 1, fail: 0 }, after: { pass: 2, unknown: 1, fail: 1 } }])),
+    changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', line: 'error', from: 'pass', to: 'fail' }]
+  })
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
@@ -108,7 +116,7 @@ describe('quality UI copy', () => {
     // Normal path of the board's admission checks, then the codes a second admission check can pass through.
     const codes = [
       'platform_mismatch', 'model_rate_limited', 'not_schedulable', 'quota_auto_pause_5h', 'quota_auto_pause_7d',
-      'model_not_supported', 'profit_threshold', 'profit_invalid_account_rate', 'account_scheduling_threshold',
+      'model_not_supported', 'profit_threshold', 'profit_floor', 'profit_invalid_account_rate', 'account_scheduling_threshold',
       'privacy_not_set', 'runtime_blocked', 'proxy_stream_quarantined', 'shadow_parent_unhealthy',
       'channel_upstream_restricted', 'channel_pricing_restricted',
       'quota_auto_reset_pending_5h', 'quota_auto_reset_pending_7d', 'quota_auto_reset_credit_check_5h', 'quota_auto_reset_credit_check_7d'

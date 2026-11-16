@@ -1,14 +1,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-import type { BackendAccountDetail, BackendDimDetail, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
+import { groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
-import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
 
 const { api, backendSummary } = vi.hoisted(() => ({
-  api: { accountDetail: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
+  api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
   backendSummary: vi.fn()
 }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api, backendSummary }))
@@ -28,21 +29,13 @@ vi.mock('vue-i18n', async () => ({
 enableAutoUnmount(afterEach)
 
 const policy: BackendPolicy = { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0.5, takeover_idle_seconds: 0 }
-const dim = (verdict: string, n = 40): BackendDimDetail & { bad: number } => ({ scope: 'own', window_min: 60, n, lcb: null, verdict, bad: 0 })
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
-const model = (name: string, failing = false): BackendGroupModel => ({
-  model: name,
-  failing,
-  dims: failing ? ['ttfo'] : [],
-  level: failing ? 1 : 0,
-  since: null,
-  until: failing ? inMinutes(20) : null,
-  other_group_ids: [],
-  exempt: false,
-  ttfo: dim(failing ? 'fail' : 'pass'),
-  error: dim('pass'),
-  cache: { ...dim('short', 3), ratio: null }
-})
+/** A model row: first output at the rear for 20 more minutes (level 1, a 40-minute stay) when `rear`; cache unknown. */
+const model = (name: string, rear = false): BackendGroupModel => {
+  const row = groupModel(name, rear ? { ttfo: 'rear', cache: 'unknown' } : { cache: 'unknown' })
+  if (rear) Object.assign(row.lines.ttfo, { level: 1, until: inMinutes(20) })
+  return row
+}
 
 // Two groups; gpt-b is at the back in 晨星组. The IQ gate of each model has its own recheck time.
 function detail(id = 7): BackendAccountDetail {
@@ -98,6 +91,7 @@ beforeEach(() => {
   document.documentElement.dataset.motion = 'reduced'
   api.accountDetail.mockReset().mockImplementation(async (id: number) => detail(id))
   api.setOverride.mockReset().mockResolvedValue(undefined)
+  api.accountDecisions.mockReset().mockResolvedValue([])
   backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] })
 })
 
@@ -225,7 +219,7 @@ describe('SchedQualityPanel', () => {
     expect(tab('gpt-b').getAttribute('aria-selected')).toBe('true')
     expect(groupRow(53).classList.contains('is-target')).toBe(true)
     expect(groupRow(54).classList.contains('is-target')).toBe(false)
-    expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toContain('admin.accounts.table.dotStates.back')
+    expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toContain('admin.schedQuality.placement.rear')
     // The amber mark sits inside the tab of the model with a group at the back, before its text.
     expect(tab('gpt-b').firstElementChild!.hasAttribute('data-qp-tab-back')).toBe(true)
     expect(tab('gpt-a').querySelector('[data-qp-tab-back]')).toBeNull()
@@ -429,20 +423,126 @@ describe('SchedQualityPanel', () => {
     alone.unmount()
     backendSummary.mockClear()
     const quality = {
-      account_id: 7, status: 'normal', reset_at: null, stop: null, substandard: [], exemptions: [],
-      ttfo: { n: 40, short: false, red: true, p50_ms: 12_300 }, error: { n: 40, short: false, red: false, rate: 0.01 }, cache: { n: 2, short: true, red: false, ratio: 0.4 }
+      account_id: 7, status: 'normal', reset_at: null, stop: null, rear: [], exemptions: [],
+      ttfo: { first_event_p50_ms: 1100, first_output_p50_ms: 12_300, gap_p50_ms: 11_200, n: 40 },
+      error: { n: 40, short: false, red: false, rate: 0.01 },
+      cache: { ratio: 0.4, turns: 2, all_ratio: 0.7, all_requests: 90 }
     }
     const row = { id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality } as never
     mount(withSchedHost(SchedQualityPanel, { row: () => row }), { attachTo: document.body, props: { account: () => row } })
     await openOn()
     expect(backendSummary).not.toHaveBeenCalled()
     const value = (key: string) => document.querySelector(`[data-qp-recent="${key}"] .rrow__v`)!
+    // First token as the line judges it (first useful output), the first event and the gap under it; cache over the
+    // continuation turns (muted: under 20) and over every successful request (N14).
     expect(value('ttfo').textContent).toBe('12.3s')
+    expect(value('ttfo_event').textContent).toBe('1.1s')
+    expect(document.querySelector('[data-qp-recent="ttfo_event"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.gap:{"value":"11.2s"}')
+    expect(value('cache').textContent).toBe('40%')
     expect(value('cache').classList.contains('rrow__v--na')).toBe(true)
+    expect(value('cache_all').textContent).toBe('70%')
+    expect(value('cache_all').classList.contains('rrow__v--na')).toBe(false)
     // The whole account's value beside the strictest groups' threshold: no "over the line", no amber, a note that the
     // threshold judges per group and model (7k-1).
     expect(value('ttfo').className).toBe('rrow__v')
     expect(document.querySelector('[data-qp-recent="ttfo"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.threshold:{"value":"≤ 10.0s"}')
     expect(document.querySelector('[data-test="qp-threshold-note"]')!.textContent).toBe('admin.schedQuality.panel.thresholdNote')
+  })
+
+  it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {
+    const value = detail()
+    const row = value.groups[0].by_model[1]
+    row.lines.error = line('error', 'trial', { trial_until: inMinutes(30) })
+    row.lines.cache = line('cache', 'unknown')
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    const marks = Array.from(groupRow(53).querySelectorAll<HTMLElement>('[data-qp-mark]'))
+    expect(marks.map((mark) => mark.dataset.identity)).toEqual(['rear', 'trial', 'unknown'])
+    expect(marks.map((mark) => mark.className)).toEqual(['mk mk--rear', 'mk mk--trial', 'mk mk--unknown'])
+    const tips = marks.map((mark) => mark.getAttribute('aria-label'))
+    expect(tips[0]).toMatch(/^admin\.schedQuality\.dim\.ttfo · admin\.schedQuality\.identity\.rear · admin\.schedQuality\.identity\.rearUntil:\{"time":"\d\d:\d\d","minutes":40\}$/)
+    expect(tips[1]).toMatch(/^admin\.schedQuality\.dim\.error · admin\.schedQuality\.identity\.trial · admin\.schedQuality\.identity\.trialLeft:\{"time":"(29:59|30:00)"\}$/)
+    expect(tips[2]).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
+    // The place the lines add up to: the rear, as long as the longest rear line.
+    expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toMatch(/admin\.schedQuality\.placement\.rear(19:59|20:00)$/)
+    // A group without a row for the model: at the front, every line unknown.
+    expect(groupRow(54).querySelector<HTMLElement>('[data-qp-place]')!.dataset.qpPlace).toBe('front')
+    expect(Array.from(groupRow(54).querySelectorAll<HTMLElement>('[data-qp-mark]'), (mark) => mark.dataset.identity)).toEqual(['unknown', 'unknown', 'unknown'])
+  })
+
+  it('opens a group row to each line\'s evidence, with why an unknown first output is unknown', async () => {
+    const value = detail()
+    value.groups[1].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ n: 4.25, s: 1, causes: ['mass_insufficient', 'no_peers'] }), source_groups: [53, 54] })
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    const toggle = document.querySelector<HTMLElement>('[data-qp-expand="54"]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-qp-group-detail="54"]')).toBeNull()
+    toggle.click()
+    await flushPromises()
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    const opened = document.querySelector<HTMLElement>('[data-qp-group-detail="54"]')!
+    expect(Array.from(opened.querySelectorAll<HTMLElement>('[data-qp-line]'), (el) => el.dataset.qpLine)).toEqual(['ttfo', 'error', 'cache'])
+    const ttfo = opened.querySelector('[data-qp-line="ttfo"]')!
+    expect(ttfo.querySelector('.idw')!.textContent).toBe('admin.schedQuality.identity.unknown')
+    expect(ttfo.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.unknownWhy')
+    const item = (key: string) => ttfo.querySelector(`[data-qp-evidence-item="${key}"]`)!.textContent!.trim()
+    expect(item('limit_s')).toBe('admin.schedQuality.evidence.ttfo.limit_s:{"v":"10"}')
+    expect(item('n')).toBe('admin.schedQuality.evidence.ttfo.n:{"v":"4.3"}')
+    expect(item('s')).toBe('admin.schedQuality.evidence.ttfo.s:{"v":"1"}')
+    expect(ttfo.querySelector('[data-qp-evidence-why]')!.textContent!.trim()).toBe(
+      'admin.schedQuality.evidence.why:{"reasons":"admin.schedQuality.evidence.causes.mass_insufficientadmin.schedQuality.evidence.reasonJoineradmin.schedQuality.evidence.causes.no_peers"}'
+    )
+    expect(ttfo.querySelector('.ev__src')!.textContent).toBe('admin.schedQuality.evidence.sources:{"names":"晨星组admin.schedQuality.evidence.joiner北辰组"}')
+    // The other lines carry no unknown causes.
+    expect(opened.querySelector('[data-qp-line="cache"] [data-qp-evidence-why]')).toBeNull()
+    // Another group stays closed.
+    expect(document.querySelector('[data-qp-group-detail="53"]')).toBeNull()
+  })
+
+  it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
+    const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+      id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),
+      basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', cut: null, threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
+      ...patch
+    })
+    const page = [record(60), record(59, { action: 'trial', until: inMinutes(50) }), record(58, { line: '', action: 'renew', basis: null })]
+    api.accountDecisions.mockResolvedValueOnce([...page, ...Array.from({ length: 47 }, (_, i) => record(57 - i, { action: 'release', until: null }))])
+      .mockResolvedValueOnce([record(3, { action: 'clear', until: null })])
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(api.accountDecisions).not.toHaveBeenCalled()
+    document.querySelector<HTMLElement>('[data-qp-decisions-toggle]')!.click()
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenCalledWith(7, { limit: 50, beforeId: undefined })
+    const rowOf = (id: number) => document.querySelector<HTMLElement>(`[data-qp-decision="${id}"]`)!
+    expect(rowOf(60).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.enter')
+    expect(rowOf(60).querySelector('.drow__where')!.textContent).toBe('晨星组 · gpt-b · admin.schedQuality.dim.ttfo')
+    expect(rowOf(60).querySelector('.drow__sub')!.textContent).toMatch(/^admin\.schedQuality\.identity\.rearUntil:\{"time":"\d\d:\d\d","minutes":40\}$/)
+    expect(rowOf(59).querySelector('.drow__sub')!.textContent).toMatch(/^admin\.schedQuality\.decisions\.trialUntil:/)
+    // A record of the previous rules: named as such with its action, no evidence to open.
+    expect(rowOf(58).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.renew"}')
+    expect(rowOf(58).querySelector('[data-qp-decision-evidence]')).toBeNull()
+
+    expect(rowOf(60).querySelector('[data-qp-evidence]')).toBeNull()
+    rowOf(60).querySelector<HTMLElement>('[data-qp-decision-evidence]')!.click()
+    await flushPromises()
+    expect(rowOf(60).querySelector('[data-qp-evidence-item="limit_s"]')!.textContent!.trim()).toBe('admin.schedQuality.evidence.ttfo.limit_s:{"v":"10"}')
+
+    document.querySelector<HTMLElement>('[data-qp-decisions-more]')!.click()
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: 11 })
+    expect(rowOf(3).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.clear')
+    expect(document.querySelector('[data-qp-decisions-more]')).toBeNull()
+
+    // A recovery or an exemption from the panel writes records: the open list starts over from the newest.
+    api.accountDecisions.mockResolvedValueOnce([record(61, { action: 'reset', until: null })])
+    await markSchedChanged()
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: undefined })
+    expect(rowOf(61).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.reset')
+    expect(document.querySelector('[data-qp-decision="60"]')).toBeNull()
   })
 })

@@ -84,7 +84,7 @@ const ToolbarStub = defineComponent({
   emits: ['change'],
   setup(props, { emit, slots }) {
     return () => h('div', [
-      h('button', { 'data-test': 'filter-substandard', onClick: () => emit('change', { ...props.filters, sched_quality: 'substandard' }) }),
+      h('button', { 'data-test': 'filter-substandard', onClick: () => emit('change', { ...props.filters, sched_quality: 'rear' }) }),
       slots['more-actions']?.()
     ])
   }
@@ -93,20 +93,21 @@ const ToolbarStub = defineComponent({
 const account = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [53] })
 const summaryOf = (id: number, patch: Partial<BackendAccountSummary> = {}): BackendAccountSummary => ({
   account_id: id,
-  status: 'normal',
+  group_status: { 53: 'pass' },
   reset_at: null,
   stop: null,
-  ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
+  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0 },
-  cache: { n: 40, short: false, red: false, ratio: 0.9 },
-  substandard: [],
+  cache: { ratio: 0.9, turns: 40, all_ratio: 0.7, all_requests: 120 },
+  rear: [],
+  trial: [],
   exemptions: [],
   ...patch
 })
 const summaries = () => [
-  summaryOf(1, { substandard: [{ group_id: 53, model: 'gpt-6.1-sol', dims: ['ttfo'], until: '2026-11-14T12:00:00Z', other_group: false, exempt: false, effective: true }], ttfo: { n: 30, short: false, red: true, p50_ms: 9100 } }),
+  summaryOf(1, { group_status: { 53: 'rear' }, rear: [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 9100, gap_p50_ms: 7900, n: 30 } }),
   summaryOf(2),
-  summaryOf(3, { status: 'observing' }),
+  summaryOf(3, { group_status: { 53: 'unknown' } }),
   summaryOf(4, { stop: { source: 'manual', reason: 'manual_off', until: null } })
 ]
 
@@ -174,7 +175,7 @@ describe('AccountsView quality columns', () => {
     const wrapper = mountView()
     await flushPromises()
     expect(backendSummary).toHaveBeenCalledWith([1, 2, 3, 4], expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    // Dots by the spec's order: back, ok, observing, stopped (the shared hollow ring).
+    // Dots by the spec's order: back, ok, unknown (grey), stopped (the shared hollow ring).
     const tone = (id: number) => rowCell(id, 'groups').querySelector('.status-dot')!.className
     expect([tone(1), tone(2), tone(3), tone(4)]).toEqual([
       'status-dot status-dot--back', 'status-dot status-dot--ok', 'status-dot status-dot--observe', 'status-dot status-dot--off'
@@ -307,7 +308,7 @@ describe('AccountsView quality columns', () => {
     await flushPromises()
     const queries = listAccounts.mock.calls.filter(([, , filters]) => !(filters as { ids?: string }).ids)
     expect(queries.length).toBeGreaterThanOrEqual(2)
-    for (const [, , filters] of queries) expect(filters).toMatchObject({ sched_quality: 'substandard' })
+    for (const [, , filters] of queries) expect(filters).toMatchObject({ sched_quality: 'rear' })
     wrapper.unmount()
   })
 })

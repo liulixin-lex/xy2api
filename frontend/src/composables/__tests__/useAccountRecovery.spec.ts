@@ -27,8 +27,9 @@ const at = (ms: number) => new Date(NOW + ms).toISOString()
 const row = (patch: Partial<RecoverableRow> = {}): RecoverableRow =>
   ({ status: 'active', rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null, extra: {}, capability_learned: null, ...patch })
 // The backend's own summary: `cooling` substandard models (the account is at the back of those groups).
-const summary = (cooling: number) => ({
-  substandard: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', dims: ['ttfo' as const], until: '', other_group: false, exempt: false, effective: true }))
+const summary = (cooling: number, trial = 0) => ({
+  rear: Array.from({ length: cooling }, (_, i) => ({ group_id: 53 + i, model: 'gpt-6.1-sol', lines: ['ttfo' as const], until: '', exempt: false, effective: true })),
+  trial: Array.from({ length: trial }, (_, i) => ({ group_id: 60 + i, model: 'gpt-6.1-sol', until: '' }))
 })
 
 describe('canRecover (contract delta F1, scenario 37)', () => {
@@ -56,6 +57,12 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
     expect(canRecover(row(), { ...summary(1), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(true)
   })
 
+  it('does not throw on a summary without trial or rear (a backend that leaves them out or sends null)', () => {
+    expect(canRecover(row(), { rear: summary(1).rear } as never, NOW)).toBe(true)
+    expect(canRecover(row(), { rear: null, trial: null } as never, NOW)).toBe(false)
+    expect(canRecover(row(), { trial: summary(0, 1).trial } as never, NOW)).toBe(true)
+  })
+
   it('counts an end time equal to now as ended, and a missing or invalid one as none', () => {
     for (const value of [at(0), at(-1), null, '', 'not-a-time']) {
       expect(canRecover(row({ rate_limit_reset_at: value, overload_until: value, temp_unschedulable_until: value }), undefined, NOW)).toBe(false)
@@ -67,6 +74,8 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
   it('decides from the row alone until the summary is in', () => {
     expect(canRecover(row(), undefined, NOW)).toBe(false)
     expect(canRecover(row(), summary(1), NOW)).toBe(true)
+    // A model on trial is something a recovery clears too (H.11).
+    expect(canRecover(row(), summary(0, 1), NOW)).toBe(true)
   })
 })
 

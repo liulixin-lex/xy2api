@@ -1,7 +1,9 @@
 /**
  * Recent status values (first token, errors, cache) from an account's quality summary, formatted the same way in the
- * accounts table and the quality panel: the whole account's values over the last hour. Nothing here compares a value
- * with a threshold; the backend judges each group and model on its own (7k).
+ * accounts table and the quality panel: the whole account's values over the last hour. First token is the first
+ * useful output (what the first-output line judges; the usage records' first token is the first event), cache the
+ * hit ratio of continuation turns (what the cache line judges), each with its other view beside it. Nothing here
+ * compares a value with a threshold; the backend judges each group and model on its own (7k).
  */
 import type { BackendAccountSummary, BackendDim, BackendPolicy } from '@/api/admin/schedQualityTypes'
 
@@ -20,11 +22,45 @@ export function formatRecentPercent(ratio: number): string {
   return pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
 }
 
-/** One dimension of the summary: its mark and its value as text (null without a value). */
-export function recentValue(quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'>, dim: BackendDim) {
-  if (dim === 'ttfo') return { mark: quality.ttfo, text: quality.ttfo.p50_ms == null ? null : formatRecentSeconds(quality.ttfo.p50_ms) }
-  if (dim === 'error') return { mark: quality.error, text: quality.error.rate == null ? null : formatRecentPercent(quality.error.rate) }
-  return { mark: quality.cache, text: quality.cache.ratio == null ? null : `${Math.round(quality.cache.ratio * 100)}%` }
+/** The cache line judges at least this many continuation turns (5.4); fewer read as too few samples. */
+export const CACHE_MIN_TURNS = 20
+
+export interface RecentValue {
+  /** null without a value. */
+  text: string | null
+  /** Too few samples (or none). */
+  short: boolean
+  /** Samples behind the value: requests with a first output, requests, continuation turns. */
+  n: number
+}
+
+const seconds = (ms: number | null) => (ms == null ? null : formatRecentSeconds(ms))
+const percent = (ratio: number | null) => (ratio == null ? null : `${Math.round(ratio * 100)}%`)
+
+/**
+ * One line of the summary as the quality lines judge it: first token is the first useful output, cache the
+ * continuation turns.
+ */
+export function recentValue(quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'>, dim: BackendDim): RecentValue {
+  if (dim === 'ttfo') {
+    const text = seconds(quality.ttfo.first_output_p50_ms)
+    return { text, short: text === null, n: quality.ttfo.n }
+  }
+  if (dim === 'error') {
+    return { text: quality.error.rate == null ? null : formatRecentPercent(quality.error.rate), short: quality.error.short, n: quality.error.n }
+  }
+  const text = percent(quality.cache.ratio)
+  return { text, short: text === null || quality.cache.turns < CACHE_MIN_TURNS, n: quality.cache.turns }
+}
+
+/** The other views of first token and cache: the first event and its gap to the first useful output, every successful request. */
+export function recentExtras(quality: Pick<BackendAccountSummary, 'ttfo' | 'cache'>) {
+  return {
+    firstEvent: seconds(quality.ttfo.first_event_p50_ms),
+    gap: seconds(quality.ttfo.gap_p50_ms),
+    cacheAll: percent(quality.cache.all_ratio),
+    cacheAllRequests: quality.cache.all_requests
+  }
 }
 
 /**

@@ -110,7 +110,7 @@ export default {
       errorRate: 'error_rate:',
       upstreamRate: 'upstream_rate:',
       latencyDuration: 'Request Duration',
-      ttftLabel: 'TTFT (first_token_ms)',
+      ttftLabel: 'First token (usage metric, ms)',
       p50: 'p50:',
       p90: 'p90:',
       p95: 'p95:',
@@ -825,7 +825,7 @@ export default {
         errors: 'Error statistics, including total errors, error rate, and upstream error rate.',
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
-        ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
+        ttft: 'First token, measured as the first-token metric in system settings says (by default the first event, keep-alive frames included): how fast streaming responses start. It differs from the "first useful output" quality judging uses, which counts only real output such as text, reasoning or tool calls.',
         health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
       },
       charts: {

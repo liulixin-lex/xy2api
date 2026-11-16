@@ -9,14 +9,29 @@
     <p v-if="marginDecimal === null" class="text-gray-500 dark:text-gray-400">
       {{ t('admin.groups.profitControl.previewInvalid') }}
     </p>
-    <template v-else-if="preview">
+    <p v-else-if="floorValue === null" class="text-gray-500 dark:text-gray-400" data-testid="profit-control-preview-floor-invalid">
+      {{ t('admin.groups.profitControl.floorPreviewInvalid') }}
+    </p>
+    <div v-else-if="preview" ref="line" class="space-y-1" :class="{ 'opacity-60': loading }">
       <p
-        ref="line"
         data-testid="profit-control-preview-line"
         :data-level="level"
-        :class="[LEVEL_CLASSES[level], { 'opacity-60': loading }]"
+        :class="LEVEL_CLASSES[level]"
       >
-        <template v-if="level === 'empty'">
+        <template v-if="!profitEnabled">
+          {{ t('admin.groups.profitControl.floorPreviewOnly', {
+            floor: formatProfitCeiling(preview.floor),
+            schedulable: preview.schedulable,
+            below: preview.below_floor
+          }) }}
+        </template>
+        <template v-else-if="preview.range_empty">
+          {{ t('admin.groups.profitControl.floorRangeEmpty', {
+            floor: formatProfitCeiling(preview.floor),
+            ceiling: formatProfitCeiling(preview.ceiling)
+          }) }}
+        </template>
+        <template v-else-if="level === 'empty'">
           {{ t('admin.groups.profitControl.previewEmpty', { ceiling: formatProfitCeiling(preview.ceiling) }) }}
         </template>
         <template v-else>
@@ -27,7 +42,29 @@
           }) }}
         </template>
       </p>
-    </template>
+      <p
+        v-if="profitEnabled && preview.floor > 0 && !preview.range_empty"
+        class="text-gray-600 dark:text-gray-300"
+        data-testid="profit-control-preview-below-floor"
+      >
+        {{ t('admin.groups.profitControl.floorBelow', { floor: formatProfitCeiling(preview.floor), n: preview.below_floor }, preview.below_floor) }}
+      </p>
+      <p v-if="preview.pinned > 0" class="text-gray-600 dark:text-gray-300" data-testid="profit-control-preview-pinned">
+        {{ t('admin.groups.profitControl.pinnedCount', { n: preview.pinned }, preview.pinned) }}
+      </p>
+      <p
+        v-if="profitEnabled && preview.pinned_loss.length"
+        class="font-medium text-amber-700 dark:text-amber-400"
+        data-testid="profit-control-preview-pinned-loss"
+      >
+        {{ t('admin.groups.profitControl.pinnedLoss', {
+          ceiling: formatProfitCeiling(preview.ceiling),
+          names: preview.pinned_loss
+            .map((item) => t('admin.groups.profitControl.pinnedLossItem', { name: item.name, rate: formatProfitCeiling(item.rate) }))
+            .join(t('admin.groups.profitControl.pinnedLossJoin'))
+        }) }}
+      </p>
+    </div>
     <p v-else-if="errorMessage" class="text-gray-500 dark:text-gray-400">
       {{ t('admin.groups.profitControl.previewFailed', { message: errorMessage }) }}
     </p>
@@ -47,14 +84,21 @@ import { useStateMotion } from '@/composables/useStateMotion'
 import type { GroupProfitControlPreview } from '@/types/groupProfitControl'
 import {
   effectiveProfitMarginPercent,
+  floorOnlyPreviewLevel,
   formatProfitCeiling,
+  minUpstreamRateValue,
+  profitBlockReason,
   profitPercentToDecimal,
   profitPreviewLevel,
+  validateMinUpstreamRate,
+  type MinUpstreamRateInput,
+  type ProfitBlockReason,
   type ProfitPreviewLevel
 } from '@/views/admin/groupsProfitControl'
 
-// 编辑现有分组时的利润门预览：毛利率换算出的上游倍率上限，以及可调度成员中能通过的数量。
-// 改毛利率时防抖重新预览；保存前由父组件调用 blocksAllMembers() 取与当前毛利率一致的结果。
+// 编辑现有分组时的利润门预览：毛利率换算出的上游倍率上限、可调度成员中能通过的数量，以及最低上游倍率
+// （倍率区间的下限）排除的号数、固定号数和高于上限的固定号。利润开关关闭、只设了下限时只显示与下限有关的几行。
+// 改毛利率或下限时防抖重新预览；保存前由父组件调用 blockingReason() 取与当前输入一致的结果。
 const PREVIEW_DEBOUNCE_MS = 400
 
 const LEVEL_CLASSES: Record<ProfitPreviewLevel, string> = {
@@ -67,6 +111,12 @@ const LEVEL_CLASSES: Record<ProfitPreviewLevel, string> = {
 const props = defineProps<{
   groupId: number
   marginPercent: number | string | null
+  /** 利润开关；关闭时上限不生效，只预览下限。 */
+  profitEnabled: boolean
+  /** 最低上游倍率输入框的值；留空表示不设。 */
+  floor: MinUpstreamRateInput
+  /** 输入框里是读不出数的内容（value 为空但不是留空）：按无效处理，不预览。 */
+  floorUnreadable?: boolean
 }>()
 
 const { t } = useI18n()
@@ -78,60 +128,77 @@ const playMotion = useStateMotion(root)
 const preview = shallowRef<GroupProfitControlPreview | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
-let previewMargin: number | null = null
+let previewKey: string | null = null
 let controller: AbortController | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 
-// 与提交校验一致：留空按默认 20%，0 ≤ 毛利率 < 100%，否则不预览。
+// 与提交校验一致：留空按默认 20%，0 ≤ 毛利率 < 100%，否则不预览。利润开关关闭时上限不生效，按 0 试算。
 const marginDecimal = computed(() => {
+  if (!props.profitEnabled) return 0
   const percent = effectiveProfitMarginPercent(props.marginPercent)
   if (!Number.isFinite(percent) || percent < 0) return null
   const decimal = profitPercentToDecimal(percent)
   return decimal < 1 ? decimal : null
 })
 
-const level = computed(() => (preview.value ? profitPreviewLevel(preview.value) : 'normal'))
+// 下限：留空为 0（不设），填错时不预览。
+const floorValue = computed(() =>
+  validateMinUpstreamRate(props.floor, props.floorUnreadable) === null ? (minUpstreamRateValue(props.floor) ?? 0) : null
+)
 
-async function fetchPreview(margin: number) {
+const query = computed(() =>
+  marginDecimal.value === null || floorValue.value === null ? null : { margin: marginDecimal.value, floor: floorValue.value }
+)
+const keyOf = (q: { margin: number; floor: number }) => `${q.margin}:${q.floor}`
+
+const level = computed<ProfitPreviewLevel>(() => {
+  if (!preview.value) return 'normal'
+  return props.profitEnabled ? profitPreviewLevel(preview.value) : floorOnlyPreviewLevel(preview.value)
+})
+
+async function fetchPreview(q: { margin: number; floor: number }) {
   clearTimeout(timer)
   controller?.abort()
   const current = (controller = new AbortController())
   const request = ++seq
   loading.value = true
   try {
-    const result = await adminAPI.groups.getProfitControlPreview(props.groupId, margin, { signal: current.signal })
+    const result = await adminAPI.groups.getProfitControlPreview(props.groupId, q.margin, q.floor, { signal: current.signal })
     if (request !== seq) return
     preview.value = result
-    previewMargin = margin
+    previewKey = keyOf(q)
     errorMessage.value = ''
   } catch (error) {
     if (request !== seq) return
     preview.value = null
-    previewMargin = null
+    previewKey = null
     errorMessage.value = extractApiErrorMessage(error, t('common.unknownError'))
   } finally {
     if (request === seq) loading.value = false
   }
 }
 
-watch(marginDecimal, (margin) => {
+watch(query, (q) => {
   clearTimeout(timer)
-  if (margin === null) return
-  timer = setTimeout(() => void fetchPreview(margin), PREVIEW_DEBOUNCE_MS)
+  if (q === null) return
+  timer = setTimeout(() => void fetchPreview(q), PREVIEW_DEBOUNCE_MS)
 })
 
 // 数值换了一次，轻推一下让人看见它刷新过。
 watch(preview, async (next, previous) => {
   if (!next || !previous) return
-  if (next.passing === previous.passing && next.ceiling === previous.ceiling && next.schedulable === previous.schedulable) return
+  if (
+    next.passing === previous.passing && next.ceiling === previous.ceiling && next.schedulable === previous.schedulable &&
+    next.below_floor === previous.below_floor && next.range_empty === previous.range_empty
+  ) return
   await nextTick()
   const el = line.value
   if (el) playMotion(() => gsap.fromTo(el, { autoAlpha: 0.4, y: 3 }, { autoAlpha: 1, y: 0, duration: 0.2, ease: 'expo.out', clearProps: 'opacity,visibility,transform' }))
 })
 
 onMounted(() => {
-  if (marginDecimal.value !== null) void fetchPreview(marginDecimal.value)
+  if (query.value !== null) void fetchPreview(query.value)
 })
 
 onUnmounted(() => {
@@ -139,13 +206,17 @@ onUnmounted(() => {
   controller?.abort()
 })
 
-/** 保存前调用：取与当前毛利率一致的预览，返回是否有可调度成员却没有一个能通过。预览失败不拦截保存。 */
-async function blocksAllMembers(): Promise<boolean> {
-  const margin = marginDecimal.value
-  if (margin === null) return false
-  if (previewMargin !== margin || loading.value) await fetchPreview(margin)
-  return previewMargin === margin && !!preview.value && profitPreviewLevel(preview.value) === 'danger'
+/**
+ * 保存前调用：取与当前输入一致的预览，返回需要确认的原因（区间为空，或有可调度成员却没有一个能用），
+ * 不需要确认时为 null。预览失败不拦截保存。
+ */
+async function blockingReason(): Promise<ProfitBlockReason | null> {
+  const q = query.value
+  if (q === null) return null
+  if (previewKey !== keyOf(q) || loading.value) await fetchPreview(q)
+  if (previewKey !== keyOf(q) || !preview.value) return null
+  return profitBlockReason(preview.value, props.profitEnabled)
 }
 
-defineExpose({ blocksAllMembers })
+defineExpose({ blockingReason })
 </script>

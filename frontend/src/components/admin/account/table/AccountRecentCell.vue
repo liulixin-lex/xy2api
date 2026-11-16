@@ -10,17 +10,18 @@
 <script setup lang="ts">
 /**
  * Recent status (prototype): first token, errors and cache on three lines, from the account's quality summary. These
- * are the whole account's values over the last hour, so they are never coloured by the summary's `red` mark, which
- * judges one group and model (7k-2): which group, model and dimension fall short is the group dots' and their tips'
- * to tell. Too few samples or no data reads muted. In the narrow card (`card`) the three sit side by side, each label
- * over its value; the thresholds are in the quality panel. The whole cell has one tip card (12.7): the window, then
- * each dimension's value and sample count.
+ * are the whole account's values over the last hour, so they are never coloured by a mark that judges one group and
+ * model (7k-2): which group, model and line fall short is the group dots' and their tips' to tell. First token is
+ * the first useful output and cache the continuation turns, as the quality lines judge them. Too few samples or no
+ * data reads muted. In the narrow card (`card`) the three sit side by side, each label over its value; the thresholds
+ * are in the quality panel. The whole cell has one tip card (12.7): the window, then each value with its samples,
+ * the first event and its gap to the first useful output, and the cache ratio of every successful request.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { BackendAccountSummary, BackendMark } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
 import { vTip, type TipCard } from '@/utils/tip'
-import { formatRecentPercent, formatRecentSeconds } from './accountRecent'
+import { RECENT_DIMS, recentExtras, recentValue } from './accountRecent'
 import { formatShortTime } from './accountTime'
 
 const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'> | null; card?: boolean }>()
@@ -28,20 +29,17 @@ const { t } = useI18n()
 
 const HOUR_MS = 3_600_000
 
-type Dim = 'ttfo' | 'error' | 'cache'
 const lines = computed(() => {
   const q = props.quality
-  const row = (dim: Dim, mark: BackendMark | undefined, value: number | null | undefined, format: (v: number) => string) => {
+  return RECENT_DIMS.map((dim: BackendDim) => {
     const label = t(`admin.accounts.table.dims.${dim}`)
-    if (!mark || value == null) return { dim, label, mark, text: '—', muted: true }
-    return { dim, label, mark, text: format(value), muted: mark.short }
-  }
-  return [
-    row('ttfo', q?.ttfo, q?.ttfo.p50_ms, formatRecentSeconds),
-    row('error', q?.error, q?.error.rate, formatRecentPercent),
-    row('cache', q?.cache, q?.cache.ratio, (v) => `${Math.round(v * 100)}%`)
-  ]
+    const value = q ? recentValue(q, dim) : null
+    if (!value || value.text === null) return { dim, label, value, text: '—', muted: true }
+    return { dim, label, value, text: value.text, muted: value.short }
+  })
 })
+
+const COUNT_KEYS: Record<BackendDim, string> = { ttfo: 'count', error: 'count', cache: 'turns' }
 
 /** "近 1 小时", or "HH:MM 起" when the account's stats were reset within the hour; no tip without quality data. */
 function tipCard(): TipCard | '' {
@@ -51,16 +49,28 @@ function tipCard(): TipCard | '' {
   const title = reset > Date.now() - HOUR_MS
     ? t('admin.accounts.table.tip.recentSince', { time: formatShortTime(quality.reset_at) })
     : t('admin.accounts.table.tip.recentTitle')
+  const extras = recentExtras(quality)
+  const plain = (text: string | null) => (text === null ? { text: '—', tone: 'muted' as const } : text)
+  const valueRow = (line: (typeof lines.value)[number], label: string) => {
+    const n = line.value?.n ?? 0
+    const key = `admin.accounts.table.tip.${COUNT_KEYS[line.dim]}${line.muted ? 'Short' : ''}`
+    return [label, line.muted ? { text: line.text, tone: 'muted' as const } : line.text, t(key, { n }, n)]
+  }
+  const [ttfo, error, cache] = lines.value
   return {
     title,
-    rows: lines.value.map((line) => {
-      const n = line.mark?.n ?? 0
-      return [
-        line.label,
-        line.muted ? { text: line.text, tone: 'muted' } : line.text,
-        t(line.mark?.short ? 'admin.accounts.table.tip.countShort' : 'admin.accounts.table.tip.count', { n }, n)
+    rows: [
+      valueRow(ttfo, t('admin.accounts.table.recent.firstOutput')),
+      [t('admin.accounts.table.recent.firstEvent'), plain(extras.firstEvent), ''],
+      [t('admin.accounts.table.recent.gap'), plain(extras.gap), ''],
+      valueRow(error, error.label),
+      valueRow(cache, t('admin.accounts.table.recent.cacheTurns')),
+      [
+        t('admin.accounts.table.recent.cacheAll'),
+        plain(extras.cacheAll),
+        t('admin.accounts.table.tip.count', { n: extras.cacheAllRequests }, extras.cacheAllRequests)
       ]
-    })
+    ]
   }
 }
 </script>

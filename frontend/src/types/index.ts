@@ -664,6 +664,8 @@ export interface AdminGroup extends Group {
   profit_control_enabled: boolean
   profit_min_margin: number
   profit_safety_buffer: number
+  /** 最低上游倍率（仅 OpenAI 分组）：上游倍率低于它的号不用；null 表示不设。不依赖利润开关。 */
+  min_upstream_rate?: number | null
 
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
@@ -873,6 +875,8 @@ export interface CreateGroupRequest {
   profit_control_enabled?: boolean
   profit_min_margin?: number
   profit_safety_buffer?: number
+  /** 最低上游倍率（仅 OpenAI 分组），不填即不设。 */
+  min_upstream_rate?: number | null
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -946,6 +950,8 @@ export interface UpdateGroupRequest {
   profit_control_enabled?: boolean
   profit_min_margin?: number
   profit_safety_buffer?: number
+  /** 最低上游倍率（仅 OpenAI 分组）。更新时 0 表示清除，不传表示不改。 */
+  min_upstream_rate?: number | null
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null

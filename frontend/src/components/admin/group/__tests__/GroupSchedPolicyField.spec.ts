@@ -7,16 +7,22 @@ import GroupSchedPolicyField from '../GroupSchedPolicyField.vue'
 
 const api = vi.hoisted(() => ({ getGroupPolicy: vi.fn(), updateGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn(), groupBoard: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const toast = vi.hoisted(() => ({ showInfo: vi.fn() }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
-  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key), te: () => true })
 }))
 
 const policy = () => structuredClone(policyFixture) as BackendGroupPolicy
 const preview = (over: Partial<BackendPolicyPreview> = {}): BackendPolicyPreview => ({
-  now: { normal: 3, below: 1 },
-  after: { normal: 2, below: 2 },
-  changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', dims: ['ttfo'] }],
+  relaxed_lines: [],
+  lines: {
+    ttfo: { now: { pass: 3, unknown: 1, fail: 0 }, after: { pass: 2, unknown: 1, fail: 1 } },
+    error: { now: { pass: 4, unknown: 0, fail: 0 }, after: { pass: 4, unknown: 0, fail: 0 } },
+    cache: { now: { pass: 2, unknown: 2, fail: 0 }, after: { pass: 2, unknown: 2, fail: 0 } }
+  },
+  changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', line: 'ttfo', from: 'pass', to: 'fail' }],
   ...over
 })
 
@@ -25,7 +31,7 @@ const error = (w: ReturnType<typeof mount>) => w.get('input[id^="sq-err-"]')
 const cache = (w: ReturnType<typeof mount>) => w.get('input[id^="sq-cache-"]')
 const save = (w: ReturnType<typeof mount>) => (w.vm as unknown as { save: () => Promise<boolean> }).save()
 const trial = (w: ReturnType<typeof mount>) => w.find('[data-sq-trial]')
-const counts = (w: ReturnType<typeof mount>) => ['normal', 'cooling'].map((kind) => w.get(`[data-sq-trial="${kind}"]`).text())
+const counts = (w: ReturnType<typeof mount>) => ['ttfo', 'error', 'cache'].map((line) => w.get(`[data-sq-trial="${line}"]`).text())
 
 async function mountField() {
   const w = mount(GroupSchedPolicyField, { props: { groupId: 53 }, global: { stubs: { Select: true } } })
@@ -43,6 +49,7 @@ beforeEach(() => {
   api.updateGroupPolicy.mockReset()
   api.previewGroupPolicy.mockReset().mockResolvedValue(preview())
   api.groupBoard.mockReset()
+  toast.showInfo.mockReset()
 })
 afterEach(() => { vi.useRealTimers() })
 
@@ -121,7 +128,7 @@ describe('GroupSchedPolicyField', () => {
     expect(w.text()).not.toMatch(/[。.]$/)
   })
 
-  it('asks the server preview after a typing pause and shows the counts now → after and the accounts that turn', async () => {
+  it('asks the server preview after a typing pause and shows each line\'s verdicts now → after and the keys that turn', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const w = await mountField()
     await ttft(w).setValue('9')
@@ -137,10 +144,14 @@ describe('GroupSchedPolicyField', () => {
       policy: { enabled: true, ttft_seconds: 8, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 0 }
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(counts(w)).toEqual([
-      'admin.schedQuality.policy.trialCount:{"state":"admin.schedQuality.state.normal","now":3,"after":2}',
-      'admin.schedQuality.policy.trialCount:{"state":"admin.schedQuality.state.cooling","now":1,"after":2}'
+      'admin.schedQuality.dim.ttfoadmin.schedQuality.policy.trialLine:{"pass":"3→2","unknown":"1→1","fail":"0→1"}',
+      'admin.schedQuality.dim.erroradmin.schedQuality.policy.trialLine:{"pass":"4→4","unknown":"0→0","fail":"0→0"}',
+      'admin.schedQuality.dim.cacheadmin.schedQuality.policy.trialLine:{"pass":"2→2","unknown":"2→2","fail":"0→0"}'
     ])
     expect(w.get('[data-sq-trial-names]').text()).toBe('acc-07')
+    // What saving does: relaxing clears and re-judges, tightening keeps identities.
+    expect(w.get('[data-sq-trial-note]').text()).toBe('admin.schedQuality.policy.trialNote')
+    expect(w.find('[data-sq-trial-relaxed]').exists()).toBe(false)
 
     // Back to the saved value: the row goes and nothing more is asked.
     await ttft(w).setValue('10')
@@ -158,14 +169,14 @@ describe('GroupSchedPolicyField', () => {
     await settle()
     const first = api.previewGroupPolicy.mock.calls[0][2].signal as AbortSignal
 
-    const many = Array.from({ length: 14 }, (_, i) => ({ account_id: i + 1, name: `acc-${i + 1}`, model: 'gpt-6.1-sol', dims: ['cache' as const] }))
+    const many = Array.from({ length: 14 }, (_, i) => ({ account_id: i + 1, name: `acc-${i + 1}`, model: 'gpt-6.1-sol', line: 'cache' as const, from: 'pass' as const, to: 'fail' as const }))
     api.previewGroupPolicy.mockResolvedValueOnce(preview({ changed: many }))
     await cache(w).setValue('96')
     expect(first.aborted).toBe(true)
     await settle()
-    release(preview({ after: { normal: 0, below: 4 } }))
+    release(preview({ lines: { ...preview().lines, ttfo: { now: { pass: 9, unknown: 9, fail: 9 }, after: { pass: 9, unknown: 9, fail: 9 } } } }))
     await flushPromises()
-    expect(counts(w)[0]).toContain('"after":2')
+    expect(counts(w)[0]).toContain('"pass":"3→2"')
     const names = w.findAll('[data-sq-trial-names] > span').map((el) => el.text())
     expect(names).toHaveLength(13)
     expect(names.slice(-1)).toEqual(['admin.schedQuality.more:{"n":2}'])
@@ -200,5 +211,27 @@ describe('GroupSchedPolicyField', () => {
       expected_version: 64,
       policy: expect.objectContaining({ ttft_seconds: 11, max_error_rate: 0.075 })
     }))
+  })
+
+  it('marks the lines saving relaxes, a line missing from the answer as "—", and tells the result of a relaxing save', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { cache: _missing, ...lines } = preview().lines
+    api.previewGroupPolicy.mockResolvedValueOnce({ ...preview({ relaxed_lines: ['ttfo'] }), lines })
+    const w = await mountField()
+    await ttft(w).setValue('12')
+    await settle()
+    expect(w.get('[data-sq-trial="ttfo"]').find('[data-sq-trial-relaxed]').exists()).toBe(true)
+    expect(w.get('[data-sq-trial="error"]').find('[data-sq-trial-relaxed]').exists()).toBe(false)
+    expect(w.get('[data-sq-trial="cache"]').text()).toContain('"pass":"—"')
+
+    api.updateGroupPolicy.mockResolvedValueOnce({ ...policy(), version: 64, relaxed_lines: ['ttfo'], cleared: 7 })
+    expect(await save(w)).toBe(true)
+    expect(toast.showInfo).toHaveBeenCalledWith('admin.schedQuality.policy.savedRelaxed:{"lines":"admin.schedQuality.lineName.ttfo","n":7}', 6000)
+
+    // An answer without relaxed_lines and cleared (a tightening, or a backend that leaves them out) saves quietly.
+    api.updateGroupPolicy.mockResolvedValueOnce({ group_id: 53, version: 65, policy: { ...policy().policy, ttft_seconds: 9 } })
+    await ttft(w).setValue('9')
+    expect(await save(w)).toBe(true)
+    expect(toast.showInfo).toHaveBeenCalledTimes(1)
   })
 })

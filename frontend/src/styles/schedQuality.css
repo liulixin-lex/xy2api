@@ -44,10 +44,13 @@
 .sq-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .sq-weak, .sq-weak .sq-link { color: var(--sq-text-3); }
 
-/* Verdict shapes (no number): filled circle (the policy trial's normal), filled square (failing). */
+/* Identity shapes (no number): filled circle (pass, the policy trial's normal), filled square (rear, failing), ring
+   (trial). */
 .sq-shape { display: inline-block; flex-shrink: 0; vertical-align: middle; }
 .sq-shape--pass { width: 8px; height: 8px; border-radius: 9999px; background: var(--sq-pass-fg); }
 .sq-shape--fail { width: 8px; height: 8px; border-radius: 1px; background: var(--sq-fail-fg); }
+.sq-shape--trial { width: 8px; height: 8px; border: 2px solid var(--color-status-info); border-radius: 9999px; }
+.sq-trial { color: var(--color-status-info-text); }
 
 /* Fill of the pause / stale mark. */
 .sq-icon-mark { color: var(--sq-mark-fill); border-radius: 4px; }
