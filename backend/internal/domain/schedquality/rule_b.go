@@ -216,6 +216,10 @@ func countRuleB(samples []RuleBSample, now, cut, limitSeconds float64, include f
 // fetching samples, snapshot membership, clocks, identities and trial leases.
 // Input slices are read-only and must represent complete evidence at Now.
 func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
+	return evaluateRuleB(in, p, ruleBBetaMaxIterations)
+}
+
+func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult, error) {
 	r := RuleBResult{State: RuleBUnknown}
 	if err := p.Validate(); err != nil {
 		return r, err
@@ -235,7 +239,7 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 	r.PeerPrior = ruleBPrior(g.K, g.N-g.X)
 	r.A = own.K + r.Prior*RuleBPriorStrength
 	r.B = math.Max(own.N, 20) - own.K + (1-r.Prior)*RuleBPriorStrength
-	absoluteCDF, err := ruleBBetaCDF(r.A, r.B, p.Tolerance)
+	absoluteCDF, err := ruleBBetaCDF(r.A, r.B, p.Tolerance, maxIterations)
 	if err != nil {
 		return r, fmt.Errorf("rule B absolute CDF: %w", err)
 	}
@@ -272,12 +276,12 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 		peers := r.PeerCounts
 		a := peers.K + peers.X + r.PeerPrior*RuleBPriorStrength
 		b := math.Max(0, peers.N-peers.K-peers.X) + (1-r.PeerPrior)*RuleBPriorStrength
-		u, err := ruleBBetaQuantile(a, b, p.Confidence)
+		u, err := ruleBBetaQuantile(a, b, p.Confidence, maxIterations)
 		if err != nil {
 			return r, fmt.Errorf("rule B peer quantile: %w", err)
 		}
 		z := math.Min(.999999, u+p.PeerMargin)
-		cdf, err := ruleBBetaCDF(r.A, r.B, z)
+		cdf, err := ruleBBetaCDF(r.A, r.B, z, maxIterations)
 		if err != nil {
 			return r, fmt.Errorf("rule B relative CDF: %w", err)
 		}
