@@ -169,7 +169,7 @@
 | `enabled` | true | 布尔 | 停滞检测 |
 | `text_stall_seconds` | 120 | 30–280 | 已输出后无有效上游活动多久判定断流 |
 
-Anthropic 原生 Messages 与协议转换中，注释和 ping 不续期；完整用量（含零）、内容、控制与结束帧推进业务期限。首输出已有 guard 时沿用其截止；无 guard 的读取与排水继续使用 `gateway.stream_data_interval_timeout`，不增加新的阈值。下游 keepalive 不影响这些上游期限。
+Anthropic 上游（原生 Messages 与协议转换）的 `ping` 和 SSE 注释不算活动，用量（包括 0）、正文、控制与结束事件才算。输出前沿用首输出截止；没有首输出截止的读取，以及结束后读完剩余数据的阶段，沿用 `gateway.stream_data_interval_timeout`；不新增阈值。网关发给客户端的心跳不影响这些计时。
 
 ### 断开计费 `disconnect`
 
