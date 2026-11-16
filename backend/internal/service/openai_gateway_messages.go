@@ -1013,7 +1013,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		}
 		return nil, nil
 	}
-	var parser openAICompatSSEFrameParser
+	var parser m7CompatSSEFrameParser
 	for {
 		select {
 		case ev, ok := <-events:
@@ -1527,7 +1527,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// ── No keepalive: fast synchronous path (no goroutine overhead) ──
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
-		var parser openAICompatSSEFrameParser
+		var parser m7CompatSSEFrameParser
 		for scanner.Scan() {
 			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
@@ -1619,7 +1619,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		defer keepaliveTimer.Stop()
 		keepaliveCh = keepaliveTimer.C
 	}
-	var parser openAICompatSSEFrameParser
+	var parser m7CompatSSEFrameParser
 
 	for {
 		select {

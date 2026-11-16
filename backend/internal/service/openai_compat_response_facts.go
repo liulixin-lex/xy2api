@@ -21,6 +21,15 @@ type openAICompatBufferedOutcome struct {
 func observeOpenAICompatFrame(c *gin.Context, resp *http.Response, frame openAICompatSSEFrame, usage *OpenAIUsage, facts *OpenAIForwardResult) OpenAIResponsesTerminal {
 	data := []byte(frame.Data)
 	terminal := ClassifyOpenAIResponsesTerminal(frame.EventType, data)
+	// A transport event name such as "message" does not override the payload.
+	if terminal.Reason == "type_status_conflict" && !ClassifyOpenAIResponsesTerminal(frame.EventType, nil).Seen {
+		terminal = ClassifyOpenAIResponsesTerminal("", data)
+	}
+	// Baseline readers skip unparseable extensions; malformed terminal candidates
+	// remain failures. Known business DTO errors are checked by each converter.
+	if !terminal.Seen {
+		terminal.Failure = false
+	}
 	source := "upstream_sse_progressive"
 	if terminal.Seen && terminal.Valid {
 		source = "upstream_sse_terminal"

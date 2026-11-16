@@ -1370,7 +1370,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	// No keepalive: fast synchronous path
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
-		var parser openAICompatSSEFrameParser
+		var parser m7CompatSSEFrameParser
 		for scanner.Scan() {
 			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
@@ -1465,7 +1465,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		defer keepaliveTimer.Stop()
 		keepaliveCh = keepaliveTimer.C
 	}
-	var parser openAICompatSSEFrameParser
+	var parser m7CompatSSEFrameParser
 
 	for {
 		select {
