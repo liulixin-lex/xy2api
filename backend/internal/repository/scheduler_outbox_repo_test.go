@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -57,54 +58,46 @@ func TestSchedulerOutboxRepositoryOldestPendingCreatedAtReturnsNotFound(t *testi
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSchedulerOutboxRepositoryDeleteProcessedUsesExactIDs(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])")).
-		WithArgs("{2,9}").WillReturnResult(sqlmock.NewResult(0, 2))
-	require.NoError(t, repo.DeleteProcessed(context.Background(), []int64{2, 9}))
-	require.NoError(t, repo.DeleteProcessed(context.Background(), nil))
-	require.NoError(t, mock.ExpectationsWereMet())
+func expectOutboxTransaction(mock sqlmock.Sqlmock, acquired bool) {
+	mock.ExpectBegin()
+	mock.ExpectExec("SET LOCAL idle_in_transaction_session_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))")).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(acquired))
 }
-
-func TestSchedulerOutboxRepositoryTryAcquireConsumerLock(t *testing.T) {
+func TestSchedulerOutboxRepositoryTransactionAcknowledgesExactIDs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-
-	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_unlock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	lease, acquired, err := repo.TryAcquireConsumerLock(context.Background())
+	expectOutboxTransaction(mock, true)
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])")).WithArgs("{2,9}").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+	lease, acquired, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
 	require.NoError(t, err)
 	require.True(t, acquired)
-	require.NotNil(t, lease)
-
-	lease.Release()
-
+	require.NoError(t, lease.DeleteProcessed(context.Background(), []int64{2, 9}))
+	require.NoError(t, lease.Commit())
+	lease.Release() // harmless after commit; no pooled session lock remains
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-
-func TestSchedulerOutboxRepositoryTryAcquireConsumerLockUnavailable(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(false))
-
-	lease, acquired, err := repo.TryAcquireConsumerLock(context.Background())
-	require.NoError(t, err)
-	require.False(t, acquired)
-	require.Nil(t, lease)
-
-	require.NoError(t, mock.ExpectationsWereMet())
+func TestSchedulerOutboxRepositoryTransactionRollsBack(t *testing.T) {
+	for _, acquired := range []bool{true, false} {
+		t.Run(fmt.Sprint(acquired), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			expectOutboxTransaction(mock, acquired)
+			mock.ExpectRollback()
+			lease, got, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, acquired, got)
+			if acquired {
+				lease.Release()
+			} else {
+				require.Nil(t, lease)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 // buildSchedulerGroupPayload 在 groupIDs 为空时必须返回 untyped nil（any），

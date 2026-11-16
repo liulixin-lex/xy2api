@@ -114,8 +114,4 @@ type SchedulerCache interface {
 	UnlockBucket(ctx context.Context, bucket SchedulerBucket) error
 	// ListBuckets 返回已注册的分桶集合。
 	ListBuckets(ctx context.Context) ([]SchedulerBucket, error)
-	// GetOutboxWatermark 读取 outbox 水位。
-	GetOutboxWatermark(ctx context.Context) (int64, error)
-	// SetOutboxWatermark 保存 outbox 水位。
-	SetOutboxWatermark(ctx context.Context, id int64) error
 }

@@ -14,17 +14,20 @@ type SchedulerOutboxEvent struct {
 	CreatedAt time.Time
 }
 
-// SchedulerOutboxRepository is a shared pending queue. Event IDs identify rows;
-// they do not imply commit visibility. Consumers must hold the lease from read
-// through acknowledgement and replay the batch on any handling/ack error.
+// SchedulerOutboxRepository exposes pending queue health independently of its
+// transactional consumer, so contending instances can still observe lag.
 type SchedulerOutboxRepository interface {
-	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
 	OldestPendingCreatedAt(ctx context.Context) (time.Time, bool, error)
 	PendingCount(ctx context.Context) (int64, error)
-	DeleteProcessed(ctx context.Context, ids []int64) error
 	TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error)
 }
 
-// SchedulerOutboxConsumerLease serializes shared Redis snapshot writes across
-// instances. PostgreSQL releases the session lock when the connection exits.
-type SchedulerOutboxConsumerLease interface{ Release() }
+// SchedulerOutboxConsumerLease owns one bounded PostgreSQL transaction. Commit
+// acknowledges the batch and releases its transaction-scoped lock; Release
+// rolls back any unfinished batch, including a partially applied projection.
+type SchedulerOutboxConsumerLease interface {
+	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
+	DeleteProcessed(ctx context.Context, ids []int64) error
+	Commit() error
+	Release()
+}
