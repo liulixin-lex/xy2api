@@ -996,7 +996,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponseWithFields(
 		errType = "api_error"
 	}
 
-	if isOpenAIDeterministicClientError(resp.StatusCode) {
+	if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusConflict ||
+		resp.StatusCode == http.StatusUnprocessableEntity || isToolHistoryUpstreamClientError(resp.StatusCode, body) {
 		errType, code, param, message := upstreamClientErrorFields(resp.StatusCode, body, SanitizeUpstreamErrorMessage(upstreamMsg))
 		writeError(c, resp.StatusCode, errType, code, param, message)
 	} else {

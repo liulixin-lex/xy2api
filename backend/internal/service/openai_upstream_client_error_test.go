@@ -361,6 +361,32 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 }
 
 func TestM8CompatStatusFieldsReachClient(t *testing.T) {
+	t.Run("ordinary_400_keeps_legacy_contract", func(t *testing.T) {
+		for _, route := range []string{"chat", "chat_after_account", "anthropic"} {
+			t.Run(route, func(t *testing.T) {
+				c, rec := newOpenAIUpstreamErrorTestContext(t)
+				svc := &OpenAIGatewayService{cfg: &config.Config{}}
+				resp := newOpenAIUpstreamErrorResponse(400, `{"error":{"type":"upstream_custom_type","code":"invalid_value","param":"messages[0]","message":"Invalid message field"}}`)
+				account := newOpenAIUpstreamErrorTestAccount()
+				var err error
+				switch route {
+				case "chat":
+					_, err = svc.handleChatCompletionsErrorResponse(resp, c, account)
+				case "chat_after_account":
+					_, err = svc.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account)
+				default:
+					_, err = svc.handleAnthropicErrorResponse(resp, c, account)
+				}
+				require.Error(t, err)
+				require.Equal(t, 400, rec.Code)
+				want := `{"error":{"message":"Invalid message field","type":"invalid_request_error"}}`
+				if route == "anthropic" {
+					want = `{"error":{"message":"Invalid message field","type":"invalid_request_error"},"type":"error"}`
+				}
+				require.Equal(t, want, rec.Body.String())
+			})
+		}
+	})
 	for _, status := range []int{408, 409, 422} {
 		for _, fields := range []bool{false, true} {
 			for _, path := range []string{"native", "chat", "chat_after_account", "anthropic", "chat_committed"} {
