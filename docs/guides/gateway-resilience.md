@@ -182,19 +182,15 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 流式开场与终止 `stream`
 
-Chat 上游转换为 Responses 或 Messages 时，有效 finish_reason、[DONE]，或正文后完整输入/输出尾部用量再正常 EOF 均可正常结束；缺用量不推翻有效结束。只有未结束生成且无上述收尾证据、结束前读取失败、坏尾帧或明确错误才返回对应协议的错误终态，尾部计量兼容成功不记为上游结束事件。
 
-错误收尾按实际响应类型与目标协议执行一次，不依赖 keepalive 开关；心跳提交后仍使用对应协议的 SSE 错误终态。
 
-Chat 与 Messages 转换出口先检查完整原始帧的失败、用量和结束证据，再解码内容；已确认失败不被后续成功事件覆盖，无关扩展事件保留原来的忽略行为。
 
 - **做什么**：上游流在第一个正文之前通常先发“开场事件”（Responses 的 `response.created`、Chat 的 role 分块、Anthropic 的 `message_start` 等）。这些事件先暂存不写给客户端，暂存期间上游失败（过载、服务忙、断流、读错）仍可换号，客户端只看到成功那次尝试的开场。
+  - **raw Chat 开场**：raw Chat 的 role 与无内容开场同样暂存，与请求大小无关；正文前出错可以换号，正文后的错误只写一次终止帧。无内容开场的暂存仍以 8 MiB 为上限，正文和图片等实际输出不受此上限限制。
+  - **Chat 上游的结束判定**：转换后的流与 raw Chat 都按同一规则判断是否正常结束，转换前先检查原始帧中的错误与用量，已确认的失败不会被之后的成功事件覆盖。规则见[客户端可见的行为](gateway-resilience-client.md#已提交后的失败)。
   - `prelude_staging`：Chat Completions 与 Messages 经兼容转换、Gateway 入站经 Anthropic 上游的 Responses 与 Chat、原生 Anthropic 与 API Key 直通推迟写出开场，暂存最多 8 MiB，超出时换号。
   - `native_prelude_whitelist`：原生 Responses 把 `response.queued`、`response.metadata`、`codex.rate_limits`、`codex.response.metadata` 与不含内容的 added 事件也算作开场。
-  - raw Chat 按完整 SSE 帧先分类错误，role 与无内容开场独立暂存，不受静默拒答检测的请求大小门槛影响；正文后错误只结束一次，前导超出原 8 MiB 上限不直接释放。
-  - raw Chat 将真实 finish/DONE 与完整尾部计量分开记录：内容后完整输入/输出计量接正常 EOF 仍成功（零有效），早期/部分/空用量不掩盖未结束生成，坏帧和结束前读错仍失败；兼容成功不补造上游终态。
   - `strict_terminal`：明确识别失败终态，例如 raw Chat 透传中 `error` 后跟 `[DONE]` 判为失败；输出后断流、读错或停滞时按协议写失败终态，不再合成成功结束；启用 Responses 透传的首输出截止与停滞检测。
-- Anthropic 的完整业务帧推进读取期限，ping 或注释不代替业务进展；流结束和用量读取不受本地下游心跳影响。
 - **何时关闭**：只在某个客户端依赖开场事件的写出时机时，关闭对应的子开关。
 - **计费与客户端**：只写出开场时断开按未送达处理，不计费。不完整（incomplete）、内容拒绝与合法空回答照常返回，不重放。
 - **观测**：计数 `relay_keepalive`、`pre_created_delta`；日志字段 `prelude_release_event` 等，见 [观测与排障](gateway-resilience-observability.md#请求关联字段)。
@@ -217,6 +213,8 @@ Chat 与 Messages 转换出口先检查完整原始帧的失败、用量和结�
 - **观测**：计数 `collab_plaintext`、`collab_call`、`collab_call_action`；日志 `resilience.collab_plaintext`（冲突、异常计数或转换后被拒时记录）。
 
 ## 不受开关控制的行为
+
+- 心跳或正文已经提交后的错误，按入站协议只写一次终止帧，与是否开启首包前保活无关。
 
 以下属于协议正确性修正，关闭总开关后仍然生效：
 
