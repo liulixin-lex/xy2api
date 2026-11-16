@@ -49,6 +49,9 @@ func TestSummaryPairedLatenciesAndRequestCounts(t *testing.T) {
 	if out.FirstEventP50Ms == nil || *out.FirstEventP50Ms != 50 || *out.FirstOutputP50Ms != 101 || *out.GapP50Ms != 100 {
 		t.Fatalf("paired median or difference of medians: %+v", out)
 	}
+	if out.FirstOutputN != 3 {
+		t.Fatalf("paired streaming sample count = %d, want 3", out.FirstOutputN)
+	}
 	if out.CacheAllRequests != 118 || out.CacheTurns != 118 || out.CacheRatio == nil || *out.CacheRatio != .8 {
 		t.Fatalf("cache totals %+v", out)
 	}
@@ -87,7 +90,7 @@ func TestSummaryCacheDenominatorsAndReset(t *testing.T) {
 		t.Fatalf("reset boundary %+v", out)
 	}
 	out = SummarizeAccount(nil, 1, time.Time{}, machineNow)
-	if out.ErrorN != 0 || out.CacheAllRatio != nil || out.GapP50Ms != nil {
+	if out.ErrorN != 0 || out.CacheAllRatio != nil || out.GapP50Ms != nil || out.FirstOutputN != 0 {
 		t.Fatal("unknown metrics must stay absent")
 	}
 }
