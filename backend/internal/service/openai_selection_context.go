@@ -62,6 +62,9 @@ func attachSelectionContext(ctx context.Context, selection *AccountSelectionResu
 	}
 	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
 		// Preserve the effective route even with profit control disabled.
+		if privacy, ok := ctx.Value(openAIGroupPrivacyRequirementContextKey{}).(openAIGroupPrivacyRequirement); ok && privacy.groupID == derefGroupID(req.GroupID) {
+			req.RequirePrivacySet = privacy.required
+		}
 		if req.GroupID != nil {
 			gid := *req.GroupID
 			req.GroupID = &gid

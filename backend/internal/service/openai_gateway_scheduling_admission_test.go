@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -92,4 +93,78 @@ func TestSelectionAdmissionUsesCurrentWebSocketTurnModel(t *testing.T) {
 	_, vetoed, _ = svc.SelectionAdmissionVetoLatest(next, &account)
 	require.True(t, vetoed, "a persistent connection must validate this turn's model")
 	require.Equal(t, "first-model", ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest).RequestedModel)
+}
+
+// Count logical repository calls, including the handler's terminal check.
+type admissionCountingAccountRepo struct {
+	schedulerTestOpenAIAccountRepo
+	reads int
+}
+
+func (r *admissionCountingAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.reads++
+	return r.schedulerTestOpenAIAccountRepo.GetByID(ctx, id)
+}
+func TestSelectionAdmissionReadCounts(t *testing.T) {
+	for _, path := range []string{"immediate", "queued", "ws_followup"} {
+		t.Run(path, func(t *testing.T) {
+			group := &Group{ID: 21, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
+			account := profitControlWSAccount(1, 0.2, time.Now())
+			account.GroupIDs = []int64{21}
+			accounts := &admissionCountingAccountRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}}
+			groups := &eligibilityCountingGroupRepo{fallbackGroupRepo: fallbackGroupRepo{groups: map[int64]*Group{21: group}}}
+			cfg := newSchedulerTestOpenAIWSV2Config()
+			cfg.Gateway.Scheduling.LoadBatchEnabled = false
+			svc := &OpenAIGatewayService{accountRepo: accounts, cfg: cfg,
+				schedulerSnapshot:  &SchedulerSnapshotService{groupRepo: groups, cache: &openAISnapshotCacheStub{snapshotAccounts: []*Account{&account}, accountsByID: map[int64]*Account{1: &account}}},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{1: path != "queued"}})}
+			requestCtx := context.WithValue(context.Background(), ctxkey.Group, group)
+			selection, err := svc.SelectAccountWithLoadAwareness(requestCtx, &group.ID, "", "gpt-test", nil)
+			require.NoError(t, err)
+			require.Equal(t, 1, accounts.reads, "initial authoritative account read")
+			require.Equal(t, 1, groups.reads, "initial privacy read")
+			ctx := ContextWithSelectionProfitGate(requestCtx, selection)
+			_, vetoed, reason := svc.SelectionAdmissionForResult(ctx, selection, path == "queued")
+			require.False(t, vetoed, reason)
+			if path == "ws_followup" {
+				accounts.reads, groups.reads = 0, 0
+				_, vetoed, reason = svc.SelectionAdmissionVetoLatest(ctx, selection.Account)
+				require.False(t, vetoed, reason)
+			}
+			want := 1
+			if path == "queued" {
+				want = 2
+			}
+			require.Equal(t, want, accounts.reads)
+			require.Equal(t, want, groups.reads)
+			t.Logf("%s: accounts=%d groups=%d", path, accounts.reads, groups.reads)
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+		})
+	}
+}
+func TestSelectionAdmissionUnknownRequestSkipsOnlyGroup(t *testing.T) {
+	account := profitControlWSAccount(1, 0.2, time.Now())
+	account.GroupIDs = []int64{7}
+	svc := &OpenAIGatewayService{}
+	_, vetoed, reason := svc.SelectionAdmissionVeto(context.Background(), &account)
+	require.False(t, vetoed, reason)
+	account.Schedulable = false
+	_, vetoed, _ = svc.SelectionAdmissionVeto(context.Background(), &account)
+	require.True(t, vetoed)
+}
+
+func TestSelectionAdmissionRechecksGrokFreeQuota(t *testing.T) {
+	const id int64 = 991701
+	account := Account{ID: id, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"subscription_tier": "free"}}
+	svc := &OpenAIGatewayService{cfg: grokFreeQuotaTestConfig(), usageLogRepo: &grokFreeQuotaUsageRepoStub{}, accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}}
+	ctx := context.WithValue(context.Background(), openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{Platform: PlatformGrok})
+	openaiGrokFreeQuotaGateCache.Store(id, grokFreeQuotaGateCacheEntry{tokens: 0, checkedAt: time.Now(), known: true})
+	defer openaiGrokFreeQuotaGateCache.Delete(id)
+	require.NotNil(t, svc.recheckSelectionAccount(ctx, OpenAIAccountScheduleRequest{Platform: PlatformGrok}, &account))
+	openaiGrokFreeQuotaGateCache.Store(id, grokFreeQuotaGateCacheEntry{tokens: 500000, checkedAt: time.Now(), known: true})
+	_, vetoed, reason := svc.SelectionAdmissionVetoLatest(ctx, &account)
+	require.True(t, vetoed)
+	require.Equal(t, "quota_auto_pause", reason)
 }
