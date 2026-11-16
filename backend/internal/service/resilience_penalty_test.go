@@ -304,7 +304,9 @@ func TestBrokenStreamUsageLiftsNoCooldown(t *testing.T) {
 	r.NoteAccountSuccess(c.Request.Context(), account)
 	require.Zero(t, repo.clearCalls, "a broken stream keeps the cooldown")
 
-	r.NoteAccountSuccess(context.Background(), account)
+	success := resilience.NewRequestState()
+	success.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: transientCooldownStartedAt(repo.tempReason).Add(time.Second)})
+	r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), success), account)
 	require.Equal(t, 1, repo.clearCalls, "a real success of the last-resort account lifts it")
 }
 
