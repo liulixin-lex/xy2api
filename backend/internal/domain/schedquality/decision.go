@@ -4,23 +4,64 @@ import "time"
 
 const RuleVersion = "3.0"
 
+// TTFTEvidence is the stable, flat representation stored in decision/state JSON
+// and returned by the API. RuleBResult remains the in-memory assessment.
+type TTFTEvidence struct {
+	LimitSeconds float64              `json:"limit_s"`
+	N            float64              `json:"n"`
+	K            float64              `json:"k"`
+	X            float64              `json:"x"`
+	S            int                  `json:"s"`
+	D            int                  `json:"d"`
+	PriorMu      float64              `json:"prior_mu"`
+	PeerNu       float64              `json:"peer_nu"`
+	PAbs         float64              `json:"p_abs"`
+	PRel         *float64             `json:"p_rel"`
+	U            *float64             `json:"u"`
+	Z            *float64             `json:"z"`
+	Causes       []RuleBUnknownReason `json:"causes"`
+}
+
+// NewTTFTEvidence copies evidence without retaining mutable result pointers.
+// Peer-dependent values stay null when fewer than 20 known peer mass is present.
+func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
+	e := &TTFTEvidence{
+		LimitSeconds: limitSeconds,
+		N:            result.Counts.N, K: result.Counts.K, X: result.Counts.X,
+		S: result.Counts.S, D: result.Counts.D,
+		PriorMu: result.Prior, PeerNu: result.PeerPrior, PAbs: result.AbsoluteProbability,
+		Causes: append([]RuleBUnknownReason{}, result.UnknownReasons...),
+	}
+	if result.PeerCounts.N-result.PeerCounts.X >= 20 {
+		copyValue := func(v *float64) *float64 {
+			if v == nil {
+				return nil
+			}
+			value := *v
+			return &value
+		}
+		e.PRel, e.U, e.Z = copyValue(result.RelativeProbability), copyValue(result.U), copyValue(result.RelativeThreshold)
+	}
+	return e
+}
+
 type Basis struct {
 	RuleVersion  string           `json:"rule_version"`
 	Line         Dimension        `json:"line"`
 	Kind         string           `json:"kind"` // regular | trial | review | relax
-	Cut          time.Time        `json:"cut"`
+	Cut          time.Time        `json:"cut,omitzero"`
 	Threshold    float64          `json:"threshold"`     // 首字 L（秒）、报错上限或缓存下限
 	SourceGroups []int64          `json:"source_groups"` // E2：证据来自哪些分组
-	TTFT         *RuleBResult     `json:"ttft,omitempty"`
+	TTFT         *TTFTEvidence    `json:"ttft,omitempty"`
 	Error        *ErrorAssessment `json:"error,omitempty"`
 	Cache        *CacheAssessment `json:"cache,omitempty"`
 	AttemptIDs   []string         `json:"-"` // 坏样本，最新的在前，最多 50 个，写入 sched_decisions.attempt_ids
 }
 type Decision struct {
-	At     time.Time
+	At     time.Time `json:",omitzero"`
 	Key    LineKey
 	Action Action
 	Level  int
-	Until  time.Time
+	Until  time.Time `json:",omitzero"`
 	Basis  Basis
 }

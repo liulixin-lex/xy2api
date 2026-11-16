@@ -35,7 +35,7 @@ func (o Outcome) String() string {
 
 type AttemptSample struct {
 	AttemptID                        string
-	StartedAt, FinishedAt            time.Time
+	StartedAt, FinishedAt            time.Time `json:",omitzero"`
 	AccountID, GroupID               int64
 	Model                            string
 	Stream                           bool
@@ -52,7 +52,7 @@ type AttemptSample struct {
 	PromptTokens, CacheReadTokens    *int
 	InputTokens, CacheCreationTokens *int // Uncached input and cache writes; PromptTokens remains total input.
 	SessionKey, RequestID            string
-	InsertedAt                       time.Time
+	InsertedAt                       time.Time `json:",omitzero"`
 }
 type Policy struct {
 	Enabled                                  bool
@@ -61,7 +61,7 @@ type Policy struct {
 }
 type OverrideRef struct {
 	Mode    Override
-	Expires time.Time
+	Expires time.Time `json:",omitzero"`
 } // zero Expires = no expiry
 func DefaultPolicy() Policy {
 	return Policy{TTFTSeconds: 15, MaxErrorRate: .10, MinCacheRatio: .5, TakeoverIdleSeconds: 900}

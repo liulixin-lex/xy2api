@@ -81,6 +81,9 @@ func TestStepCooldownAndReview(t *testing.T) {
 		if tc.v == VerdictFail && (!next.Entry.Equal(frozen.Until) || !next.LastRear.Equal(frozen.Until)) {
 			t.Fatal("renewal did not restart evidence")
 		}
+		if tc.v == VerdictPass && !next.GoodSince.Equal(frozen.Until) {
+			t.Fatal("review release must start good evidence at the actual release time")
+		}
 	}
 	for level := 1; level <= 6; level++ {
 		at := s.Until
@@ -119,6 +122,9 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 			}
 			if tc.v == VerdictFail && (next.Level != 1 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
 				t.Fatal("trial failed to escalate")
+			}
+			if tc.v == VerdictPass && !next.GoodSince.Equal(prev.TrialUntil) {
+				t.Fatal("trial pass must start good evidence at the actual pass time")
 			}
 		}
 	}
