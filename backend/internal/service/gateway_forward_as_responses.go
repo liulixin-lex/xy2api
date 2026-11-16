@@ -648,15 +648,6 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			firstTokenMs = &ms
 		}
 
-		// Extract usage from message_delta
-		if event.Type == "message_delta" && event.Usage != nil {
-			mergeAnthropicUsage(&usage, *event.Usage)
-		}
-		// Also capture usage from message_start
-		if event.Type == "message_start" && event.Message != nil {
-			mergeAnthropicUsage(&usage, event.Message.Usage)
-		}
-
 		// Keep the terminal Responses usage aligned with the normalized billing
 		// buckets. Normalize the converter input too, so message handlers cannot
 		// restore the provider's overlapping raw input total.
@@ -708,6 +699,16 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	// stages the opening and ends a broken stream with response.failed.
 	var stream *gatewayConvertStream
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertResponses, mappedModel, gatewayConvertHooks{
+		observeUsage: func(event *apicompat.AnthropicStreamEvent) {
+			// Extract usage from message_delta
+			if event.Type == "message_delta" && event.Usage != nil {
+				mergeAnthropicUsage(&usage, *event.Usage)
+			}
+			// Also capture usage from message_start
+			if event.Type == "message_start" && event.Message != nil {
+				mergeAnthropicUsage(&usage, event.Message.Usage)
+			}
+		},
 		convert:                func(event *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return processEvent(event) },
 		finalize:               finalizeStream,
 		terminalMappingHandled: opts.Bridge != nil,

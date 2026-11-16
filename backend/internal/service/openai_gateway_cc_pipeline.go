@@ -347,6 +347,14 @@ func (s *OpenAIGatewayService) scanCCStream(
 			st.UsagePresent = true
 			st.UsageSource = "upstream_sse_progressive"
 		}
+		// After conversion fails, later frames only contribute usage.
+		if st.Err != nil {
+			if payload == "[DONE]" {
+				st.SawDone = true
+				return true
+			}
+			return false
+		}
 		if terminal.sawMalformed || terminal.failurePayload != "" {
 			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid or failed Chat Completions stream frame", SourceProtocol: "chat"}
 			return true
@@ -367,12 +375,12 @@ func (s *OpenAIGatewayService) scanCCStream(
 				st.FirstTokenMs = &ms
 			}
 			st.Err = emitRaw[0]([]byte(payload))
-			return st.Err != nil
+			return false
 		}
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"}
-			return true
+			return false
 		}
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
 			ms := int(time.Since(startTime).Milliseconds())
@@ -392,7 +400,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			break
 		}
 	}
-	if st.Err == nil && !st.SawDone {
+	if !st.SawDone {
 		if frame, complete := parser.Finish(); complete {
 			processFrame(frame)
 		}

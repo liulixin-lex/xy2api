@@ -59,6 +59,8 @@ func gatewayConvertGuarded() bool {
 
 // gatewayConvertHooks are the protocol conversion of one attempt.
 type gatewayConvertHooks struct {
+	// observeUsage runs after conversion failure without emitting frames.
+	observeUsage func(*apicompat.AnthropicStreamEvent)
 	// convert turns one Anthropic event into wire frames. hold is set while
 	// the opening is staged; the driver keeps the frames until it ends.
 	convert func(event *apicompat.AnthropicStreamEvent, payload string, hold bool) []string
@@ -72,6 +74,7 @@ type gatewayConvertHooks struct {
 }
 
 type gatewayConvertStream struct {
+	conversionErr     error
 	evidence          anthropicBufferedEvidence
 	s                 *GatewayService
 	c                 *gin.Context
@@ -302,6 +305,13 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 			zap.String("request_id", st.requestID), zap.String("protocol", st.protocol), zap.String("event_type", name))
 		return gatewayConvertOutcome{}, false
 	}
+	if st.hooks.observeUsage != nil {
+		st.hooks.observeUsage(&event)
+	}
+	if st.conversionErr != nil {
+		terminal := event.Type == "message_stop" || event.Type == "error" || (event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "")
+		return gatewayConvertOutcome{err: st.conversionErr}, terminal
+	}
 	if st.canceledBeforeOutput() {
 		return gatewayConvertOutcome{err: st.ctx().Err(), noResult: true}, true
 	}
@@ -343,7 +353,7 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 	frames := st.hooks.convert(&event, payload, hold)
 	if st.hooks.conversionError != nil {
 		if err := st.hooks.conversionError(); err != nil {
-			return st.conversionFailed(err), true
+			return st.conversionFailed(err), st.sawStop
 		}
 	}
 	if hold {
@@ -387,6 +397,9 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 
 // onEnd handles the end of the upstream: EOF (cause nil) or a read error.
 func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
 	if st.sawStop {
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 			logger.L().Warn("gateway convert stream: read error", zap.Error(cause),
@@ -438,6 +451,9 @@ func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
 }
 
 func (st *gatewayConvertStream) onStall(threshold time.Duration) gatewayConvertOutcome {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
 	if st.gone {
 		MarkResponseCommitted(st.c)
 		return gatewayConvertOutcome{err: errors.New("stream usage incomplete after timeout")}
@@ -727,6 +743,13 @@ func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Co
 }
 
 func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcome {
+	if st.conversionErr != nil {
+		return gatewayConvertOutcome{err: st.conversionErr}
+	}
+	st.conversionErr = err
+	st.stopFirstEvent()
+	st.stopCancel()
+	st.released = true
 	st.held = nil
 	st.sawFailure = true
 	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())

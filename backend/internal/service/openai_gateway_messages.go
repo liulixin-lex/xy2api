@@ -1078,7 +1078,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
 	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
-	defer func() { finishOpenAICompatResponse(c, account, result, retErr, &facts) }()
+	var conversionErr error
+	defer func() {
+		if conversionErr != nil {
+			retErr = conversionErr
+		}
+		finishOpenAICompatResponse(c, account, result, retErr, &facts)
+	}()
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -1147,10 +1153,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}()
 	}
 	canReplayPrelude := func() bool {
-		return stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
+		return conversionErr == nil && stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
 	}
 	canceledPrelude := func() error {
-		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if conversionErr == nil && stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			return c.Request.Context().Err()
 		}
 		return nil
@@ -1173,6 +1179,12 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	relayLive := relayLivenessFor(c, account)
 	scanner := s.newUpstreamSSEScanner(resp.Body, relayLive)
 	firstEvent := openAICompatFirstEventOf(resp)
+	latchConversionError := func(err error) {
+		conversionErr, streamNonFailoverErr = err, err
+		pendingPrelude.take()
+		firstEvent.disarm()
+		stopPreludeCancel()
+	}
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
@@ -1237,8 +1249,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		} else if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			if conversionErr := m7ResponseDecodeError(payload, terminal, err); conversionErr != nil {
 				WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
-				streamNonFailoverErr = conversionErr
-				return true
+				latchConversionError(conversionErr)
+				return terminal.Seen && terminal.Valid
 			}
 			return false // Unknown extension DTO fields retain the existing ignore behavior.
 		}
@@ -1378,8 +1390,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			deferredOpenAIAnthropicEvents(&event, state, true)
 			if err := state.Err(); err != nil {
 				WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
-				streamNonFailoverErr = err
-				return true
+				latchConversionError(err)
+				return terminal.Seen && terminal.Valid
 			}
 			return false
 		}
@@ -1397,8 +1409,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		if err := state.Err(); err != nil {
 			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
-			streamNonFailoverErr = err
-			return true
+			latchConversionError(err)
+			return terminal.Seen && terminal.Valid
 		}
 		if !clientDisconnected {
 			for _, evt := range events {
@@ -1483,6 +1495,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if conversionErr != nil {
+			return resultWithUsage(), conversionErr
+		}
 		if err := canceledPrelude(); err != nil {
 			return nil, err
 		}
@@ -1507,10 +1522,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
 		terminal := observeOpenAICompatFrame(c, resp, frame, &usage, &facts)
+		if conversionErr != nil {
+			return terminal.Seen && terminal.Valid
+		}
 		if terminal.Failure && !terminal.Valid {
 			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
-			streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"}
-			return true
+			latchConversionError(&apicompat.UpstreamConversionError{Field: "response", Reason: terminal.Reason, SourceProtocol: "responses"})
+			return false
 		}
 		payload := frame.Data
 		if !terminal.Failure {

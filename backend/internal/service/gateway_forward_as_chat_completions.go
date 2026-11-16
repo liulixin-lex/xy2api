@@ -507,15 +507,6 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			firstTokenMs = &ms
 		}
 
-		// Extract usage from message_delta
-		if event.Type == "message_delta" && event.Usage != nil {
-			mergeAnthropicUsage(&usage, *event.Usage)
-		}
-		// Also capture usage from message_start (carries cache fields)
-		if event.Type == "message_start" && event.Message != nil {
-			mergeAnthropicUsage(&usage, event.Message.Usage)
-		}
-
 		// Keep the outward Responses/Chat usage on the same normalized buckets used
 		// for billing, including converter handlers that consume event usage.
 		syncAnthropicResponsesUsage(anthState, usage)
@@ -554,6 +545,16 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	// xy2api resilience (W1.1, W1.2): the driver reads the Anthropic stream,
 	// stages the role chunk and ends a broken stream with an error chunk.
 	stream = s.newGatewayConvertStream(c, resp, account, gatewayConvertChat, mappedModel, gatewayConvertHooks{
+		observeUsage: func(event *apicompat.AnthropicStreamEvent) {
+			// Extract usage from message_delta
+			if event.Type == "message_delta" && event.Usage != nil {
+				mergeAnthropicUsage(&usage, *event.Usage)
+			}
+			// Also capture usage from message_start (carries cache fields)
+			if event.Type == "message_start" && event.Message != nil {
+				mergeAnthropicUsage(&usage, event.Message.Usage)
+			}
+		},
 		convert:                processAnthropicEvent,
 		terminalMappingHandled: opts.Bridge != nil,
 		conversionError: func() error {
