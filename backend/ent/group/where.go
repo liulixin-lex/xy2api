@@ -90,6 +90,11 @@ func RateMultiplier(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRateMultiplier, v))
 }
 
+// MinUpstreamRate applies equality check predicate on the "min_upstream_rate" field. It's identical to MinUpstreamRateEQ.
+func MinUpstreamRate(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMinUpstreamRate, v))
+}
+
 // PeakRateEnabled applies equality check predicate on the "peak_rate_enabled" field. It's identical to PeakRateEnabledEQ.
 func PeakRateEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldPeakRateEnabled, v))
@@ -738,6 +743,56 @@ func RateMultiplierLT(v float64) predicate.Group {
 // RateMultiplierLTE applies the LTE predicate on the "rate_multiplier" field.
 func RateMultiplierLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldRateMultiplier, v))
+}
+
+// MinUpstreamRateEQ applies the EQ predicate on the "min_upstream_rate" field.
+func MinUpstreamRateEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateNEQ applies the NEQ predicate on the "min_upstream_rate" field.
+func MinUpstreamRateNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateIn applies the In predicate on the "min_upstream_rate" field.
+func MinUpstreamRateIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldMinUpstreamRate, vs...))
+}
+
+// MinUpstreamRateNotIn applies the NotIn predicate on the "min_upstream_rate" field.
+func MinUpstreamRateNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldMinUpstreamRate, vs...))
+}
+
+// MinUpstreamRateGT applies the GT predicate on the "min_upstream_rate" field.
+func MinUpstreamRateGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateGTE applies the GTE predicate on the "min_upstream_rate" field.
+func MinUpstreamRateGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateLT applies the LT predicate on the "min_upstream_rate" field.
+func MinUpstreamRateLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateLTE applies the LTE predicate on the "min_upstream_rate" field.
+func MinUpstreamRateLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldMinUpstreamRate, v))
+}
+
+// MinUpstreamRateIsNil applies the IsNil predicate on the "min_upstream_rate" field.
+func MinUpstreamRateIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldMinUpstreamRate))
+}
+
+// MinUpstreamRateNotNil applies the NotNil predicate on the "min_upstream_rate" field.
+func MinUpstreamRateNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldMinUpstreamRate))
 }
 
 // PeakRateEnabledEQ applies the EQ predicate on the "peak_rate_enabled" field.

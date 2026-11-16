@@ -47,7 +47,7 @@ func TestSchedAttemptTerminalRetainsEvidence(t *testing.T) {
 			a := svc.beginSchedAttempt(resilience.WithRequestState(context.Background(), st), &Account{ID: 1, Platform: PlatformOpenAI}, nil, 0, true)
 			a.noteUsage(&OpenAIUsage{InputTokens: 100, CacheReadInputTokens: 80, CacheReadInputTokensPresent: true, CacheCreationInputTokens: 20})
 			if tc.first {
-				a.MarkFirstOutput(a.started.Add(10 * time.Millisecond))
+				a.MarkOutput(OutputValid, a.started.Add(10*time.Millisecond))
 			}
 			if tc.cancel {
 				cancel()
@@ -61,8 +61,9 @@ func TestSchedAttemptTerminalRetainsEvidence(t *testing.T) {
 				a.finish(nil, tc.err)
 			}
 			a.finish(nil, nil)
-			require.Len(t, rows, 1)
-			row := rows[0]
+			require.Len(t, rows, 2)
+			require.True(t, rows[0].FinishedAt.IsZero())
+			row := rows[1]
 			require.Equal(t, tc.outcome, row.Outcome)
 			require.Equal(t, tc.outcome == 5, row.ClientCanceled)
 			require.Equal(t, 0, *row.InputTokens)

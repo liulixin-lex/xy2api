@@ -29,23 +29,26 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 	_, _ = q.WriteString(`INSERT INTO account_attempt_samples
 		(attempt_id, started_at, finished_at, account_id, group_id, model, request_class,
 		stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens, prev_prompt_tokens,
-		cache_read_tokens, session_key, request_id, input_tokens, cache_creation_tokens) VALUES `)
-	args := make([]any, 0, len(rows)*20)
+		cache_read_tokens, session_key, request_id, input_tokens, cache_creation_tokens,
+		capture_version, first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes) VALUES `)
+	const columns = 27
+	args := make([]any, 0, len(rows)*columns)
 	for i, row := range rows {
 		if i > 0 {
 			_ = q.WriteByte(',')
 		}
 		_ = q.WriteByte('(')
-		for j := 0; j < 20; j++ {
+		for j := 0; j < columns; j++ {
 			if j > 0 {
 				_ = q.WriteByte(',')
 			}
-			fmt.Fprintf(&q, "$%d", i*20+j+1)
+			fmt.Fprintf(&q, "$%d", i*columns+j+1)
 		}
 		_ = q.WriteByte(')')
 		args = append(args, row.AttemptID, row.StartedAt, row.FinishedAt, row.AccountID, row.GroupID,
 			row.Model, 1, row.Stream, false, row.TTFOMs, row.CensoredMs, row.Outcome,
-			row.Detail, row.PromptTokens, nil, row.CacheReadTokens, row.SessionKey, row.RequestID, row.InputTokens, row.CacheCreationTokens)
+			row.Detail, row.PromptTokens, nil, row.CacheReadTokens, row.SessionKey, row.RequestID, row.InputTokens, row.CacheCreationTokens,
+			2, row.FirstEventMs, row.FirstAnswerMs, row.Class, row.HTTPStatus, row.StatusOrigin, row.OutputBytes)
 	}
 	_, _ = q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
 	_, err := r.db.ExecContext(ctx, q.String(), args...)
@@ -54,7 +57,8 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 
 const schedAttemptColumns = `attempt_id, started_at, finished_at, account_id, group_id, model,
 	stream, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
-	cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens`
+	cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens,
+	first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes`
 
 func (r *schedAttemptRepository) read(ctx context.Context, where string, args ...any) ([]schedquality.AttemptSample, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerReadTimeout)
@@ -67,7 +71,9 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	if _, err = tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", schedquality.LedgerReadTimeout.Milliseconds())); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT `+schedAttemptColumns+` FROM account_attempt_samples `+where, args...)
+	// Apply the evidence cutover centrally, including callers with their own WHERE.
+	rows, err := tx.QueryContext(ctx, `SELECT `+schedAttemptColumns+` FROM
+		(SELECT * FROM account_attempt_samples WHERE capture_version >= 2) AS account_attempt_samples `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,9 +100,10 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 }
 
 func (r *schedAttemptRepository) LoadInsertedAfter(ctx context.Context, after time.Time, limit int) ([]schedquality.AttemptSample, time.Time, error) {
+	// Legacy rows must not consume the page limit and stall the v2 cursor.
 	rows, err := r.read(ctx, `WHERE inserted_at > $1 AND inserted_at <= (
 		SELECT max(inserted_at) FROM (
-			SELECT inserted_at FROM account_attempt_samples WHERE inserted_at > $1
+			SELECT inserted_at FROM account_attempt_samples WHERE capture_version >= 2 AND inserted_at > $1
 			ORDER BY inserted_at LIMIT NULLIF($2, 0)
 		) AS page
 	) ORDER BY inserted_at, attempt_id`, after, limit)
