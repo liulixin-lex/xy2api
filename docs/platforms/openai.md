@@ -54,7 +54,6 @@ API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effo
 
 `/v1/chat/completions` 收到 Responses 格式的正文、而账号上游只支持 Chat Completions（含 Grok API Key）时，网关在发送前把它转换为 Chat 请求，保留能表达的多模态内容与工具历史；字段非法或目标确实无法表达时返回 400，`param` 指向该字段。
 
-
 ### Chat Completions 转 Responses
 
 `/v1/chat/completions` 请求转换为 Responses 发往上游，响应再转换回 Chat Completions。下文的“返回错误”指：非流式返回错误 JSON；流式已经输出后写 `data: {"error":…}` 和 `data: [DONE]`，见 [网关韧性](../guides/gateway-resilience-client.md#已提交后的失败)。

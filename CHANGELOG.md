@@ -156,8 +156,6 @@
 
 ### 流式传输与报错
 
-- Chat、Messages 转 Responses 的请求，加密推理项被上游拒绝时会按已有修复规则重试；无法修复或重试后仍被拒时返回 400 `encrypted_content_rejected`，已经输出时按入站协议结束。
-
 - Responses 失败保留上游原始等待提示，客户端重试建议继续限幅为 2–10 秒。
 
 - 非流式 Responses 请求遇到缺少结束事件或含损坏帧的上游 SSE 时返回 502 JSON 错误，不再以 200 原样返回 SSE。
@@ -176,20 +174,9 @@
 
 - 非流式 Responses 的 JSON 响应被上游标成 SSE 时，用量不再记为 0；SSE 拼成的 JSON 响应改用 JSON 响应头。
 
+- Chat、Messages 转 Responses 的请求，加密推理项被上游拒绝时会按已有修复规则重试；无法修复或重试后仍被拒时返回 400 `encrypted_content_rejected`，已经输出时按入站协议结束。
+
 - 账号只支持 Chat Completions（含 Grok API Key）时，发到 `/v1/chat/completions` 的 Responses 格式请求会先转换再发送，只有非法或确实无法表达的字段返回 400。
-
-### 重试、调度与续接
-
-- 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。
-
-- 加密推理项被上游拒绝后，同号重试只去掉被上游指出的那一项，其他推理与压缩历史保留；上游没指出是哪一项、或重试后又有别的项被拒时，照旧去掉全部密文重试一次；仍无法修复时返回 400 `encrypted_content_rejected` 并附恢复说明。
-
-- 同一会话里一个账号的密文被拒，不再让换账号或换 API Key 之后的请求被提前删去密文；旧版本的拒绝记录不再沿用。
-
-- 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
-
-### 用量记录与计费
-
 
 - 心跳或正文已提交后的错误按 Chat、Messages、Responses 协议收尾一次，避免混入 JSON 或重复结束帧。
 
@@ -209,13 +196,15 @@
 
 ### 重试、调度与续接
 
-- 工具历史 400 在透传出口保留上游说明和已有定位字段，调用方可据此修正历史，不新增本地闭合校验。
-- 加密推理项被上游拒绝后的同号修复只清理唯一被指认项，保留其他推理和压缩历史；无法安全修复时明确返回 `encrypted_content_rejected`。
-- 原生与透传 HTTP 的密文拒绝证据按账号和实际凭据版本隔离，旧会话级证据不迁移，换账号或换凭据后保留首发历史。
-- 原生 HTTP 续接错误区分响应归属、目标不支持、工具输出缺 call_id 与上游状态过期，保留对应错误码和字段位置。
+- 原样转发 Responses 的工具历史 400 保留上游的 `type`、`code`、`param` 与说明，不再换成通用文案。
+
+- 加密推理项被上游拒绝后，同号重试只去掉被上游指出的那一项，其他推理与压缩历史保留；上游没指出是哪一项、或重试后又有别的项被拒时，照旧去掉全部密文重试一次；仍无法修复时返回 400 `encrypted_content_rejected` 并附恢复说明。
+
+- 同一会话里一个账号的密文被拒，不再让换账号或换 API Key 之后的请求被提前删去密文；旧版本的拒绝记录不再沿用。
+
+- 原生 Responses HTTP 的 `previous_response_id` 续接失败改为分别返回 `previous_response_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`（均为 400）与 `upstream_continuation_expired`（410），并指出出错的字段。
 
 ### 用量记录与计费
-
 
 ## [0.6.7] - 2026-11-15
 

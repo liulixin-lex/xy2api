@@ -223,8 +223,6 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 ## 协议转换字段表
 
-
-
 Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转换为 Anthropic Messages 后发往上游，普通账号与兼容账号的转换相同。字段语义以 Anthropic 官方 [OpenAI SDK 兼容文档](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) 为准：官方支持的映射，官方忽略的忽略。标「网关扩展」的是官方文档之外网关额外提供的映射。所有字段的 JSON `null` 都视为未提供。Gemini 分组的 `/v1/chat/completions` 同样先转为 Messages，但不套用本表的思考预算与 JSON 格式规则，处理方式见 [Gemini · 兼容入口参数](gemini.md#兼容入口参数)。
 
 | 字段 | 处理 | 说明 |
@@ -276,7 +274,6 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 `/v1/responses` 的流式响应中，每段 thinking 摘要依次发出 `response.reasoning_summary_part.added`、文本增量、带完整文本的 `response.reasoning_summary_text.done` 与 `response.reasoning_summary_part.done`，之后才结束该 reasoning 项；只有签名或 redacted thinking 时不生成空摘要。
 
 非流式 Chat 与 Responses 请求的上游是 Anthropic 时，网关把 Anthropic 的流拼成一个响应：收到 `message_stop`、带有效 `stop_reason` 的 `message_delta` 或兼容的 `[DONE]` 时返回成功；在此之前断流、读取出错或收到错误时返回 502，保留已读到的用量。已经正常结束后连接关闭，或者缺少结尾的用量，不影响成功。
-
 
 ## 限制与注意事项
 

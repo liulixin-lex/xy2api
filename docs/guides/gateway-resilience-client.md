@@ -55,13 +55,7 @@
 
 ## 流式请求的失败结束方式
 
-
-
-
-
 ### 已提交后的失败
-
-原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。
 
 HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的失败按入站协议写终止帧：
 
@@ -100,7 +94,7 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 原生与原样转发的 Responses 流还按以下规则结束，每个响应只写一个结束事件，成功结束后不会再追加失败：
 
 - 收齐完整的 SSE 事件后才判断是否结束。坏 UTF-8、坏 JSON、缺 `response` 或状态矛盾的结束事件不算成功；已经输出时以 `response.failed` 结束，保留已读到的用量。连续多行 `data:` 拼起来不是合法 JSON、但每行都是完整 JSON 对象时，继续按独立事件处理；拼起来合法的多行 JSON 保持一个事件。
-- 顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
+- 原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
 - 原生 OAuth 上游先给出字符串 `type:"error"`、随后又给出合法 `response.completed` 时，流式和非流式都继续按成功结束。通用的 SSE 事件名（如 `message`、`error`）不会覆盖合法 payload 的结束类型。
 
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
@@ -158,20 +152,15 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 |---|---|
 | 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
-| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生与原样转发的 Responses 在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时：请求顶层只有一项带密文的 reasoning 或 compaction 就修复该项；有多项时清理全部顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次，并在请求级 `degradations` 中记录 `input[].encrypted_content/omit`。位置冲突、重复 ID 或越界时不做猜测性清理 |
-
-| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生、透传 Responses 及 Chat/Messages 转 Responses 出口在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。没有位置时，仅在请求恰好只有一个 reasoning 且没有 compaction/compaction_summary 时清理该 reasoning 的密文；位置冲突、重复 ID 或越界时不做猜测性清理 |
+| 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生、原样转发及 Chat/Messages 转为 Responses 的请求在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时：请求顶层只有一项带密文的 reasoning 或 compaction 就修复该项；有多项时清理全部顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次，并在请求级 `degradations` 中记录 `input[].encrypted_content/omit`。位置冲突、重复 ID 或越界时不做猜测性清理 |
 
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 补上 web_search 工具声明后重放一次；成功后该账号 6 小时内同类请求直接补声明。仍失败时返回 502 并说明原因，不换号 |
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
 
-原生与原样转发的 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、重复 ID、越界、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
+原生、原样转发及 Chat/Messages 转为 Responses 的 HTTP 请求明确拒绝 reasoning/compaction 密文、但位置冲突、重复 ID、越界、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
 账号只支持 Chat Completions 的 API Key 路由（以及 Grok API Key）收到 Responses 格式的正文时，网关在发送前把它转换为 Chat 请求：能表达的字段照转，不能表达的按既有规则省略并记录降级，然后只发送一次；这一步不是重放，不消耗重放次数。普通的 `messages` 请求不受影响。
-
-
-原生、透传 Responses 及 Chat/Messages 转 Responses 出口明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或修复一次仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
 
 网关会记住被上游拒绝后去掉的密文项，下次请求中唯一命中同一项时，在第一次发送前就去掉它。这份记录按会话、账号、上游地址和本次实际使用的凭据分开保存：换账号、换 API Key、换实例、重启或记录过期后都不沿用，第一次发送保留原文；旧版本按会话保存的记录不再读取。即使没有记录，本次被明确拒绝后仍按上面的规则修复。
@@ -179,7 +168,6 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务正文，网关优先把它调度到父线程的粘性账号（只有父线程的账号能解开），父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`。父账号不可用时普通选号。
 
 ## 送达与计费口径
-
 
 “已输出”与计费、换号共用同一个判据：客户端是否收到过语义内容。
 
@@ -199,5 +187,3 @@ raw Chat 以“完整用量后正常关闭”判定为成功的响应，按读�
 原生 Anthropic 与 API Key 直通在开场暂存期失败并换号的尝试，不向用户计费、不产生用量记录；上游可能已对这次尝试的输入计费，这部分成本由网关承担。
 
 上游的完整响应只是缺少用量时照常返回；使用记录会标出“上游未给用量”，与上游给出的真实 0 区分。流式和非流式拼装都保留中途已拿到的用量，结束事件不带用量时不会把它清零。HTTP 200 正文明确表示失败时不当作成功计费；失败流没有向客户端交付语义内容时不写用量。
-
-
