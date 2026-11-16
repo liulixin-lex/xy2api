@@ -154,8 +154,6 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 
 ### 请求关联字段
 
-通用 Chat/Responses、Images、Responses 生图和 Embeddings 均在准入后关联 `gateway_request_id`；`request_scope=text/image/embedding` 独立于文本统计资格，图片及 embedding 不进入文本成功率分母。
-
 `post_output_failure`、`session_rebind`、`last_resort`、`turn_cap`、`keepalive_committed`、`stall` 等事件另带以下字段：
 
 | 字段 | 含义 |
@@ -171,6 +169,8 @@ OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下�
 访问日志（组件 `http.access`）也带 `gateway_request_id`，取同一个本地 ID；客户端传来的同名请求头不会改变它，没有经过网关的请求（如管理接口）不带这个字段，原有的 `request_id` 不变。访问日志是否写入系统日志仍由运维监控“系统日志”里的“将访问日志写入数据库”决定（默认关）。
 
 Responses 拒参修复（包括流内修复）在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
+
+通用 Chat/Responses、Images、Responses 生图和 Embeddings 均在准入后关联 `gateway_request_id`；`request_scope=text/image/embedding` 独立于文本统计资格，图片及 embedding 不进入文本成功率分母。
 
 用量与无账单请求的 `usage_observed/usage_source`、`terminal_event_seen/terminal_event_valid`、`response_body_type` 分别对应运行时的用量存在性、来源、原始终态证据和 JSON/SSE 正文类型；未观测的事实为 `NULL`。`degradations` 保存请求级字段名与 `omit/map/default` 动作，错误记录同步保存同一份列表。具体语义见[用量与完成证据](usage.md#用量与完成证据)。
 
@@ -195,5 +195,3 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
 
 转换中省略或改写的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
-
-通用模型供给诊断完整扫描持久配置范围，成员数与模型支持数不受瞬时冷却影响；通用路径的请求支持数等于静态模型/compat 支持数。数据库或兼容配置解析失败保留真实错误并标为未知，不伪造可用结论。

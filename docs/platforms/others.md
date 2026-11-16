@@ -24,6 +24,8 @@
 | `POST /v1/responses`（别名 `/responses`） | Responses，适配 Codex |
 | `GET /v1/models` | 模型列表 |
 
+各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
+
 Embeddings、图片、视频、语音等端点对这些平台返回 `404 not_found_error`。
 
 - **客户端配置**：「使用密钥」弹窗提供 Claude Code、Codex CLI 与 OpenCode 三个选项卡。Claude Code 的写法与 [Anthropic](anthropic.md#claude-code) 相同（`ANTHROPIC_BASE_URL` 填根地址，不带 `/v1`）；Codex CLI 使用 `env_key = "XY2API_API_KEY"`、`wire_api = "responses"`、`supports_websockets = false`，并可加载当前分组的远程模型目录。

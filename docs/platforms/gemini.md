@@ -1,7 +1,5 @@
 # Gemini
 
-推理 HTTP 入口遵循[顶层 model 唯一性规则](openai.md#对外端点)：重复字段在路由改写前返回 `400`，错误消息指出 `model`；嵌套同名字段不受影响。
-
 本文介绍如何把 Google Gemini 账号接入 XY2API：三种 OAuth 授权方式、AI Studio API Key 与 Vertex Service Account 账号的添加方法，自建 OAuth Client 时需要的环境变量，Gemini 分组对外暴露的端点，以及 Gemini CLI 的配置。部署 XY2API 的管理员和使用 Gemini SDK / CLI 的用户需要阅读。
 
 ## 账号类型
@@ -121,6 +119,8 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 | `POST /v1/chat/completions` | Chat Completions 格式，转换后转发到 Gemini |
 
 `/v1/chat/completions` 中图片的 `image_url.detail` 为 `auto`、`low`、`high` 时，Gemini 没有对应参数，网关去掉该提示并记录降级，图片照常发送；其他值返回 400。质量与费用不保证与指定 `detail` 时相同。
+
+各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
 
 `/v1beta` 端点的密钥读取顺序为 `x-goog-api-key` 请求头、`Authorization: Bearer`、`x-api-key`，最后是查询参数 `key`（只在 `/v1beta` 与 `/antigravity/v1beta` 下接受）；查询参数 `api_key` 已弃用，会返回 400。
 

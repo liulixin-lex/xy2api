@@ -93,6 +93,8 @@ OAuth 管理接口（均位于 `/api/v1/admin/grok` 下）：
 | `POST /v1/messages` | Anthropic Messages 格式，转换为 Responses 后以 Messages 格式返回，供 Claude Code 等客户端使用 |
 | `POST /v1/messages/count_tokens` | 在本地估算，不选号、不计费 |
 
+各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
+
 文本模型：`grok-4.7`、`grok-4.6`、`grok-4.5`、`grok-4.3`、`grok-build-0.1`、`grok-composer-2.5-fast`、`grok-4.20-0309-reasoning`、`grok-4.20-0309-non-reasoning`、`grok-4.20-multi-agent-0309`。另接受 `grok-3-mini`、`grok-3-mini-fast`，以及 `grok-build`、`grok-composer`、`grok-4.5-latest` 等别名；模型名可带 `xai/`、`x-ai/`、`grok/` 前缀。
 
 ### 图片与视频

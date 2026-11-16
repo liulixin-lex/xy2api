@@ -33,8 +33,6 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 
 ## 对外端点
 
-API Key 原生非流式 Images 没有有效图片时返回 `invalid_image_response`（`param: data`）。响应尚未提交时为 HTTP 502；JSON 保活已提交时停止后续心跳，以 HTTP 200 返回相同错误封套。少于请求张数时按实际有效图片数收费。
-
 鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`。
 
 | 端点 | 说明 |
@@ -51,6 +49,8 @@ API Key 原生非流式 Images 没有有效图片时返回 `invalid_image_respon
 | `GET /backend-api/codex/models` | Codex 模型清单（`chatgpt_base_url` 模式） |
 | `POST /v1/alpha/search` | Codex 使用的独立搜索端点 |
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
+
+API Key 原生非流式 Images 没有有效图片时返回 `invalid_image_response`（`param: data`）。响应尚未提交时为 HTTP 502；JSON 保活已提交时停止后续心跳，以 HTTP 200 返回相同错误封套。少于请求张数时按实际有效图片数收费。
 
 API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
 
