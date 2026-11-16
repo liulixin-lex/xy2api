@@ -1017,9 +1017,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if terminal.Failure {
 			event.Type = terminal.EventType
 		} else if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			if terminal.Seen {
+			if conversionErr := m7ResponseDecodeError(payload, terminal, err); conversionErr != nil {
 				WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream response event")
-				streamNonFailoverErr = &apicompat.UpstreamConversionError{Field: "response", Reason: "invalid terminal response", SourceProtocol: "responses"}
+				streamNonFailoverErr = conversionErr
 				return true
 			}
 			return false // Unknown extension DTO fields retain the existing ignore behavior.
