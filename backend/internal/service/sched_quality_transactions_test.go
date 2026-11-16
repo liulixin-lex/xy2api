@@ -134,3 +134,19 @@ func TestEngineSnapshotKeepsTTFTSourceGroupsSeparate(t *testing.T) {
 	require.Equal(t, []int64{10, 20, 30}, row.Error.SourceGroups)
 	require.Equal(t, []int64{10, 20, 30}, row.SourceGroups)
 }
+
+func TestEngineSlowBoundaryMatchesRuleB(t *testing.T) {
+	at := time.Unix(1000, 0)
+	ms := 1001
+	a := q.AttemptSample{Stream: true, FinishedAt: at, Outcome: q.OutcomeOK, TTFOMs: &ms}
+	require.False(t, schedSlow(a, 1.001), "known first output equal to the limit is not slow")
+	ms = 1002
+	require.True(t, schedSlow(a, 1.001))
+	a.TTFOMs = nil
+	a.Outcome = q.OutcomeTimeout
+	a.CensoredMs = &ms
+	ms = 1001
+	require.True(t, schedSlow(a, 1.001), "censoring at the limit proves slow")
+	ms = 1000
+	require.False(t, schedSlow(a, 1.001))
+}

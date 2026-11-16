@@ -183,7 +183,7 @@ func schedSlow(a q.AttemptSample, limit float64) bool {
 		return false
 	}
 	if a.TTFOMs != nil && *a.TTFOMs > 0 {
-		return float64(*a.TTFOMs) > limit*1000
+		return float64(*a.TTFOMs)/1000 > limit
 	}
-	return a.Outcome == q.OutcomeTimeout && a.CensoredMs != nil && float64(*a.CensoredMs) >= limit*1000
+	return a.Outcome == q.OutcomeTimeout && a.CensoredMs != nil && float64(*a.CensoredMs)/1000 >= limit
 }
