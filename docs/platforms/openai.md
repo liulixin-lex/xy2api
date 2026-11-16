@@ -136,6 +136,20 @@ goals = true
 
 分组开启「允许 /v1/messages 调度」后，Claude Code 的配置与 Anthropic 分组相同（`ANTHROPIC_BASE_URL` 填根地址，不带 `/v1`），见 [Anthropic](anthropic.md#claude-code)。OpenCode 配置文件为 `~/.config/opencode/opencode.json`，按弹窗内容复制。
 
+`/v1/messages` 请求转换为 Responses 发往上游，响应再转换回 Messages。下表中的“返回错误”指：非流式返回错误 JSON；流式以 `event: error` 结束、不发送 `message_stop`，见 [网关韧性](../guides/gateway-resilience-client.md#已提交后的失败)。
+
+| 项 | 处理 | 说明 |
+|---|---|---|
+| 工具的 `strict` | 映射 | 显式 `true` 仅在 schema 各层对象都设为 `additionalProperties:false` 且所有属性都列入 `required` 时保留；否则按 `false` 发送，并记录 `tools[i].strict/omit` 降级，schema 不改写。显式 `false` 与未指定仍按 `false` 发送 |
+| 工具的 `allowed_callers` | 省略并记录 | 未提供、`null` 或只含 `direct` 时正常转换。其他字符串列表（包括空列表、空字符串）在 Responses 中无法表达，网关省略这项限制并记录 `tools[i].allowed_callers/omit` 降级；工具声明与 schema 保留，模型仍可直接调用该函数。不是数组或成员不是字符串时返回 400，`param` 为 `tools[i].allowed_callers` |
+| 历史 thinking 的签名 | 过滤 | 去掉首尾空白后，空值、`gAAAA` 开头的值以及 CC Switch 的 `ccswitch-openai-reasoning-v1:` 本地包装（包括内容损坏的）不作为 `encrypted_content` 发出；其他签名（包括 CC Switch 的其他版本）照旧发送，正文与工具历史不变 |
+| 结束原因 | 映射 | `completed` 为 `end_turn`，有完整工具调用时为 `tool_use`；`incomplete` 的 `max_output_tokens` 或未给原因为 `max_tokens`，`content_filter` 为 `refusal`；正常完成但含拒答时为 `refusal`。`failed`、`cancelled` 或无法确认结束状态时返回错误。其他未列出的非空原因按正常结束处理，并记录 `status/map` 或 `incomplete_details.reason/map` 降级 |
+| 拒答（`refusal`） | 映射 | 拒答正文作为 `text` 块返回，非流式与流式相同；流式只补发尚未发出的部分，不重复 |
+| reasoning | 映射 | 有非空 summary 时只输出 summary，否则输出原始推理文本（`reasoning_text`），两者不拼接。summary 增量实时转发；原始推理文本在该 reasoning 项结束（或响应结束）时一次给出。`encrypted_content` 作为 thinking 块的 `signature`，在块结束前发出 |
+| 网页搜索结果 | 映射 | 只对已完成的 `web_search_call` 生成结果：取上游实际返回的 HTTP(S) 来源，重复的 URL 只保留第一条，只填上游给出的标题和内容；`open_page` 使用实际打开的 URL；上游没有来源时结果为空列表 |
+| `custom_tool_call` | 映射 | 转为 `tool_use`，自由文本输入包装为 `{"input":"原文"}`（空字符串同样包装），保留调用 ID 与名称；流式在输入完成后一次给出 |
+| 工具参数 | 校验 | 普通函数的参数必须是完整的 JSON 对象，成功结束而参数为空时按 `{}` 交付；坏 JSON、数组、`null`、标量，以及带 `encrypted_function_args` 的加密参数（Messages 无法表达）返回错误，不修补、不解密 |
+
 ### 反向代理
 
 在 Nginx 后使用 Codex CLI 时，需要在 `http` 块中加入 `underscores_in_headers on;`。Nginx 默认丢弃名称含下划线的请求头（如 `session_id`），会导致多账号下的粘性会话失效。更多见 [反向代理](../deployment/reverse-proxy.md)。

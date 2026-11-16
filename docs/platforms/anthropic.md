@@ -147,6 +147,8 @@ Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses`
 
 兼容账号对 thinking 签名历史的处理与普通 API Key 账号完全相同。
 
+经 OpenAI 分组的 `/v1/messages` 转为 Responses 时，历史 thinking 签名的过滤见 [OpenAI](openai.md#claude-code-与-opencode)。
+
 | 情形 | 行为 |
 |---|---|
 | 同一会话的后续轮次 | 粘性调度把会话留在同一账号，thinking 签名发回产生它的账号 |
@@ -228,6 +230,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具历史 | 映射 | API Key 账号按轮次与出现顺序配对；后一轮复用同一 ID 时保留各轮自己的结果，历史工具不会补进本轮声明。缺结果、孤儿结果与同轮重复 ID 维持原有处理 |
 | `temperature`、`top_p` | 映射或丢弃 | `temperature` 大于 1 时按 1 发送，负数返回 400。Claude 4.6 及以前：两者同时出现时丢弃 `top_p`。Claude 4.7 及以后（5.5 除外）只接受默认采样：`temperature` 不为 1、`top_p` 不为 0.99 时丢弃该参数，两者同时出现时丢弃 `top_p`。Claude 5.5 各模型按自己的采样规则丢弃不接受的值。丢弃都不报错 |
 | `stop` | 映射 | 转为 `stop_sequences`；只含空白的项丢弃，空字符串返回 400。发往 Responses 上游时的处理见 [OpenAI](openai.md#chat-completions-转-responses) |
+| function 的 `strict` | 映射 | Chat Completions 的 `tools[].function.strict`、旧版 `functions[].strict` 与 Responses 的 `tools[].strict` 为 `true` 或 `false` 时原样转为 Anthropic 工具的 `strict`，未指定时不发送 |
 | function 工具、Responses `custom` 工具（含 namespace 中的工具） | 映射 | 转为 Anthropic 工具；`parameters` 缺失、为 `null` 或为空数组 `[]`（PHP 客户端常见）时用空的 object schema。API Key 账号上：名称超过 Anthropic 长度限制、含 Anthropic 不接受的字符，或 namespace 展开后重名的工具，以短别名发往上游，响应中还原原名；`tools` 与 `additional_tools` 中类型、namespace 路径和名称都相同的工具只发送第一份，后续不同的 schema、`strict` 或 format 记录 `<字段路径>/omit` 降级 |
 | Anthropic 原生工具类型（`bash_20250124` 这类 `名称_YYYYMMDD`） | Responses 透传，Chat 丢弃 | Responses 按原定义转发；Chat Completions 中去掉 |
 | `web_search`、`web_search_preview`、`code_execution` | 映射（网关扩展） | 两个入口都支持；前两种转为 Anthropic `web_search_20250305` |
@@ -247,7 +250,7 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | `metadata`、`user` | 部分映射 | API Key 账号上，可识别的 `metadata.user_id` 作为 Anthropic 的 `metadata.user_id` 发送（兼容账号随后按 [Claude Code 请求兼容](#claude-code-请求兼容api-key-账号) 改写）；其余 `metadata` 字段与 `user` 不发送，也不把 `user` 当作身份。OAuth 账号不变 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | Chat `reasoning` 字符串或对象 | 映射（网关扩展） | 先归一到 Responses `reasoning.effort` / `summary`；非空 `reasoning_effort` 优先，未知扩展及原来忽略的形状不新增报错。后续按上表的目标模型规则处理 |
-| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
+| `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`prediction`、`service_tier`、`audio`、`store`、`modalities` | 忽略 | 与官方一致；Chat 的 user、metadata 类型不符时也照旧忽略，不新增本地报错 |
 
 转换失败时网关不向上游发请求，直接返回 400，`param` 是出错的字段路径：
 

@@ -10,10 +10,7 @@ import (
 func TestResToAnthFuncArgsDelta_ReadToolWaitsForCompleteJSON(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 	state.MessageStartSent = true
-	state.ContentBlockOpen = true
-	state.CurrentBlockType = "tool_use"
-	state.CurrentToolName = "Read"
-	state.OutputIndexToBlockIdx = map[int]int{0: 0}
+	ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", CallID: "call_test", Name: "Read"}}, state)
 
 	events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
 		Type:        "response.function_call_arguments.delta",
@@ -96,9 +93,7 @@ func TestResponsesEventToAnthropicEvents_ReadToolWithoutArgumentsDoneClosesOnCom
 func TestResToAnthFuncArgsDelta_NonReadToolStreamsPartialJSONImmediately(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 	state.MessageStartSent = true
-	state.CurrentBlockType = "tool_use"
-	state.CurrentToolName = "Write"
-	state.OutputIndexToBlockIdx = map[int]int{0: 0}
+	ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", CallID: "call_test", Name: "Write"}}, state)
 
 	evt := &ResponsesStreamEvent{
 		Type:        "response.function_call_arguments.delta",

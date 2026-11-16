@@ -699,10 +699,12 @@ func TestStreamingToolCall(t *testing.T) {
 
 	// 4. arguments done
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
-		Type: "response.function_call_arguments.done",
+		Type:      "response.function_call_arguments.done",
+		Arguments: `{"city":"Tokyo"}`,
 	}, state)
-	require.Len(t, events, 1)
-	assert.Equal(t, "content_block_stop", events[0].Type)
+	require.Len(t, events, 2)
+	assert.Equal(t, `"Tokyo"}`, events[0].Delta.PartialJSON)
+	assert.Equal(t, "content_block_stop", events[1].Type)
 
 	// 5. completed with tool_calls
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
@@ -947,7 +949,7 @@ func TestFinalizeStream_AbnormalTermination(t *testing.T) {
 	assert.Equal(t, "message_stop", events[2].Type)
 }
 
-func TestFinalizeStream_ToolCallAbnormalTerminationKeepsToolUseStopReason(t *testing.T) {
+func TestFinalizeStream_ToolCallAbnormalTerminationReturnsConversionError(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 
 	ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
@@ -961,11 +963,8 @@ func TestFinalizeStream_ToolCallAbnormalTerminationKeepsToolUseStopReason(t *tes
 	}, state)
 
 	events := FinalizeResponsesAnthropicStream(state)
-	require.Len(t, events, 3)
-	assert.Equal(t, "content_block_stop", events[0].Type)
-	assert.Equal(t, "message_delta", events[1].Type)
-	assert.Equal(t, "tool_use", events[1].Delta.StopReason)
-	assert.Equal(t, "message_stop", events[2].Type)
+	require.Empty(t, events)
+	require.Error(t, state.Err())
 }
 
 func TestStreamingEmptyResponse(t *testing.T) {
@@ -1034,14 +1033,11 @@ func TestStreamingFailed(t *testing.T) {
 		},
 	}, state)
 
-	// Should close text block + message_delta + message_stop
-	require.Len(t, events, 3)
-	assert.Equal(t, "content_block_stop", events[0].Type)
-	assert.Equal(t, "message_delta", events[1].Type)
-	assert.Equal(t, "end_turn", events[1].Delta.StopReason)
-	assert.Equal(t, 50, events[1].Usage.InputTokens)
-	assert.Equal(t, 10, events[1].Usage.OutputTokens)
-	assert.Equal(t, "message_stop", events[2].Type)
+	require.Empty(t, events)
+	require.Error(t, state.Err())
+	require.Equal(t, 50, state.InputTokens)
+	require.Equal(t, 10, state.OutputTokens)
+	require.Empty(t, FinalizeResponsesAnthropicStream(state))
 }
 
 func TestStreamingFailedNoOutput(t *testing.T) {
@@ -1063,11 +1059,11 @@ func TestStreamingFailedNoOutput(t *testing.T) {
 		},
 	}, state)
 
-	// Should emit message_delta + message_stop (no block to close)
-	require.Len(t, events, 2)
-	assert.Equal(t, "message_delta", events[0].Type)
-	assert.Equal(t, "end_turn", events[0].Delta.StopReason)
-	assert.Equal(t, "message_stop", events[1].Type)
+	require.Empty(t, events)
+	require.Error(t, state.Err())
+	require.Equal(t, 20, state.InputTokens)
+	require.Equal(t, 0, state.OutputTokens)
+	require.Empty(t, FinalizeResponsesAnthropicStream(state))
 }
 
 func TestResponsesToAnthropic_Failed(t *testing.T) {
@@ -1080,12 +1076,8 @@ func TestResponsesToAnthropic_Failed(t *testing.T) {
 		Usage:  &ResponsesUsage{InputTokens: 30, OutputTokens: 0},
 	}
 
-	anth := ResponsesToAnthropic(resp, "claude-opus-4-6")
-	// Failed status defaults to "end_turn" stop reason
-	assert.Equal(t, "end_turn", AnthropicStopReasonString(anth.StopReason))
-	// Should have at least an empty text block
-	require.Len(t, anth.Content, 1)
-	assert.Equal(t, "text", anth.Content[0].Type)
+	require.Error(t, ValidateResponsesForAnthropic(resp))
+	require.Nil(t, ResponsesToAnthropic(resp, "claude-opus-4-6"))
 }
 
 // ---------------------------------------------------------------------------

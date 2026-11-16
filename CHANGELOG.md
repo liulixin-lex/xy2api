@@ -52,6 +52,27 @@
 
 - 跨位置重复声明工具时保留第一份定义，后续 schema 差异只记录省略，避免向上游发送重复工具。
 
+
+- Messages 转 Responses 时，工具的显式 `strict: true` 仅在各层对象禁止额外属性且所有属性必填时保留，否则按 `false` 发送并记录降级；显式 `false` 与未指定照旧，`allowed_callers` 中无法表达的限制省略并记录，不是字符串数组时返回 400。
+
+- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
+
+- Messages 转 Responses 时，流式并行工具调用不再丢失第一个工具迟到的参数，各工具按顺序完整交付。
+
+- Messages 转 Responses 时，上游生成的工具参数不是合法 JSON 对象时改为返回错误，不再作为可执行的工具调用交给客户端；成功结束的空参数仍按 `{}` 交付。
+
+- Messages 转 Responses 时，流式工具参数的最终值与已发出的增量矛盾时改为返回错误，最终值只多出尾部时补发一次尾部。
+
+- Messages 转 Responses 时，非流式响应中的 custom 工具调用不再丢失，流式不再把自由文本当作 JSON 参数输出，输入统一包装为 `{"input":"原文"}`。
+
+- Messages 转 Responses 时，网页搜索结果带回上游实际返回的来源链接与标题，不再总是空结果。
+
+- Messages 转 Responses 时，上游只返回原始推理文本的思考内容不再丢失，同时返回摘要时只输出摘要；流式的原始推理文本改为在该项结束时一次给出。
+
+- Messages 转 Responses 时保留上游的拒答正文并以 `refusal` 结束，内容过滤与无原因的截断不再报成 `end_turn`，流式遇到上游失败或取消时以错误结束。
+
+- Messages 转 Responses 时，上游返回未列出的非标准结束原因仍按正常结束（有完整工具调用时为 `tool_use`）返回，并记录一条映射降级。
+
 - Responses 拒参修复记录被拒字段与实际重发事实，删除 max_output_tokens 后重发会记录参数省略。
 
 - 分组推理策略按最终模型执行，同目标重试不重复映射，并保留 Anthropic 的显式思考模式；省略档位的 Messages 保持转换默认值。
@@ -95,6 +116,8 @@
 - 上游以流式返回、网关拼成非流式结果时，只在 done 事件中出现的网页搜索项不再丢失，custom 工具调用保留原类型，转为 Chat 时仍以 `function` 返回。
 
 - `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
+
+- Messages 转 Responses 时不再把 CC Switch 的已知 v1 本地签名包装当作供应商密文发送，正文和工具历史保持不变。
 
 ### 流式传输与报错
 

@@ -62,6 +62,14 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 - 转为 Responses 时，Chat 上游因 `length` 截断的工具调用不发送参数完成事件，也不发送完成的工具项（即使参数是合法 JSON 或为空）；已收到的文本、参数片段和用量照常保留。
 - 上游生成的工具参数不是合法 JSON，或工具调用片段无法确定归属、位于非 0 的 choice 中时，按上表写终止帧，不会删掉该调用后报成功。转为 Messages 时，工具参数未完成前不会因交错的正文关闭工具块；长度或过滤结束时保留参数片段和排队正文，不补空参数。
 
+经 `/v1/messages` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#claude-code-与-opencode)）另有以下结束方式。`event: error` 只写一次，之后不再发送 `message_stop`：
+
+- 上游失败或取消：以 `event: error` 结束。截断、内容过滤与拒答仍按正常结束返回，停止原因见上述链接中的表。
+
+- 工具参数：普通函数的参数不是完整的 JSON 对象时以 `event: error` 结束；成功结束而参数为空时按 `{}` 交付，截断或断流时的空参数不补成 `{}`。完成事件中的参数与已发出的增量相同时不重发，只多出尾部时补发尾部，互相矛盾时以 `event: error` 结束，已发出的参数不会再发一遍；Read 工具去掉空 `pages` 不算矛盾。
+
+- 并行工具：按上游输出顺序逐个交付。前一个工具的参数完成之前，后面的工具以及随后的正文、思考与搜索块先暂存，完成后依次发出。重复的完成事件不会重复结束块。结束事件里的输出列表按 item ID、call ID 对应已流式的工具，排列与流式顺序不同、缺少或换了 item ID 时不重复交付、不报错；流式事件里同一工具的 item ID、call ID 或输出位置互相矛盾，或参数未完成就断流时，以 `event: error` 结束。
+
 ### `response.failed` 的重试时间
 
 `errors.failed_frame_retry_after` 开启时（默认），合成的 `response.failed` 在 `error.headers.retry-after` 中给出重试时间（Codex 从这里读取），正文 “try again in Ns” 的 N 与之相同：
@@ -121,7 +129,7 @@ Codex 子 agent 的请求如果在 `agent_message` 条目中带加密的任务�
 |---|---|
 | 任何输出前客户端断开（只收到开场与心跳） | 立即取消上游，不写用量、不计费，记入未送达表；超过滥用阈值的 API Key 按上游成本计费 |
 | 部分输出后客户端断开 | 最多再读上游 180 秒（`disconnect.partial_drain_max_seconds`），按已得用量计费 |
-| 输出后上游异常结束（流内错误、缺终态、读错、停滞） | 按已读到的用量计费一次 |
+| 输出后上游异常结束（流内错误、缺终态、读错、停滞，以及经 `/v1/messages` 转为 Responses 时工具参数无效或与已发增量矛盾） | 按已读到的用量计费一次 |
 | 换号前失败的尝试 | 不向用户计费 |
 
 原生 Anthropic 与 API Key 直通在开场暂存期失败并换号的尝试，不向用户计费、不产生用量记录；上游可能已对这次尝试的输入计费，这部分成本由网关承担。

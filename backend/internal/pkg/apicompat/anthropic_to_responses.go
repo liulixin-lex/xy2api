@@ -13,10 +13,19 @@ import (
 // Chat Completions intermediary round-trip (e.g. thinking, cache_control,
 // structured system prompts).
 func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
+	return AnthropicToResponsesWithOptions(req, ConversionOptions{})
+}
+
+// AnthropicToResponsesWithOptions converts Messages with an optional notice sink.
+// Zero options preserve the behavior of AnthropicToResponses.
+func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptions) (*ResponsesRequest, error) {
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
 	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
+		return nil, err
+	}
+	if err := openai.ValidateGPT61TerraReasoningEffort(req.Model, anthropicReasoningEffort(req)); err != nil {
 		return nil, err
 	}
 	input, err := convertAnthropicToResponsesInput(req.System, req.Messages)
@@ -63,12 +72,15 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	}
 
 	if len(req.Tools) > 0 {
-		out.Tools = convertAnthropicToolsToResponses(req.Tools)
+		out.Tools, err = convertAnthropicToolsToResponses(req.Tools, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// An explicit thinking disable takes precedence over output_config.effort.
 	effort := anthropicReasoningEffort(req)
-	if openai.IsGPT61SolModelSpelling(req.Model) && req.OutputConfig != nil && req.OutputConfig.Effort == "max" && effort != "none" {
+	if (openai.IsGPT61SolModelSpelling(req.Model) || openai.IsGPT61TerraModelSpelling(req.Model)) && req.OutputConfig != nil && req.OutputConfig.Effort == "max" && effort != "none" {
 		effort = "max"
 	}
 	out.Reasoning = &ResponsesReasoning{
@@ -315,9 +327,9 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 			continue
 		}
 		sig := strings.TrimSpace(b.Signature)
-		// Only replay provider ciphertext. Skip GPT/Codex-style gAAAA blobs and
-		// empty placeholders — xAI returns 400 on decrypt for foreign signatures.
-		if sig == "" || strings.HasPrefix(sig, "gAAAA") {
+		// Skip known foreign ciphertext and CC Switch's local v1 envelope.
+		// Unknown versions and ordinary provider signatures retain their behavior.
+		if sig == "" || strings.HasPrefix(sig, "gAAAA") || strings.HasPrefix(sig, "ccswitch-openai-reasoning-v1:") {
 			continue
 		}
 		items = append(items, ResponsesInputItem{
@@ -478,23 +490,128 @@ func mapAnthropicEffortToResponses(effort string) string {
 // convertAnthropicToolsToResponses maps Anthropic tool definitions to
 // Responses API tools. Server-side tools like web_search are mapped to their
 // OpenAI equivalents; regular tools become function tools.
-func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
+func convertAnthropicToolsToResponses(tools []AnthropicTool, opts ConversionOptions) ([]ResponsesTool, error) {
 	var out []ResponsesTool
-	for _, t := range tools {
+	for i, t := range tools {
+		if raw := normalizedRawJSON(t.AllowedCallers); len(raw) > 0 {
+			field := fmt.Sprintf("tools[%d].allowed_callers", i)
+			var callers []json.RawMessage
+			if json.Unmarshal(raw, &callers) != nil {
+				return nil, unsupportedConversion(field, "expected an array of strings")
+			}
+			omit := len(callers) == 0
+			for _, caller := range callers {
+				var name string
+				if len(caller) == 0 || caller[0] != '"' || json.Unmarshal(caller, &name) != nil {
+					return nil, unsupportedConversion(field, "expected an array of strings")
+				}
+				omit = omit || name != "direct"
+			}
+			if omit && opts.Record != nil {
+				opts.Record(ConversionNotice{Field: field, Action: "omit"})
+			}
+		}
 		// Anthropic server tools like "web_search_20250305" → OpenAI {"type":"web_search"}
 		if strings.HasPrefix(t.Type, "web_search") {
 			out = append(out, ResponsesTool{Type: "web_search"})
 			continue
 		}
+		parameters := normalizeToolParameters(t.InputSchema)
+		strict := defaultStrictFalse(t.Strict)
+		if *strict && !anthropicSchemaSupportsResponsesStrict(parameters) {
+			strict = boolPtr(false)
+			if opts.Record != nil {
+				opts.Record(ConversionNotice{Field: fmt.Sprintf("tools[%d].strict", i), Action: "omit"})
+			}
+		}
 		out = append(out, ResponsesTool{
 			Type:        "function",
 			Name:        t.Name,
 			Description: t.Description,
-			Parameters:  normalizeToolParameters(t.InputSchema),
-			Strict:      boolPtr(false),
+			Parameters:  parameters,
+			Strict:      strict,
 		})
 	}
-	return out
+	return out, nil
+}
+
+// Check schema positions only: values inside const/default/enum are user data.
+// The schema itself is never rewritten to manufacture strict compatibility.
+func anthropicSchemaSupportsResponsesStrict(raw json.RawMessage) bool {
+	var schema map[string]any
+	if json.Unmarshal(raw, &schema) != nil || schema == nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(value any) bool {
+		if _, ok := value.(bool); ok {
+			return true
+		}
+		node, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		object := node["type"] == "object"
+		if types, ok := node["type"].([]any); ok {
+			for _, kind := range types {
+				object = object || kind == "object"
+			}
+		}
+		properties, hasProperties := node["properties"]
+		_, hasAdditionalProperties := node["additionalProperties"]
+		if object || hasProperties || hasAdditionalProperties {
+			if additional, ok := node["additionalProperties"].(bool); !ok || additional {
+				return false
+			}
+			props, ok := properties.(map[string]any)
+			if hasProperties && !ok {
+				return false
+			}
+			required := make(map[string]bool)
+			if names, present := node["required"]; present {
+				list, ok := names.([]any)
+				if !ok {
+					return false
+				}
+				for _, name := range list {
+					key, ok := name.(string)
+					if !ok {
+						return false
+					}
+					required[key] = true
+				}
+			}
+			for name := range props {
+				if !required[name] {
+					return false
+				}
+			}
+		}
+		for _, key := range []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"} {
+			if children, ok := node[key].(map[string]any); ok {
+				for _, child := range children {
+					if !visit(child) {
+						return false
+					}
+				}
+			}
+		}
+		for _, key := range []string{"items", "prefixItems", "additionalProperties", "unevaluatedProperties", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "contains", "propertyNames"} {
+			if child, present := node[key]; present {
+				if children, ok := child.([]any); ok {
+					for _, item := range children {
+						if !visit(item) {
+							return false
+						}
+					}
+				} else if !visit(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return visit(schema)
 }
 
 func boolPtr(v bool) *bool {

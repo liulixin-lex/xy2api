@@ -94,6 +94,7 @@
 
 - 只访问顶层、tools、system 与 messages 内容块的协议字段，不递归修改工具 schema、工具入参或用户数据；保留合法声明的类型、其他属性、内容与断点位置。
 - Chat / Responses 转换保留工具调用与结果上的缓存标记：Chat `role=tool`（以及旧版 `role=function`）消息的消息级标记、或其内容分片上的最后一个标记，落在对应的 `tool_result` 块；只含 `tool_calls` 的 assistant 消息的标记落在最后一个 `tool_use` 块。Responses `function_call_output`（含降级后的 `custom_tool_call_output`）以项级标记为准，否则取数组 `output` 中最后一个带标记的分片；`function_call` 的项级标记落在 `tool_use`。每个工具块只保留一个标记。这些标记只随 Anthropic 转换转发，不加入发往 OpenAI Responses 上游的请求。
+- Messages 转为 OpenAI Responses 或 Chat Completions 时不带顶层 `cache_control`，其中的 TTL 也不换算成 OpenAI 的缓存参数；发往 Anthropic 上游的请求照常按本节处理。
 - 顶层 automatic 与显式断点共占最多 4 个槽位，空间不足时不新增断点，也不删除合法的客户端声明。网关构造的 Chat / Responses 转换请求中，顶层 automatic 与末块显式标记一个为 1 小时、另一个为 5 分钟或省略时统一为 1 小时，并把之前的 ephemeral 断点提升到 1 小时，以保持“长 TTL 在前”的顺序。`off` 保留合法的混合 TTL。
 - `thinking`、`redacted_thinking`、空文本与延迟加载的工具不能新增缓存标记；旧的 Bedrock 集成不支持顶层 automatic；能力清理移除的字段不会在签名前补回。
 - `/v1/messages/count_tokens` 不执行 TTL 覆写或补断点，也不创建、刷新缓存。
