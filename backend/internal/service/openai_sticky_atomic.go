@@ -86,22 +86,22 @@ func (s *OpenAIGatewayService) openAIStickyBindingTTL(groupID *int64) time.Durat
 // recheckOpenAIStickyOwnerFromDB is recheckSelectedOpenAIAccountFromDB for a
 // sticky owner. transient reports a failed read of an existing account; the
 // owner is then skipped once and its binding kept.
-func (s *OpenAIGatewayService) recheckOpenAIStickyOwnerFromDB(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) (latest *Account, transient bool) {
+func (s *OpenAIGatewayService) recheckOpenAIStickyOwnerFromDB(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) (latest *Account, transient bool, profitReason string) {
 	if account == nil || s.schedulerSnapshot == nil || s.accountRepo == nil {
-		return s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability), false
+		latest = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	} else {
+		var err error
+		latest, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			return nil, err != nil && !errors.Is(err, ErrAccountNotFound), ""
+		}
+		latest = s.recheckLatestOpenAIAccount(ctx, latest, groupID, NormalizeOpenAICompatiblePlatform(platform), requestedModel, requireCompact, requiredCapability)
 	}
-	latest, err := s.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || latest == nil {
-		return nil, err != nil && !errors.Is(err, ErrAccountNotFound)
-	}
-	latest = s.recheckLatestOpenAIAccount(ctx, latest, groupID, NormalizeOpenAICompatiblePlatform(platform), requestedModel, requireCompact, requiredCapability)
 	if latest == nil {
-		return nil, false
+		return nil, false, ""
 	}
-	if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
-		return nil, false
-	}
-	return latest, false
+	_, profitReason = openAIProfitControlVetoReason(ctx, latest)
+	return latest, false, profitReason
 }
 
 type openAILegacyStickyCapacityKey struct{}

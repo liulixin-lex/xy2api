@@ -30,6 +30,7 @@ type groupRepoStubForAdmin struct {
 
 	deleteAccountGroupsByGroupIDFn func(groupID int64) (int64, error)
 	bindAccountsToGroupFn          func(groupID int64, accountIDs []int64) error
+	copyAccountMembersFn           func(int64, []int64, []int64, bool) error
 	getAccountIDsByGroupIDsFn      func(groupIDs []int64) ([]int64, error)
 
 	listWithFiltersCalls       int
@@ -2400,4 +2401,14 @@ func TestAdminService_CreateGroup_CodexModelsManifestConfigDisabledAccepted(t *t
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, group.CodexModelsManifestConfig.AccountIDs)
 	require.False(t, repo.created.CodexModelsManifestConfig.Enabled)
+}
+
+func (s *groupRepoStubForAdmin) SetMemberPinned(context.Context, int64, int64, bool) error {
+	panic("unexpected SetMemberPinned")
+}
+func (s *groupRepoStubForAdmin) CopyAccountMembers(_ context.Context, groupID int64, sources, accounts []int64, replace bool) error {
+	if s.copyAccountMembersFn != nil {
+		return s.copyAccountMembersFn(groupID, sources, accounts, replace)
+	}
+	panic("unexpected CopyAccountMembers")
 }

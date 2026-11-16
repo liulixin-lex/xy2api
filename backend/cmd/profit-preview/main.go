@@ -19,21 +19,23 @@ import (
 )
 
 type inputGroup struct {
-	ID                   int64   `json:"id"`
-	Name                 string  `json:"name"`
-	Platform             string  `json:"platform"`
-	RateMultiplier       float64 `json:"rate_multiplier"`
-	SubscriptionType     string  `json:"subscription_type"`
-	ProfitControlEnabled bool    `json:"profit_control_enabled"`
-	ProfitMinMargin      float64 `json:"profit_min_margin"`
-	ProfitSafetyBuffer   float64 `json:"profit_safety_buffer"`
-	PeakRateEnabled      bool    `json:"peak_rate_enabled"`
-	PeakStart            string  `json:"peak_start"`
-	PeakEnd              string  `json:"peak_end"`
-	PeakRateMultiplier   float64 `json:"peak_rate_multiplier"`
+	MinUpstreamRate      *float64 `json:"min_upstream_rate"`
+	ID                   int64    `json:"id"`
+	Name                 string   `json:"name"`
+	Platform             string   `json:"platform"`
+	RateMultiplier       float64  `json:"rate_multiplier"`
+	SubscriptionType     string   `json:"subscription_type"`
+	ProfitControlEnabled bool     `json:"profit_control_enabled"`
+	ProfitMinMargin      float64  `json:"profit_min_margin"`
+	ProfitSafetyBuffer   float64  `json:"profit_safety_buffer"`
+	PeakRateEnabled      bool     `json:"peak_rate_enabled"`
+	PeakStart            string   `json:"peak_start"`
+	PeakEnd              string   `json:"peak_end"`
+	PeakRateMultiplier   float64  `json:"peak_rate_multiplier"`
 }
 
 type inputAccount struct {
+	Pinned         bool              `json:"pinned"`
 	ID             int64             `json:"id"`
 	Name           string            `json:"name"`
 	Platform       string            `json:"platform"`
@@ -163,6 +165,7 @@ func parsePreviewInputs(raw []byte, assumeEnabled bool) ([]service.ProfitPreview
 			RateMultiplier:       entry.Group.RateMultiplier,
 			SubscriptionType:     entry.Group.SubscriptionType,
 			ProfitControlEnabled: entry.Group.ProfitControlEnabled,
+			MinUpstreamRate:      entry.Group.MinUpstreamRate,
 			ProfitMinMargin:      entry.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:   entry.Group.ProfitSafetyBuffer,
 			PeakRateEnabled:      entry.Group.PeakRateEnabled,
@@ -178,6 +181,7 @@ func parsePreviewInputs(raw []byte, assumeEnabled bool) ([]service.ProfitPreview
 				Platform:       a.Platform,
 				Type:           a.Type,
 				RateMultiplier: a.RateMultiplier,
+				AccountGroups:  []service.AccountGroup{{AccountID: a.ID, GroupID: group.ID, Pinned: a.Pinned}},
 				Extra:          a.Extra,
 			}
 			if len(a.ModelMapping) > 0 {

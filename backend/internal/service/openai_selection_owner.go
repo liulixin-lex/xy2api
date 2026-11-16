@@ -65,14 +65,18 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, nil
 	}
 	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
-		noteBypass(reason)
+		if reason == openAIProfitFilterReasonFloor {
+			clearBinding(reason)
+		} else {
+			noteBypass(reason)
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding("transport_incompatible")
 		return nil, false, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 	if account == nil {
 		clearBinding("owner_recheck_failed")
 		return nil, false, nil
@@ -82,7 +86,11 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, nil
 	}
 	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
-		clearBinding(reason)
+		if reason == openAIProfitFilterReasonThreshold || reason == openAIProfitFilterReasonInvalidAccountRate {
+			noteBypass(reason)
+		} else {
+			clearBinding(reason)
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {

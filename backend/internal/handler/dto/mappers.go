@@ -155,6 +155,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		FreeOpenAIFast:              g.FreeOpenAIFast,
 		AvailabilityFallbackGroupID: g.AvailabilityFallbackGroupID,
 		ProfitControlEnabled:        g.ProfitControlEnabled,
+		MinUpstreamRate:             g.MinUpstreamRate,
 		ProfitMinMargin:             g.ProfitMinMargin,
 		ProfitSafetyBuffer:          g.ProfitSafetyBuffer,
 		ModelPricing:                g.ModelPricing,

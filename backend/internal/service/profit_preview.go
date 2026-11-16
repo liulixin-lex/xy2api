@@ -38,6 +38,7 @@ type ProfitPreviewGroupInput struct {
 
 // 预演账号分类与线上否决原因一一对应。
 const (
+	ProfitPreviewClassRejectedFloor       = "rejected_floor"
 	ProfitPreviewClassAdmitted            = "admitted"
 	ProfitPreviewClassRejectedThreshold   = "rejected_threshold"
 	ProfitPreviewClassRejectedInvalidRate = "rejected_invalid_account_rate"
@@ -89,7 +90,9 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 			continue
 		}
 		group := in.Group
-		effectiveGate := (group.ProfitControlEnabled || in.AssumeEnabled) && profitControlPlatformSupported(group.Platform)
+		ceilingOn := (group.ProfitControlEnabled || in.AssumeEnabled) && profitControlPlatformSupported(group.Platform)
+		floor := groupProfitFloor(group)
+		effectiveGate := ceilingOn || floor > 0
 		report := ProfitPreviewGroupReport{
 			GroupID:              group.ID,
 			GroupName:            group.Name,
@@ -128,7 +131,7 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 			if account == nil {
 				continue
 			}
-			verdict := previewAccountProfitAdmission(account, effectiveGate, thresholdDefault, thresholdMinD, evalAt)
+			verdict := previewAccountProfitAdmission(account, effectiveGate, ceilingOn, floor, group.Platform == PlatformOpenAI && account.PinnedIn(group.ID), thresholdDefault, thresholdMinD, evalAt)
 			admittedDefault := verdict.Class == ProfitPreviewClassAdmitted
 			admittedMinD := admittedDefault && !verdict.RejectedUnderMinD
 			for _, model := range in.Models {
@@ -154,7 +157,9 @@ func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) 
 
 func previewAccountProfitAdmission(
 	account *Account,
-	effectiveGate bool,
+	effectiveGate, ceilingOn bool,
+	floor float64,
+	pinned bool,
 	thresholdDefault float64,
 	thresholdMinD float64,
 	evalAt time.Time,
@@ -176,16 +181,24 @@ func previewAccountProfitAdmission(
 	if validRate {
 		verdict.AccountRate = &rate
 	}
-	switch {
-	case !effectiveGate:
-		verdict.Class = ProfitPreviewClassAdmitted
-	case !validRate:
+	var ceiling, minCeiling *float64
+	if ceilingOn {
+		ceiling, minCeiling = &thresholdDefault, &thresholdMinD
+	}
+	result := profitRangeVerdict(rate, validRate, ceiling, floor, pinned)
+	if !effectiveGate {
+		result = "pass"
+	}
+	switch result {
+	case openAIProfitFilterReasonInvalidAccountRate:
 		verdict.Class = ProfitPreviewClassRejectedInvalidRate
-	case profitControlOverThreshold(rate, thresholdDefault):
+	case openAIProfitFilterReasonFloor:
+		verdict.Class = ProfitPreviewClassRejectedFloor
+	case openAIProfitFilterReasonThreshold:
 		verdict.Class = ProfitPreviewClassRejectedThreshold
 	default:
 		verdict.Class = ProfitPreviewClassAdmitted
-		verdict.RejectedUnderMinD = profitControlOverThreshold(rate, thresholdMinD)
+		verdict.RejectedUnderMinD = effectiveGate && !profitVerdictAdmitted(profitRangeVerdict(rate, validRate, minCeiling, floor, pinned))
 	}
 	return verdict
 }
@@ -211,9 +224,20 @@ func profitPreviewProbeWarnings(account *Account, evalAt time.Time) []string {
 // ProfitControlPreview is the compact group-level report used by the admin
 // group editor. The ceiling is a derived upstream-cost multiplier and is not
 // persisted.
+type ProfitPinnedLoss struct {
+	AccountID int64   `json:"account_id"`
+	Name      string  `json:"name"`
+	Rate      float64 `json:"rate"`
+}
+
 type ProfitControlPreview struct {
-	Members     int     `json:"members"`
-	Schedulable int     `json:"schedulable"`
-	Passing     int     `json:"passing"`
-	Ceiling     float64 `json:"ceiling"`
+	Floor       float64            `json:"floor"`
+	BelowFloor  int                `json:"below_floor"`
+	Pinned      int                `json:"pinned"`
+	RangeEmpty  bool               `json:"range_empty"`
+	PinnedLoss  []ProfitPinnedLoss `json:"pinned_loss"`
+	Members     int                `json:"members"`
+	Schedulable int                `json:"schedulable"`
+	Passing     int                `json:"passing"`
+	Ceiling     float64            `json:"ceiling"`
 }

@@ -185,6 +185,7 @@ type AdminGroup struct {
 	// 仅管理员可见：这三个字段与同响应中的 rate_multiplier 相乘即可反推出
 	// 运营方的上游成本上限，属于内部经营信息，不得下放到 dto.Group。
 	ProfitControlEnabled bool                          `json:"profit_control_enabled"`
+	MinUpstreamRate      *float64                      `json:"min_upstream_rate"`
 	ProfitMinMargin      float64                       `json:"profit_min_margin"`
 	ProfitSafetyBuffer   float64                       `json:"profit_safety_buffer"`
 	ModelPricing         []service.ChannelModelPricing `json:"model_pricing"`

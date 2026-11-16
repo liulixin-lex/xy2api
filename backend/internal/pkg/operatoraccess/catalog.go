@@ -332,6 +332,7 @@ var catalog = map[string]Entry{
 	"POST /groups":                                                             {Kind: KindModule, Module: "groups", Level: LevelManage, Fields: "group_create"},
 	"DELETE /groups/:id":                                                       {Kind: KindModule, Module: "groups", Level: LevelManage, Target: "group_members", Fields: "group_delete"},
 	"GET /groups/:id":                                                          {Kind: KindModule, Module: "groups", Level: LevelView},
+	"PUT /groups/:id/members/:account_id":                                      {Kind: KindModule, Module: "groups", Level: LevelManage},
 	"PUT /groups/:id":                                                          {Kind: KindModule, Module: "groups", Level: LevelManage, Fields: "group_update"},
 	"GET /groups/:id/api-keys":                                                 {Kind: KindModule, Module: "groups", Level: LevelView, Redact: []Redaction{"api_key"}},
 	"GET /groups/:id/composite-routes":                                         {Kind: KindModule, Module: "groups", Level: LevelView},

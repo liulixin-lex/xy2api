@@ -189,7 +189,7 @@ func duplicateAccountGroups(source *Account) ([]AccountGroup, []int64) {
 		groups := make([]AccountGroup, 0, len(source.AccountGroups))
 		groupIDs := make([]int64, 0, len(source.AccountGroups))
 		for _, sourceGroup := range source.AccountGroups {
-			groups = append(groups, AccountGroup{GroupID: sourceGroup.GroupID})
+			groups = append(groups, AccountGroup{GroupID: sourceGroup.GroupID, Pinned: sourceGroup.Pinned})
 			groupIDs = append(groupIDs, sourceGroup.GroupID)
 		}
 		return groups, groupIDs

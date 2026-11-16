@@ -1073,6 +1073,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	// Verify account is usable for current request
 	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
+		if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
+			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		}
 		return nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
@@ -1085,7 +1089,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
-	account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	account, transient, profitReason := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 	if transient {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_recheck_transient")
 		return nil
@@ -1093,6 +1097,13 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		return nil
+	}
+	if profitReason != "" {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(profitReason)
+		if profitReason == openAIProfitFilterReasonFloor {
+			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		}
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
@@ -1264,10 +1275,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				eligible := !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s)
 				if !clearSticky && !eligible {
 					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
+					if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
+						resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					}
 				}
 				if eligible {
 					var transient bool
-					account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+					var profitReason string
+					account, transient, profitReason = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						if !transient {
 							resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
@@ -1278,6 +1294,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					} else if profitReason != "" {
+						resilience.StateFrom(ctx).NoteStickyBypassReason(profitReason)
+						if profitReason == openAIProfitFilterReasonFloor {
+							_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						}
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
@@ -1771,6 +1792,10 @@ func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context,
 		}
 	}
 	latest, reason := s.recheckSelectionAdmission(ctx, req, latest)
+	if reason == openAIProfitFilterReasonFloor && req.SessionHash != "" {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, account.ID)
+	}
 	if reason != "" {
 		observeSelectionFailure(ctx, account.ID, reason, nil)
 	}

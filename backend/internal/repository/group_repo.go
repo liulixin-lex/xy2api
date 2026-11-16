@@ -158,6 +158,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
+		SetNillableMinUpstreamRate(groupIn.MinUpstreamRate).
 		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
 		SetProfitMinMargin(groupIn.ProfitMinMargin).
 		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
@@ -226,8 +227,8 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	}
 	result, err := txClient.ExecContext(
 		ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at)
-		 SELECT ag.account_id, $2, NOW()
+		`INSERT INTO account_groups (account_id, group_id, pinned, created_at)
+		 SELECT ag.account_id, $2, ag.pinned, NOW()
 		 FROM account_groups ag
 		 JOIN accounts a ON a.id = ag.account_id
 		 WHERE ag.group_id = $1
@@ -343,9 +344,14 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
+		SetNillableMinUpstreamRate(groupIn.MinUpstreamRate).
 		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
 		SetProfitMinMargin(groupIn.ProfitMinMargin).
 		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
+
+	if groupIn.MinUpstreamRate == nil {
+		builder = builder.ClearMinUpstreamRate()
+	}
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.DailyLimitUSD != nil {
