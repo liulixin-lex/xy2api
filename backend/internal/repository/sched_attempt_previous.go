@@ -13,7 +13,8 @@ func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
 	return []any{&row.AttemptID, &row.StartedAt, &row.FinishedAt, &row.AccountID, &row.GroupID,
 		&row.Model, &row.Stream, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
 		&row.Detail, &row.PromptTokens, &row.CacheReadTokens, &row.SessionKey,
-		&row.RequestID, &row.InsertedAt, &row.InputTokens, &row.CacheCreationTokens}
+		&row.RequestID, &row.InsertedAt, &row.InputTokens, &row.CacheCreationTokens,
+		&row.FirstEventMs, &row.FirstAnswerMs, &row.Class, &row.HTTPStatus, &row.StatusOrigin, &row.OutputBytes}
 }
 
 func (r *schedAttemptRepository) LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
@@ -54,6 +55,7 @@ func (r *schedAttemptRepository) LoadPreviousAttempts(ctx context.Context, curre
 		JOIN LATERAL (
 			SELECT ` + schedAttemptColumns + ` FROM account_attempt_samples s
 			WHERE s.group_id=c.group_id AND s.session_key=c.session_key AND s.model=c.model
+			AND s.capture_version >= 2
 			AND s.started_at<c.started_at AND s.started_at >= $2
 			ORDER BY s.started_at DESC, s.attempt_id DESC LIMIT 1
 		) p ON true`

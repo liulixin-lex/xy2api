@@ -275,6 +275,11 @@ func DurationMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldDurationMs, v))
 }
 
+// FirstOutputMs applies equality check predicate on the "first_output_ms" field. It's identical to FirstOutputMsEQ.
+func FirstOutputMs(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldFirstOutputMs, v))
+}
+
 // EndToEndFirstOutputMs applies equality check predicate on the "end_to_end_first_output_ms" field. It's identical to EndToEndFirstOutputMsEQ.
 func EndToEndFirstOutputMs(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndFirstOutputMs, v))
@@ -1093,6 +1098,26 @@ func PricingSourceIsNil() predicate.UsageLog {
 // PricingSourceNotNil applies the NotNil predicate on the "pricing_source" field.
 func PricingSourceNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSource))
+}
+
+// ProfitBasisIsNil applies the IsNil predicate on the "profit_basis" field.
+func ProfitBasisIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldProfitBasis))
+}
+
+// ProfitBasisNotNil applies the NotNil predicate on the "profit_basis" field.
+func ProfitBasisNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldProfitBasis))
+}
+
+// DispatchPhasesIsNil applies the IsNil predicate on the "dispatch_phases" field.
+func DispatchPhasesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldDispatchPhases))
+}
+
+// DispatchPhasesNotNil applies the NotNil predicate on the "dispatch_phases" field.
+func DispatchPhasesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldDispatchPhases))
 }
 
 // ModelEQ applies the EQ predicate on the "model" field.
@@ -2418,6 +2443,56 @@ func DurationMsIsNil() predicate.UsageLog {
 // DurationMsNotNil applies the NotNil predicate on the "duration_ms" field.
 func DurationMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldDurationMs))
+}
+
+// FirstOutputMsEQ applies the EQ predicate on the "first_output_ms" field.
+func FirstOutputMsEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsNEQ applies the NEQ predicate on the "first_output_ms" field.
+func FirstOutputMsNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsIn applies the In predicate on the "first_output_ms" field.
+func FirstOutputMsIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldFirstOutputMs, vs...))
+}
+
+// FirstOutputMsNotIn applies the NotIn predicate on the "first_output_ms" field.
+func FirstOutputMsNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldFirstOutputMs, vs...))
+}
+
+// FirstOutputMsGT applies the GT predicate on the "first_output_ms" field.
+func FirstOutputMsGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsGTE applies the GTE predicate on the "first_output_ms" field.
+func FirstOutputMsGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsLT applies the LT predicate on the "first_output_ms" field.
+func FirstOutputMsLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsLTE applies the LTE predicate on the "first_output_ms" field.
+func FirstOutputMsLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldFirstOutputMs, v))
+}
+
+// FirstOutputMsIsNil applies the IsNil predicate on the "first_output_ms" field.
+func FirstOutputMsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldFirstOutputMs))
+}
+
+// FirstOutputMsNotNil applies the NotNil predicate on the "first_output_ms" field.
+func FirstOutputMsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldFirstOutputMs))
 }
 
 // EndToEndFirstOutputMsEQ applies the EQ predicate on the "end_to_end_first_output_ms" field.

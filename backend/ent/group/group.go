@@ -30,6 +30,8 @@ const (
 	FieldDescription = "description"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldMinUpstreamRate holds the string denoting the min_upstream_rate field in the database.
+	FieldMinUpstreamRate = "min_upstream_rate"
 	// FieldPeakRateEnabled holds the string denoting the peak_rate_enabled field in the database.
 	FieldPeakRateEnabled = "peak_rate_enabled"
 	// FieldPeakStart holds the string denoting the peak_start field in the database.
@@ -242,6 +244,7 @@ var Columns = []string{
 	FieldAlias,
 	FieldDescription,
 	FieldRateMultiplier,
+	FieldMinUpstreamRate,
 	FieldPeakRateEnabled,
 	FieldPeakStart,
 	FieldPeakEnd,
@@ -505,6 +508,11 @@ func ByDescription(opts ...sql.OrderTermOption) OrderOption {
 // ByRateMultiplier orders the results by the rate_multiplier field.
 func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateMultiplier, opts...).ToFunc()
+}
+
+// ByMinUpstreamRate orders the results by the min_upstream_rate field.
+func ByMinUpstreamRate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMinUpstreamRate, opts...).ToFunc()
 }
 
 // ByPeakRateEnabled orders the results by the peak_rate_enabled field.

@@ -5216,6 +5216,7 @@ type AccountGroupMutation struct {
 	typ            string
 	priority       *int
 	addpriority    *int
+	pinned         *bool
 	created_at     *time.Time
 	clearedFields  map[string]struct{}
 	account        *int64
@@ -5342,6 +5343,25 @@ func (m *AccountGroupMutation) ResetPriority() {
 	m.addpriority = nil
 }
 
+// SetPinned sets the "pinned" field.
+func (m *AccountGroupMutation) SetPinned(b bool) {
+	m.pinned = &b
+}
+
+// Pinned returns the value of the "pinned" field in the mutation.
+func (m *AccountGroupMutation) Pinned() (r bool, exists bool) {
+	v := m.pinned
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPinned resets all changes to the "pinned" field.
+func (m *AccountGroupMutation) ResetPinned() {
+	m.pinned = nil
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *AccountGroupMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -5449,7 +5469,7 @@ func (m *AccountGroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountGroupMutation) Fields() []string {
-	fields := make([]string, 0, 4)
+	fields := make([]string, 0, 5)
 	if m.account != nil {
 		fields = append(fields, accountgroup.FieldAccountID)
 	}
@@ -5458,6 +5478,9 @@ func (m *AccountGroupMutation) Fields() []string {
 	}
 	if m.priority != nil {
 		fields = append(fields, accountgroup.FieldPriority)
+	}
+	if m.pinned != nil {
+		fields = append(fields, accountgroup.FieldPinned)
 	}
 	if m.created_at != nil {
 		fields = append(fields, accountgroup.FieldCreatedAt)
@@ -5476,6 +5499,8 @@ func (m *AccountGroupMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case accountgroup.FieldPriority:
 		return m.Priority()
+	case accountgroup.FieldPinned:
+		return m.Pinned()
 	case accountgroup.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -5514,6 +5539,13 @@ func (m *AccountGroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPriority(v)
+		return nil
+	case accountgroup.FieldPinned:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPinned(v)
 		return nil
 	case accountgroup.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -5594,6 +5626,9 @@ func (m *AccountGroupMutation) ResetField(name string) error {
 		return nil
 	case accountgroup.FieldPriority:
 		m.ResetPriority()
+		return nil
+	case accountgroup.FieldPinned:
+		m.ResetPinned()
 		return nil
 	case accountgroup.FieldCreatedAt:
 		m.ResetCreatedAt()
@@ -22213,6 +22248,8 @@ type GroupMutation struct {
 	description                             *string
 	rate_multiplier                         *float64
 	addrate_multiplier                      *float64
+	min_upstream_rate                       *float64
+	addmin_upstream_rate                    *float64
 	peak_rate_enabled                       *bool
 	peak_start                              *string
 	peak_end                                *string
@@ -22727,6 +22764,76 @@ func (m *GroupMutation) AddedRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetRateMultiplier() {
 	m.rate_multiplier = nil
 	m.addrate_multiplier = nil
+}
+
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (m *GroupMutation) SetMinUpstreamRate(f float64) {
+	m.min_upstream_rate = &f
+	m.addmin_upstream_rate = nil
+}
+
+// MinUpstreamRate returns the value of the "min_upstream_rate" field in the mutation.
+func (m *GroupMutation) MinUpstreamRate() (r float64, exists bool) {
+	v := m.min_upstream_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMinUpstreamRate returns the old "min_upstream_rate" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldMinUpstreamRate(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMinUpstreamRate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMinUpstreamRate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMinUpstreamRate: %w", err)
+	}
+	return oldValue.MinUpstreamRate, nil
+}
+
+// AddMinUpstreamRate adds f to the "min_upstream_rate" field.
+func (m *GroupMutation) AddMinUpstreamRate(f float64) {
+	if m.addmin_upstream_rate != nil {
+		*m.addmin_upstream_rate += f
+	} else {
+		m.addmin_upstream_rate = &f
+	}
+}
+
+// AddedMinUpstreamRate returns the value that was added to the "min_upstream_rate" field in this mutation.
+func (m *GroupMutation) AddedMinUpstreamRate() (r float64, exists bool) {
+	v := m.addmin_upstream_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (m *GroupMutation) ClearMinUpstreamRate() {
+	m.min_upstream_rate = nil
+	m.addmin_upstream_rate = nil
+	m.clearedFields[group.FieldMinUpstreamRate] = struct{}{}
+}
+
+// MinUpstreamRateCleared returns if the "min_upstream_rate" field was cleared in this mutation.
+func (m *GroupMutation) MinUpstreamRateCleared() bool {
+	_, ok := m.clearedFields[group.FieldMinUpstreamRate]
+	return ok
+}
+
+// ResetMinUpstreamRate resets all changes to the "min_upstream_rate" field.
+func (m *GroupMutation) ResetMinUpstreamRate() {
+	m.min_upstream_rate = nil
+	m.addmin_upstream_rate = nil
+	delete(m.clearedFields, group.FieldMinUpstreamRate)
 }
 
 // SetPeakRateEnabled sets the "peak_rate_enabled" field.
@@ -26318,7 +26425,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 72)
+	fields := make([]string, 0, 73)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26339,6 +26446,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
+	}
+	if m.min_upstream_rate != nil {
+		fields = append(fields, group.FieldMinUpstreamRate)
 	}
 	if m.peak_rate_enabled != nil {
 		fields = append(fields, group.FieldPeakRateEnabled)
@@ -26557,6 +26667,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.Description()
 	case group.FieldRateMultiplier:
 		return m.RateMultiplier()
+	case group.FieldMinUpstreamRate:
+		return m.MinUpstreamRate()
 	case group.FieldPeakRateEnabled:
 		return m.PeakRateEnabled()
 	case group.FieldPeakStart:
@@ -26710,6 +26822,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldDescription(ctx)
 	case group.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
+	case group.FieldMinUpstreamRate:
+		return m.OldMinUpstreamRate(ctx)
 	case group.FieldPeakRateEnabled:
 		return m.OldPeakRateEnabled(ctx)
 	case group.FieldPeakStart:
@@ -26897,6 +27011,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRateMultiplier(v)
+		return nil
+	case group.FieldMinUpstreamRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMinUpstreamRate(v)
 		return nil
 	case group.FieldPeakRateEnabled:
 		v, ok := value.(bool)
@@ -27364,6 +27485,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
 	}
+	if m.addmin_upstream_rate != nil {
+		fields = append(fields, group.FieldMinUpstreamRate)
+	}
 	if m.addpeak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
 	}
@@ -27455,6 +27579,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case group.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case group.FieldMinUpstreamRate:
+		return m.AddedMinUpstreamRate()
 	case group.FieldPeakRateMultiplier:
 		return m.AddedPeakRateMultiplier()
 	case group.FieldDailyLimitUsd:
@@ -27524,6 +27650,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case group.FieldMinUpstreamRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMinUpstreamRate(v)
 		return nil
 	case group.FieldPeakRateMultiplier:
 		v, ok := value.(float64)
@@ -27728,6 +27861,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldDescription) {
 		fields = append(fields, group.FieldDescription)
 	}
+	if m.FieldCleared(group.FieldMinUpstreamRate) {
+		fields = append(fields, group.FieldMinUpstreamRate)
+	}
 	if m.FieldCleared(group.FieldDuplicateOperationID) {
 		fields = append(fields, group.FieldDuplicateOperationID)
 	}
@@ -27810,6 +27946,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldDescription:
 		m.ClearDescription()
+		return nil
+	case group.FieldMinUpstreamRate:
+		m.ClearMinUpstreamRate()
 		return nil
 	case group.FieldDuplicateOperationID:
 		m.ClearDuplicateOperationID()
@@ -27902,6 +28041,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldRateMultiplier:
 		m.ResetRateMultiplier()
+		return nil
+	case group.FieldMinUpstreamRate:
+		m.ResetMinUpstreamRate()
 		return nil
 	case group.FieldPeakRateEnabled:
 		m.ResetPeakRateEnabled()
@@ -45225,6 +45367,10 @@ type UsageLogMutation struct {
 	appenddegradations            jsontext.Value
 	pricing_source                *jsontext.Value
 	appendpricing_source          jsontext.Value
+	profit_basis                  *jsontext.Value
+	appendprofit_basis            jsontext.Value
+	dispatch_phases               *jsontext.Value
+	appenddispatch_phases         jsontext.Value
 	model                         *string
 	requested_model               *string
 	upstream_model                *string
@@ -45269,6 +45415,8 @@ type UsageLogMutation struct {
 	stream                        *bool
 	duration_ms                   *int
 	addduration_ms                *int
+	first_output_ms               *int
+	addfirst_output_ms            *int
 	end_to_end_first_output_ms    *int64
 	addend_to_end_first_output_ms *int64
 	attempt_first_output_ms       *int64
@@ -46290,6 +46438,136 @@ func (m *UsageLogMutation) ResetPricingSource() {
 	m.pricing_source = nil
 	m.appendpricing_source = nil
 	delete(m.clearedFields, usagelog.FieldPricingSource)
+}
+
+// SetProfitBasis sets the "profit_basis" field.
+func (m *UsageLogMutation) SetProfitBasis(j jsontext.Value) {
+	m.profit_basis = &j
+	m.appendprofit_basis = nil
+}
+
+// ProfitBasis returns the value of the "profit_basis" field in the mutation.
+func (m *UsageLogMutation) ProfitBasis() (r jsontext.Value, exists bool) {
+	v := m.profit_basis
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProfitBasis returns the old "profit_basis" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldProfitBasis(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProfitBasis is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProfitBasis requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProfitBasis: %w", err)
+	}
+	return oldValue.ProfitBasis, nil
+}
+
+// AppendProfitBasis adds j to the "profit_basis" field.
+func (m *UsageLogMutation) AppendProfitBasis(j jsontext.Value) {
+	m.appendprofit_basis = append(m.appendprofit_basis, j...)
+}
+
+// AppendedProfitBasis returns the list of values that were appended to the "profit_basis" field in this mutation.
+func (m *UsageLogMutation) AppendedProfitBasis() (jsontext.Value, bool) {
+	if len(m.appendprofit_basis) == 0 {
+		return nil, false
+	}
+	return m.appendprofit_basis, true
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (m *UsageLogMutation) ClearProfitBasis() {
+	m.profit_basis = nil
+	m.appendprofit_basis = nil
+	m.clearedFields[usagelog.FieldProfitBasis] = struct{}{}
+}
+
+// ProfitBasisCleared returns if the "profit_basis" field was cleared in this mutation.
+func (m *UsageLogMutation) ProfitBasisCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldProfitBasis]
+	return ok
+}
+
+// ResetProfitBasis resets all changes to the "profit_basis" field.
+func (m *UsageLogMutation) ResetProfitBasis() {
+	m.profit_basis = nil
+	m.appendprofit_basis = nil
+	delete(m.clearedFields, usagelog.FieldProfitBasis)
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (m *UsageLogMutation) SetDispatchPhases(j jsontext.Value) {
+	m.dispatch_phases = &j
+	m.appenddispatch_phases = nil
+}
+
+// DispatchPhases returns the value of the "dispatch_phases" field in the mutation.
+func (m *UsageLogMutation) DispatchPhases() (r jsontext.Value, exists bool) {
+	v := m.dispatch_phases
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDispatchPhases returns the old "dispatch_phases" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldDispatchPhases(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDispatchPhases is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDispatchPhases requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDispatchPhases: %w", err)
+	}
+	return oldValue.DispatchPhases, nil
+}
+
+// AppendDispatchPhases adds j to the "dispatch_phases" field.
+func (m *UsageLogMutation) AppendDispatchPhases(j jsontext.Value) {
+	m.appenddispatch_phases = append(m.appenddispatch_phases, j...)
+}
+
+// AppendedDispatchPhases returns the list of values that were appended to the "dispatch_phases" field in this mutation.
+func (m *UsageLogMutation) AppendedDispatchPhases() (jsontext.Value, bool) {
+	if len(m.appenddispatch_phases) == 0 {
+		return nil, false
+	}
+	return m.appenddispatch_phases, true
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (m *UsageLogMutation) ClearDispatchPhases() {
+	m.dispatch_phases = nil
+	m.appenddispatch_phases = nil
+	m.clearedFields[usagelog.FieldDispatchPhases] = struct{}{}
+}
+
+// DispatchPhasesCleared returns if the "dispatch_phases" field was cleared in this mutation.
+func (m *UsageLogMutation) DispatchPhasesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldDispatchPhases]
+	return ok
+}
+
+// ResetDispatchPhases resets all changes to the "dispatch_phases" field.
+func (m *UsageLogMutation) ResetDispatchPhases() {
+	m.dispatch_phases = nil
+	m.appenddispatch_phases = nil
+	delete(m.clearedFields, usagelog.FieldDispatchPhases)
 }
 
 // SetModel sets the "model" field.
@@ -47833,6 +48111,76 @@ func (m *UsageLogMutation) ResetDurationMs() {
 	m.duration_ms = nil
 	m.addduration_ms = nil
 	delete(m.clearedFields, usagelog.FieldDurationMs)
+}
+
+// SetFirstOutputMs sets the "first_output_ms" field.
+func (m *UsageLogMutation) SetFirstOutputMs(i int) {
+	m.first_output_ms = &i
+	m.addfirst_output_ms = nil
+}
+
+// FirstOutputMs returns the value of the "first_output_ms" field in the mutation.
+func (m *UsageLogMutation) FirstOutputMs() (r int, exists bool) {
+	v := m.first_output_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFirstOutputMs returns the old "first_output_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldFirstOutputMs(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFirstOutputMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFirstOutputMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFirstOutputMs: %w", err)
+	}
+	return oldValue.FirstOutputMs, nil
+}
+
+// AddFirstOutputMs adds i to the "first_output_ms" field.
+func (m *UsageLogMutation) AddFirstOutputMs(i int) {
+	if m.addfirst_output_ms != nil {
+		*m.addfirst_output_ms += i
+	} else {
+		m.addfirst_output_ms = &i
+	}
+}
+
+// AddedFirstOutputMs returns the value that was added to the "first_output_ms" field in this mutation.
+func (m *UsageLogMutation) AddedFirstOutputMs() (r int, exists bool) {
+	v := m.addfirst_output_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearFirstOutputMs clears the value of the "first_output_ms" field.
+func (m *UsageLogMutation) ClearFirstOutputMs() {
+	m.first_output_ms = nil
+	m.addfirst_output_ms = nil
+	m.clearedFields[usagelog.FieldFirstOutputMs] = struct{}{}
+}
+
+// FirstOutputMsCleared returns if the "first_output_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) FirstOutputMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldFirstOutputMs]
+	return ok
+}
+
+// ResetFirstOutputMs resets all changes to the "first_output_ms" field.
+func (m *UsageLogMutation) ResetFirstOutputMs() {
+	m.first_output_ms = nil
+	m.addfirst_output_ms = nil
+	delete(m.clearedFields, usagelog.FieldFirstOutputMs)
 }
 
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
@@ -50092,7 +50440,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 82)
+	fields := make([]string, 0, 85)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -50143,6 +50491,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.pricing_source != nil {
 		fields = append(fields, usagelog.FieldPricingSource)
+	}
+	if m.profit_basis != nil {
+		fields = append(fields, usagelog.FieldProfitBasis)
+	}
+	if m.dispatch_phases != nil {
+		fields = append(fields, usagelog.FieldDispatchPhases)
 	}
 	if m.model != nil {
 		fields = append(fields, usagelog.FieldModel)
@@ -50230,6 +50584,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.duration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
+	}
+	if m.first_output_ms != nil {
+		fields = append(fields, usagelog.FieldFirstOutputMs)
 	}
 	if m.end_to_end_first_output_ms != nil {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
@@ -50381,6 +50738,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Degradations()
 	case usagelog.FieldPricingSource:
 		return m.PricingSource()
+	case usagelog.FieldProfitBasis:
+		return m.ProfitBasis()
+	case usagelog.FieldDispatchPhases:
+		return m.DispatchPhases()
 	case usagelog.FieldModel:
 		return m.Model()
 	case usagelog.FieldRequestedModel:
@@ -50439,6 +50800,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Stream()
 	case usagelog.FieldDurationMs:
 		return m.DurationMs()
+	case usagelog.FieldFirstOutputMs:
+		return m.FirstOutputMs()
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.EndToEndFirstOutputMs()
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -50554,6 +50917,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldDegradations(ctx)
 	case usagelog.FieldPricingSource:
 		return m.OldPricingSource(ctx)
+	case usagelog.FieldProfitBasis:
+		return m.OldProfitBasis(ctx)
+	case usagelog.FieldDispatchPhases:
+		return m.OldDispatchPhases(ctx)
 	case usagelog.FieldModel:
 		return m.OldModel(ctx)
 	case usagelog.FieldRequestedModel:
@@ -50612,6 +50979,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStream(ctx)
 	case usagelog.FieldDurationMs:
 		return m.OldDurationMs(ctx)
+	case usagelog.FieldFirstOutputMs:
+		return m.OldFirstOutputMs(ctx)
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.OldEndToEndFirstOutputMs(ctx)
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -50811,6 +51180,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPricingSource(v)
+		return nil
+	case usagelog.FieldProfitBasis:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProfitBasis(v)
+		return nil
+	case usagelog.FieldDispatchPhases:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDispatchPhases(v)
 		return nil
 	case usagelog.FieldModel:
 		v, ok := value.(string)
@@ -51014,6 +51397,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDurationMs(v)
+		return nil
+	case usagelog.FieldFirstOutputMs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFirstOutputMs(v)
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		v, ok := value.(int64)
@@ -51332,6 +51722,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addduration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
 	}
+	if m.addfirst_output_ms != nil {
+		fields = append(fields, usagelog.FieldFirstOutputMs)
+	}
 	if m.addend_to_end_first_output_ms != nil {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
 	}
@@ -51432,6 +51825,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedBillingType()
 	case usagelog.FieldDurationMs:
 		return m.AddedDurationMs()
+	case usagelog.FieldFirstOutputMs:
+		return m.AddedFirstOutputMs()
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.AddedEndToEndFirstOutputMs()
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -51610,6 +52005,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddDurationMs(v)
 		return nil
+	case usagelog.FieldFirstOutputMs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFirstOutputMs(v)
+		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		v, ok := value.(int64)
 		if !ok {
@@ -51783,6 +52185,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldPricingSource) {
 		fields = append(fields, usagelog.FieldPricingSource)
 	}
+	if m.FieldCleared(usagelog.FieldProfitBasis) {
+		fields = append(fields, usagelog.FieldProfitBasis)
+	}
+	if m.FieldCleared(usagelog.FieldDispatchPhases) {
+		fields = append(fields, usagelog.FieldDispatchPhases)
+	}
 	if m.FieldCleared(usagelog.FieldRequestedModel) {
 		fields = append(fields, usagelog.FieldRequestedModel)
 	}
@@ -51818,6 +52226,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usagelog.FieldDurationMs) {
 		fields = append(fields, usagelog.FieldDurationMs)
+	}
+	if m.FieldCleared(usagelog.FieldFirstOutputMs) {
+		fields = append(fields, usagelog.FieldFirstOutputMs)
 	}
 	if m.FieldCleared(usagelog.FieldEndToEndFirstOutputMs) {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
@@ -51968,6 +52379,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 	case usagelog.FieldPricingSource:
 		m.ClearPricingSource()
 		return nil
+	case usagelog.FieldProfitBasis:
+		m.ClearProfitBasis()
+		return nil
+	case usagelog.FieldDispatchPhases:
+		m.ClearDispatchPhases()
+		return nil
 	case usagelog.FieldRequestedModel:
 		m.ClearRequestedModel()
 		return nil
@@ -52003,6 +52420,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ClearDurationMs()
+		return nil
+	case usagelog.FieldFirstOutputMs:
+		m.ClearFirstOutputMs()
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		m.ClearEndToEndFirstOutputMs()
@@ -52159,6 +52579,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 	case usagelog.FieldPricingSource:
 		m.ResetPricingSource()
 		return nil
+	case usagelog.FieldProfitBasis:
+		m.ResetProfitBasis()
+		return nil
+	case usagelog.FieldDispatchPhases:
+		m.ResetDispatchPhases()
+		return nil
 	case usagelog.FieldModel:
 		m.ResetModel()
 		return nil
@@ -52245,6 +52671,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ResetDurationMs()
+		return nil
+	case usagelog.FieldFirstOutputMs:
+		m.ResetFirstOutputMs()
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		m.ResetEndToEndFirstOutputMs()

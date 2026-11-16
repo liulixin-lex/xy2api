@@ -120,6 +120,20 @@ func (_c *GroupCreate) SetNillableRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (_c *GroupCreate) SetMinUpstreamRate(v float64) *GroupCreate {
+	_c.mutation.SetMinUpstreamRate(v)
+	return _c
+}
+
+// SetNillableMinUpstreamRate sets the "min_upstream_rate" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableMinUpstreamRate(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetMinUpstreamRate(*v)
+	}
+	return _c
+}
+
 // SetPeakRateEnabled sets the "peak_rate_enabled" field.
 func (_c *GroupCreate) SetPeakRateEnabled(v bool) *GroupCreate {
 	_c.mutation.SetPeakRateEnabled(v)
@@ -1584,6 +1598,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
 	}
+	if value, ok := _c.mutation.MinUpstreamRate(); ok {
+		_spec.SetField(group.FieldMinUpstreamRate, field.TypeFloat64, value)
+		_node.MinUpstreamRate = &value
+	}
 	if value, ok := _c.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)
 		_node.PeakRateEnabled = value
@@ -2087,6 +2105,30 @@ func (u *GroupUpsert) UpdateRateMultiplier() *GroupUpsert {
 // AddRateMultiplier adds v to the "rate_multiplier" field.
 func (u *GroupUpsert) AddRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldRateMultiplier, v)
+	return u
+}
+
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (u *GroupUpsert) SetMinUpstreamRate(v float64) *GroupUpsert {
+	u.Set(group.FieldMinUpstreamRate, v)
+	return u
+}
+
+// UpdateMinUpstreamRate sets the "min_upstream_rate" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateMinUpstreamRate() *GroupUpsert {
+	u.SetExcluded(group.FieldMinUpstreamRate)
+	return u
+}
+
+// AddMinUpstreamRate adds v to the "min_upstream_rate" field.
+func (u *GroupUpsert) AddMinUpstreamRate(v float64) *GroupUpsert {
+	u.Add(group.FieldMinUpstreamRate, v)
+	return u
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (u *GroupUpsert) ClearMinUpstreamRate() *GroupUpsert {
+	u.SetNull(group.FieldMinUpstreamRate)
 	return u
 }
 
@@ -3290,6 +3332,34 @@ func (u *GroupUpsertOne) AddRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (u *GroupUpsertOne) SetMinUpstreamRate(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMinUpstreamRate(v)
+	})
+}
+
+// AddMinUpstreamRate adds v to the "min_upstream_rate" field.
+func (u *GroupUpsertOne) AddMinUpstreamRate(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddMinUpstreamRate(v)
+	})
+}
+
+// UpdateMinUpstreamRate sets the "min_upstream_rate" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateMinUpstreamRate() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMinUpstreamRate()
+	})
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (u *GroupUpsertOne) ClearMinUpstreamRate() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearMinUpstreamRate()
 	})
 }
 
@@ -4834,6 +4904,34 @@ func (u *GroupUpsertBulk) AddRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetMinUpstreamRate sets the "min_upstream_rate" field.
+func (u *GroupUpsertBulk) SetMinUpstreamRate(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMinUpstreamRate(v)
+	})
+}
+
+// AddMinUpstreamRate adds v to the "min_upstream_rate" field.
+func (u *GroupUpsertBulk) AddMinUpstreamRate(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddMinUpstreamRate(v)
+	})
+}
+
+// UpdateMinUpstreamRate sets the "min_upstream_rate" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateMinUpstreamRate() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMinUpstreamRate()
+	})
+}
+
+// ClearMinUpstreamRate clears the value of the "min_upstream_rate" field.
+func (u *GroupUpsertBulk) ClearMinUpstreamRate() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearMinUpstreamRate()
 	})
 }
 

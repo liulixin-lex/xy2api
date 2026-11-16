@@ -58,6 +58,10 @@ type UsageLog struct {
 	Degradations jsontext.Value `json:"degradations,omitempty"`
 	// PricingSource holds the value of the "pricing_source" field.
 	PricingSource jsontext.Value `json:"pricing_source,omitempty"`
+	// ProfitBasis holds the value of the "profit_basis" field.
+	ProfitBasis jsontext.Value `json:"profit_basis,omitempty"`
+	// DispatchPhases holds the value of the "dispatch_phases" field.
+	DispatchPhases jsontext.Value `json:"dispatch_phases,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
 	// RequestedModel holds the value of the "requested_model" field.
@@ -116,6 +120,8 @@ type UsageLog struct {
 	Stream bool `json:"stream,omitempty"`
 	// DurationMs holds the value of the "duration_ms" field.
 	DurationMs *int `json:"duration_ms,omitempty"`
+	// Milliseconds from gateway entry to the first valid client output, including retries
+	FirstOutputMs *int `json:"first_output_ms,omitempty"`
 	// EndToEndFirstOutputMs holds the value of the "end_to_end_first_output_ms" field.
 	EndToEndFirstOutputMs *int64 `json:"end_to_end_first_output_ms,omitempty"`
 	// AttemptFirstOutputMs holds the value of the "attempt_first_output_ms" field.
@@ -271,13 +277,13 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
 		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUsageObserved, usagelog.FieldTerminalEventSeen, usagelog.FieldTerminalEventValid, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstOutputMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
 			values[i] = new(sql.NullInt64)
 		case usagelog.FieldRequestID, usagelog.FieldGatewayRequestID, usagelog.FieldRequestScope, usagelog.FieldUsageSource, usagelog.FieldResponseBodyType, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy, usagelog.FieldAnchorBasis, usagelog.FieldClientFamily, usagelog.FieldCancelStage, usagelog.FieldCdnObserved, usagelog.FieldBudgetStartMode:
 			values[i] = new(sql.NullString)
@@ -419,6 +425,22 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.PricingSource); err != nil {
 					return fmt.Errorf("unmarshal field pricing_source: %w", err)
+				}
+			}
+		case usagelog.FieldProfitBasis:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field profit_basis", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ProfitBasis); err != nil {
+					return fmt.Errorf("unmarshal field profit_basis: %w", err)
+				}
+			}
+		case usagelog.FieldDispatchPhases:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field dispatch_phases", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.DispatchPhases); err != nil {
+					return fmt.Errorf("unmarshal field dispatch_phases: %w", err)
 				}
 			}
 		case usagelog.FieldModel:
@@ -606,6 +628,13 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DurationMs = new(int)
 				*_m.DurationMs = int(value.Int64)
+			}
+		case usagelog.FieldFirstOutputMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field first_output_ms", values[i])
+			} else if value.Valid {
+				_m.FirstOutputMs = new(int)
+				*_m.FirstOutputMs = int(value.Int64)
 			}
 		case usagelog.FieldEndToEndFirstOutputMs:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -990,6 +1019,12 @@ func (_m *UsageLog) String() string {
 	builder.WriteString("pricing_source=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PricingSource))
 	builder.WriteString(", ")
+	builder.WriteString("profit_basis=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ProfitBasis))
+	builder.WriteString(", ")
+	builder.WriteString("dispatch_phases=")
+	builder.WriteString(fmt.Sprintf("%v", _m.DispatchPhases))
+	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)
 	builder.WriteString(", ")
@@ -1098,6 +1133,11 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	if v := _m.DurationMs; v != nil {
 		builder.WriteString("duration_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.FirstOutputMs; v != nil {
+		builder.WriteString("first_output_ms=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
