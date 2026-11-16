@@ -11,11 +11,10 @@
 | 入站请求体上传超时 | 408 `invalid_request_error`，消息 `Timed out reading request body`；OpenAI 协议 code 为 `request_upload_timeout`。不调用上游；真正取消或断连只记 499，不补写响应 |
 | 普通上游 408、409、422 | 保留状态码与脱敏消息；Responses 与 Chat 错误体保留安全的 `type/code/param`，Messages 保留既有 `type/message` 形状，缺省 code 分别为 `request_timeout/conflict/unprocessable_entity`；管理员配置的错误规则优先 |
 | 分组内没有任何账号支持该模型（持久配置中没有成员，或没有成员支持该模型） | 404，`model_not_found`，消息为 `Model "<model>" is not supported by any configured account in this group` |
-| 有支持该模型的账号，但没有一个能满足本次请求的能力（如带工具的 Chat 需要 Responses） | 400 `invalid_request_error`；需要 Responses 时 `code` 为 `responses_required`，`param` 为 `tools` 或 `functions` |
+| 有支持该模型的账号，但没有一个能满足本次请求的能力 | 400 `invalid_request_error`；带工具的 Chat 按最终模型与档位需要 Responses 时，`code` 为 `responses_required`，`param` 与消息指出 `tools` 或 `functions`。有能力的账号只是暂时繁忙时，按实际无号原因处理 |
 | 能服务的账号都只是被限流、并发已满或排队已满 | 429 `rate_limit_error`，消息为 `All available accounts are currently rate-limited. Please retry later.` |
 | 非流式请求，但组内账号都只接受流式 | 503，消息为 `No available account in this group supports non-streaming requests; retry with "stream": true`，带 `x-should-retry: false`，不带 `Retry-After` |
 | 其他无号情况（混合限制、硬暂停、依赖故障、数据库查询失败等） | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
-| 带 `tools` 或 `functions` 的 Chat 请求，其最终模型与档位要求 Responses，但分组里没有任何账号能用该协议服务它 | 400 `invalid_request_error`，code `responses_required`，param 与消息指出 `tools` 或 `functions`。有这类账号只是暂时繁忙时，按实际无号原因处理 |
 | 配置原因导致无号（如渠道定价不含该模型） | 503，`Retry-After: 60`，`x-should-retry: false` |
 | 模型不在分组白名单 | 404，消息为 `Model "<model>" is not available for this group`，并列出本分组白名单的前 10 项 |
 | 分组仅限 Claude Code，请求不是 Claude Code 且没有兜底分组 | 403 `permission_error`，不带重试头 |
@@ -38,8 +37,6 @@
 
 - 上游明确报告 `No tool call found for function call output` 或 `No tool output found for function call` 的工具历史 400 时，原生、原样转发和 Chat→Responses 都保留上游脱敏后的 `type`、`code`、`param`、`message`；上游没给 `param` 时不补。请求只发送一次，不换号、不罚号。
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
-
-
 - 上游给出的重试时间（如 `Retry-After`）之前，网关不会再选用同一账号，末位兜底也一样；冷却上限只决定网关何时重新检查这个账号。
 - 返回给客户端的上游错误消息会去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与响应 ID 保留；运维记录仍保存受控的原文。
 - Anthropic 协议（`/v1/messages`）下，网关自身的 503 失败，以及换号耗尽的上游容量降载（`overloaded_error`、529），统一返回 503、错误类型 `api_error`；已提交的流写 `event: error`，类型同样为 `api_error`。Claude Code 会把任何 `overloaded_error` 当作 529 计数并在连续 3 次后停止或切换模型，这样改写可以避免误触发。
@@ -57,7 +54,6 @@
 响应归属按用户判断，同一用户换了 API 密钥仍可续接自己的响应。走原生 Responses 的 API Key 账号收到的 `previous_response_id` 与 `store`（缺省、`false`、`true`）都不改动；DeepSeek、Kimi 等无状态上游照旧去掉 `previous_response_id`、把 `store` 设为 `false` 后发送，上游走 Chat Completions 或 Anthropic 协议的 API Key 账号也照旧转换后发送，都不返回上面的错误。上游只返回普通的 404、409 或含义不明的 4xx 时，不当作续接过期，照原样返回。以上错误都不罚号、不计会话失败；尚未提交时不带 `Retry-After`，并写 `x-should-retry: false`；已提交的流保持原 HTTP 状态，以同样的错误码写一个错误终止帧。
 
 实际错误字段中的会话政策拒绝（`session_blocked_by_cyber_policy`、`cyber_policy`）会结束本次请求，不跨账号重发；防护墙 1010 拦截不视为账号凭据失效。
-
 
 ## Retry-After 的取值
 
@@ -89,6 +85,10 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 - 原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
 - 原生 OAuth 上游先给出字符串 `type:"error"`、随后又给出合法 `response.completed` 时，流式和非流式都继续按成功结束。通用的 SSE 事件名（如 `message`、`error`）不会覆盖合法 payload 的结束类型。
 
+Chat Completions 上游（包括原样转发的 raw Chat，以及转为 Responses、Messages 的流）以下列任一情况结束时算正常结束：给出有效的 `finish_reason`；收到 `[DONE]`；或者最后一段正文之后给出完整的输入、输出用量（显式 0 也算），然后连接正常关闭。只收到早期、部分或空的用量不算；正常结束之前读取出错、以损坏的帧结尾或收到明确的错误，按上表写一次终止帧。中间无法解析的保活帧之后仍收到合法事件的，继续读取。已经正常结束、只是缺少用量的，照常成功。按“完整用量后正常关闭”判定为成功的，运维记录中不算收到了上游结束事件。
+
+非流式 Chat 与 Responses 请求的上游是 Anthropic 时，网关把 Anthropic 的流拼成一个响应：收到 `message_stop`、带有效 `stop_reason` 的 `message_delta` 或兼容的 `[DONE]` 时返回成功；在此之前断流、读取出错或收到错误时返回 502，保留已读到的用量。已经正常结束后连接关闭，或者缺少结尾的用量，不影响成功。
+
 `/v1/chat/completions` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#chat-completions-转-responses)）另有以下结束方式。错误按上表只写一次，之前不会发出成功的 `finish_reason`：
 
 - 上游没有有效结束：Responses 上游以 `response.completed`、兼容的 `response.done` 或 `response.incomplete` 结束；合法结束事件没有 status、done 没带 response 或 incomplete 未给原因时沿用正常结束。中途断开且没有有效结束事件、`response.failed` 或取消时以错误结束，不补成 `stop`。非流式请求也一样，从 done 事件恢复出了正文不代表成功结束。
@@ -109,10 +109,6 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 Gemini 分组的 `/v1/chat/completions`、`/v1/messages` 流式请求（见 [Gemini](../platforms/gemini.md#兼容入口参数)），遇到无法转换的结束原因（如 `MALFORMED_FUNCTION_CALL`），或工具参数不是 JSON 对象时，按上表写一次终止帧，保留已读到的用量，不再补发成功结束。
 
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
-
-Chat Completions 上游（包括原样转发的 raw Chat，以及转为 Responses、Messages 的流）以下列任一情况结束时算正常结束：给出有效的 `finish_reason`；收到 `[DONE]`；或者最后一段正文之后给出完整的输入、输出用量（显式 0 也算），然后连接正常关闭。只收到早期、部分或空的用量不算；正常结束之前读取出错、以损坏的帧结尾或收到明确的错误，按上表写一次终止帧。中间无法解析的保活帧之后仍收到合法事件的，继续读取。已经正常结束、只是缺少用量的，照常成功。按“完整用量后正常关闭”判定为成功的，运维记录中不算收到了上游结束事件。
-
-非流式 Chat 与 Responses 请求的上游是 Anthropic 时，网关把 Anthropic 的流拼成一个响应：收到 `message_stop`、带有效 `stop_reason` 的 `message_delta` 或兼容的 `[DONE]` 时返回成功；在此之前断流、读取出错或收到错误时返回 502，保留已读到的用量。已经正常结束后连接关闭，或者缺少结尾的用量，不影响成功。
 
 ### `response.failed` 的重试时间
 
@@ -164,7 +160,6 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 | 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。API Key 账号显式发送的 `reasoning.effort: none` 被第三方上游以 400 明确拒绝（`param` 为 `reasoning.effort` 或 `reasoning`）时，也在这一预算内删除后重放一次，并记录 `reasoning.effort/omit` 降级；其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
 | 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生、原样转发及 Chat/Messages 转为 Responses 的请求在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时：请求顶层只有一项带密文的 reasoning 或 compaction 就修复该项；有多项时清理全部顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次，并在请求级 `degradations` 中记录 `input[].encrypted_content/omit`。位置冲突、重复 ID 或越界时不做猜测性清理 |
-
 | 上游会话状态拒绝 | 按请求级拒绝处理，不罚号、不计会话失败；原生与透传 Responses 在输出前可替换协作消息与工具输出中的密文槽位后重放或换号一次 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 补上 web_search 工具声明后重放一次；成功后该账号 6 小时内同类请求直接补声明。仍失败时返回 502 并说明原因，不换号 |
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
@@ -172,7 +167,6 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 原生、原样转发及 Chat/Messages 转为 Responses 的 HTTP 请求明确拒绝 reasoning/compaction 密文、但位置冲突、重复 ID、越界、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
 账号只支持 Chat Completions 的 API Key 路由（以及 Grok API Key）收到 Responses 格式的正文时，网关在发送前把它转换为 Chat 请求：能表达的字段照转，不能表达的按既有规则省略并记录降级，然后只发送一次；这一步不是重放，不消耗重放次数。普通的 `messages` 请求不受影响。
-
 
 网关会记住被上游拒绝后去掉的密文项，下次请求中唯一命中同一项时，在第一次发送前就去掉它。这份记录按会话、账号、上游地址和本次实际使用的凭据分开保存：换账号、换 API Key、换实例、重启或记录过期后都不沿用，第一次发送保留原文；旧版本按会话保存的记录不再读取。即使没有记录，本次被明确拒绝后仍按上面的规则修复。
 
