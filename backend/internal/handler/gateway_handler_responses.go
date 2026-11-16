@@ -446,7 +446,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if message, matched := inferenceNotFoundExhaustedMessage(c, lastErr); matched {
 		if streamStarted {
 			service.MarkOpsStreamError(c, "model_not_found", message, http.StatusNotFound)
-			if c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+			if !service.ProtocolTerminalClaimed(c) {
 				writeResponsesFailedSSEWithOpeningStatus(c, http.StatusNotFound, "invalid_request_error", "model_not_found", message, gatewayStreamHasOnlyHeartbeats(c))
 			}
 		} else {
@@ -483,7 +483,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if msg, rejected := resilienceContentRejection(c, lastErr); rejected {
 		status, code, message = http.StatusBadRequest, codeContentPolicyViolation, msg
 	}
-	if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+	if service.ProtocolTerminalClaimed(c) {
 		service.MarkOpsStreamError(c, code, message, status)
 		return
 	}
@@ -492,12 +492,10 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	}
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	if streamStarted {
-		// A slot-wait heartbeat commits HTTP 200 before any upstream response.
-		// In that case a terminal frame is still required; once any semantic or
-		// official terminal bytes exist, preserve them without appending a second
-		// generic response.failed.
+		// Committed content still needs a terminal. The shared writer prevents
+		// a second failure after an already delivered terminal.
 		service.MarkOpsStreamError(c, code, message, status)
-		if c != nil && c.Writer != nil && (c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c)) {
+		if c != nil && c.Writer != nil && !service.ProtocolTerminalClaimed(c) {
 			errType, explicitCode, translatedMessage := resilienceTranslateError(c, status, code, "", message)
 			writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))
 		}

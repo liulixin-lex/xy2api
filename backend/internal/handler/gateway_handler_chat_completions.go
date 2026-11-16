@@ -460,7 +460,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if message, matched := inferenceNotFoundExhaustedMessage(c, lastErr); matched {
 		if streamStarted {
 			service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusNotFound)
-			if c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+			if !service.ProtocolTerminalClaimed(c) {
 				writeChatCompletionsErrorSSE(c, "invalid_request_error", "model_not_found", message, http.StatusNotFound)
 			}
 		} else {
@@ -475,7 +475,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		return
 	}
 	write := func(status int, errType, code, message string) {
-		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
+		if service.ProtocolTerminalClaimed(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
 			return
 		}

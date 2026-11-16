@@ -61,3 +61,20 @@ func TestM7ReviewChatKeepalive(t *testing.T) {
 		}
 	}
 }
+
+func TestM7ReviewChatStringCompatibility(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, target := range []string{"raw", "responses", "messages"} {
+		for _, content := range []string{`"content":"",`, `"content":null,`, ``} {
+			t.Run(target+content, func(t *testing.T) {
+				tool := `{"choices":[{"index":0,"delta":{` + content + `"tool_calls":[{"index":0,"id":"call_fixed","type":"function","function":{"name":"original_tool","arguments":"{}"}}]}}]}`
+				finish := `{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`
+				result, body, err := m7ReviewChatStream(t, target, m7ReviewWire(tool, finish, "[DONE]"))
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Contains(t, body, "original_tool")
+				require.Contains(t, body, "call_fixed")
+			})
+		}
+	}
+}
