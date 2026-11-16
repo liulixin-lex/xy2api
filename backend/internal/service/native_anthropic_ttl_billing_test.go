@@ -4,10 +4,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +72,61 @@ func TestNativeAnthropicTTLProjection(t *testing.T) {
 				generic := &GatewayService{billingService: billing, resolver: svc.resolver}
 				comparison := generic.calculateTokenCost(context.Background(), &ForwardResult{Model: "fixture-ttl", Usage: ClaudeUsage{CacheCreationInputTokens: tc.aggregate, CacheCreationInputTokensPresent: tc.aggregatePresent, CacheCreation5mTokens: tc.five, CacheCreation1hTokens: tc.hour, CacheCreation5mTokensPresent: tc.fivePresent, CacheCreation1hTokensPresent: tc.hourPresent}}, key, "fixture-ttl", 1, time.Now())
 				require.InDelta(t, comparison.CacheCreationCost, repo.lastLog.CacheCreationCost, 1e-12)
+
+				// B3: native JSON/SSE -> M7's ClaudeUsage conversion -> real RecordUsage.
+				rawUsage := map[string]any{"input_tokens": 0, "output_tokens": 0}
+				if tc.aggregatePresent {
+					rawUsage["cache_creation_input_tokens"] = tc.aggregate
+				}
+				buckets := map[string]int{}
+				if tc.fivePresent {
+					buckets["ephemeral_5m_input_tokens"] = tc.five
+				}
+				if tc.hourPresent {
+					buckets["ephemeral_1h_input_tokens"] = tc.hour
+				}
+				if len(buckets) > 0 {
+					rawUsage["cache_creation"] = buckets
+				}
+				usageJSON, marshalErr := json.Marshal(rawUsage)
+				require.NoError(t, marshalErr)
+				for _, stream := range []bool{false, true} {
+					t.Run(fmt.Sprintf("native_stream=%t", stream), func(t *testing.T) {
+						payload := `{"id":"msg_ttl_b3","type":"message","role":"assistant","model":"fixture-ttl","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":` + string(usageJSON) + `}`
+						contentType := "application/json"
+						if stream {
+							contentType = "text/event-stream"
+							payload = intB3BillingStream("anthropic", false)
+							payload = strings.ReplaceAll(payload, `{"input_tokens":10,"output_tokens":5}`, string(usageJSON))
+							payload = strings.ReplaceAll(payload, `"usage":{"output_tokens":5}`, `"usage":{"output_tokens":0}`)
+						}
+						upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(payload))}}
+						forwarder := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+						body := []byte(fmt.Sprintf(`{"model":"fixture-ttl","max_tokens":16384,"stream":%t,"messages":[{"role":"user","content":"hello"}]}`, stream))
+						c, _ := gin.CreateTestContext(httptest.NewRecorder())
+						c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+						nativeAccount := nativeAnthropicTestAccount()
+						nativeResult, forwardErr := forwarder.forwardAnthropicViaNativeAnthropicEndpoint(context.Background(), c, nativeAccount, body, "")
+						require.NoError(t, forwardErr)
+						require.NotNil(t, nativeResult)
+						require.Len(t, upstream.bodies, 1)
+						require.Equal(t, tc.aggregate, nativeResult.Usage.CacheCreationInputTokens)
+						require.Equal(t, tc.aggregatePresent, nativeResult.Usage.CacheCreationInputTokensPresent)
+						require.Equal(t, tc.fivePresent, nativeResult.Usage.CacheCreation5mTokensPresent)
+						require.Equal(t, tc.hourPresent, nativeResult.Usage.CacheCreation1hTokensPresent)
+						nativeRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+						nativeLedger := newOpenAIRecordUsageServiceForTest(nativeRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+						nativeLedger.cfg.Default.RateMultiplier = 1
+						nativeLedger.billingService = billing
+						nativeLedger.resolver = svc.resolver
+						require.NoError(t, nativeLedger.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: nativeResult, APIKey: key, User: &User{ID: 1}, Account: nativeAccount}))
+						require.NotNil(t, nativeRepo.lastLog)
+						require.InDelta(t, want, nativeRepo.lastLog.CacheCreationCost, 1e-12)
+						require.InDelta(t, comparison.CacheCreationCost, nativeRepo.lastLog.CacheCreationCost, 1e-12)
+						require.Equal(t, tc.five, nativeRepo.lastLog.CacheCreation5mTokens)
+						require.Equal(t, tc.hour, nativeRepo.lastLog.CacheCreation1hTokens)
+					})
+				}
 			})
 		}
 	}
