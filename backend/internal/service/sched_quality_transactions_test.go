@@ -118,3 +118,19 @@ func TestEngineRuleBEvaluationErrorRemainsUnknown(t *testing.T) {
 	require.Equal(t, q.VerdictUnknown, verdict)
 	require.Nil(t, b.TTFT)
 }
+
+func TestEngineSnapshotKeepsTTFTSourceGroupsSeparate(t *testing.T) {
+	f := newQualityFixture(t)
+	rows := engineSamples(4, f.now.Add(-time.Minute), true)
+	rows[0].GroupID = 30
+	rows[1].GroupID = 10
+	rows[2].GroupID = 30
+	rows[3].GroupID = 20
+	rows[3].Stream = false
+	f.ledger.Rows = rows
+	f.cycle()
+	row := f.e.Snapshot().RowsForAccount(1)[0]
+	require.Equal(t, []int64{10, 30}, row.TTFTSourceGroups)
+	require.Equal(t, []int64{10, 20, 30}, row.Error.SourceGroups)
+	require.Equal(t, []int64{10, 20, 30}, row.SourceGroups)
+}

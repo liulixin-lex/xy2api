@@ -112,6 +112,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		case q.DimensionTTFO:
 			row.View.TTFO = lv
 			row.TTFTVerdict = verdict
+			row.TTFTSourceGroups = append([]int64(nil), basis.SourceGroups...)
 			if basis.TTFT != nil {
 				row.TTFT = *basis.TTFT
 			}

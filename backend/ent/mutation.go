@@ -45415,8 +45415,6 @@ type UsageLogMutation struct {
 	stream                        *bool
 	duration_ms                   *int
 	addduration_ms                *int
-	first_output_ms               *int
-	addfirst_output_ms            *int
 	end_to_end_first_output_ms    *int64
 	addend_to_end_first_output_ms *int64
 	attempt_first_output_ms       *int64
@@ -48113,76 +48111,6 @@ func (m *UsageLogMutation) ResetDurationMs() {
 	delete(m.clearedFields, usagelog.FieldDurationMs)
 }
 
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (m *UsageLogMutation) SetFirstOutputMs(i int) {
-	m.first_output_ms = &i
-	m.addfirst_output_ms = nil
-}
-
-// FirstOutputMs returns the value of the "first_output_ms" field in the mutation.
-func (m *UsageLogMutation) FirstOutputMs() (r int, exists bool) {
-	v := m.first_output_ms
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldFirstOutputMs returns the old "first_output_ms" field's value of the UsageLog entity.
-// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageLogMutation) OldFirstOutputMs(ctx context.Context) (v *int, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldFirstOutputMs is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldFirstOutputMs requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldFirstOutputMs: %w", err)
-	}
-	return oldValue.FirstOutputMs, nil
-}
-
-// AddFirstOutputMs adds i to the "first_output_ms" field.
-func (m *UsageLogMutation) AddFirstOutputMs(i int) {
-	if m.addfirst_output_ms != nil {
-		*m.addfirst_output_ms += i
-	} else {
-		m.addfirst_output_ms = &i
-	}
-}
-
-// AddedFirstOutputMs returns the value that was added to the "first_output_ms" field in this mutation.
-func (m *UsageLogMutation) AddedFirstOutputMs() (r int, exists bool) {
-	v := m.addfirst_output_ms
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (m *UsageLogMutation) ClearFirstOutputMs() {
-	m.first_output_ms = nil
-	m.addfirst_output_ms = nil
-	m.clearedFields[usagelog.FieldFirstOutputMs] = struct{}{}
-}
-
-// FirstOutputMsCleared returns if the "first_output_ms" field was cleared in this mutation.
-func (m *UsageLogMutation) FirstOutputMsCleared() bool {
-	_, ok := m.clearedFields[usagelog.FieldFirstOutputMs]
-	return ok
-}
-
-// ResetFirstOutputMs resets all changes to the "first_output_ms" field.
-func (m *UsageLogMutation) ResetFirstOutputMs() {
-	m.first_output_ms = nil
-	m.addfirst_output_ms = nil
-	delete(m.clearedFields, usagelog.FieldFirstOutputMs)
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (m *UsageLogMutation) SetEndToEndFirstOutputMs(i int64) {
 	m.end_to_end_first_output_ms = &i
@@ -50440,7 +50368,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 85)
+	fields := make([]string, 0, 84)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -50584,9 +50512,6 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.duration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
-	}
-	if m.first_output_ms != nil {
-		fields = append(fields, usagelog.FieldFirstOutputMs)
 	}
 	if m.end_to_end_first_output_ms != nil {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
@@ -50800,8 +50725,6 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Stream()
 	case usagelog.FieldDurationMs:
 		return m.DurationMs()
-	case usagelog.FieldFirstOutputMs:
-		return m.FirstOutputMs()
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.EndToEndFirstOutputMs()
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -50979,8 +50902,6 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStream(ctx)
 	case usagelog.FieldDurationMs:
 		return m.OldDurationMs(ctx)
-	case usagelog.FieldFirstOutputMs:
-		return m.OldFirstOutputMs(ctx)
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.OldEndToEndFirstOutputMs(ctx)
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -51398,13 +51319,6 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDurationMs(v)
 		return nil
-	case usagelog.FieldFirstOutputMs:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetFirstOutputMs(v)
-		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		v, ok := value.(int64)
 		if !ok {
@@ -51722,9 +51636,6 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addduration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
 	}
-	if m.addfirst_output_ms != nil {
-		fields = append(fields, usagelog.FieldFirstOutputMs)
-	}
 	if m.addend_to_end_first_output_ms != nil {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
 	}
@@ -51825,8 +51736,6 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedBillingType()
 	case usagelog.FieldDurationMs:
 		return m.AddedDurationMs()
-	case usagelog.FieldFirstOutputMs:
-		return m.AddedFirstOutputMs()
 	case usagelog.FieldEndToEndFirstOutputMs:
 		return m.AddedEndToEndFirstOutputMs()
 	case usagelog.FieldAttemptFirstOutputMs:
@@ -52004,13 +51913,6 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddDurationMs(v)
-		return nil
-	case usagelog.FieldFirstOutputMs:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddFirstOutputMs(v)
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		v, ok := value.(int64)
@@ -52227,9 +52129,6 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldDurationMs) {
 		fields = append(fields, usagelog.FieldDurationMs)
 	}
-	if m.FieldCleared(usagelog.FieldFirstOutputMs) {
-		fields = append(fields, usagelog.FieldFirstOutputMs)
-	}
 	if m.FieldCleared(usagelog.FieldEndToEndFirstOutputMs) {
 		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
 	}
@@ -52420,9 +52319,6 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ClearDurationMs()
-		return nil
-	case usagelog.FieldFirstOutputMs:
-		m.ClearFirstOutputMs()
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		m.ClearEndToEndFirstOutputMs()
@@ -52671,9 +52567,6 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ResetDurationMs()
-		return nil
-	case usagelog.FieldFirstOutputMs:
-		m.ResetFirstOutputMs()
 		return nil
 	case usagelog.FieldEndToEndFirstOutputMs:
 		m.ResetEndToEndFirstOutputMs()
