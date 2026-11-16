@@ -23,8 +23,11 @@ func TestM8ExplicitRequestErrorExits(t *testing.T) {
 		{"unsupported", `{"error":{"code":"unsupported_parameter","param":"previous_response_id","message":"not supported"}}`, "http_continuation_unsupported", "previous_response_id", 400, 400},
 		{"encrypted_terminal", `{"error":{"code":"encrypted_content_rejected","param":"input[1].encrypted_content","message":"Remove the identified encrypted item rs_bad"}}`, "encrypted_content_rejected", "input[1].encrypted_content", 502, 400},
 	} {
-		for _, route := range []string{"native", "chat", "chat_after_account", "anthropic"} {
+		for _, route := range []string{"native", "chat", "chat_after_account", "anthropic", "forward_native", "forward_passthrough"} {
 			for _, committed := range []bool{false, true} {
+				if committed && strings.HasPrefix(route, "forward_") {
+					continue
+				}
 				t.Run(fmt.Sprintf("%s/%s/committed=%t", tc.name, route, committed), func(t *testing.T) {
 					req := newWebSearchReplayRequest(t)
 					req.c.Header("Retry-After", "310")
@@ -39,8 +42,14 @@ func TestM8ExplicitRequestErrorExits(t *testing.T) {
 						rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil)}
 					resp := newOpenAIUpstreamErrorResponse(tc.status, tc.payload)
 					account := webSearchReplayAccount(false)
+					upstream := &httpUpstreamRecorder{resp: resp}
+					svc.httpUpstream = upstream
 					var err error
 					switch route {
+					case "forward_native", "forward_passthrough":
+						account.Extra["openai_passthrough"] = route == "forward_passthrough"
+						_, err = svc.Forward(req.ctx, req.c, account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hello"}`))
+						require.Len(t, upstream.requests, 1)
 					case "chat":
 						_, err = svc.handleChatCompletionsErrorResponse(resp, req.c, account)
 					case "chat_after_account":
@@ -82,7 +91,13 @@ func TestM8ExplicitRequestErrorExits(t *testing.T) {
 						require.Equal(t, tc.code, gjson.Get(output, "error.code").String())
 						require.Equal(t, tc.param, gjson.Get(output, "error.param").String())
 					}
-					require.Equal(t, "invalid_request_error", gjson.Get(output, "error.type").String())
+					if route == "native" && committed {
+						// Responses response.failed retains its existing code/message
+						// error shape; the type field belongs to JSON/compat errors.
+						require.False(t, gjson.Get(output, "error.type").Exists())
+					} else {
+						require.Equal(t, "invalid_request_error", gjson.Get(output, "error.type").String())
+					}
 					require.True(t, resilience.RetryAdviceFrom(req.ctx).Suppress)
 					require.Empty(t, req.session.failures)
 					require.Zero(t, repo.setErrorCalls)

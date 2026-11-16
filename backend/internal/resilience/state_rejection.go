@@ -43,6 +43,8 @@ func ClassifyStateRejection(code, message string) StateRejection {
 		r.Family = StateToolOutputMissingCallID
 	case "upstream_continuation_expired":
 		r.Family = StateUpstreamContinuationExpired
+	case "encrypted_content_rejected":
+		r.Family, r.Encrypted = StateOtherEncrypted, true
 	}
 	if r.RequestScoped() {
 		return r

@@ -1166,6 +1166,14 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	requestBody []byte,
 	responseBody []byte,
 ) (forwardErr error) {
+	if rejection := classifyHTTPContinuationError(responseBody); rejection != nil {
+		WriteHTTPContinuationError(c, account, rejection)
+		return &OpenAIRequestRejectionError{rejection}
+	}
+	if rejection := upstreamEncryptedTerminalRejection(s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)); rejection != nil {
+		writeOpenAIEncryptedContentRejection(c, openAIHTTPErrorProtocol(c), rejection)
+		return &OpenAIRequestRejectionError{rejection}
+	}
 	defer func() {
 		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, responseBody, forwardErr)
 	}()
