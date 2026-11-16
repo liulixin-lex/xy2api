@@ -37,7 +37,7 @@ export function canRecover(row: RecoverableRow, summary: Pick<BackendAccountSumm
   const limits = row.extra?.model_rate_limits ?? {}
   if (Object.entries(limits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && activeUntil(info?.rate_limit_reset_at, now))) return true
   if (activeStreamOnly(row.capability_learned, now).length) return true
-  return (summary?.rear.length ?? 0) > 0 || (summary?.trial.length ?? 0) > 0
+  return (summary?.rear?.length ?? 0) > 0 || (summary?.trial?.length ?? 0) > 0
 }
 
 const pending = reactive(new Set<number>())

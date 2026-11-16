@@ -202,7 +202,7 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
   if (!quality) return []
   if (state === 'back') {
-    return quality.rear
+    return (quality.rear ?? [])
       .filter((item) => item.group_id === group.id)
       .map((item) => [
         iqModelLabel(item.model),
@@ -211,7 +211,7 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
       ])
   }
   if (state === 'trial') {
-    return quality.trial
+    return (quality.trial ?? [])
       .filter((item) => item.group_id === group.id)
       .map((item) => [iqModelLabel(item.model), trialUntil(item.until)])
   }
@@ -220,7 +220,8 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
     const rows = [[t('admin.accounts.table.tip.exemptUntil'), exemptEnd(exemption?.expires_at)]]
     return exemption?.reason ? [...rows, [t('admin.accounts.table.tip.reason'), exemption.reason]] : rows
   }
-  if (state === 'unknown') return [[t('admin.accounts.table.tip.samples'), t('admin.accounts.table.tip.count', { n: quality.ttfo.n }, quality.ttfo.n)]]
+  // Unknown may come from any of the three lines: the panel has each line's evidence.
+  if (state === 'unknown') return [[t('admin.accounts.table.tip.reason'), t('admin.accounts.table.tip.unknownWhy')]]
   if (state === 'stopped' && quality.stop) {
     const rows = [
       [t('admin.accounts.table.tip.reason'), kindName(quality.stop.reason, t, te)],
@@ -263,9 +264,9 @@ function moreTip(): TipCard {
       const state = stateOf(group)!
       const end =
         state === 'back'
-          ? backIn(latest(quality.rear, group))
+          ? backIn(latest(quality.rear ?? [], group))
           : state === 'trial'
-            ? trialUntil(latest(quality.trial, group))
+            ? trialUntil(latest(quality.trial ?? [], group))
             : state === 'exempt'
               ? exemptEnd(exemptionOf(quality, group)?.expires_at)
               : ''

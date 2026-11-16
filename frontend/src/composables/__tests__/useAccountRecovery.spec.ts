@@ -57,6 +57,12 @@ describe('canRecover (contract delta F1, scenario 37)', () => {
     expect(canRecover(row(), { ...summary(1), exemptions: [{ group_id: 0, expires_at: null, reason: '' }] } as never, NOW)).toBe(true)
   })
 
+  it('does not throw on a summary without trial or rear (a backend that leaves them out or sends null)', () => {
+    expect(canRecover(row(), { rear: summary(1).rear } as never, NOW)).toBe(true)
+    expect(canRecover(row(), { rear: null, trial: null } as never, NOW)).toBe(false)
+    expect(canRecover(row(), { trial: summary(0, 1).trial } as never, NOW)).toBe(true)
+  })
+
   it('counts an end time equal to now as ended, and a missing or invalid one as none', () => {
     for (const value of [at(0), at(-1), null, '', 'not-a-time']) {
       expect(canRecover(row({ rate_limit_reset_at: value, overload_until: value, temp_unschedulable_until: value }), undefined, NOW)).toBe(false)

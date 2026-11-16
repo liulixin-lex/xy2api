@@ -50,7 +50,7 @@ export default {
           source: '来源',
           sources: { auto: '自动', manual: '手动' },
           resume: '恢复',
-          samples: '首字样本',
+          unknownWhy: '证据不够，点圆点看三条线各自的证据',
           trialUntil: '试用到 {time}',
           count: '{n} 次',
           countShort: '{n} 次 · 样本不足',

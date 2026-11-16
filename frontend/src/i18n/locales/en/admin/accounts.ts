@@ -50,7 +50,7 @@ export default {
           source: 'Source',
           sources: { auto: 'Automatic', manual: 'Manual' },
           resume: 'Resumes',
-          samples: 'TTFT',
+          unknownWhy: 'Not enough evidence; click the dot for each line\'s evidence',
           trialUntil: 'trial until {time}',
           count: '{n} sample | {n} samples',
           countShort: '{n} sample · too few | {n} samples · too few',

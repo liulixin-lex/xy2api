@@ -204,9 +204,13 @@ describe('AccountGroupPills', () => {
       chip: { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true },
       rows: [['admin.accounts.table.tip.exemptUntil', 'admin.accounts.table.tip.forever'], ['admin.accounts.table.tip.reason', '试用']]
     })
+    // A trial group in a summary without `trial` (left out or null): the card has no rows, nothing throws.
+    const noTrial = mountPills(1, { ...baseQuality({ group_status: statuses({ 1: 'trial' }) }), trial: null } as never)
+    expect(cardOf(noTrial.get('[data-test="group-pill-dot"]'))).toMatchObject({ chip: { text: 'admin.accounts.table.dotStates.trial' }, rows: [] })
+    // Unknown may come from any line, not only first output: the tip says why and points at the panel, no TTFT count.
     const unknown = mountPills(1, baseQuality({ group_status: statuses({ 1: 'unknown' }), ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
     expect(cardOf(unknown.get('[data-test="group-pill-dot"]'))).toMatchObject({
-      chip: { text: 'admin.accounts.table.dotStates.unknown', tone: 'observe' }, rows: [['admin.accounts.table.tip.samples', 'admin.accounts.table.tip.count:{"n":12}']]
+      chip: { text: 'admin.accounts.table.dotStates.unknown', tone: 'observe' }, rows: [['admin.accounts.table.tip.reason', 'admin.accounts.table.tip.unknownWhy']]
     })
     const until = inMinutes(90)
     const stopped = mountPills(1, baseQuality({ stop: { source: 'manual', reason: 'manual_off', until } }))
