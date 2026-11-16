@@ -86,20 +86,101 @@ export const validateProfitControlFormState = (
   return null;
 };
 
-// 利润门预览的提示等级：有可调度成员但没有一个能通过为红字并在保存时要求确认，只剩 1 个为黄字；
-// 本组没有可调度成员时与毛利率无关，显示中性提示，不要求确认。
+// 最低上游倍率（倍率区间的下限）：只用于 OpenAI 分组，与利润开关无关，填了就生效；留空表示不设。
+// 后端按 decimal 存，最多 4 位小数，必须 > 0。
+export const isMinUpstreamRatePlatform = (platform: string): boolean =>
+  platform === "openai";
+
+export type MinUpstreamRateInput = number | string | null | undefined;
+
+const isBlankRate = (value: MinUpstreamRateInput): boolean =>
+  value === null || value === undefined || String(value).trim() === "";
+
+// 提交前校验：留空通过；否则必须是有限数、> 0、最多 4 位小数。
+// 返回 null 表示通过，否则返回错误信息的 i18n key（相对 admin.groups.profitControl 前缀）。
+export const validateMinUpstreamRate = (
+  value: MinUpstreamRateInput,
+): string | null => {
+  if (isBlankRate(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "floorRangeError";
+  if (Math.abs(Math.round(parsed * 1e4) / 1e4 - parsed) > 1e-9 * Math.max(1, parsed)) {
+    return "floorPrecisionError";
+  }
+  return null;
+};
+
+// 表单值 → 下限数值；留空或无效为 null（不设）。
+export const minUpstreamRateValue = (value: MinUpstreamRateInput): number | null =>
+  isBlankRate(value) || validateMinUpstreamRate(value) !== null ? null : Number(value);
+
+// 创建：只有 OpenAI 分组、填了值才提交；不填就不传。
+export const minUpstreamRateForCreate = (
+  platform: string,
+  value: MinUpstreamRateInput,
+): number | undefined => {
+  if (!isMinUpstreamRatePlatform(platform)) return undefined;
+  return minUpstreamRateValue(value) ?? undefined;
+};
+
+// 编辑：与 availability_fallback_group_id 同样的可空写法，提交 0 表示清除（只在原来设过、现在清空时才发）；
+// 原来就没设、现在也没填时不传；非 OpenAI 分组不传。
+export const minUpstreamRateForUpdate = (
+  platform: string,
+  value: MinUpstreamRateInput,
+  saved: number | null | undefined,
+): number | undefined => {
+  if (!isMinUpstreamRatePlatform(platform)) return undefined;
+  const next = minUpstreamRateValue(value);
+  if (next !== null) return next;
+  return typeof saved === "number" && saved > 0 ? 0 : undefined;
+};
+
+// 编辑回显：没设（null / 0）显示空框。
+export const minUpstreamRateFormValue = (
+  rate: number | null | undefined,
+): number | "" => (typeof rate === "number" && rate > 0 ? rate : "");
+
+// 利润门预览的提示等级：有可调度成员但没有一个能通过、或倍率区间为空（下限高于上限）为红字并在保存时要求确认，
+// 只剩 1 个为黄字；本组没有可调度成员时与毛利率无关，显示中性提示，不要求确认。
 export type ProfitPreviewLevel = "empty" | "danger" | "warning" | "normal";
 
 export const profitPreviewLevel = (preview: {
   schedulable: number;
   passing: number;
+  range_empty?: boolean;
 }): ProfitPreviewLevel => {
+  if (preview.range_empty) return "danger";
   if (preview.schedulable <= 0) return "empty";
   if (preview.passing <= 0) return "danger";
   if (preview.passing === 1) return "warning";
   return "normal";
 };
 
-// 上游倍率上限最多保留 4 位小数，去掉尾随 0（0.17600 → 0.176）。
+// 利润开关关闭、只设了下限时的预览等级：可调度成员全部低于下限（固定号不计入 below_floor）为红字。
+export const floorOnlyPreviewLevel = (preview: {
+  schedulable: number;
+  below_floor: number;
+}): ProfitPreviewLevel => {
+  if (preview.schedulable <= 0) return "empty";
+  if (preview.below_floor >= preview.schedulable) return "danger";
+  return "normal";
+};
+
+// 保存前要求确认的原因：区间为空，或没有成员能用。
+export type ProfitBlockReason = "range_empty" | "none_usable";
+
+export const profitBlockReason = (
+  preview: { schedulable: number; passing: number; below_floor: number; range_empty: boolean },
+  profitEnabled: boolean,
+): ProfitBlockReason | null => {
+  if (profitEnabled) {
+    if (preview.range_empty) return "range_empty";
+    return profitPreviewLevel(preview) === "danger" ? "none_usable" : null;
+  }
+  return floorOnlyPreviewLevel(preview) === "danger" ? "none_usable" : null;
+};
+
+// 上游倍率上限、下限最多保留 4 位小数，去掉尾随 0（0.17600 → 0.176）。
 export const formatProfitCeiling = (ceiling: number): string =>
   String(Math.round(ceiling * 1e4) / 1e4);

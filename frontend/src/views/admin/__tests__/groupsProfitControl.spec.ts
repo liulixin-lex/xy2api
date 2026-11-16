@@ -3,12 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
   effectiveProfitMarginPercent,
+  floorOnlyPreviewLevel,
   formatProfitCeiling,
+  minUpstreamRateForCreate,
+  minUpstreamRateForUpdate,
+  minUpstreamRateFormValue,
+  profitBlockReason,
   profitDecimalToPercent,
   profitMarginPercentOnEnable,
   profitMarginPercentFromGroup,
   profitPercentToDecimal,
   profitPreviewLevel,
+  validateMinUpstreamRate,
   validateProfitControlFormState,
   type ProfitControlFormState,
 } from "../groupsProfitControl";
@@ -193,6 +199,85 @@ describe("profitPreviewLevel", () => {
 
   it("is neutral when the group has no schedulable members", () => {
     expect(profitPreviewLevel({ schedulable: 0, passing: 0 })).toBe("empty");
+  });
+
+  it("is red when the floor is above the ceiling, even with passing members", () => {
+    expect(profitPreviewLevel({ schedulable: 11, passing: 4, range_empty: true })).toBe("danger");
+    expect(profitPreviewLevel({ schedulable: 0, passing: 0, range_empty: true })).toBe("danger");
+  });
+});
+
+describe("validateMinUpstreamRate", () => {
+  it("accepts an empty box as no floor", () => {
+    for (const value of ["", "  ", null, undefined]) {
+      expect(validateMinUpstreamRate(value)).toBeNull();
+    }
+  });
+
+  it("accepts finite positive values with at most four decimals", () => {
+    for (const value of [0.0001, 0.1234, 0.5, 1, 2.75, "0.3"]) {
+      expect(validateMinUpstreamRate(value)).toBeNull();
+    }
+  });
+
+  it("rejects zero, negatives and non-numbers", () => {
+    for (const value of [0, -0.1, "abc", Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(validateMinUpstreamRate(value)).toBe("floorRangeError");
+    }
+  });
+
+  it("rejects a fifth decimal instead of rounding it", () => {
+    expect(validateMinUpstreamRate(0.12345)).toBe("floorPrecisionError");
+    expect(validateMinUpstreamRate(0.00001)).toBe("floorPrecisionError");
+  });
+});
+
+describe("min upstream rate submit values", () => {
+  it("creates an OpenAI group with the floor only when one is entered", () => {
+    expect(minUpstreamRateForCreate("openai", "")).toBeUndefined();
+    expect(minUpstreamRateForCreate("openai", 0.3)).toBe(0.3);
+    expect(minUpstreamRateForCreate("anthropic", 0.3)).toBeUndefined();
+  });
+
+  it("clears a stored floor with 0, leaves an unset one alone and never sends it for other platforms", () => {
+    expect(minUpstreamRateForUpdate("openai", "", 0.3)).toBe(0);
+    expect(minUpstreamRateForUpdate("openai", "", null)).toBeUndefined();
+    expect(minUpstreamRateForUpdate("openai", 0.25, null)).toBe(0.25);
+    expect(minUpstreamRateForUpdate("openai", 0.25, 0.3)).toBe(0.25);
+    expect(minUpstreamRateForUpdate("gemini", 0.25, 0.3)).toBeUndefined();
+  });
+
+  it("echoes a stored floor and shows an empty box for none", () => {
+    expect(minUpstreamRateFormValue(0.25)).toBe(0.25);
+    expect(minUpstreamRateFormValue(null)).toBe("");
+    expect(minUpstreamRateFormValue(undefined)).toBe("");
+    expect(minUpstreamRateFormValue(0)).toBe("");
+  });
+});
+
+describe("profitBlockReason", () => {
+  const preview = (over: Partial<Parameters<typeof profitBlockReason>[0]> = {}) => ({
+    schedulable: 6,
+    passing: 3,
+    below_floor: 2,
+    range_empty: false,
+    ...over,
+  });
+
+  it("asks for confirmation when the range is empty or nobody passes with profit control on", () => {
+    expect(profitBlockReason(preview({ range_empty: true }), true)).toBe("range_empty");
+    expect(profitBlockReason(preview({ passing: 0 }), true)).toBe("none_usable");
+    expect(profitBlockReason(preview(), true)).toBeNull();
+    expect(profitBlockReason(preview({ schedulable: 0, passing: 0 }), true)).toBeNull();
+  });
+
+  it("with profit control off judges only the floor", () => {
+    // The ceiling does not apply: no passing member is not a reason by itself.
+    expect(profitBlockReason(preview({ passing: 0, range_empty: true }), false)).toBeNull();
+    expect(profitBlockReason(preview({ below_floor: 6 }), false)).toBe("none_usable");
+    expect(floorOnlyPreviewLevel(preview({ below_floor: 6 }))).toBe("danger");
+    expect(floorOnlyPreviewLevel(preview({ below_floor: 5 }))).toBe("normal");
+    expect(floorOnlyPreviewLevel(preview({ schedulable: 0, below_floor: 0 }))).toBe("empty");
   });
 });
 

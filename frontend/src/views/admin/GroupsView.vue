@@ -1251,6 +1251,27 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效 -->
+          <div
+            v-if="isMinUpstreamRatePlatform(createForm.platform)"
+            class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <div>
+              <label for="create-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
+              <input
+                id="create-min-upstream-rate"
+                v-model.number="createForm.min_upstream_rate"
+                type="number"
+                step="0.0001"
+                min="0"
+                :class="['input', { 'input-error': validateMinUpstreamRate(createForm.min_upstream_rate) }]"
+                :aria-invalid="!!validateMinUpstreamRate(createForm.min_upstream_rate)"
+                :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
+                data-testid="create-min-upstream-rate"
+              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.floorHint") }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- 支持的模型系列（仅 antigravity 平台） -->
@@ -2942,13 +2963,38 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
-          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（五个利润平台共用线上成本口径） -->
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效 -->
+          <div
+            v-if="isMinUpstreamRatePlatform(editForm.platform)"
+            class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <div>
+              <label for="edit-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
+              <input
+                id="edit-min-upstream-rate"
+                :disabled="!canAdjustBalance"
+                v-model.number="editForm.min_upstream_rate"
+                type="number"
+                step="0.0001"
+                min="0"
+                :class="['input', { 'input-error': validateMinUpstreamRate(editForm.min_upstream_rate) }]"
+                :aria-invalid="!!validateMinUpstreamRate(editForm.min_upstream_rate)"
+                :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
+                data-testid="edit-min-upstream-rate"
+              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.floorHint") }}</p>
+            </div>
+          </div>
+          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（五个利润平台共用线上成本口径），
+               以及下限排除的号、固定号；利润开关关闭但设了下限时只预览下限 -->
           <GroupProfitControlPreview
-            v-if="editForm.profit_control_enabled && editingGroup"
+            v-if="editingGroup && (editForm.profit_control_enabled || editFloorSet)"
             ref="editProfitPreviewRef"
             class="mb-3"
             :group-id="editingGroup.id"
             :margin-percent="editForm.profit_min_margin_percent"
+            :profit-enabled="editForm.profit_control_enabled"
+            :floor="isMinUpstreamRatePlatform(editForm.platform) ? editForm.min_upstream_rate : ''"
           />
         </div>
 
@@ -3861,8 +3907,8 @@
 
     <ConfirmDialog
       :show="showZeroPassProfitConfirm"
-      :title="t('admin.groups.profitControl.zeroPassConfirmTitle')"
-      :message="t('admin.groups.profitControl.zeroPassConfirmMessage')"
+      :title="t(`admin.groups.profitControl.${zeroPassProfitCopy}ConfirmTitle`)"
+      :message="t(`admin.groups.profitControl.${zeroPassProfitCopy}ConfirmMessage`)"
       :confirm-text="t('admin.groups.profitControl.zeroPassConfirm')"
       :cancel-text="t('common.cancel')"
       :danger="true"
@@ -4476,11 +4522,17 @@ import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
   PROFIT_SAFETY_BUFFER,
   effectiveProfitMarginPercent,
+  isMinUpstreamRatePlatform,
   isProfitControlPlatform,
+  minUpstreamRateForCreate,
+  minUpstreamRateForUpdate,
+  minUpstreamRateFormValue,
   profitMarginPercentFromGroup,
   profitMarginPercentOnEnable,
   profitPercentToDecimal,
+  validateMinUpstreamRate,
   validateProfitControlFormState,
+  type ProfitBlockReason,
   type ProfitControlFormState,
 } from "./groupsProfitControl";
 import {
@@ -4615,6 +4667,7 @@ const operatorGroupPriceFields = [
   "profit_control_enabled",
   "profit_min_margin",
   "profit_safety_buffer",
+  "min_upstream_rate",
   "image_price_1k",
   "image_price_2k",
   "image_price_4k",
@@ -5325,6 +5378,7 @@ const createForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
+  min_upstream_rate: "" as number | string,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5695,6 +5749,7 @@ const editForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
+  min_upstream_rate: "" as number | string,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5725,6 +5780,13 @@ const editForm = reactive({
   max_reasoning_effort_over_limit: reasoningEffortOverLimitDowngrade,
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
+
+// 编辑弹窗里填了最低上游倍率（OpenAI 分组）：利润开关关闭时也显示预览，只看与下限有关的几行。
+const editFloorSet = computed(
+  () =>
+    isMinUpstreamRatePlatform(editForm.platform) &&
+    String(editForm.min_upstream_rate ?? "").trim() !== "",
+);
 
 type ImagePricingFormState = {
   platform: GroupPlatform;
@@ -6043,6 +6105,7 @@ const closeCreateModal = () => {
   createForm.peak_rate_multiplier = 1.0;
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
+  createForm.min_upstream_rate = "";
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -6106,10 +6169,18 @@ const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
 };
 
 // 利润门预览显示没有成员能通过时，保存前要求确认。
+// 下限把区间压空、或设了下限后没有成员能用时，换用说明下限的文案。
 const showZeroPassProfitConfirm = ref(false);
+const zeroPassProfitCopy = ref<"zeroPass" | "floorRangeEmpty" | "floorNoneUsable">("zeroPass");
 let zeroPassProfitResolve: ((confirmed: boolean) => void) | null = null;
-const confirmZeroPassProfit = () =>
+const confirmZeroPassProfit = (reason: ProfitBlockReason) =>
   new Promise<boolean>((resolve) => {
+    zeroPassProfitCopy.value =
+      reason === "range_empty"
+        ? "floorRangeEmpty"
+        : editForm.profit_control_enabled && !editFloorSet.value
+          ? "zeroPass"
+          : "floorNoneUsable";
     zeroPassProfitResolve = resolve;
     showZeroPassProfitConfirm.value = true;
   });
@@ -6119,8 +6190,14 @@ const settleZeroPassProfitConfirm = (confirmed: boolean) => {
   zeroPassProfitResolve = null;
 };
 
-const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
-  const errorKey = validateProfitControlFormState(form);
+const validateProfitControlForm = (
+  form: ProfitControlFormState & { min_upstream_rate: number | string },
+): boolean => {
+  const errorKey =
+    validateProfitControlFormState(form) ??
+    (isMinUpstreamRatePlatform(form.platform)
+      ? validateMinUpstreamRate(form.min_upstream_rate)
+      : null);
   if (errorKey) {
     appStore.showError(t(`admin.groups.profitControl.${errorKey}`));
     return false;
@@ -6233,8 +6310,16 @@ const handleCreateGroup = async () => {
         createForm.profit_control_enabled,
       profit_min_margin: profitMarginToDecimal(createForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
+      // 最低上游倍率：仅 OpenAI 分组，不填就不传
+      min_upstream_rate: minUpstreamRateForCreate(
+        createForm.platform,
+        createForm.min_upstream_rate,
+      ),
     };
     delete (requestData as Record<string, unknown>).profit_min_margin_percent;
+    if (requestData.min_upstream_rate === undefined) {
+      delete (requestData as Record<string, unknown>).min_upstream_rate;
+    }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
@@ -6372,6 +6457,7 @@ const handleEdit = async (group: AdminGroup) => {
     group.profit_min_margin,
     group.profit_safety_buffer,
   );
+  editForm.min_upstream_rate = minUpstreamRateFormValue(group.min_upstream_rate);
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -6466,6 +6552,7 @@ const closeEditModal = () => {
   editForm.peak_rate_multiplier = 1.0;
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
+  editForm.min_upstream_rate = "";
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -6608,8 +6695,17 @@ const handleUpdateGroup = async () => {
         editForm.profit_control_enabled,
       profit_min_margin: profitMarginToDecimal(editForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
+      // 最低上游倍率：仅 OpenAI 分组；清空已设的下限时提交 0（与 availability_fallback_group_id 同样的写法）
+      min_upstream_rate: minUpstreamRateForUpdate(
+        editForm.platform,
+        editForm.min_upstream_rate,
+        editingGroup.value.min_upstream_rate,
+      ),
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
+    if (payload.min_upstream_rate === undefined) {
+      delete (payload as Record<string, unknown>).min_upstream_rate;
+    }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
@@ -6683,11 +6779,10 @@ const handleUpdateGroup = async () => {
       if (
         !authStore.isSimpleMode &&
         canAdjustBalance.value &&
-        editProfitPreviewRef.value &&
-        (await editProfitPreviewRef.value.blocksAllMembers()) &&
-        !(await confirmZeroPassProfit())
+        editProfitPreviewRef.value
       ) {
-        return;
+        const reason = await editProfitPreviewRef.value.blockingReason();
+        if (reason && !(await confirmZeroPassProfit(reason))) return;
       }
       await adminAPI.groups.update(groupId, requestData);
       savedEditGroupRequestKey = groupRequestKey;
@@ -7028,6 +7123,9 @@ watch(
       createForm.profit_control_enabled = false;
       createForm.profit_min_margin_percent = 0;
     }
+    if (!isMinUpstreamRatePlatform(newVal)) {
+      createForm.min_upstream_rate = "";
+    }
     createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
       createForm.max_reasoning_effort,
@@ -7083,6 +7181,9 @@ watch(
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
       editForm.profit_min_margin_percent = 0;
+    }
+    if (!isMinUpstreamRatePlatform(newVal)) {
+      editForm.min_upstream_rate = "";
     }
     editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
