@@ -349,11 +349,9 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		if hint, ok := st.AccountRetryNotBefore(account.ID); ok && now.Before(hint.NotBefore) {
 			return nil, schedHTTPPreDispatchFailure(ctx)
 		}
-		// First sends and in-service repairs already have their own admission.
-		// Recheck handler retries without overriding those existing grants.
-		if st.LastUpstreamFailure() != nil && !st.Budget().CanAttempt(now) {
-			return nil, schedHTTPPreDispatchFailure(ctx)
-		}
+		// Handler retries are admitted after their wait. In-service repairs
+		// have a separate grant, including encrypted repair on the last attempt;
+		// do not revoke that grant by checking the handler attempt count again.
 	}
 	st.SetUpstreamRecoveryHint(nil)
 	st.SetUpstreamAttemptTarget(nil)

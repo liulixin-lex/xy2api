@@ -16,7 +16,7 @@ import (
 )
 
 func TestM8PreDispatchPreservesFailure(t *testing.T) {
-	for _, gate := range []string{"not_before", "budget", "deadline"} {
+	for _, gate := range []string{"not_before", "deadline"} {
 		t.Run(gate, func(t *testing.T) {
 			st := resilience.NewRequestState()
 			ctx := resilience.WithRequestState(context.Background(), st)
@@ -28,12 +28,6 @@ func TestM8PreDispatchPreservesFailure(t *testing.T) {
 			switch gate {
 			case "not_before":
 				st.NoteAccountRetryNotBefore(11, hint)
-			case "budget":
-				settings := resilience.Defaults()
-				settings.Budget.MaxAttempts = 1
-				budget := resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now())
-				budget.RecordAttemptAt(time.Now())
-				st.SetBudget(budget)
 			case "deadline":
 				deadline, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 				defer cancel()
@@ -95,6 +89,31 @@ func TestM8PreDispatchPreservesFailure(t *testing.T) {
 	var absent *resilience.RequestState
 	absent.SetLastUpstreamFailure(errors.New("ignored"))
 	require.Nil(t, absent.LastUpstreamFailure())
+}
+
+func TestM8AdmittedEncryptedRepairReachesLastAttempt(t *testing.T) {
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	settings := resilience.Defaults()
+	budget := resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now())
+	st.SetBudget(budget)
+	for i := 1; i < budget.MaxAttempts(); i++ {
+		budget.RecordAttemptAt(time.Now())
+	}
+	st.SetLastUpstreamFailure(&UpstreamFailoverError{StatusCode: 429,
+		ResponseBody: []byte(`{"error":{"message":"previous account rate limit"}}`)})
+	require.True(t, budget.CanAttempt(time.Now()))
+	require.True(t, budget.ConsumeInPlaceRetry(44, false, time.Now(), resilience.ReasonEncryptedContent))
+	require.False(t, budget.CanAttempt(time.Now()), "the repair has already consumed its grant")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upstream.example/v1/responses", nil)
+	require.NoError(t, err)
+	transport := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody}}
+	svc := &OpenAIGatewayService{httpUpstream: transport}
+	var capture *schedAttemptCapture
+	resp, err := svc.sendSchedHTTP(ctx, &Account{ID: 44, Platform: PlatformOpenAI}, req, "", nil, false, &capture)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, transport.requests, 1)
 }
 
 // Credential resolution can finish after the header timer fires, before any
