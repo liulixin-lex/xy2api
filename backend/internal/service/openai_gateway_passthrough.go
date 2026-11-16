@@ -374,6 +374,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if budgetReasoningEffort != nil {
 		reasoningEffortValue = *budgetReasoningEffort
 	}
+	hasExplicitReasoningEffort := extractOpenAIReasoningEffortFromBody(body) != nil
 	// xy2api resilience (W1.2): with stream.strict_terminal the first-output
 	// deadline of a streaming passthrough also bounds the header wait.
 
@@ -406,6 +407,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, actualModel, "responses")
 			if policyErr != nil {
 				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			if !replayAttempt && hasExplicitReasoningEffort {
+				if effort := extractOpenAIReasoningEffortFromBody(policyBody); effort != nil {
+					reasoningEffortValue = *effort
+				}
 			}
 			body = policyBody
 		}
