@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"context"
-	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,9 +13,6 @@ import (
 func WriteInferenceBodyReadError(c *gin.Context, err error) {
 	logRequestBodyReadFailure(requestLogger(c, "handler.gateway.ingress"), c.Request, err)
 	status, kind, code, message := requestBodyReadFailureResponse(c.Request, err)
-	if errors.Is(c.Request.Context().Err(), context.Canceled) {
-		status = statusClientClosedRequest
-	}
 	if status == statusClientClosedRequest {
 		if !c.Writer.Written() {
 			c.Status(status)
