@@ -228,6 +228,7 @@ func TestModelRejectDiagnosis503BoundariesUnchanged(t *testing.T) {
 	} {
 		for _, route := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages/count_tokens"} {
 			t.Run(tc.name+route, func(t *testing.T) {
+				withHandlerResilience(t, nil)
 				platform := service.PlatformOpenAI
 				if route == "/v1/messages/count_tokens" {
 					platform = service.PlatformGemini
@@ -240,6 +241,12 @@ func TestModelRejectDiagnosis503BoundariesUnchanged(t *testing.T) {
 					repo.diagnosisErr = errors.New("diagnosis query failed")
 				}
 				c, response := runModelRejectHandler(t, route, platform, repo, map[string]string{"public-model": "actual-model"})
+				if tc.empty && platform == service.PlatformOpenAI {
+					require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+					require.Equal(t, `{"error":{"message":"Model \"public-model\" is not supported by any configured account in this group","type":"model_not_found"}}`, response.Body.String())
+					require.Empty(t, response.Header().Get("Retry-After"))
+					return
+				}
 				require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 				want := `{"error":{"message":"Service temporarily unavailable. Please try again in 30s.","type":"api_error"}}`
 				if route == "/v1/messages/count_tokens" {

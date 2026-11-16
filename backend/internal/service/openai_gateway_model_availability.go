@@ -53,12 +53,7 @@ func (s *OpenAIGatewayService) openAIModelAvailability(ctx context.Context, grou
 	for i := range accounts {
 		account := &accounts[i]
 		diag.Members++
-		if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
-			if publicModel, known := RequestedPublicModelFromContext(ctx); known && !explicitModelMappingClaims(*account, publicModel) {
-				continue
-			}
-		}
-		if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		if openAIConfiguredModelFailureReason(ctx, account, requestedModel) != "" {
 			continue
 		}
 		diag.ModelSupported++
@@ -69,4 +64,16 @@ func (s *OpenAIGatewayService) openAIModelAvailability(ctx context.Context, grou
 	diag.HasAccountsInPool = diag.Members > 0
 	diag.HasModelSupport = diag.ModelSupported > 0
 	return diag, accounts
+}
+
+func openAIConfiguredModelFailureReason(ctx context.Context, account *Account, requestedModel string) string {
+	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
+		if publicModel, known := RequestedPublicModelFromContext(ctx); known && !explicitModelMappingClaims(*account, publicModel) {
+			return string(SelectionReasonAccountModelNotOwned)
+		}
+	}
+	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		return string(SelectionReasonModelNotSupported)
+	}
+	return ""
 }

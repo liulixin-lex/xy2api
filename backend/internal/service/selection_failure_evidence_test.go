@@ -193,6 +193,24 @@ func TestM9SelectionRetainsRecordedFailure(t *testing.T) {
 	require.Nil(t, resilienceNegativeCacheHit(ctx, ptrInt64Selection(709), "m9-recorded-failure", "", nil))
 }
 
+func TestM9PersistentModelAbsenceSurvivesCooldown(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := selectionFixtureAccount(1, 1)
+	account.GroupIDs = []int64{709}
+	account.Credentials = map[string]any{"model_mapping": map[string]any{"different-model": "different-model"}}
+	until := time.Now().Add(time.Hour)
+	account.TempUnschedulableUntil = &until
+	f := newSelectionRuntimeFixture(t, account)
+	_, _, err := f.svc.SelectAccountWithScheduler(context.Background(), ptrInt64Selection(709), "", "", "missing-model", nil, OpenAIUpstreamTransportHTTPSSE, false)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	e, ok := SelectionExhaustionFromError(err)
+	require.True(t, ok)
+	require.True(t, e.Known)
+	require.Equal(t, 1, e.Members)
+	require.Zero(t, e.ModelSupported)
+	require.Equal(t, map[SelectionReason]int{SelectionReasonModelNotSupported: 1}, e.Reasons)
+}
+
 func TestSelectionRetryNotBeforeAllPaths(t *testing.T) {
 	for _, mode := range []string{"normal", "sticky", "legacy", "db", "last_resort", "no_wait"} {
 		t.Run(mode, func(t *testing.T) {

@@ -182,7 +182,15 @@ func (s *OpenAIGatewayService) withOpenAISelectionExhaustion(ctx context.Context
 	// persistent members too, without acquiring a slot or relaxing any gate.
 	for i := range accounts {
 		a := &accounts[i]
-		if evidence == nil || evidence.reasons[a.ID] != "" || evidence.ready[a.ID] {
+		if evidence == nil || evidence.ready[a.ID] {
+			continue
+		}
+		// A transient block cannot supply a model absent from configuration.
+		if reason := openAIConfiguredModelFailureReason(ctx, a, req.RequestedModel); reason != "" {
+			observeSelectionFailure(ctx, a.ID, reason, nil)
+			continue
+		}
+		if evidence.reasons[a.ID] != "" {
 			continue
 		}
 		if _, excluded := req.ExcludedIDs[a.ID]; excluded {
