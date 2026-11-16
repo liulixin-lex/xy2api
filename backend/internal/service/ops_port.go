@@ -105,6 +105,8 @@ type OpsInsertErrorLogInput struct {
 	ErrorSource string
 	ErrorOwner  string
 
+	StatusOrigin         int16
+	ClientStatus         int
 	UpstreamStatusCode   *int
 	UpstreamErrorMessage *string
 	UpstreamErrorDetail  *string

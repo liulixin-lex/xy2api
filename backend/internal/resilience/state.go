@@ -16,6 +16,9 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
+	clientOutputBytes     atomic.Int64
+	upstreamHTTPStatus    int
+	upstreamHTTPAccount   int64
 	upstreamRecoveryHint  *UpstreamRecoveryHint
 	accountRetryNotBefore map[int64]UpstreamRecoveryHint
 	upstreamAttemptTarget *UpstreamAttemptTarget

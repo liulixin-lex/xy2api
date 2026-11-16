@@ -1,21 +1,131 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
+
+// classifySchedAttempt keeps quality attribution separate from resilience's
+// immediate retry/credential policy. An unexplained 4xx is not proof of fault.
+func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, output bool) SchedAttemptFinish {
+	if in.Outcome == schedquality.OutcomeOK {
+		in.Class = schedquality.ClassNone
+		return in
+	}
+	if in.Class != schedquality.ClassNone {
+		return in
+	}
+	in.Class = schedquality.ClassUnknown
+	if in.StatusOrigin == schedquality.OriginGateway {
+		in.Class = schedquality.ClassGateway
+		if in.HTTPStatus == http.StatusBadRequest || in.HTTPStatus == http.StatusNotFound {
+			in.Class = schedquality.ClassRequest
+		}
+		return in
+	}
+	if failure == nil {
+		if output {
+			in.Class = schedquality.ClassInterrupted
+		}
+		return in
+	}
+	o := *failure
+	if o.StatusCode > 0 && (o.Source == resilience.SourceHTTP || o.Source == resilience.SourceStreamEvent) {
+		in.HTTPStatus, in.StatusOrigin = o.StatusCode, schedquality.OriginUpstream
+	}
+	fields := schedErrorFields(o.Body)
+	code, message := o.Code, o.Message
+	if code == "" {
+		code = fields.Get("code").String()
+	}
+	if message == "" {
+		message = fields.Get("message").String()
+	}
+	capabilityStatus := o.StatusCode
+	if o.Source == resilience.SourceStreamEvent {
+		capabilityStatus = http.StatusBadRequest
+	}
+	result := classifyUpstreamOutcome(o)
+	switch {
+	case o.Source == resilience.SourceClientCancel:
+		in.Class = schedquality.ClassClientCancel
+	case o.Source == resilience.SourceFirstOutputTimeout:
+		in.Class, in.HTTPStatus, in.StatusOrigin = schedquality.ClassFirstOutputTimeout, http.StatusGatewayTimeout, schedquality.OriginGateway
+	case output:
+		in.Class = schedquality.ClassInterrupted
+	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
+		in.Class = schedquality.ClassMigration400
+	case IsUpstreamCapabilityFailure(capabilityStatus, o.Body) || result.Category == resilience.CategoryModelUnsupported && result.Reason != "status_404_model":
+		in.Class = schedquality.ClassCapability
+	case result.Category == resilience.CategoryBalance && strings.Contains(strings.ToLower(message), "upstream image account"):
+		in.Class = schedquality.ClassUpstream
+	case result.Category == resilience.CategoryAuth && (!result.StatusOnly() || o.StatusCode == http.StatusUnauthorized) || result.Category == resilience.CategoryBalance:
+		in.Class = schedquality.ClassAccountAccess
+	case schedAccountCapacity(code, message):
+		in.Class = schedquality.ClassAccountCapacity
+	case schedRequestMessage(message) || resilience.IsContextWindowError(message, o.Body) || result.Category == resilience.CategoryUpstreamRequestRestriction || result.Category == resilience.CategoryClientError && !result.StatusOnly():
+		in.Class = schedquality.ClassRequest
+	case result.Category == resilience.CategoryCapacityShed:
+		in.Class = schedquality.ClassUpstream
+	case o.Source == resilience.SourceHTTP && o.StatusCode >= 500:
+		in.Class = schedquality.ClassUpstream
+	case o.Source == resilience.SourceNetwork && o.Err != nil && !errors.Is(o.Err, context.Canceled) && !errors.Is(o.Err, context.DeadlineExceeded):
+		in.Class = schedquality.ClassUpstream
+	}
+	return in
+}
+
+func schedMigrationMessage(message string) bool {
+	m := strings.ToLower(message)
+	for _, phrase := range []string{"no tool call found for function call output", "tool_use ids were found without tool_result", "tool_result blocks must have a corresponding tool_use", "previous_response_id is not supported", "previous response not found"} {
+		if strings.Contains(m, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func schedAccountCapacity(code, message string) bool {
+	switch strings.ToLower(code) {
+	case "account_limit_exceeded", "account_rate_limit_exceeded", "concurrency_limit_exceeded", "account_pool_exhausted", "credentials_exhausted":
+		return true
+	}
+	m := strings.ToLower(message)
+	for _, phrase := range []string{"account limit reached", "account rate limit", "concurrency limit exceeded", "concurrency limit reached", "no available credentials", "no available accounts"} {
+		if strings.Contains(m, phrase) {
+			return true
+		}
+	}
+	if strings.Contains(m, "all credentials") || strings.Contains(m, "all accounts") {
+		for _, exhausted := range []string{"exhausted", "rate limited", "rate-limited", "unavailable", "cooldown"} {
+			if strings.Contains(m, exhausted) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // IsUpstreamCapabilityFailure recognizes an explicit upstream model/protocol
 // rejection. Callers must supply the upstream response, not a gateway status or
 // request body. Ordinary parameter errors and ambiguous 404s are not evidence.
 func IsUpstreamCapabilityFailure(status int, body []byte) bool {
-	if status < 400 || status > 599 || len(body) > 1<<20 || !gjson.ValidBytes(body) {
+	if status < 400 || status > 599 || len(body) > 1<<20 {
 		return false
 	}
-	if resilience.IsModelUnsupportedResponse(status, body) || resilience.IsStreamOnlyFailure(status, body) {
+	if resilience.IsStreamOnlyFailure(status, body) {
+		return true
+	}
+	if !gjson.ValidBytes(body) {
+		return false
+	}
+	if resilience.IsModelUnsupportedResponse(status, body) {
 		return true
 	}
 	fields := schedErrorFields(body)
@@ -53,4 +163,14 @@ func schedErrorFields(body []byte) gjson.Result {
 		return fields
 	}
 	return gjson.Result{}
+}
+
+func schedRequestMessage(message string) bool {
+	m := strings.ToLower(message)
+	for _, phrase := range []string{"invalid parameter", "invalid type", "request too large", "request body too large", "request entity too large", "payload too large"} {
+		if strings.Contains(m, phrase) {
+			return true
+		}
+	}
+	return false
 }

@@ -15,7 +15,7 @@ func TestOpsInsertErrorLogArgsPreservesExplicitZeroUpstreamStatus(t *testing.T) 
 	args := opsInsertErrorLogArgs(&service.OpsInsertErrorLogInput{UpstreamStatusCode: &zero})
 
 	// xy2api resilience: disconnect_stage and delivered_bytes (migration 275).
-	require.Len(t, args, 45)
+	require.Len(t, args, 47)
 	encoded, ok := args[27].(sql.NullInt64)
 	require.True(t, ok)
 	require.True(t, encoded.Valid)
@@ -46,4 +46,12 @@ func TestOpsNullableIntPointerDistinguishesNilZeroAndStatus(t *testing.T) {
 	status := opsNullableIntPointer(&statusValue).(sql.NullInt64)
 	require.True(t, status.Valid)
 	require.EqualValues(t, 503, status.Int64)
+}
+
+func TestOpsInsertErrorLogArgsStatusProvenance(t *testing.T) {
+	status := 502
+	args := opsInsertErrorLogArgs(&service.OpsInsertErrorLogInput{UpstreamStatusCode: &status, StatusOrigin: 1, ClientStatus: 200, StatusCode: 503})
+	require.Equal(t, sql.NullInt64{Int64: 502, Valid: true}, args[27])
+	require.Equal(t, sql.NullInt64{Int64: 1, Valid: true}, args[45])
+	require.Equal(t, sql.NullInt64{Int64: 200, Valid: true}, args[46])
 }

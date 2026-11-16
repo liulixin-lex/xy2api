@@ -359,6 +359,7 @@
     "311_enable_apikey_upstream_billing_probe.sql": "7f1f0f8879e921d02020b1dee95441cf9e99c478592dc1929f49b2941bb55644",
     "312_gateway_usage_facts.sql": "ca0977857d525087fed73bd388649aa1e603d8af6b200eb8a512d52720e27d42",
     "313_sched_attempt_v2.sql": "80db1d9c07741459ef9deeb92d88ed2814962c2ac762f408de5b850443d47047",
-    "314_quality_gate_v2_fields.sql": "d288152de934c5a8ceaeee5eaa7415636eb212758954ec1e8712d2fc614fac1c"
+    "314_quality_gate_v2_fields.sql": "d288152de934c5a8ceaeee5eaa7415636eb212758954ec1e8712d2fc614fac1c",
+    "316_ops_status_origin.sql": "866e930c56080874293f34f118bfc07863f1016d40a909ab1ee9ac39a24633ea"
   }
 }

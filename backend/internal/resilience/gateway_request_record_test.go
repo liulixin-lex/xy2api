@@ -261,3 +261,36 @@ func TestM8GatewayMetadataFreeze(t *testing.T) {
 		require.Equal(t, first, second)
 	})
 }
+
+func TestGatewayRequestRescueRequiresEarlierFailedSend(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sends    int
+		failedAt int
+		want     int16
+	}{
+		{"single contradictory capture", 1, 1, RequestSuccess},
+		{"two successful sends", 2, 0, RequestSuccess},
+		{"only last capture failed", 2, 2, RequestSuccess},
+		{"earlier send failed", 2, 1, RequestRescued},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewRequestState()
+			st.EnableGatewayRequest(time.Now())
+			id := st.GatewayRequestID()
+			for i := 1; i <= tc.sends; i++ {
+				st.NoteGatewaySend(1)
+				st.NoteGatewayAttempt(i != tc.failedAt, "synthetic", nil, nil, nil)
+			}
+			st.CompleteGatewayForward(true, false)
+			meta, write := st.ClaimGatewayRequest(true)
+			require.False(t, write)
+			require.Equal(t, tc.want, meta.Result)
+			require.Equal(t, id, meta.RequestID)
+			require.NotEmpty(t, meta.RequestID)
+			st.NoteGatewayAttempt(false, "late cleanup", nil, nil, nil)
+			frozen, _ := st.ClaimGatewayRequest(false)
+			require.Equal(t, meta, frozen)
+		})
+	}
+}

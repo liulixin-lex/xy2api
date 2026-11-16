@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -50,6 +52,8 @@ type gatewayRequestTrace struct {
 
 	started                    time.Time
 	sends                      int
+	failedBeforeSend           bool
+	currentFailed              bool
 	lastAccount                int64
 	switches                   int16
 	fallback, takeover         bool
@@ -150,6 +154,10 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 	r.lastAccount = accountID
 	r.fallback = s.selectionFlags.accountID == accountID && s.selectionFlags.fallback
 	r.takeover = s.selectionFlags.accountID == accountID && s.selectionFlags.takeover
+	if r.sends > 0 && r.currentFailed {
+		r.failedBeforeSend = true
+	}
+	r.currentFailed = false
 	r.sends++
 	r.complete = false
 	r.UsageObserved, r.UsageSource = nil, nil
@@ -178,6 +186,7 @@ func (s *RequestState) NoteGatewayAttempt(success bool, detail string, input, re
 	}
 	if !success {
 		r.failed = true
+		r.currentFailed = true
 		r.errorClass = detail
 	}
 	addKnown := func(dst **int, value *int) {
@@ -209,6 +218,7 @@ func (s *RequestState) CompleteGatewayForward(complete, canceled bool) {
 	r.complete, r.canceled = complete && !canceled, canceled
 	if !complete && r.sends > 0 {
 		r.failed = true
+		r.currentFailed = true
 	}
 }
 
@@ -231,10 +241,14 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 		switch {
 		case r.canceled || !r.complete && canceled:
 			result = RequestCanceled
-		case r.complete && r.failed:
+		case r.complete && r.sends >= 2 && r.failedBeforeSend:
 			result = RequestRescued
 		case r.complete:
 			result = RequestSuccess
+			if r.failed {
+				logger.L().Warn("sched_quality.delivery_capture_mismatch", zap.String("component", "sched_quality"),
+					zap.String("request_id", s.requestID), zap.Int("sends", r.sends), zap.String("sample_error_class", r.errorClass))
+			}
 		}
 		r.final = cloneGatewayRequest(&GatewayRequestMetadata{RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
@@ -353,4 +367,44 @@ func (s *RequestState) SetGatewayResponseFacts(accountID int64, known, usagePres
 	r.UsageObserved, r.UsageSource = &usagePresent, &usageSource
 	r.TerminalEventSeen, r.TerminalEventValid, r.ResponseBodyType = &terminalSeen, &terminalValid, &bodyKind
 	return true
+}
+
+// NoteUpstreamHTTPStatus stores only the actual response head for the active
+// send. A zero status resets it before transport; semantic error projections
+// must never be passed here.
+func (s *RequestState) NoteUpstreamHTTPStatus(accountID int64, status int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, status
+}
+
+func (s *RequestState) UpstreamHTTPStatus(accountID int64) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if accountID != 0 && accountID != s.upstreamHTTPAccount {
+		return 0
+	}
+	return s.upstreamHTTPStatus
+}
+
+// NoteClientOutputBytes records confirmed client payload writes, independently
+// of semantic-output eligibility. HTTP supplies Write's n; WebSocket supplies
+// the payload size only after a successful frame write.
+func (s *RequestState) NoteClientOutputBytes(n int) {
+	if s != nil && n > 0 {
+		s.clientOutputBytes.Add(int64(n))
+	}
+}
+
+func (s *RequestState) ClientOutputBytes() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.clientOutputBytes.Load()
 }
