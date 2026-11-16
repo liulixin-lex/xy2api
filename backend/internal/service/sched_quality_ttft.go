@@ -131,12 +131,14 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		result := q.AssessError(samples, running, p.MaxErrorRate, cut, at)
 		basis.Threshold = result.Limit
 		basis.Error = &result
+		basis.SourceGroups = append([]int64(nil), result.SourceGroups...)
 		basis.AttemptIDs = result.AttemptIDs
 		verdict = result.Verdict
 	case q.DimensionCache:
 		result := q.AssessCache(samples, p.MinCacheRatio, cut, at)
 		basis.Threshold = p.MinCacheRatio
 		basis.Cache = &result
+		basis.SourceGroups = append([]int64(nil), result.SourceGroups...)
 		basis.AttemptIDs = result.AttemptIDs
 		verdict = result.Verdict
 	}
@@ -167,14 +169,7 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		if len(basis.AttemptIDs) > 50 {
 			basis.AttemptIDs = basis.AttemptIDs[:50]
 		}
-	case q.DimensionError:
-		for _, group := range basis.Error.SourceGroups {
-			sources[group] = true
-		}
-	case q.DimensionCache:
-		for _, group := range basis.Cache.SourceGroups {
-			sources[group] = true
-		}
+
 	}
 	for g := range sources {
 		basis.SourceGroups = append(basis.SourceGroups, g)

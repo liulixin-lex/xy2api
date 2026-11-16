@@ -93,3 +93,28 @@ func TestEngineErrorSourceGroupsFollowFinalHundredRequests(t *testing.T) {
 	require.Equal(t, 100, b.Error.Clear)
 	require.Equal(t, []int64{10}, b.SourceGroups)
 }
+
+func TestEngineRequestOriginSurvivesEvidenceCut(t *testing.T) {
+	f := newQualityFixture(t)
+	at := f.now.Add(-10 * time.Second)
+	cut := at.Add(-time.Minute)
+	first := engineSamples(1, at.Add(-2*time.Minute), false)[0]
+	last := engineSamples(1, at.Add(-time.Second), false)[0]
+	first.RequestID, last.RequestID = "same-request", "same-request"
+	first.GroupID = 20
+	f.e.window.merge([]q.AttemptSample{first, last}, f.now)
+	d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
+	require.NoError(t, err)
+	_, b := f.e.assessLine(d, q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: first.Model, Line: q.DimensionError}, Epoch: cut}, q.EventRegular, at, nil)
+	require.Zero(t, b.Error.Clear)
+	require.Empty(t, b.SourceGroups)
+}
+func TestEngineRuleBEvaluationErrorRemainsUnknown(t *testing.T) {
+	f := newQualityFixture(t)
+	d, err := f.e.inputs(context.Background(), f.now, nil)
+	require.NoError(t, err)
+	f.e.rule.Params.Confidence = 0
+	verdict, b := f.e.assessLine(d, q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic", Line: q.DimensionTTFO}}, q.EventRegular, f.now, nil)
+	require.Equal(t, q.VerdictUnknown, verdict)
+	require.Nil(t, b.TTFT)
+}
