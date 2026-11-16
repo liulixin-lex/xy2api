@@ -57,6 +57,20 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if isGrokImageGenerationModel(upstreamModel) {
 		return nil, fmt.Errorf("model %s is an image model and is not available on the Responses endpoint; use /v1/images/generations instead", upstreamModel)
 	}
+	if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		policy, _ := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+		if policy.maxEffort == "" && len(policy.mappings) == 0 && c != nil && c.Request != nil {
+			policy, _ = c.Request.Context().Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
+		}
+		// With no group policy, keep Grok's existing field shape and normalization.
+		if policy.maxEffort != "" || len(policy.mappings) > 0 {
+			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, upstreamModel, "responses")
+			if policyErr != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			body = policyBody
+		}
+	}
 	patchedBody, clientToolMapping, err := patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 	if err != nil {
 		setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")

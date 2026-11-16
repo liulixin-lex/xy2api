@@ -95,6 +95,8 @@ OAuth 管理接口（均位于 `/api/v1/admin/grok` 下）：
 
 各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
 
+API Key 账号的 HTTP Responses 请求按最终上游模型应用分组推理档位映射与上限，命中拒绝规则时返回 403；实际档位与计费以最终发出的正文为准。未配置分组策略时保留原有正文处理。
+
 文本模型：`grok-4.7`、`grok-4.6`、`grok-4.5`、`grok-4.3`、`grok-build-0.1`、`grok-composer-2.5-fast`、`grok-4.20-0309-reasoning`、`grok-4.20-0309-non-reasoning`、`grok-4.20-multi-agent-0309`。另接受 `grok-3-mini`、`grok-3-mini-fast`，以及 `grok-build`、`grok-composer`、`grok-4.5-latest` 等别名；模型名可带 `xai/`、`x-ai/`、`grok/` 前缀。
 
 ### 图片与视频
