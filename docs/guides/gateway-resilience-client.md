@@ -55,15 +55,13 @@
 
 ## 流式请求的失败结束方式
 
-Chat 上游转换为 Responses 或 Messages 时，有效 finish_reason、[DONE]，或正文后完整输入/输出尾部用量再正常 EOF 均可正常结束；缺用量不推翻有效结束。只有未结束生成且无上述收尾证据、结束前读取失败、坏尾帧或明确错误才返回对应协议的错误终态，尾部计量兼容成功不记为上游结束事件。
 
-响应头或心跳提交后，错误按入站协议只写一次：Chat 为 data 错误与 `[DONE]`，Messages 为 `event: error`，Responses 为 `response.failed`。已写 JSON、已结束或已取消的响应不会再追加错误，也不会改动已提交的 HTTP 状态。
 
-上游 Responses 帧先核验原始错误与用量，再进行协议转换。没有 type 的数字错误码也会结束本次尝试，随后到来的 completed 不会覆盖失败；错误帧中已收到的用量仍用于内部记录。
 
-非流式 Chat 与 Responses 由 Anthropic 流拼装时，必须收到完整 `message_stop` 或有效 `message_delta.stop_reason` 才返回成功。结束前断流、读取失败或明确错误返回 502，并保留已观察的用量；有效结束后的连接关闭和缺少尾部用量不改变成功结果。
 
 ### 已提交后的失败
+
+原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：完整的顶层 error 对象即使没有 type、只有数字 code，也按失败处理；数字不作为可信 HTTP 状态码。失败一经确认，后继 completed 不能覆盖它；error 为 null、空对象和正文回显不算失败。
 
 HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的失败按入站协议写终止帧：
 
@@ -72,6 +70,8 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 | Responses | `response.failed`（`rate_limit_exceeded` 或 `server_error`）；客户端此前只收到心跳时，前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始） |
 | Chat Completions | `data: {"error":{…,"status":N}}`，随后 `data: [DONE]` |
 | Anthropic Messages | `event: error` |
+
+已经写出 JSON、已经结束或已经取消的响应不会再追加错误，也不会改动已提交的 HTTP 状态。
 
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
 
@@ -105,7 +105,9 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
 
-raw Chat 接受有效 finish_reason、`[DONE]`，也兼容最后正文之后完整输入/输出用量帧接正常 EOF（显式零有效）。只有早期、部分或空用量不能证明生成完成；之后新增内容、坏帧或完成前读错仍按截断处理。兼容尾部计量成功保留原计数，但内部不会记成见过上游结束事件；已确认结束只是缺用量时仍正常返回。
+Chat Completions 上游（包括原样转发的 raw Chat，以及转为 Responses、Messages 的流）以下列任一情况结束时算正常结束：给出有效的 `finish_reason`；收到 `[DONE]`；或者最后一段正文之后给出完整的输入、输出用量（显式 0 也算），然后连接正常关闭。只收到早期、部分或空的用量不算；正常结束之前读取出错、以损坏的帧结尾或收到明确的错误，按上表写一次终止帧。中间无法解析的保活帧之后仍收到合法事件的，继续读取。已经正常结束、只是缺少用量的，照常成功。按“完整用量后正常关闭”判定为成功的，运维记录中不算收到了上游结束事件。
+
+非流式 Chat 与 Responses 请求的上游是 Anthropic 时，网关把 Anthropic 的流拼成一个响应：收到 `message_stop`、带有效 `stop_reason` 的 `message_delta` 或兼容的 `[DONE]` 时返回成功；在此之前断流、读取出错或收到错误时返回 502，保留已读到的用量。已经正常结束后连接关闭，或者缺少结尾的用量，不影响成功。
 
 ### `response.failed` 的重试时间
 
