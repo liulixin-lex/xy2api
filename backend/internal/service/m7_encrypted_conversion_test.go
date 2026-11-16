@@ -94,7 +94,7 @@ func TestM7EncryptedConversionRepair(t *testing.T) {
 						if target == "chat" {
 							require.Contains(t, req.rec.Body.String(), "encrypted_content_rejected")
 						} else {
-							require.NotContains(t, req.rec.Body.String(), `"code":`)
+							require.Contains(t, req.rec.Body.String(), `"code":"encrypted_content_rejected"`)
 						}
 						require.Contains(t, req.rec.Body.String(), "Encrypted content could not be verified")
 						if mode == "after_output" {
