@@ -128,6 +128,9 @@ func selectionExhaustionEvidence(ctx context.Context, diagnosis ModelAvailabilit
 	if errors.As(err, &upstream) {
 		e.LastCause = upstream
 	}
+	if e.LastCause == nil {
+		e.LastCause = resilience.StateFrom(ctx).LastUpstreamFailure()
+	}
 	if e.LastCause == nil && !isNoAccountSelectionError(err) {
 		e.LastCause = err
 	}

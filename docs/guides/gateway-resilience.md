@@ -164,7 +164,8 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
   - Responses 失败帧保留上游给出的等待提示（0 不算提示），没有其他已知建议时给客户端的等待夹到 2–10 秒，同一账号仍按上游原始时刻恢复；无 `type` 的失败不会被之后的 `response.completed` 清除。
   - 没有可用账号时，运维记录分别统计：分组中可用的账号数、支持该模型的账号数、能满足本次请求能力的账号数、此刻有空位的账号数；每个账号只按它第一个不满足的条件计一次。数据库查询失败时记为未知，不据此判定模型不存在。
   - 没有可用账号时按原因返回 404、400、429 或 503，具体见[错误响应](gateway-resilience-client.md#错误响应)。需要重试的 503 带 `Retry-After`（`no_account_retry_after`，默认 2–30 秒）；配置原因导致无号时 `Retry-After: 60` 并带 `x-should-retry: false`。
-  - 同一分组、平台、模型的“无号”结论负缓存 `negative_cache_seconds`（默认 2 秒）；同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。带工具的 Chat 请求不使用这份负缓存，也不计入快速失败。
+  - 同一分组、平台、模型的无号结论负缓存 `negative_cache_seconds`（默认 2 秒），期间直接返回同样的错误（状态码与原因相同）。只有确认对整个分组成立的结论才缓存；只与本次请求有关的失败（带工具的 Chat、响应归属、隐私、利润、渠道、会话、已排除的账号）不缓存，也不计入快速失败。旧空值缓存按未命中处理。
+  - 同一 API Key 在 30 秒内收到 10 次相同 503 后快速返回（`fast_fail`）。
   - 同一会话连续 5 次耗尽失败（间隔 120 秒内）后改为终止应答，不再建议重试（`turn_cap`）。
   - 合成的 `response.failed` 按情况附带重试时间（`failed_frame_retry_after`）；Codex 客户端收到的 `Retry-After` 不超过 `codex_retry_after_cap_seconds`（默认 10 秒，0 表示不另设）。
   - Anthropic 协议下网关自身的 503 失败与换号耗尽的容量降载使用 `api_error`，避免 Claude Code 把 `overloaded_error` 计为 529 后停止或切换模型。

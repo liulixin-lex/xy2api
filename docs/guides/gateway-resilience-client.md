@@ -4,13 +4,18 @@
 
 ## 错误响应
 
+本次请求最后一次真实上游失败已知时，按该失败映射状态与消息，不进入下面的本地无号分类。
+
 | 场景 | 响应 |
 |---|---|
 | 入站请求体上传超时 | 408 `invalid_request_error`，消息 `Timed out reading request body`；OpenAI 协议 code 为 `request_upload_timeout`。不调用上游；真正取消或断连只记 499，不补写响应 |
 | 普通上游 408、409、422 | 保留状态码与脱敏消息；Responses 与 Chat 错误体保留安全的 `type/code/param`，Messages 保留既有 `type/message` 形状，缺省 code 分别为 `request_timeout/conflict/unprocessable_entity`；管理员配置的错误规则优先 |
-| 分组内没有可用账号 | 按原因区分：确认无成员或没有账号支持该模型时为 404；只有请求能力不满足时为 400；所有能服务的账号仅因普通限流或槽位、队列容量耗尽时为 429；余额暂停、混合限制或数据库查询失败时为 503。已有上游失败时保留最后一次失败的处理结果 |
-| 带 `tools` 或 `functions` 的 Chat 请求，其最终模型与档位要求 Responses，但分组里没有任何账号能用该协议服务它 | 400 `invalid_request_error`，code `responses_required`，消息指出 `tools` 或 `functions`。有这类账号只是暂时繁忙时，按“分组内没有可用账号”处理 |
+| 分组内没有任何账号支持该模型（持久配置中没有成员，或没有成员支持该模型） | 404，`model_not_found`，消息为 `Model "<model>" is not supported by any configured account in this group` |
+| 有支持该模型的账号，但没有一个能满足本次请求的能力（如带工具的 Chat 需要 Responses） | 400 `invalid_request_error`；需要 Responses 时 `code` 为 `responses_required`，`param` 为 `tools` 或 `functions` |
+| 能服务的账号都只是被限流、并发已满或排队已满 | 429 `rate_limit_error`，消息为 `All available accounts are currently rate-limited. Please retry later.` |
 | 非流式请求，但组内账号都只接受流式 | 503，消息为 `No available account in this group supports non-streaming requests; retry with "stream": true`，带 `x-should-retry: false`，不带 `Retry-After` |
+| 其他无号情况（混合限制、硬暂停、依赖故障、数据库查询失败等） | 503，`Retry-After` 2–30 秒（带抖动，按组内最早恢复时间估算），消息附 “Please try again in Ns.” |
+| 带 `tools` 或 `functions` 的 Chat 请求，其最终模型与档位要求 Responses，但分组里没有任何账号能用该协议服务它 | 400 `invalid_request_error`，code `responses_required`，param 与消息指出 `tools` 或 `functions`。有这类账号只是暂时繁忙时，按实际无号原因处理 |
 | 配置原因导致无号（如渠道定价不含该模型） | 503，`Retry-After: 60`，`x-should-retry: false` |
 | 模型不在分组白名单 | 404，消息为 `Model "<model>" is not available for this group`，并列出本分组白名单的前 10 项 |
 | 分组仅限 Claude Code，请求不是 Claude Code 且没有兜底分组 | 403 `permission_error`，不带重试头 |

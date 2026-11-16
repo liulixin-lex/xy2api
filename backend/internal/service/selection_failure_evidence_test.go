@@ -176,6 +176,23 @@ func TestSelectionExhaustionEvidence(t *testing.T) {
 	})
 }
 
+func TestM9SelectionRetainsRecordedFailure(t *testing.T) {
+	withResilienceSettings(t, nil)
+	f := newSelectionRuntimeFixture(t)
+	state := resilience.NewRequestState()
+	upstream := &UpstreamFailoverError{StatusCode: 429, ResponseBody: []byte(`{"error":{"message":"quota"}}`)}
+	state.SetLastUpstreamFailure(upstream)
+	ctx := resilience.WithRequestState(context.Background(), state)
+	_, _, err := f.svc.SelectAccountWithScheduler(ctx, ptrInt64Selection(709), "", "", "m9-recorded-failure", nil, OpenAIUpstreamTransportHTTPSSE, false)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	e, ok := SelectionExhaustionFromError(err)
+	require.True(t, ok)
+	require.Same(t, upstream, e.LastCause)
+	require.ErrorIs(t, err, upstream)
+	require.False(t, e.GroupLevel)
+	require.Nil(t, resilienceNegativeCacheHit(ctx, ptrInt64Selection(709), "m9-recorded-failure", "", nil))
+}
+
 func TestSelectionRetryNotBeforeAllPaths(t *testing.T) {
 	for _, mode := range []string{"normal", "sticky", "legacy", "db", "last_resort", "no_wait"} {
 		t.Run(mode, func(t *testing.T) {
