@@ -57,9 +57,9 @@ func (t *openAIRawStreamTerminalState) ObserveDataLine(payload string) {
 	for _, choice := range choices.Array() {
 		delta := choice.Get("delta")
 		generation := len(delta.Get("tool_calls").Array()) > 0 || delta.Get("function_call").IsObject()
-		for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal"} {
+		for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal", "images", "audio"} {
 			v := delta.Get(field)
-			generation = generation || v.Type == gjson.String && v.Str != "" || v.IsArray() && len(v.Array()) > 0
+			generation = generation || v.Type == gjson.String && v.Str != "" || v.IsArray() && len(v.Array()) > 0 || v.IsObject() && len(v.Map()) > 0
 		}
 		if generation {
 			t.sawUnfinishedGeneration = true

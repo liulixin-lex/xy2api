@@ -362,7 +362,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			c.Writer.Flush()
 			return
 		}
-		if !clientOutputStarted && (!releaseFrame || !refusalDetector.ShouldReleaseClientOutput()) {
+		if !clientOutputStarted && (!releaseFrame || !refusalDetector.ShouldReleaseClientOutput() && !terminal.sawUnfinishedGeneration) {
 			prefixBytes += len(line) + 1
 			if prefixBytes > openAIFirstOutputStageMaxBytes {
 				terminal.sawMalformed = true
@@ -467,7 +467,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	var parser openAICompatSSEFrameParser
 	var frameLines []string
-	frameBytes := 0
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, ":") && !clientOutputStarted {
@@ -480,11 +480,6 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			continue
 		}
 		frameLines = append(frameLines, line)
-		frameBytes += len(line) + 1
-		if frameBytes > openAIFirstOutputStageMaxBytes {
-			terminal.sawMalformed = true
-			break
-		}
 		frame, complete := parser.AddLine(line)
 		if !complete && line != "" {
 			continue
@@ -493,7 +488,6 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			return nil, err
 		}
 		frameLines = nil
-		frameBytes = 0
 		if terminal.sawDone || terminal.failurePayload != "" || terminal.sawMalformed {
 			break
 		}
@@ -604,7 +598,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	if scanErr == nil && !clientAborted && !clientOutputStarted {
-		if refusalDetector.IsSilentRefusal() {
+		if refusalDetector.IsSilentRefusal() && !terminal.sawUnfinishedGeneration {
 			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 		}
 		if len(pendingLines) > 0 {
