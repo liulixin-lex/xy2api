@@ -5,6 +5,7 @@ import {
   effectiveProfitMarginPercent,
   floorOnlyPreviewLevel,
   formatProfitCeiling,
+  isUnreadableNumberInput,
   minUpstreamRateForCreate,
   minUpstreamRateForUpdate,
   minUpstreamRateFormValue,
@@ -245,6 +246,18 @@ describe("min upstream rate submit values", () => {
     expect(minUpstreamRateForUpdate("openai", 0.25, null)).toBe(0.25);
     expect(minUpstreamRateForUpdate("openai", 0.25, 0.3)).toBe(0.25);
     expect(minUpstreamRateForUpdate("gemini", 0.25, 0.3)).toBeUndefined();
+  });
+
+  // type=number reports "" for text it cannot read ("1e", "-"); only validity.badInput tells it from an empty box.
+  it("blocks saving an unreadable floor and never clears the stored one with it; plain clearing still sends 0", () => {
+    const event = (badInput: boolean) => ({ target: { validity: { badInput } } }) as unknown as Event;
+    expect(isUnreadableNumberInput(event(true))).toBe(true);
+    expect(isUnreadableNumberInput(event(false))).toBe(false);
+
+    expect(validateMinUpstreamRate("", true)).toBe("floorUnreadable");
+    expect(minUpstreamRateForUpdate("openai", "", 0.3, true)).toBeUndefined();
+    expect(validateMinUpstreamRate("", false)).toBeNull();
+    expect(minUpstreamRateForUpdate("openai", "", 0.3, false)).toBe(0);
   });
 
   it("echoes a stored floor and shows an empty box for none", () => {

@@ -1264,8 +1264,9 @@
                 type="number"
                 step="0.0001"
                 min="0"
-                :class="['input', { 'input-error': validateMinUpstreamRate(createForm.min_upstream_rate) }]"
-                :aria-invalid="!!validateMinUpstreamRate(createForm.min_upstream_rate)"
+                :class="['input', { 'input-error': validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable) }]"
+                :aria-invalid="!!validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable)"
+                @input="createFloorUnreadable = isUnreadableNumberInput($event)"
                 :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
                 data-testid="create-min-upstream-rate"
               />
@@ -2977,8 +2978,9 @@
                 type="number"
                 step="0.0001"
                 min="0"
-                :class="['input', { 'input-error': validateMinUpstreamRate(editForm.min_upstream_rate) }]"
-                :aria-invalid="!!validateMinUpstreamRate(editForm.min_upstream_rate)"
+                :class="['input', { 'input-error': validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable) }]"
+                :aria-invalid="!!validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable)"
+                @input="editFloorUnreadable = isUnreadableNumberInput($event)"
                 :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
                 data-testid="edit-min-upstream-rate"
               />
@@ -2995,6 +2997,7 @@
             :margin-percent="editForm.profit_min_margin_percent"
             :profit-enabled="editForm.profit_control_enabled"
             :floor="isMinUpstreamRatePlatform(editForm.platform) ? editForm.min_upstream_rate : ''"
+            :floor-unreadable="isMinUpstreamRatePlatform(editForm.platform) && editFloorUnreadable"
           />
         </div>
 
@@ -4531,6 +4534,7 @@ import {
   profitMarginPercentOnEnable,
   profitPercentToDecimal,
   validateMinUpstreamRate,
+  isUnreadableNumberInput,
   validateProfitControlFormState,
   type ProfitBlockReason,
   type ProfitControlFormState,
@@ -5781,11 +5785,15 @@ const editForm = reactive({
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
+// 下限框里是读不出数的内容（type=number 时 value 为 ""）：不当成留空，校验不通过，编辑时也不提交清除。
+const createFloorUnreadable = ref(false);
+const editFloorUnreadable = ref(false);
+
 // 编辑弹窗里填了最低上游倍率（OpenAI 分组）：利润开关关闭时也显示预览，只看与下限有关的几行。
 const editFloorSet = computed(
   () =>
     isMinUpstreamRatePlatform(editForm.platform) &&
-    String(editForm.min_upstream_rate ?? "").trim() !== "",
+    (editFloorUnreadable.value || String(editForm.min_upstream_rate ?? "").trim() !== ""),
 );
 
 type ImagePricingFormState = {
@@ -6106,6 +6114,7 @@ const closeCreateModal = () => {
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
   createForm.min_upstream_rate = "";
+  createFloorUnreadable.value = false;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -6192,11 +6201,12 @@ const settleZeroPassProfitConfirm = (confirmed: boolean) => {
 
 const validateProfitControlForm = (
   form: ProfitControlFormState & { min_upstream_rate: number | string },
+  floorUnreadable: boolean,
 ): boolean => {
   const errorKey =
     validateProfitControlFormState(form) ??
     (isMinUpstreamRatePlatform(form.platform)
-      ? validateMinUpstreamRate(form.min_upstream_rate)
+      ? validateMinUpstreamRate(form.min_upstream_rate, floorUnreadable)
       : null);
   if (errorKey) {
     appStore.showError(t(`admin.groups.profitControl.${errorKey}`));
@@ -6233,7 +6243,7 @@ const handleCreateGroup = async () => {
   ) {
     return;
   }
-  if (!validateProfitControlForm(createForm)) {
+  if (!validateProfitControlForm(createForm, createFloorUnreadable.value)) {
     return;
   }
   if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
@@ -6458,6 +6468,7 @@ const handleEdit = async (group: AdminGroup) => {
     group.profit_safety_buffer,
   );
   editForm.min_upstream_rate = minUpstreamRateFormValue(group.min_upstream_rate);
+  editFloorUnreadable.value = false;
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -6553,6 +6564,7 @@ const closeEditModal = () => {
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
   editForm.min_upstream_rate = "";
+  editFloorUnreadable.value = false;
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -6596,7 +6608,7 @@ const handleUpdateGroup = async () => {
   ) {
     return;
   }
-  if (!validateProfitControlForm(editForm)) {
+  if (!validateProfitControlForm(editForm, editFloorUnreadable.value)) {
     return;
   }
   if (editSchedPolicyRef.value && !editSchedPolicyRef.value.valid) return;
@@ -6700,6 +6712,7 @@ const handleUpdateGroup = async () => {
         editForm.platform,
         editForm.min_upstream_rate,
         editingGroup.value.min_upstream_rate,
+        editFloorUnreadable.value,
       ),
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
@@ -7125,6 +7138,7 @@ watch(
     }
     if (!isMinUpstreamRatePlatform(newVal)) {
       createForm.min_upstream_rate = "";
+      createFloorUnreadable.value = false;
     }
     createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
@@ -7184,6 +7198,7 @@ watch(
     }
     if (!isMinUpstreamRatePlatform(newVal)) {
       editForm.min_upstream_rate = "";
+      editFloorUnreadable.value = false;
     }
     editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,

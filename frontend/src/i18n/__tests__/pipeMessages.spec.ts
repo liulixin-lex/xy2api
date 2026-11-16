@@ -12,6 +12,8 @@ const pluralKeys = new Set([
   'batchImage.create.referenceCount',
   'admin.accounts.table.tip.count',
   'admin.accounts.table.tip.countShort',
+  'admin.groups.profitControl.floorBelow',
+  'admin.groups.profitControl.pinnedCount',
   'admin.accounts.table.tip.turns',
   'admin.accounts.table.tip.turnsShort',
   'admin.schedQuality.panel.allRequests'

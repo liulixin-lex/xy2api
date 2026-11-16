@@ -24,7 +24,7 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   ...over
 })
 
-type Props = { marginPercent?: number | string | null; profitEnabled?: boolean; floor?: number | string | null }
+type Props = { marginPercent?: number | string | null; profitEnabled?: boolean; floor?: number | string | null; floorUnreadable?: boolean }
 const mountPreview = (props: Props = {}) =>
   mount(GroupProfitControlPreview, { props: { groupId: 53, marginPercent: 20, profitEnabled: true, floor: '', ...props } })
 const line = (w: ReturnType<typeof mount>) => w.get('[data-testid="profit-control-preview-line"]')
@@ -50,6 +50,14 @@ describe('GroupProfitControlPreview', () => {
 
   it('does not ask while the floor is invalid', async () => {
     const w = mountPreview({ floor: 0.12345 })
+    await flushPromises()
+    expect(api.getProfitControlPreview).not.toHaveBeenCalled()
+    expect(w.find('[data-testid="profit-control-preview-floor-invalid"]').exists()).toBe(true)
+  })
+
+  // A number box with unreadable text ("1e") reports "", which is not an empty box: no preview with the floor dropped.
+  it('treats an unreadable floor as invalid, not as no floor', async () => {
+    const w = mountPreview({ floor: '', floorUnreadable: true })
     await flushPromises()
     expect(api.getProfitControlPreview).not.toHaveBeenCalled()
     expect(w.find('[data-testid="profit-control-preview-floor-invalid"]').exists()).toBe(true)

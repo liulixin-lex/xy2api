@@ -96,11 +96,18 @@ export type MinUpstreamRateInput = number | string | null | undefined;
 const isBlankRate = (value: MinUpstreamRateInput): boolean =>
   value === null || value === undefined || String(value).trim() === "";
 
-// 提交前校验：留空通过；否则必须是有限数、> 0、最多 4 位小数。
+// type=number 的输入框里填了读不出数的内容（如 "1e"、"-"）时，value 是 ""，看起来和留空一样；
+// 只能从 validity.badInput 区分。输入事件里记下它，校验和提交都要带上，否则编辑时会把已设的下限当成清除。
+export const isUnreadableNumberInput = (event: Event): boolean =>
+  (event.target as HTMLInputElement | null)?.validity?.badInput === true;
+
+// 提交前校验：留空通过；读不出数不通过；否则必须是有限数、> 0、最多 4 位小数。
 // 返回 null 表示通过，否则返回错误信息的 i18n key（相对 admin.groups.profitControl 前缀）。
 export const validateMinUpstreamRate = (
   value: MinUpstreamRateInput,
+  unreadable = false,
 ): string | null => {
+  if (unreadable) return "floorUnreadable";
   if (isBlankRate(value)) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return "floorRangeError";
@@ -124,13 +131,14 @@ export const minUpstreamRateForCreate = (
 };
 
 // 编辑：与 availability_fallback_group_id 同样的可空写法，提交 0 表示清除（只在原来设过、现在清空时才发）；
-// 原来就没设、现在也没填时不传；非 OpenAI 分组不传。
+// 原来就没设、现在也没填时不传；非 OpenAI 分组不传；输入读不出数时不传（保留已设的下限）。
 export const minUpstreamRateForUpdate = (
   platform: string,
   value: MinUpstreamRateInput,
   saved: number | null | undefined,
+  unreadable = false,
 ): number | undefined => {
-  if (!isMinUpstreamRatePlatform(platform)) return undefined;
+  if (!isMinUpstreamRatePlatform(platform) || unreadable) return undefined;
   const next = minUpstreamRateValue(value);
   if (next !== null) return next;
   return typeof saved === "number" && saved > 0 ? 0 : undefined;

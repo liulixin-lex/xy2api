@@ -47,10 +47,10 @@
         class="text-gray-600 dark:text-gray-300"
         data-testid="profit-control-preview-below-floor"
       >
-        {{ t('admin.groups.profitControl.floorBelow', { floor: formatProfitCeiling(preview.floor), n: preview.below_floor }) }}
+        {{ t('admin.groups.profitControl.floorBelow', { floor: formatProfitCeiling(preview.floor), n: preview.below_floor }, preview.below_floor) }}
       </p>
       <p v-if="preview.pinned > 0" class="text-gray-600 dark:text-gray-300" data-testid="profit-control-preview-pinned">
-        {{ t('admin.groups.profitControl.pinnedCount', { n: preview.pinned }) }}
+        {{ t('admin.groups.profitControl.pinnedCount', { n: preview.pinned }, preview.pinned) }}
       </p>
       <p
         v-if="profitEnabled && preview.pinned_loss.length"
@@ -115,6 +115,8 @@ const props = defineProps<{
   profitEnabled: boolean
   /** 最低上游倍率输入框的值；留空表示不设。 */
   floor: MinUpstreamRateInput
+  /** 输入框里是读不出数的内容（value 为空但不是留空）：按无效处理，不预览。 */
+  floorUnreadable?: boolean
 }>()
 
 const { t } = useI18n()
@@ -141,7 +143,9 @@ const marginDecimal = computed(() => {
 })
 
 // 下限：留空为 0（不设），填错时不预览。
-const floorValue = computed(() => (validateMinUpstreamRate(props.floor) === null ? (minUpstreamRateValue(props.floor) ?? 0) : null))
+const floorValue = computed(() =>
+  validateMinUpstreamRate(props.floor, props.floorUnreadable) === null ? (minUpstreamRateValue(props.floor) ?? 0) : null
+)
 
 const query = computed(() =>
   marginDecimal.value === null || floorValue.value === null ? null : { margin: marginDecimal.value, floor: floorValue.value }
