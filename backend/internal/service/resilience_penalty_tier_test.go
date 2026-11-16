@@ -76,7 +76,9 @@ func TestLiftTransientCooldownKeepsPauseWrittenAfterRead(t *testing.T) {
 		repo.tempReason = resilience.BalancePauseReason("concurrent request")
 		repo.mu.Unlock()
 	}
-	r.NoteAccountSuccess(context.Background(), account)
+	success := resilience.NewRequestState()
+	success.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: transientCooldownStartedAt(repo.tempReason).Add(time.Second)})
+	r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), success), account)
 	require.True(t, resilience.IsBalancePause(repo.tempReason), "the balance pause stays: %q", repo.tempReason)
 	require.True(t, repo.tempUntil.Equal(balanceUntil))
 	require.Zero(t, repo.clearCalls)

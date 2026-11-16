@@ -51,7 +51,7 @@ func TestOpenAICacheSpilloverAdmissionPreservesAffinity(t *testing.T) {
 				// The old owner may expire during queueing; spillover must still not rebind.
 				require.NoError(t, cache.SetSessionAccountID(ctx, group, "openai:v2:session", 1, time.Minute))
 				require.NoError(t, cache.DeleteSessionAccountID(ctx, group, "openai:v2:session"))
-				selection := &service.AccountSelectionResult{Account: &service.Account{ID: 2, Platform: service.PlatformOpenAI}, StickyCapacitySpillover: spillover}
+				selection := &service.AccountSelectionResult{Account: &service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true}, StickyCapacitySpillover: spillover}
 				if path == "acquired" {
 					selection.Acquired = true
 					selection.ReleaseFunc = func() { concurrency.releases.Add(1) }

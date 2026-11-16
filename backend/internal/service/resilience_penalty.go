@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,8 +211,9 @@ func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account
 	if cooldown <= 0 {
 		return false
 	}
-	until := time.Now().Add(cooldown)
-	reason := resilience.ReasonPrefixTransient + label + " " + truncateString(evidence, 160)
+	startedAt := time.Now()
+	until := startedAt.Add(cooldown)
+	reason := transientCooldownReason(label, evidence, startedAt)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	written, err := s.writeTempPenalty(stateCtx, account.ID, until, reason)
@@ -234,6 +236,27 @@ func (s *RateLimitService) applyTransientCooldownAs(ctx context.Context, account
 		"cooldown", cooldown.String(),
 	)
 	return true
+}
+
+// The timestamp belongs to this exact cooldown version, not the account's
+// UpdatedAt (which also changes for usage/quota writes). Keep the reason prefix
+// intact for existing tier classification and diagnostics.
+func transientCooldownReason(label, evidence string, startedAt time.Time) string {
+	return resilience.ReasonPrefixTransient + label + " " + truncateString(evidence, 160) +
+		" [set_at=" + strconv.FormatInt(startedAt.UnixNano(), 10) + "]"
+}
+
+func transientCooldownStartedAt(reason string) time.Time {
+	const marker = " [set_at="
+	pos := strings.LastIndex(reason, marker)
+	if pos < 0 || !strings.HasSuffix(reason, "]") {
+		return time.Time{}
+	}
+	nanos, err := strconv.ParseInt(reason[pos+len(marker):len(reason)-1], 10, 64)
+	if err != nil || nanos <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // applyBalancePause pauses an account whose relay reported an exhausted
@@ -360,9 +383,11 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	}
 	// A last-resort account that served successfully has recovered: lift its
 	// transient cooldown so normal selection uses it again (design §4.3).
-	if v, ok := r.lastResortUsed.LoadAndDelete(account.ID); ok {
-		if at, _ := v.(time.Time); now.Sub(at) < 10*time.Minute {
-			r.rateLimit.liftTransientCooldown(ctx, account.ID)
+	if v, ok := r.lastResortUsed.Load(account.ID); ok {
+		if at, _ := v.(time.Time); now.Sub(at) < 10*time.Minute && profile.AccountID == account.ID {
+			if r.rateLimit.liftTransientCooldown(ctx, account.ID, profile.AttemptStart) {
+				r.lastResortUsed.CompareAndDelete(account.ID, v)
+			}
 		}
 	}
 }
@@ -396,30 +421,39 @@ func (s *RateLimitService) liftBalancePause(ctx context.Context, accountID int64
 // liftTransientCooldown clears a soft transient cooldown after the account
 // served a request successfully; other pauses stay. Only the cooldown that
 // was read is cleared: a pause written in between (balance, credentials, an
-// administrator) stays (review R02).
-func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID int64) {
+// administrator) stays (review R02). The successful attempt must have started
+// after this cooldown was set; missing timing evidence leaves it to expire.
+func (s *RateLimitService) liftTransientCooldown(ctx context.Context, accountID int64, attemptStart time.Time) bool {
+	if s == nil || s.accountRepo == nil || attemptStart.IsZero() {
+		return false
+	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	fresh, err := s.accountRepo.GetByID(stateCtx, accountID)
 	if err != nil || fresh == nil || fresh.TempUnschedulableUntil == nil ||
 		!strings.HasPrefix(fresh.TempUnschedulableReason, resilience.ReasonPrefixTransient) {
-		return
+		return false
+	}
+	startedAt := transientCooldownStartedAt(fresh.TempUnschedulableReason)
+	if startedAt.IsZero() || !attemptStart.After(startedAt) {
+		return false
 	}
 	if store, ok := s.accountRepo.(ResiliencePenaltyStore); ok {
 		cleared, err := store.ClearTempUnschedulableIf(stateCtx, accountID, fresh.TempUnschedulableReason, *fresh.TempUnschedulableUntil)
 		if err != nil {
 			slog.Warn("resilience.transient_lift_failed", "account_id", accountID, "error", err)
-			return
+			return false
 		}
 		if !cleared {
-			return
+			return false
 		}
 	} else if err := s.accountRepo.ClearTempUnschedulable(stateCtx, accountID); err != nil {
 		slog.Warn("resilience.transient_lift_failed", "account_id", accountID, "error", err)
-		return
+		return false
 	}
 	s.resilience.invalidateAccountGroups(fresh)
 	slog.Info("resilience.transient_lifted", "account_id", accountID)
+	return true
 }
 
 // invalidateAccountGroups drops the negative-cache entries and the cached
