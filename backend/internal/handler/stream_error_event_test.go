@@ -140,7 +140,7 @@ func TestOpenAIUpstreamRateLimitWithoutLocalCodeRemainsUnchanged(t *testing.T) {
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "upstream limited", false)
 
 	assert.Equal(t, "rate_limit_error", gjson.GetBytes(w.Body.Bytes(), "error.type").String())
-	assert.Equal(t, gatewayQueueFullCode, gjson.GetBytes(w.Body.Bytes(), "error.code").String())
+	assert.False(t, gjson.GetBytes(w.Body.Bytes(), "error.code").Exists())
 }
 
 // 当 setOpsRequestContext 写过 model，合成事件应回填该字段（与 codebase 已有 makeResponsesCompletedEvent 对齐）。
