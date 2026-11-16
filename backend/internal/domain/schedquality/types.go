@@ -2,11 +2,8 @@ package schedquality
 
 import "time"
 
-type Outcome int8  // OutcomeOther=4 is read-only legacy; cancellation is 5.
-type State int8    // StateNormal, StateCooling
-type Override int8 // OverrideNone, OverrideExempt
-type Verdict int8  // VerdictNoData, VerdictPass, VerdictFail
-type Standing int8 // StandFront, StandBack
+type Outcome int8
+type Override int8
 
 const (
 	OutcomeOK Outcome = iota + 1
@@ -16,21 +13,8 @@ const (
 	OutcomeCanceled
 )
 const (
-	StateNormal State = iota
-	StateCooling
-)
-const (
 	OverrideNone Override = iota
 	OverrideExempt
-)
-const (
-	VerdictNoData Verdict = iota
-	VerdictPass
-	VerdictFail Verdict = 3
-)
-const (
-	StandFront Standing = iota
-	StandBack
 )
 
 func (o Outcome) String() string {
@@ -45,26 +29,6 @@ func (o Outcome) String() string {
 		return "other"
 	case OutcomeCanceled:
 		return "canceled"
-	}
-	return ""
-}
-func (s State) String() string {
-	switch s {
-	case StateNormal:
-		return "normal"
-	case StateCooling:
-		return "cooling"
-	}
-	return ""
-}
-func (v Verdict) String() string {
-	switch v {
-	case VerdictNoData:
-		return "nodata"
-	case VerdictPass:
-		return "pass"
-	case VerdictFail:
-		return "fail"
 	}
 	return ""
 }
@@ -95,40 +59,10 @@ type Policy struct {
 	TTFTSeconds, MaxErrorRate, MinCacheRatio float64
 	TakeoverIdleSeconds                      int
 }
-type Verdicts struct{ Speed, Error, Cache Verdict }
-
-type StateRow struct {
-	AccountID     int64
-	Model         string
-	GroupID       int64
-	State         State
-	Level         int
-	Since, Until  time.Time
-	EvidenceSince time.Time
-	Basis         *DecisionBasis
-}
 type OverrideRef struct {
 	Mode    Override
 	Expires time.Time
 } // zero Expires = no expiry
-type StateView struct {
-	Failing                    bool
-	Dims                       []Dimension
-	EvidenceSince              time.Time
-	Level                      int
-	Since, Until               time.Time
-	GroupOverride, AllOverride OverrideRef
-}
-type View interface {
-	Version() int64
-	At() time.Time // when this view was built
-	GlobalEnabled() bool
-	GroupEnabled(groupID int64) bool
-	ResetAt(accountID int64) time.Time
-	StateOf(groupID, accountID int64, model string) StateView
-	TakeoverIdle(groupID int64) (idle time.Duration, enabled bool)
-}
-
 func DefaultPolicy() Policy {
 	return Policy{TTFTSeconds: 15, MaxErrorRate: .10, MinCacheRatio: .5, TakeoverIdleSeconds: 900}
 }

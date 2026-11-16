@@ -3,9 +3,7 @@ package schedquality
 import "time"
 
 const (
-	SlowShareTolerance    = 0.10
-	WilsonZ               = 1.96
-	LevelDecayAfter       = 30 * time.Minute
+	ErrorRateFloor        = 0.05
 	TakeoverFullCooloff   = 60 * time.Second
 	EvalInterval          = 5 * time.Second
 	LedgerReloadOverlap   = 10 * time.Second
