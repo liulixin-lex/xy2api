@@ -37,7 +37,6 @@
 补充说明：
 
 - 上游明确报告 `No tool call found for function call output` 或 `No tool output found for function call` 的工具历史 400 时，原生、原样转发和 Chat→Responses 都保留上游脱敏后的 `type`、`code`、`param`、`message`；上游没给 `param` 时不补。请求只发送一次，不换号、不罚号。
-
 - 非流式 Responses 按完整正文识别 JSON 与 SSE：完整 JSON 优先于上游 Content-Type，SSE 聚合后返回 `application/json; charset=utf-8`，用量按真实正文读取。
 
 
@@ -84,13 +83,16 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
 
-Gemini 分组的 `/v1/chat/completions`、`/v1/messages` 流式请求（见 [Gemini](../platforms/gemini.md#兼容入口参数)），遇到无法转换的结束原因（如 `MALFORMED_FUNCTION_CALL`），或工具参数不是 JSON 对象时，按上表写一次终止帧，保留已读到的用量，不再补发成功结束。
+原生与原样转发的 Responses 流还按以下规则结束，每个响应只写一个结束事件，成功结束后不会再追加失败：
+
+- 收齐完整的 SSE 事件后才判断是否结束。坏 UTF-8、坏 JSON、缺 `response` 或状态矛盾的结束事件不算成功；已经输出时以 `response.failed` 结束，保留已读到的用量。连续多行 `data:` 拼起来不是合法 JSON、但每行都是完整 JSON 对象时，继续按独立事件处理；拼起来合法的多行 JSON 保持一个事件。
+- 原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
+- 原生 OAuth 上游先给出字符串 `type:"error"`、随后又给出合法 `response.completed` 时，流式和非流式都继续按成功结束。通用的 SSE 事件名（如 `message`、`error`）不会覆盖合法 payload 的结束类型。
 
 `/v1/chat/completions` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#chat-completions-转-responses)）另有以下结束方式。错误按上表只写一次，之前不会发出成功的 `finish_reason`：
 
 - 上游没有有效结束：Responses 上游以 `response.completed`、兼容的 `response.done` 或 `response.incomplete` 结束；合法结束事件没有 status、done 没带 response 或 incomplete 未给原因时沿用正常结束。中途断开且没有有效结束事件、`response.failed` 或取消时以错误结束，不补成 `stop`。非流式请求也一样，从 done 事件恢复出了正文不代表成功结束。
 - 工具参数：上游生成的普通函数参数不是合法 JSON 时以错误结束，不修补；成功结束而参数为空时按 `{}` 交付。明确的输出上限截断以 `length` 结束，incomplete 未给原因或工具参数不完整时以 `stop` 结束，都不会以 `tool_calls` 交给客户端执行。流内事件之间的同一调用身份或参数与已发部分矛盾时以错误结束；结束事件更换 item ID 则按内容与顺序对应。
-
 
 Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见 [其他平台](../platforms/others.md#协议转换)）：
 
@@ -101,16 +103,10 @@ Responses、Messages 请求转为 Chat Completions 或 Anthropic 上游时（见
 经 `/v1/messages` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#claude-code-与-opencode)）另有以下结束方式。`event: error` 只写一次，之后不再发送 `message_stop`：
 
 - 上游失败或取消：以 `event: error` 结束。截断、内容过滤与拒答仍按正常结束返回，停止原因见上述链接中的表。
-
 - 工具参数：普通函数的参数不是完整的 JSON 对象时以 `event: error` 结束；成功结束而参数为空时按 `{}` 交付，截断或断流时的空参数不补成 `{}`。完成事件中的参数与已发出的增量相同时不重发，只多出尾部时补发尾部，互相矛盾时以 `event: error` 结束，已发出的参数不会再发一遍；Read 工具去掉空 `pages` 不算矛盾。
-
 - 并行工具：按上游输出顺序逐个交付。前一个工具的参数完成之前，后面的工具以及随后的正文、思考与搜索块先暂存，完成后依次发出。重复的完成事件不会重复结束块。结束事件里的输出列表按 item ID、call ID 对应已流式的工具，排列与流式顺序不同、缺少或换了 item ID 时不重复交付、不报错；流式事件里同一工具的 item ID、call ID 或输出位置互相矛盾，或参数未完成就断流时，以 `event: error` 结束。
 
-原生与原样转发的 Responses 流还按以下规则结束，每个响应只写一个结束事件，成功结束后不会再追加失败：
-
-- 收齐完整的 SSE 事件后才判断是否结束。坏 UTF-8、坏 JSON、缺 `response` 或状态矛盾的结束事件不算成功；已经输出时以 `response.failed` 结束，保留已读到的用量。连续多行 `data:` 拼起来不是合法 JSON、但每行都是完整 JSON 对象时，继续按独立事件处理；拼起来合法的多行 JSON 保持一个事件。
-- 原生、原样转发，以及上游为 Responses 的 Chat、Messages 流：顶层 `error` 对象即使没有 `type`、只有数字 `code` 也算失败；这个数字不当作上游 HTTP 状态码，写给客户端时使用字符串。无 `type` 的失败确认之后，再来的 `response.completed` 不会把它改成成功。`error` 为 `null`、空对象，以及正文里回显的错误文字不算失败。
-- 原生 OAuth 上游先给出字符串 `type:"error"`、随后又给出合法 `response.completed` 时，流式和非流式都继续按成功结束。通用的 SSE 事件名（如 `message`、`error`）不会覆盖合法 payload 的结束类型。
+Gemini 分组的 `/v1/chat/completions`、`/v1/messages` 流式请求（见 [Gemini](../platforms/gemini.md#兼容入口参数)），遇到无法转换的结束原因（如 `MALFORMED_FUNCTION_CALL`），或工具参数不是 JSON 对象时，按上表写一次终止帧，保留已读到的用量，不再补发成功结束。
 
 compact 心跳提交后的失败也只写一次 `response.failed`；已确认请求模型时携带映射前的 `response.model`，未观察到模型时不猜测。
 
@@ -165,7 +161,7 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 
 | 上游拒绝 | 网关处理 |
 |---|---|
-| 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。其他字段被拒时原样返回 |
+| 明确点名不支持的参数（结构化 `code`/`param`，或 “Unsupported parameter: X”） | 删除请求顶层的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`、`max_output_tokens`、`truncation` 中被点名的那个后重放；每个请求合计最多 6 次，同一请求体不重放第二次。API Key 账号显式发送的 `reasoning.effort: none` 被第三方上游以 400 明确拒绝（`param` 为 `reasoning.effort` 或 `reasoning`）时，也在这一预算内删除后重放一次，并记录 `reasoning.effort/omit` 降级；其他字段被拒时原样返回 |
 | 明确拒绝 content part 上的 `cache_control` | 删除该请求所有 content part 上的 `cache_control`，重放一次；顶层、消息级与工具参数里的同名字段保留 |
 | 无法解密或校验请求中的加密内容（`invalid_encrypted_content`、`encrypted_context_invalid` 等，密文通常来自别的账号） | 按请求级处理，不罚号。OpenAI 原生、原样转发及 Chat/Messages 转为 Responses 的请求在第一个内容之前遇到时，只修复上游唯一定位的 reasoning 或 compaction 项后重放一次；reasoning 保留 id、summary 与非 null content，其他项原样保留。重放后上游又指出另一项时，说明不止一项失效，再清理其余顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次。上游没有给出位置，或给出的项 ID 在请求里找不到时：请求顶层只有一项带密文的 reasoning 或 compaction 就修复该项；有多项时清理全部顶层 reasoning 的密文、丢弃带密文的 compaction 后重放一次，并在请求级 `degradations` 中记录 `input[].encrypted_content/omit`。位置冲突、重复 ID 或越界时不做猜测性清理 |
 
