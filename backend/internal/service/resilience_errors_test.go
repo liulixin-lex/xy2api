@@ -17,7 +17,15 @@ import (
 // cache skips selection.
 type countingPlatformRepo struct {
 	groupListingRepo
-	lists int
+	lists        int
+	diagnosisErr error
+}
+
+func (r *countingPlatformRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	if r.diagnosisErr != nil {
+		return nil, r.diagnosisErr
+	}
+	return r.groupListingRepo.ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
 }
 
 func (r *countingPlatformRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
@@ -41,29 +49,53 @@ func (r *countingPlatformRepo) ListSchedulableByPlatforms(ctx context.Context, p
 }
 
 func TestNegativeCacheBurstOfRetries(t *testing.T) {
-	// A legacy selector without structured completeness cannot populate the cache.
-	until := time.Now().Add(time.Hour)
-	svc, _ := newLastResortGatewayFixture(t, []Account{{
-		ID: 81, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1,
-		TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x",
-	}})
-	counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo)}
-	svc.accountRepo = counting
-	groupID := int64(7)
-	for i := 0; i < 50; i++ {
-		_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
-		require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	}
-	require.Equal(t, 50, counting.lists, "unknown selection evidence must not cache")
+	t.Run("unknown_evidence", func(t *testing.T) {
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(7) })
+		// A failed persistent diagnosis is unknown and cannot populate the cache.
+		until := time.Now().Add(time.Hour)
+		svc, _ := newLastResortGatewayFixture(t, []Account{{
+			ID: 81, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1,
+			TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x",
+		}})
+		counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo), diagnosisErr: errors.New("fixture persistent diagnosis read failed")}
+		svc.accountRepo = counting
+		groupID := int64(7)
+		diagnosis := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4", PlatformAnthropic)
+		require.False(t, diagnosis.Known)
+		require.ErrorIs(t, diagnosis.Err, counting.diagnosisErr)
+		for i := 0; i < 50; i++ {
+			_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		}
+		require.Equal(t, 50, counting.lists, "unknown selection evidence must not cache")
 
-	// Failover attempts (with exclusions) never use the cache.
-	_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", map[int64]struct{}{99: {}}, "", 0)
-	require.Equal(t, 51, counting.lists)
+		// Failover attempts (with exclusions) never use the cache.
+		_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", map[int64]struct{}{99: {}}, "", 0)
+		require.Equal(t, 51, counting.lists)
 
-	// Account recovery invalidates the entry.
-	resilience.ProcessNegativeCache().InvalidateGroup(7)
-	_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
-	require.Equal(t, 52, counting.lists)
+		// Account recovery invalidates the entry.
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		_, _ = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+		require.Equal(t, 52, counting.lists)
+	})
+	t.Run("known_empty_pool", func(t *testing.T) {
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(7) })
+		svc, _ := newLastResortGatewayFixture(t, nil)
+		counting := &countingPlatformRepo{groupListingRepo: svc.accountRepo.(groupListingRepo)}
+		svc.accountRepo = counting
+		groupID := int64(7)
+		diagnosis := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4", PlatformAnthropic)
+		require.True(t, diagnosis.Known)
+		require.NoError(t, diagnosis.Err)
+		require.Zero(t, diagnosis.Members)
+		for i := 0; i < 50; i++ {
+			_, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+		}
+		require.Equal(t, 1, counting.lists, "complete evidence for an empty pool may be negatively cached")
+	})
 }
 
 func TestNegativeCacheOffWhenErrorsDisabled(t *testing.T) {
