@@ -38,6 +38,8 @@ type SchedAttemptStart struct {
 type SchedAttemptUsage struct {
 	// PromptTokens is total input; InputTokens excludes cache reads and writes.
 	PromptTokens, InputTokens, CacheReadTokens, CacheCreationTokens int
+	// Missing cache-read usage is unknown; an explicit zero is evidence.
+	CacheReadTokensPresent bool
 }
 type SchedAttemptFinish struct {
 	Outcome schedquality.Outcome

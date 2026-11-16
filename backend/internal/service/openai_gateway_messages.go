@@ -514,7 +514,11 @@ retryMessagesResponsesWire:
 			zap.String("upstream_error_preview", truncateOpenAIWSLogValue(string(respBody), 240)),
 		)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(forwardResult, forwardErr)
+		_ = resp.Body.Close()
+	}(schedCapture)
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
@@ -792,7 +796,12 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, anthropicResp)
+	payload, err := json.Marshal(anthropicResp)
+	if err != nil {
+		return nil, err
+	}
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(payload)
 
 	result = &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -806,6 +815,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		Stream:                        false,
+		ClientDisconnect:              writeErr != nil,
 		Duration:                      time.Since(startTime),
 	}
 	// Grok /v1/messages uses Responses upstream; count native search for surcharge.
@@ -815,6 +825,10 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				result.SearchCount = n
 			}
 		}
+	}
+	if writeErr != nil {
+		cancelSchedClient(c)
+		return result, writeErr
 	}
 	return result, nil
 }
@@ -944,7 +958,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	go func() {
@@ -957,7 +970,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			select {
 			case events <- scanEvent{err: err}:
 			case <-done:
@@ -1595,7 +1607,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	var lastReadAt int64
@@ -1617,7 +1628,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}()
