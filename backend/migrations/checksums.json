@@ -360,6 +360,7 @@
     "312_gateway_usage_facts.sql": "ca0977857d525087fed73bd388649aa1e603d8af6b200eb8a512d52720e27d42",
     "315_sched_line_states.sql": "f411be7893aebb2773bbd5ac373fac8f4001e0eda3fada60a4f6b352a1c63868",
     "313_sched_attempt_v2.sql": "80db1d9c07741459ef9deeb92d88ed2814962c2ac762f408de5b850443d47047",
-    "314_quality_gate_v2_fields.sql": "d288152de934c5a8ceaeee5eaa7415636eb212758954ec1e8712d2fc614fac1c"
+    "314_quality_gate_v2_fields.sql": "d288152de934c5a8ceaeee5eaa7415636eb212758954ec1e8712d2fc614fac1c",
+    "318_group_ratefloor_auth_cache_invalidation.sql": "c76a4e3a7ee5e31e4c8d23258d4b3fcc9454c8a0c1bbeb4c76bb7c7ad976c979"
   }
 }

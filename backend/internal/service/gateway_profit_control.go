@@ -23,7 +23,7 @@ func (s *GatewayService) withGatewayProfitControlGate(ctx context.Context, group
 		slog.Warn("profit_control_group_load_failed", "group_id", *groupID, "error", err)
 		return s.clearForeignProfitControlGate(ctx, groupID)
 	}
-	if group == nil || !group.ProfitControlEnabled || !profitControlPlatformSupported(group.Platform) {
+	if group == nil || (!group.ProfitControlEnabled && groupProfitFloor(group) <= 0) || !profitControlPlatformSupported(group.Platform) {
 		return s.clearForeignProfitControlGate(ctx, groupID)
 	}
 
@@ -48,6 +48,9 @@ func (s *GatewayService) withGatewayProfitControlGate(ctx context.Context, group
 		groupID:   group.ID,
 		platform:  group.Platform,
 		threshold: threshold,
+		ceilingOn: group.ProfitControlEnabled,
+		floor:     groupProfitFloor(group),
+		sell:      downstream,
 		pricingAt: pricingAt,
 	}
 	openAIProfitControlObserverInstance.recordInstall(gate.groupID, gate.platform, gate.threshold)

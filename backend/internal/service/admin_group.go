@@ -504,6 +504,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, infraerrors.BadRequest("INVALID_PEAK_RATE_CONFIG", err.Error())
 	}
 
+	if err := ValidateMinUpstreamRate(platform, input.MinUpstreamRate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+	}
+	minUpstreamRate := input.MinUpstreamRate
+	if minUpstreamRate != nil && *minUpstreamRate == 0 {
+		minUpstreamRate = nil
+	}
 	profitMinMargin := 0.0
 	if input.ProfitMinMargin != nil {
 		profitMinMargin = *input.ProfitMinMargin
@@ -624,6 +631,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		PeakRateMultiplier:              peakRateMultiplier,
 		ProfitControlEnabled:            profitControlEnabled,
 		ProfitMinMargin:                 profitMinMargin,
+		MinUpstreamRate:                 minUpstreamRate,
 		ProfitSafetyBuffer:              profitSafetyBuffer,
 		ImagePrice1K:                    imagePrice1K,
 		ImagePrice2K:                    imagePrice2K,
@@ -694,7 +702,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 
 	// 如果有需要复制的账号，绑定到新分组
 	if len(accountIDsToCopy) > 0 {
-		if err := s.groupRepo.BindAccountsToGroup(ctx, group.ID, accountIDsToCopy); err != nil {
+		if err := s.copyGroupAccountMembers(ctx, group.ID, input.CopyAccountsFromGroupIDs, accountIDsToCopy, false); err != nil {
 			return nil, fmt.Errorf("failed to bind accounts to new group: %w", err)
 		}
 		group.AccountCount = int64(len(accountIDsToCopy))
@@ -963,6 +971,18 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	// 利润控制与高峰同一收口：按合并后的最终平台归一化（转到不支持平台时静默重置），
 	// 再对合并后的最终配置统一校验，防止部分字段更新拼出非法组合入库。
+	if err := ValidateMinUpstreamRate(group.Platform, input.MinUpstreamRate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+	}
+	if input.MinUpstreamRate != nil {
+		group.MinUpstreamRate = input.MinUpstreamRate
+		if *input.MinUpstreamRate == 0 {
+			group.MinUpstreamRate = nil
+		}
+	}
+	if group.Platform != PlatformOpenAI {
+		group.MinUpstreamRate = nil
+	}
 	group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer = NormalizeProfitControlConfig(group.Platform, group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer)
 	if err := ValidateProfitControlConfig(group.Platform, group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer); err != nil {
 		return nil, err
@@ -1192,11 +1212,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
 		}
 
-		// 先清空当前分组的所有账号绑定
-		if _, err := s.groupRepo.DeleteAccountGroupsByGroupID(ctx, id); err != nil {
-			return nil, fmt.Errorf("failed to clear existing account bindings: %w", err)
-		}
-
 		// require_oauth_only: 过滤掉 apikey 类型账号
 		if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) && len(accountIDsToCopy) > 0 {
 			accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
@@ -1219,10 +1234,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 
 		// 再绑定源分组的账号
-		if len(accountIDsToCopy) > 0 {
-			if err := s.groupRepo.BindAccountsToGroup(ctx, id, accountIDsToCopy); err != nil {
-				return nil, fmt.Errorf("failed to bind accounts to group: %w", err)
-			}
+		if err := s.copyGroupAccountMembers(ctx, id, uniqueSourceGroupIDs, accountIDsToCopy, true); err != nil {
+			return nil, fmt.Errorf("failed to copy account members: %w", err)
 		}
 	}
 

@@ -215,6 +215,7 @@ type CreateGroupRequest struct {
 	PeakEnd                         string                        `json:"peak_end"`
 	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
 	ProfitControlEnabled            bool                          `json:"profit_control_enabled"`
+	MinUpstreamRate                 *float64                      `json:"min_upstream_rate"`
 	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
 	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
 	ImagePrice1K                    *float64                      `json:"image_price_1k"`
@@ -296,6 +297,7 @@ type UpdateGroupRequest struct {
 	PeakEnd                         *string                       `json:"peak_end"`
 	PeakRateMultiplier              *float64                      `json:"peak_rate_multiplier"`
 	ProfitControlEnabled            *bool                         `json:"profit_control_enabled"`
+	MinUpstreamRate                 *float64                      `json:"min_upstream_rate"`
 	ProfitMinMargin                 *float64                      `json:"profit_min_margin"`
 	ProfitSafetyBuffer              *float64                      `json:"profit_safety_buffer"`
 	ImagePrice1K                    *float64                      `json:"image_price_1k"`
@@ -709,6 +711,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
 		ProfitControlEnabled:            req.ProfitControlEnabled,
+		MinUpstreamRate:                 req.MinUpstreamRate,
 		ProfitMinMargin:                 req.ProfitMinMargin,
 		ProfitSafetyBuffer:              req.ProfitSafetyBuffer,
 		ImagePrice1K:                    req.ImagePrice1K,
@@ -861,6 +864,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		PeakEnd:                         req.PeakEnd,
 		PeakRateMultiplier:              req.PeakRateMultiplier,
 		ProfitControlEnabled:            req.ProfitControlEnabled,
+		MinUpstreamRate:                 req.MinUpstreamRate,
 		ProfitMinMargin:                 req.ProfitMinMargin,
 		ProfitSafetyBuffer:              req.ProfitSafetyBuffer,
 		ImagePrice1K:                    req.ImagePrice1K,
@@ -1176,4 +1180,33 @@ func (h *GroupHandler) UpdateSortOrder(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Sort order updated successfully"})
+}
+
+func (h *GroupHandler) SetMemberPinned(c *gin.Context) {
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("account_id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	var req struct {
+		Pinned *bool `json:"pinned"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Pinned == nil {
+		response.BadRequest(c, "pinned must be a boolean")
+		return
+	}
+	svc, ok := h.adminService.(service.GroupMemberAdmin)
+	if !ok {
+		response.Error(c, 503, "group member service unavailable")
+		return
+	}
+	if response.ErrorFrom(c, svc.SetGroupMemberPinned(c.Request.Context(), groupID, accountID, *req.Pinned)) {
+		return
+	}
+	response.Success(c, gin.H{"group_id": groupID, "account_id": accountID, "pinned": *req.Pinned})
 }

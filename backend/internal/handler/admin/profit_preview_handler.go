@@ -37,7 +37,16 @@ func (h *ProfitPreviewHandler) ProfitControlPreview(c *gin.Context) {
 		}
 		margin = &value
 	}
-	out, err := h.svc.ProfitControlPreview(c.Request.Context(), groupID, margin)
+	var floor *float64
+	if raw, ok := c.GetQuery("floor"); ok {
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil {
+			response.BadRequest(c, "Invalid floor")
+			return
+		}
+		floor = &value
+	}
+	out, err := h.svc.ProfitControlPreview(c.Request.Context(), groupID, margin, floor)
 	if response.ErrorFrom(c, err) {
 		return
 	}

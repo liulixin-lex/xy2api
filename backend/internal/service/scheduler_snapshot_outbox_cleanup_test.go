@@ -12,8 +12,6 @@ import (
 )
 
 type outboxCleanupCache struct {
-	watermark       int64
-	setWatermarks   []int64
 	updateErr       error
 	listBucketErr   error
 	listBuckets     []SchedulerBucket
@@ -77,16 +75,6 @@ func (c *outboxCleanupCache) ListBuckets(ctx context.Context) ([]SchedulerBucket
 	return c.listBuckets, c.listBucketErr
 }
 
-func (c *outboxCleanupCache) GetOutboxWatermark(ctx context.Context) (int64, error) {
-	return c.watermark, nil
-}
-
-func (c *outboxCleanupCache) SetOutboxWatermark(ctx context.Context, id int64) error {
-	c.watermark = id
-	c.setWatermarks = append(c.setWatermarks, id)
-	return nil
-}
-
 type outboxCleanupRepo struct {
 	events          []SchedulerOutboxEvent
 	rows            []int64
@@ -98,6 +86,8 @@ type outboxCleanupRepo struct {
 	deleteCalls     [][]int64
 	deleteErr       error
 	pendingReads    int
+	healthUnderLock bool
+	commitErr       error
 }
 
 type outboxCleanupAccountRepo struct {
@@ -143,6 +133,7 @@ func (r *outboxCleanupRepo) ListPendingAndReleaseDedup(_ context.Context, limit 
 }
 func (r *outboxCleanupRepo) OldestPendingCreatedAt(context.Context) (time.Time, bool, error) {
 	r.pendingReads++
+	r.healthUnderLock = r.lockUnavailable
 	if len(r.events) == 0 {
 		return time.Time{}, false, nil
 	}
@@ -189,27 +180,49 @@ func (r *outboxCleanupRepo) TryAcquireConsumerLock(context.Context) (SchedulerOu
 		return nil, false, nil
 	}
 	r.lockUnavailable = true
-	return outboxCleanupLease{release: func() { r.lockUnavailable = false; r.releaseCount++ }}, true, nil
+	return &outboxCleanupLease{repo: r}, true, nil
 }
 
 type outboxCleanupLease struct {
-	release func()
+	repo     *outboxCleanupRepo
+	ids      []int64
+	released bool
 }
 
-func (l outboxCleanupLease) Release() {
-	if l.release != nil {
-		l.release()
+func (l *outboxCleanupLease) ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error) {
+	return l.repo.ListPendingAndReleaseDedup(ctx, limit)
+}
+func (l *outboxCleanupLease) DeleteProcessed(_ context.Context, ids []int64) error {
+	if l.repo.deleteErr != nil {
+		return l.repo.deleteErr
+	}
+	l.ids = append([]int64(nil), ids...)
+	return nil
+}
+func (l *outboxCleanupLease) Commit() error {
+	if l.repo.commitErr != nil {
+		l.Release()
+		return l.repo.commitErr
+	}
+	err := l.repo.DeleteProcessed(context.Background(), l.ids)
+	l.Release()
+	return err
+}
+func (l *outboxCleanupLease) Release() {
+	if !l.released {
+		l.released = true
+		l.repo.lockUnavailable = false
+		l.repo.releaseCount++
 	}
 }
 
 func TestSchedulerSnapshotServicePollOutboxAcknowledgesOnlySelectedIDs(t *testing.T) {
-	cache := &outboxCleanupCache{watermark: 10000}
+	cache := &outboxCleanupCache{}
 	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 3, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1, 2, 3, 4}}
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
 	svc.pollOutbox()
 	require.Equal(t, []int64{1, 2, 4}, repo.rows)
 	require.Equal(t, [][]int64{{3}}, repo.deleteCalls)
-	require.Empty(t, cache.setWatermarks, "Redis watermark is not a commit cursor")
 	require.Equal(t, 1, repo.releaseCount)
 }
 func TestSchedulerSnapshotServicePollOutboxSkipsLockedConsumer(t *testing.T) {
@@ -705,7 +718,6 @@ func TestSchedulerSnapshotServicePollOutboxHealthyEmptyBatchSkipsLagHealthQuerie
 
 func TestSchedulerSnapshotServiceEmptyPollDoesNotReleaseRunningRebuild(t *testing.T) {
 	baseCache := &outboxCleanupCache{
-		watermark:   1,
 		listBuckets: []SchedulerBucket{{Platform: PlatformOpenAI, Mode: SchedulerModeSingle}},
 	}
 	cache := &blockingOutboxCleanupCache{
@@ -770,4 +782,38 @@ func int64Range(start, end int64) []int64 {
 		values = append(values, id)
 	}
 	return values
+}
+
+func TestSchedulerOutboxLockContentionHealthAndWarnings(t *testing.T) {
+	repo := &outboxCleanupRepo{lockUnavailable: true, events: []SchedulerOutboxEvent{{ID: 1, CreatedAt: time.Now().Add(-time.Hour)}}, rows: []int64{1}}
+	cache := &outboxCleanupCache{}
+	cfg := &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxLagWarnSeconds: 1, OutboxLagRebuildSeconds: 1, OutboxLagRebuildFailures: 1, OutboxBacklogRebuildRows: 1}}}
+	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
+	svc.pollOutbox()
+	require.Equal(t, 1, repo.pendingReads)
+	require.Equal(t, 1, repo.countCalls)
+	require.Zero(t, cache.listBucketCalls, "contending instances inspect health without synchronously rebuilding")
+	now := time.Unix(1000, 0)
+	svc.noteOutboxLockContention(now, false)
+	require.False(t, svc.noteOutboxLockContention(now, true))
+	require.True(t, svc.noteOutboxLockContention(now.Add(30*time.Second), true))
+	require.False(t, svc.noteOutboxLockContention(now.Add(45*time.Second), true))
+	require.True(t, svc.noteOutboxLockContention(now.Add(90*time.Second), true))
+}
+func TestSchedulerOutboxReleasesTransactionBeforeLagCheck(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, &config.Config{})
+	svc.pollOutbox()
+	require.Equal(t, 1, repo.pendingReads)
+	require.False(t, repo.healthUnderLock)
+	require.Equal(t, 1, repo.releaseCount)
+}
+func TestSchedulerOutboxCommitFailureReplaysBatch(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}, commitErr: errors.New("transaction terminated")}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, nil)
+	svc.pollOutbox()
+	require.Len(t, repo.events, 1)
+	repo.commitErr = nil
+	svc.pollOutbox()
+	require.Empty(t, repo.events)
 }

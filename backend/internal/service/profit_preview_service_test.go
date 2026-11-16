@@ -53,7 +53,7 @@ func TestProfitPreviewService(t *testing.T) {
 			}
 			repo := &groupAccountsRepo{byGroup: map[int64][]Account{10: rows}}
 			svc := NewProfitPreviewService(repo, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
-			got, err := svc.ProfitControlPreview(context.Background(), 10, &tc.margin)
+			got, err := svc.ProfitControlPreview(context.Background(), 10, &tc.margin, nil)
 			require.NoError(t, err)
 			require.True(t, repo.listedAll, "members query must include inactive accounts")
 			require.Equal(t, 8, got.Members)

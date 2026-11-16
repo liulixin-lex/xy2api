@@ -1414,3 +1414,12 @@ func (r *chainIdempotency) ExtendProcessingLock(context.Context, int64, string, 
 func (r *chainIdempotency) MarkFailedRetryable(context.Context, int64, string, time.Time, time.Time) error {
 	return nil
 }
+
+func (r *chainGroups) CopyAccountMembers(ctx context.Context, _ int64, _ []int64, _ []int64, _ bool) error {
+	r.w.record(ctx, "group.bind")
+	return nil
+}
+func (r *chainGroups) SetMemberPinned(ctx context.Context, _, _ int64, _ bool) error {
+	r.w.record(ctx, "group.pin")
+	return nil
+}

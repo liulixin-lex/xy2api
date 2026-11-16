@@ -135,6 +135,9 @@ func (s *OpenAIGatewayService) recheckSelectionAdmission(ctx context.Context, re
 	if latest == nil {
 		return nil, "account_nil"
 	}
+	if latest.IsGrok() && len(s.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*latest})) == 0 {
+		return latest, "quota_auto_pause"
+	}
 	if _, excluded := req.ExcludedIDs[latest.ID]; excluded {
 		return latest, "excluded"
 	}
@@ -230,7 +233,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		if fresh == nil {
 			return nil
 		}
-		latest, vetoed, _ := s.SelectionAdmissionVetoLatest(ctx, fresh)
+		latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
 		if vetoed {
 			return nil
 		}
