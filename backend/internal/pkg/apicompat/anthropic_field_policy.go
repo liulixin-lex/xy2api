@@ -36,15 +36,30 @@ var anthropicFieldPolicies = []anthropicFieldPolicy{
 	{"n", validateAnthropicN},                                   // Only an explicit 1 is representable.
 	// Officially ignored: logprobs, top_logprobs, seed, presence_penalty,
 	// frequency_penalty, logit_bias, user, metadata, prediction, service_tier,
-	// audio, store, modalities and function strict. None enter AnthropicRequest.
+	// audio, store and modalities. None enter AnthropicRequest.
 }
 
 func applyAnthropicFieldPolicies(req *ResponsesRequest, out *AnthropicRequest) error {
+	return applyAnthropicFieldPoliciesWithOptions(req, out, ConversionOptions{})
+}
+
+func applyAnthropicFieldPoliciesWithOptions(req *ResponsesRequest, out *AnthropicRequest, opts ConversionOptions) error {
 	for _, policy := range anthropicFieldPolicies {
 		if policy.apply == nil {
 			continue
 		}
-		if err := policy.apply(req, out); err != nil {
+		apply := policy.apply
+		switch policy.field {
+		case "tools/functions":
+			apply = func(req *ResponsesRequest, out *AnthropicRequest) error {
+				return mapAnthropicToolsWithOptions(req, out, opts)
+			}
+		case "tool_choice/function_call":
+			apply = func(req *ResponsesRequest, out *AnthropicRequest) error {
+				return mapAnthropicToolChoiceWithOptions(req, out, opts)
+			}
+		}
+		if err := apply(req, out); err != nil {
 			var unsupported *UnsupportedConversionError
 			if req.anthropicChatSource != nil && errors.As(err, &unsupported) {
 				field := unsupported.Field
@@ -87,6 +102,10 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	if json.Unmarshal(aux.MaxOutputTokens, &maxOutputTokens) == nil {
 		r.MaxOutputTokens = maxOutputTokens
 	}
+	reasoning, _ := decodeChatReasoning(r.Reasoning, r.ReasoningEffort)
+	if reasoning != nil {
+		r.ReasoningEffort = reasoning.Effort
+	}
 	type rawTool struct {
 		Type     string        `json:"type"`
 		Name     string        `json:"name"`
@@ -115,6 +134,32 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// decodeChatReasoning accepts the Chat extension without tightening decoding.
+// The legacy effort wins; malformed or unknown extension members stay ignored.
+func decodeChatReasoning(raw json.RawMessage, legacy string) (*ResponsesReasoning, error) {
+	var result ResponsesReasoning
+	if json.Unmarshal(raw, &result.Effort) != nil {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			_ = json.Unmarshal(fields["effort"], &result.Effort)
+			_ = json.Unmarshal(fields["summary"], &result.Summary)
+		}
+	}
+	result.Effort = strings.ToLower(strings.TrimSpace(result.Effort))
+	switch result.Effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	default:
+		result.Effort = ""
+	}
+	if legacy != "" {
+		result.Effort = legacy
+	}
+	if result.Effort == "" && result.Summary == "" {
+		return nil, nil
+	}
+	return &result, nil
 }
 
 func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
@@ -249,6 +294,10 @@ func mapAnthropicStops(req *ResponsesRequest, out *AnthropicRequest) error {
 }
 
 func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
+	return mapAnthropicToolsWithOptions(req, out, ConversionOptions{})
+}
+
+func mapAnthropicToolsWithOptions(req *ResponsesRequest, out *AnthropicRequest, opts ConversionOptions) error {
 	tools := req.Tools
 	var paths []string
 	if source := req.anthropicChatSource; source != nil {
@@ -256,6 +305,11 @@ func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
 		for i, tool := range source.Tools {
 			field := fmt.Sprintf("tools[%d]", i)
 			converted := convertChatToolsToResponses([]ChatTool{tool}, nil)
+			if tool.Function != nil {
+				for j := range converted {
+					converted[j].Strict = tool.Function.Strict
+				}
+			}
 			if tool.Type == "web_search_preview" {
 				converted = []ResponsesTool{{Type: "web_search_preview"}}
 			}
@@ -270,11 +324,19 @@ func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
 			paths = append(paths, field)
 		}
 		for i, f := range source.Functions {
-			tools = append(tools, convertChatToolsToResponses(nil, []ChatFunction{f})...)
+			converted := convertChatToolsToResponses(nil, []ChatFunction{f})
+			for j := range converted {
+				converted[j].Strict = f.Strict
+			}
+			tools = append(tools, converted...)
 			paths = append(paths, fmt.Sprintf("functions[%d]", i))
 		}
 	}
+	allowed := anthropicAllowedToolIdentities(req, tools, opts)
 	for i, tool := range tools {
+		if allowed != nil && !allowed[anthropicToolIdentity(tool, opts)] {
+			continue
+		}
 		field := fmt.Sprintf("tools[%d]", i)
 		if len(paths) > i {
 			field = paths[i]
@@ -306,9 +368,61 @@ func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
 		}
 		out.Tools = append(out.Tools, AnthropicTool{CacheControl: tool.CacheControl,
 			DeferLoading: tool.DeferLoading, Custom: tool.Custom,
-			Name: tool.Name, Description: tool.Description, InputSchema: schema})
+			Name: tool.Name, Description: tool.Description, InputSchema: schema, Strict: tool.Strict})
 	}
 	return nil
+}
+
+func anthropicToolIdentity(tool ResponsesTool, opts ConversionOptions) ToolNameIdentity {
+	if opts.Bridge != nil && opts.Bridge.ToolNames != nil {
+		if identity, ok := opts.Bridge.ToolNames.Reverse[tool.Name]; ok {
+			return identity
+		}
+	}
+	return ToolNameIdentity{Kind: tool.Type, Name: tool.Name}
+}
+
+func anthropicAllowedToolIdentities(req *ResponsesRequest, tools []ResponsesTool, opts ConversionOptions) map[ToolNameIdentity]bool {
+	if opts.Bridge == nil || !opts.Bridge.Enabled {
+		return nil
+	}
+	var choice struct {
+		Type  string `json:"type"`
+		Tools []struct {
+			Type      string `json:"type"`
+			Namespace string `json:"namespace"`
+			Name      string `json:"name"`
+			Function  struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(req.ToolChoice, &choice) != nil || choice.Type != "allowed_tools" {
+		return nil
+	}
+	declared := make(map[ToolNameIdentity]bool, len(tools))
+	for _, tool := range tools {
+		declared[anthropicToolIdentity(tool, opts)] = true
+	}
+	allowed := make(map[ToolNameIdentity]bool, len(choice.Tools))
+	for i, tool := range choice.Tools {
+		name := tool.Name
+		if name == "" {
+			name = tool.Function.Name
+		}
+		id := ToolNameIdentity{Kind: tool.Type, Namespace: tool.Namespace, Name: name}
+		if opts.Bridge.ToolNames != nil {
+			if original, ok := opts.Bridge.ToolNames.Reverse[name]; ok && tool.Namespace == "" {
+				id = original
+			}
+		}
+		if declared[id] {
+			allowed[id] = true
+		} else if opts.Record != nil {
+			opts.Record(ConversionNotice{Field: fmt.Sprintf("tool_choice.tools[%d]", i), Action: "omit"})
+		}
+	}
+	return allowed
 }
 
 func logDroppedAnthropicTool(field, toolType string) {
@@ -328,6 +442,10 @@ func knownAnthropicServerTool(typ string) bool {
 }
 
 func mapAnthropicToolChoice(req *ResponsesRequest, out *AnthropicRequest) error {
+	return mapAnthropicToolChoiceWithOptions(req, out, ConversionOptions{})
+}
+
+func mapAnthropicToolChoiceWithOptions(req *ResponsesRequest, out *AnthropicRequest, opts ConversionOptions) error {
 	if len(normalizedRawJSON(req.ToolChoice)) == 0 {
 		return nil
 	}
@@ -342,7 +460,19 @@ func mapAnthropicToolChoice(req *ResponsesRequest, out *AnthropicRequest) error 
 		Type string `json:"type"`
 	}
 	_ = json.Unmarshal(choice, &value)
+	if opts.Bridge != nil && opts.Bridge.Enabled && len(out.Tools) == 0 && value.Type == "auto" {
+		var source struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(req.ToolChoice, &source)
+		if source.Type == "allowed_tools" {
+			choice = json.RawMessage(`{"type":"none"}`)
+		}
+	}
 	if spec, ok := claude.Claude55(req.Model); ok && !spec.ForcedToolChoice && (value.Type == "any" || value.Type == "tool") {
+		return unsupportedConversion("tool_choice", "this model does not support forced tool_choice; use auto or none")
+	}
+	if spec, ok := claude.Claude52(req.Model); ok && !spec.ForcedToolChoice && (value.Type == "any" || value.Type == "tool") {
 		return unsupportedConversion("tool_choice", "this model does not support forced tool_choice; use auto or none")
 	}
 	out.ToolChoice = choice
@@ -421,6 +551,18 @@ func mapAnthropicResponseFormat(req *ResponsesRequest, out *AnthropicRequest) er
 			return err
 		}
 		raw = converted
+	}
+	if req.conversionTarget == "gemini" {
+		if err := validateResponseFormat(raw, false); err != nil {
+			return err
+		}
+		if len(normalizedRawJSON(raw)) > 0 {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Format = append(json.RawMessage(nil), raw...)
+		}
+		return nil
 	}
 	format, err := responsesTextFormatToAnthropic(raw)
 	if err != nil {

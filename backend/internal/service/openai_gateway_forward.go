@@ -46,6 +46,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
 	}
+	if account.Type != AccountTypeAPIKey {
+		policyBody, _, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
+		if policyErr != nil {
+			return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+		}
+		body = policyBody
+	}
 	// Validate the original request before compatibility filters can discard an
 	// explicit effort. Use the same final account/compact model as forwarding.
 	requestedValidationModel := gjson.GetBytes(body, "model").String()
@@ -56,9 +63,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			validationModel = mapped
 		}
 	}
-	if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-		return nil, err
+	if account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+	} else {
+		ctx = WithFinalReasoningEffortRequest(ctx, body)
 	}
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
@@ -318,7 +329,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
-		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
+		// Passthrough keeps the baseline reading for its first-output budget until its final-wire actual is wired.
+		reasoningEffort := extractOpenAIWSLegacyReasoningEffort(body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
 		reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
 		return s.forwardOpenAIPassthrough(
@@ -333,6 +345,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			reqStream,
 			startTime,
 		)
+	}
+
+	if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, validationModel, "responses")
+		if policyErr != nil {
+			return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+		}
+		body = policyBody
+		if err := validateGPT61FinalCompatRequest(body, validationModel); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "reasoning.effort"}})
+			return nil, err
+		}
+		requestView = newOpenAIRequestView(body)
 	}
 
 	bodyModified := false
@@ -1095,11 +1120,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
-	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
+	defer func() {
+		if result != nil {
+			result.ReasoningEffort = reasoningEffort
+		}
+	}()
+	// Timeouts retain the baseline effective preference; billing uses final wire only.
+	budgetEffort := ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, upstreamModel, billingModel, originalModel), body, reqModel)
 	reasoningEffortValue := ""
-	if reasoningEffort != nil {
-		reasoningEffortValue = *reasoningEffort
+	if budgetEffort != nil {
+		reasoningEffortValue = *budgetEffort
 	}
 
 	// xy2api resilience: web_search history on API-key relays.
@@ -1109,6 +1139,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
+	var rejectedFieldRetryEvent *OpsUpstreamErrorEvent
+	var rejectedFieldRetrySequence uint64
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
@@ -1116,6 +1148,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	for {
 		if replayAttempt {
 			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		}
+		if account.Type == AccountTypeAPIKey && GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+			policyBody, _, policyErr := applyFinalReasoningEffortForAccount(ctx, c, account, body, upstreamModel, "responses")
+			if policyErr != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", policyErr)
+			}
+			body = policyBody
 		}
 		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
 		if deriveErr != nil {
@@ -1149,6 +1188,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 
+		reasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
+
 		// Get proxy URL
 		proxyURL := ""
 		if account.ProxyID != nil && account.Proxy != nil {
@@ -1158,6 +1199,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		if rejectedFieldRetryEvent != nil {
+			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
+				rejectedFieldRetryEvent.Resent = true
+			}
+			rejectedFieldRetryEvent = nil
+		}
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0
 			if resp != nil {
@@ -1233,9 +1280,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					continue
 				}
 			}
-			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
+			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account, resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
+				rejectedFieldRetryEvent = recordOpenAIResponsesRejectedFieldRetry(c, account, resp, respBody)
+				rejectedFieldRetrySequence = resilience.StateFrom(ctx).OpsUpstreamEventSequence()
+				recordOpenAIRejectedOutputLimitOmission(ctx, body, retryBody)
+				recordOpenAIRejectedReasoningOmission(ctx, c, account, upstreamModel, body, retryBody)
 				body = retryBody
 				requestView = newOpenAIRequestView(body)
 				reqBody = nil

@@ -10,7 +10,10 @@ import (
 	"strings"
 	"sync"
 
+	"context"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -121,6 +124,68 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 		s.seenBodyHashes = make(map[[sha256.Size]byte]struct{}, maxOpenAIResponsesRejectedFieldRetries+1)
 	}
 	s.seenBodyHashes[sha256.Sum256(body)] = struct{}{}
+}
+
+// E21 is restricted to third-party API-key Responses requests and explicit none.
+// Existing callers retain their prior repair contract until they opt into this account-aware entry.
+func normalizeOpenAIResponsesRejectedFieldRetryBodyForAccount(account *Account, statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
+	if openAIAccountPreviouslyStrippedNoneReasoningEffort(account) && statusCode == http.StatusBadRequest {
+		param := strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String())
+		effort := gjson.GetBytes(body, "reasoning.effort")
+		if (param == "reasoning.effort" || param == "reasoning") && effort.Type == gjson.String && strings.EqualFold(strings.TrimSpace(effort.String()), "none") {
+			next, err := sjson.DeleteBytes(body, param)
+			if err != nil {
+				return nil, "", false, err
+			}
+			if alias := gjson.GetBytes(next, "reasoning_effort"); alias.Type == gjson.String && strings.EqualFold(strings.TrimSpace(alias.String()), "none") {
+				next, err = sjson.DeleteBytes(next, "reasoning_effort")
+				if err != nil {
+					return nil, "", false, err
+				}
+			}
+			if reasoning := gjson.GetBytes(next, "reasoning"); reasoning.IsObject() && len(reasoning.Map()) == 0 {
+				next, err = sjson.DeleteBytes(next, "reasoning")
+				if err != nil {
+					return nil, "", false, err
+				}
+			}
+			return next, "reasoning.effort none parameter rejection", true, nil
+		}
+	}
+	return normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode, body, responseBody)
+}
+
+// The API-key targets whose none the baseline stripped before sending: OpenAI
+// keys on a non-official base_url and every other OpenAI-protocol platform key.
+func openAIAccountPreviouslyStrippedNoneReasoningEffort(account *Account) bool {
+	if account == nil || account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() {
+		return false
+	}
+	if !account.IsOpenAI() {
+		return true
+	}
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	return baseURL != "" && !isOfficialOpenAIModelsBaseURL(baseURL)
+}
+
+// Call only after the existing retry budget approves the omission.
+func recordOpenAIRejectedReasoningOmission(ctx context.Context, c *gin.Context, account *Account, model string, before, after []byte) {
+	if account == nil || !strings.EqualFold(gjson.GetBytes(before, "reasoning.effort").String(), "none") || gjson.GetBytes(after, "reasoning.effort").Exists() {
+		return
+	}
+	var state *finalReasoningRequest
+	if ctx != nil {
+		state, _ = ctx.Value(finalReasoningRequestKey{}).(*finalReasoningRequest)
+	}
+	if c != nil {
+		if value, ok := c.Get("xy_final_reasoning_request"); ok {
+			state, _ = value.(*finalReasoningRequest)
+		}
+	}
+	if state != nil {
+		state.noneOmitted, state.omittedAccountID, state.omittedModel = true, account.ID, model
+	}
+	resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "reasoning.effort", Action: "omit"})
 }
 
 func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
@@ -236,6 +301,48 @@ func isExplicitOpenAIResponsesFieldRejection(code, message string) bool {
 	}
 	return strings.Contains(message, "unknown parameter") ||
 		strings.Contains(message, "unsupported parameter")
+}
+
+// openAIResponsesRejectedFieldForRecord returns only known wire field names and
+// structural paths. Error messages and caller-controlled field values never
+// become observation fields, and recognition does not authorize a repair.
+func openAIResponsesRejectedFieldForRecord(statusCode int, responseBody []byte) string {
+	if statusCode != http.StatusBadRequest {
+		return ""
+	}
+	param := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String()))
+	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
+	messageParam := openAIResponsesRejectedParamFromMessage(message)
+	if messageParam == "" {
+		messageParam = openAIResponsesCacheModelRejectionParamFromMessage(message)
+	}
+	if messageParam == "" {
+		messageParam = openAIResponsesInvalidTypeParamFromMessage(message)
+	}
+	if messageParam == "" {
+		messageParam = openAIResponsesMaxZeroContentParamFromMessage(message)
+	}
+	if param != "" && messageParam != "" && param != messageParam {
+		return ""
+	}
+	if param == "" {
+		param = messageParam
+	}
+	switch param {
+	case "max_output_tokens", "truncation", "top_p", "metadata", "temperature", "frequency_penalty", "presence_penalty", "prompt_cache_breakpoint", "input", "tools", "model", "reasoning", "reasoning.effort", "reasoning_effort":
+		return param
+	}
+	for _, pattern := range []*regexp.Regexp{
+		openAIResponsesRejectedNamespaceParamPattern, openAIResponsesRejectedStatusParamPattern,
+		openAIResponsesRejectedContentParamPattern, openAIResponsesRejectedCacheParamPattern,
+		openAIResponsesRejectedContentCacheParamPattern, openAIResponsesRejectedArgumentsParamPattern,
+		openAIResponsesToolParametersParamPattern,
+	} {
+		if pattern.MatchString(param) {
+			return param
+		}
+	}
+	return ""
 }
 
 func openAIResponsesRejectedParamFromMessage(message string) string {
@@ -578,4 +685,31 @@ func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]by
 		return nil, "", false, fmt.Errorf("delete rejected namespace at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed namespace parameter rejection", true, nil
+}
+
+// recordOpenAIResponsesRejectedFieldRetry stores the refusal that an approved
+// repair will retry. Terminal refusals retain their existing error-event path.
+func recordOpenAIResponsesRejectedFieldRetry(c *gin.Context, account *Account, resp *http.Response, responseBody []byte) *OpsUpstreamErrorEvent {
+	if c == nil || account == nil || resp == nil {
+		return nil
+	}
+	field := openAIResponsesRejectedFieldForRecord(resp.StatusCode, responseBody)
+	if field == "" {
+		return nil
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account), UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"), Kind: "http_error", RejectedField: field, Resent: false, Message: extractUpstreamErrorMessage(responseBody)})
+	value, _ := c.Get(OpsUpstreamErrorsKey)
+	events, _ := value.([]*OpsUpstreamErrorEvent)
+	if len(events) == 0 {
+		return nil
+	}
+	return events[len(events)-1]
+}
+
+// Record the actual wire omission after the existing repair budget approved it.
+// M6/M7/M10 reuse this on their max_output_tokens repair paths.
+func recordOpenAIRejectedOutputLimitOmission(ctx context.Context, before, after []byte) {
+	if gjson.GetBytes(before, "max_output_tokens").Exists() && !gjson.GetBytes(after, "max_output_tokens").Exists() {
+		resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "max_output_tokens", Action: "omit"})
+	}
 }

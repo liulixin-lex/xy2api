@@ -120,6 +120,10 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	openAICtx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	openAICtx.Request = openAICtx.Request.WithContext(service.WithResolvedTargetPlatform(openAICtx.Request.Context(), service.PlatformOpenAI))
 	got, changed, err := applyOpenAIReasoningEffortPolicyForRequest(openAICtx, apiKey, body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	require.Equal(t, body, got)
+	got, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(openAICtx.Request.Context(), body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.JSONEq(t, `{"reasoning":{"effort":"medium"}}`, string(got))
@@ -137,10 +141,11 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	omittedCtx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 	omittedCtx.Request = omittedCtx.Request.WithContext(service.WithResolvedTargetPlatform(omittedCtx.Request.Context(), service.PlatformOpenAI))
 	bindOpenAIReasoningEffortPolicyForMessagesRequest(omittedCtx, apiKey, []byte(`{"model":"gpt-5"}`))
-	omitted, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(omittedCtx.Request.Context(), body)
+	omitted, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(omittedCtx.Request.Context(), []byte(`{"reasoning":{"effort":"high"}}`))
 	require.NoError(t, err)
 	require.False(t, changed)
-	require.Equal(t, body, omitted)
+	require.JSONEq(t, `{"reasoning":{"effort":"high"}}`, string(omitted))
+	require.Nil(t, service.RequestedReasoningEffortFromContext(omittedCtx.Request.Context()))
 
 	denyGroup := *group
 	denyGroup.MaxReasoningEffortOverLimit = service.ReasoningEffortOverLimitDeny
@@ -149,6 +154,8 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	denyCtx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	denyCtx.Request = denyCtx.Request.WithContext(service.WithResolvedTargetPlatform(denyCtx.Request.Context(), service.PlatformOpenAI))
 	_, _, err = applyOpenAIReasoningEffortPolicyForRequest(denyCtx, denyAPIKey, body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	_, _, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(denyCtx.Request.Context(), body)
 	require.Error(t, err)
 	var overLimit *service.ReasoningEffortOverLimitError
 	require.ErrorAs(t, err, &overLimit)
@@ -163,6 +170,9 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	mappingDenyCtx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	mappingDenyCtx.Request = mappingDenyCtx.Request.WithContext(service.WithResolvedTargetPlatform(mappingDenyCtx.Request.Context(), service.PlatformOpenAI))
 	_, changed, err = applyOpenAIReasoningEffortPolicyForRequest(mappingDenyCtx, mappingDenyAPIKey, body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	_, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(mappingDenyCtx.Request.Context(), body)
 	require.Error(t, err)
 	require.False(t, changed)
 	var mappingDenied *service.ReasoningEffortMappingDeniedError
@@ -189,6 +199,10 @@ func TestOpenAIShapedReasoningEffortPolicyForAnthropicGroup(t *testing.T) {
 	}}
 
 	got, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, []byte(`{"reasoning":{"effort":"max"}}`))
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	require.Equal(t, []byte(`{"reasoning":{"effort":"max"}}`), got)
+	got, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(c.Request.Context(), []byte(`{"reasoning":{"effort":"max"}}`))
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.Equal(t, "xhigh", gjson.GetBytes(got, "reasoning.effort").String())
@@ -210,6 +224,10 @@ func TestAnthropicReasoningEffortPolicyForConcreteAndCompositeTargets(t *testing
 	concrete, _ := gin.CreateTestContext(httptest.NewRecorder())
 	concrete.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 	got, changed, err := applyAnthropicReasoningEffortPolicyForRequest(concrete, policy(service.PlatformAnthropic), body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	require.Equal(t, body, got)
+	got, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(concrete.Request.Context(), body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.JSONEq(t, `{"model":"claude-fable-5-1","output_config":{"effort":"xhigh"}}`, string(got))
@@ -218,6 +236,9 @@ func TestAnthropicReasoningEffortPolicyForConcreteAndCompositeTargets(t *testing
 	denyMax.Group.ReasoningEffortMappings = nil
 	denyMax.Group.MaxReasoningEffortOverLimit = service.ReasoningEffortOverLimitDeny
 	_, changed, err = applyAnthropicReasoningEffortPolicyForRequest(concrete, denyMax, body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	_, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(concrete.Request.Context(), body)
 	require.Error(t, err)
 	require.False(t, changed)
 	var overLimit *service.ReasoningEffortOverLimitError
@@ -229,6 +250,10 @@ func TestAnthropicReasoningEffortPolicyForConcreteAndCompositeTargets(t *testing
 	composite.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 	composite.Request = composite.Request.WithContext(service.WithResolvedTargetPlatform(composite.Request.Context(), service.PlatformAnthropic))
 	got, changed, err = applyAnthropicReasoningEffortPolicyForRequest(composite, policy(service.PlatformComposite), body)
+	require.NoError(t, err) // Binding does not execute or reject the request.
+	require.False(t, changed)
+	require.Equal(t, body, got)
+	got, changed, err = service.ApplyOpenAIReasoningEffortPolicyFromContext(composite.Request.Context(), body)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.Equal(t, "xhigh", gjson.GetBytes(got, "output_config.effort").String())

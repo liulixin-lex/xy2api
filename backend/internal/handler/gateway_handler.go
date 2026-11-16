@@ -761,6 +761,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
+			if err := applyAntigravityReasoningEffortPolicyForRequest(c, account, attemptParsedReq); err != nil {
+				sessionSlotAccounts[account.ID] = account // Include an unsent denial in the existing deferred session release.
+				if selection.Acquired && selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				if service.IsReasoningEffortPolicyDenied(err) {
+					respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
+				} else {
+					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+				}
+				return
+			}
+
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
 				zap.Int64("selected_account_id", account.ID),

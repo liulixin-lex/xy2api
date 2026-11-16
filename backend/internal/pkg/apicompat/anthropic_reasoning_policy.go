@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 )
 
 // Reasoning is a gateway extension: official SDK compatibility ignores it.
@@ -25,8 +26,25 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	default:
 		return unsupportedConversion("reasoning.effort", "expected none, minimal, low, medium, high or xhigh (max is also supported by the gateway)")
 	}
+	if req.conversionTarget == "gemini" {
+		if effort == "none" {
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
+		} else if effort != "" {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = effort
+		}
+		return nil
+	}
 	if effort == "none" && claude.SupportsDisabledThinking(req.Model) {
 		out.Thinking = &AnthropicThinking{Type: "disabled"}
+		if spec, ok := claude.Claude55(req.Model); ok && spec.DisabledThinkingMaxEffort != "" {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = "low"
+		}
 		return nil
 	}
 	if spec, ok := claude.Claude55(req.Model); ok {
@@ -48,6 +66,9 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 		out.OutputConfig.Effort = effort
 		return nil
 	}
+	if spec, ok := claude.Claude52(req.Model); ok && effort == "" {
+		effort = spec.DefaultEffort
+	}
 	if effort == "" {
 		return nil
 	}
@@ -57,8 +78,11 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 		}
 		levels := claude.EffortLevelsForModel(req.Model)
 		if len(levels) > 0 && !slices.Contains(levels, effort) {
-			// xhigh lies between high and max; use the deepest supported tier.
-			effort = levels[len(levels)-1]
+			var err error
+			effort, err = openai.NearestSupportedReasoningEffort(effort, levels)
+			if err != nil {
+				return err
+			}
 		}
 		out.Thinking = &AnthropicThinking{Type: "adaptive"}
 		if len(levels) > 0 {
@@ -76,19 +100,26 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	if effort == "minimal" {
 		effort = "low"
 	}
-	if effort == "xhigh" {
+	levels := claude.EffortLevelsForModel(req.Model)
+	if len(levels) == 0 && effort == "xhigh" {
 		effort = "max"
 	}
-	levels := claude.EffortLevelsForModel(req.Model)
 	if len(levels) > 0 || !claude.IsClaudeModel(req.Model) {
 		if out.OutputConfig == nil {
 			out.OutputConfig = &AnthropicOutputConfig{}
 		}
 		mapped := effort
 		if len(levels) > 0 && !slices.Contains(levels, mapped) {
-			mapped = levels[len(levels)-1]
+			var err error
+			mapped, err = openai.NearestSupportedReasoningEffort(mapped, levels)
+			if err != nil {
+				return err
+			}
 		}
 		out.OutputConfig.Effort = mapped
+	}
+	if effort == "xhigh" {
+		effort = "max"
 	}
 	if effort != "low" {
 		if out.MaxTokens <= 1024 {

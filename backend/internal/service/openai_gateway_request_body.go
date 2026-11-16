@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"io"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -72,16 +73,12 @@ func shouldPreserveOpenAIResponsesNoneReasoningEffort(account *Account) bool {
 	if account.IsOpenAIOAuthLike() {
 		return true
 	}
-	if !account.IsOpenAIApiKey() {
-		return false
-	}
-	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
-	return baseURL == "" || isOfficialOpenAIModelsBaseURL(baseURL)
+	return account.Type == AccountTypeAPIKey
 }
 
-// Codex 0.149.0 needs a single advertised effort to directly select a visible
-// non-reasoning model. Treat that catalog-only "none" value as omission for
-// compatible upstreams, while preserving official OpenAI request semantics.
+// A request's explicit none is an inference preference, even when the catalog
+// also uses none for non-reasoning models. API-key requests retain that intent;
+// final-target compatibility handles any unsupported effort.
 func filterOpenAIResponsesNoneReasoningEffortForAccount(account *Account, body []byte) ([]byte, error) {
 	if len(body) == 0 || shouldPreserveOpenAIResponsesNoneReasoningEffort(account) {
 		return body, nil
@@ -1010,43 +1007,6 @@ func getOpenAIReasoningEffortFromReqBody(reqBody map[string]any, requestedModel 
 	return "", false
 }
 
-func deriveOpenAIReasoningEffortFromModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return ""
-	}
-
-	modelID := strings.TrimSpace(model)
-	if strings.Contains(modelID, "/") {
-		parts := strings.Split(modelID, "/")
-		modelID = parts[len(parts)-1]
-	}
-
-	parts := strings.FieldsFunc(strings.ToLower(modelID), func(r rune) bool {
-		switch r {
-		case '-', '_', ' ':
-			return true
-		default:
-			return false
-		}
-	})
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return normalizeOpenAIReasoningEffortForModel(parts[len(parts)-1], modelID)
-}
-
-// deriveOpenAIReasoningEffortFromModelCandidates 依次对每个候选模型做后缀推导，
-// 返回第一个非空结果。
-func deriveOpenAIReasoningEffortFromModelCandidates(models []string) string {
-	for _, model := range models {
-		if value := deriveOpenAIReasoningEffortFromModel(model); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 type openAIRequestView struct {
 	body               []byte
 	Model              string
@@ -1709,39 +1669,34 @@ func isOpenAICodexModel(model string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "codex")
 }
 
-// extractOpenAIReasoningEffortFromBody 按优先级传入模型候选（如 upstreamModel,
-// billingModel, originalModel）：显式 effort 的模型归一化（max 保留判定）用第一个
-// 非空候选；body 未携带 effort 时的模型后缀推导依次尝试每个候选——OAuth 的
-// normalizeCodexModel 会剥掉 upstreamModel 的 effort 后缀，只有原始模型名还留着。
+// extractOpenAIReasoningEffortFromBody reads only explicit final wire fields.
+// Model suffixes and request preferences are not evidence of actual effort.
 func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string) *string {
-	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if reasoningEffort == "" {
-		reasoningEffort = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
-	}
-	if reasoningEffort != "" {
-		normalized := normalizeOpenAIReasoningEffortForModel(reasoningEffort, firstNonEmpty(modelCandidates...))
-		if normalized == "" {
+	for _, path := range []string{"reasoning.effort", "reasoning_effort"} {
+		field := gjson.GetBytes(body, path)
+		if field.Type != gjson.String || strings.TrimSpace(field.String()) == "" {
+			continue
+		}
+		value := normalizeOpenAIReasoningEffortForModel(field.String(), firstNonEmpty(modelCandidates...))
+		if value == "" {
 			return nil
 		}
-		return &normalized
+		return &value
 	}
-
-	value := deriveOpenAIReasoningEffortFromModelCandidates(modelCandidates)
-	if value == "" {
-		return nil
-	}
-	return &value
+	return nil
 }
 
 func explicitRequestedReasoningEffortFromBody(body []byte) string {
-	raw := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	for _, path := range []string{"reasoning_effort", "reasoning.effort", "reasoning", "output_config.effort"} {
+		value := gjson.GetBytes(body, path)
+		if value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+			return strings.TrimSpace(value.String())
+		}
 	}
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "output_config.effort").String())
+	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+		return "none"
 	}
-	return raw
+	return ""
 }
 
 // CanonicalRequestedReasoningEffort extracts the client-requested effort before
@@ -1750,7 +1705,7 @@ func explicitRequestedReasoningEffortFromBody(body []byte) string {
 // later persist "xhigh".
 func CanonicalRequestedReasoningEffort(body []byte, modelCandidates ...string) *string {
 	if raw := explicitRequestedReasoningEffortFromBody(body); raw != "" {
-		canonical := NormalizeMaxReasoningEffort(raw)
+		canonical := normalizeReasoningEffortMappingSource(raw)
 		if canonical == "" {
 			return nil
 		}
@@ -1789,7 +1744,7 @@ func canonicalReasoningEffortFromModelSuffix(model string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return NormalizeMaxReasoningEffort(parts[len(parts)-1])
+	return normalizeReasoningEffortMappingSource(parts[len(parts)-1])
 }
 
 func extractOpenAIServiceTier(reqBody map[string]any) *string {
@@ -2509,45 +2464,20 @@ func getOpenAIRequestBodyMap(_ *gin.Context, body []byte) (map[string]any, error
 	return reqBody, nil
 }
 
-// extractOpenAIReasoningEffort 的模型候选语义同 extractOpenAIReasoningEffortFromBody。
+// extractOpenAIReasoningEffort reads explicit final wire fields without inference.
 func extractOpenAIReasoningEffort(reqBody map[string]any, modelCandidates ...string) *string {
-	if value, present := getOpenAIReasoningEffortFromReqBody(reqBody, firstNonEmpty(modelCandidates...)); present {
-		if value == "" {
-			return nil
-		}
+	if value, present := getOpenAIReasoningEffortFromReqBody(reqBody, firstNonEmpty(modelCandidates...)); present && value != "" {
 		return &value
 	}
-
-	value := deriveOpenAIReasoningEffortFromModelCandidates(modelCandidates)
-	if value == "" {
-		return nil
-	}
-	return &value
+	return nil
 }
 
 func CanonicalRequestedReasoningEffortFromReqBody(reqBody map[string]any, modelCandidates ...string) *string {
-	if reqBody == nil {
-		return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil
 	}
-	raw := ""
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw == "" {
-		if effort, ok := reqBody["reasoning_effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw != "" {
-		canonical := NormalizeMaxReasoningEffort(raw)
-		if canonical == "" {
-			return nil
-		}
-		return &canonical
-	}
-	return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
+	return CanonicalRequestedReasoningEffort(body, modelCandidates...)
 }
 
 func normalizeOpenAIReasoningEffort(raw string) string {
@@ -2570,38 +2500,12 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 	}
 }
 
-func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "none") && openai.IsGPT6SolOrLunaModelSpelling(model) {
-		return "none"
-	}
-	if strings.EqualFold(strings.TrimSpace(raw), "max") && supportsOpenAIReasoningEffortMax(model) {
-		return "max"
+func normalizeOpenAIReasoningEffortForModel(raw, _ string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "max" || value == "ultra" {
+		return value
 	}
 	return normalizeOpenAIReasoningEffort(raw)
-}
-
-// supportsOpenAIReasoningEffortMax reports model families whose upstream scale
-// has a distinct max level. Other models keep the legacy max -> xhigh behavior.
-func supportsOpenAIReasoningEffortMax(model string) bool {
-	if isOpenAIGPT6Model(model) || isOpenAIGPT56Model(model) {
-		return true
-	}
-
-	normalized := strings.ToLower(lastOpenAIModelSegment(model))
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	switch {
-	case strings.HasPrefix(normalized, "deepseek-v4"), strings.HasPrefix(normalized, "deepseek-flash"):
-		// deepseek-flash（= DeepSeek-V4.1-Flash）与 v4 系同为 low/high/max 档位。
-		return true
-	case strings.HasPrefix(normalized, "glm-"):
-		return true
-	case strings.HasPrefix(normalized, "kimi-"), strings.HasPrefix(normalized, "moonshot-"):
-		return true
-	case normalized == "k3" || strings.HasPrefix(normalized, "k3-"):
-		return true
-	default:
-		return false
-	}
 }
 
 // validateGPT61SolCompatRequest runs after model mapping, before conversion can
@@ -2611,12 +2515,18 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		if strings.TrimSpace(gjson.GetBytes(body, path).String()) == "" {
+			continue
+		}
 		if err := openai.ValidateGPT61SolReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
 			return err
 		}
 	}
 	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
 		return openai.ValidateGPT61SolReasoningEffort(model, "none")
+	}
+	if explicitRequestedReasoningEffortFromBody(body) != "" {
+		return nil
 	}
 	requestedModel := openai.CanonicalizeOpenAIModelAliasSpelling(gjson.GetBytes(body, "model").String())
 	for _, effort := range []string{"none", "minimal"} {
@@ -2625,4 +2535,31 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 		}
 	}
 	return nil
+}
+
+// Terra validation is only safe after final compatibility normalization.
+func validateGPT61FinalCompatRequest(body []byte, model string) error {
+	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		if err := openai.ValidateGPT61TerraReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
+			return err
+		}
+	}
+	return validateGPT61SolCompatRequest(body, model)
+}
+
+// Inspect replayable final builder bytes without consuming or rewriting the wire.
+func extractOpenAIReasoningEffortFromRequest(request *http.Request) *string {
+	if request == nil || request.GetBody == nil {
+		return nil
+	}
+	reader, err := request.GetBody()
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = reader.Close() }()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil
+	}
+	return extractOpenAIReasoningEffortFromBody(body)
 }

@@ -36,20 +36,28 @@ func TestOpenAIForwardEarlyJSONErrorRemainsSingleJSON(t *testing.T) {
 					c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, bytes.NewReader(body))
 					before := c.Writer.Size()
 					account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: accountType}
-					// Invalid input must return before any upstream dependency is needed.
+					ctx := context.Background()
+					wantStatus, wantType := http.StatusBadRequest, "invalid_request_error"
+					if accountType == service.AccountTypeAPIKey {
+						// These efforts now map successfully. Exercise a real local
+						// policy denial to retain the completed JSON error regression.
+						ctx = service.WithOpenAIReasoningEffortPolicy(ctx, "", []service.ReasoningEffortMapping{{From: effort, To: "deny"}}, "")
+						wantStatus, wantType = http.StatusForbidden, "permission_error"
+					}
+					// The local rejection returns before upstream dependencies are needed.
 					svc := &service.OpenAIGatewayService{}
-					_, forwardErr := svc.Forward(context.Background(), c, account, body)
+					_, forwardErr := svc.Forward(ctx, c, account, body)
 					require.Error(t, forwardErr)
 					h := &OpenAIGatewayHandler{}
 					if !openAIForwardErrorAlreadyCommunicated(c, before, forwardErr) {
 						h.ensureForwardErrorResponse(c, false)
 					}
-					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Equal(t, wantStatus, recorder.Code)
 					var response struct {
 						Error struct{ Type, Message string } `json:"error"`
 					}
 					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response), "body=%s", recorder.Body.String())
-					require.Equal(t, "invalid_request_error", response.Error.Type)
+					require.Equal(t, wantType, response.Error.Type)
 					require.Contains(t, response.Error.Message, effort)
 					require.NotContains(t, recorder.Body.String(), "event:")
 				})

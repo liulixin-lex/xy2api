@@ -50,11 +50,13 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 | `POST /v1/alpha/search` | Codex 使用的独立搜索端点 |
 | `POST /v1/live`、`/backend-api/codex/realtime/calls` | ChatGPT Live 会话，单会话上限由 `gateway.live.max_session_duration_seconds` 控制（默认 3600 秒） |
 
+API Key 账号的请求显式写了 `reasoning.effort: none` 或 `reasoning_effort: none` 时，不论 Base URL 是否为 OpenAI 官方地址，都原样发送；最终模型明确不支持 `none` 时按[推理档位策略](../guides/groups.md#推理档位策略)映射。第三方上游以 400 且 `param` 为 `reasoning.effort` 或 `reasoning` 明确拒绝时，在既有修复预算内删除后重发一次，并记录 `reasoning.effort/omit` 降级；重发不会补回 `none`。`/v1/chat/completions` 收到 Responses 格式的正文时保留 `metadata`。Chat 请求的 `stream_options` 在发往 Responses 上游时省略，并记录 `stream_options/omit` 降级，因此 `include_usage` 不起作用，返回的用量仍是上游给出的值。
+
 ## 客户端配置
 
 ### Codex CLI
 
-在「使用密钥」中选择 **Codex CLI**。弹窗会读取当前密钥可用的模型目录，自动选择模型和思考深度。`base_url` 必须以 `/v1` 结尾，Codex 会直接拼接 `/responses`。
+在「使用密钥」中选择 **Codex CLI**。弹窗会读取当前密钥可用的模型目录，自动选择模型和思考深度。已获取的上游实时模型元数据优先于网关内置目录。`base_url` 必须以 `/v1` 结尾，Codex 会直接拼接 `/responses`。
 
 认证模式有两种：
 
@@ -62,6 +64,8 @@ OAuth 账号有多种添加方式，都在添加账号弹窗中选择：
 |---|---|---|
 | 兼容模式（默认） | `requires_openai_auth = true`，密钥写在 `auth.json` 的 `OPENAI_API_KEY` | 旧版 Codex 配置 |
 | API Key Mode | `requires_openai_auth = false`，密钥写在 `experimental_bearer_token`，并带 `http_headers = { "x-openai-actor-authorization" = "local-image-extension" }` | 需要授权客户端图片执行器时；保存后必须完全退出并重启 Codex Desktop 或 CLI，再新建 task |
+
+模型别名的能力来自唯一的映射目标；配置合并追加的别名与完整目录使用同一能力来源。多个账号将同一别名映射到不同目标时，不猜测其中一个目标的能力，已获取的上游目录条目保持不变。
 
 模型目录来源有两种：**远程目录**（Codex 0.156.0 及以上，配置 `model_catalog_url` 并开启 `api_key_model_discovery`）和 **本地文件**（旧版客户端，下载目录保存为 `~/.codex/codex-models.json` 并配置 `model_catalog_json`）。完整目录超过 1 MiB 时弹窗会自动改用本地文件。
 
@@ -130,7 +134,7 @@ goals = true
 网关内置支持 `gpt-6.1-sol`：
 
 - **名称**：模型目录、映射、计价和发往上游的 ID 都是 `gpt-6.1-sol`。大小写、下划线、`openai/` 等前缀和已知的思考深度、compact 后缀会精确归一到该模型；不认识的近似名称不会被映射过去。
-- **思考深度**：支持 `low`、`medium`、`high`、`xhigh`、`max`。在最终模型映射之后，显式的 `none`、`minimal` 或关闭 thinking 会在本地被拒绝，覆盖 HTTP、协议转换、透传以及 WebSocket 的首帧、后续轮次和 `session.update`。映射到其他模型的请求不套用这条限制。
+- **思考深度**：支持 `low`、`medium`、`high`、`xhigh`、`max`。API Key 账号的 HTTP 请求在最终模型确定后，把显式的 `none`、`minimal` 映射为 `low` 发送，按 `low` 计费。OAuth 账号与 WebSocket（首帧、后续轮次和 `session.update`）仍在本地拒绝 `none`、`minimal` 与关闭 thinking。映射到其他模型的请求不套用这条限制。
 - **工具调用**：只支持 Chat Completions 的账号无法为该模型执行工具调用，网关返回明确的请求错误（`gpt-6.1-sol requires Responses for tool calls`），不会静默丢弃工具，也不会把账号判为故障。
 - **Codex**：默认思考深度 `low`。API Key 账号的 Codex 模型目录对该模型及其映射别名不启用 Responses Lite。
 - **上下文**：API 与 OpenCode 口径为 context 1,050,000、最大输入 922,000、最大输出 128,000；Codex 模型描述符口径为 context 272,000、`max_context_window` 872,000。两个入口各按各自的口径。
@@ -145,6 +149,13 @@ goals = true
 | 缓存读取 | 0.1 | 0.2 | 0.05 |
 
 输入超过 272,000 token 时启用长上下文计价：输入 ×2、输出 ×1.5。分组是否启用阶梯计费、渠道自定义价格和显式零价仍然优先。
+
+## 模型支持：GPT-6.1 Terra
+
+- **名称**：`gpt-6.1-terra`，供应商前缀、大小写、下划线与已知推理/compact 后缀精确归一；未知日期或近似别名不自动匹配。
+- **推理档位**：支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`；`minimal` 按最近可用档位映射到 `none`。工具调用只能走 Responses 接口。OAuth 原生 Responses 的 `minimal` 同样先归一为 `none` 再发送。
+- **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
+- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
 
 ## 相关功能
 

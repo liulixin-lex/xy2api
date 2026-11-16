@@ -48,6 +48,11 @@ func TestAnthropicConversionV063Golden(t *testing.T) {
 			case "chat/sampling-default-pair", "responses/sampling-default-pair":
 				want = strings.Replace(want, `,"top_p":0.9`, "", 1)
 			}
+			// Explicit strict is now preserved; all other recorded tool bytes stay fixed.
+			switch strings.TrimPrefix(strings.TrimPrefix(tc.Name, "chat/"), "responses/") {
+			case "ordered-object", "missing-type", "empty-required", "no-properties", "nested-union", "object-union", "object-allof":
+				want = strings.Replace(want, `"tools":[{"name":`, `"tools":[{"strict":true,"name":`, 1)
+			}
 			require.Equal(t, want, string(wire))
 		})
 	}

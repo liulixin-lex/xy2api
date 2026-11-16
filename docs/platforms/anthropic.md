@@ -143,6 +143,8 @@ Cline、Cherry Studio、new-api 中转、OpenAI SDK 等客户端使用同一个 
 
 ### 会话与签名历史
 
+Fable 5.2、Mythos 5.2 与 5.5 相同：`/v1/chat/completions`、`/v1/responses` 历史中网关先前返回的已签名 thinking 会发回上游；没有签名的 thinking 照旧处理。
+
 兼容账号对 thinking 签名历史的处理与普通 API Key 账号完全相同。
 
 | 情形 | 行为 |
@@ -233,12 +235,12 @@ Anthropic 分组的 `/v1/chat/completions`、`/v1/responses` 请求由网关转�
 | 工具 schema，根为 `allOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取并集；没有 `type` 的分支视为 object |
 | 工具 schema，根为 `anyOf`、`oneOf` | 映射（网关扩展） | 合并各分支的 `properties`，`required` 取交集；没有 `type` 的分支（如只写了 `required`）视为 object |
 | 工具 schema，根不是 object，或联合分支显式声明了非 object 类型 | 报错 | 400，`param` 指向 `tools[i]…parameters` |
-| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`；`allowed_tools` 按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型收到 `required` 或指定函数时返回 400 |
+| `tool_choice`、旧版 `function_call` | 映射 | `auto`→`auto`，`required`→`any`，`none`→`none`，指定函数→`tool`；`allowed_tools` 按 `mode` 转为 `auto` 或 `any`，不限制工具子集。不支持强制选择工具的 Claude 5.5 模型以及 Fable 5.2、Mythos 5.2 收到 `required` 或指定函数时返回 400 |
 | `parallel_tool_calls` | 映射 | `false` 转为 `disable_parallel_tool_use: true` |
 | `response_format`、`text.format` 的 `json_schema` | 映射 | 转为 Anthropic 结构化输出；`strict` 为 `true`、`false` 或未指定都映射 |
 | `response_format` 的 `json_object` | 忽略（网关放宽） | Anthropic 没有不带 schema 的 JSON 模式，网关去掉该字段，按普通请求生成，模型可能输出普通文本而不是 JSON；需要保证 JSON 时改用 `json_schema` |
 | `text.format` 的 `text` | 映射（网关扩展） | 普通文本输出 |
-| `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Claude 5 及以后 thinking 常开，按 `low` 处理（Sonnet 5.5 改为 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking |
+| `reasoning_effort`、Responses `reasoning.effort` | 映射（网关扩展） | 接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，其他值返回 400。Claude 4.6 及以后：adaptive thinking + `output_config.effort`，`minimal` 按 `low`，模型没有的档位取它的最高档，没有 effort 档位的模型不发送 effort。Claude 4.5 及以前：enabled thinking + `budget_tokens`，`low` 不开启 thinking，`max_tokens` 容纳不下最小 thinking 预算时返回 400。`none`：Claude 5 以前关闭 thinking；Haiku 5.5 使用 `disabled` + `output_config.effort: low`；其他 Claude 5 及以后按 `low` 处理（Sonnet 5.5 使用 `between_tools`）。Claude 5.5 模型没有指定时按模型默认档位开启 thinking；Fable 5.2、Mythos 5.2 没有指定时为 adaptive + `high`。分组推理策略或就近映射得到 `none` 时，同样按上面的 `none` 规则处理 |
 | `n` | 校验 | 只能为 1，其他值返回 400 |
 | `logprobs`、`top_logprobs`、`seed`、`presence_penalty`、`frequency_penalty`、`logit_bias`、`user`、`metadata`、`prediction`、`service_tier`、`audio`、`store`、`modalities`、function 的 `strict` | 忽略 | 与官方一致 |
 
