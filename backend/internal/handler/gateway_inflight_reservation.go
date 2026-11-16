@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
 )
@@ -44,6 +45,21 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 		Kind:       service.InflightEstimateToken,
 		SessionKey: requestCacheSessionKey(body),
 	}
+}
+
+// tokenInflightEstimateForProtocol uses conversion precedence when parsable.
+// Estimation never rejects a request: unsupported inputs retain the legacy estimate.
+// The error return is retained for existing callers and is always nil.
+func tokenInflightEstimateForProtocol(model string, body []byte, protocol string) (service.InflightEstimateRequest, error) {
+	limit, _, err := apicompat.EffectiveRequestMaxOutputTokens(protocol, body)
+	if err != nil {
+		return tokenInflightEstimate(model, body), nil
+	}
+	estimate := service.InflightEstimateRequest{Model: model, BodyBytes: len(body), Kind: service.InflightEstimateToken, SessionKey: requestCacheSessionKey(body)}
+	if limit != nil {
+		estimate.MaxTokens = *limit
+	}
+	return estimate, nil
 }
 
 func inflightNoop() {}

@@ -132,3 +132,46 @@ func TestSupplementResponseOutput_NoSyntheticMessageWithoutStreamText(t *testing
 	require.Len(t, resp.Output, 1)
 	assert.Empty(t, resp.Output[0].Content)
 }
+
+func TestBufferedDoneOnlyParts(t *testing.T) {
+	t.Run("anonymous text and refusal", func(t *testing.T) {
+		a := NewBufferedResponseAccumulator()
+		for _, event := range []ResponsesStreamEvent{{Type: "response.output_text.delta", Delta: "text"}, {Type: "response.refusal.delta", Delta: "no"}, {Type: "response.refusal.delta", Delta: " thanks"}, {Type: "response.refusal.done", Refusal: "no thanks"}} {
+			a.ProcessEvent(&event)
+		}
+		out := a.BuildOutput()
+		require.NoError(t, a.Err())
+		require.Len(t, out, 1)
+		require.Len(t, out[0].Content, 2)
+		require.Equal(t, "no thanks", out[0].Content[1].Refusal)
+	})
+
+	for _, terminal := range []string{"", "C"} {
+		a := NewBufferedResponseAccumulator()
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_text.delta", ItemID: "m", OutputIndexPresent: true, Delta: "A"})
+		item := ResponsesOutput{Type: "message", ID: "m", Role: "assistant", Content: []ResponsesContentPart{{Type: "output_text", Text: "B"}, {Type: "refusal", Refusal: "no"}}}
+		event := &ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &item}
+		a.ProcessEvent(event)
+		a.ProcessEvent(event)
+		second := ResponsesOutput{Type: "message", ID: "m2", Content: []ResponsesContentPart{{Type: "output_text", Text: "second"}}}
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", OutputIndex: 1, OutputIndexPresent: true, Item: &second})
+		response := &ResponsesResponse{Status: "failed", Output: []ResponsesOutput{{Type: "message", ID: "m", Content: []ResponsesContentPart{{Type: "output_text", Text: terminal}}}}, Usage: &ResponsesUsage{InputTokens: 5}}
+		a.SupplementResponseOutput(response)
+		require.NoError(t, a.Err())
+		require.Len(t, response.Output, 2)
+		want := "B"
+		if terminal != "" {
+			want = terminal
+		}
+		require.Equal(t, want, response.Output[0].Content[0].Text)
+		require.Len(t, response.Output[0].Content, 2)
+		require.Equal(t, "no", response.Output[0].Content[1].Refusal)
+		require.Equal(t, "second", response.Output[1].Content[0].Text)
+		require.Equal(t, "failed", response.Status)
+		require.Equal(t, 5, response.Usage.InputTokens)
+	}
+	a := NewBufferedResponseAccumulator()
+	a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &ResponsesOutput{Type: "message", ID: "a"}})
+	a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &ResponsesOutput{Type: "message", ID: "b"}})
+	require.Error(t, a.Err())
+}

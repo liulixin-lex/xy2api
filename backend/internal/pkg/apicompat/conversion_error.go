@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-const nativeResponsesMinMaxOutputTokens = 128
-
 // UnsupportedConversionError identifies input that cannot be converted without
 // losing client intent. Callers can use errors.As, including through json.Marshal.
 // Field is a protocol field path; Reason never includes user content.
@@ -88,17 +86,44 @@ func applyAnthropicOutputControls(req *AnthropicRequest, out *ResponsesRequest) 
 	return nil
 }
 
-// NativeWireRequest applies the established native Responses token floor only
-// at the wire boundary. Intermediate Chat/Anthropic conversions retain the
-// client's exact limit. Bridge-only stops cannot cross this boundary.
+// PrepareNativeResponsesRequest prepares a copy at the final Responses wire
+// boundary. Intermediate conversions retain their stops and exact token limit.
+func PrepareNativeResponsesRequest(req ResponsesRequest, opts ConversionOptions) (ResponsesRequest, error) {
+	stops, err := parseStopSequences(req.bridgeStop)
+	if err != nil {
+		return req, err
+	}
+	out := req
+	out.bridgeStop = nil
+	out, err = out.NativeWireRequest()
+	if err != nil {
+		return req, err
+	}
+	if opts.Record != nil {
+		if len(stops) > 0 {
+			opts.Record(ConversionNotice{Field: "stop", Action: "omit"})
+		}
+		if req.MaxOutputTokens != nil && *req.MaxOutputTokens < 16 {
+			opts.Record(ConversionNotice{Field: "max_output_tokens", Action: "map"})
+		}
+	}
+	return out, nil
+}
+
+// NativeWireRequest applies the Responses minimum of 16 at the wire boundary.
+// Larger limits and the intermediate request stay unchanged. Bridge-only stops
+// cannot cross this boundary.
 func (r ResponsesRequest) NativeWireRequest() (ResponsesRequest, error) {
 	if stops, err := parseStopSequences(r.bridgeStop); err != nil {
 		return r, err
 	} else if len(stops) > 0 {
 		return r, unsupportedConversion("stop", "the Responses wire protocol has no stop-sequence equivalent")
 	}
-	if r.MaxOutputTokens != nil && *r.MaxOutputTokens > 0 && *r.MaxOutputTokens < nativeResponsesMinMaxOutputTokens {
-		limit := nativeResponsesMinMaxOutputTokens
+	if err := validateTokenLimit("max_output_tokens", r.MaxOutputTokens); err != nil {
+		return r, err
+	}
+	if r.MaxOutputTokens != nil && *r.MaxOutputTokens < 16 {
+		limit := 16
 		r.MaxOutputTokens = &limit
 	}
 	return r, nil
@@ -112,5 +137,17 @@ func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	type wire ResponsesRequest
+	if r.anthropicChatSource != nil && r.Reasoning != nil && r.Reasoning.Effort == "" && r.Reasoning.Summary != "" {
+		// A Chat summary-only extension must not synthesize an empty effort.
+		// Keep the shared DTO and other request paths' encoding unchanged.
+		return json.Marshal(struct {
+			wire
+			Reasoning struct {
+				Summary string `json:"summary"`
+			} `json:"reasoning"`
+		}{wire: wire(r), Reasoning: struct {
+			Summary string `json:"summary"`
+		}{Summary: r.Reasoning.Summary}})
+	}
 	return json.Marshal(wire(r))
 }

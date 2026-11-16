@@ -1875,3 +1875,461 @@ func TestBufferedResponseAccumulator_IgnoresNonFunctionCallItems(t *testing.T) {
 
 	assert.False(t, acc.HasContent())
 }
+
+func TestChatSchemaStrictDefaultsFalse(t *testing.T) {
+	for _, tc := range []struct{ name, input, expected string }{
+		{"missing", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":false}`},
+		{"true", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"},"strict":true}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":true}`},
+		{"false", `{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"},"strict":false}}`, `{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":false}`},
+		{"text", `{"type":"text"}`, `{"type":"text"}`},
+		{"json_object", `{"type":"json_object"}`, `{"type":"json_object"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &ChatCompletionsRequest{Model: "gpt-4o", ResponseFormat: json.RawMessage(tc.input)}
+			converted, err := ChatCompletionsToResponses(request)
+			require.NoError(t, err)
+			require.NotNil(t, converted.Text)
+			require.JSONEq(t, tc.expected, string(converted.Text.Format))
+			require.Equal(t, tc.input, string(request.ResponseFormat))
+		})
+	}
+}
+
+func TestImageDetailOmission(t *testing.T) {
+	for _, detail := range []string{"", "auto", "high", "low", "invalid"} {
+		t.Run(detail, func(t *testing.T) {
+			part := ResponsesContentPart{Type: "input_image", ImageURL: "https://example.com/image.png", Detail: detail}
+			var notices []ConversionNotice
+			out, err := responsesMediaToAnthropicWithOptions(part, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }}, "input[2].content[0].detail")
+			if detail == "invalid" {
+				requireUnsupportedConversion(t, err, "input[2].content[0].detail")
+				require.Empty(t, notices)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "image", out.Type)
+			require.Equal(t, part.ImageURL, out.Source.URL)
+			if detail == "" {
+				require.Empty(t, notices)
+			} else {
+				require.Equal(t, []ConversionNotice{{Field: "input[2].content[0].detail", Action: "omit"}}, notices)
+			}
+			wire, err := json.Marshal(out)
+			require.NoError(t, err)
+			require.NotContains(t, string(wire), `"detail"`)
+			var req ChatCompletionsRequest
+			raw := `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"` + detail + `"}}]}]}`
+			require.NoError(t, json.Unmarshal([]byte(raw), &req))
+			converted, err := ChatCompletionsToResponses(&req)
+			require.NoError(t, err)
+			if detail != "" {
+				require.Contains(t, string(converted.Input), `"detail":"`+detail+`"`)
+			}
+		})
+	}
+	notices := 0
+	_, err := responsesMediaToAnthropicWithOptions(ResponsesContentPart{Type: "input_image", Detail: "high", ImageURL: "bad"}, ConversionOptions{Record: func(ConversionNotice) { notices++ }}, "input[0].content[0].detail")
+	require.Error(t, err)
+	require.Zero(t, notices)
+}
+
+func TestChatHistoryReasoningSeparated(t *testing.T) {
+	for _, content := range []string{`"answer"`, `null`, `[{"type":"thinking","thinking":"more"},{"type":"text","text":"answer","cache_control":{"type":"ephemeral"}}]`} {
+		t.Run(content, func(t *testing.T) {
+			req := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ReasoningContent: "thought", Content: json.RawMessage(content), ToolCalls: []ChatToolCall{{ID: "c", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: `{}`}}}}}}
+			legacy, err := ChatCompletionsToResponses(req)
+			require.NoError(t, err)
+			zero, err := ChatCompletionsToResponsesWithOptions(req, ConversionOptions{})
+			require.NoError(t, err)
+			require.Equal(t, string(legacy.Input), string(zero.Input))
+			require.Contains(t, string(zero.Input), "thinking")
+			converted, err := ChatCompletionsToResponsesWithOptions(req, ConversionOptions{SupportsPlaintextReasoningInput: true})
+			require.NoError(t, err)
+			var items []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(converted.Input, &items))
+			require.Equal(t, "reasoning", items[0].Type)
+			require.Contains(t, string(items[0].Content), "thought")
+			require.Equal(t, "function_call", items[len(items)-1].Type)
+			require.NotContains(t, string(converted.Input), "<thinking>")
+			require.NotContains(t, string(converted.Input), `\u003cthinking`)
+			if content == `null` {
+				require.Len(t, items, 2)
+			} else {
+				require.Equal(t, "message", items[1].Type)
+				require.Contains(t, string(items[1].Content), "answer")
+			}
+			if content[0] == '[' {
+				require.Contains(t, string(items[1].Content), "cache_control")
+				require.Contains(t, string(items[0].Content), "thoughtmore")
+			}
+		})
+	}
+}
+
+func TestBufferedHostedAndCustomIdentity(t *testing.T) {
+	a := NewBufferedResponseAccumulator()
+	hosted := ResponsesOutput{Type: "web_search_call", ID: "w", Status: "completed", Action: &WebSearchAction{Type: "search", Query: "query"}}
+	custom := ResponsesOutput{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch", Namespace: "ns", Input: "raw patch"}
+	normal := ResponsesOutput{Type: "function_call", ID: "f", CallID: "fc", Name: "read", Arguments: `{}`}
+	for i, item := range []ResponsesOutput{hosted, custom, normal} {
+		event := &ResponsesStreamEvent{Type: "response.output_item.done", OutputIndex: i, OutputIndexPresent: true, Item: &item}
+		a.ProcessEvent(event)
+		a.ProcessEvent(event)
+	}
+	for _, partial := range []bool{false, true} {
+		resp := &ResponsesResponse{Status: "completed"}
+		if partial {
+			resp.Output = []ResponsesOutput{{Type: "custom_tool_call", ID: "i", CallID: "c", Name: "patch"}}
+		}
+		a.SupplementResponseOutput(resp)
+		require.NoError(t, a.Err())
+		require.Len(t, resp.Output, 3)
+		require.Equal(t, hosted, resp.Output[0])
+		require.Equal(t, custom, resp.Output[1])
+		require.Equal(t, normal, resp.Output[2])
+		projected := ResponsesToChatCompletions(resp, "m")
+		require.Len(t, projected.Choices[0].Message.ToolCalls, 2)
+		require.Equal(t, "raw patch", projected.Choices[0].Message.ToolCalls[0].Function.Arguments)
+	}
+}
+
+func TestStreamingToolSnapshots(t *testing.T) {
+	t.Run("parallel and empty custom", func(t *testing.T) {
+		state := NewResponsesEventToChatState()
+		for i, id := range []string{"a", "b"} {
+			ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndex: i, OutputIndexPresent: true, Item: &ResponsesOutput{Type: "custom_tool_call", ID: id, CallID: id, Name: id}}, state)
+		}
+		first := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", ItemID: "b", Input: "patch", InputPresent: true}, state)
+		require.Len(t, first, 1)
+		require.Equal(t, 1, *first[0].Choices[0].Delta.ToolCalls[0].Index)
+		require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.done", ItemID: "a", InputPresent: true}, state))
+		require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.custom_tool_call_input.delta", ItemID: "a", Delta: "late"}, state))
+		require.NoError(t, state.Err())
+	})
+
+	for _, source := range []string{"arguments", "item", "terminal", "added"} {
+		t.Run(source, func(t *testing.T) {
+			state := NewResponsesEventToChatState()
+			item := ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f"}
+			var chunks []ChatCompletionsChunk
+			if source == "added" {
+				item.Arguments = `{"x":1}`
+			}
+			chunks = append(chunks, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", OutputIndexPresent: true, Item: &item}, state)...)
+			item.Arguments = `{"x":1}`
+			if source == "arguments" {
+				chunks = append(chunks, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: `{"x":`}, state)...)
+				event := &ResponsesStreamEvent{Type: "response.function_call_arguments.done", ItemID: "i", Arguments: item.Arguments, ArgumentsPresent: true}
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+			}
+			if source != "terminal" {
+				event := &ResponsesStreamEvent{Type: "response.output_item.done", OutputIndexPresent: true, Item: &item}
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+				chunks = append(chunks, ResponsesEventToChatChunks(event, state)...)
+			}
+			terminal := &ResponsesStreamEvent{Type: "response.completed", Response: &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}}
+			chunks = append(chunks, ResponsesEventToChatChunks(terminal, state)...)
+			chunks = append(chunks, ResponsesEventToChatChunks(terminal, state)...)
+			require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: "late"}, state))
+			require.NoError(t, state.Err())
+			args := ""
+			finishes := 0
+			for _, chunk := range chunks {
+				for _, choice := range chunk.Choices {
+					if choice.FinishReason != nil {
+						finishes++
+					}
+					for _, tool := range choice.Delta.ToolCalls {
+						args += tool.Function.Arguments
+					}
+				}
+			}
+			require.Equal(t, `{"x":1}`, args)
+			require.Equal(t, 1, finishes)
+		})
+	}
+	state := NewResponsesEventToChatState()
+	for _, id := range []string{"a", "b"} {
+		ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: id, CallID: id, Name: id}}, state)
+	}
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", Delta: "ambiguous"}, state)
+	require.Error(t, state.Err())
+	state = NewResponsesEventToChatState()
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.added", Item: &ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f"}}, state)
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.delta", ItemID: "i", Delta: `{"x":1}`}, state)
+	ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.function_call_arguments.done", ItemID: "i", Arguments: `{"x":2}`}, state)
+	require.Error(t, state.Err())
+}
+
+func TestReasoningTextFallback(t *testing.T) {
+	for _, tc := range []struct {
+		item ResponsesOutput
+		want string
+	}{
+		{ResponsesOutput{Type: "reasoning", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}, {Type: "reasoning_text", Text: "more"}}}, "rawmore"},
+		{ResponsesOutput{Type: "reasoning", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}, "summary"},
+		{ResponsesOutput{Type: "reasoning", Summary: []ResponsesSummary{{Type: "summary_text"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}, {Type: "text", Text: "ignored"}}}, "raw"},
+		{ResponsesOutput{Type: "reasoning", EncryptedContent: "opaque"}, ""},
+	} {
+		response := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{tc.item}}
+		require.Equal(t, tc.want, ResponsesToChatCompletions(response, "m").Choices[0].Message.ReasoningContent)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: response}, state)
+		require.NoError(t, state.Err())
+		text := ""
+		for _, chunk := range chunks {
+			for _, choice := range chunk.Choices {
+				if choice.Delta.ReasoningContent != nil {
+					text += *choice.Delta.ReasoningContent
+				}
+			}
+		}
+		require.Equal(t, tc.want, text)
+	}
+	state := NewResponsesEventToChatState()
+	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.reasoning_text.delta", ItemID: "r", Delta: "raw"}, state))
+	chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.reasoning_summary_text.delta", ItemID: "r", Delta: "summary"}, state)
+	require.Len(t, chunks, 1)
+	require.Equal(t, "summary", *chunks[0].Choices[0].Delta.ReasoningContent)
+	item := ResponsesOutput{Type: "reasoning", ID: "r", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary tail"}}, Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "raw"}}}
+	chunks = ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, state)
+	require.Len(t, chunks, 1)
+	require.Equal(t, " tail", *chunks[0].Choices[0].Delta.ReasoningContent)
+	require.Empty(t, ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item}, state))
+	require.NoError(t, state.Err())
+}
+
+func TestToolArgumentsJSONAndCompleteness(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{{`{"x":`, false}, {`{}`, true}, {`[]`, true}, {`42`, true}, {``, true}} {
+		item := ResponsesOutput{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: tc.raw}
+		response := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}
+		err := ValidateResponsesForChat(response)
+		require.Equal(t, tc.valid, err == nil)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: response}, state)
+		require.Equal(t, tc.valid, state.Err() == nil)
+		if !tc.valid {
+			require.Empty(t, chunks)
+		}
+		if tc.raw == "" {
+			require.Equal(t, "{}", ResponsesToChatCompletions(response, "m").Choices[0].Message.ToolCalls[0].Function.Arguments)
+		}
+		a := NewBufferedResponseAccumulator()
+		a.ProcessEvent(&ResponsesStreamEvent{Type: "response.output_item.done", Item: &item})
+		a.SupplementResponseOutput(&ResponsesResponse{Status: "completed"})
+		require.Equal(t, tc.valid, a.Err() == nil)
+		req := &ChatCompletionsRequest{Messages: []ChatMessage{{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "c", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: tc.raw}}}}}}
+		_, err = ChatCompletionsToResponses(req)
+		require.NoError(t, err, "history retains raw arguments")
+	}
+	for _, item := range []ResponsesOutput{{Type: "custom_tool_call", Input: "raw"}, {Type: "custom_tool_call", Input: ""}, {Type: "function_call", Arguments: "opaque", EncryptedFunctionArgs: json.RawMessage(`null`)}} {
+		require.NoError(t, ValidateResponsesForChat(&ResponsesResponse{Status: "completed", Output: []ResponsesOutput{item}}))
+	}
+	require.Error(t, ValidateToolArguments("function", `[]`, true, false))
+	for _, raw := range []string{`{}`, ``} {
+		response := &ResponsesResponse{Status: "incomplete", IncompleteDetails: &ResponsesIncompleteDetails{Reason: "max_output_tokens"}, Output: []ResponsesOutput{{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: raw}}}
+		require.NoError(t, ValidateResponsesForChat(response))
+		require.Equal(t, "length", ResponsesToChatCompletions(response, "m").Choices[0].FinishReason)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.incomplete", Response: response}, state)
+		require.NoError(t, state.Err())
+		require.Equal(t, "length", *chunks[len(chunks)-1].Choices[0].FinishReason)
+	}
+}
+
+func TestTerminalProjectionJSONAndSSE(t *testing.T) {
+	for _, tc := range []struct {
+		status, reason, want string
+		invalid              bool
+	}{
+		{"completed", "", "tool_calls", false}, {"incomplete", "max_output_tokens", "length", false}, {"incomplete", "content_filter", "content_filter", false}, {"incomplete", "other", "tool_calls", false}, {"failed", "", "", true}, {"future", "", "tool_calls", false},
+	} {
+		resp := &ResponsesResponse{Status: tc.status, Output: []ResponsesOutput{{Type: "function_call", ID: "i", CallID: "c", Name: "f", Arguments: `{}`}}}
+		if tc.reason != "" {
+			resp.IncompleteDetails = &ResponsesIncompleteDetails{Reason: tc.reason}
+		}
+		err := ValidateResponsesForChat(resp)
+		require.Equal(t, tc.invalid, err != nil)
+		state := NewResponsesEventToChatState()
+		chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response." + tc.status, Response: resp}, state)
+		if tc.status == "future" {
+			chunks = ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.done", Response: resp}, state)
+		}
+		require.Equal(t, tc.invalid, state.Err() != nil)
+		if tc.invalid {
+			require.Empty(t, chunks)
+			continue
+		}
+		require.Equal(t, tc.want, ResponsesToChatCompletions(resp, "m").Choices[0].FinishReason)
+		require.Equal(t, tc.want, *chunks[len(chunks)-1].Choices[0].FinishReason)
+	}
+	resp := &ResponsesResponse{Status: "completed", Output: []ResponsesOutput{{Type: "message", ID: "m", Content: []ResponsesContentPart{{Type: "refusal", Refusal: "declined"}}}}}
+	require.NoError(t, ValidateResponsesForChat(resp))
+	require.Equal(t, "declined", ResponsesToChatCompletions(resp, "m").Choices[0].Message.Refusal)
+	state := NewResponsesEventToChatState()
+	chunks := ResponsesEventToChatChunks(&ResponsesStreamEvent{Type: "response.completed", Response: resp}, state)
+	require.NoError(t, state.Err())
+	require.Equal(t, "declined", *chunks[0].Choices[0].Delta.Refusal)
+	require.Equal(t, "stop", *chunks[len(chunks)-1].Choices[0].FinishReason)
+	state = NewResponsesEventToChatState()
+	require.Empty(t, FinalizeResponsesChatStreamWithTerminal(state, false))
+	require.Error(t, state.Err())
+	state = NewResponsesEventToChatState()
+	require.NotEmpty(t, FinalizeResponsesChatStreamWithTerminal(state, true))
+	require.Empty(t, FinalizeResponsesChatStreamWithTerminal(state, true))
+	require.NotEmpty(t, FinalizeResponsesChatStream(NewResponsesEventToChatState()))
+}
+
+func TestChatFieldsPreservedForResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, want, errorField string
+		notices                        []ConversionNotice
+	}{
+		{"modeled fields", `"metadata":{"team":"blue"},"user":"client","max_output_tokens":22,"verbosity":"low","text":{"verbosity":"high"},"include":["message.output_text.logprobs","reasoning.encrypted_content","message.output_text.logprobs","file_search_call.results"],"reasoning":{"effort":"high","summary":"concise"}`,
+			`"metadata":{"team":"blue"},"user":"client","max_output_tokens":22,"text":{"verbosity":"high"},"include":["message.output_text.logprobs","reasoning.encrypted_content","file_search_call.results"],"reasoning":{"effort":"high","summary":"concise"}`, "", []ConversionNotice{{Field: "verbosity", Action: "omit"}}},
+		{"null fields", `"metadata":null,"user":null,"max_output_tokens":null,"verbosity":null,"text":null,"include":null,"reasoning":null`, ``, "", nil},
+		{"empty fields", `"metadata":{},"user":"","include":[]`, `"metadata":{},"user":""`, "", nil},
+		{"verbosity alias", `"verbosity":"low"`, `"text":{"verbosity":"low"}`, "", nil},
+		{"text null verbosity", `"verbosity":"low","text":{"verbosity":null}`, `"text":{"verbosity":"low"}`, "", nil},
+		{"format and verbosity", `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, `"text":{"format":{"type":"json_object"},"verbosity":"high"}`, "", nil},
+		{"existing format priority", `"response_format":{"type":"json_object"},"text":{"format":{"type":"text"}}`, `"text":{"format":{"type":"json_object"}}`, "", []ConversionNotice{{Field: "text.format", Action: "omit"}}},
+		{"explicit include appended", `"include":["file_search_call.results","file_search_call.results"],"reasoning":{"summary":"detailed"}`, `"include":["file_search_call.results","reasoning.encrypted_content"],"reasoning":{"summary":"detailed"}`, "", nil},
+		{"metadata array", `"metadata":[]`, ``, "metadata", nil},
+		{"metadata nonstring", `"metadata":{"k":1}`, ``, "metadata", nil},
+		{"metadata null member", `"metadata":{"k":null}`, ``, "metadata", nil},
+		{"user object", `"user":{}`, ``, "user", nil},
+		{"include string", `"include":"reasoning.encrypted_content"`, ``, "include", nil},
+		{"include nonstring", `"include":[1]`, ``, "include", nil},
+		{"include null member", `"include":[null]`, ``, "include", nil},
+		{"invalid text format", `"text":{"format":{"type":"unknown"}}`, ``, "", []ConversionNotice{{Field: "text.format", Action: "omit"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req ChatCompletionsRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"model":"test",`+tc.fields+`}`), &req))
+			before, err := json.Marshal(req)
+			require.NoError(t, err)
+			var notices []ConversionNotice
+			out, err := ChatCompletionsToResponsesWithOptions(&req, ConversionOptions{Record: func(n ConversionNotice) { notices = append(notices, n) }})
+			if tc.errorField == "metadata" || tc.errorField == "user" || tc.errorField == "include" {
+				require.NoError(t, err)
+				require.Empty(t, out.Metadata)
+				require.Empty(t, out.User)
+				require.Equal(t, []string{"reasoning.encrypted_content"}, out.Include)
+				require.Equal(t, []ConversionNotice{{Field: tc.errorField, Action: "omit"}}, notices)
+				return
+			}
+			if tc.errorField != "" {
+				var conversionErr *UnsupportedConversionError
+				require.ErrorAs(t, err, &conversionErr)
+				require.Equal(t, tc.errorField, conversionErr.Field)
+				return
+			}
+			require.NoError(t, err)
+			want := map[string]any{"model": "test", "input": nil, "stream": true, "include": []any{"reasoning.encrypted_content"}, "store": false}
+			var additions map[string]any
+			require.NoError(t, json.Unmarshal([]byte(`{`+tc.want+`}`), &additions))
+			for k, v := range additions {
+				want[k] = v
+			}
+			expected, err := json.Marshal(want)
+			require.NoError(t, err)
+			actual, err := json.Marshal(out)
+			require.NoError(t, err)
+			require.JSONEq(t, string(expected), string(actual))
+			require.Equal(t, tc.notices, notices)
+			after, err := json.Marshal(req)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+	t.Run("final Terra effort", func(t *testing.T) {
+		for _, model := range []string{"gpt-6.1-terra", "openai/GPT_6.1_TERRA"} {
+			for _, effort := range []string{"none", "low", "max"} {
+				limit, sampling := 23, 0.7
+				out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model, ReasoningEffort: effort, MaxOutputTokens: &limit, Temperature: &sampling, TopP: &sampling})
+				require.NoError(t, err)
+				require.Equal(t, model, out.Model)
+				require.Equal(t, effort, out.Reasoning.Effort)
+				require.Equal(t, 23, *out.MaxOutputTokens)
+				if effort == "none" {
+					require.Equal(t, &sampling, out.Temperature)
+					require.Equal(t, &sampling, out.TopP)
+				} else {
+					require.Nil(t, out.Temperature)
+					require.Nil(t, out.TopP)
+				}
+			}
+			_, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model, ReasoningEffort: "minimal"})
+			require.Error(t, err, "caller must apply D2 before passing the final Terra effort")
+		}
+	})
+	t.Run("text schema bytes", func(t *testing.T) {
+		format := json.RawMessage(`{"type":"json_schema","name":"result","schema":{"type":"object","maximum":9007199254740993}}`)
+		req := ChatCompletionsRequest{Model: "test", Text: &ResponsesText{Format: format}}
+		out, err := ChatCompletionsToResponses(&req)
+		require.NoError(t, err)
+		require.Equal(t, format, out.Text.Format)
+		out.Text.Format[0] = ' '
+		require.Equal(t, byte('{'), req.Text.Format[0], "converted format does not alias caller bytes")
+	})
+}
+
+func TestReviewM2HistoryArgumentsRemainRaw(t *testing.T) {
+	for _, raw := range []string{`{"a":`, `ls -la`, `{broken`, ``} {
+		for _, legacy := range []bool{false, true} {
+			assistant := ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{ID: "call", Type: "function", Function: ChatFunctionCall{Name: "f", Arguments: raw}}}}
+			result := ChatMessage{Role: "tool", ToolCallID: "call", Content: json.RawMessage(`"parameter parse failed"`)}
+			if legacy {
+				assistant.FunctionCall = &assistant.ToolCalls[0].Function
+				assistant.ToolCalls = nil
+				result.Role = "function"
+				result.Name = "f"
+				result.ToolCallID = ""
+			}
+			out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Messages: []ChatMessage{assistant, result}})
+			require.NoError(t, err)
+			var input []ResponsesInputItem
+			require.NoError(t, json.Unmarshal(out.Input, &input))
+			require.Len(t, input, 2)
+			want := raw
+			if want == "" {
+				want = "{}"
+			}
+			require.Equal(t, want, input[0].Arguments)
+			require.Equal(t, input[0].CallID, input[1].CallID)
+		}
+	}
+}
+
+func TestReviewM2IllTypedChatFieldsAreOmitted(t *testing.T) {
+	for _, fields := range []string{`"metadata":123,"user":123,"reasoning":[1],"include":false`, `"metadata":{"session":1,"tags":["a"]},"user":12345,"include":"reasoning.encrypted_content"`} {
+		var req ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],`+fields+`}`), &req))
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+		for _, record := range []bool{false, true} {
+			var notices []ConversionNotice
+			opts := ConversionOptions{}
+			if record {
+				opts.Record = func(n ConversionNotice) { notices = append(notices, n) }
+			}
+			out, err := ChatCompletionsToResponsesWithOptions(&req, opts)
+			require.NoError(t, err)
+			require.Empty(t, out.Metadata)
+			require.Empty(t, out.User)
+			require.Nil(t, out.Reasoning)
+			require.Equal(t, []string{"reasoning.encrypted_content"}, out.Include)
+			require.Contains(t, string(out.Input), "hi")
+			if record {
+				require.Equal(t, []ConversionNotice{{Field: "metadata", Action: "omit"}, {Field: "user", Action: "omit"}, {Field: "include", Action: "omit"}}, notices)
+			}
+		}
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	}
+}

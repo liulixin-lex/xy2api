@@ -18,16 +18,18 @@ type chatMessageContent struct {
 // true. store is always false and reasoning.encrypted_content is always
 // included so that the response translator has full context.
 func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest, error) {
+	return ChatCompletionsToResponsesWithOptions(req, ConversionOptions{})
+}
+
+// ChatCompletionsToResponsesWithOptions reports deliberate parameter mappings.
+func ChatCompletionsToResponsesWithOptions(req *ChatCompletionsRequest, opts ConversionOptions) (*ResponsesRequest, error) {
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
 	if _, err := parseStopSequences(req.Stop); err != nil {
 		return nil, err
 	}
-	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
-		return nil, err
-	}
-	input, err := convertChatMessagesToResponsesInput(req.Messages)
+	input, err := convertChatMessagesToResponsesInput(req.Messages, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -57,48 +59,60 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	out.anthropicN = req.anthropicN
 	out.chatCacheControls = chatInputCacheControls(input)
 
-	// Reasoning models (gpt-5.x) do not accept sampling parameters.
-	// See isReasoningModel in anthropic_to_responses.go.
-	if !isReasoningModel(req.Model) || (openai.IsGPT6SolOrLunaModelSpelling(req.Model) && req.ReasoningEffort == "none") {
-		out.Temperature = req.Temperature
-		out.TopP = req.TopP
-	}
-
 	storeFalse := false
 	out.Store = &storeFalse
 
-	// max_tokens / max_completion_tokens → max_output_tokens, prefer max_completion_tokens
-	maxTokens := req.MaxTokens
-	limitField := "max_tokens"
-	if req.MaxCompletionTokens != nil {
-		maxTokens = req.MaxCompletionTokens
-		limitField = "max_completion_tokens"
-	}
-	if err := validateTokenLimit(limitField, maxTokens); err != nil {
+	maxTokens, limitField, err := EffectiveChatMaxOutputTokens(req)
+	if err != nil {
 		return nil, err
 	}
 	if maxTokens != nil {
 		v := *maxTokens
 		out.MaxOutputTokens = &v
 	}
-
-	// reasoning_effort → reasoning.effort + reasoning.summary="auto"
-	if req.ReasoningEffort != "" {
-		out.Reasoning = &ResponsesReasoning{
-			Effort:  req.ReasoningEffort,
-			Summary: "auto",
+	if opts.Record != nil {
+		for _, alias := range []struct {
+			field string
+			value *int
+		}{
+			{"max_completion_tokens", req.MaxCompletionTokens}, {"max_tokens", req.MaxTokens}, {"max_output_tokens", req.MaxOutputTokens},
+		} {
+			if alias.field != limitField && alias.value != nil && *alias.value > 0 {
+				opts.Record(ConversionNotice{Field: alias.field, Action: "omit"})
+			}
 		}
 	}
 
-	format, err := chatResponseFormatToResponsesTextFormat(req.ResponseFormat)
+	out.Reasoning, err = decodeChatReasoning(req.Reasoning, req.ReasoningEffort)
 	if err != nil {
 		return nil, err
 	}
-	if len(format) > 0 {
-		if out.Text == nil {
-			out.Text = &ResponsesText{}
+	if out.Reasoning != nil && out.Reasoning.Effort != "" && out.Reasoning.Summary == "" {
+		// An explicit string summary, including an empty one, wins over the
+		// legacy default. Ignored extension shapes do not suppress the default.
+		fields, _ := rawJSONObject(req.Reasoning)
+		var summary string
+		if len(normalizedRawJSON(fields["summary"])) == 0 || json.Unmarshal(fields["summary"], &summary) != nil {
+			out.Reasoning.Summary = "auto"
 		}
-		out.Text.Format = format
+	}
+
+	// The caller supplies the final mapped model and applied effort after D2.
+	// Do not validate a Sol alias before that policy has selected its effort.
+	effort := ""
+	if out.Reasoning != nil {
+		effort = out.Reasoning.Effort
+	}
+	if err := openai.ValidateGPT61TerraReasoningEffort(out.Model, effort); err != nil {
+		return nil, err
+	}
+	terra := openai.IsGPT61TerraModelSpelling(out.Model)
+	if (!isReasoningModel(out.Model) && !terra) || ((openai.IsGPT6SolOrLunaModelSpelling(out.Model) || terra) && effort == "none") {
+		out.Temperature = req.Temperature
+		out.TopP = req.TopP
+	}
+	if err := applyChatResponsesFields(req, out, opts); err != nil {
+		return nil, err
 	}
 
 	// tools[] and legacy functions[] → ResponsesTool[]
@@ -122,12 +136,99 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	return out, nil
 }
 
+// applyChatResponsesFields carries only the modeled Chat extensions.
+func applyChatResponsesFields(req *ChatCompletionsRequest, out *ResponsesRequest, opts ConversionOptions) error {
+	omit := func(field string) {
+		if opts.Record != nil {
+			opts.Record(ConversionNotice{Field: field, Action: "omit"})
+		}
+	}
+	if metadata := normalizedRawJSON(req.Metadata); len(metadata) > 0 {
+		values, valid := rawJSONObject(metadata)
+		for _, raw := range values {
+			var value string
+			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
+				valid = false
+			}
+		}
+		if valid {
+			out.Metadata = metadata
+		} else {
+			omit("metadata")
+		}
+	}
+	if user := normalizedRawJSON(req.User); len(user) > 0 {
+		var value string
+		if json.Unmarshal(user, &value) == nil {
+			out.User = user
+		} else {
+			omit("user")
+		}
+	}
+	if include := normalizedRawJSON(req.Include); len(include) > 0 {
+		var values []json.RawMessage
+		valid := json.Unmarshal(include, &values) == nil
+		var included []string
+		seen := make(map[string]bool)
+		for _, raw := range values {
+			var value string
+			if raw[0] != '"' || json.Unmarshal(raw, &value) != nil {
+				valid = false
+				break
+			}
+			if !seen[value] {
+				included = append(included, value)
+				seen[value] = true
+			}
+		}
+		if valid {
+			if !seen["reasoning.encrypted_content"] {
+				included = append(included, "reasoning.encrypted_content")
+			}
+			out.Include = included
+		} else {
+			omit("include")
+		}
+	}
+
+	// Preserve the existing Chat response_format precedence. text.format is
+	// used when that field is absent; validation of the selected format is shared.
+	format, err := chatResponseFormatToResponsesTextFormat(req.ResponseFormat)
+	if err != nil {
+		return err
+	}
+	verbosity := req.Verbosity
+	if req.Text != nil {
+		if len(format) == 0 {
+			// The baseline Chat DTO ignored text; an invalid format alone is
+			// omitted instead of rejecting a request that used to succeed.
+			if validateResponseFormat(req.Text.Format, false) == nil {
+				format = normalizedRawJSON(req.Text.Format)
+			} else {
+				omit("text.format")
+			}
+		} else if len(normalizedRawJSON(req.Text.Format)) > 0 && opts.Record != nil {
+			opts.Record(ConversionNotice{Field: "text.format", Action: "omit"})
+		}
+		if req.Text.Verbosity != "" {
+			verbosity = req.Text.Verbosity
+			if req.Verbosity != "" && opts.Record != nil {
+				opts.Record(ConversionNotice{Field: "verbosity", Action: "omit"})
+			}
+		}
+	}
+	if len(format) > 0 || verbosity != "" {
+		out.Text = &ResponsesText{Format: format, Verbosity: verbosity}
+	}
+	return nil
+}
+
 // convertChatMessagesToResponsesInput converts the Chat Completions messages
 // array into a Responses API input items array.
-func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputItem, error) {
+func convertChatMessagesToResponsesInput(msgs []ChatMessage, opts ConversionOptions) ([]ResponsesInputItem, error) {
 	var out []ResponsesInputItem
 	legacyIDs := legacyFunctionCallIDs{msgs: msgs}
-	for _, m := range msgs {
+	for messageIndex, m := range msgs {
 		switch {
 		case m.Role == "assistant" && m.FunctionCall != nil && len(m.ToolCalls) == 0:
 			m.ToolCalls = []ChatToolCall{{
@@ -138,7 +239,7 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputIt
 		case m.Role == "function" && m.ToolCallID == "":
 			m.ToolCallID = legacyIDs.claim(m.Name)
 		}
-		items, err := chatMessageToResponsesItems(m)
+		items, err := chatMessageToResponsesItems(m, opts, messageIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -202,14 +303,14 @@ func (ids *legacyFunctionCallIDs) claim(name string) string {
 
 // chatMessageToResponsesItems converts a single ChatMessage into one or more
 // ResponsesInputItem values.
-func chatMessageToResponsesItems(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatMessageToResponsesItems(m ChatMessage, opts ConversionOptions, messageIndex int) ([]ResponsesInputItem, error) {
 	switch m.Role {
 	case "system", "developer":
 		return chatSystemToResponses(m)
 	case "user":
 		return chatUserToResponses(m)
 	case "assistant":
-		return chatAssistantToResponses(m)
+		return chatAssistantToResponses(m, opts, messageIndex)
 	case "tool":
 		return chatToolToResponses(m)
 	case "function":
@@ -252,7 +353,22 @@ func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // text content and tool_calls, the text is emitted as an assistant message
 // first, then each tool_call becomes a function_call item. If the content is
 // empty/nil and there are tool_calls, only function_call items are emitted.
-func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatAssistantToResponses(m ChatMessage, opts ConversionOptions, messageIndex int) ([]ResponsesInputItem, error) {
+	var prefix []ResponsesInputItem
+	if opts.SupportsPlaintextReasoningInput {
+		reasoning, visible, err := splitChatAssistantContent(m)
+		if err != nil {
+			return nil, err
+		}
+		m.ReasoningContent, m.Content = "", visible
+		if reasoning != "" {
+			raw, err := json.Marshal([]ResponsesContentPart{{Type: "reasoning_text", Text: reasoning}})
+			if err != nil {
+				return nil, err
+			}
+			prefix = []ResponsesInputItem{{Type: "reasoning", Content: raw}}
+		}
+	}
 	var items []ResponsesInputItem
 	content := ""
 
@@ -339,7 +455,7 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 		})
 	}
 
-	return items, nil
+	return append(prefix, items...), nil
 }
 
 // parseAssistantContent returns assistant content as plain text.

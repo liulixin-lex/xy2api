@@ -173,7 +173,7 @@ OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-qual
 
 ### 在途预留 `reservation`
 
-- **做什么**：用户余额会为在途请求预留一部分。`cache_aware_estimate` 按该会话最近一次的缓存读比例估算输入费用；`output_p99_cap` 把输出 Token 估算封顶为该模型近 7 天的 P99（下限 1024）。两者都让预留更接近实际费用，减少余额充足却因预留被拒的情况。
+- **做什么**：用户余额会为在途请求预留一部分。`cache_aware_estimate` 按该会话最近一次的缓存读比例估算输入费用；`output_p99_cap` 把输出 Token 估算封顶为该模型近 7 天的 P99（下限 1024）。两者都让预留更接近实际费用，减少余额充足却因预留被拒的情况。Chat 请求的输出上限按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的顺序取第一个非 null 值，与转换选择相同；无法按协议解析时沿用原估算方式，不因此拒绝请求。
 - **客户端**：余额被在途请求占用时返回 429 `rate_limit_error`（`concurrent_balance_reserved`），`Retry-After` 约 5 秒（`errors.reservation_retry_after_seconds`），运维记录标为业务限制。
 - **何时关闭**：需要更保守的预留（按最坏情况估算）时关闭。
 - **观测**：`resilience.output_p99_refresh_failed`、`resilience.cache_ratio_store_failed`（存储失败时降级为原有估算）。

@@ -118,6 +118,8 @@ GEMINI_QUOTA_POLICY={"tiers":{"LEGACY":{"pro_rpd":50,"flash_rpd":1500,"cooldown_
 | `POST /v1/messages` | Anthropic Messages 格式，转换后转发到 Gemini |
 | `POST /v1/chat/completions` | Chat Completions 格式，转换后转发到 Gemini |
 
+`/v1/chat/completions` 中图片的 `image_url.detail` 为 `auto`、`low`、`high` 时，Gemini 没有对应参数，网关去掉该提示并记录降级，图片照常发送；其他值返回 400。质量与费用不保证与指定 `detail` 时相同。
+
 `/v1beta` 端点的密钥读取顺序为 `x-goog-api-key` 请求头、`Authorization: Bearer`、`x-api-key`，最后是查询参数 `key`（只在 `/v1beta` 与 `/antigravity/v1beta` 下接受）；查询参数 `api_key` 已弃用，会返回 400。
 
 开启了混合调度的 Antigravity 账号也会参与 Gemini 分组的调度，见 [Antigravity](antigravity.md)。排查上游问题时可短时开启 `gateway.gemini_debug_response_headers`（默认 `false`）记录上游响应头，排障后关闭。

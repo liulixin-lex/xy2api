@@ -50,6 +50,12 @@ HTTP 200 一旦因心跳或开场提交，状态码就不能再改，之后的�
 
 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）同样以 `response.failed` 结束（`server_error`，沿用本响应的 ID 与已得用量）。
 
+`/v1/chat/completions` 转为 Responses 的流式请求（见 [OpenAI](../platforms/openai.md#chat-completions-转-responses)）另有以下结束方式。错误按上表只写一次，之前不会发出成功的 `finish_reason`：
+
+- 上游没有有效结束：Responses 上游以 `response.completed`、兼容的 `response.done` 或 `response.incomplete` 结束；合法结束事件没有 status、done 没带 response 或 incomplete 未给原因时沿用正常结束。中途断开且没有有效结束事件、`response.failed` 或取消时以错误结束，不补成 `stop`。非流式请求也一样，从 done 事件恢复出了正文不代表成功结束。
+- 工具参数：上游生成的普通函数参数不是合法 JSON 时以错误结束，不修补；成功结束而参数为空时按 `{}` 交付。明确的输出上限截断以 `length` 结束，incomplete 未给原因或工具参数不完整时以 `stop` 结束，都不会以 `tool_calls` 交给客户端执行。流内事件之间的同一调用身份或参数与已发部分矛盾时以错误结束；结束事件更换 item ID 则按内容与顺序对应。
+
+
 ### `response.failed` 的重试时间
 
 `errors.failed_frame_retry_after` 开启时（默认），合成的 `response.failed` 在 `error.headers.retry-after` 中给出重试时间（Codex 从这里读取），正文 “try again in Ns” 的 N 与之相同：

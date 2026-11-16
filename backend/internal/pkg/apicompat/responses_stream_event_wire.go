@@ -128,6 +128,9 @@ func (e ResponsesStreamEvent) putItemID(m map[string]any) {
 // outputTextPartWire renders a content part for a message's output_text, always
 // carrying text/annotations/logprobs (matching cc-switch's push_text_delta).
 func outputTextPartWire(part *ResponsesContentPart) map[string]any {
+	if part != nil && part.Type == "refusal" {
+		return map[string]any{"type": "refusal", "refusal": part.Refusal}
+	}
 	text := ""
 	if part != nil {
 		text = part.Text
@@ -202,6 +205,14 @@ func responsesItemWire(item *ResponsesOutput) map[string]any {
 		m["execution"] = "client"
 		m["arguments"] = toolSearchCallArgumentsJSON(item.Arguments)
 	}
+	if len(item.encryptedContentRaw) > 0 {
+		m["encrypted_content"] = item.encryptedContentRaw
+	} else if item.EncryptedContent != "" {
+		m["encrypted_content"] = item.EncryptedContent
+	}
+	if len(item.EncryptedFunctionArgs) > 0 {
+		m["encrypted_function_args"] = item.EncryptedFunctionArgs
+	}
 	return m
 }
 
@@ -214,7 +225,11 @@ func messageContentWire(parts []ResponsesContentPart) []map[string]any {
 		if typ == "" {
 			typ = "output_text"
 		}
-		out = append(out, map[string]any{"type": typ, "text": p.Text})
+		if typ == "refusal" {
+			out = append(out, map[string]any{"type": typ, "refusal": p.Refusal})
+		} else {
+			out = append(out, map[string]any{"type": typ, "text": p.Text})
+		}
 	}
 	return out
 }

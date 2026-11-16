@@ -15,6 +15,34 @@
 - Codex 目录追加的模型别名继承唯一映射目标的推理档位与能力，保留上游已有条目。
 - Haiku 5.5 请求显式指定 `none` 时关闭思考并使用 `low` 档位，保留结构化输出与强制工具选择；`minimal` 保持既有 adaptive 行为。
 
+- Chat 请求转 Responses 时转发 `metadata`、`user`、`verbosity` 与显式 `include`；metadata、user、include 类型不符或单独给出的 `text.format` 非法时照旧省略该字段并记录，不新增报错。
+
+- Chat 请求的 `reasoning` 写成字符串或对象时生效，`reasoning_effort` 仍优先；转 Responses 时显式 `summary` 不再被改成 `auto`，只给 summary 时不再丢失。
+
+- Chat 请求只填 `max_output_tokens` 时也会生效；同时填写多个输出上限时，在途预留与实际发送按 `max_completion_tokens`、`max_tokens`、`max_output_tokens` 的顺序取值，估算解析失败时沿用原估算方式。
+
+- Chat 与 Messages 请求转 Responses 时，16 至 127 的输出上限不再被提高到 128，1 至 15 提高到 16。
+
+- 带合法 `stop` 的请求可转换为 Responses，省略停止序列并记录，停止边界不再生效。
+
+- Chat 的 JSON Schema 响应格式未指定 `strict` 时，转 Responses 默认发送 `false`。
+
+- 图片携带合法 `detail` 提示时可转换为 Anthropic/Gemini，保留图片并记录提示省略，质量与费用不保证等价。
+
+- Responses 上游转 Chat 时，上游失败或取消返回错误；未知结束原因照旧正常结束，合法结束事件缺少状态或 incomplete 未给原因时也保持原有结束方式。
+
+- Responses 上游转 Chat 时，上游生成的普通工具参数不是合法 JSON 时返回错误，不交给客户端执行；客户端历史参数仍原样保留。
+
+- Responses 上游转 Chat 时，没有摘要的思考内容用 `reasoning_text` 输出，有摘要时只输出摘要；流式原始推理文本在该项结束后发出。
+
+- Responses 上游转 Chat 流式时，只在 `output_item.done` 或结束事件中给出的工具参数不再丢失，重复完成事件不再重复输出参数或结束帧。
+
+- 上游以流式返回、网关拼成非流式结果时，只在 done 事件中给出的正文与拒答不再丢失，同一段内容不重复拼接。
+
+- 上游以流式返回、网关拼成非流式结果时，只在 done 事件中出现的网页搜索项不再丢失，custom 工具调用保留原类型，转为 Chat 时仍以 `function` 返回。
+
+- `/v1/responses` 的流式事件与非流式结果中，function_call 项的 `encrypted_content` 与 `encrypted_function_args` 不再丢失。
+
 ## [0.6.7] - 2026-11-15
 
 账号列表恢复状态颜色、悬停提示改为数据卡片，分组和用户管理的工具栏更紧凑。
