@@ -67,7 +67,7 @@ func TestStickyChangeUsesActualAttemptTerminal(t *testing.T) {
 				case "cancel_before_output":
 					result.ClientDisconnect = true
 				case "cancel_after_output":
-					a.MarkFirstOutput(time.Now())
+					a.MarkOutput(OutputValid, time.Now())
 					result.ClientDisconnect = true
 				case "upstream_canceled":
 					err = context.Canceled

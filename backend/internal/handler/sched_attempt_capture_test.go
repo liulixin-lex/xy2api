@@ -42,9 +42,9 @@ func (r *captureRecorder) Begin(in service.SchedAttemptStart) service.SchedAttem
 	r.starts = append(r.starts, in)
 	return &captureAttempt{owner: r, in: in, sample: schedquality.AttemptSample{AccountID: in.AccountID, Model: in.Model, Stream: in.Stream, RequestID: in.RequestID}}
 }
-func (*captureRecorder) SetObserver(func(schedquality.AttemptSample)) {}
-func (*captureRecorder) Flush(context.Context) error                  { return nil }
-func (a *captureAttempt) MarkFirstOutput(time.Time)                   { n := 1; a.sample.TTFOMs = &n }
+func (*captureRecorder) SetObserver(func(schedquality.AttemptSample))   {}
+func (*captureRecorder) Flush(context.Context) error                    { return nil }
+func (a *captureAttempt) MarkOutput(service.SchedOutputKind, time.Time) { n := 1; a.sample.TTFOMs = &n }
 func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.SchedAttemptUsage) {
 	if a.done {
 		panic("attempt finished twice")

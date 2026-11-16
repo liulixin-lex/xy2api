@@ -33,7 +33,7 @@ type chatOutcomeAttempt struct {
 	done     bool
 }
 
-func (*chatOutcomeAttempt) MarkFirstOutput(time.Time) {}
+func (*chatOutcomeAttempt) MarkOutput(SchedOutputKind, time.Time) {}
 func (a *chatOutcomeAttempt) Finish(in SchedAttemptFinish) {
 	if a.done {
 		panic("duplicate chat outcome finish")
