@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
@@ -34,7 +35,15 @@ func m7ResponsesToAnthropicRequest(req *apicompat.ResponsesRequest, opts apicomp
 	if opts.Bridge == nil {
 		return apicompat.ResponsesToAnthropicRequest(req)
 	}
-	return apicompat.ResponsesToAnthropicRequestWithOptions(req, opts)
+	out, err := apicompat.ResponsesToAnthropicRequestWithOptions(req, opts)
+	var unsupported *apicompat.UnsupportedConversionError
+	if errors.As(err, &unsupported) && unsupported.Field == "stop" {
+		// Until the bridge can copy this private intermediate field, keep the
+		// existing Anthropic conversion and its stop_sequences unchanged.
+		opts.Bridge.Enabled = false
+		return apicompat.ResponsesToAnthropicRequest(req)
+	}
+	return out, err
 }
 
 func m7ForwardChatMetadata(req *apicompat.ResponsesRequest, out *apicompat.AnthropicRequest, opts apicompat.ConversionOptions) {
