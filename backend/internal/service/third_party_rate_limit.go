@@ -33,6 +33,9 @@ func cooldownAttemptTarget(ctx context.Context, account *Account) (*resilience.U
 			parsed, _ := url.Parse(origin)
 			if parsed.Scheme == "http" || parsed.Scheme == "https" {
 				target.Origin = origin
+				if target.Protocol == PreOutputProtocolChat {
+					target.Protocol = APIProtocolChatCompletions
+				}
 				return target, true
 			}
 		}
@@ -167,6 +170,7 @@ func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 		}
 		found, evidenceMatches := false, false
 		evidence, tagged := account.Extra[quotaCooldownEvidenceKey].(map[string]any)
+		evidenceProtocol, _ := evidence["protocol"].(string)
 		for _, protocol := range []string{APIProtocolChatCompletions, APIProtocolResponses, APIProtocolAnthropic} {
 			if !account.providerSupportsProtocol(protocol) {
 				continue
@@ -177,7 +181,7 @@ func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 				return false
 			}
 			found = true
-			if tagged && evidence["owner"] == "key" && evidence["protocol"] == protocol && evidence["origin_digest"] == cooldownOriginDigest(origin) {
+			if tagged && evidence["owner"] == "key" && normalizeCapabilityProtocol(evidenceProtocol) == normalizeCapabilityProtocol(protocol) && evidence["origin_digest"] == cooldownOriginDigest(origin) {
 				evidenceMatches = true
 			}
 		}
@@ -187,7 +191,8 @@ func rawQuotaAppliesToTarget(ctx context.Context, account *Account) bool {
 		return false
 	}
 	if evidence, ok := account.Extra[quotaCooldownEvidenceKey].(map[string]any); ok {
-		return evidence["owner"] == "key" && evidence["protocol"] == target.Protocol &&
+		evidenceProtocol, _ := evidence["protocol"].(string)
+		return evidence["owner"] == "key" && normalizeCapabilityProtocol(evidenceProtocol) == normalizeCapabilityProtocol(target.Protocol) &&
 			evidence["origin_digest"] == cooldownOriginDigest(target.Origin)
 	}
 	return true

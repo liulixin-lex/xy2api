@@ -13,7 +13,7 @@ import (
 
 func TestReviewAdaptiveOfficialThresholdsRemainActive(t *testing.T) {
 	for _, platform := range []string{PlatformOpenCodeGo, PlatformKimi, PlatformZhipu, PlatformMiniMax} {
-		for _, mode := range []string{"official", "relay_chat", "relay_anthropic", "old_relay_evidence", "official_evidence"} {
+		for _, mode := range []string{"official", "relay_chat", "relay_anthropic", "old_relay_evidence", "official_evidence", "official_wire_evidence"} {
 			t.Run(platform+"/"+mode, func(t *testing.T) {
 				withResilienceSettings(t, nil)
 				accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
@@ -34,15 +34,18 @@ func TestReviewAdaptiveOfficialThresholdsRemainActive(t *testing.T) {
 				if mode == "old_relay_evidence" {
 					a.Extra[quotaCooldownEvidenceKey] = (QuotaCooldownEvidence{Owner: "unknown", Protocol: APIProtocolChatCompletions, OriginDigest: cooldownOriginDigest("https://relay.invalid")}).extra()
 				}
-				if mode == "official_evidence" {
+				if mode == "official_evidence" || mode == "official_wire_evidence" {
 					origin, err := upstreamBalanceOrigin(a.GetCNProtocolBaseURL(APIProtocolChatCompletions))
 					require.NoError(t, err)
 					a.Extra[quotaCooldownEvidenceKey] = (QuotaCooldownEvidence{Owner: "key", Protocol: APIProtocolChatCompletions, OriginDigest: cooldownOriginDigest(origin)}).extra()
+					if mode == "official_wire_evidence" {
+						a.Extra[quotaCooldownEvidenceKey].(map[string]any)["protocol"] = PreOutputProtocolChat
+					}
 				}
 				repo := &rateLimitAccountRepoStub{}
 				svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 				svc.SetSettingService(NewSettingService(newMockSettingRepo(), &config.Config{}))
-				want := mode == "official" || mode == "official_evidence"
+				want := mode == "official" || mode == "official_evidence" || mode == "official_wire_evidence"
 				require.Equal(t, want, rawQuotaAppliesToTarget(context.Background(), a))
 				require.Equal(t, want, svc.ApplyAccountSchedulingThreshold(context.Background(), a))
 				if want {

@@ -82,7 +82,9 @@ func TestThirdParty429EffectiveCooldown(t *testing.T) {
 			account := &Account{ID: 911, Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{
 				"api_protocol": "adaptive", "api_base_urls": map[string]any{APIProtocolChatCompletions: chat, APIProtocolResponses: responses},
 			}}
-			gateway := &OpenAIGatewayService{cfg: &config.Config{}}
+			gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: &httpUpstreamRecorder{
+				resp: &http.Response{StatusCode: http.StatusTooManyRequests, Header: week, Body: http.NoBody},
+			}}
 			state := resilience.NewRequestState()
 			ctx := resilience.WithRequestState(context.Background(), state)
 			for _, protocol := range []string{APIProtocolChatCompletions, APIProtocolResponses} {
@@ -101,12 +103,15 @@ func TestThirdParty429EffectiveCooldown(t *testing.T) {
 				require.NoError(t, err)
 				origin, err := upstreamBalanceOrigin(request.URL.String())
 				require.NoError(t, err)
-				// The M8 send boundary supplies this snapshot in production. Exercise
-				// the consumer here with the real builder's final request URL.
-				state.SetUpstreamRecoveryHint(nil)
-				state.SetUpstreamAttemptTarget(&resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: protocol, Origin: origin})
+				var capture *schedAttemptCapture
+				response, err := gateway.sendSchedHTTP(ctx, account, request, "", nil, false, &capture)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Nil(t, capture, "actual target must reach cooldown even without an attempt recorder")
+				require.Equal(t, &resilience.UpstreamAttemptTarget{AccountID: account.ID, Protocol: normalizeCapabilityProtocol(protocol), Origin: origin}, state.UpstreamAttemptTarget())
 				target, known := cooldownAttemptTarget(ctx, account)
 				require.True(t, known)
+				require.Equal(t, protocol, target.Protocol)
 				wantOfficial := (protocol == APIProtocolChatCompletions) == officialChat
 				require.Equal(t, wantOfficial, cooldownTargetOfficial(account, target))
 				repo := &rateLimitAccountRepoStub{}
