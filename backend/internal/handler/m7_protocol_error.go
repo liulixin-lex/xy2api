@@ -94,3 +94,13 @@ func prepareHandlerErrorSSE(c *gin.Context) bool {
 	}
 	return true
 }
+
+// A response that already delivered content still needs its first terminal,
+// but does not become a new pre-output failed turn or acquire retry headers.
+func writePostOutputExhaustion(c *gin.Context, protocol string, status int, errType, code, message string, streamStarted bool) bool {
+	if !streamStarted || c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+		return false
+	}
+	service.WriteTargetProtocolError(c, protocol, status, errType, code, "", message)
+	return true
+}

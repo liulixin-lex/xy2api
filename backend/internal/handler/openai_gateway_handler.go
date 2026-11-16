@@ -1801,8 +1801,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		return
 	}
 	write := func(status int, errType, message string, codes ...string) {
-		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
-			service.MarkOpsStreamError(c, errType, message, status)
+		code := ""
+		if len(codes) > 0 {
+			code = codes[0]
+		}
+		if writePostOutputExhaustion(c, service.PreOutputProtocolAnthropic, status, anthropicLocalErrorType(status, errType), code, message, streamStarted) {
 			return
 		}
 		if failoverErr != nil {

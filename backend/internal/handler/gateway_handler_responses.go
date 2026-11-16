@@ -487,6 +487,9 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		service.MarkOpsStreamError(c, code, message, status)
 		return
 	}
+	if writePostOutputExhaustion(c, service.PreOutputProtocolResponses, status, code, "", message, streamStarted) {
+		return
+	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.StatusCode, lastErr.ResponseHeaders)
 	}
