@@ -535,7 +535,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	scanErr := scanner.Err()
-	noteSchedError(c, scanErr)
+	// The consumer below decides whether the read error invalidates this
+	// response; a reset after finish_reason cannot undo a completed stream.
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),

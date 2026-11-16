@@ -103,23 +103,11 @@ func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 		PromptTokens:           u.InputTokens,
 		InputTokens:            max(u.InputTokens-read-creation, 0),
 		CacheReadTokens:        read,
-		CacheReadTokensPresent: u.CacheReadInputTokensPresent,
+		CacheReadTokensPresent: u.CacheReadInputTokensPresent || u.CacheReadInputTokens > 0,
 		CacheCreationTokens:    creation,
 	}
 }
 
-func isBenignOpenAIIncomplete(payload []byte) bool {
-	root := gjson.ParseBytes(payload)
-	typ := strings.TrimSpace(root.Get("type").String())
-	if typ != "response.incomplete" && strings.TrimSpace(root.Get("status").String()) != "incomplete" {
-		return false
-	}
-	reason := strings.TrimSpace(root.Get("response.incomplete_details.reason").String())
-	if reason == "" {
-		reason = strings.TrimSpace(root.Get("incomplete_details.reason").String())
-	}
-	return reason == "max_output_tokens" || reason == "content_filter"
-}
 func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 	if a == nil {
 		return
@@ -157,29 +145,36 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.markTerminal()
 		}
 	}
-	status := root.Get("status").String()
-	terminalEvent := typ
-	if terminalEvent == "" && (status == "completed" || status == "failed" || status == "incomplete" || status == "cancelled" || status == "canceled") {
-		terminalEvent = "response." + status
-	}
-	if isOpenAIWSTerminalEvent(terminalEvent) || terminalEvent == "error" {
+	terminal := ClassifyOpenAIResponsesTerminal("", data)
+	if terminal.Seen {
 		a.mu.Lock()
-		a.terminalEvent = terminalEvent
+		a.terminalEvent = terminal.EventType
+		a.terminal = a.terminal || terminal.Valid
+		// Some Responses transports accept a typed provisional error followed
+		// by a completed response. Keep their final decision: explicit failed
+		// responses remain sticky, and a consumer error still fails finish.
+		if terminal.Success && a.failure != nil && a.failure.Source == resilience.SourceStreamEvent && openAIResponsesTypedBareError(a.failure.Body) {
+			a.failure = nil
+		}
 		a.mu.Unlock()
 	}
-	if isBenignOpenAIIncomplete(data) {
+	if terminal.BenignIncomplete() {
 		a.mu.Lock()
 		a.benignIncomplete = true
 		a.mu.Unlock()
 		return
 	}
-	failed := typ == "error" || typ == "response.failed" || typ == "response.incomplete" || typ == "response.cancelled" || typ == "response.canceled" || status == "failed" || status == "incomplete" || root.Get("error").IsObject()
-	if !failed {
+	if !terminal.QualityFailure() {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.done {
+		return
+	}
+	// A later provisional error must not replace an authoritative failure;
+	// otherwise a subsequent completed event could incorrectly erase it.
+	if a.failure != nil && (a.failure.Source != resilience.SourceStreamEvent || !openAIResponsesTypedBareError(a.failure.Body)) {
 		return
 	}
 	o := resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: http.StatusOK, Body: append([]byte(nil), data...)}
@@ -240,14 +235,14 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.done {
+		return
+	}
 	if result != nil {
 		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
 		if result.UpstreamTerminalEvent == "" {
 			result.UpstreamTerminalEvent = a.terminalEvent
 		}
-	}
-	if a.done {
-		return
 	}
 	if err == nil {
 		err = a.sendErr
@@ -261,8 +256,11 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
 	canceled := a.client || a.state.ClientCanceled()
+	// The reader can prove a complete JSON document despite an SSE header.
+	// Such responses do not require an SSE terminal (status may be omitted).
+	jsonComplete := result != nil && result.ResponseFactsKnown && result.ResponseBodyKind == "json"
 	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
-		(!a.expectTerminal || a.terminal) &&
+		(!a.expectTerminal || a.terminal || jsonComplete) &&
 		(result == nil || result.CompletedForDelivery())
 
 	noteOpenAIStickyAttemptOutcome(a, success)
@@ -284,6 +282,10 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
+			terminal := ClassifyOpenAIResponsesTerminal("", failure.Body)
+			if failure.Source == resilience.SourceStreamEvent && terminal.Valid && terminal.Status == "incomplete" && !terminal.BenignIncomplete() {
+				detail = "OUTPUT_INCOMPLETE"
+			}
 		}
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 		return

@@ -284,7 +284,12 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 		contentType = "application/json"
 	}
 	body = reverseToolNamesIfPresent(c, body)
-	c.Data(resp.StatusCode, contentType, body)
+	c.Header("Content-Type", contentType)
+	c.Status(resp.StatusCode)
+	_, writeErr := c.Writer.Write(body)
+	if writeErr != nil {
+		cancelSchedClient(c)
+	}
 
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
@@ -295,9 +300,10 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 		UpstreamModel:    upstreamModel,
 		UpstreamEndpoint: "/v1/messages",
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		ReasoningEffort:  reasoningEffort,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleNativeAnthropicStreamingResponse 处理流式原生 Anthropic 响应：
