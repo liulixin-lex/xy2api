@@ -152,10 +152,6 @@ Anthropic 上游（原生 Messages 与协议转换）发来的 `ping` 和 SSE �
 
 ## 请求修复与重放
 
-Chat 上游以 `length` 结束时，转换出口保留文本、用量及标为 `incomplete` 的工具原始片段，不发可执行的工具完成事件，也不因该截断增加重放。
-
-固定 Chat 与 Grok API-key 路由的 Responses 形状请求先按既有规则转换、映射或省略并记录，再发送一次；此转换不增加重放，普通 messages 请求沿用原路径。
-
 以下情况网关在本地修复请求后，在同一账号上重放，客户端不感知失败尝试。重放消耗本请求预算中的尝试次数，预算不足时不重放；密文拒绝按下述专用错误返回，其他错误照常返回。
 
 | 上游拒绝 | 网关处理 |
@@ -171,6 +167,9 @@ Chat 上游以 `length` 结束时，转换出口保留文本、用量及标为 `
 | Claude 请求分发到 GPT 中转时，续链（`previous_response_id`）被笼统的 4xx 拒绝 | 去掉续链、按完整历史重放一次，并对该会话在该账号上关闭续链。指名其他参数的错误、上下文超长、内容审核、模型不存在等照常返回 |
 
 原生与原样转发的 Responses HTTP 明确拒绝 reasoning/compaction 密文、但位置冲突、重复 ID、越界、预算不足或上述修复后仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
+
+账号只支持 Chat Completions 的 API Key 路由（以及 Grok API Key）收到 Responses 格式的正文时，网关在发送前把它转换为 Chat 请求：能表达的字段照转，不能表达的按既有规则省略并记录降级，然后只发送一次；这一步不是重放，不消耗重放次数。普通的 `messages` 请求不受影响。
+
 
 原生、透传 Responses 及 Chat/Messages 转 Responses 出口明确拒绝 reasoning/compaction 密文、但位置冲突、多项无定位、预算不足或修复一次仍被拒时，返回 400 `invalid_request_error`，`error.code` 为 `encrypted_content_rejected`。上游提供的脱敏 `param` 保留；唯一位置说明只删除被指认项重试，否则提示用完整可读历史重建请求或新建会话。脱敏后的上游 code、message 与位置附在 `Upstream detail:` 后，不回显密文或凭据。不换号、不罚号、不计会话失败；尚未提交时清除 `Retry-After`、写 `x-should-retry: false`，已提交的流保持原 HTTP 状态并只写一次协议错误终态。
 
