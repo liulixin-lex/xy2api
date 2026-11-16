@@ -12,15 +12,16 @@ const (
 )
 
 type CacheAssessment struct {
-	Verdict     Verdict  `json:"verdict"`
-	MinRatio    float64  `json:"min_ratio"`
-	Ratio       float64  `json:"ratio"`
-	Turns       int      `json:"turns"`
-	Sessions    int      `json:"sessions"`
-	LowSessions int      `json:"low_sessions"`
-	ReadTokens  int64    `json:"read_tokens"`
-	InputTokens int64    `json:"input_tokens"`
-	AttemptIDs  []string `json:"-"`
+	Verdict      Verdict  `json:"verdict"`
+	MinRatio     float64  `json:"min_ratio"`
+	Ratio        float64  `json:"ratio"`
+	Turns        int      `json:"turns"`
+	Sessions     int      `json:"sessions"`
+	LowSessions  int      `json:"low_sessions"`
+	ReadTokens   int64    `json:"read_tokens"`
+	InputTokens  int64    `json:"input_tokens"`
+	AttemptIDs   []string `json:"-"`
+	SourceGroups []int64  `json:"-"` // Actual selected continuation turns, deduplicated and ascending.
 }
 
 // 只取续接轮、本轮成功、token 都已知、FinishedAt∈[now-30m,now]、StartedAt>cut 的样本。
@@ -33,6 +34,7 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 	}
 	type tokens struct{ read, input int64 }
 	sessions := make(map[session]tokens)
+	groups := make(map[int64]struct{})
 	var bad []AttemptSample
 	for _, s := range completedAttempts(samples, cut, now.Add(-CacheWindow), now) {
 		if !s.Continuation || s.SessionKey == "" {
@@ -42,6 +44,7 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 		if !ok {
 			continue
 		}
+		groups[s.GroupID] = struct{}{}
 		out.Turns++
 		out.ReadTokens += read
 		out.InputTokens += input
@@ -54,6 +57,7 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 			bad = append(bad, s)
 		}
 	}
+	out.SourceGroups = sortedSourceGroups(groups)
 	out.Sessions = len(sessions)
 	for _, tally := range sessions {
 		if float64(tally.read)/float64(tally.input) < minRatio {
