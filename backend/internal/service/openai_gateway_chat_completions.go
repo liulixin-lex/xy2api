@@ -478,7 +478,11 @@ retryChatResponsesWire:
 			_ = resp.Body.Close()
 		})
 	}
-	defer closeAttempt()
+	defer func(a *schedAttemptCapture) {
+		// Freeze this send before cleanup can cancel its upstream reader.
+		a.finish(schedResult, schedErr)
+		closeAttempt()
+	}(schedCapture)
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
@@ -777,7 +781,12 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// writeContentType 仅在头不存在时才设置，无法覆盖。这里显式 Set 强制改回 JSON，
 	// 否则下游"看头判流式"的中间层（如 new-api）会把本应聚合的 JSON 当成 SSE 处理。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, chatResp)
+	payload, err := json.Marshal(chatResp)
+	if err != nil {
+		return nil, err
+	}
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(payload)
 
 	result = &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -790,6 +799,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		Stream:                        false,
+		ClientDisconnect:              writeErr != nil,
 		Duration:                      time.Since(startTime),
 	}
 	// Grok chat bridge: bill native search tools found in the terminal Responses body.
@@ -799,6 +809,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 				result.SearchCount = n
 			}
 		}
+	}
+	if writeErr != nil {
+		cancelSchedClient(c)
+		return result, writeErr
 	}
 	return result, nil
 }
@@ -1443,7 +1457,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	var lastReadAt int64
@@ -1465,7 +1478,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}()

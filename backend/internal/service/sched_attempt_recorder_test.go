@@ -33,7 +33,7 @@ func TestSchedAttemptLifecycle(t *testing.T) {
 	now = now.Add(3 * time.Second)
 	b.MarkFirstOutput(now)
 	b.MarkFirstOutput(now.Add(time.Second))
-	b.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: &SchedAttemptUsage{PromptTokens: 100000, CacheReadTokens: 90000}})
+	b.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: &SchedAttemptUsage{PromptTokens: 100000, CacheReadTokens: 90000, CacheReadTokensPresent: true}})
 	c := r.Begin(in)
 	now = now.Add(time.Second)
 	c.MarkFirstOutput(now)

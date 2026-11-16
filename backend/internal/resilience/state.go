@@ -180,10 +180,13 @@ type SessionRecorder interface {
 	Success(ctx context.Context, groupID int64, sessionHash string, accountID int64)
 }
 
-// SetSession records the sticky session of the request and its recorder.
+// SetSession records the selected group even when there is no sticky session.
 func (s *RequestState) SetSession(groupID int64, sessionHash string, rec SessionRecorder) {
-	if s == nil || sessionHash == "" || rec == nil {
+	if s == nil {
 		return
+	}
+	if sessionHash == "" {
+		rec = nil
 	}
 	s.mu.Lock()
 	s.sessionGroupID, s.sessionHash, s.sessionRec = groupID, sessionHash, rec

@@ -337,9 +337,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {
-		if sessionHash != "" {
-			resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
-		}
+		resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
 	}
 	return selection, decision, capabilitySelectionError(ctx, err)
 }
