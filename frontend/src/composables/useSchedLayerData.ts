@@ -1,6 +1,6 @@
 /**
  * The data of the quality panel and the group board (opened through useSchedLayers), fetched by the host page's live
- * table as two page tasks on a 5 s beat (spec 5, 7f-1). They follow the table: paused with it, stopped while the tab
+ * table as two page tasks on a 5 s beat (spec 5, 7f-1), and the board's group summary as a third, once a minute. They follow the table: paused with it, stopped while the tab
  * is hidden, slowed down after failures, and the page's live indicator is theirs too. The panel and the board only
  * show what lands here.
  *
@@ -27,7 +27,13 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 
 export const SCHED_PANEL_TASK = 'schedPanel'
 export const SCHED_BOARD_TASK = 'schedBoard'
+export const SCHED_BOARD_SUMMARY_TASK = 'schedBoardSummary'
 const BEAT_MS = 5000
+/**
+ * The group summary is over all models and costly to compute (an hour of usage records): asked on opening the board
+ * and on switching to another group, then once a minute; never on the board's 5 s beat nor on a model switch.
+ */
+export const SUMMARY_MS = 60_000
 
 /** A page's row of an account; `quality` is its summary when the page's table carries one. */
 export type SchedPanelRow = Account & { quality?: BackendAccountSummary | null }
@@ -47,7 +53,7 @@ const board = shallowReactive({
   /** `group id:model` of the data. */
   key: null as string | null,
   data: null as BackendOrder | null,
-  /** The group over all its models (POST …/groups/summary); null when it did not load. */
+  /** The group over all its models (POST …/groups/summary), written on its own; null when it did not load. */
   summary: null as BackendGroupSummary | null,
   failedKey: null as string | null
 })
@@ -91,19 +97,32 @@ export function useSchedLayerTasks() {
         const key = boardKey()
         if (key === null) return
         try {
-          const groupId = boardRequest.groupId!
-          // The group's summary comes with each beat; without it the board still shows, its line reads "—".
-          const summary = schedQualityAPI.groupsSummary([groupId], { signal })
-            .then((value) => value.groups.find((group) => group.group_id === groupId) ?? null, () => null)
-          const data = await schedQualityAPI.groupBoard(groupId, boardRequest.model ?? undefined, { signal })
-          const groupSummary = await summary
+          const data = await schedQualityAPI.groupBoard(boardRequest.groupId!, boardRequest.model ?? undefined, { signal })
           if (signal.aborted || boardKey() !== key) return
-          Object.assign(board, { key, data, summary: groupSummary, failedKey: null })
+          Object.assign(board, { key, data, failedKey: null })
         } catch (error) {
           if (signal.aborted || boardKey() !== key) return
           board.failedKey = key
           throw error
         }
+      }
+    },
+    {
+      name: SCHED_BOARD_SUMMARY_TASK,
+      intervalMs: SUMMARY_MS,
+      // Never fails the page: without a summary the board's line reads "—".
+      run: async (signal) => {
+        const groupId = boardRequest.groupId
+        if (groupId === null) return
+        let summary: BackendGroupSummary | null = null
+        try {
+          const value = await schedQualityAPI.groupsSummary([groupId], { signal })
+          summary = value?.groups?.find((group) => group.group_id === groupId) ?? null
+        } catch {
+          summary = null
+        }
+        if (signal.aborted || boardRequest.groupId !== groupId) return
+        board.summary = summary
       }
     }
   ]
@@ -119,6 +138,11 @@ export function useSchedLayerTasks() {
     watch(() => [boardKey(), boardRequest.raise] as const, ([key]) => {
       if (key === null) forgetBoard()
       else void refresh(SCHED_BOARD_TASK)
+    })
+    // The summary is the group's over all models: a model switch keeps it, another group asks again.
+    watch(() => boardRequest.groupId, (groupId) => {
+      board.summary = null
+      if (groupId !== null) void refresh(SCHED_BOARD_SUMMARY_TASK)
     })
     // Any quality action (in the panel, the row menu, a batch) reloads the open layers; a recovery waits for the panel.
     watch(changed, () => {

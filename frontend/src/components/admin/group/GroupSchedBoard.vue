@@ -216,19 +216,29 @@ function stateOf(row: BackendOrderRow): { text: string; cls: string } {
 }
 
 // ---- Pinning: saved at once. The board reads the scheduler's snapshot, which follows a change a few seconds later,
-// so the switch keeps the saved state until an answer agrees (not just the next one). A failure shows the backend's
-// reason (not a member, not an OpenAI group) until the next try.
+// so the switch keeps the saved state until an answer agrees (not just the next one), for at most PIN_HOLD_MS; after
+// that the backend's value stands (someone changed it back, or the board never shows it). A failure shows the
+// backend's reason (not a member, not an OpenAI group) until the next try.
+const PIN_HOLD_MS = 30_000
 const pinBusy = reactive(new Set<number>())
 const pinFailed = reactive(new Map<number, string>())
-const pinShown = reactive(new Map<number, boolean>())
+const pinShown = reactive(new Map<number, { pinned: boolean; at: number }>())
+const held = (accountId: number) => {
+  const shown = pinShown.get(accountId)
+  return shown && now.value - shown.at <= PIN_HOLD_MS ? shown : null
+}
 watch(() => boardData.data, (value) => {
-  for (const row of value?.rows ?? []) if (pinShown.get(row.account_id) === row.pinned) pinShown.delete(row.account_id)
+  for (const row of value?.rows ?? []) {
+    // The board agrees, or the hold is over: the backend's value stands.
+    const shown = held(row.account_id)
+    if (!shown || shown.pinned === row.pinned) pinShown.delete(row.account_id)
+  }
 })
 watch(() => board.groupId, () => {
   pinShown.clear()
   pinFailed.clear()
 })
-const pinnedOf = (row: BackendOrderRow) => pinShown.get(row.account_id) ?? row.pinned
+const pinnedOf = (row: BackendOrderRow) => held(row.account_id)?.pinned ?? row.pinned
 
 async function setPinned(row: BackendOrderRow, pinned: boolean) {
   const groupId = board.groupId
@@ -237,7 +247,7 @@ async function setPinned(row: BackendOrderRow, pinned: boolean) {
   pinFailed.delete(row.account_id)
   try {
     const result = await adminAPI.groups.setMemberPinned(groupId, row.account_id, pinned)
-    pinShown.set(row.account_id, result.pinned)
+    pinShown.set(row.account_id, { pinned: result.pinned, at: now.value })
     void markSchedChanged()
   } catch (error) {
     pinFailed.set(row.account_id, extractApiErrorMessage(error, ''))

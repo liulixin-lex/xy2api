@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import type { BackendOrder, BackendOrderRow } from '@/api/admin/schedQualityTypes'
@@ -231,6 +231,67 @@ describe('GroupSchedBoard', () => {
     expect(text('e2e')).toBe('admin.schedQuality.board.summaryFromGateway:{"p50":"3.2s","p90":"8.1s"}')
     expect(text('body')).toBe('admin.schedQuality.board.summaryFromBody:{"p50":"2.9s","p90":"—"}')
     expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":"3"}')
+  })
+
+  it('asks for the group summary on opening and on another group, then once a minute: not on the 5 s beat nor a model switch', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    mount(Board, { attachTo: document.body })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.groupsSummary).not.toHaveBeenCalled()
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.groupsSummary).toHaveBeenCalledTimes(1)
+    // Several board beats and a model switch: the board asks each time, the summary does not.
+    await vi.advanceTimersByTimeAsync(5_000 * 5)
+    setSchedBoardModel('gpt-6-astra')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.groupBoard.mock.calls.length).toBeGreaterThanOrEqual(6)
+    expect(api.groupBoard).toHaveBeenLastCalledWith(53, 'gpt-6-astra', expect.anything())
+    expect(api.groupsSummary).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(35_000)
+    expect(api.groupsSummary).toHaveBeenCalledTimes(2)
+    // Another group asks at once, for that group.
+    openSchedBoard({ id: 54, name: '北辰组' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.groupsSummary).toHaveBeenCalledTimes(3)
+    expect(api.groupsSummary).toHaveBeenLastCalledWith([54], expect.anything())
+  })
+
+  it('shows the board without waiting for a slow summary, and reads a summary without groups as "—"', async () => {
+    api.groupsSummary.mockReturnValueOnce(new Promise(() => {}))
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(rows()).toHaveLength(5)
+    expect(document.querySelector('[data-sq-summary="accounts"]')!.textContent).toContain('"pass":"—"')
+
+    closeSchedBoard()
+    await flushPromises()
+    api.groupsSummary.mockResolvedValueOnce({ at: '', stale: false, groups: null })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-board-failed]')).toBeNull()
+    expect(rows()).toHaveLength(5)
+    expect(document.querySelector('[data-sq-summary="migration"]')!.textContent).toBe('admin.schedQuality.board.summaryMigration:{"n":"—"}')
+  })
+
+  it('holds a saved pin for at most 30 s while the board still shows the old state, then the backend\'s value stands', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    perms.granted = ['accounts:view', 'groups:view', 'groups:manage']
+    groupsApi.setMemberPinned.mockResolvedValue({ group_id: 53, account_id: 7, pinned: true })
+    api.groupBoard.mockImplementation(async () => board())
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await vi.advanceTimersByTimeAsync(0)
+    const pin = () => document.querySelector<HTMLButtonElement>('[data-sq-pin="7"]')!
+    pin().click()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(pin().getAttribute('aria-checked')).toBe('true')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(pin().getAttribute('aria-checked')).toBe('false')
   })
 
   it('shows "—" in the summary when it has no data or did not load, and still shows the board', async () => {
