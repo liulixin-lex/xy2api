@@ -21,11 +21,9 @@ OAuth 类账号的授权接口位于 `/api/v1/admin/accounts` 下：`generate-au
 2. 「分组管理」中创建平台为 Anthropic 的分组，把账号加入该分组。分组的调度、系统提示词等设置见 [分组](../guides/groups.md) 与 [账号调度](../guides/scheduling.md)。
 3. 用户在「API 密钥」中创建绑定该分组的密钥，点击「使用密钥」即可获得各客户端的配置。
 
-API Key 账号的上游 Base URL 可填写根地址、版本前缀（如 `/v1`）或对应完整端点；Messages、Token 计数和模型发现按版本段拼接，保留查询参数并清除 fragment。需要 `beta=true` 的请求只设置一次；原生第三方 Messages 不额外添加 beta。
+API Key 账号的上游 Base URL 可以填根地址、带版本前缀的地址（如 `…/v1`）或完整的端点地址；网关拼接 Messages、Token 计数与模型发现的路径时不会重复版本段，查询参数保留，`#` 之后的部分去掉。需要 `beta=true` 的请求只加一次；发往第三方的原生 Messages 不额外添加。
 
 ## 对外端点
-
-上述 Base URL 是账号的上游地址；客户端仍填写本页「客户端配置」规定的网关地址。
 
 Anthropic 分组的密钥可以调用以下端点。鉴权使用 `Authorization: Bearer <密钥>` 或 `x-api-key: <密钥>`；不接受 URL 查询参数里的密钥。
 
@@ -37,6 +35,8 @@ Anthropic 分组的密钥可以调用以下端点。鉴权使用 `Authorization:
 | `POST /v1/responses`（别名 `/responses`） | OpenAI Responses 格式，网关转换为 Messages 后转发，见[协议转换字段表](#协议转换字段表) |
 | `GET /v1/models`、`GET /v1/models/:model` | 模型列表 |
 | `GET /v1/usage` | 当前密钥的额度与用量（供 CC Switch 等工具读取） |
+
+上述 Base URL 是账号的上游地址；客户端仍填写本页「客户端配置」规定的网关地址。
 
 各推理端点拒绝重复的顶层 `model` 字段，返回 400 并指出 `model`，规则见 [OpenAI · 对外端点](openai.md#对外端点)；嵌套的同名字段不受影响。
 
