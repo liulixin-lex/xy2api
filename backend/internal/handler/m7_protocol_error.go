@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +26,10 @@ func inboundOpenAIErrorProtocol(c *gin.Context) string {
 	if c != nil && c.Request != nil && c.Request.URL != nil && strings.Contains(c.Request.URL.Path, "/messages") {
 		return service.PreOutputProtocolAnthropic
 	}
-	return service.PreOutputProtocolResponses
+	if inboundIsResponses(c) {
+		return service.PreOutputProtocolResponses
+	}
+	return ""
 }
 
 func writeHandlerProtocolError(c *gin.Context, protocol string, status int, errType, code, param, message string) bool {
@@ -49,6 +53,28 @@ func writeHandlerProtocolError(c *gin.Context, protocol string, status int, errT
 				code = codeServerIsOverloaded
 			}
 		}
+	}
+	if protocol == "" {
+		if c.Writer.Written() && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+			if c.Request != nil && c.Request.Context().Err() != nil || service.GatewayDeliveryFailed(c) {
+				return false
+			}
+			service.StopOpenAICompactSSEKeepaliveCommitted(c)
+			if !service.ClaimProtocolTerminal(c) {
+				return false
+			}
+			errorBody := gin.H{"type": errType, "message": message}
+			if code != "" {
+				errorBody["code"] = code
+			}
+			body, _ := json.Marshal(gin.H{"error": errorBody})
+			service.MarkOpsGatewayTerminalStatus(c, status)
+			service.MarkOpsStreamError(c, errType, message, status)
+			_, _ = c.Writer.WriteString("event: error\ndata: " + string(body) + "\n\n")
+			c.Writer.Flush()
+			return true
+		}
+		protocol = service.PreOutputProtocolChat // The existing generic JSON envelope.
 	}
 	return service.WriteTargetProtocolError(c, protocol, status, errType, code, param, message)
 }
