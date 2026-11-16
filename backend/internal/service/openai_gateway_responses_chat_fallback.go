@@ -266,7 +266,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		c.Writer.Flush()
 	}
 
-	scan := s.scanCCStream(c, resp, account, "openai responses chat fallback", requestID, startTime, nil, func(raw []byte) error {
+	scan := s.scanCCStream(c, resp, account, PreOutputProtocolResponses, "openai responses chat fallback", requestID, startTime, nil, func(raw []byte) error {
 		m7RecordLegacyChatTerminal(c.Request.Context(), raw, opts)
 		events := apicompat.ChatCompletionsChunkToResponsesEventsWithBridgeOptions(raw, state)
 		if err := state.Err(); err != nil {
@@ -295,7 +295,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	if scan.Err != nil {
 		noUsageBeforeOutput := !c.Writer.Written() && state.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
-		writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
+		if !ProtocolTerminalClaimed(c) {
+			writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
+		}
 		if noUsageBeforeOutput {
 			return nil, scan.Err
 		}

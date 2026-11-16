@@ -259,7 +259,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		return nil
 	}
 
-	scan := s.scanCCStream(c, resp, account, "openai messages chat fallback", requestID, startTime, nil, emitChunk)
+	scan := s.scanCCStream(c, resp, account, PreOutputProtocolAnthropic, "openai messages chat fallback", requestID, startTime, nil, emitChunk)
 	usage := scan.Usage
 
 	// Completion eligibility comes from the scanner, not from JSON validity.
@@ -275,7 +275,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 
 	if scan.Err != nil {
 		noUsageBeforeOutput := !c.Writer.Written() && anthropicState.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
-		writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
+		if !ProtocolTerminalClaimed(c) {
+			writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
+		}
 		if noUsageBeforeOutput {
 			return nil, scan.Err
 		}

@@ -3,16 +3,115 @@
 package service
 
 import (
+	"bufio"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFinalR3ChatFallbackErrorBeforeUsageDrain(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, target := range []string{"responses", "messages"} {
+		for _, prefix := range []string{"content", "heartbeat"} {
+			t.Run(target+"/"+prefix, func(t *testing.T) {
+				reader, writer := io.Pipe()
+				releaseUsage := make(chan struct{})
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(releaseUsage) }) }
+				upstreamDone := make(chan struct{})
+				go func() {
+					defer close(upstreamDone)
+					defer func() { _ = writer.Close() }()
+					if prefix == "content" {
+						_, _ = io.WriteString(writer, "data: "+`{"id":"chat_r3","choices":[{"index":0,"delta":{"content":"hello"}}]}`+"\n\n")
+					}
+					_, _ = io.WriteString(writer, "data: "+`{"id":"chat_r3","choices":[{"index":0,"delta":{"content":123}}]}`+"\n\n")
+					<-releaseUsage
+					_, _ = io.WriteString(writer, "data: "+`{"id":"chat_r3","choices":[{"index":0,"delta":{"content":"after-error"}}]}`+"\n\n")
+					_, _ = io.WriteString(writer, "data: "+`{"id":"chat_r3","choices":[],"usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}}`+"\n\ndata: [DONE]\n\n")
+				}()
+				type outcome struct {
+					result  *OpenAIForwardResult
+					err     error
+					claimed bool
+				}
+				done := make(chan outcome, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					c, _ := gin.CreateTestContext(w)
+					c.Request = r
+					if prefix == "heartbeat" {
+						c.Header("Content-Type", "text/event-stream")
+						_, _ = c.Writer.WriteString(": heartbeat\n\n")
+						c.Writer.Flush()
+					}
+					svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+					resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}
+					account := rawChatCompletionsTestAccount()
+					var result *OpenAIForwardResult
+					var err error
+					if target == "responses" {
+						result, err = svc.streamChatCompletionsAsResponses(c, resp, account, "fixture", nil, nil, false, nil, "fixture", "fixture", nil, nil, time.Now())
+					} else {
+						result, err = svc.streamChatCompletionsAsAnthropic(c, resp, account, "fixture", "fixture", "fixture", nil, nil, time.Now())
+					}
+					done <- outcome{result: result, err: err, claimed: ProtocolTerminalClaimed(c)}
+				}))
+				defer func() {
+					release()
+					_ = reader.Close()
+					_ = writer.Close()
+					server.Close()
+					<-upstreamDone
+				}()
+				client := server.Client()
+				client.Timeout = time.Second
+				start := time.Now()
+				resp, err := client.Post(server.URL+"/v1/"+target, "application/json", strings.NewReader(`{}`))
+				require.NoError(t, err)
+				defer func() { _ = resp.Body.Close() }()
+				require.Equal(t, http.StatusOK, resp.StatusCode)
+				stream := bufio.NewReader(resp.Body)
+				var body strings.Builder
+				for !strings.Contains(body.String(), `"error":`) {
+					line, readErr := stream.ReadString('\n')
+					body.WriteString(line)
+					require.NoError(t, readErr, "error must arrive before the upstream usage is released")
+				}
+				errorAt := time.Since(start)
+				require.Less(t, errorAt, 200*time.Millisecond)
+				select {
+				case <-done:
+					t.Fatal("the upstream drain must still be waiting for usage")
+				default:
+				}
+				release()
+				tail, err := io.ReadAll(stream)
+				require.NoError(t, err)
+				body.Write(tail)
+				got := <-done
+				require.Error(t, got.err)
+				require.True(t, got.claimed)
+				require.NotNil(t, got.result)
+				require.True(t, got.result.PartialFailure)
+				require.True(t, got.result.UsagePresent)
+				require.Equal(t, 13, got.result.Usage.InputTokens)
+				require.Equal(t, 5, got.result.Usage.OutputTokens)
+				require.Equal(t, 1, strings.Count(body.String(), `"error":`))
+				require.NotContains(t, body.String(), "after-error")
+				require.NotContains(t, body.String(), `"type":"response.completed"`)
+				require.NotContains(t, body.String(), "event: message_stop")
+				t.Logf("error_bytes_at=%s errors=1 usage=13/5 terminal_claimed=true", errorAt)
+			})
+		}
+	}
+}
 
 func TestFinalR2PreOutputConversionErrorReturnsBeforeTerminal(t *testing.T) {
 	withResilienceSettings(t, nil)

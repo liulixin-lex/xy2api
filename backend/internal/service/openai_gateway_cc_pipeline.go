@@ -319,6 +319,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 	c *gin.Context,
 	resp *http.Response,
 	account *Account,
+	protocol string,
 	logPrefix string,
 	requestID string,
 	startTime time.Time,
@@ -333,6 +334,16 @@ func (s *OpenAIGatewayService) scanCCStream(
 			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, st.ResponseFactsKnown, st.UsagePresent, st.UsageSource, st.TerminalSeen, st.TerminalValid, st.ResponseBodyKind)
 		}
 	}()
+	latchConversionError := func(err error) bool {
+		st.Err = err
+		if !c.Writer.Written() {
+			_ = resp.Body.Close()
+			return true
+		}
+		// Deliver the terminal before waiting for the remaining upstream usage.
+		writeCCStreamReadError(c, protocol, err)
+		return false
+	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
 		payload := strings.TrimSpace(frame.Data)
 		terminal.ObserveDataLine(payload)
@@ -374,21 +385,14 @@ func (s *OpenAIGatewayService) scanCCStream(
 				ms := int(time.Since(startTime).Milliseconds())
 				st.FirstTokenMs = &ms
 			}
-			st.Err = emitRaw[0]([]byte(payload))
-			if st.Err != nil && !c.Writer.Written() {
-				_ = resp.Body.Close()
-				return true
+			if err := emitRaw[0]([]byte(payload)); err != nil {
+				return latchConversionError(err)
 			}
 			return false
 		}
 		var chunk apicompat.ChatCompletionsChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			st.Err = &apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"}
-			if !c.Writer.Written() {
-				_ = resp.Body.Close()
-				return true
-			}
-			return false
+			return latchConversionError(&apicompat.UpstreamConversionError{Field: "stream", Reason: "invalid Chat Completions chunk", SourceProtocol: "chat"})
 		}
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
 			ms := int(time.Since(startTime).Milliseconds())
