@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"io"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -15,20 +13,13 @@ func m7EncryptedRepairEligible(account *Account) bool {
 	return account != nil && account.Type == AccountTypeAPIKey && account.Platform != PlatformGrok
 }
 
-func bindM7ResponsesWireBody(c *gin.Context, account *Account, req *http.Request) error {
-	if !m7EncryptedRepairEligible(account) || c == nil || req == nil || req.GetBody == nil {
-		return nil
+// Repairs must reuse the converted body before builder-level prompt injection.
+// The builder preserves input item positions, so rejection locators still apply.
+func bindM7ResponsesWireBody(c *gin.Context, account *Account, body []byte) {
+	if !m7EncryptedRepairEligible(account) || c == nil {
+		return
 	}
-	reader, err := req.GetBody()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = reader.Close() }()
-	body, err := io.ReadAll(reader)
-	if err == nil {
-		c.Set(m7ResponsesWireBodyKey, body)
-	}
-	return err
+	c.Set(m7ResponsesWireBodyKey, append([]byte(nil), body...))
 }
 
 func (s *OpenAIGatewayService) handleM7EncryptedFailure(ctx context.Context, c *gin.Context, account *Account, payload []byte, status int, outputStarted, sse bool) error {

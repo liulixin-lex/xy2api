@@ -469,9 +469,7 @@ retryMessagesResponsesWire:
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		if err := bindM7ResponsesWireBody(c, account, upstreamReq); err != nil {
-			return nil, err
-		}
+		bindM7ResponsesWireBody(c, account, responsesBody)
 		actualReasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
 		noteOpenAIRequestRepairResent(ctx, c, account)

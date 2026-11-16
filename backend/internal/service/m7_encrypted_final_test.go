@@ -215,12 +215,11 @@ func TestM7FinalEncryptedMappedReaderLocator(t *testing.T) {
 				svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
 				repair := armOpenAIRequestRepair(req.c, account, nil)
 				svc.prepareM7EncryptedRepair(req.c, account, repair, []byte(original), "fixture-token")
-				wireRequest, err := http.NewRequest(http.MethodPost, "https://fixture.example/responses", strings.NewReader(normalized))
-				require.NoError(t, err)
-				require.NoError(t, bindM7ResponsesWireBody(req.c, account, wireRequest))
+				bindM7ResponsesWireBody(req.c, account, []byte(normalized))
 				req.budget.RecordAttemptAt(time.Now())
 				response := m7FinalEncryptedFailure("eof", m7FinalEncryptedError("", "Encrypted content could not be verified for item "+id), !buffered)
 				var result *OpenAIForwardResult
+				var err error
 				if target == "chat" {
 					if buffered {
 						result, err = svc.handleChatBufferedStreamingResponse(response, req.c, account, "fixture", "fixture", "fixture", time.Now())

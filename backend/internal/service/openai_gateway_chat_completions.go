@@ -444,9 +444,7 @@ retryChatResponsesWire:
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if err := bindM7ResponsesWireBody(c, account, upstreamReq); err != nil {
-		return nil, err
-	}
+	bindM7ResponsesWireBody(c, account, responsesBody)
 	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
 	if promptCacheKey != "" {
