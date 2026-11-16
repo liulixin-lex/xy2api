@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"time"
 )
 
@@ -62,6 +63,8 @@ type OpsRepository interface {
 }
 
 type OpsInsertErrorLogInput struct {
+	ConversionNotices []apicompat.ConversionNotice `json:"degradations,omitempty"`
+
 	GatewayRequestID string
 	RequestID        string
 	ClientRequestID  string

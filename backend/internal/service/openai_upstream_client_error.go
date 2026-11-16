@@ -3,6 +3,7 @@ package service
 import (
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -60,4 +61,52 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 // client error when the handler has exhausted all eligible accounts.
 func WriteOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
 	writeOpenAIUpstreamClientError(c, statusCode, body, upstreamMsg)
+}
+
+// isToolHistoryUpstreamClientError recognizes only the established structured
+// HTTP 400 tool-history rejection, without validating local history.
+//
+//nolint:unused // M6/M8 own the passthrough call sites after this prerequisite.
+func isToolHistoryUpstreamClientError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusBadRequest || !utf8.Valid(body) || !gjson.ValidBytes(body) {
+		return false
+	}
+	object := gjson.GetBytes(body, "error")
+	if !object.IsObject() {
+		return false
+	}
+	message := object.Get("message")
+	if message.Type != gjson.String {
+		return false
+	}
+	matched := false
+	for _, prefix := range []string{"No tool call found for function call output", "No tool output found for function call"} {
+		if message.Str == prefix || strings.HasPrefix(message.Str, prefix+" ") || strings.HasPrefix(message.Str, prefix+".") || strings.HasPrefix(message.Str, prefix+":") {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	code := object.Get("code")
+	if code.Exists() && code.Type != gjson.Null && (code.Type != gjson.String || code.Str != "" && code.Str != "invalid_request_error") {
+		return false
+	}
+	param := object.Get("param")
+	if !param.Exists() || param.Type == gjson.Null {
+		return true
+	}
+	if param.Type != gjson.String {
+		return false
+	}
+	if param.Str == "" {
+		return true
+	}
+	for _, root := range []string{"input", "messages"} {
+		if param.Str == root || strings.HasPrefix(param.Str, root+"[") || strings.HasPrefix(param.Str, root+".") {
+			return true
+		}
+	}
+	return false
 }

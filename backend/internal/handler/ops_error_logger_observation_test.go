@@ -25,7 +25,9 @@ func TestOpsObservationDoesNotChangeQueueAdmission(t *testing.T) {
 	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - headroom)
 	accepted := reserveOpsErrorLogQueueBytes(size)
 	t.Logf("headroom=%d queued_bytes=%d accepted=%t upstream_json_bytes=%d", headroom, size, accepted, len(*entry.UpstreamErrorsJSON))
-	require.EqualValues(t, 744, size, "admission must use the legacy event representation")
+	// Resent is a required, visible false field in the foundation contract.
+	const eventBytes int64 = 744 + int64(len(`,"resent":false`))
+	require.EqualValues(t, eventBytes, size, "admission must include the required resend fact")
 	require.True(t, accepted, "observe diagnostics must not change admission of the same legacy ops event")
 	require.Equal(t, stored, *entry.UpstreamErrorsJSON, "sizing must preserve persisted diagnostics")
 	var saved service.OpsUpstreamErrorEvent
@@ -33,8 +35,8 @@ func TestOpsObservationDoesNotChangeQueueAdmission(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stored), &events))
 	require.NoError(t, json.Unmarshal(events[0], &saved))
 	require.Equal(t, "remaining_cap", saved.TimeoutSource)
-	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - 744)
-	require.True(t, reserveOpsErrorLogQueueBytes(size), "exact legacy boundary fits")
-	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - 743)
+	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - eventBytes)
+	require.True(t, reserveOpsErrorLogQueueBytes(size), "exact event boundary fits")
+	opsErrorLogQueueBytes.Store(opsErrorLogMaxQueueBytes - eventBytes + 1)
 	require.False(t, reserveOpsErrorLogQueueBytes(size), "existing global byte limit is still enforced")
 }

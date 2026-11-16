@@ -7,6 +7,8 @@ import (
 
 // TokenCostRequest 通用网关 token 计费请求。
 type TokenCostRequest struct {
+	Purpose string
+
 	Ctx             context.Context
 	Model           string
 	Group           *Group

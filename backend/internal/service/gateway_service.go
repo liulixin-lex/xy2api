@@ -594,6 +594,14 @@ func (r *AccountSelectionResult) ProfitGateActive() bool {
 
 // ClaudeUsage 表示Claude API返回的usage信息
 type ClaudeUsage struct {
+	InputTokensPresent          bool `json:"-"`
+	OutputTokensPresent         bool `json:"-"`
+	CacheReadInputTokensPresent bool `json:"-"`
+	UsageIncomplete             bool `json:"-"`
+	UsageInconsistent           bool `json:"-"`
+	RawPromptTokens             *int `json:"-"`
+	RawCacheReadTokens          *int `json:"-"`
+
 	CacheCreationInputTokensPresent bool `json:"-"`
 	CacheCreation5mTokensPresent    bool `json:"-"`
 	CacheCreation1hTokensPresent    bool `json:"-"`
@@ -613,6 +621,15 @@ type AudioUsage struct {
 }
 
 type ForwardResult struct {
+	ResponseFactsKnown   bool
+	UsagePresent         bool
+	UsageSource          string
+	TerminalSeen         bool
+	TerminalValid        bool
+	ResponseBodyKind     string
+	UpstreamRecoveryHint *resilience.UpstreamRecoveryHint
+	ImageCountObserved   bool
+
 	AnthropicCacheTTLPolicy  *string
 	AnthropicCacheTTLApplied *bool
 	ClaudeCacheFallback      *ClaudeCacheFallbackDecision
@@ -695,6 +712,8 @@ const OpenAIAlphaSearchE5001Reason GatewayFailureReason = "openai_alpha_search_e
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
+	UpstreamRecoveryHint            *resilience.UpstreamRecoveryHint
+	UpstreamTarget                  *resilience.UpstreamAttemptTarget
 	BudgetCutPlan                   *resilience.TimeoutPlan
 	cause                           error // Original read failure, never included in client-facing text.
 	PreDispatchSelectionInvalidated bool  // Candidate lost admission before any upstream call.

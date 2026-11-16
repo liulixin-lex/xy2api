@@ -241,12 +241,10 @@ func (k *openAICompactSSEKeepalive) replaceCommittedErrorBody(w gin.ResponseWrit
 // response with response.created first.
 func preOutputTerminalFrame(ctx context.Context, protocol string, status int, body []byte) []byte {
 	errType, code, message := committedErrorFields(status, body)
+	param := gjson.GetBytes(body, "error.param").String()
 	switch protocol {
 	case PreOutputProtocolAnthropic:
-		payload, _ := json.Marshal(map[string]any{
-			"type":  "error",
-			"error": map[string]any{"type": errType, "message": message},
-		})
+		payload, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": errType, "message": message}})
 		return []byte("event: error\ndata: " + string(payload) + "\n\n")
 	case PreOutputProtocolGemini:
 		payload, _ := json.Marshal(map[string]any{"error": map[string]any{
@@ -255,6 +253,9 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 		return []byte("data: " + string(payload) + "\n\n")
 	case PreOutputProtocolChat:
 		errObj := map[string]any{"type": errType, "message": message, "status": status}
+		if param != "" {
+			errObj["param"] = param
+		}
 		if code != "" {
 			errObj["code"] = code
 		}

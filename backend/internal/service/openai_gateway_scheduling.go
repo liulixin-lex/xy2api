@@ -370,6 +370,7 @@ func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool,
 }
 
 type openAINoAvailableSelectionError struct {
+	exhaustion     *SelectionExhaustion
 	message        string
 	capabilityOnly bool
 }
@@ -381,6 +382,9 @@ func (e openAINoAvailableSelectionError) Error() string {
 }
 
 func (e openAINoAvailableSelectionError) Unwrap() error {
+	if e.exhaustion != nil {
+		return e.exhaustion.Snapshot()
+	}
 	return ErrNoAvailableAccounts
 }
 

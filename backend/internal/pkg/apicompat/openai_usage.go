@@ -9,13 +9,14 @@ import (
 // OpenAIUsageCounts keeps field presence separate from a reported zero. All
 // Responses/Chat adapters use the same precedence before billing conversion.
 type OpenAIUsageCounts struct {
+	InputTokensPresent, OutputTokensPresent                      bool
 	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int
 	CacheReadSource, CacheWriteSource                            string
 }
 
 func ParseOpenAIUsageCounts(value gjson.Result) OpenAIUsageCounts {
-	input, _ := firstUsageCount(value, "input_tokens", "prompt_tokens")
-	output, _ := firstUsageCount(value, "output_tokens", "completion_tokens")
+	input, inputSource := firstUsageCount(value, "input_tokens", "prompt_tokens")
+	output, outputSource := firstUsageCount(value, "output_tokens", "completion_tokens")
 	read, readSource := firstUsageCount(value,
 		"input_tokens_details.cached_tokens", "prompt_tokens_details.cached_tokens",
 		"cache_read_input_tokens", "cache_read_tokens", "cached_tokens")
@@ -23,7 +24,7 @@ func ParseOpenAIUsageCounts(value gjson.Result) OpenAIUsageCounts {
 		"input_tokens_details.cache_write_tokens", "prompt_tokens_details.cache_write_tokens",
 		"input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens",
 		"cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens")
-	return OpenAIUsageCounts{input, output, read, write, readSource, writeSource}
+	return OpenAIUsageCounts{InputTokens: input, OutputTokens: output, CacheReadTokens: read, CacheWriteTokens: write, CacheReadSource: readSource, CacheWriteSource: writeSource, InputTokensPresent: inputSource != "" && value.Get(inputSource).Num >= 0, OutputTokensPresent: outputSource != "" && value.Get(outputSource).Num >= 0}
 }
 
 func firstUsageCount(value gjson.Result, paths ...string) (int, string) {

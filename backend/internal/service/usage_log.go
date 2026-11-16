@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strings"
 	"time"
@@ -103,6 +105,16 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	PricingSource json.RawMessage `json:"pricing_source,omitempty"`
+
+	RequestScope       resilience.GatewayRequestScope
+	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
+	UsageObserved      *bool
+	UsageSource        *string
+	TerminalEventSeen  *bool
+	TerminalEventValid *bool
+	ResponseBodyType   *string
+
 	GatewayRequestID *string
 	Result           *int16
 	Switches         *int16

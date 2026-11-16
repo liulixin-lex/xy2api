@@ -64,12 +64,29 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	type wire ChatCompletionsRequest
 	aux := struct {
 		*wire
-		N json.RawMessage `json:"n"`
+		N               json.RawMessage `json:"n"`
+		Verbosity       json.RawMessage `json:"verbosity"`
+		Text            json.RawMessage `json:"text"`
+		MaxOutputTokens json.RawMessage `json:"max_output_tokens"`
 	}{wire: (*wire)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	r.anthropicN = aux.N
+	// These extension fields were ignored before they gained typed carriers.
+	// Preserve that acceptance range while retaining correctly typed values.
+	var verbosity string
+	if json.Unmarshal(aux.Verbosity, &verbosity) == nil {
+		r.Verbosity = verbosity
+	}
+	var text *ResponsesText
+	if json.Unmarshal(aux.Text, &text) == nil {
+		r.Text = text
+	}
+	var maxOutputTokens *int
+	if json.Unmarshal(aux.MaxOutputTokens, &maxOutputTokens) == nil {
+		r.MaxOutputTokens = maxOutputTokens
+	}
 	type rawTool struct {
 		Type     string        `json:"type"`
 		Name     string        `json:"name"`

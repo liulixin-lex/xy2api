@@ -1213,6 +1213,13 @@ func collectOpenAIPassthroughTimeoutHeaders(h http.Header) []string {
 }
 
 type openaiStreamingResultPassthrough struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	usage            *OpenAIUsage
 	firstTokenMs     *int
 	responseID       string
@@ -1225,6 +1232,13 @@ type openaiStreamingResultPassthrough struct {
 }
 
 type openaiNonStreamingResultPassthrough struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	*OpenAIUsage
 	upstreamAccepted bool
 	usage            *OpenAIUsage

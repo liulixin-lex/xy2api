@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"go.uber.org/zap"
@@ -284,6 +285,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 
 // ccStreamScanState 是 scanCCStream 返回的读取状态快照。
 type ccStreamScanState struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	// Usage 为 include_usage chunk 中最近一次出现的用量（上游可能重复发送，
 	// 总是保留最新值）；终态事件中的用量由调用方在 finalize 阶段自行覆盖。
 	Usage OpenAIUsage
@@ -423,4 +431,126 @@ func writeOpenAIResponsesFallbackError(c *gin.Context, statusCode int, errType, 
 			"message": message,
 		},
 	})
+}
+
+// WriteTargetProtocolError finishes an inbound protocol once, after stopping its
+// heartbeat. True means this call claimed the terminal (including write failure).
+// An existing terminal, written JSON or canceled connection returns false.
+func WriteTargetProtocolError(c *gin.Context, protocol string, status int, errType, code, param, message string) bool {
+	if c == nil || c.Writer == nil {
+		return false
+	}
+	switch protocol {
+	case PreOutputProtocolChat, PreOutputProtocolAnthropic, PreOutputProtocolResponses:
+	default:
+		return false
+	}
+	StopOpenAICompactSSEKeepaliveCommitted(c)
+	if ProtocolTerminalClaimed(c) {
+		return false
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil || GatewayDeliveryFailed(c) {
+		return false
+	}
+	written := c.Writer.Written()
+	sse := written && strings.Contains(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream")
+	if written && !sse {
+		return false
+	}
+	if !ClaimProtocolTerminal(c) {
+		return false
+	}
+	errorBody := gin.H{"type": errType, "message": message}
+	if code != "" {
+		errorBody["code"] = code
+	}
+	if param != "" {
+		errorBody["param"] = param
+	}
+	payload := gin.H{"error": errorBody}
+	if protocol == PreOutputProtocolAnthropic {
+		delete(errorBody, "code")
+		delete(errorBody, "param")
+		payload["type"] = "error"
+	}
+	MarkOpsGatewayTerminalStatus(c, status)
+	if !sse {
+		c.Header("Content-Type", "application/json; charset=utf-8")
+		writeOpenAICollaborationErrorJSON(c, status, payload)
+		return true
+	}
+	MarkOpsStreamError(c, errType, message, status)
+	ctx := context.Background()
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	var frame []byte
+	if protocol != PreOutputProtocolResponses {
+		body, _ := json.Marshal(payload)
+		frame = preOutputTerminalFrame(ctx, protocol, status, restoreOpenAICollaborationError(c, body))
+	} else {
+		id, model, createdAt, sequence := "", "", time.Now().Unix(), int64(0)
+		opened := false
+		var usage json.RawMessage
+		if w := deliveryWriterFrom(c); w != nil {
+			s := &w.terminal
+			s.mu.Lock()
+			id, model, sequence, opened = s.id, s.model, s.nextSequence, s.opened
+			if s.createdAt != 0 {
+				createdAt = s.createdAt
+			}
+			usage = append(json.RawMessage(nil), s.usage...)
+			s.mu.Unlock()
+		}
+		if id == "" && c.Request != nil {
+			if rid, ok := ctx.Value(ctxkey.RequestID).(string); ok && rid != "" {
+				id = "resp_" + strings.ReplaceAll(rid, "-", "")
+			}
+		}
+		if id == "" {
+			id = "resp_" + randomKeepaliveHex(12)
+		}
+		if model == "" {
+			model = c.GetString("ops_model")
+		}
+		if !opened {
+			frame = ResponsesCreatedFrame(id, model, createdAt)
+			sequence = 1
+		}
+		if code == "" {
+			switch errType {
+			case "rate_limit_error", "overloaded_error":
+				code = "rate_limit_exceeded"
+			case "invalid_request_error":
+				code = "invalid_request"
+			case "permission_error":
+				code = "permission_denied"
+			case "authentication_error":
+				code = "authentication_failed"
+			case "upstream_error":
+				code = "upstream_error"
+			default:
+				code = "server_error"
+			}
+		}
+		failure := openAIResponseFailureError(ctx, status, errType, code, message)
+		if param != "" {
+			failure["param"] = param
+		}
+		response := gin.H{"id": id, "object": "response", "created_at": createdAt, "status": "failed", "output": []any{}, "error": failure}
+		if model != "" {
+			response["model"] = model
+		}
+		if normalized := targetProtocolFailureUsage(usage); len(normalized) > 0 {
+			response["usage"] = normalized
+		}
+		body, _ := json.Marshal(gin.H{"type": "response.failed", "sequence_number": sequence, "response": response})
+		frame = append(frame, []byte("event: response.failed\ndata: "+string(restoreOpenAICollaborationError(c, body))+"\n\n")...)
+	}
+	if _, err := c.Writer.Write(frame); err != nil {
+		_ = c.Error(err)
+		return true
+	}
+	c.Writer.Flush()
+	return true
 }

@@ -14,6 +14,9 @@ import (
 // on the "no available accounts" error path to distinguish 404
 // model_not_found from 503 service_unavailable.
 type ModelAvailabilityDiagnosis struct {
+	Known                                     bool
+	Err                                       error
+	Members, ModelSupported, RequestSupported int
 	// HasAccountsInPool is true if the group has at least one persistently
 	// eligible account on the queried platform (or, for Anthropic/Gemini, on
 	// the platform plus mixed-scheduled Antigravity accounts).

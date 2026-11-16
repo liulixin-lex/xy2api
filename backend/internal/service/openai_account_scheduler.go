@@ -25,6 +25,7 @@ const (
 )
 
 type OpenAIAccountScheduleRequest struct {
+	NoWait                  bool
 	GroupID                 *int64
 	Platform                string
 	SessionHash             string

@@ -34,7 +34,7 @@ const (
 	// no-account response to the writers, which add the message hint.
 	ginKeyResilienceRetryAfter  = "xy_resilience_retry_after"
 	ginKeyResilienceTurnCounted = "xy_resilience_turn_counted"
-	ginKeyResilienceFinalized   = "xy_resilience_terminal_finalized"
+	ginKeyResilienceFinalized   = resilience.GinKeyTerminalFinalized
 
 	// ginKeyResilienceTurnCapped marks a failure that ends the client's turn
 	// (design §9.7); the writers give it the code server_is_overloaded.
@@ -60,11 +60,7 @@ const (
 // Handler writes run on the request goroutine; heartbeat writers are stopped
 // before this marker is used.
 func beginResilienceTerminal(c *gin.Context) bool {
-	if c == nil || c.GetBool(ginKeyResilienceFinalized) {
-		return false
-	}
-	c.Set(ginKeyResilienceFinalized, true)
-	return true
+	return service.ClaimProtocolTerminal(c)
 }
 
 // upstreamURLPattern finds URLs in upstream text, which may name the

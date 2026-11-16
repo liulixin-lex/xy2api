@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"maps"
 	"strings"
@@ -17,6 +18,8 @@ const (
 
 // ResolvedPricing 统一定价解析结果
 type ResolvedPricing struct {
+	PricingSource json.RawMessage `json:"-"`
+
 	// Mode 计费模式
 	Mode BillingMode
 
@@ -62,6 +65,8 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 
 // PricingInput 定价解析输入
 type PricingInput struct {
+	Purpose string
+
 	Model   string
 	GroupID *int64 // nil 表示不检查渠道
 	Group   *Group

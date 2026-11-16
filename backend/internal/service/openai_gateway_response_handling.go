@@ -29,6 +29,13 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	usage            *OpenAIUsage
 	firstTokenMs     *int
 	responseID       string
@@ -60,6 +67,13 @@ func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
 }
 
 type openaiNonStreamingResult struct {
+	ResponseFactsKnown bool
+	UsagePresent       bool
+	UsageSource        string
+	TerminalSeen       bool
+	TerminalValid      bool
+	ResponseBodyKind   string
+
 	*OpenAIUsage
 	upstreamAccepted bool
 	usage            *OpenAIUsage

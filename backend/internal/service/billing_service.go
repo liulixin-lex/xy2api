@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -186,20 +187,23 @@ func pricingWithPriorityMultiplier(base *ModelPricing, multiplier float64) *Mode
 
 // UsageTokens 使用的token数量
 type UsageTokens struct {
-	InputTokens                int
-	ImageInputTokens           int
-	ImageCacheReadTokens       int
-	OutputTokens               int
-	CacheCreationTokensPresent bool // distinguishes an explicit aggregate zero from omitted usage
-	CacheCreationTokens        int
-	CacheReadTokens            int
-	CacheCreation5mTokens      int
-	CacheCreation1hTokens      int
-	ImageOutputTokens          int
+	CacheCreation5mTokensPresent, CacheCreation1hTokensPresent bool
+	InputTokens                                                int
+	ImageInputTokens                                           int
+	ImageCacheReadTokens                                       int
+	OutputTokens                                               int
+	CacheCreationTokensPresent                                 bool // distinguishes an explicit aggregate zero from omitted usage
+	CacheCreationTokens                                        int
+	CacheReadTokens                                            int
+	CacheCreation5mTokens                                      int
+	CacheCreation1hTokens                                      int
+	ImageOutputTokens                                          int
 }
 
 // CostBreakdown 费用明细
 type CostBreakdown struct {
+	PricingSource json.RawMessage `json:"-"`
+
 	InputCost                 float64 // 文本输入费用（不含图片输入，图片输入单独记入 ImageInputCost）
 	ImageInputCost            float64 // 图片输入 token 费用（如 gpt-image-2 图片编辑）
 	OutputCost                float64
@@ -1479,6 +1483,8 @@ func applyChannelTokenPriceOverrides(pricing *ModelPricing, channelPricing *Chan
 
 // CostInput 统一计费输入
 type CostInput struct {
+	Purpose string
+
 	Ctx                       context.Context
 	Model                     string
 	GroupID                   *int64 // 用于渠道定价查找

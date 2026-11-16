@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -222,6 +223,19 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 
 // OpenAIUsage represents OpenAI API response usage
 type OpenAIUsage struct {
+	CacheCreation5mTokens           int  `json:"-"`
+	CacheCreation1hTokens           int  `json:"-"`
+	InputTokensPresent              bool `json:"-"`
+	OutputTokensPresent             bool `json:"-"`
+	CacheReadInputTokensPresent     bool `json:"-"`
+	UsageIncomplete                 bool `json:"-"`
+	UsageInconsistent               bool `json:"-"`
+	CacheCreationInputTokensPresent bool `json:"-"`
+	CacheCreation5mTokensPresent    bool `json:"-"`
+	CacheCreation1hTokensPresent    bool `json:"-"`
+	RawPromptTokens                 *int `json:"-"`
+	RawCacheReadTokens              *int `json:"-"`
+
 	CacheReadSource          string `json:"-"`
 	CacheWriteSource         string `json:"-"`
 	InputTokens              int    `json:"input_tokens"`
@@ -235,6 +249,15 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	ResponseFactsKnown   bool
+	UsagePresent         bool
+	UsageSource          string
+	TerminalSeen         bool
+	TerminalValid        bool
+	ResponseBodyKind     string
+	UpstreamRecoveryHint *resilience.UpstreamRecoveryHint
+	ImageCountObserved   bool
+
 	CacheDiagnostic  *OpenAICacheDiagnostic `json:"-"`
 	RoutingSessionID string                 `json:"-"`
 	RequestID        string
