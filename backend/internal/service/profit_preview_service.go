@@ -43,9 +43,9 @@ func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID
 		return nil, infraerrors.BadRequest("INVALID_PROFIT_CONTROL_CONFIG", err.Error())
 	}
 	previewGroup := *group
-	// A supplied margin previews enabling the ceiling; a floor-only request
-	// respects the saved ceiling switch.
-	previewGroup.ProfitControlEnabled = group.ProfitControlEnabled || margin != nil
+	// The default preview and an explicit margin simulate the ceiling. An
+	// explicit floor-only request respects the saved ceiling switch.
+	previewGroup.ProfitControlEnabled = group.ProfitControlEnabled || margin != nil || floor == nil
 	if err := ValidateMinUpstreamRate(group.Platform, floor); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
 	}
