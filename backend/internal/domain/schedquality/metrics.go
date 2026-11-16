@@ -16,6 +16,7 @@ const (
 type AccountSummary struct {
 	From, To                                       time.Time `json:",omitzero"`
 	FirstEventP50Ms, FirstOutputP50Ms, GapP50Ms    *int      // 流式且两种时间都有的样本；Gap 是逐条差值的中位数
+	FirstOutputN                                   int       // Paired streaming samples used by all three latency medians.
 	ErrorN, ErrorBad, CacheTurns, CacheAllRequests int       // 报错按请求单位、口径同报错线（不填补）
 	CacheRatio, CacheAllRatio                      *float64  // 判定口径（续接轮）、全部成功请求口径
 }
@@ -72,6 +73,7 @@ func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.
 			allInput += input
 		}
 	}
+	out.FirstOutputN = len(outputs)
 	out.FirstEventP50Ms, out.FirstOutputP50Ms, out.GapP50Ms = medianMs(events), medianMs(outputs), medianMs(gaps)
 	if continuationInput > 0 {
 		ratio := float64(continuationRead) / float64(continuationInput)
