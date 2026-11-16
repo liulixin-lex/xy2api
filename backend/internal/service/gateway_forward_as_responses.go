@@ -229,7 +229,7 @@ func (s *GatewayService) ForwardAsResponses(
 	if clientStream {
 		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping, opts)
 	}
 
 	return result, handleErr
@@ -415,6 +415,7 @@ func parseAnthropicSSEField(line, field string) (string, bool) {
 func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -439,13 +440,17 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	var readErr error
 	defer func() {
 		facts := evidence.facts()
-		if result == nil && retErr != nil {
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		// A failed buffered response is billable only when it retained metered tokens.
+		// Keep response evidence in RequestState even when there is no partial result.
+		if result == nil && retErr != nil && usage.hasObservedTokens() {
 			result = &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}
 		}
 		if result != nil {
 			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
 			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
-
 		}
 	}()
 

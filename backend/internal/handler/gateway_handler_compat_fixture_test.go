@@ -81,7 +81,8 @@ func (r *handlerCompatAccounts) SetOverloaded(context.Context, int64, time.Time)
 
 type handlerCompatHTTP struct{ client *http.Client }
 
-func (u *handlerCompatHTTP) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *handlerCompatHTTP) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
 	return u.client.Do(req)
 }
 func (u *handlerCompatHTTP) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {

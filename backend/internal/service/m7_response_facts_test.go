@@ -52,7 +52,7 @@ func TestM7UnknownTerminalMapping(t *testing.T) {
 		} else {
 			wire := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_fixture\",\"role\":\"assistant\",\"content\":[]}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"some_future_reason\"}}\n\n"
 			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
-			_, err = (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			_, err = (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, nil, "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 		}
 		require.NoError(t, err)
 		require.Equal(t, 200, rec.Code)

@@ -220,7 +220,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if clientStream {
 		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, opts)
+		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, opts)
 	}
 
 	return result, handleErr
@@ -253,6 +253,7 @@ func extractCCReasoningEffortFromBody(body []byte, modelCandidates ...string) *s
 func (s *GatewayService) handleCCBufferedFromAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -275,13 +276,17 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	var readErr error
 	defer func() {
 		facts := evidence.facts()
-		if result == nil && retErr != nil {
+		if c != nil && c.Request != nil && account != nil {
+			resilience.StateFrom(c.Request.Context()).SetGatewayResponseFacts(account.ID, facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource, facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind)
+		}
+		// A failed buffered response is billable only when it retained metered tokens.
+		// Keep response evidence in RequestState even when there is no partial result.
+		if result == nil && retErr != nil && usage.hasObservedTokens() {
 			result = &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}
 		}
 		if result != nil {
 			result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = facts.ResponseFactsKnown, facts.UsagePresent, facts.UsageSource
 			result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = facts.TerminalSeen, facts.TerminalValid, facts.ResponseBodyKind
-
 		}
 	}()
 

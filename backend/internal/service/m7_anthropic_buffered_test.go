@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +44,10 @@ func TestM7AnthropicBufferedRequiresStop(t *testing.T) {
 		} {
 			t.Run(target+"/"+tc.name, func(t *testing.T) {
 				c, rec := compatStreamContext("/v1/"+target, "")
+				state := resilience.NewRequestState()
+				state.EnableGatewayRequest(time.Now())
+				state.NoteGatewaySend(1)
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 				reader := io.NopCloser(strings.NewReader(tc.wire))
 				if tc.readerError {
 					reader = &openAIChatStreamReadErrorCloser{payload: []byte(tc.wire), err: errors.New("fixture read error")}
@@ -67,13 +72,20 @@ func TestM7AnthropicBufferedRequiresStop(t *testing.T) {
 					svc := &GatewayService{}
 					var result *ForwardResult
 					if target == "chat" {
-						result, err = svc.handleCCBufferedFromAnthropic(resp, c, "fixture", "fixture", nil, time.Now())
+						result, err = svc.handleCCBufferedFromAnthropic(resp, c, &Account{ID: 1}, "fixture", "fixture", nil, time.Now())
 					} else {
-						result, err = svc.handleResponsesBufferedStreamingResponse(resp, c, "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+						result, err = svc.handleResponsesBufferedStreamingResponse(resp, c, &Account{ID: 1}, "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 					}
-					require.NotNil(t, result)
-					known, present, seen, valid = result.ResponseFactsKnown, result.UsagePresent, result.TerminalSeen, result.TerminalValid
-					tokens = result.Usage.InputTokens
+					if tc.failed && !tc.usage {
+						require.Nil(t, result, "facts alone must not create a billable result")
+					} else {
+						require.NotNil(t, result)
+						tokens = result.Usage.InputTokens
+					}
+					meta, _ := state.ClaimGatewayRequest(false)
+					require.NotNil(t, meta)
+					require.NotNil(t, meta.UsageObserved)
+					known, present, seen, valid = true, *meta.UsageObserved, *meta.TerminalEventSeen, *meta.TerminalEventValid
 				}
 				if tc.failed {
 					require.Error(t, err)
