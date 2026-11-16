@@ -3393,16 +3393,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					start = time.Now()
 				}
 				resilience.StateFrom(ctx).BeginGatewayTurn(start)
-				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
-					if userReleaseFunc != nil {
-						userReleaseFunc()
-					}
-					reqLog.Info("openai.websocket_turn_profit_vetoed",
-						zap.Int("turn", turn),
-						zap.Int64("account_id", account.ID),
-						zap.String("reason", reason))
-					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
-				}
+
 				// A full account gets the sticky short wait before the client
 				// is asked to reconnect; the user's own limit above does not.
 				var accountReleaseFunc func()
@@ -3422,6 +3413,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						userReleaseFunc()
 					}
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is busy, please retry later", nil)
+				}
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					turnAdmissionCtx = service.WithOpenAISelectionRequestModel(turnAdmissionCtx, snapshot.mapping.MappedModel)
+				}
+				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
+					}
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					reqLog.Info("openai.websocket_turn_profit_vetoed",
+						zap.Int("turn", turn),
+						zap.Int64("account_id", account.ID),
+						zap.String("reason", reason))
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)

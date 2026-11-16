@@ -3804,7 +3804,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 	}
 
 	groups, err := q.
-		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 		Order(
 			dbaccountgroup.ByAccountField(dbaccount.FieldPriority),
 			dbaccountgroup.ByAccountID(),
@@ -3954,7 +3954,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			end = len(accountIDs)
 		}
 		entries, err := r.client.AccountGroup.Query().
-			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 			Where(dbaccountgroup.AccountIDIn(accountIDs[start:end]...)).
 			Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByGroupID()).
 			All(ctx)
@@ -3975,6 +3975,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			agSvc := service.AccountGroup{
 				AccountID: ag.AccountID,
 				GroupID:   ag.GroupID,
+				Pinned:    ag.Pinned,
 				CreatedAt: ag.CreatedAt,
 				Group:     groupSvc,
 			}

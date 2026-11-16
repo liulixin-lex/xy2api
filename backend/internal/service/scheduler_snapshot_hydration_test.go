@@ -87,6 +87,7 @@ func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedul
 		snapshot: []*Account{
 			{
 				ID:          1,
+				GroupIDs:    []int64{2},
 				Platform:    PlatformOpenAI,
 				Type:        AccountTypeAPIKey,
 				Status:      StatusActive,
@@ -103,6 +104,7 @@ func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedul
 		accounts: map[int64]*Account{
 			1: {
 				ID:          1,
+				GroupIDs:    []int64{2},
 				Platform:    PlatformOpenAI,
 				Type:        AccountTypeAPIKey,
 				Status:      StatusActive,

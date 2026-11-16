@@ -101,23 +101,52 @@ func (s *OpenAIGatewayService) recheckSelectionAccount(ctx context.Context, req 
 	if account == nil {
 		return nil
 	}
-	if _, excluded := req.ExcludedIDs[account.ID]; excluded {
-		observeSelectionFailure(ctx, account.ID, "excluded", nil)
-		return nil
+	fresh := account
+	if s.accountRepo != nil {
+		var err error
+		fresh, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || fresh == nil {
+			observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
+			return nil
+		}
+	} else {
+		fresh = s.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 	}
-	fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-	if fresh == nil {
-		return nil
-	}
-	fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) {
-		return nil
-	}
-	if !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
-		observeSelectionFailure(ctx, fresh.ID, "transport_incompatible", nil)
+	fresh, reason := s.recheckSelectionAdmission(ctx, req, fresh)
+	if reason != "" {
 		return nil
 	}
 	return fresh
+}
+
+// recheckSelectionAdmission is the shared normal-selection and post-slot gate.
+// New eligibility conditions belong here so queued requests see them as well.
+func (s *OpenAIGatewayService) recheckSelectionAdmission(ctx context.Context, req OpenAIAccountScheduleRequest, latest *Account) (*Account, string) {
+	if latest == nil {
+		return nil, "account_nil"
+	}
+	if _, excluded := req.ExcludedIDs[latest.ID]; excluded {
+		return latest, "excluded"
+	}
+	if resilienceLastResortGate(ctx) {
+		// Re-evaluate the current penalty; rescue may bypass soft restrictions
+		// but must never revive a newly disabled or hard-paused account.
+		now := time.Now()
+		if tier, _, _ := s.resilienceOpenAIPenaltyOf(latest, req.RequestedModel, now); tier == resilience.TierHard {
+			return latest, "not_schedulable"
+		}
+		latest = withoutSoftPenalties(*latest, now)
+	}
+	if s.recheckLatestOpenAIAccount(ctx, latest, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability) == nil {
+		return latest, "selection_ineligible"
+	}
+	if ok, reason := s.isAccountRequestCompatibleReason(ctx, latest, req); !ok {
+		return latest, reason
+	}
+	if !s.isAccountTransportCompatible(latest, req.RequiredTransport) {
+		return latest, "transport_incompatible"
+	}
+	return latest, ""
 }
 
 func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {

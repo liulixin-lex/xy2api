@@ -530,6 +530,7 @@ func AccountGroupFromService(ag *service.AccountGroup) *AccountGroup {
 	return &AccountGroup{
 		AccountID: ag.AccountID,
 		GroupID:   ag.GroupID,
+		Pinned:    ag.Pinned,
 		CreatedAt: ag.CreatedAt,
 		Account:   AccountFromServiceShallow(ag.Account),
 		Group:     GroupFromServiceShallow(ag.Group),

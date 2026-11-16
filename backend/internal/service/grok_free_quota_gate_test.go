@@ -30,6 +30,15 @@ type grokFreeQuotaAccountRepoStub struct {
 	accounts []Account
 }
 
+func (r *grokFreeQuotaAccountRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	for _, account := range r.accounts {
+		if account.ID == id {
+			return &account, nil
+		}
+	}
+	return nil, ErrAccountNotFound
+}
+
 func (r *grokFreeQuotaAccountRepoStub) ListSchedulableByPlatform(context.Context, string) ([]Account, error) {
 	return append([]Account(nil), r.accounts...), nil
 }

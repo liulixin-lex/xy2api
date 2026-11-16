@@ -93,6 +93,13 @@ func (r stubOpenAIAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*Ac
 }
 
 func (r stubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	// A group-filtered repository row includes its membership when re-read.
+	// Materialize the fixture's declared membership before terminal admission.
+	for i := range r.accounts {
+		if r.accounts[i].Platform == platform && len(r.accounts[i].GroupIDs) == 0 && len(r.accounts[i].AccountGroups) == 0 {
+			r.accounts[i].GroupIDs = []int64{groupID}
+		}
+	}
 	var result []Account
 	for _, acc := range r.accounts {
 		if acc.Platform == platform {
