@@ -222,11 +222,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			)
 			if len(failedAccountIDs) == 0 {
 				cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, err)
-				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound && !cls.CapabilityOnly {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				h.handleOpenAISelectionError(c, cls, streamStarted)
 				return
 			} else {
 				if lastFailoverErr != nil {
@@ -242,7 +241,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+			h.handleOpenAISelectionError(c, cls, streamStarted)
 			return
 		}
 		account := selection.Account

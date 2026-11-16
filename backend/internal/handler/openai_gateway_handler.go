@@ -769,11 +769,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					return
 				}
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, requestPlatform, err)
-				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound && !cls.CapabilityOnly {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				h.handleOpenAISelectionError(c, cls, streamStarted)
 				return
 			}
 			if lastFailoverErr != nil {
@@ -796,7 +795,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
 			}
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+			h.handleOpenAISelectionError(c, cls, streamStarted)
 			return
 		}
 		if previousResponseID != "" && selection != nil && selection.Account != nil {
