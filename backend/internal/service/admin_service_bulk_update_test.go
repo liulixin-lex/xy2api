@@ -344,14 +344,17 @@ func TestAdminServiceBulkUpdateAccounts_SchedQualityFilter(t *testing.T) {
 		wantIDs       []int64
 		invalid       bool
 	}{
-		{name: "substandard", quality: "substandard", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
+		{name: "rear", quality: "rear", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
 		{name: "exempt", quality: "exempt", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
-		{name: "observing", quality: "observing", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
+		{name: "unknown", quality: "unknown", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
 		{name: "normal", quality: "normal", ids: []int64{7}, bound: true, exclude: true, wantIDs: []int64{11}},
 		{name: "normal_empty_union", quality: "normal", ids: []int64{}, bound: true, exclude: true, wantIDs: []int64{7, 11}},
-		{name: "empty", quality: "substandard", ids: []int64{}, bound: true, wantIDs: []int64{}},
-		{name: "unresolved", quality: "substandard", invalid: true},
-		{name: "invalid", quality: "unknown", invalid: true},
+		{name: "empty", quality: "rear", ids: []int64{}, bound: true, wantIDs: []int64{}},
+		{name: "unresolved", quality: "rear", invalid: true},
+		{name: "trial", quality: "trial", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
+		{name: "removed_substandard", quality: "substandard", bound: true, invalid: true},
+		{name: "removed_observing", quality: "observing", bound: true, invalid: true},
+		{name: "invalid", quality: "invalid", bound: true, invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &accountRepoStubForBulkUpdate{listData: []Account{{ID: 7}, {ID: 11}}}

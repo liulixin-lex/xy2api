@@ -124,3 +124,35 @@ func (qualityHealthAccounts) GetByIDs(_ context.Context, ids []int64) ([]*servic
 	}
 	return out, nil
 }
+
+func TestRuntimeQualityKeepsTrialDeadlineAndEvidence(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	key := schedquality.LineKey{AccountID: 1, GroupID: 2, Model: "model-a", Line: schedquality.DimensionTTFO}
+	entered, action := schedquality.Step(schedquality.Relaxed(key), schedquality.EventRegular, schedquality.VerdictFail, schedquality.Basis{}, now)
+	require.Equal(t, schedquality.ActionEnter, action)
+	trial, action := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictUnknown, schedquality.Basis{}, entered.Until)
+	require.Equal(t, schedquality.ActionTrial, action)
+	snapshot := &service.SchedQualitySnapshot{At: trial.EvaluatedAt, GlobalEnabled: true, Members: map[int64][]int64{1: {2}}, GroupRows: map[int64][]service.SchedGroupRow{1: {{GroupID: 2, Model: "model-a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: trial.Identity, Trial: trial.Trial, Level: trial.Level, Until: trial.Until, TrialUntil: trial.TrialUntil}}, TTFTSourceGroups: []int64{3}, TTFT: schedquality.TTFTEvidence{Causes: []schedquality.RuleBUnknownReason{schedquality.RuleBNoPeers}}}}}}
+	r := &runtimeReader{quality: &qualitySnapshotStub{snapshot: snapshot}}
+	q, err := newReaderQuery(QueryRequest{Tool: "xy2api.routing.get_quality_state", Actor: testReaderActor(), Input: QueryInput{AccountID: 1}}, trial.EvaluatedAt)
+	require.NoError(t, err)
+	require.NoError(t, r.qualityState(context.Background(), q))
+	raw, err := json.Marshal(q.result.Items[0])
+	require.NoError(t, err)
+	var row map[string]any
+	require.NoError(t, json.Unmarshal(raw, &row))
+	require.Equal(t, "trial", row["placement"])
+	ttfo := row["lines"].(map[string]any)["ttfo"].(map[string]any)
+	require.Equal(t, "trial", ttfo["identity"])
+	require.Nil(t, ttfo["until"])
+	require.Equal(t, trial.TrialUntil.Format(time.RFC3339Nano), ttfo["trial_until"])
+	require.Equal(t, []any{float64(3)}, ttfo["source_groups"])
+	evidence := ttfo["evidence"].(map[string]any)
+	require.Equal(t, []any{"no_peers"}, evidence["causes"])
+	for _, key := range []string{"p_rel", "u", "z"} {
+		require.Nil(t, evidence[key])
+	}
+	require.NotContains(t, row, "dims")
+	require.NotContains(t, row, "failing")
+	require.NotContains(t, row, "status")
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,35 +36,100 @@ func TestSchedAdminRepositoryDecisionJSONLegacyAndUntil(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := newAccountRepositoryWithSQL(nil, db, nil)
 	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
-	until := at.Add(time.Minute)
+	key := schedquality.LineKey{AccountID: 1, GroupID: 2, Model: "a", Line: schedquality.DimensionTTFO}
+	basis := schedquality.Basis{RuleVersion: schedquality.RuleVersion, Line: key.Line, Kind: "review", Threshold: 10, TTFT: &schedquality.TTFTEvidence{LimitSeconds: 10}}
+	entered, enterAction := schedquality.Step(schedquality.Relaxed(key), schedquality.EventRegular, schedquality.VerdictFail, basis, at)
+	require.Equal(t, schedquality.ActionEnter, enterAction)
+	renewed, renewAction := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictFail, basis, entered.Until)
+	require.Equal(t, schedquality.ActionRenew, renewAction)
+	trial, trialAction := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictUnknown, basis, entered.Until)
+	require.Equal(t, schedquality.ActionTrial, trialAction)
+	require.True(t, trial.Until.IsZero())
+	require.False(t, trial.TrialUntil.IsZero())
+	failed, failAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictFail, basis, trial.EvaluatedAt.Add(time.Minute))
+	require.Equal(t, schedquality.ActionTrialFail, failAction)
+	require.True(t, failed.TrialUntil.IsZero())
+	released, releaseAction := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictPass, basis, entered.Until)
+	require.Equal(t, schedquality.ActionRelease, releaseAction)
+	passed, passAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictPass, basis, trial.EvaluatedAt.Add(time.Minute))
+	require.Equal(t, schedquality.ActionTrialPass, passAction)
+	timedOut, timeoutAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictUnknown, basis, trial.TrialUntil)
+	require.Equal(t, schedquality.ActionTrialTimeout, timeoutAction)
+	// Supply the real Step deadlines as persisted by the engine's action-specific mapping.
+	cases := []struct {
+		state  schedquality.LineState
+		action schedquality.Action
+		until  time.Time
+	}{
+		{trial, trialAction, trial.TrialUntil}, {failed, failAction, failed.Until}, {entered, enterAction, entered.Until}, {renewed, renewAction, renewed.Until},
+		{released, releaseAction, time.Time{}}, {passed, passAction, time.Time{}}, {timedOut, timeoutAction, time.Time{}},
+	}
 	rows := sqlmock.NewRows([]string{"id", "at", "group_id", "model", "line", "action", "level", "until", "basis"})
-	rows.AddRow(6, at, 2, "a", "ttfo", "trial", 1, until, `{"rule_version":"3.0","line":"ttfo","kind":"review","threshold":10,"ttft":{"limit_s":10}}`)
-	rows.AddRow(5, at, 2, "a", "error", "renew", 2, until, `{"line":"error","error":{"limit":0.05}}`)
-	rows.AddRow(4, at, 2, "a", "cache", "release", 1, until, `{"line":"cache","cache":{"min_ratio":0.8}}`)
-	rows.AddRow(3, at, 2, "a", "", "enter", 1, until, `{"old":"not a v2 basis"}`)
-	rows.AddRow(2, at, 2, "a", "ttfo", "trial_fail", 2, until, `{"line":"ttfo"}`)
-	mock.ExpectQuery(regexp.QuoteMeta(schedAdminDecisionsSQL)).WithArgs(int64(1), int64(7), 50).WillReturnRows(rows)
-	out, err := repo.SchedAdminDecisions(context.Background(), 1, 50, 7)
+	for i, c := range cases {
+		raw, err := json.Marshal(c.state.Basis)
+		require.NoError(t, err)
+		var until any
+		if !c.until.IsZero() {
+			until = c.until
+		}
+		rows.AddRow(10-i, c.state.EvaluatedAt, 2, "a", "ttfo", string(c.action), c.state.Level, until, raw)
+	}
+	rows.AddRow(1, at, 2, "a", "", "enter", 1, entered.Until, `{"old":"not a v2 basis"}`)
+	mock.ExpectQuery(regexp.QuoteMeta(schedAdminDecisionsSQL)).WithArgs(int64(1), int64(11), 50).WillReturnRows(rows)
+	out, err := repo.SchedAdminDecisions(context.Background(), 1, 50, 11)
 	require.NoError(t, err)
 	raw, err := json.Marshal(out)
 	require.NoError(t, err)
 	var items []map[string]any
 	require.NoError(t, json.Unmarshal(raw, &items))
-	require.Equal(t, until.Format(time.RFC3339Nano), items[0]["until"])
-	require.Equal(t, until.Format(time.RFC3339Nano), items[1]["until"])
-	require.Nil(t, items[2]["until"])
-	require.Nil(t, items[3]["until"])
-	require.NotContains(t, items[3], "basis")
-	require.Equal(t, until.Format(time.RFC3339Nano), items[4]["until"])
-	basis := items[0]["basis"].(map[string]any)
-	require.NotContains(t, basis, "cut")
-	require.Equal(t, []any{}, basis["source_groups"])
-	ev := basis["ttft"].(map[string]any)
-	require.Nil(t, ev["p_rel"])
-	require.Nil(t, ev["u"])
-	require.Nil(t, ev["z"])
+	for i, c := range cases {
+		require.Equal(t, string(c.action), items[i]["action"])
+		if c.until.IsZero() {
+			require.Nil(t, items[i]["until"])
+		} else {
+			require.Equal(t, c.until.Format(time.RFC3339Nano), items[i]["until"])
+		}
+	}
+	require.Nil(t, items[len(cases)]["until"])
+	require.NotContains(t, items[len(cases)], "basis")
+	b := items[0]["basis"].(map[string]any)
+	require.NotContains(t, b, "cut")
+	require.Equal(t, []any{}, b["source_groups"])
+	ev := b["ttft"].(map[string]any)
+	for _, key := range []string{"p_rel", "u", "z"} {
+		require.Nil(t, ev[key])
+	}
 	require.Equal(t, []any{}, ev["causes"])
-	require.NotContains(t, items[1]["basis"].(map[string]any)["error"], "verdict")
-	require.NotContains(t, items[2]["basis"].(map[string]any)["cache"], "read_tokens")
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSchedAdminRepositoryDecisionsUsePersistedUntil(t *testing.T) {
+	// Arbitrary persisted values prove the reader does not reconstruct deadlines from at.
+	db, mock := newSQLMock(t)
+	repo := newAccountRepositoryWithSQL(nil, db, nil)
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	until := at.Add(17 * time.Second)
+	rows := sqlmock.NewRows([]string{"id", "at", "group_id", "model", "line", "action", "level", "until", "basis"})
+	actions := []string{"trial", "trial_fail", "enter", "renew", "release", "trial_pass", "trial_timeout", "reset", "relax", "clear"}
+	for i, action := range actions {
+		rows.AddRow(20-i, at, 2, "a", "ttfo", action, 1, until, `{"line":"ttfo"}`)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(schedAdminDecisionsSQL)).WithArgs(int64(1), int64(0), 50).WillReturnRows(rows)
+	out, err := repo.SchedAdminDecisions(context.Background(), 1, 50, 0)
+	require.NoError(t, err)
+	for i := range actions {
+		if i < 4 {
+			require.Equal(t, until.Format(time.RFC3339Nano), *out[i].Until)
+		} else {
+			require.Nil(t, out[i].Until)
+		}
+	}
+	require.NoError(t, mock.ExpectationsWereMet())
+	// Non-TTFO bases retain only the fields in the public evidence contract.
+	for _, basis := range []schedquality.Basis{{Error: &schedquality.ErrorAssessment{}}, {Cache: &schedquality.CacheAssessment{}}} {
+		raw, err := json.Marshal(service.SchedAdminDecisionBasis(basis))
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), `"verdict"`)
+		require.NotContains(t, string(raw), `"read_tokens"`)
+	}
 }

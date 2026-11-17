@@ -219,15 +219,61 @@ func TestSchedAdminV2PreviewJSONAndConflict(t *testing.T) {
 }
 func TestSchedAdminV2OrderJSON(t *testing.T) {
 	s, e, _ := schedAdminFixture()
+	now := s.d.Now()
 	e.snapshot.GroupModels = map[int64][]SchedModelCount{1: {{Model: "a", Requests: 10}}}
-	s.d.Board = &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Layer: "front", Rank: 1}}}
+	// The admin snapshot deliberately disagrees: a row's layer and lines must both come from select.
+	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
+	rearUntil, trialUntil, stopUntil := now.Add(20*time.Minute), now.Add(schedquality.TrialDuration), now.Add(2*time.Minute)
+	board := &schedAdminBoard{rows: []SchedBoardRow{
+		{AccountID: 1, Layer: "front", Rank: 1, Pinned: true, Lines: map[string]string{"ttfo": "pass", "error": "unknown", "cache": "pass"}},
+		{AccountID: 2, Layer: "trial", Rank: 2, Until: &trialUntil, Lines: map[string]string{"ttfo": "trial", "error": "pass", "cache": "unknown"}},
+		{AccountID: 3, Layer: "trial_full", Rank: 3, Until: &trialUntil, Lines: map[string]string{"ttfo": "unknown", "error": "trial", "cache": "pass"}},
+		{AccountID: 4, Layer: "rear", Rank: 4, Until: &rearUntil, Lines: map[string]string{"ttfo": "rear", "error": "pass", "cache": "trial"}},
+		{AccountID: 5, Layer: "stopped", Rank: 5, Until: &stopUntil, Excluded: "profit_floor", Lines: map[string]string{"ttfo": "unknown", "error": "unknown", "cache": "unknown"}},
+	}}
+	s.d.Board = board
 	out, err := s.Order(context.Background(), 1, "")
 	require.NoError(t, err)
-	row := schedAdminJSON(t, out.Rows[0])
-	require.NotContains(t, row, "dims")
-	require.Contains(t, row, "pinned")
-	require.Nil(t, row["excluded"])
-	require.Equal(t, map[string]any{"ttfo": "unknown", "error": "unknown", "cache": "unknown"}, row["lines"])
+	require.Equal(t, "a", board.model)
+	require.Len(t, out.Rows, 5)
+	for i, source := range board.rows {
+		row := schedAdminJSON(t, out.Rows[i])
+		require.NotContains(t, row, "dims")
+		require.Equal(t, source.Layer, row["layer"])
+		require.Equal(t, source.Pinned, row["pinned"])
+		require.Equal(t, map[string]any{"ttfo": source.Lines["ttfo"], "error": source.Lines["error"], "cache": source.Lines["cache"]}, row["lines"])
+		if source.Until == nil {
+			require.Nil(t, row["until"])
+		} else {
+			require.Equal(t, source.Until.UTC().Format(time.RFC3339Nano), row["until"])
+		}
+		if source.Excluded == "" {
+			require.Nil(t, row["excluded"])
+		} else {
+			require.Equal(t, "profit_floor", row["excluded"])
+		}
+	}
+	require.Equal(t, "pass", out.Rows[0].Lines["ttfo"], "do not recompute lines from another snapshot")
+}
+
+func TestSchedAdminEffectiveMatchesSelectionAuto(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name          string
+		global, group bool
+		age           time.Duration
+		want          bool
+	}{
+		{"on", true, true, 0, true}, {"global off", false, true, 0, false}, {"group off", true, false, 0, false},
+		{"fresh boundary", true, true, schedquality.ViewMaxAge, true}, {"stale", true, true, schedquality.ViewMaxAge + time.Nanosecond, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &SchedQualitySnapshot{At: now.Add(-tc.age), GlobalEnabled: tc.global}
+			view := &schedQualityView{at: p.At, globalEnabled: tc.global, policies: map[int64]SchedPolicyRecord{1: {Policy: schedquality.Policy{Enabled: tc.group}}}}
+			require.Equal(t, tc.want, selectionAuto(view, 1, now))
+			require.Equal(t, selectionAuto(view, 1, now), schedAdminEffective(p, now, tc.group))
+		})
+	}
 }
 
 func TestSchedAdminV2PreviewUsesEngineAndDoesNotChangeIdentity(t *testing.T) {

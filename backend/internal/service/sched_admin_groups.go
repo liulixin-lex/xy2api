@@ -235,7 +235,11 @@ func (s *SchedAdminService) Order(ctx context.Context, g int64, model string) (S
 		return out, err
 	}
 	for _, r := range rows {
-		x := SchedAdminOrderRow{Rank: r.Rank, AccountID: r.AccountID, Name: r.Name, Layer: schedAdminBoardLayer(r.Layer), Lines: schedAdminBoardLines(p, r.AccountID, g, out.Model), Exempt: r.Exempt, Priority: r.Priority, Rate: r.Rate, LoadRate: r.LoadRate, InFlight: r.InFlight, Concurrency: r.Concurrency}
+		x := SchedAdminOrderRow{Rank: r.Rank, AccountID: r.AccountID, Name: r.Name, Layer: r.Layer, Lines: r.Lines, Pinned: r.Pinned, Exempt: r.Exempt, Priority: r.Priority, Rate: r.Rate, LoadRate: r.LoadRate, InFlight: r.InFlight, Concurrency: r.Concurrency}
+		if r.Excluded != "" {
+			excluded := r.Excluded
+			x.Excluded = &excluded
+		}
 		if r.Until != nil {
 			x.Until = schedAdminTime(*r.Until)
 		}
@@ -245,29 +249,4 @@ func (s *SchedAdminService) Order(ctx context.Context, g int64, model string) (S
 		out.Rows = append(out.Rows, x)
 	}
 	return out, nil
-}
-
-// SELECT_INTEGRATION: until the select merge exposes Lines/Pinned/Excluded,
-// derive identities from the same immutable snapshot. Selection still owns order.
-func schedAdminBoardLines(p *SchedQualitySnapshot, account, group int64, model string) map[string]string {
-	out := map[string]string{"ttfo": "unknown", "error": "unknown", "cache": "unknown"}
-	for _, r := range p.RowsForAccount(account) {
-		if r.GroupID == group && r.Model == model {
-			out["ttfo"] = schedAdminIdentity(r.View.TTFO)
-			out["error"] = schedAdminIdentity(r.View.Error)
-			out["cache"] = schedAdminIdentity(r.View.Cache)
-			break
-		}
-	}
-	return out
-}
-
-func schedAdminBoardLayer(layer string) string {
-	switch layer {
-	case "normal":
-		return "front"
-	case "below":
-		return "rear"
-	}
-	return layer
 }
