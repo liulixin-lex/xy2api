@@ -29,9 +29,8 @@ func openAIProfitGateCostSource(acc *Account, at time.Time) (float64, string, bo
 			return *rate, "oauth_setting", true
 		}
 	} else if acc.IsOpenAIApiKey() {
-		if data, fresh := openAIFreshUpstreamBillingData(acc, at); fresh && data["billing_scope"] == "token" {
-			rate, valid := upstreamBillingRateAt(data, at)
-			return rate, "upstream_probe", valid && rate >= 0 && !math.IsNaN(rate) && !math.IsInf(rate, 0)
+		if rate, ok := openAIFreshUpstreamBillingRate(acc, at); ok {
+			return rate, "upstream_probe", true
 		}
 	}
 	return raw, "stored", true

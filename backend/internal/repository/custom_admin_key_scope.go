@@ -221,6 +221,9 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 			return err
 		}
 	}
+	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
+		return err
+	}
 	return enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(mergeGroupIDs(existing, groupIDs)))
 }
 

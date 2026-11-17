@@ -4,6 +4,10 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+	"strconv"
 	"testing"
 	"time"
 
@@ -29,7 +33,26 @@ func runRatefloorMemberPersistence(t *testing.T, client *dbent.Client, exec sqlE
 	repo := newAccountRepositoryWithSQL(client, exec, nil)
 	groups := newGroupRepositoryWithSQL(client, exec)
 	require.NoError(t, repo.BindGroups(ctx, a.ID, []int64{g1.ID, g3.ID}))
+	oldProjection, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
 	require.NoError(t, groups.SetMemberPinned(ctx, g1.ID, a.ID, true))
+	pinnedProjection, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.True(t, pinnedProjection.UpdatedAt.After(oldProjection.UpdatedAt))
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := newSchedulerCacheWithChunkSizes(rdb, defaultSchedulerSnapshotMGetChunkSize, defaultSchedulerSnapshotWriteChunkSize).(*schedulerCache)
+	require.NoError(t, cache.SetAccount(ctx, pinnedProjection))
+	require.NoError(t, cache.SetAccount(ctx, oldProjection))
+	cached, err := cache.GetAccount(ctx, a.ID)
+	require.NoError(t, err)
+	require.True(t, cached.PinnedIn(g1.ID))
+	var meta service.Account
+	raw, err := rdb.Get(ctx, schedulerAccountMetaPrefix+strconv.FormatInt(a.ID, 10)).Bytes()
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &meta))
+	require.True(t, meta.PinnedIn(g1.ID))
 	created := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	_, err = exec.ExecContext(ctx, `UPDATE account_groups SET created_at=$3 WHERE account_id=$1 AND group_id=$2`, a.ID, g1.ID, created)
 	require.NoError(t, err)
@@ -49,17 +72,23 @@ func runRatefloorMemberPersistence(t *testing.T, client *dbent.Client, exec sqlE
 	require.True(t, byGroup[0].PinnedIn(g1.ID))
 	slim := buildSchedulerMetadataAccount(*loaded)
 	require.True(t, slim.PinnedIn(g1.ID))
-	require.NoError(t, groups.CopyAccountMembers(ctx, g2.ID, []int64{g1.ID}, []int64{a.ID}, true))
+	count, copyErr := groups.CopyAccountMembers(ctx, g2.ID, []int64{g1.ID}, false, true)
+	require.NoError(t, copyErr)
+	require.EqualValues(t, 1, count)
 	loaded, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, loaded.PinnedIn(g2.ID), "retained unpinned target must not inherit source pin")
-	require.NoError(t, groups.CopyAccountMembers(ctx, g3.ID, []int64{g1.ID}, []int64{a.ID}, false))
+	count, copyErr = groups.CopyAccountMembers(ctx, g3.ID, []int64{g1.ID}, false, false)
+	require.NoError(t, copyErr)
+	require.EqualValues(t, 1, count)
 	loaded, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, loaded.PinnedIn(g3.ID), "new target membership starts unpinned")
 	require.NoError(t, groups.SetMemberPinned(ctx, g2.ID, a.ID, true))
 	require.NoError(t, groups.SetMemberPinned(ctx, g1.ID, a.ID, false))
-	require.NoError(t, groups.CopyAccountMembers(ctx, g2.ID, []int64{g1.ID}, []int64{a.ID}, true))
+	count, copyErr = groups.CopyAccountMembers(ctx, g2.ID, []int64{g1.ID}, false, true)
+	require.NoError(t, copyErr)
+	require.EqualValues(t, 1, count)
 	loaded, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, loaded.PinnedIn(g2.ID), "target pin survives an unpinned source")
@@ -68,6 +97,29 @@ func runRatefloorMemberPersistence(t *testing.T, client *dbent.Client, exec sqlE
 	loaded, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, loaded.PinnedIn(clone.ID))
+	empty, err := client.Group.Create().SetName("empty-source").SetPlatform("openai").Save(ctx)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name    string
+		sources []int64
+		oauth   bool
+	}{{"empty source", []int64{empty.ID}, false}, {"filtered source", []int64{g1.ID}, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exec.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id,pinned,created_at) VALUES($1,$2,TRUE,NOW()) ON CONFLICT(account_id,group_id) DO UPDATE SET pinned=TRUE`, a.ID, g2.ID)
+			require.NoError(t, err)
+			before, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			count, err := groups.CopyAccountMembers(ctx, g2.ID, tc.sources, tc.oauth, true)
+			require.NoError(t, err)
+			require.Zero(t, count)
+			var remaining int
+			require.NoError(t, scanSingleRow(ctx, exec, `SELECT count(*) FROM account_groups WHERE group_id=$1`, []any{g2.ID}, &remaining))
+			require.Zero(t, remaining)
+			after, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.True(t, after.UpdatedAt.After(before.UpdatedAt))
+		})
+	}
 	require.NoError(t, repo.BindGroups(ctx, a.ID, nil))
 	loaded, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)

@@ -1407,9 +1407,9 @@ func (r *chainIdempotency) MarkFailedRetryable(context.Context, int64, string, t
 	return nil
 }
 
-func (r *chainGroups) CopyAccountMembers(ctx context.Context, _ int64, _ []int64, _ []int64, _ bool) error {
+func (r *chainGroups) CopyAccountMembers(ctx context.Context, _ int64, _ []int64, _, _ bool) (int64, error) {
 	r.w.record(ctx, "group.bind")
-	return nil
+	return 1, nil
 }
 func (r *chainGroups) SetMemberPinned(ctx context.Context, _, _ int64, _ bool) error {
 	r.w.record(ctx, "group.pin")

@@ -315,15 +315,20 @@ func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionRe
 	return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, sel.profitGate)
 }
 
-// openAIProfitFloorExcluded is a read-only precheck before sticky bypasses.
-// It does not record a second decision or increment admission counters.
+// openAIProfitFloorExcluded records only an actual floor exclusion before
+// sticky bypasses. Pass/ceiling prechecks must not duplicate later decisions.
 func openAIProfitFloorExcluded(ctx context.Context, account *Account) bool {
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || gate.floor <= 0 || account == nil {
 		return false
 	}
-	rate, ok := openAIProfitGateCost(account, gate.pricingAt)
-	return profitRangeVerdict(rate, ok, nil, gate.floor, gate.platform == PlatformOpenAI && account.PinnedIn(gate.groupID)) == openAIProfitFilterReasonFloor
+	rate, source, ok := openAIProfitGateCostSource(account, gate.pricingAt)
+	if profitRangeVerdict(rate, ok, nil, gate.floor, gate.platform == PlatformOpenAI && account.PinnedIn(gate.groupID)) != openAIProfitFilterReasonFloor {
+		return false
+	}
+	recordProfitDecision(ctx, gate, account.ID, rate, source, ok, openAIProfitFilterReasonFloor)
+	openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, openAIProfitFilterReasonFloor)
+	return true
 }
 
 // openAIProfitControlVetoReason 报告利润门是否否决该账号。ctx 中没有门

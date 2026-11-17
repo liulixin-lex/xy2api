@@ -19,6 +19,7 @@ type ProfitDecision struct {
 
 type profitTrace struct {
 	passed map[int64]ProfitDecision
+	sent   *ProfitDecision
 	vetoes []ProfitDecision
 }
 
@@ -58,13 +59,24 @@ func (s *RequestState) NoteProfitDecision(decision ProfitDecision) {
 	}
 }
 
-func (p *profitTrace) snapshot(accountID int64) *ProfitBasis {
+func (p *profitTrace) noteSend(accountID int64) {
+	if p == nil {
+		return
+	}
+	p.sent = nil
+	if decision, ok := p.passed[accountID]; ok {
+		frozen := cloneProfitDecision(decision)
+		p.sent = &frozen
+	}
+}
+
+func (p *profitTrace) snapshot() *ProfitBasis {
 	if p == nil {
 		return nil
 	}
 	out := &ProfitBasis{}
-	if admitted, ok := p.passed[accountID]; ok {
-		v := cloneProfitDecision(admitted)
+	if p.sent != nil {
+		v := cloneProfitDecision(*p.sent)
 		out.Admitted = &v
 	}
 	for _, veto := range p.vetoes {

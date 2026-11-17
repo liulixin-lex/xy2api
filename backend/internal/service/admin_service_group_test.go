@@ -27,7 +27,7 @@ type groupRepoStubForAdmin struct {
 	createID int64
 
 	getByIDByID               map[int64]*Group
-	copyAccountMembersFn      func(int64, []int64, []int64, bool) error
+	copyAccountMembersFn      func(int64, []int64, bool, bool) (int64, error)
 	getAccountIDsByGroupIDsFn func(groupIDs []int64) ([]int64, error)
 
 	listWithFiltersCalls       int
@@ -2373,9 +2373,9 @@ func TestAdminService_CreateGroup_CodexModelsManifestConfigDisabledAccepted(t *t
 func (s *groupRepoStubForAdmin) SetMemberPinned(context.Context, int64, int64, bool) error {
 	panic("unexpected SetMemberPinned")
 }
-func (s *groupRepoStubForAdmin) CopyAccountMembers(_ context.Context, groupID int64, sources, accounts []int64, replace bool) error {
+func (s *groupRepoStubForAdmin) CopyAccountMembers(_ context.Context, groupID int64, sources []int64, oauthOnly, replace bool) (int64, error) {
 	if s.copyAccountMembersFn != nil {
-		return s.copyAccountMembersFn(groupID, sources, accounts, replace)
+		return s.copyAccountMembersFn(groupID, sources, oauthOnly, replace)
 	}
 	panic("unexpected CopyAccountMembers")
 }
