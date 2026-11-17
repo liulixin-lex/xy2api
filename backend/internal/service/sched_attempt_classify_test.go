@@ -32,7 +32,7 @@ func TestIsUpstreamCapabilityFailure(t *testing.T) {
 		{"error string", 400, `{"error":"model synthetic-model is not supported by any synthetic-provider account in this synthetic-region"}`, true},
 		{"numeric detail", 404, `{"detail":404}`, false},
 		{"detail echo object", 404, `{"detail":{"input":"model synthetic-model is not available for this synthetic-account"}}`, false},
-		{"auth exception", 401, `{"error":{"code":"model_not_found"}}`, true},
+		{"unqualified auth is not capability", 401, `{"error":{"code":"model_not_found"}}`, false},
 		{"temporary missing model", 503, `{"error":{"code":"model_not_found","message":"No available channel"}}`, false},
 		{"temporary unsupported model", 502, `{"error":{"code":"unsupported_model"}}`, false},
 		{"limited missing model", 429, `{"error":{"code":"model_not_supported"}}`, false},
@@ -69,7 +69,7 @@ func TestErrclassAttributionVectors(t *testing.T) {
 		{"state_without_repair", resilience.SourceHTTP, 400, `{"error":{"code":"invalid_encrypted_content"}}`, schedquality.ClassMigration400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: tc.source, StatusCode: tc.status, Body: []byte(tc.body)}, false)
+			got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: tc.source, StatusCode: tc.status, Body: []byte(tc.body)}, false, false)
 			require.Equal(t, tc.want, got.Class)
 		})
 	}
