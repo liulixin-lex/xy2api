@@ -358,9 +358,9 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	if failure == nil && err != nil && httpErr != nil {
 		// A projected status is not an upstream response head. Preserve any
 		// structured refusal while keeping that projection out of attribution.
-		failure = &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: a.httpStatus, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
-		if a.httpStatus >= 400 {
-			failure.Source = resilience.SourceHTTP
+		failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: a.httpStatus, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
+		if a.httpStatus > 0 && a.httpStatus < 400 {
+			failure.Source = resilience.SourceStreamEvent
 		}
 	}
 	a.failure = failure
@@ -371,6 +371,11 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
+			if httpErr != nil && a.httpStatus == 0 && a.networkErr == nil {
+				// Detail is the existing resilience diagnostic, independent of
+				// quality attribution and the provenance of the projected status.
+				detail = string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}).Category)
+			}
 			terminal := ClassifyOpenAIResponsesTerminal("", failure.Body)
 			if failure.Source == resilience.SourceStreamEvent && terminal.Valid && terminal.Status == "incomplete" && !terminal.BenignIncomplete() {
 				detail = "OUTPUT_INCOMPLETE"
