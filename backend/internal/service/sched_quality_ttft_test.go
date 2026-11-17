@@ -145,13 +145,14 @@ func TestEnginePeerSnapshotPrecedesAllTransitions(t *testing.T) {
 	run := func(reverse bool) map[q.LineKey]q.LineState {
 		d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
 		require.NoError(t, err)
-		rows, _, _, decisions := f.e.replay(d, nil, nil, at.Add(-time.Second), at, func(keys []q.LineKey) {
+		rows, _, _, decisions, err := f.e.replay(context.Background(), d, nil, nil, at.Add(-time.Second), at, func(keys []q.LineKey) {
 			if reverse {
 				for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
 					keys[i], keys[j] = keys[j], keys[i]
 				}
 			}
 		})
+		require.NoError(t, err)
 		result := make(map[q.LineKey]q.LineState)
 		for _, r := range rows {
 			result[r.LineKey] = r
@@ -266,7 +267,8 @@ func TestEngineSyntheticCycleTiming(t *testing.T) {
 			d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
 			require.NoError(t, err)
 			prepared := time.Since(started)
-			rows, _, _, _ := f.e.replay(d, nil, nil, at.Add(-q.RegularInterval), at)
+			rows, _, _, _, err := f.e.replay(context.Background(), d, nil, nil, at.Add(-q.RegularInterval), at)
+			require.NoError(t, err)
 			require.Len(t, rows, 900)
 			replayed := time.Since(started) - prepared
 			f.e.publish(d, rows, nil, nil, f.now)

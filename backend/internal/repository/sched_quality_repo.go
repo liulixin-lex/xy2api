@@ -449,9 +449,20 @@ func readSchedQualityPolicyField[T any](fields map[string]json.RawMessage, name 
 	return value, nil
 }
 
+type schedConfigReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]service.SchedPolicyRecord, error) {
+	return loadSchedPolicies(ctx, r.db)
+}
+func (t *schedQualityTx) Policies() (map[int64]service.SchedPolicyRecord, error) {
+	return loadSchedPolicies(t.ctx, t.tx)
+}
+func loadSchedPolicies(ctx context.Context, db schedConfigReader) (map[int64]service.SchedPolicyRecord, error) {
 	var raw string
-	err := r.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&raw)
+	err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -459,7 +470,7 @@ func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]se
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id FROM groups WHERE lower(platform)='openai' AND deleted_at IS NULL`)
+	rows, err := db.QueryContext(ctx, `SELECT id FROM groups WHERE lower(platform)='openai' AND deleted_at IS NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -564,8 +575,14 @@ func decodeSchedTTFTRule(raw string) (service.SchedTTFTRuleRecord, error) {
 	return r, r.Params.Validate()
 }
 func (r *schedQualityRepository) LoadTTFTRule(ctx context.Context) (service.SchedTTFTRuleRecord, error) {
+	return loadSchedTTFTRule(ctx, r.db)
+}
+func (t *schedQualityTx) TTFTRule() (service.SchedTTFTRuleRecord, error) {
+	return loadSchedTTFTRule(t.ctx, t.tx)
+}
+func loadSchedTTFTRule(ctx context.Context, db schedConfigReader) (service.SchedTTFTRuleRecord, error) {
 	var raw string
-	err := r.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeySchedQualityTTFTRule).Scan(&raw)
+	err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeySchedQualityTTFTRule).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return service.SchedTTFTRuleRecord{}, err
 	}

@@ -506,3 +506,38 @@ func (f *fakeSchedQualityTx) SaveTTFTRule(version int64, p schedquality.RuleBPar
 	return f.rule, nil
 }
 func (*fakeSchedView) SessionSlowTwice(int64, int64, string, string) bool { return false }
+
+func (f *fakeSchedQualityTx) Policies() (map[int64]SchedPolicyRecord, error) {
+	policies := cloneSchedPolicies(f.policies)
+	for id, r := range policies {
+		r.Version = f.version
+		policies[id] = r
+	}
+	return policies, nil
+}
+func (f *fakeSchedQualityTx) TTFTRule() (SchedTTFTRuleRecord, error) {
+	r := f.rule
+	if r.Params.Confidence == 0 {
+		r.Params = schedquality.DefaultRuleBParams()
+	}
+	return r, nil
+}
+func (f *fakeSchedAttemptStore) LoadFinishedPage(ctx context.Context, since, through time.Time, after SchedAttemptCursor, limit int) ([]schedquality.AttemptSample, error) {
+	rows, err := f.LoadFinishedSince(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	var out []schedquality.AttemptSample
+	for _, r := range rows {
+		if !r.FinishedAt.After(through) && (r.FinishedAt.After(after.At) || r.FinishedAt.Equal(after.At) && r.AttemptID > after.AttemptID) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FinishedAt.Equal(out[j].FinishedAt) {
+			return out[i].AttemptID < out[j].AttemptID
+		}
+		return out[i].FinishedAt.Before(out[j].FinishedAt)
+	})
+	return out[:min(len(out), limit)], nil
+}

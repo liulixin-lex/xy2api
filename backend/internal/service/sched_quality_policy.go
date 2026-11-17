@@ -85,12 +85,12 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 	var resets map[int64]time.Time
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
 		// Read after acquiring the lock: another instance may have saved since refreshConfig.
-		policies, e := s.store.LoadPolicies(ctx)
+		policies, e := tx.Policies()
 		if e != nil {
 			return e
 		}
 		s.policies = policies
-		rule, e := s.store.LoadTTFTRule(ctx)
+		rule, e := tx.TTFTRule()
 		if e != nil {
 			return e
 		}
@@ -163,12 +163,12 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 	var overrides []SchedOverride
 	var resets map[int64]time.Time
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
-		policies, e := s.store.LoadPolicies(ctx)
+		policies, e := tx.Policies()
 		if e != nil {
 			return e
 		}
 		s.policies = policies
-		old, e := s.store.LoadTTFTRule(ctx)
+		old, e := tx.TTFTRule()
 		if e != nil {
 			return e
 		}

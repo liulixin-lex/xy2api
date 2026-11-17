@@ -5,11 +5,13 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,6 +41,9 @@ func assertSchedAttemptV2Evidence(t *testing.T, db *sql.DB) {
 	finished, err := repo.LoadFinishedSince(ctx, start)
 	require.NoError(t, err)
 	require.Empty(t, finished)
+	emptyPage, err := repo.LoadFinishedPage(ctx, start, start.Add(time.Hour), service.SchedAttemptCursor{}, 1)
+	require.NoError(t, err)
+	require.Empty(t, emptyPage, "v1 evidence must not enter paged boot reads")
 	current := schedquality.AttemptSample{AttemptID: uuid.NewString(), StartedAt: start.Add(20 * time.Second), GroupID: 1, Model: "model", SessionKey: requestID}
 	previous, err := repo.LoadPreviousAttempts(ctx, []schedquality.AttemptSample{current})
 	require.NoError(t, err)
@@ -82,6 +87,22 @@ func assertSchedAttemptV2Evidence(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 	require.Len(t, finished, 2)
 	require.Equal(t, nullable.AttemptID, finished[1].AttemptID)
+	// Split equal completion timestamps by UUID, including the lower endpoint.
+	_, err = db.Exec("UPDATE account_attempt_samples SET finished_at=$1 WHERE attempt_id=$2", nullable.FinishedAt, sample.AttemptID)
+	require.NoError(t, err)
+	ids := []string{sample.AttemptID, nullable.AttemptID}
+	sort.Strings(ids)
+	var pageCursor service.SchedAttemptCursor
+	for _, id := range ids {
+		page, e := repo.LoadFinishedPage(ctx, nullable.FinishedAt, start.Add(time.Hour), pageCursor, 1)
+		require.NoError(t, e)
+		require.Len(t, page, 1)
+		require.Equal(t, id, page[0].AttemptID)
+		pageCursor = service.SchedAttemptCursor{At: page[0].FinishedAt, AttemptID: page[0].AttemptID}
+	}
+	emptyPage, err = repo.LoadFinishedPage(ctx, nullable.FinishedAt, start.Add(time.Hour), pageCursor, 1)
+	require.NoError(t, err)
+	require.Empty(t, emptyPage)
 	require.Nil(t, finished[1].FirstEventMs)
 	require.Nil(t, finished[1].FirstAnswerMs)
 	require.Nil(t, finished[1].HTTPStatus)

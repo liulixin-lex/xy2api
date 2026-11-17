@@ -71,9 +71,17 @@ type SchedAttemptRecorder interface {
 	SetObserver(fn func(schedquality.AttemptSample))
 	Flush(ctx context.Context) error
 }
+
+// SchedAttemptCursor is a strict keyset cursor; equal completion timestamps
+// are split by attempt ID so a single timestamp cannot make a page unbounded.
+type SchedAttemptCursor struct {
+	At        time.Time
+	AttemptID string
+}
 type SchedAttemptStore interface {
 	InsertBatch(ctx context.Context, rows []schedquality.AttemptSample) error
 	LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error)
+	LoadFinishedPage(ctx context.Context, since, through time.Time, after SchedAttemptCursor, limit int) ([]schedquality.AttemptSample, error)
 	LoadPreviousAttempts(ctx context.Context, current []schedquality.AttemptSample) (map[string]*schedquality.AttemptSample, error)
 	// LoadInsertedAfter returns rows with inserted_at > after, ordered by inserted_at
 	// then attempt_id. It completes the final timestamp group even beyond limit.
@@ -182,6 +190,8 @@ type SchedQualityStore interface {
 	LoadTTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
 }
 type SchedQualityTx interface {
+	Policies() (map[int64]SchedPolicyRecord, error)
+	TTFTRule() (SchedTTFTRuleRecord, error)
 	States() ([]schedquality.LineState, error)
 	Overrides() ([]SchedOverride, error)
 	ResetTimes() (map[int64]time.Time, error)

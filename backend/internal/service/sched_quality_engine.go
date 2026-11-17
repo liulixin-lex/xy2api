@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"reflect"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -21,32 +20,36 @@ type schedQualitySwitches interface {
 }
 
 type SchedQualityEngineService struct {
-	store       SchedQualityStore
-	attempts    SchedAttemptStore
-	switches    schedQualitySwitches
-	now         func() time.Time
-	mu          sync.Mutex
-	window      schedQualityWindow
-	snapshot    atomic.Pointer[SchedQualitySnapshot]
-	processedAt time.Time
-	loaded      bool
-	insertedAt  time.Time
-	configAt    time.Time
-	rule        SchedTTFTRuleRecord
-	peerBuckets map[time.Time]*peerBucket
-	leases      SchedTrialLeases
-	policies    map[int64]SchedPolicyRecord
-	members     map[int64][]int64
-	seenResets  map[int64]time.Time
-	callbackMu  sync.Mutex
-	callbacks   []func(int64, time.Time)
-	lifecycle   sync.Mutex
-	stop        chan struct{}
-	done        chan struct{}
-	lockCache   LeaderLockCache
-	db          *sql.DB
-	instanceID  string
-	obs         SchedObs
+	store                  SchedQualityStore
+	attempts               SchedAttemptStore
+	switches               schedQualitySwitches
+	now                    func() time.Time
+	mu                     sync.Mutex
+	window                 schedQualityWindow
+	snapshot               atomic.Pointer[SchedQualitySnapshot]
+	processedAt            time.Time
+	loaded                 bool
+	loadSince, loadThrough time.Time
+	finishedCursor         SchedAttemptCursor
+	finishedLoaded         bool
+	loadRows, loadPages    int
+	insertedAt             time.Time
+	configAt               time.Time
+	rule                   SchedTTFTRuleRecord
+	peerBuckets            map[time.Time]*peerBucket
+	leases                 SchedTrialLeases
+	policies               map[int64]SchedPolicyRecord
+	members                map[int64][]int64
+	seenResets             map[int64]time.Time
+	callbackMu             sync.Mutex
+	callbacks              []func(int64, time.Time)
+	lifecycle              sync.Mutex
+	stop                   chan struct{}
+	done                   chan struct{}
+	lockCache              LeaderLockCache
+	db                     *sql.DB
+	instanceID             string
+	obs                    SchedObs
 }
 
 const schedQualityLedgerPageSize = 5000
@@ -137,32 +140,59 @@ func (s *SchedQualityEngineService) notify(resets map[int64]time.Time) {
 	}
 }
 
-func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.Time) error {
-	cursor := s.insertedAt
-	if !s.loaded {
-		rows, err := s.attempts.LoadFinishedSince(ctx, now.Add(-schedEvidenceRetention))
-		if err != nil {
-			return err
-		}
-		cursor = now.Add(-schedEvidenceRetention)
-		s.window.merge(rows, now)
-		// A recently inserted attempt may have finished before the completion
-		// window. Scan the entire insertion window on boot, not just the newest
-		// completion's overlap, because availability is max(finished, inserted).
+func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.Time) (err error) {
+	boot := !s.loaded
+	if boot && s.loadSince.IsZero() {
+		s.loadSince = now.Add(-schedEvidenceRetention)
+		s.loadThrough = now
+		s.insertedAt = s.loadSince
 	}
-	maxSeen := cursor
-	after := cursor.Add(-schedquality.LedgerReloadOverlap)
-	for {
-		rows, latest, err := s.attempts.LoadInsertedAfter(ctx, after, schedQualityLedgerPageSize)
+	if boot {
+		defer func() {
+			if err != nil {
+				slog.WarnContext(ctx, "sched_quality.loading", "component", "sched_quality", "status", "incomplete", "layering", false, "rows", s.loadRows, "pages", s.loadPages, "error", err)
+			}
+		}()
+	}
+	for !s.finishedLoaded {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		var rows []schedquality.AttemptSample
+		rows, err = s.attempts.LoadFinishedPage(ctx, s.loadSince, s.loadThrough, s.finishedCursor, schedQualityLedgerPageSize)
 		if err != nil {
 			return err
 		}
 		s.window.merge(rows, now)
-		if len(rows) == 0 {
-			break
+		s.loadRows += len(rows)
+		s.loadPages++
+		if len(rows) > 0 {
+			last := rows[len(rows)-1]
+			next := SchedAttemptCursor{At: last.FinishedAt, AttemptID: last.AttemptID}
+			if !next.At.After(s.finishedCursor.At) && !(next.At.Equal(s.finishedCursor.At) && next.AttemptID > s.finishedCursor.AttemptID) {
+				return errors.New("finished evidence cursor did not advance")
+			}
+			s.finishedCursor = next
 		}
-		if latest.After(maxSeen) {
-			maxSeen = latest
+		slog.InfoContext(ctx, "sched_quality.loading", "component", "sched_quality", "status", "page", "layering", false, "rows", s.loadRows, "pages", s.loadPages)
+		if len(rows) < schedQualityLedgerPageSize {
+			s.finishedLoaded = true
+		}
+	}
+	after := s.insertedAt.Add(-schedquality.LedgerReloadOverlap)
+	for {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		var rows []schedquality.AttemptSample
+		var latest time.Time
+		rows, latest, err = s.attempts.LoadInsertedAfter(ctx, after, schedQualityLedgerPageSize)
+		if err != nil {
+			return err
+		}
+		s.window.merge(rows, now)
+		if latest.After(s.insertedAt) {
+			s.insertedAt = latest
 		}
 		if len(rows) < schedQualityLedgerPageSize {
 			break
@@ -172,10 +202,13 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		}
 		after = latest
 	}
-	if err := s.window.prepareContinuations(ctx, s.attempts); err != nil {
+	if err = s.window.prepareContinuations(ctx, s.attempts); err != nil {
 		return err
 	}
-	s.insertedAt, s.loaded = maxSeen, true
+	s.loaded = true
+	if boot {
+		slog.InfoContext(ctx, "sched_quality.loading", "component", "sched_quality", "status", "complete", "rows", s.loadRows, "pages", s.loadPages)
+	}
 	return nil
 }
 
@@ -228,11 +261,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	locked, err := s.store.RunCycle(ctx, func(tx SchedQualityTx) error {
 		// Configuration must match the states protected by this transaction, even
 		// when another instance changed it since our last cached membership refresh.
-		policies, err := s.store.LoadPolicies(ctx)
+		policies, err := tx.Policies()
 		if err != nil {
 			return err
 		}
-		rule, err := s.store.LoadTTFTRule(ctx)
+		rule, err := tx.TTFTRule()
 		if err != nil {
 			return err
 		}
@@ -252,7 +285,10 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 		}
 		var changed []schedquality.LineState
 		var deleted []schedquality.LineKey
-		states, changed, deleted, decisions = s.replay(d, states, resets, after, horizon)
+		states, changed, deleted, decisions, err = s.replay(ctx, d, states, resets, after, horizon)
+		if err != nil {
+			return err
+		}
 		if err := tx.Upsert(changed); err != nil {
 			return err
 		}
@@ -296,120 +332,6 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	s.window.newFinishedAt = time.Time{}
 	notifications = s.publish(d, states, overrides, resets, now)
 	return nil
-}
-
-// replay advances complete event batches in chronological order. EvaluatedAt is
-// persisted even when Step emits no decision, preventing repeat work on restart.
-func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, after, horizon time.Time, order ...func([]schedquality.LineKey)) (kept, changed []schedquality.LineState, deleted []schedquality.LineKey, decisions []schedquality.Decision) {
-	keys, loaded := s.rowKeys(d, states)
-	if len(order) > 0 {
-		order[0](keys)
-	}
-	initial := make(map[schedquality.LineKey]schedquality.LineState)
-	for _, r := range states {
-		initial[r.LineKey] = r
-	}
-	rows := make(map[schedquality.LineKey]schedquality.LineState)
-	enabled := keys[:0]
-	for _, k := range keys {
-		if s.policies[k.GroupID].Policy.Enabled {
-			r := loaded[k]
-			r.LineKey = k
-			rows[k] = r
-			enabled = append(enabled, k)
-		}
-	}
-	keys = enabled
-	events := make(map[time.Time]map[SchedAccountModel]bool)
-	add := func(at time.Time) {
-		if !at.IsZero() && !at.After(horizon) {
-			if events[at] == nil {
-				events[at] = make(map[SchedAccountModel]bool)
-			}
-		}
-	}
-	for at := after.Truncate(time.Minute).Add(time.Minute); !at.After(horizon); at = at.Add(time.Minute) {
-		add(at)
-	}
-	for pair, samples := range d.samples {
-		for _, r := range samples {
-			at := schedAvailableAt(r)
-			if !at.After(after) {
-				continue
-			}
-			add(at)
-			if events[at] != nil {
-				events[at][pair] = true
-			}
-		}
-	}
-	schedule := func(r schedquality.LineState) {
-		deadlines := []time.Time{r.Until, r.TrialUntil}
-		if !r.LastRear.IsZero() && (r.Level > 0 || r.Admissions > 0) {
-			deadlines = append(deadlines, r.LastRear.Add(schedquality.LevelClearQuiet))
-		}
-		for _, at := range deadlines {
-			// Recover overdue persisted timers at their original instant. Moving a
-			// review to the restart watermark would grant a fresh hour of trial.
-			if at.After(r.EvaluatedAt) {
-				add(at)
-			}
-		}
-	}
-
-	for _, r := range rows {
-		schedule(r)
-	}
-	for len(events) > 0 {
-		var at time.Time
-		for t := range events {
-			if at.IsZero() || t.Before(at) {
-				at = t
-			}
-		}
-		touched := events[at]
-		delete(events, at)
-		bucket := at.UTC().Truncate(schedquality.RegularInterval)
-		d.usePeerBucket(at, rows)
-		// Overdue timers must not synthesize historical regular/minute ticks
-		// for newly discovered keys outside this cycle's replay window.
-		fiveMin := at.After(after) && at.Equal(bucket)
-		minute := at.After(after) && at.Equal(at.Truncate(time.Minute))
-		for _, k := range keys {
-			prev := rows[k]
-			if !at.After(prev.EvaluatedAt) || !at.After(resets[k.AccountID]) {
-				continue
-			}
-			kind, due := schedquality.Due(prev, at, fiveMin, minute || touched[SchedAccountModel{k.AccountID, k.Model}])
-			if !due {
-				continue
-			}
-			v, basis := s.assessLine(d, prev, kind, at, resets)
-			next, action := schedquality.Step(prev, kind, v, basis, at)
-			rows[k] = next
-			if action != "" {
-				decisions = append(decisions, schedquality.Decision{At: at, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
-			}
-			schedule(next)
-		}
-	}
-	for _, k := range keys {
-		r := rows[k]
-		if r.EvaluatedAt.IsZero() {
-			continue
-		}
-		kept = append(kept, r)
-		if !reflect.DeepEqual(r, initial[k]) {
-			changed = append(changed, r)
-		}
-	}
-	for k := range initial {
-		if _, ok := rows[k]; !ok {
-			deleted = append(deleted, k)
-		}
-	}
-	sort.Slice(deleted, func(i, j int) bool { return schedLineLess(deleted[i], deleted[j]) })
-	return
 }
 
 func (s *SchedQualityEngineService) rebuild(ctx context.Context) (map[int64]time.Time, error) {
