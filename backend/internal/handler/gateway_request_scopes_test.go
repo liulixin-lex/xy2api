@@ -40,6 +40,7 @@ func TestGatewayRequestFiveEntryScopes(t *testing.T) {
 	}{
 		{"generic_chat", "chat", `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"fixture"}]}`, "", resilience.GatewayRequestScopeText, true},
 		{"generic_responses", "responses", `{"model":"claude-opus-4-8","input":"fixture"}`, "", resilience.GatewayRequestScopeText, true},
+		{"generic_messages", "messages", `{"model":"claude-opus-4-8","max_tokens":32,"messages":[{"role":"user","content":"fixture"}]}`, "", resilience.GatewayRequestScopeText, true},
 		{"images", "/v1/images/generations", `{"model":"gpt-image-1","prompt":"fixture","n":1}`, `{"data":[{"b64_json":"ZmFrZQ=="}]}`, resilience.GatewayRequestScopeImage, false},
 		{"responses_image", "/v1/responses", `{"model":"gpt-5.1","input":"fixture","tools":[{"type":"image_generation"}]}`, captureResponseJSON, resilience.GatewayRequestScopeImage, false},
 		{"embeddings", "/v1/embeddings", `{"model":"text-embedding-3-small","input":"fixture"}`, `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`, resilience.GatewayRequestScopeEmbedding, false},

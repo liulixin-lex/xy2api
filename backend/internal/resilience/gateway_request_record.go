@@ -80,7 +80,7 @@ func (s *RequestState) EnableGatewayRequest(at time.Time, scopes ...GatewayReque
 		scope = scopes[0]
 	}
 	switch scope {
-	case GatewayRequestScopeText, GatewayRequestScopeImage, GatewayRequestScopeEmbedding:
+	case GatewayRequestScopeText, GatewayRequestScopeImage, GatewayRequestScopeEmbedding, GatewayRequestScopeSearch:
 	default:
 		return
 	}
@@ -340,6 +340,7 @@ const (
 	GatewayRequestScopeText      GatewayRequestScope = "text"
 	GatewayRequestScopeImage     GatewayRequestScope = "image"
 	GatewayRequestScopeEmbedding GatewayRequestScope = "embedding"
+	GatewayRequestScopeSearch    GatewayRequestScope = "search"
 )
 
 func (s *RequestState) GatewayRequestScope() (GatewayRequestScope, bool) {
