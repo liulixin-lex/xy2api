@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -121,7 +122,15 @@ func IsUpstreamCapabilityFailure(status int, body []byte) bool {
 	if !gjson.ValidBytes(body) {
 		return false
 	}
-	if resilience.IsModelUnsupportedResponse(status, body) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(body) {
+	modelBody := body
+	if !schedErrorFields(body).IsObject() {
+		if message := schedErrorMessage(body); message != "" {
+			// Apply the existing narrow model predicate to string envelopes too.
+			encoded, _ := json.Marshal(message)
+			modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
+		}
+	}
+	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
 		return true
 	}
 	fields := schedErrorFields(body)
