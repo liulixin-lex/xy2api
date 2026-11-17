@@ -3043,8 +3043,8 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		if !strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_") {
 			continue
 		}
-		// Serialize the bound check with the merge; two simultaneous 32nd
-		// marks must never both be admitted from an old scheduler snapshot.
+		// Serialize eviction and merge; simultaneous new keys must keep the
+		// account bounded without losing either update to an old snapshot.
 		updates, err = limitCapabilityMarkUpdates(ctx, client, id, updates)
 		if err != nil {
 			return err

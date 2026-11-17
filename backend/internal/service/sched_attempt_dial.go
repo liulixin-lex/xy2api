@@ -14,12 +14,13 @@ type schedWSDialContextKey struct{}
 // This observer belongs to one acquisition, not to the connection or pool.
 // Background prewarm uses a fresh context and cannot inherit its ownership.
 type schedWSDialObservation struct {
-	service        *OpenAIGatewayService
-	ctx            context.Context
-	account        *Account
-	stream         bool
-	started        time.Time
-	successStarted time.Time
+	service         *OpenAIGatewayService
+	ctx             context.Context
+	account         *Account
+	stream          bool
+	started         time.Time
+	successStarted  time.Time
+	learnCapability func(int, []byte)
 }
 
 func withSchedWSDialObservation(acquireCtx, requestCtx context.Context, s *OpenAIGatewayService, account *Account, stream bool) (context.Context, *schedWSDialObservation) {
@@ -47,6 +48,9 @@ func dialOpenAIWSWithSchedCapture(ctx context.Context, dialer openAIWSClientDial
 				var body []byte
 				if errors.As(err, &handshake) {
 					body = handshake.Body
+				}
+				if observation.learnCapability != nil {
+					observation.learnCapability(status, body)
 				}
 				capture.finishHTTP(&http.Response{StatusCode: status, Header: responseHeaders}, body)
 			} else {

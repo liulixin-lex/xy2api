@@ -984,6 +984,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
 		dialCtx, schedDial = withSchedWSDialObservation(dialCtx, ctx, s, account, true)
+		schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, firstClientMessage)
 		upstreamConn, statusCode, handshakeHeaders, err = dialOpenAIWSWithSchedCapture(dialCtx, dialer, wsURL, headers, proxyURL)
 		cancelDial()
 		if err == nil {
