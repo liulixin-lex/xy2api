@@ -219,8 +219,6 @@ export interface BackendAccountDetail {
   at: string
   stale: boolean
   global_enabled: boolean
-  /** normal | observing | disabled */
-  status: string
   stop: BackendAccountSummary['stop']
   reset_at: string | null
   /** The account's OpenAI groups, by group id. */
@@ -235,9 +233,10 @@ export interface BackendAccountDetail {
 export interface BackendBasis {
   rule_version: string
   line: BackendDim
-  /** regular | trial | review | relax */
+  /** regular | trial | review | relax | clock (the 24-hour clear) */
   kind: string
-  cut: string | null
+  /** Omitted when zero. */
+  cut?: string | null
   /** The threshold then: first-output limit (seconds), error limit or cache minimum (ratios). */
   threshold: number
   source_groups: number[]
