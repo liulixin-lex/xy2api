@@ -36,7 +36,7 @@ func (s *schedQualityListAdmin) selectAccounts(ctx context.Context, group int64)
 		if group > 0 && !member {
 			continue
 		}
-		if s.filtered && slices.Contains(s.filter.IDs, id) == s.filter.Exclude {
+		if s.filtered && !slices.Contains(s.filter.IDs, id) {
 			continue
 		}
 		s.matched = append(s.matched, id)
@@ -143,7 +143,6 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 				}
 				require.Equal(t, 1, admin.calls)
 				require.Equal(t, tc.quality != "", admin.filtered)
-				require.Equal(t, false, admin.filter.Exclude)
 				require.Equal(t, tc.want, admin.matched)
 				if tc.quality == "normal" && !tc.empty {
 					require.Equal(t, []int64{5, 6}, admin.filter.IDs)

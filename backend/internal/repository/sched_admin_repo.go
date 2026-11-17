@@ -87,7 +87,7 @@ func (c *tempUnschedCache) SchedAdminClearHealth(ctx context.Context, id int64) 
 
 var _ service.SchedAdminAccountRepository = (*accountRepository)(nil)
 
-// SchedAdminAccountIDs includes unsampled and ungrouped accounts for observing filters.
+// SchedAdminAccountIDs includes unsampled and ungrouped accounts for quality identity filters.
 func (r *accountRepository) SchedAdminAccountIDs(ctx context.Context) ([]int64, error) {
 	rows, err := r.sql.QueryContext(ctx, `SELECT id FROM accounts WHERE deleted_at IS NULL AND platform='openai' ORDER BY id`)
 	if err != nil {

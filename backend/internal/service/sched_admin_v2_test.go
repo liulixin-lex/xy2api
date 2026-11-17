@@ -354,3 +354,79 @@ func TestSchedAdminV2RuleRejectsNonfiniteBeforeEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestSchedAdminTrialSummaryUsesEffectiveIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		global, group, stale, exempt bool
+		wantTrial                    bool
+	}{
+		{name: "active", global: true, group: true, wantTrial: true},
+		{name: "global off", global: false, group: true},
+		{name: "group off", global: true, group: false},
+		{name: "stale", global: true, group: true, stale: true},
+		{name: "exempt", global: true, group: true, exempt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, _ := schedAdminFixture()
+			now := s.d.Now()
+			p := e.snapshot
+			p.GlobalEnabled = tc.global
+			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: tc.group}}
+			if tc.stale {
+				p.At = now.Add(-schedquality.ViewMaxAge - time.Nanosecond)
+			}
+			if tc.exempt {
+				p.Overrides = []SchedOverride{{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideExempt}}
+			}
+			until := now.Add(schedquality.TrialDuration)
+			p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "trial", View: schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: until}}}}
+			out, err := s.Summary(context.Background(), []int64{1})
+			require.NoError(t, err)
+			item := out.Accounts[0]
+			raw := schedAdminJSON(t, item)
+			if tc.wantTrial {
+				require.Equal(t, "trial", item.GroupStatus["1"])
+				require.Len(t, item.Trial, 1)
+				require.Equal(t, until.Format(time.RFC3339Nano), item.Trial[0].Until)
+			} else {
+				require.Equal(t, "unknown", item.GroupStatus["1"])
+				require.Equal(t, []any{}, raw["trial"])
+			}
+			detail, err := s.Detail(context.Background(), 1)
+			require.NoError(t, err)
+			require.Equal(t, "trial", detail.Groups[0].ByModel[0].Lines.TTFO.Identity, "panel retains raw identity")
+		})
+	}
+}
+
+func TestSchedAdminBoardSharesEngineTrialLeases(t *testing.T) {
+	now := time.Now()
+	leases := newSelectionTrialLeaseFake()
+	leases.full[1] = true
+	engine := &SchedQualityEngineService{}
+	engine.SetTrialLeases(leases)
+	view := selectionTestView(now)
+	view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: now.Add(schedquality.TrialDuration)}}
+	engine.snapshot.Store(&SchedQualitySnapshot{At: now, GlobalEnabled: true, View: view, GroupModels: map[int64][]SchedModelCount{7: {{Model: "m", Requests: 1}}}})
+	gateway := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}}
+	board := ProvideOpenAISelectionBoard(gateway, engine)
+	board.now = func() time.Time { return now }
+	admin := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Board: board, Groups: schedAdminGroups{7: {ID: 7, Platform: PlatformOpenAI}}, Now: func() time.Time { return now }})
+	require.Same(t, leases, engine.leases)
+	require.Same(t, leases, board.leases)
+	require.Same(t, board, gateway.selectionBoard)
+	require.Same(t, board, admin.d.Board)
+	out, err := admin.Order(context.Background(), 7, "m")
+	require.NoError(t, err)
+	require.Len(t, out.Rows, 1)
+	require.Equal(t, "trial_full", out.Rows[0].Layer)
+	leases.full[1] = false
+	out, err = admin.Order(context.Background(), 7, "m")
+	require.NoError(t, err)
+	require.Equal(t, "trial", out.Rows[0].Layer)
+	for _, call := range leases.calls {
+		require.Contains(t, call, "room:", "board must only inspect capacity")
+	}
+	require.Empty(t, leases.held)
+}

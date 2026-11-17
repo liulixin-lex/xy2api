@@ -115,7 +115,7 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			if r.View.Error.Identity == schedquality.IdentityRear {
 				out.Error.Red = true
 			}
-			if len(rear) == 0 {
+			if len(rear) == 0 && !exempt && effective {
 				var until time.Time
 				for _, l := range []schedquality.LineView{r.View.TTFO, r.View.Error, r.View.Cache} {
 					if l.Trial && (l.TrialUntil.After(until)) {

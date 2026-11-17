@@ -48,7 +48,7 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 				eligible = nil
 			}
 			filter := value.Filter(tc.quality, eligible)
-			ctx := service.WithSchedQualityAccountFilter(s.ctx, filter.IDs, filter.Exclude)
+			ctx := service.WithSchedQualityAccountFilter(s.ctx, filter.IDs)
 			rows, page, err := s.repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, tc.platform, "", "", "", tc.group, "")
 			s.Require().NoError(err)
 			ids := []int64{}

@@ -7,12 +7,11 @@ import (
 type schedQualityAccountFilterKey struct{}
 
 type SchedQualityFilter struct {
-	IDs     []int64
-	Exclude bool
+	IDs []int64
 }
 
-func WithSchedQualityAccountFilter(ctx context.Context, ids []int64, exclude bool) context.Context {
-	return context.WithValue(ctx, schedQualityAccountFilterKey{}, SchedQualityFilter{IDs: append([]int64{}, ids...), Exclude: exclude})
+func WithSchedQualityAccountFilter(ctx context.Context, ids []int64) context.Context {
+	return context.WithValue(ctx, schedQualityAccountFilterKey{}, SchedQualityFilter{IDs: append([]int64{}, ids...)})
 }
 
 func SchedQualityAccountFilter(ctx context.Context) (SchedQualityFilter, bool) {

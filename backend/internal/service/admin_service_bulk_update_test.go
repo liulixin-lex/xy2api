@@ -150,7 +150,7 @@ func (s *accountRepoStubForBulkUpdate) ListWithFilters(ctx context.Context, para
 					break
 				}
 			}
-			if found != filter.Exclude {
+			if found {
 				rows = append(rows, account)
 			}
 		}
@@ -340,15 +340,14 @@ func TestAdminServiceBulkUpdateAccounts_SchedQualityFilter(t *testing.T) {
 		name, quality string
 		ids           []int64
 		bound         bool
-		exclude       bool
 		wantIDs       []int64
 		invalid       bool
 	}{
 		{name: "rear", quality: "rear", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
 		{name: "exempt", quality: "exempt", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
 		{name: "unknown", quality: "unknown", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
-		{name: "normal", quality: "normal", ids: []int64{7}, bound: true, exclude: true, wantIDs: []int64{11}},
-		{name: "normal_empty_union", quality: "normal", ids: []int64{}, bound: true, exclude: true, wantIDs: []int64{7, 11}},
+		{name: "normal", quality: "normal", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
+		{name: "normal_empty", quality: "normal", ids: []int64{}, bound: true, wantIDs: []int64{}},
 		{name: "empty", quality: "rear", ids: []int64{}, bound: true, wantIDs: []int64{}},
 		{name: "unresolved", quality: "rear", invalid: true},
 		{name: "trial", quality: "trial", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
@@ -361,7 +360,7 @@ func TestAdminServiceBulkUpdateAccounts_SchedQualityFilter(t *testing.T) {
 			svc := &adminServiceImpl{accountRepo: repo}
 			ctx := context.Background()
 			if tc.bound {
-				ctx = WithSchedQualityAccountFilter(ctx, tc.ids, tc.exclude)
+				ctx = WithSchedQualityAccountFilter(ctx, tc.ids)
 			}
 			schedulable := true
 			result, err := svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{
