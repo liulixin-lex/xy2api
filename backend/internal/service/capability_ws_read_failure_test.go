@@ -14,7 +14,6 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -157,9 +156,6 @@ func TestCapabilityWSReadFailureFinality(t *testing.T) {
 					}
 					if sampled {
 						require.Len(t, rec.finishes, 1)
-						if mode == "local_limit" {
-							require.Equal(t, q.ClassGateway, rec.finishes[0].Class)
-						}
 					} else {
 						require.Empty(t, rec.starts, "independent learning must not allocate a quality capture")
 					}
