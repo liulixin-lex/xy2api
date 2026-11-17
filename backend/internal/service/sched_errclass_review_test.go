@@ -153,6 +153,7 @@ func TestErrclassStreamReadCauseSurvivesProjection(t *testing.T) {
 				ctx := resilience.WithRequestState(context.Background(), st)
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+				InstallDeliveryTracking(c, time.Now())
 				account := newOpenAIRejectedFieldTestAccount()
 				account.ID = 1
 				if target == "passthrough" {
@@ -178,6 +179,8 @@ func TestErrclassStreamReadCauseSurvivesProjection(t *testing.T) {
 				require.Len(t, rec.finishes, 1)
 				want := schedquality.ClassUpstream
 				if output {
+					require.NotNil(t, st.EndToEndFirstOutputMs(), "the production writer must confirm semantic delivery")
+					require.Positive(t, rec.finishes[0].OutputBytes)
 					want = schedquality.ClassInterrupted
 				}
 				require.Equal(t, want, rec.finishes[0].Class)
