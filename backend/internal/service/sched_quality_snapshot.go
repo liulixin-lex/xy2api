@@ -26,14 +26,15 @@ type schedQualityData struct {
 }
 
 type schedQualityView struct {
-	version       int64
-	at            time.Time
-	globalEnabled bool
-	states        map[schedQualityKey]q.StateView
-	policies      map[int64]SchedPolicyRecord
-	overrides     map[int64][]SchedOverride
-	resets        map[int64]time.Time
-	sessions      map[schedSessionKey][]q.AttemptSample
+	version            int64
+	at                 time.Time
+	globalEnabled      bool
+	states             map[schedQualityKey]q.StateView
+	policies           map[int64]SchedPolicyRecord
+	overrides          map[int64][]SchedOverride
+	resets             map[int64]time.Time
+	sessions           map[schedSessionKey][]q.AttemptSample
+	incompleteSessions map[schedSessionKey]bool
 }
 
 func (v *schedQualityView) Version() int64            { return v.version }
@@ -59,7 +60,11 @@ func (v *schedQualityView) TakeoverIdle(g int64) (time.Duration, bool) {
 }
 
 func (v *schedQualityView) SessionSlowTwice(g, a int64, m, session string) bool {
-	rows := v.sessions[schedSessionKey{g, m, session}]
+	key := schedSessionKey{g, m, session}
+	if v.incompleteSessions[key] {
+		return false
+	}
+	rows := v.sessions[key]
 	if len(rows) < 2 {
 		return false
 	}
@@ -164,8 +169,14 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			}
 		}
 	}
+	// Only durable samples have confirmed predecessor/switch boundaries.
+	// Even a finished observer sample is incomplete history until read from the
+	// ledger. Do not substitute older durable rounds across this gap.
+	view.incompleteSessions = make(map[schedSessionKey]bool)
 	for _, r := range d.running {
-		sessions.add(schedQualityCloneSample(r))
+		if r.SessionKey != "" && !r.StartedAt.After(d.now) {
+			view.incompleteSessions[schedSessionOf(r)] = true
+		}
 	}
 	sessions.sort()
 	view.sessions = make(map[schedSessionKey][]q.AttemptSample)

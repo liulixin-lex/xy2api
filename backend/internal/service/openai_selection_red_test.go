@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func TestSelectionLogicalRoundsDriveRealSnapshotMigration(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newQualityFixture(t)
 			n := 2
-			if mode == "switched_first" {
+			if mode == "switched_first" || mode == "final_retry_fast" {
 				n = 3
 			}
 			if mode == "two_later_rounds" {
@@ -76,12 +77,14 @@ func TestSelectionLogicalRoundsDriveRealSnapshotMigration(t *testing.T) {
 				rows[i].StartedAt = rows[i].StartedAt.Add(time.Duration(i) * 4 * time.Second)
 				rows[i].FinishedAt = rows[i].StartedAt.Add(3 * time.Second)
 			}
-			if mode == "retry_one_round" || mode == "final_retry_fast" {
+			if mode == "retry_one_round" {
 				rows[1].RequestID = rows[0].RequestID
 			}
 			if mode == "final_retry_fast" {
+				// Independent slow round, then a slow first attempt whose final retry is fast.
+				rows[2].RequestID = rows[1].RequestID
 				ms := 100
-				rows[1].TTFOMs = &ms
+				rows[2].TTFOMs = &ms
 			}
 			if mode == "switched_first" || mode == "two_later_rounds" {
 				rows[0].AccountID = 2
@@ -90,6 +93,11 @@ func TestSelectionLogicalRoundsDriveRealSnapshotMigration(t *testing.T) {
 			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
 			f.cycle()
 			view := f.e.Snapshot().View
+			if mode == "final_retry_fast" {
+				history := view.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+				require.Len(t, history, 2)
+				require.Equal(t, 100, *history[1].TTFOMs, "the final attempt determines this round")
+			}
 			require.Equal(t, mode == "two_later_rounds", view.SessionSlowTwice(10, 1, "synthetic-model", "session"))
 			require.Equal(t, q.PlaceRear, view.StateOf(10, 1, "synthetic-model").Placement(true, f.now))
 			session := selectionNewSessionFixture()
@@ -175,4 +183,100 @@ func TestSelectionActiveAliasedTurnsRenewBeyondIdleLimit(t *testing.T) {
 	}
 	require.Len(t, leases.scores, 1)
 	require.Len(t, leases.calls, 12)
+}
+
+func TestSelectionUnpersistedFinishedRoundsBlockMigration(t *testing.T) {
+	for _, mode := range []string{"switch_not_persisted", "gap_before_later_rounds"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newQualityFixture(t)
+			rows := engineSamples(4, f.now.Add(-time.Minute), true)
+			for i := range rows {
+				rows[i].SessionKey = "session"
+				rows[i].StartedAt = rows[i].StartedAt.Add(time.Duration(i) * 4 * time.Second)
+				rows[i].FinishedAt = rows[i].StartedAt.Add(3 * time.Second)
+			}
+			pending := rows[1:3]
+			f.ledger.Rows = rows[:1]
+			if mode == "switch_not_persisted" {
+				rows[0].AccountID = 2
+			} else {
+				// Two later durable slow rounds cannot hide an earlier incomplete round.
+				f.ledger.Rows = rows[2:]
+				pending = rows[:1]
+			}
+			for _, finished := range pending {
+				begin := finished
+				begin.FinishedAt = time.Time{}
+				f.e.Observe(begin)
+				f.e.Observe(finished) // Finish observed, asynchronous ledger write still pending.
+			}
+			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
+			f.cycle()
+			view := f.e.Snapshot().View
+			require.Len(t, f.e.window.running, len(pending))
+			require.False(t, view.SessionSlowTwice(10, 1, "synthetic-model", "session"), "unconfirmed switch boundaries must block this migration")
+			session := selectionNewSessionFixture()
+			session.owner = selectionTestAccount(1, 5)
+			session.candidates = []*Account{selectionTestAccount(3, 1)}
+			session.candidates[0].GroupIDs = []int64{10}
+			session.binding.owner = 1
+			session.session.now = func() time.Time { return f.now }
+			session.session.view = func() q.View { return view }
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			require.Nil(t, session.session.selectOwner(ctx, 10, "session", "synthetic-model", session.owner, session.candidates, selectionRequest{}))
+			require.Empty(t, session.slots.attempts)
+			// A later successful ledger read clears the barrier and confirms boundaries.
+			f.now = f.now.Add(time.Second)
+			for i := range rows {
+				rows[i].InsertedAt = f.now
+			}
+			f.ledger.Rows = rows
+			f.cycle()
+			require.Empty(t, f.e.window.running)
+			require.True(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "session"), "two confirmed slow rounds after the switched first round now allow migration")
+		})
+	}
+}
+
+type selectionPromoteFailure struct {
+	*selectionTrialLeaseFake
+	applied bool
+}
+
+func (l *selectionPromoteFailure) Promote(ctx context.Context, a int64, m string, g int64, request, session string, now time.Time) error {
+	if l.applied {
+		_ = l.selectionTrialLeaseFake.Promote(ctx, a, m, g, request, session, now)
+	}
+	return fmt.Errorf("synthetic promotion transport failure")
+}
+func TestSelectionPromotionErrorReleasesOnlyOwnRequest(t *testing.T) {
+	for _, applied := range []bool{false, true} {
+		t.Run(fmt.Sprint(applied), func(t *testing.T) {
+			output := captureSchedObsLogs(t)
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+			leases := newSelectionTrialLeaseFake()
+			selectionSetTrial(f, 1, leases)
+			f.svc.selectionBoard.leases = &selectionPromoteFailure{leases, applied}
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			selected := selectTrialRuntime(t, f, ctx, "session")
+			member := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
+			requestKey := trialTestKey(1, "m", 7, member)
+			require.True(t, leases.held[requestKey])
+			selected.ReleaseFunc() // Production HTTP order: slot first, commit afterward.
+			CompleteOpenAIStickyChange(ctx, 1, true, false)
+			selected.ReleaseFunc()
+			require.EqualValues(t, 1, f.cache.sessionBindings["openai:session"], "conversion failure must not undo a committed binding")
+			require.False(t, leases.held[requestKey], "best-effort release must not leave the request reservation until expiry")
+			require.Equal(t, applied, leases.held[trialTestKey(1, "m", 7, "s:session")], "lost replies must not cause the session member to be removed")
+			require.Contains(t, leases.calls, "release:"+requestKey)
+			logged := false
+			for _, row := range schedObsLogRecords(t, output) {
+				if row["msg"] == "sched_quality.trial_promote_failed" {
+					logged = true
+					require.Equal(t, "sched_quality", row["component"])
+				}
+			}
+			require.True(t, logged)
+		})
+	}
 }
