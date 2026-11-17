@@ -46,7 +46,7 @@ export default {
       allExempt: '全部豁免',
       tabBack: '该模型下有后排分组',
       evidenceToggle: '{name} 的判定证据',
-      noData: '该分组还没有这个模型的数据：三条线都是未知（证据不够）。',
+      noData: '该分组还没有这个模型的数据：三条线都是未知（{why}）。',
       recentLines: {
         ttfo: '首个有效输出',
         firstEvent: '首个事件',
@@ -60,6 +60,7 @@ export default {
       autoRecheck: '{time} 后复检',
       exemptAllTip: '所有分组强制正常参与调度',
       recoverTip: '清除后排和可清除的自动状态，回到自动调度',
+      recoverNone: '没有可恢复的状态：不在后排或试用，也没有可清除的自动状态',
     },
     col: {
       group: '分组',
@@ -170,6 +171,8 @@ export default {
       trial: '试用',
       rear: '后排',
       unknownWhy: '证据不够',
+      gateOffGlobal: '门槛已关闭：质量调度总开关关闭，不做判定',
+      gateOffGroup: '门槛已关闭：本分组没有开质量门槛，不做判定',
       trialLeft: '试用剩 {time}',
       rearUntil: '停留 {minutes} 分钟，{time} 到期复核',
       rearStay: '停留 {minutes} 分钟',

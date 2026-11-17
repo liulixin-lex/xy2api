@@ -46,7 +46,7 @@ export default {
       allExempt: 'All exempt',
       tabBack: 'a group is at the back of the queue for this model',
       evidenceToggle: 'Evidence for {name}',
-      noData: 'No data for this model in the group yet: all three lines are unknown (not enough evidence).',
+      noData: 'No data for this model in the group yet: all three lines are unknown ({why}).',
       recentLines: {
         ttfo: 'First output',
         firstEvent: 'First event',
@@ -59,7 +59,8 @@ export default {
       autoUntil: 'ends in {time}',
       autoRecheck: 'recheck in {time}',
       exemptAllTip: 'Every group schedules it as normal',
-      recoverTip: 'Clears back-of-queue and clearable automatic states, back to automatic scheduling',
+      recoverTip: 'Clears the rear and clearable automatic states, back to automatic scheduling',
+      recoverNone: 'Nothing to recover: not at the rear or on trial, and no clearable automatic state',
     },
     col: {
       group: 'Group',
@@ -170,6 +171,8 @@ export default {
       trial: 'Trial',
       rear: 'Rear',
       unknownWhy: 'not enough evidence',
+      gateOffGlobal: 'gate off: quality scheduling is switched off, nothing is judged',
+      gateOffGroup: 'gate off: this group\'s quality gate is off, nothing is judged',
       trialLeft: '{time} of trial left',
       rearUntil: 'stays {minutes} min, review at {time}',
       rearStay: 'stays {minutes} min',
