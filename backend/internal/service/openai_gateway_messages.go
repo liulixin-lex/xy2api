@@ -1044,6 +1044,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 						return response, usage, acc, err
 					}
 				}
+				noteSchedError(c, ev.err)
 				return nil, usage, acc, &openAICompatBufferedReadError{cause: ev.err}
 			}
 			if isOpenAICompatDoneSentinelLine(ev.line) {
@@ -1667,6 +1668,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
+				noteSchedError(c, ev.err)
 				if cancelErr := canceledPrelude(); cancelErr != nil {
 					return nil, cancelErr
 				}

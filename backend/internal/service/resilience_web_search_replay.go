@@ -264,6 +264,11 @@ func (s *OpenAIGatewayService) openAIWebSearchReplayDecide(ctx context.Context, 
 		next, changed, err := ensureOpenAIOAuthWebSearchToolForHistoryBody(sent, r.responsesLite)
 		if err == nil && changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
 			r.declared, r.replayed = true, true
+			if capture := currentSchedAttempt(ctx); capture != nil {
+				capture.mu.Lock()
+				capture.repairPrepared = !capture.first
+				capture.mu.Unlock()
+			}
 			logger.FromContext(ctx).Info("resilience.web_search_replay",
 				zap.Int64("account_id", account.ID),
 				zap.Int("upstream_status", status),
