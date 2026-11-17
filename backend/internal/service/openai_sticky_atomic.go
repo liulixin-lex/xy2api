@@ -29,13 +29,29 @@ func markOpenAIStickySpillover(selection *AccountSelectionResult, spillover bool
 	return selection
 }
 
-func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) error {
+func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) (retErr error) {
 	if releasePendingOpenAIStickyOwner(ctx, groupID, sessionHash, owner) {
 		return nil
 	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) || s.cache == nil || owner <= 0 {
 		return nil
 	}
+	// Only clear a lease after the binding is confirmed absent or moved. An
+	// unavailable binding/model read leaves cleanup to the ten-minute expiry.
+	defer func() {
+		trial, _ := ctx.Value(selectionTrialContextKey{}).(*selectionTrial)
+		if retErr != nil || trial == nil && s.selectionTrialLeases() == nil {
+			return
+		}
+		if current, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); (err == nil || errors.Is(err, ErrStickySessionNotFound)) && current != owner {
+			// Legacy caches delete eagerly. Placement after a real deletion is a
+			// replacement, whereas an excluded or temporarily unavailable owner stays.
+			if trial != nil && trial.owner == owner {
+				trial.owner = current
+			}
+			s.releaseDeletedTrialOwner(ctx, groupID, sessionHash, owner)
+		}
+	}()
 	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, owner); handled {
 		return err
 	}

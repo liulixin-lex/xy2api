@@ -2046,6 +2046,8 @@ type openAIResponsesWSUsageLogCase struct {
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
 	qualityView           schedquality.View
+	trialLeases           service.SchedTrialLeases
+	sessionID             string
 	gatewayCache          service.GatewayCache
 	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
 	acquireAccountSlot func() bool
@@ -2094,7 +2096,7 @@ func (wsPinnedQualityView) At() time.Time                            { return ti
 func (wsPinnedQualityView) GlobalEnabled() bool                      { return true }
 func (wsPinnedQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (wsPinnedQualityView) StateOf(int64, int64, string) schedquality.StateView {
-	return schedquality.StateView{Failing: true}
+	return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 }
 
 func wsResponseAccountCacheKey(responseID string) string {
@@ -2166,7 +2168,7 @@ func (*wsTurnQualityView) GlobalEnabled() bool                      { return tru
 func (*wsTurnQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (v *wsTurnQualityView) StateOf(int64, int64, string) schedquality.StateView {
 	if v.failing.Load() {
-		return schedquality.StateView{Failing: true}
+		return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 	}
 	return schedquality.StateView{}
 }
@@ -3282,7 +3284,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil, // userPlatformQuotaRepo
 	)
 	if tc.qualityView != nil {
-		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView })
+		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView }, tc.trialLeases)
 	}
 
 	cache := &concurrencyCacheMock{
@@ -3339,6 +3341,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	defer handlerServer.Close()
 
 	headers := http.Header{}
+	if tc.sessionID != "" {
+		headers.Set("session-id", tc.sessionID)
+	}
 	if tc.userAgent != nil {
 		headers.Set("User-Agent", *tc.userAgent)
 	}
@@ -3774,3 +3779,7 @@ func (s *openAIWSUsageHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ 
 	}
 	return nil, nil
 }
+
+func (wsPinnedQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }
+
+func (*wsTurnQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }

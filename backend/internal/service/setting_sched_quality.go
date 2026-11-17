@@ -2,6 +2,8 @@ package service
 
 import "context"
 
+const SettingKeySchedQualityTTFTRule = "sched_quality_ttft_rule"
+
 func schedQualitySettingEnabled(value string) bool {
 	return value == "" || value == "true"
 }

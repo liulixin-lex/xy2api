@@ -296,17 +296,20 @@ func TestCopyAccountMembersWaitingBehindGuardedDeleteCannotCommit(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var groupID, accountID int64
+	var groupID, sourceGroupID, accountID int64
 	require.NoError(t, scanSingleRow(ctx, integrationDB,
 		"INSERT INTO groups (name, platform, rate_multiplier, status, subscription_type) VALUES ($1, $2, 1, $3, $4) RETURNING id",
 		[]any{"guarded-delete-bind-race", service.PlatformAnthropic, service.StatusActive, service.SubscriptionTypeStandard}, &groupID))
 	require.NoError(t, scanSingleRow(ctx, integrationDB,
 		"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
 		[]any{"guarded-delete-bind-race-account", service.PlatformAnthropic, service.AccountTypeOAuth}, &accountID))
+	require.NoError(t, scanSingleRow(ctx, integrationDB, "INSERT INTO groups(name,platform,rate_multiplier,status,subscription_type) VALUES($1,$2,1,$3,$4) RETURNING id", []any{"guarded-delete-source", service.PlatformAnthropic, service.StatusActive, service.SubscriptionTypeStandard}, &sourceGroupID))
+	_, err := integrationDB.ExecContext(ctx, "INSERT INTO account_groups(account_id,group_id,created_at) VALUES($1,$2,NOW())", accountID, sourceGroupID)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE group_id = $1 OR account_id = $2", groupID, accountID)
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id IN ($1,$2)", groupID, sourceGroupID)
 	})
 
 	deleteTx, err := integrationEntClient.Tx(ctx)
@@ -319,8 +322,8 @@ func TestCopyAccountMembersWaitingBehindGuardedDeleteCannotCommit(t *testing.T) 
 
 	bindDone := make(chan error, 1)
 	go func() {
-		bindDone <- newGroupRepositoryWithSQL(integrationEntClient, integrationDB).
-			CopyAccountMembers(ctx, groupID, []int64{groupID}, []int64{accountID}, false)
+		_, err := newGroupRepositoryWithSQL(integrationEntClient, integrationDB).CopyAccountMembers(ctx, groupID, []int64{sourceGroupID}, false, false)
+		bindDone <- err
 	}()
 
 	require.Eventually(t, func() bool {

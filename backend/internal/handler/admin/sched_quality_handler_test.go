@@ -44,12 +44,12 @@ func (e *schedAdminHandlerEngine) ClearOverride(context.Context, int64, int64) e
 func (e *schedAdminHandlerEngine) Policy(_ context.Context, id int64) (service.SchedPolicyRecord, error) {
 	return service.SchedPolicyRecord{GroupID: id, Version: e.version, Policy: schedquality.Policy{TTFTSeconds: 10}}, nil
 }
-func (e *schedAdminHandlerEngine) UpdatePolicy(_ context.Context, id, v int64, p schedquality.Policy) (service.SchedPolicyRecord, error) {
+func (e *schedAdminHandlerEngine) UpdatePolicy(_ context.Context, id, v int64, p schedquality.Policy) (service.SchedPolicyUpdate, error) {
 	if e.conflict || v != e.version {
-		return service.SchedPolicyRecord{}, service.ErrSchedPolicyConflict
+		return service.SchedPolicyUpdate{}, service.ErrSchedPolicyConflict
 	}
 	e.version++
-	return service.SchedPolicyRecord{GroupID: id, Version: e.version, Policy: p}, nil
+	return service.SchedPolicyUpdate{SchedPolicyRecord: service.SchedPolicyRecord{GroupID: id, Version: e.version, Policy: p}}, nil
 }
 
 type schedAdminHandlerAccounts struct {

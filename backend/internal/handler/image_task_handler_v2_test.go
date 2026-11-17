@@ -221,10 +221,13 @@ func TestAsyncImageV2AdmissionLimit(t *testing.T) {
 
 	close(hr.release)
 	hr.waitStatus(taskIDOf(t, decodeTaskBody(t, first)), service.ImageTaskStatusCompleted)
+	// completed is stored before run's cleanup defers release the counters.
+	hr.handler.wg.Wait()
 	// The refused submission released its Idempotency-Key and its slot.
 	retry := hr.do(http.MethodPost, "/v1/images/generations/async", asyncV2Body, map[string]string{"Idempotency-Key": "k2"})
 	require.Equal(t, http.StatusAccepted, retry.Code, retry.Body.String())
 	hr.waitStatus(taskIDOf(t, decodeTaskBody(t, retry)), service.ImageTaskStatusCompleted)
+	hr.handler.wg.Wait()
 	require.Zero(t, hr.handler.running.Load())
 }
 

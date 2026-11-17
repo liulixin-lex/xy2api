@@ -159,6 +159,7 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 		r.switches++
 	}
 	r.lastAccount = accountID
+	r.profit.noteSend(accountID)
 	r.fallback = s.selectionFlags.accountID == accountID && s.selectionFlags.fallback
 	r.takeover = s.selectionFlags.accountID == accountID && s.selectionFlags.takeover
 	if r.sends > 0 && r.currentFailed {
@@ -268,7 +269,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
-			ProfitBasis:   r.profit.snapshot(r.lastAccount),
+			ProfitBasis:   r.profit.snapshot(),
 			UsageObserved: r.UsageObserved, UsageSource: r.UsageSource, TerminalEventSeen: r.TerminalEventSeen,
 			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing

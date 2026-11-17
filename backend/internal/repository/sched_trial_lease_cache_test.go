@@ -234,3 +234,42 @@ func TestSchedTrialLeaseRedisErrors(t *testing.T) {
 	require.ErrorContains(t, cache.Release(ctx, 1, "model-a", 1, "s:a"), "synthetic storage failure")
 	require.ErrorContains(t, cache.ReleaseGroup(ctx, 1, "model-a", 1), "synthetic storage failure")
 }
+
+func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
+	for _, order := range []string{"failure_first", "release_after_commit"} {
+		t.Run(order, func(t *testing.T) {
+			leases, rdb, _, now := newTrialLeaseTestCache(t)
+			ctx := context.Background()
+			first, second, session := service.TrialLeaseRequestMember("request-one"), service.TrialLeaseRequestMember("request-two"), service.TrialLeaseSessionMember("session")
+			requireTrialAcquire(t, leases, 7, first, now)
+			requireTrialAcquire(t, leases, 7, second, now)
+			canceled, commit := make(chan struct{}), make(chan struct{})
+			released := make(chan error, 1)
+			go func() { close(canceled); <-commit; released <- leases.Release(ctx, 1, "model-a", 7, first) }()
+			<-canceled
+			if order == "failure_first" {
+				close(commit)
+				require.NoError(t, <-released)
+			}
+			bindings := NewGatewayCache(rdb).(service.OpenAIStickyVersionedCache)
+			changed, commitErr := bindings.CommitSessionBinding(ctx, 7, "openai:session", service.StickySessionBinding{}, 1, time.Hour)
+			require.NoError(t, commitErr)
+			require.True(t, changed)
+			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, second, session, now.Add(time.Second)))
+			if order == "release_after_commit" {
+				close(commit)
+				require.NoError(t, <-released)
+			}
+			members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+			require.NoError(t, err)
+			require.Equal(t, []string{"7:" + session}, members)
+			binding, bindErr := bindings.GetSessionBinding(ctx, 7, "openai:session")
+			require.NoError(t, bindErr)
+			require.EqualValues(t, 1, binding.AccountID)
+			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, second, session, now))
+			score, err := rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "7:"+session).Result()
+			require.NoError(t, err)
+			require.EqualValues(t, now.Add(time.Second).UnixMilli(), score)
+		})
+	}
+}

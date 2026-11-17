@@ -60,8 +60,8 @@ func (e *schedAdminEngine) ClearOverride(_ context.Context, a, g int64) error {
 func (e *schedAdminEngine) Policy(_ context.Context, _ int64) (SchedPolicyRecord, error) {
 	return e.policy, e.policyErr
 }
-func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedquality.Policy) (SchedPolicyRecord, error) {
-	return e.policy, e.policyErr
+func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedquality.Policy) (SchedPolicyUpdate, error) {
+	return SchedPolicyUpdate{SchedPolicyRecord: e.policy}, e.policyErr
 }
 
 type schedAdminAccounts struct {

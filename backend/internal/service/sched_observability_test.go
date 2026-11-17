@@ -69,7 +69,7 @@ func TestSchedObsSummaryWindows(t *testing.T) {
 		require.Equal(t, []map[string]any{{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(2), "cycles_failed": float64(1), "cycle_ms_max": float64(5000),
-			"cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0), "trial": float64(0), "clear": float64(0),
 		}}, schedObsLogRecords(t, output))
 
 		output.Reset()
@@ -78,7 +78,7 @@ func TestSchedObsSummaryWindows(t *testing.T) {
 		require.Equal(t, []map[string]any{{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(0), "cycles_failed": float64(0), "cycle_ms_max": float64(0),
-			"cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0), "trial": float64(0), "clear": float64(0),
 		}}, schedObsLogRecords(t, output))
 		s.Count("cooled", 1)
 		s.Stop()
@@ -114,7 +114,7 @@ func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 		require.Equal(t, map[string]any{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(33), "cycles_failed": float64(32), "cycle_ms_max": float64(6000),
-			"cooled": float64(96), "released": float64(128),
+			"cooled": float64(96), "released": float64(128), "trial": float64(0), "clear": float64(0),
 		}, records[1])
 
 		output.Reset()
@@ -130,7 +130,7 @@ func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 		require.Equal(t, map[string]any{
 			"level": "INFO", "msg": "sched_quality.summary", "component": "sched_quality",
 			"cycles": float64(2), "cycles_failed": float64(0), "cycle_ms_max": float64(8000),
-			"cooled": float64(0), "released": float64(0),
+			"cooled": float64(0), "released": float64(0), "trial": float64(0), "clear": float64(0),
 		}, records[1])
 	})
 }

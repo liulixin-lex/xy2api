@@ -143,7 +143,7 @@ func (codexModelsSelectionView) GlobalEnabled() bool                      { retu
 func (codexModelsSelectionView) TakeoverIdle(int64) (time.Duration, bool) { return 0, false }
 func (v codexModelsSelectionView) StateOf(_ int64, accountID int64, _ string) schedquality.StateView {
 	if accountID == 11 {
-		return schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: v.manual}}
+		return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: v.manual}}
 	}
 	return schedquality.StateView{}
 }
@@ -1077,3 +1077,5 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 
 func (codexModelsSelectionView) GroupEnabled(int64) bool { return true }
 func (codexModelsSelectionView) ResetAt(int64) time.Time { return time.Time{} }
+
+func (codexModelsSelectionView) SessionSlowTwice(int64, int64, string, string) bool { return false }

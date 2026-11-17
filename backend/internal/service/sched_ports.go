@@ -66,10 +66,8 @@ type SchedAttempt interface {
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
-	// Report Begin (FinishedAt zero) and Finish once each. Engine integration
-	// must adopt F7: use observations only for in-flight tracking and admit
-	// completed evidence through LoadInsertedAfter. The legacy engine on this
-	// branch still adds Finish observations directly to its window.
+	// Report Begin (FinishedAt zero) and Finish once each for in-flight tracking.
+	// Completed evidence enters the engine only through LoadInsertedAfter (F7).
 	SetObserver(fn func(schedquality.AttemptSample))
 	Flush(ctx context.Context) error
 }
@@ -120,18 +118,35 @@ type SchedModelCount struct {
 	Model    string
 	Requests int
 }
+type SchedPolicyUpdate struct {
+	SchedPolicyRecord
+	RelaxedLines []schedquality.Dimension
+	Cleared      int
+}
+type SchedTTFTRuleRecord struct {
+	Version int64                    `json:"version"`
+	Params  schedquality.RuleBParams `json:"-"`
+}
+type SchedTTFTRuleUpdate struct {
+	SchedTTFTRuleRecord
+	Change  schedquality.RuleBParamChange
+	Cleared int
+}
 type SchedPolicyChange struct {
 	AccountID int64
 	Model     string
-	Dims      []schedquality.Dimension
+	Lines     map[schedquality.Dimension]schedquality.Verdict
 }
-
 type SchedGroupRow struct {
-	OtherGroupIDs []int64
-	Evaluation    schedquality.Evaluation
-	GroupID       int64
-	Model         string
-	View          schedquality.StateView
+	GroupID          int64
+	Model            string
+	View             schedquality.StateView
+	TTFT             schedquality.TTFTEvidence
+	TTFTVerdict      schedquality.Verdict
+	TTFTSourceGroups []int64
+	Error            schedquality.ErrorAssessment
+	Cache            schedquality.CacheAssessment
+	SourceGroups     []int64
 }
 type SchedQualityEngine interface {
 	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)
@@ -146,7 +161,10 @@ type SchedQualityEngine interface {
 	Policy(ctx context.Context, groupID int64) (SchedPolicyRecord, error)
 	// UpdatePolicy compares the entire setting's version, updates this group's v4,
 	// and increments the setting version; a mismatch returns ErrSchedPolicyConflict.
-	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error)
+	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyUpdate, error)
+	SetTrialLeases(SchedTrialLeases)
+	TTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
+	UpdateTTFTRule(ctx context.Context, expectedVersion int64, p schedquality.RuleBParams) (SchedTTFTRuleUpdate, error)
 }
 type SchedQualityStore interface {
 	DeleteDecisionsBefore(ctx context.Context, before time.Time) (int64, error)
@@ -155,20 +173,23 @@ type SchedQualityStore interface {
 	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and deletes the account's rows.
 	RunReset(ctx context.Context, accountID int64) (resetAt time.Time, err error)
 	// LoadRows reads states, overrides and reset times in one read-only repeatable-read transaction.
-	LoadRows(ctx context.Context) (states []schedquality.StateRow, overrides []SchedOverride, resetAt map[int64]time.Time, err error)
+	LoadRows(ctx context.Context) (states []schedquality.LineState, overrides []SchedOverride, resetAt map[int64]time.Time, err error)
 	LoadMembers(ctx context.Context) (map[int64][]int64, error) // OpenAI group id -> account ids
 	UpsertOverride(ctx context.Context, o SchedOverride) error
 	DeleteOverride(ctx context.Context, accountID, groupID int64) error
 	LoadPolicies(ctx context.Context) (map[int64]SchedPolicyRecord, error)
-	SavePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error)
+	RunExclusive(ctx context.Context, fn func(SchedQualityTx) error) error
+	LoadTTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
 }
 type SchedQualityTx interface {
-	States() ([]schedquality.StateRow, error)
+	States() ([]schedquality.LineState, error)
 	Overrides() ([]SchedOverride, error)
 	ResetTimes() (map[int64]time.Time, error)
-	Upsert(rows []schedquality.StateRow) error
+	Upsert(rows []schedquality.LineState) error
 	InsertDecisions(rows []schedquality.Decision) error
-	Delete(keys []schedquality.StateRow) error
+	Delete(keys []schedquality.LineKey) error
+	SavePolicy(groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error)
+	SaveTTFTRule(expectedVersion int64, p schedquality.RuleBParams) (SchedTTFTRuleRecord, error)
 	// DeleteOverrides requires the key and original expires_at to still match.
 	// It deletes expired overrides or overrides for an OpenAI group the account left.
 	// The all-groups override (group_id=0) is only removed when expired.
@@ -180,7 +201,10 @@ type SchedBoardRow struct {
 	AccountID   int64
 	Name        string
 	Rank        int
-	Layer       string // normal | below | stopped
+	Layer       string // front | trial | trial_full | rear | stopped
+	Lines       map[string]string
+	Pinned      bool
+	Excluded    string
 	Dims        []schedquality.Dimension
 	Until       *time.Time
 	Exempt      bool

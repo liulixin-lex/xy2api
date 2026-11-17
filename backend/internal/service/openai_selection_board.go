@@ -14,14 +14,18 @@ import (
 // It never acquires slots or records full observations.
 type OpenAISelectionBoard struct {
 	service *OpenAIGatewayService
+	leases  SchedTrialLeases
 	view    func() schedquality.View
 	now     func() time.Time
 }
 
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
 
-func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View) *OpenAISelectionBoard {
+func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View, leases ...SchedTrialLeases) *OpenAISelectionBoard {
 	board := &OpenAISelectionBoard{service: service, view: view, now: time.Now}
+	if len(leases) > 0 {
+		board.leases = leases[0]
+	}
 	if service != nil {
 		service.selectionBoard = board
 		if service.resilience != nil {
@@ -60,7 +64,8 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 	}
 	multiplier := s.openAIOAuthSchedulingRateMultiplier(ctx)
-	selectionReq := selectionRequest{TokenBilled: true, Loads: loads, OAuthRateMultiplier: multiplier}
+	selectionReq := s.selectionRequest(ctx, req, loads)
+	selectionReq.TokenBilled, selectionReq.OAuthRateMultiplier = true, multiplier
 	checker := s
 	channelRestricted := s.checkChannelPricingRestriction(ctx, &groupID, model)
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
@@ -86,21 +91,51 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 		key := buildSelectionKey(view, groupID, model, account, selectionReq, now)
 		row := SchedBoardRow{AccountID: account.ID, Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
-		row.Name, row.Layer = account.Name, "normal"
+		row.Name, row.Layer, row.Pinned = account.Name, "front", key.Pinned
 		row.LoadRate, row.LastUsedAt = key.LoadRate, account.LastUsedAt
 		state := selectionState(view, groupID, account, model)
 		override, _ := state.EffectiveOverride(now)
 		row.Exempt = override.Mode == schedquality.OverrideExempt
-		if key.Standing == int(schedquality.StandBack) {
-			row.Layer = "below"
+		placement := state.Placement(selectionAuto(view, groupID, now), now)
+		if placement == schedquality.PlaceRear {
+			row.Layer = "rear"
 		}
-		if state.Failing {
-			row.Dims = append([]schedquality.Dimension(nil), state.Dims...)
-			if !state.Until.IsZero() {
-				until := state.Until
-				row.Until = &until
+		if placement == schedquality.PlaceTrial {
+			row.Layer = "trial"
+			if key.Tier == 1 {
+				row.Layer = "trial_full"
 			}
 		}
+		row.Lines = map[string]string{}
+		hasRear := state.TTFO.Identity == schedquality.IdentityRear || state.Error.Identity == schedquality.IdentityRear || state.Cache.Identity == schedquality.IdentityRear
+		for name, line := range map[string]schedquality.LineView{"ttfo": state.TTFO, "error": state.Error, "cache": state.Cache} {
+			identity := "unknown"
+			if line.Identity == schedquality.IdentityPass {
+				identity = "pass"
+			}
+			if line.Identity == schedquality.IdentityRear {
+				identity = "rear"
+			}
+			if line.Trial {
+				identity = "trial"
+			}
+			row.Lines[name] = identity
+			var until time.Time
+			if hasRear && line.Identity == schedquality.IdentityRear {
+				until = line.Until
+			}
+			if !hasRear && line.Trial {
+				until = line.TrialUntil
+			}
+			if !until.IsZero() && (row.Until == nil || until.After(*row.Until)) {
+				at := until
+				row.Until = &at
+			}
+		}
+		if strings.HasPrefix(reason, "profit_") {
+			row.Excluded = reason
+		}
+
 		if !ok {
 			row.Layer = "stopped"
 			if reason == "account_scheduling_threshold" {

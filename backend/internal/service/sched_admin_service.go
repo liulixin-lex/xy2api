@@ -231,5 +231,5 @@ func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, 
 	if e != nil {
 		return SchedAdminPolicy{}, e
 	}
-	return schedAdminPolicy(r), nil
+	return schedAdminPolicy(r.SchedPolicyRecord), nil
 }

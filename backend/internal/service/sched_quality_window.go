@@ -9,7 +9,7 @@ import (
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
-const schedEvidenceRetention = 180 * time.Minute
+const schedEvidenceRetention = 250 * time.Minute
 
 type schedQualityWindow struct {
 	mu            sync.Mutex
@@ -17,6 +17,8 @@ type schedQualityWindow struct {
 	samples       map[SchedAccountModel][]q.AttemptSample
 	previous      map[string]*q.AttemptSample
 	newFinishedAt time.Time
+	running       map[string]q.AttemptSample
+	byGroupModel  map[schedGroupModel][]q.AttemptSample
 }
 
 func (w *schedQualityWindow) add(s q.AttemptSample) {
@@ -30,11 +32,34 @@ func (w *schedQualityWindow) take(now time.Time) map[SchedAccountModel][]q.Attem
 	pending := w.pending
 	w.pending = nil
 	w.mu.Unlock()
-	w.merge(pending, now)
+	if w.running == nil {
+		w.running = make(map[string]q.AttemptSample)
+	}
+	for _, row := range pending {
+		old, exists := w.running[row.AttemptID]
+		if exists && !old.FinishedAt.IsZero() && row.FinishedAt.IsZero() {
+			continue
+		}
+		w.running[row.AttemptID] = row
+	}
+	w.merge(nil, now)
 	return w.samples
 }
 
 func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
+	if w.running == nil {
+		w.running = make(map[string]q.AttemptSample)
+	}
+	for _, row := range added {
+		if !row.FinishedAt.IsZero() {
+			delete(w.running, row.AttemptID)
+		}
+	}
+	for id, row := range w.running {
+		if row.FinishedAt.IsZero() && !row.StartedAt.After(now.Add(-2*time.Hour)) || !row.FinishedAt.IsZero() && !row.FinishedAt.After(now.Add(-2*time.Minute)) {
+			delete(w.running, id)
+		}
+	}
 	if w.samples == nil {
 		w.samples = make(map[SchedAccountModel][]q.AttemptSample)
 	}
@@ -78,12 +103,12 @@ func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
 	for pair, rows := range byPair {
 		kept := make([]q.AttemptSample, 0, len(rows))
 		for _, s := range rows {
-			if s.FinishedAt.IsZero() || s.FinishedAt.Before(now.Add(-schedEvidenceRetention)) || alive[s.AttemptID] {
+			if s.FinishedAt.IsZero() || schedAvailableAt(s).Before(now.Add(-schedEvidenceRetention)) || alive[s.AttemptID] {
 				continue
 			}
 			alive[s.AttemptID] = true
-			if !known[s.AttemptID] && (w.newFinishedAt.IsZero() || s.FinishedAt.Before(w.newFinishedAt)) {
-				w.newFinishedAt = s.FinishedAt
+			if !known[s.AttemptID] && (w.newFinishedAt.IsZero() || schedAvailableAt(s).Before(w.newFinishedAt)) {
+				w.newFinishedAt = schedAvailableAt(s)
 			}
 			kept = append(kept, schedQualityCloneSample(s))
 		}
@@ -93,6 +118,14 @@ func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
 			w.samples[pair] = kept
 		}
 	}
+	// A delayed Begin must not resurrect a completed attempt.
+	for id := range known {
+		delete(w.running, id)
+	}
+	for id := range alive {
+		delete(w.running, id)
+	}
+	w.indexGroups()
 	for id := range w.previous {
 		if !alive[id] {
 			delete(w.previous, id)
@@ -154,6 +187,23 @@ func closerPredecessor(current, candidate q.AttemptSample, previous *q.AttemptSa
 // Completion-window neighbors cannot prove dispatch-order adjacency: an
 // intervening failed attempt may already have left the window. Resolve every
 // new session attempt against the ledger in one batch and cache that fact.
+type schedGroupModel struct {
+	group int64
+	model string
+}
+
+func schedAvailableAt(s q.AttemptSample) time.Time {
+	return schedQualitySince(s.FinishedAt, s.InsertedAt)
+}
+func (w *schedQualityWindow) indexGroups() {
+	w.byGroupModel = make(map[schedGroupModel][]q.AttemptSample)
+	for _, rows := range w.samples {
+		for _, s := range rows {
+			k := schedGroupModel{s.GroupID, s.Model}
+			w.byGroupModel[k] = append(w.byGroupModel[k], s)
+		}
+	}
+}
 func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader schedPreviousLoader) error {
 	var missing []q.AttemptSample
 	for _, rows := range w.samples {
@@ -196,10 +246,12 @@ func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader sc
 	for pair, rows := range w.samples {
 		for i := range rows {
 			p := w.previous[rows[i].AttemptID]
+			rows[i].Switched = p != nil && p.AccountID != rows[i].AccountID
 			rows[i].Continuation = p != nil && p.StartedAt.Before(rows[i].StartedAt) && q.IsContinuation(rows[i], *p)
 		}
 		w.samples[pair] = rows
 	}
+	w.indexGroups()
 	return nil
 }
 
@@ -212,6 +264,10 @@ func schedQualityCloneInt(p *int) *int {
 }
 func schedQualityCloneSample(s q.AttemptSample) q.AttemptSample {
 	s.TTFOMs = schedQualityCloneInt(s.TTFOMs)
+	s.FirstEventMs = schedQualityCloneInt(s.FirstEventMs)
+	s.FirstAnswerMs = schedQualityCloneInt(s.FirstAnswerMs)
+	s.HTTPStatus = schedQualityCloneInt(s.HTTPStatus)
+	s.OutputBytes = schedQualityCloneInt(s.OutputBytes)
 	s.CensoredMs = schedQualityCloneInt(s.CensoredMs)
 	s.PromptTokens = schedQualityCloneInt(s.PromptTokens)
 	s.InputTokens = schedQualityCloneInt(s.InputTokens)
