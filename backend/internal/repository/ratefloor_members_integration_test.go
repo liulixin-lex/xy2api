@@ -29,3 +29,7 @@ func TestRatefloorMemberPersistenceIntegration(t *testing.T) {
 func TestRatefloorCopyConcurrentSourceChangeIntegration(t *testing.T) {
 	runRatefloorCopyConcurrentSourceChange(t, integrationEntClient, integrationDB)
 }
+
+func TestRatefloorMembershipLockOrderIntegration(t *testing.T) {
+	runRatefloorMembershipLockOrder(t, integrationEntClient, integrationDB)
+}

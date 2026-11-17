@@ -51,4 +51,5 @@ func TestRatefloorMemberPersistence(t *testing.T) {
 	require.NoError(t, migrate.Create(ctx, migrate.NewSchema(driver), []*schema.Table{migrate.ProxiesTable, migrate.AccountsTable, migrate.GroupsTable, migrate.AccountGroupsTable}, migrate.WithForeignKeys(false)))
 	runRatefloorMemberPersistence(t, client, db)
 	runRatefloorCopyConcurrentSourceChange(t, client, db)
+	runRatefloorMembershipLockOrder(t, client, db)
 }

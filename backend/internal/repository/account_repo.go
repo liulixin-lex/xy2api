@@ -2180,6 +2180,9 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		// 已处于外部事务中（ErrTxStarted），复用当前 client
 		txClient = r.client
 	}
+	if err := bumpAccountMembershipRevision(ctx, txClient, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
@@ -2198,9 +2201,6 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 			accountID, pq.Array(groupIDs)); err != nil {
 			return err
 		}
-	}
-	if err := bumpAccountMembershipRevision(ctx, txClient, []int64{accountID}); err != nil {
-		return err
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {

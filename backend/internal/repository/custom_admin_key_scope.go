@@ -208,6 +208,9 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 	if len(added) == 0 && len(removed) == 0 {
 		return nil
 	}
+	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, r.client, added); err != nil {
 		return err
 	}
@@ -220,9 +223,6 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 		if _, err := r.client.ExecContext(ctx, `INSERT INTO account_groups (account_id, group_id, created_at) VALUES ($1, $2, NOW())`, accountID, id); err != nil {
 			return err
 		}
-	}
-	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
-		return err
 	}
 	return enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(mergeGroupIDs(existing, groupIDs)))
 }
