@@ -33,6 +33,7 @@
             v-model="form[field]"
             type="number"
             step="1"
+            :disabled="saving"
             :aria-invalid="!valid[field]"
             :aria-describedby="!valid[field] || outside[field] ? `${ids[field]}-note` : undefined"
             :placeholder="record.defaults ? display(record.defaults[field]) : undefined"
@@ -104,6 +105,8 @@ const record = shallowRef<BackendTTFTRule | null>(null)
 const loadFailed = ref(false)
 // The last save stopped at the confirm dialog's cancel.
 const declined = ref(false)
+// A PUT is on its way: the inputs wait for it, so its answer (filled back in) cannot overwrite newer typing.
+const saving = ref(false)
 const conflict = ref(false)
 const saveFailed = ref(false)
 const saveMessage = ref('')
@@ -186,6 +189,7 @@ async function save(): Promise<boolean> {
   declined.value = false
   saveFailed.value = false
   saveMessage.value = ''
+  saving.value = true
   try {
     const result = await schedQualityAPI.updateTTFTRule({ expected_version: saved.version, ...next })
     // Merged: an answer without the defaults or the replayed ranges keeps the ones loaded.
@@ -204,6 +208,8 @@ async function save(): Promise<boolean> {
       saveMessage.value = extractApiErrorMessage(error, '')
     }
     return false
+  } finally {
+    saving.value = false
   }
 }
 

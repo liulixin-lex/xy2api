@@ -179,6 +179,23 @@ describe('SchedTTFTRuleField', () => {
     expect(input(w, 'confidence').attributes('data-sq-ttft-unsaved-input')).toBeUndefined()
   })
 
+  // I2: the answer is filled back in, so nothing can be typed while the PUT is on its way.
+  it('locks the inputs while a save is on its way and opens them again when it ends', async () => {
+    let answer!: (value: unknown) => void
+    api.updateTTFTRule.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    const w = await mountField()
+    await input(w, 'tolerance').setValue('15')
+    const saving = vm(w).save()
+    await flushPromises()
+    expect(api.updateTTFTRule).toHaveBeenCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.05 })
+    expect(['confidence', 'tolerance', 'peer_margin'].map((field) => (input(w, field).element as HTMLInputElement).disabled)).toEqual([true, true, true])
+    answer({ ...rule({ tolerance: 0.15 }), version: 5, change: 'tighten', cleared: 0 })
+    expect(await saving).toBe(true)
+    await flushPromises()
+    expect((input(w, 'tolerance').element as HTMLInputElement).disabled).toBe(false)
+    expect((input(w, 'tolerance').element as HTMLInputElement).value).toBe('15')
+  })
+
   it('keeps the loaded defaults and replayed ranges when the save answer leaves them out, and says what a relaxation cleared', async () => {
     const w = await mountField()
     await input(w, 'peer_margin').setValue('10')
