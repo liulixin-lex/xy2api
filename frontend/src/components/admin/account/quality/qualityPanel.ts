@@ -40,16 +40,17 @@ type PlaceDetail = Pick<BackendAccountDetail, 'stop'> & Partial<Pick<BackendAcco
 /**
  * What an unknown line in a group is down to besides the evidence. A stale view comes first: before the engine's
  * first cycle (a few seconds after a restart) the backend answers stale with global_enabled false, so only a fresh
- * view tells quality scheduling is switched off (selection then ignores the layers; judging goes on). A group whose
- * policy is off is not judged at all. null: the gate works and the evidence decides.
+ * view tells anything about the switches. A group whose policy is off is not judged at all, whatever the global
+ * switch; the global switch off alone only stops layering (judging goes on). null: the gate works and the evidence
+ * decides.
  */
 export function gateOff(
   detail: Partial<Pick<BackendAccountDetail, 'global_enabled' | 'stale'>>,
   group: BackendDetailGroup
 ): 'stale' | 'global' | 'group' | null {
   if (detail.stale === true) return 'stale'
-  if (detail.global_enabled === false) return 'global'
-  return group.policy.enabled === false ? 'group' : null
+  if (group.policy.enabled === false) return 'group'
+  return detail.global_enabled === false ? 'global' : null
 }
 
 export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model: string | null): PanelPlace {
