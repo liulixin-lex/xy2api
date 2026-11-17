@@ -751,7 +751,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		Stream:                        reqStream,
 		OpenAIWSMode:                  false,
 		Duration:                      time.Since(startTime),
-		FirstTokenMs:                  firstTokenMs,
+		FirstTokenMs:                  schedFirstEvent(c, startTime, firstTokenMs),
 	}
 	if imageCount > 0 {
 		forwardResult.ImageCount = imageCount
@@ -1425,8 +1425,8 @@ func openAIStreamItemHasVisibleOutput(item gjson.Result) bool {
 	return false
 }
 
-// Structural progress can commit an attempt and disarm first-output failover,
-// but TTFT should start only when the stream carries content a client can use.
+// Legacy visible-mode usage TTFT projection (H.13). Quality timing and
+// first-output deadlines use resilience.ClassifyOutput instead.
 func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" || trimmed == "[DONE]" {
@@ -2490,6 +2490,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// writes the pre-output heartbeats itself, so a failed heartbeat is seen
 	// as a departed client (PM7).
 	guarded := resilience.Current().StrictTerminalOn()
+	stagePrelude := !resilience.Current().Enabled || resilience.Current().Stream.PreludeStaging
 	firstOutputTimeout := time.Duration(0)
 	var firstOutputPlan resilience.TimeoutPlan
 	if guarded && account != nil && account.Platform == PlatformOpenAI {
@@ -2624,7 +2625,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			TerminalSeen:     observedTerminal.Seen,
 			TerminalValid:    observedTerminal.Valid,
 			usage:            usage,
-			firstTokenMs:     relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),
+			firstTokenMs:     schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode)),
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
@@ -2760,7 +2761,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			observeOpenAIPreludeCreated(preludeTrace, sourceEventType)
-			observeSchedPayload(c, dataBytes, sourceEventType)
+			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			if account == nil || account.Platform != PlatformOpenAI {
+				commitsOutput = openAIStreamDataStartsClientOutput(data, sourceEventType)
+			}
+			observeSchedPayload(c, dataBytes, pendingSSEEventType)
 			observer.ObserveOpenAI(dataBytes, sourceEventType)
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -2952,16 +2957,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			lineStartsClientOutput = !stagePrelude || forceFlushFailedEvent || commitsOutput
 			// Content stops the first-output deadline even after a failed
 			// heartbeat, so it cannot cut the drain of the usage (PM7).
-			firstOutputSeen = firstOutputSeen || lineStartsClientOutput
+			firstOutputSeen = firstOutputSeen || lineStartsClientOutput && !suppressCurrentEvent
 			if lineStartsClientOutput && !clientOutputStarted {
 				releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)
 			}
 			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
+				schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode))
 			}
 			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 		}
@@ -2997,7 +3003,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if responsesEOF && line == "" {
 				wireLine = ""
 			}
-			if !clientOutputStarted && !lineStartsClientOutput {
+			if stagePrelude && !clientOutputStarted && !lineStartsClientOutput {
 				if _, err := pendingStage.WriteString(wireLine); err != nil {
 					message := "OpenAI first-output staging failed"
 					if errors.Is(err, errOpenAIFirstOutputStageLimit) {
@@ -3261,7 +3267,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		processLine: processLine,
 		finish:      finish,
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
-		contentSeen: func() bool { return firstOutputSeen },
+		contentSeen: func() bool { return firstOutputSeen || clientOutputStarted },
 		onDeadline: func() (*openaiStreamingResultPassthrough, error) {
 			if resilience.BudgetTraceEnabledForTest {
 				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")

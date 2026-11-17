@@ -459,7 +459,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
 			ResponseHeaders:               lease.HandshakeHeaders(),
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  markSchedFirstEvent(schedCapture, startTime, firstTokenMs),
 			ClientDisconnect:              clientDisconnected,
 		}
 	}
@@ -663,6 +663,7 @@ readLoop:
 		if firstTokenMs == nil && isTokenEvent {
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			markSchedFirstEvent(schedCapture, startTime, &ms)
 		}
 		if debugEnabled && shouldLogOpenAIWSEvent(eventCount, eventType) {
 			logOpenAIWSModeDebug(

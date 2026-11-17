@@ -675,7 +675,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
 			ResponseHeaders:               cloneHeader(resp.Header),
 			Duration:                      time.Since(turnStart),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  markSchedFirstEvent(schedCapture, turnStart, firstTokenMs),
 		}
 		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
@@ -788,6 +788,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if firstTokenMs == nil {
 				ms := int(time.Since(turnStart).Milliseconds())
 				firstTokenMs = &ms
+				markSchedFirstEvent(schedCapture, turnStart, &ms)
 			}
 		}
 		if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {

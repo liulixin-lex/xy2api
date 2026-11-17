@@ -656,6 +656,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
+	resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("user_admission_ms", routingStart)
 
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
 	if !acquired {
@@ -768,6 +769,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				requestPlatform,
 			)
 		}
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_selection_ms", time.Now())
 		selection, scheduleDecision, err := selectNext(c.Request.Context(), failedAccountIDs)
 		if err != nil {
 			recordSelectionExhausted(c.Request.Context())
@@ -852,6 +854,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_admission_ms", time.Now())
 		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, previousResponseID != "", selectNext, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
@@ -871,6 +874,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("upstream_prepare_ms", forwardStart)
 		// 用扣除非语义心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
@@ -1393,6 +1397,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
+	resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("user_admission_ms", routingStart)
 
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
 	if !acquired {
@@ -1480,6 +1485,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				requestPlatform,
 			)
 		}
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_selection_ms", time.Now())
 		selection, scheduleDecision, err := selectNext(c.Request.Context(), failedAccountIDs)
 		if err != nil {
 			recordSelectionExhausted(c.Request.Context())
@@ -1522,6 +1528,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_admission_ms", time.Now())
 		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, false, selectNext, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
@@ -1540,6 +1547,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("upstream_prepare_ms", forwardStart)
 
 		defaultMappedModel := strings.TrimSpace(effectiveMappedModel)
 		// 应用渠道模型映射到请求体

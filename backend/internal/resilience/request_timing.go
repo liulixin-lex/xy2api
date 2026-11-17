@@ -9,27 +9,28 @@ import (
 // from forgeable client headers and must never drive budget or scheduling.
 // Pointers distinguish an observed zero from an unavailable/historical value.
 type RequestTiming struct {
-	BodyBytes               *int64  `json:"body_bytes,omitempty"`
-	FirstReadMs             *int64  `json:"first_read_ms,omitempty"`
-	BodyEOFMs               *int64  `json:"body_eof_ms,omitempty"`
-	AnchorBasis             *string `json:"anchor_basis,omitempty"`
-	AnchorEligible          *bool   `json:"anchor_eligible,omitempty"`
-	ReceiptSource           *string `json:"receipt_source,omitempty"`
-	BodyReceiptRepeat       *int64  `json:"body_receipt_repeat,omitempty"`
-	PreDispatchMs           *int64  `json:"pre_dispatch_ms,omitempty"`
-	KeepaliveCommitMs       *int64  `json:"keepalive_commit_ms,omitempty"`
-	WireStatus              *int64  `json:"wire_status,omitempty"`
-	DispatchCount           *int64  `json:"dispatch_count,omitempty"`
-	MinDispatchRemainingMs  *int64  `json:"min_dispatch_remaining_ms,omitempty"`
-	FinalDeadlineMs         *int64  `json:"final_deadline_ms,omitempty"`
-	LateAttemptNoTimerCount *int64  `json:"-"`
-	BudgetStartMode         *string `json:"budget_start_mode,omitempty"`
-	BudgetT0UnixMs          *int64  `json:"budget_t0_unix_ms,omitempty"`
-	LateAttemptCount        *int64  `json:"-"`
-	ClientFamily            *string `json:"client_family,omitempty"`
-	ClientCancelMs          *int64  `json:"client_cancel_ms,omitempty"`
-	CancelStage             *string `json:"cancel_stage,omitempty"`
-	CDNObserved             *string `json:"cdn_observed,omitempty"`
+	DispatchPhases          json.RawMessage `json:"dispatch_phases,omitempty"`
+	BodyBytes               *int64          `json:"body_bytes,omitempty"`
+	FirstReadMs             *int64          `json:"first_read_ms,omitempty"`
+	BodyEOFMs               *int64          `json:"body_eof_ms,omitempty"`
+	AnchorBasis             *string         `json:"anchor_basis,omitempty"`
+	AnchorEligible          *bool           `json:"anchor_eligible,omitempty"`
+	ReceiptSource           *string         `json:"receipt_source,omitempty"`
+	BodyReceiptRepeat       *int64          `json:"body_receipt_repeat,omitempty"`
+	PreDispatchMs           *int64          `json:"pre_dispatch_ms,omitempty"`
+	KeepaliveCommitMs       *int64          `json:"keepalive_commit_ms,omitempty"`
+	WireStatus              *int64          `json:"wire_status,omitempty"`
+	DispatchCount           *int64          `json:"dispatch_count,omitempty"`
+	MinDispatchRemainingMs  *int64          `json:"min_dispatch_remaining_ms,omitempty"`
+	FinalDeadlineMs         *int64          `json:"final_deadline_ms,omitempty"`
+	LateAttemptNoTimerCount *int64          `json:"-"`
+	BudgetStartMode         *string         `json:"budget_start_mode,omitempty"`
+	BudgetT0UnixMs          *int64          `json:"budget_t0_unix_ms,omitempty"`
+	LateAttemptCount        *int64          `json:"-"`
+	ClientFamily            *string         `json:"client_family,omitempty"`
+	ClientCancelMs          *int64          `json:"client_cancel_ms,omitempty"`
+	CancelStage             *string         `json:"cancel_stage,omitempty"`
+	CDNObserved             *string         `json:"cdn_observed,omitempty"`
 }
 
 type ResponseStageTiming struct {
@@ -38,6 +39,10 @@ type ResponseStageTiming struct {
 }
 
 type timingTrace struct {
+	dispatchPhase   string
+	phaseStarted    time.Time
+	phasesFinished  time.Time
+	dispatchPhases  map[string]time.Duration
 	firstDispatch   time.Time
 	keepaliveCommit time.Time
 	wireStatus      int64
@@ -50,6 +55,65 @@ type timingTrace struct {
 
 func observed[T any](v T) *T { return &v }
 
+// BeginDispatchPhase splits only the first EOF-to-dispatch interval into
+// mutually exclusive phases. Retries cannot overwrite or extend this trace.
+func (s *RequestState) BeginDispatchPhase(name string, at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.timing.phasesFinished.IsZero() || s.bodyReceived.IsZero() || at.Before(s.bodyReceived) {
+		return
+	}
+	s.closeDispatchPhaseLocked(at)
+	s.timing.dispatchPhase, s.timing.phaseStarted = name, at
+}
+
+func (s *RequestState) closeDispatchPhaseLocked(at time.Time) {
+	if s.bodyReceived.IsZero() {
+		return
+	}
+	name, start := s.timing.dispatchPhase, s.timing.phaseStarted
+	if start.IsZero() {
+		name, start = "body_decode_ms", s.bodyReceived
+	}
+	if at.Before(start) {
+		return
+	}
+	if s.timing.dispatchPhases == nil {
+		s.timing.dispatchPhases = make(map[string]time.Duration)
+	}
+	s.timing.dispatchPhases[name] += at.Sub(start)
+	s.timing.dispatchPhase, s.timing.phaseStarted = name, at
+}
+
+// FinishRejectedDispatch freezes an explicit rejection before any upstream send.
+// Normal completions without dispatch instrumentation leave the phases absent.
+func (s *RequestState) FinishRejectedDispatch(at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.timing.phasesFinished.IsZero() || (s.gatewayRecord != nil && s.gatewayRecord.sends > 0) {
+		return
+	}
+	s.closeDispatchPhaseLocked(at)
+	s.timing.phasesFinished = at
+}
+
+func (s *RequestState) dispatchPhasesLocked() map[string]int64 {
+	if s.timing.phasesFinished.IsZero() {
+		return nil
+	}
+	out := make(map[string]int64, len(s.timing.dispatchPhases))
+	for name, elapsed := range s.timing.dispatchPhases {
+		out[name] = elapsed.Milliseconds()
+	}
+	return out
+}
+
 // Timing copies state without invoking delivery/keepalive probes (lock order).
 func (s *RequestState) Timing() RequestTiming {
 	if s == nil {
@@ -59,6 +123,7 @@ func (s *RequestState) Timing() RequestTiming {
 	b, firstRead, eof := s.budget, s.bodyFirstRead, s.bodyReceived
 	bytes, repeat, edge, trace := s.bodyBytes, s.bodyReceiptRepeat, s.edge, s.timing
 	receiptSource := s.bodyReceiptBasis
+	phases := s.dispatchPhasesLocked()
 	lateCount := len(s.timing.attemptMetrics)
 	lateNoTimer := int64(0)
 	for _, timed := range s.timing.attemptMetrics {
@@ -71,6 +136,9 @@ func (s *RequestState) Timing() RequestTiming {
 	start, cancelAt, cancelStage := s.d.started, s.d.disconnectAt, s.d.stageAtCut
 	s.d.mu.Unlock()
 	var out RequestTiming
+	if len(phases) > 0 {
+		out.DispatchPhases, _ = json.Marshal(phases)
+	}
 	if b != nil {
 		start = b.Started()
 		out.ClientFamily = observed(b.clientFamily)
@@ -248,6 +316,8 @@ func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
 	s.ObserveAttemptStart()
 	s.mu.Lock()
 	if s.timing.dispatchCount == 0 {
+		s.closeDispatchPhaseLocked(at)
+		s.timing.phasesFinished = at
 		s.timing.firstDispatch, s.timing.minRemaining = at, rem
 	}
 	s.timing.dispatchCount++

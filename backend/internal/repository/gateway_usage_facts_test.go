@@ -34,6 +34,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, RequestID: "fixture", Model: "fixture", CreatedAt: time.Now().UTC(), RequestScope: resilience.GatewayRequestScopeText, ConversionNotices: []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}}, PricingSource: json.RawMessage(`{"matched_key":"fixture","source":"litellm","revision":"fixture-revision","effective_prices":{"input":0}}`)}
+			row.DispatchPhases = json.RawMessage(`{"body_decode_ms":12,"upstream_prepare_ms":34}`)
 			if tc.known {
 				row.UsageObserved = &tc.present
 				row.UsageSource = &tc.source
@@ -48,6 +49,8 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			require.NoError(t, json.Unmarshal(payload, &restored))
 			row.ConversionNotices[0].Field = "mutated"
 			row.PricingSource[2] = 'X'
+			row.DispatchPhases[2] = 'X'
+			require.JSONEq(t, `{"body_decode_ms":12,"upstream_prepare_ms":34}`, string(frozen.DispatchPhases))
 			require.Equal(t, "stop", frozen.ConversionNotices[0].Field)
 			require.True(t, json.Valid(frozen.PricingSource))
 			prepared := prepareUsageLogInsert(restored.Usage)
@@ -55,7 +58,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			key := usageLogBatchKey("fixture", 2)
 			batch, _ := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
 			best, _ := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
-			for _, column := range []string{"request_scope", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type", "degradations", "pricing_source"} {
+			for _, column := range []string{"request_scope", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type", "degradations", "pricing_source", "dispatch_phases"} {
 				require.Equal(t, 3, strings.Count(batch, column))
 				require.Equal(t, 3, strings.Count(best, column))
 			}
@@ -83,6 +86,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			require.Equal(t, frozen.ResponseBodyType, got.ResponseBodyType)
 			require.Equal(t, frozen.ConversionNotices, got.ConversionNotices)
 			require.JSONEq(t, string(frozen.PricingSource), string(got.PricingSource))
+			require.JSONEq(t, string(frozen.DispatchPhases), string(got.DispatchPhases))
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -119,7 +123,7 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			notices := []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}, {Field: "reasoning.effort", Action: "map"}}
 			row := &service.GatewayUnbilledRequest{RequestID: "failed-no-usage", CreatedAt: time.Now(), Result: result, ConversionNotices: notices}
 			capture := &noticeArgument{}
-			args := make([]driver.Value, 28)
+			args := make([]driver.Value, 29)
 			for i := range args {
 				args[i] = sqlmock.AnyArg()
 			}

@@ -4,12 +4,10 @@ package resilience
 
 import (
 	"testing"
-	"time"
 )
 
 type schedTestMarker struct{ id int }
 
-func (*schedTestMarker) MarkFirstOutput(time.Time) {}
 func TestSchedState(t *testing.T) {
 	s := NewRequestState()
 	if _, ok := s.SchedSelection(); ok {

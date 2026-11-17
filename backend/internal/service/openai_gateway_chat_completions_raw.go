@@ -436,6 +436,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				if firstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) {
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
+					schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())))
 				}
 			}
 		}
@@ -530,7 +531,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
+			FirstTokenMs:                  schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context()))),
 		}
 	}
 

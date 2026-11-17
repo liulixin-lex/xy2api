@@ -96,6 +96,9 @@ func TestG2BB2ProtocolStringsRemainVisible(t *testing.T) {
 			t.Run(tc.name+"/"+fmtBool(passthrough), func(t *testing.T) {
 				c, rec := compatStreamContext("/v1/responses", `{}`)
 				frame := "data: " + tc.payload + "\n\n"
+				if tc.name == "known tool progress" {
+					frame = "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"web_search_call\",\"id\":\"synthetic-tool\"}}\n\n" + frame
+				}
 				failed := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"synthetic-busy\"}}}\n\n"
 				_, err := runBlankPlaceholderAttempt(compatStreamService(nil, 0, 0, 0), c, rawChatCompletionsTestAccount(), passthrough, io.NopCloser(strings.NewReader(frame+failed)), time.Now())
 				var failover *UpstreamFailoverError

@@ -302,7 +302,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
-			FirstTokenMs:                scan.FirstTokenMs,
+			FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 			ClientDisconnect:            clientDisconnected,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
@@ -347,7 +347,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
-		FirstTokenMs:                scan.FirstTokenMs,
+		FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 		ClientDisconnect:            clientDisconnected,
 	}, nil
 }

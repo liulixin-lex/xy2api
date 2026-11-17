@@ -390,12 +390,20 @@ func (s *RequestState) EndToEndFirstOutputMs() *int64 {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
+	b := s.budget
+	s.mu.Unlock()
 	s.d.mu.Lock()
-	defer s.d.mu.Unlock()
-	if s.d.started.IsZero() || s.d.semanticOutput.IsZero() {
+	start, output := s.d.started, s.d.semanticOutput
+	s.d.mu.Unlock()
+	// Match Timing().BodyEOFMs exactly, including the budget's ingress clock.
+	if b != nil {
+		start = b.Started()
+	}
+	if start.IsZero() || output.IsZero() {
 		return nil
 	}
-	ms := max(0, s.d.semanticOutput.Sub(s.d.started).Milliseconds())
+	ms := max(0, output.Sub(start).Milliseconds())
 	return &ms
 }
 

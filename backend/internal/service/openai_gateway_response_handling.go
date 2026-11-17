@@ -124,7 +124,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
 	}
 	guardFirstOutput := firstOutputTimeout > 0
-	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
+	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI && (!resilience.Current().Enabled || resilience.Current().Stream.PreludeStaging)
 	var attemptResponseHeaders http.Header
 	if stageFirstOutput {
 		if s.responseHeaderFilter != nil {
@@ -396,14 +396,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 			}
 		}
-		if completedProgressEvent && !firstOutputProgressObserved {
-			firstOutputScanGuard.Store(false)
-			firstOutputProgressObserved = true
-			stopFirstOutputTimer()
-		}
+
 		if completedTTFTEvent && firstTokenMs == nil {
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode))
 		}
 		eventStartsClientOutput = false
 		eventStartsTTFTOutput = false
@@ -466,7 +463,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			TerminalSeen:     observedTerminal.Seen,
 			TerminalValid:    observedTerminal.Valid,
 			usage:            usage,
-			firstTokenMs:     relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),
+			firstTokenMs:     schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode)),
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
@@ -683,7 +680,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
-			observeSchedPayload(c, dataBytes, eventType)
+			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			observeSchedPayload(c, dataBytes, pendingSSEEventType)
+
 			observer.ObserveOpenAI(dataBytes, eventType)
 			// 初始上游 data 的 type 只解析一次：原始值保持终止事件的精确匹配，规范化值供后续分支复用。
 			if currentTerminal.Seen && currentTerminal.Valid || strings.TrimSpace(data) == "[DONE]" {
@@ -921,7 +920,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 				return
 			}
-			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			startsClientOutput := forceFlushFailedEvent || commitsOutput
+			if account == nil || account.Platform != PlatformOpenAI {
+				startsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			}
+			if startsClientOutput && !suppressCurrentEvent {
+				firstOutputProgressObserved = true
+				firstOutputScanGuard.Store(false)
+				stopFirstOutputTimer()
+			}
 			if startsClientOutput && !clientOutputStarted {
 				releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)
 			}
@@ -953,7 +960,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					delivery.semanticEnd = queuedBytes + int64(len(line))
 				}
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
-				if firstTokenMs == nil && startsVisibleOutput {
+				if firstTokenMs == nil && startsVisibleOutput && (clientOutputStarted || startsClientOutput) {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。
 					shouldFlush = true
 				}
@@ -975,10 +982,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 
 			// Record first token time
-			if !guardFirstOutput && firstTokenMs == nil && startsTTFTOutput {
+			if (!guardFirstOutput || !stageFirstOutput) && firstTokenMs == nil && startsTTFTOutput {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
-				stopFirstOutputTimer()
+				schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode))
 			}
 			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 			return
@@ -1095,7 +1102,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			typedBareErrorRecoverable = false
 			resilience.StateFrom(ctx).SetUpstreamRecoveryHint(nil)
 		}
-		if !currentTerminal.Failure && openAIStreamDataStartsClientOutput(frame.Data, effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)) {
+		if !currentTerminal.Failure && (!stageFirstOutput || openAIStreamCommitsOutput(frame.EventType, []byte(frame.Data), currentTerminal)) {
 			firstOutputScanGuard.Store(false)
 			if releaseFrameScan != nil {
 				releaseFrameScan()
@@ -1353,7 +1360,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-firstOutputCh:
-			if firstOutputProgressObserved {
+			if firstOutputProgressObserved || clientOutputStarted {
 				stopFirstOutputTimer()
 				continue
 			}

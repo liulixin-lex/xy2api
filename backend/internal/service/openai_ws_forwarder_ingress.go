@@ -1192,6 +1192,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if firstTokenMs == nil && isTokenEvent {
 				ms := int(time.Since(turnStart).Milliseconds())
 				firstTokenMs = &ms
+				markSchedFirstEvent(schedCapture, turnStart, &ms)
 			}
 			imageCounter.AddSSEData(upstreamMessage)
 
@@ -1292,7 +1293,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					UpstreamTerminalEvent:         terminalEvent,
 					ResponseHeaders:               lease.HandshakeHeaders(),
 					Duration:                      time.Since(turnStart),
-					FirstTokenMs:                  firstTokenMs,
+					FirstTokenMs:                  markSchedFirstEvent(schedCapture, turnStart, firstTokenMs),
 				}
 				if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 					result.wsReplayInput = replayInput

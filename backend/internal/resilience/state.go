@@ -54,7 +54,7 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	currentAttempt       AttemptMarker
+	currentAttempt       any
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -512,8 +512,6 @@ type SchedSelection struct {
 	StickyWarm bool
 }
 
-type AttemptMarker interface{ MarkFirstOutput(at time.Time) }
-
 func (s *RequestState) SetSchedSelection(v SchedSelection) {
 	if s == nil {
 		return
@@ -530,7 +528,7 @@ func (s *RequestState) SchedSelection() (SchedSelection, bool) {
 	defer s.mu.Unlock()
 	return s.schedSelection, s.schedSelectionSet
 }
-func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
+func (s *RequestState) SetCurrentAttempt(m any) {
 	if s == nil {
 		return
 	}
@@ -538,7 +536,7 @@ func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
 	s.currentAttempt = m
 	s.mu.Unlock()
 }
-func (s *RequestState) CurrentAttempt() AttemptMarker {
+func (s *RequestState) CurrentAttempt() any {
 	if s == nil {
 		return nil
 	}
@@ -546,7 +544,7 @@ func (s *RequestState) CurrentAttempt() AttemptMarker {
 	defer s.mu.Unlock()
 	return s.currentAttempt
 }
-func (s *RequestState) ClearCurrentAttemptIf(m AttemptMarker) {
+func (s *RequestState) ClearCurrentAttemptIf(m any) {
 	if s == nil {
 		return
 	}

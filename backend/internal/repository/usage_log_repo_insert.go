@@ -122,6 +122,7 @@ var usageLogInsertArgTypes = [...]string{
 	"text",        // response_body_type
 	"jsonb",       // degradations
 	"jsonb",       // pricing_source
+	"jsonb",       // dispatch_phases
 }
 
 const (
@@ -345,14 +346,14 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98, $99
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -828,7 +829,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		) AS (VALUES `)
 
 	// Each batch row prepends the synthetic input_index before the 90
@@ -946,7 +947,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				cancel_stage,
 				cdn_observed,
 				budget_start_mode,
-				budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+				budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 			)
 			SELECT
 				user_id,
@@ -1033,7 +1034,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				cancel_stage,
 				cdn_observed,
 				budget_start_mode,
-				budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+				budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -1160,7 +1161,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
@@ -1273,7 +1274,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		)
 		SELECT
 			user_id,
@@ -1360,7 +1361,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1455,14 +1456,14 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			cancel_stage,
 			cdn_observed,
 			budget_start_mode,
-			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source
+			budget_t0_unix_ms, gateway_request_id, result, switches, fallback, takeover, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, pricing_source, dispatch_phases
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98, $99
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1611,7 +1612,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.BudgetStartMode,        // budget_start_mode
 			log.BudgetT0UnixMs,         // budget_t0_unix_ms
 			log.GatewayRequestID, log.Result, log.Switches, log.Fallback, log.Takeover,
-			gatewayScopeSQL(log.RequestScope), log.UsageObserved, log.UsageSource, log.TerminalEventSeen, log.TerminalEventValid, log.ResponseBodyType, gatewayNoticesSQL(log.ConversionNotices), gatewayPricingSQL(log.PricingSource),
+			gatewayScopeSQL(log.RequestScope), log.UsageObserved, log.UsageSource, log.TerminalEventSeen, log.TerminalEventValid, log.ResponseBodyType, gatewayNoticesSQL(log.ConversionNotices), gatewayPricingSQL(log.PricingSource), gatewayPricingSQL(log.DispatchPhases),
 		},
 	}
 }

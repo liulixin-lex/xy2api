@@ -1570,7 +1570,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			Stream:                        reqStream,
 			OpenAIWSMode:                  false,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  schedFirstEvent(c, startTime, firstTokenMs),
 		}
 		if imageCount > 0 {
 			forwardResult.ImageCount = imageCount

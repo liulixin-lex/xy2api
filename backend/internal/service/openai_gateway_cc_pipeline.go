@@ -384,6 +384,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && (gjson.Get(payload, "choices.0.delta.content").String() != "" || gjson.Get(payload, "choices.0.delta.reasoning_content").String() != "" || len(gjson.Get(payload, "choices.0.delta.tool_calls").Array()) > 0) {
 				ms := int(time.Since(startTime).Milliseconds())
 				st.FirstTokenMs = &ms
+				schedFirstEvent(c, startTime, &ms)
 			}
 			if err := emitRaw[0]([]byte(payload)); err != nil {
 				return latchConversionError(err)
@@ -397,6 +398,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
+			schedFirstEvent(c, startTime, &ms)
 		}
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != nil {
