@@ -159,7 +159,7 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 
 ### 采样写入丢弃
 
-`sched_attempt.dropped` 为 Warn，组件 `service.sched_attempt_recorder`，可在系统日志按该组件或事件名查。`reason=stopped` 表示记录器停止后才到达的完成记录，计入 `dropped_write_failed`；`queue_full` 表示队列满导致丢样，计入 `dropped_queue_full`；`write_failed` 表示写入失败后丢弃，也计入 `dropped_write_failed`。日志另含 `error`，按原因限频，不会为每条丢样各写一条。关停超期未结束的请求可能在这里留下丢弃记录。
+`sched_attempt.dropped` 为 Warn，组件 `service.sched_attempt_recorder`，可在系统日志按该组件或事件名查。`reason=stopped` 表示记录器停止后才到达的完成记录，计入 `dropped_write_failed`；`queue_full` 表示队列满导致丢样，计入 `dropped_queue_full`；`write_failed` 表示写入失败后丢弃，也计入 `dropped_write_failed`。只有 `reason=write_failed` 的日志带具体 `error`；`stopped` 和 `queue_full` 不带具体错误。日志按原因限频，不会为每条丢样各写一条。关停超期未结束的请求可能在这里留下丢弃记录。
 
 ### 请求关联字段
 
