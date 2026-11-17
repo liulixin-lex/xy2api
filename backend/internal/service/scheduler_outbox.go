@@ -14,20 +14,21 @@ type SchedulerOutboxEvent struct {
 	CreatedAt time.Time
 }
 
-// SchedulerOutboxRepository exposes pending queue health independently of its
-// transactional consumer, so contending instances can still observe lag.
+// SchedulerOutboxRepository performs each queue operation in autocommit mode.
+// Reading releases dedup keys before event handling, so same-key producers do
+// not wait for the consumer's lease or for its external projection writes.
 type SchedulerOutboxRepository interface {
+	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
+	DeleteProcessed(ctx context.Context, ids []int64) error
 	OldestPendingCreatedAt(ctx context.Context) (time.Time, bool, error)
 	PendingCount(ctx context.Context) (int64, error)
 	TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error)
 }
 
-// SchedulerOutboxConsumerLease owns one bounded PostgreSQL transaction. Commit
-// acknowledges the batch and releases its transaction-scoped lock; Release
-// rolls back any unfinished batch, including a partially applied projection.
+// SchedulerOutboxConsumerLease owns a transaction used only for its advisory
+// lock. It never locks or updates queue rows. A lost lease permits duplicate
+// idempotent processing, but must not prevent acknowledging completed events.
 type SchedulerOutboxConsumerLease interface {
-	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
-	DeleteProcessed(ctx context.Context, ids []int64) error
-	Commit() error
+	KeepAlive(ctx context.Context) error
 	Release()
 }

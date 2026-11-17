@@ -27,26 +27,26 @@ func TestSchedulerOutboxCommittedQueueSurvivesLateSmallID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 	defer lease.Release()
-	events, err := lease.ListPendingAndReleaseDedup(ctx, 200)
+	events, err := repo.ListPendingAndReleaseDedup(ctx, 200)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Equal(t, largeID, events[0].ID)
 	// Commit between the read and acknowledgement, the most dangerous order:
 	// acknowledging ID 2 must not delete now-visible but unhandled ID 1.
 	require.NoError(t, first.Commit())
-	require.NoError(t, lease.DeleteProcessed(ctx, []int64{largeID}))
-	events, err = lease.ListPendingAndReleaseDedup(ctx, 200)
+	require.NoError(t, repo.DeleteProcessed(ctx, []int64{largeID}))
+	events, err = repo.ListPendingAndReleaseDedup(ctx, 200)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Equal(t, smallID, events[0].ID)
-	require.NoError(t, lease.DeleteProcessed(ctx, []int64{smallID}))
-	events, err = lease.ListPendingAndReleaseDedup(ctx, 200)
+	require.NoError(t, repo.DeleteProcessed(ctx, []int64{smallID}))
+	events, err = repo.ListPendingAndReleaseDedup(ctx, 200)
 	require.NoError(t, err)
 	require.Empty(t, events)
-	require.NoError(t, lease.Commit())
+	require.NoError(t, lease.KeepAlive(ctx))
 }
 
-func TestSchedulerOutboxTerminatedTransactionReplaysAndReleasesLock(t *testing.T) {
+func TestSchedulerOutboxTerminatedLeaseStillAcknowledgesAndReleasesLock(t *testing.T) {
 	_ = testEntClient(t)
 	ctx := context.Background()
 	_, err := integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox")
@@ -58,30 +58,29 @@ func TestSchedulerOutboxTerminatedTransactionReplaysAndReleasesLock(t *testing.T
 	require.NoError(t, err)
 	require.True(t, acquired)
 	defer lease.Release()
-	tx := lease.(*schedulerOutboxConsumerLease).tx
+	tx := lease.(*schedulerOutboxConsumerLease).conn
 	var idle, statement string
 	require.NoError(t, tx.QueryRowContext(ctx, "SHOW idle_in_transaction_session_timeout").Scan(&idle))
 	require.NoError(t, tx.QueryRowContext(ctx, "SHOW statement_timeout").Scan(&statement))
 	require.Equal(t, "1min", idle)
 	require.Equal(t, "1min", statement)
-	events, err := lease.ListPendingAndReleaseDedup(ctx, 200)
+	events, err := repo.ListPendingAndReleaseDedup(ctx, 200)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
-	require.NoError(t, lease.DeleteProcessed(ctx, []int64{events[0].ID}))
 	var pid int
 	require.NoError(t, tx.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid))
 	var terminated bool
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT pg_terminate_backend($1)", pid).Scan(&terminated))
 	require.True(t, terminated)
-	require.Error(t, lease.Commit())
+	require.Error(t, lease.KeepAlive(ctx))
+	// Completed event work can still be acknowledged after its lease expires.
+	require.NoError(t, repo.DeleteProcessed(ctx, []int64{events[0].ID}))
 	next, acquired, err := repo.TryAcquireConsumerLock(ctx)
 	require.NoError(t, err)
 	require.True(t, acquired)
 	defer next.Release()
-	replay, err := next.ListPendingAndReleaseDedup(ctx, 200)
+	pending, err := repo.ListPendingAndReleaseDedup(ctx, 200)
 	require.NoError(t, err)
-	require.Len(t, replay, 1)
-	require.Equal(t, events[0].ID, replay[0].ID, "uncommitted acknowledgement rolls back")
-	require.NoError(t, next.DeleteProcessed(ctx, []int64{replay[0].ID}))
-	require.NoError(t, next.Commit())
+	require.Empty(t, pending, "the lost lease cannot roll back an autocommit acknowledgement")
+	require.NoError(t, next.KeepAlive(ctx))
 }

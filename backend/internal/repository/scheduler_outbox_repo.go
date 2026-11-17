@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/lib/pq"
@@ -16,22 +18,26 @@ import (
 )
 
 type schedulerOutboxRepository struct {
-	db *sql.DB
+	db             *sql.DB
+	acquireTimeout time.Duration // Non-positive values use the production default.
 }
 
+const schedulerOutboxAcquireTimeout = 5 * time.Second
+
 type schedulerOutboxConsumerLease struct {
-	tx *sql.Tx
+	conn        *sql.Conn
+	releaseOnce sync.Once
 }
 
 func NewSchedulerOutboxRepository(db *sql.DB) service.SchedulerOutboxRepository {
 	return &schedulerOutboxRepository{db: db}
 }
 
-func (r *schedulerOutboxConsumerLease) ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]service.SchedulerOutboxEvent, error) {
+func (r *schedulerOutboxRepository) ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]service.SchedulerOutboxEvent, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.tx.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, `
 		WITH selected AS MATERIALIZED (
 			SELECT id, event_type, account_id, group_id, payload, created_at
 			FROM scheduler_outbox
@@ -119,45 +125,68 @@ func (r *schedulerOutboxRepository) PendingCount(ctx context.Context) (int64, er
 
 // DeleteProcessed acknowledges only the successfully applied batch. A lower ID
 // committed during processing was never in that batch and remains pending.
-func (r *schedulerOutboxConsumerLease) DeleteProcessed(ctx context.Context, ids []int64) error {
+func (r *schedulerOutboxRepository) DeleteProcessed(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := r.tx.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])", pq.Array(ids))
+	_, err := r.db.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])", pq.Array(ids))
 	return err
 }
 
 func (r *schedulerOutboxRepository) TryAcquireConsumerLock(ctx context.Context) (service.SchedulerOutboxConsumerLease, bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	timeout := r.acquireTimeout
+	if timeout <= 0 {
+		timeout = schedulerOutboxAcquireTimeout
+	}
+	acquireCtx, acquireCancel := context.WithTimeout(ctx, timeout)
+	defer acquireCancel()
+	conn, err := r.db.Conn(acquireCtx)
 	if err != nil {
 		return nil, false, err
 	}
-	// Both an idle disappeared client and an executing SQL statement are
-	// bounded. A lost holder cannot strand this lock on a pooled connection;
-	// transaction pooling (PgBouncer) keeps one backend until commit/rollback.
-	for _, setting := range []string{
-		"SET LOCAL idle_in_transaction_session_timeout = '60s'",
-		"SET LOCAL statement_timeout = '60s'",
-	} {
-		if _, err := tx.ExecContext(ctx, setting); err != nil {
-			_ = tx.Rollback()
-			return nil, false, err
-		}
+	lease := &schedulerOutboxConsumerLease{conn: conn}
+	// lib/pq starts watching a BeginTx context only after BEGIN returns. Use
+	// its cancellable ExecContext path on this reserved connection instead.
+	// The setup deadline bounds pool waits and asks a responsive server to
+	// cancel slow queries, without limiting an acquired transaction's lifetime.
+	// A half-open socket can still await TCP keepalive failure (about 2.5
+	// minutes with the default dialer); cancellation alone cannot unblock it.
+	if _, err := conn.ExecContext(acquireCtx, "BEGIN; SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'"); err != nil {
+		lease.Release()
+		return nil, false, err
 	}
 	var acquired bool
-	if err := tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))").Scan(&acquired); err != nil {
-		_ = tx.Rollback()
+	if err := conn.QueryRowContext(acquireCtx, "SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))").Scan(&acquired); err != nil {
+		lease.Release()
+		return nil, false, err
+	}
+	if err := acquireCtx.Err(); err != nil {
+		lease.Release()
 		return nil, false, err
 	}
 	if !acquired {
-		_ = tx.Rollback()
+		lease.Release()
 		return nil, false, nil
 	}
-	return &schedulerOutboxConsumerLease{tx: tx}, true, nil
+	return lease, true, nil
 }
 
-func (l *schedulerOutboxConsumerLease) Commit() error { return l.tx.Commit() }
-func (l *schedulerOutboxConsumerLease) Release()      { _ = l.tx.Rollback() }
+func (l *schedulerOutboxConsumerLease) KeepAlive(ctx context.Context) error {
+	var alive int
+	return l.conn.QueryRowContext(ctx, "SELECT 1").Scan(&alive)
+}
+func (l *schedulerOutboxConsumerLease) Release() {
+	l.releaseOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), schedulerOutboxAcquireTimeout)
+		defer cancel()
+		if _, err := l.conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+			// A connection with uncertain transaction state must never rejoin
+			// the pool. Raw's ErrBadConn discards the physical connection.
+			_ = l.conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+		_ = l.conn.Close()
+	})
+}
 
 func enqueueSchedulerOutbox(ctx context.Context, exec sqlExecutor, eventType string, accountID *int64, groupID *int64, payload any) error {
 	if exec == nil {

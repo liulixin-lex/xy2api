@@ -377,7 +377,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	if s.outboxRepo == nil || s.cache == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// All event effects target the shared Redis snapshot, not process-local
 	// state. Serialize consumers until the exact successful batch is deleted.
@@ -400,7 +400,9 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	}
 	s.noteOutboxLockContention(time.Now(), false)
 	defer lease.Release()
-	events, err := lease.ListPendingAndReleaseDedup(ctx, 200)
+	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
+	events, err := s.outboxRepo.ListPendingAndReleaseDedup(readCtx, 200)
+	readCancel()
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox poll failed: %v", err)
 		return
@@ -411,6 +413,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	}
 	seen := make(map[batchSeenKey]struct{})
 	ids := make([]int64, 0, len(events))
+	var leaseErr error
 	for _, event := range events {
 		eventCtx, eventCancel := context.WithTimeout(ctx, outboxEventTimeout)
 		err := s.handleOutboxEvent(eventCtx, event, seen)
@@ -420,19 +423,30 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 			return
 		}
 		ids = append(ids, event.ID)
+		// Long batches have no aggregate deadline. Each completed event renews
+		// the idle lease; a single slow event may still outlive it safely.
+		if leaseErr == nil {
+			heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, 5*time.Second)
+			leaseErr = lease.KeepAlive(heartbeatCtx)
+			heartbeatCancel()
+		}
+	}
+	if leaseErr == nil {
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		leaseErr = lease.KeepAlive(checkCtx)
+		checkCancel()
+	}
+	if leaseErr != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox lease lost; acknowledging %d processed events: %v", len(ids), leaseErr)
 	}
 	ackCtx, ackCancel := context.WithTimeout(ctx, 10*time.Second)
-	err = lease.DeleteProcessed(ackCtx, ids)
+	err = s.outboxRepo.DeleteProcessed(ackCtx, ids)
 	ackCancel()
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox acknowledgement failed: %v", err)
 		return
 	}
-	if err := lease.Commit(); err != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox commit failed: %v", err)
-		return
-	}
-	lease.Release() // end the transaction before a potentially slow rebuild
+	lease.Release() // autocommit acknowledgement completed; release before rebuilding
 	// Only pending rows contribute to lag/backlog, including late small IDs.
 	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	s.checkOutboxLag(lagCtx)
