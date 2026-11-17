@@ -171,7 +171,12 @@ describe('GroupSchedBoard', () => {
     await flushPromises()
     expect(groupsApi.setMemberPinned).toHaveBeenLastCalledWith(53, 5, true)
     expect(pin(5).getAttribute('aria-checked')).toBe('false')
-    expect(document.querySelector('[data-sq-pin-failed="5"]')!.textContent).toBe('admin.schedQuality.result.failed · account 5 is not a member of group 53')
+    // N2: only the word on the board, so the column stays narrow at 1024; the backend's reason is in the tip and the label.
+    const failure = document.querySelector<HTMLElement>('[data-sq-pin-failed="5"]')!
+    expect(failure.textContent).toBe('admin.schedQuality.result.failed')
+    expect((failure as HTMLElement & { __tipText?: string }).__tipText).toBe('account 5 is not a member of group 53')
+    expect(failure.getAttribute('aria-label')).toBe('admin.schedQuality.result.failed · account 5 is not a member of group 53')
+    expect(failure.getAttribute('tabindex')).toBe('0')
   })
 
   it('keeps a saved pin through board answers that still show the old state, until one agrees', async () => {
@@ -358,7 +363,7 @@ describe('GroupSchedBoard', () => {
     document.querySelector<HTMLButtonElement>('[data-sq-pin="7"]')!.click()
     await vi.advanceTimersByTimeAsync(0)
     const failure = () => document.querySelector('[data-sq-pin-failed="7"]')
-    expect(failure()!.textContent).toBe('admin.schedQuality.result.failed · account 7 changed meanwhile')
+    expect(failure()!.getAttribute('aria-label')).toBe('admin.schedQuality.result.failed · account 7 changed meanwhile')
     await vi.advanceTimersByTimeAsync(25_000)
     expect(failure()).not.toBeNull()
     await vi.advanceTimersByTimeAsync(10_000)
