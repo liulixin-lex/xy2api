@@ -37,7 +37,7 @@ func scopedPermissionsTestDB(t *testing.T, options ...dbent.Option) (*dbent.Clie
 	t.Cleanup(func() { _ = client.Close(); _, _ = base.Exec(`DROP SCHEMA ` + schema + ` CASCADE`); _ = base.Close() })
 	_, err = db.Exec(`CREATE TABLE groups(id BIGINT PRIMARY KEY, name TEXT DEFAULT '分组', platform TEXT DEFAULT 'openai', status TEXT DEFAULT 'active', model_allowlist JSONB DEFAULT '{}', deleted_at TIMESTAMPTZ);
 	CREATE TABLE accounts(id BIGINT PRIMARY KEY, name TEXT DEFAULT '账户', notes TEXT, platform TEXT DEFAULT 'openai', type TEXT DEFAULT 'oauth', status TEXT DEFAULT 'active', schedulable BOOLEAN DEFAULT true, concurrency INT DEFAULT 1, priority INT DEFAULT 1, credentials JSONB DEFAULT '{}', extra JSONB DEFAULT '{}', expires_at TIMESTAMPTZ, rate_limit_reset_at TIMESTAMPTZ, overload_until TIMESTAMPTZ, temp_unschedulable_until TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
-	CREATE TABLE account_groups(account_id BIGINT, group_id BIGINT, priority INT DEFAULT 50, created_at TIMESTAMPTZ DEFAULT NOW());
+	CREATE TABLE account_groups(account_id BIGINT, group_id BIGINT, priority INT DEFAULT 50, pinned BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW());
 	INSERT INTO groups(id,platform,status) VALUES (1,'openai','active'),(2,'openai','active'),(3,'anthropic','active'),(4,'openai','inactive');
 	INSERT INTO accounts(id,credentials,extra) VALUES (1,'{"email":"test@example.com","access_token":"SECRET"}','{}'),(2,'{}','{"email":"test@example.com"}'),(3,'{"email":"test@example.com"}','{}');
 	INSERT INTO account_groups(account_id,group_id) VALUES (1,1),(1,9),(2,2),(3,3);`)
