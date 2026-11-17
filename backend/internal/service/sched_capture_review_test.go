@@ -26,10 +26,18 @@ func TestCaptureReviewWSPassthroughCachePresence(t *testing.T) {
 		{"zero", `,"input_tokens_details":{"cached_tokens":0}`, captureInt(0)},
 		{"positive", `,"input_tokens_details":{"cached_tokens":800}`, captureInt(800)},
 		{"missing", "", nil},
+		{"missing_response_shell", "", nil},
+		{"missing_done_shell", "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := newStagedPassthroughConn()
-			upstream.Send(`{"type":"response.completed","response":{"id":"resp_fixture","model":"gpt-5.1","usage":{"input_tokens":1000,"output_tokens":2` + tc.details + `}}}`)
+			if tc.name == "missing_response_shell" {
+				upstream.Send(`{"type":"response.completed","response_id":"resp_fixture"}`)
+			} else if tc.name == "missing_done_shell" {
+				upstream.Send(`{"type":"response.done","response_id":"resp_fixture"}`)
+			} else {
+				upstream.Send(`{"type":"response.completed","response":{"id":"resp_fixture","model":"gpt-5.1","usage":{"input_tokens":1000,"output_tokens":2` + tc.details + `}}}`)
+			}
 			svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
 			account := passthroughLifecycleAccount()
 			st := resilience.NewRequestState()
@@ -42,7 +50,16 @@ func TestCaptureReviewWSPassthroughCachePresence(t *testing.T) {
 			rec.Start(ctx)
 			defer rec.Stop()
 			rows := make(chan q.AttemptSample, 1)
-			rec.SetObserver(func(row q.AttemptSample) { rows <- row })
+			rec.SetObserver(func(row q.AttemptSample) {
+				if row.FinishedAt.IsZero() {
+					return
+				}
+				select {
+				case rows <- row:
+				default:
+					t.Error("duplicate finished attempt")
+				}
+			})
 			svc.SetSchedAttemptRecorder(rec)
 			completed := make(chan *OpenAIForwardResult, 1)
 			server, _ := startPassthroughHookRecordingServer(t, ctx, svc, account, &OpenAIWSIngressHooks{
@@ -59,7 +76,12 @@ func TestCaptureReviewWSPassthroughCachePresence(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("OnTurnComplete did not finish the attempt")
 			}
-			row := <-rows
+			var row q.AttemptSample
+			select {
+			case row = <-rows:
+			default:
+				t.Fatal("OnTurnComplete returned without a finished sample")
+			}
 			require.Equal(t, q.OutcomeOK, row.Outcome)
 			require.Equal(t, tc.want != nil, result.Usage.CacheReadInputTokensPresent)
 			require.Equal(t, tc.want, row.CacheReadTokens)
@@ -111,18 +133,89 @@ func TestCaptureReviewRawChatResetAfterFinish(t *testing.T) {
 }
 
 func TestCaptureReviewFinishedOwnerCannotRewriteResult(t *testing.T) {
-	for _, payload := range []string{
-		`{"type":"response.failed","response":{"status":"failed"}}`,
-		`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`,
+	withResilienceSettings(t, nil)
+	for _, target := range []string{"chat", "messages"} {
+		t.Run(target, func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			account := webSearchReplayAccount(false)
+			resilience.StateFrom(req.ctx).SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "fixture"})
+			body := []byte(`{"model":"fixture","stream":false,"input":[{"type":"reasoning","id":"rs_bad","encrypted_content":"bad-A","summary":[]},{"role":"user","content":"hi"}]}`)
+			param := "input[0].encrypted_content"
+			req.c.Request.URL.Path = "/v1/chat/completions"
+			if target == "messages" {
+				req.c.Request.URL.Path = "/v1/messages"
+				body = []byte(`{"model":"fixture","stream":false,"max_tokens":32,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"one","signature":"bad-A"},{"type":"thinking","thinking":"two","signature":"good-B"}]},{"role":"user","content":"hi"}]}`)
+				param = "input[1].encrypted_content"
+			}
+			wire := m7ReviewWire(`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"invalid_encrypted_content","param":"` + param + `","message":"Encrypted content could not be verified"}}}`)
+			var old *schedAttemptCapture
+			first := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: &captureCloseBody{
+				ReadCloser: io.NopCloser(strings.NewReader(wire)),
+				close: func() {
+					if a := currentSchedAttempt(req.ctx); old == nil && a != nil {
+						old = a
+					}
+				},
+			}}
+			second := webSearchSuccessStream("resp_repaired")
+			probed := false
+			second.Body = &captureCloseBody{ReadCloser: second.Body, close: func() {
+				// Mark the retired handle after final delivery. Only a stale
+				// deferred finish could copy this probe into the final result.
+				if old != nil {
+					old.mu.Lock()
+					old.benignIncomplete = true
+					old.mu.Unlock()
+					probed = true
+				}
+			}}
+			up := &httpUpstreamRecorder{responses: []*http.Response{first, second}}
+			svc := newOpenAIImageGenerationControlTestService(up)
+			svc.cfg.JWT.Secret = "fixture-secret"
+			svc.SetSchedAttemptRecorder(&captureServiceRecorder{})
+			result, err := captureForward(svc, req.c, account, body, target)
+			require.NoError(t, err)
+			require.Len(t, up.requests, 2)
+			require.True(t, probed)
+			require.False(t, result.BenignIncomplete, "retired send's defer must be blocked by a == schedCapture")
+			require.True(t, result.CompletedForDelivery())
+		})
+	}
+}
+
+func TestCaptureReviewDrainedTerminalEnrichesFinishedAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		payload, event  string
+		benign, success bool
+	}{
+		{`{"type":"response.failed","response":{"status":"failed"}}`, "response.failed", false, false},
+		{`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"interrupted"}}}`, "response.incomplete", false, false},
+		{`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`, "response.incomplete", true, true},
 	} {
-		a, _ := newClassificationCapture()
+		t.Run(tc.event+fmt.Sprint(tc.benign), func(t *testing.T) {
+			a, rec := newClassificationCapture()
+			a.cancel()                    // Downstream write failed, so the sample is already finished.
+			a.observe([]byte(tc.payload)) // The gateway keeps draining the upstream.
+			result := &OpenAIForwardResult{}
+			a.finish(result, nil)
+			require.Equal(t, tc.event, result.UpstreamTerminalEvent)
+			require.Equal(t, tc.benign, result.BenignIncomplete)
+			require.Equal(t, tc.success, result.SucceededForScheduling())
+			require.Len(t, rec.samples, 1)
+			require.Equal(t, q.Outcome(5), rec.samples[0].Outcome)
+		})
+	}
+}
+
+func TestCaptureReviewCompletedWithErrorIsQualityFailure(t *testing.T) {
+	for _, payload := range []string{
+		`{"status":"completed","error":{"message":"fixture failure"}}`,
+		`{"type":"response.completed","response":{"status":"completed"},"error":{"message":"fixture failure"}}`,
+	} {
+		a, rec := newClassificationCapture()
 		a.observe([]byte(payload))
-		a.finish(nil, nil)
-		result := &OpenAIForwardResult{}
-		a.finish(result, nil) // An older send's deferred finish sees the final send's result.
-		require.Empty(t, result.UpstreamTerminalEvent)
-		require.False(t, result.BenignIncomplete)
-		require.True(t, result.CompletedForDelivery())
+		a.finish(&OpenAIForwardResult{}, nil)
+		require.Equal(t, q.OutcomeAccountFault, rec.samples[0].Outcome)
 	}
 }
 
@@ -162,7 +255,11 @@ func TestCaptureReviewNativeBufferedDisconnect(t *testing.T) {
 			c.Request = c.Request.WithContext(ctx)
 			recorder := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
 			var row q.AttemptSample
-			recorder.SetObserver(func(sample q.AttemptSample) { row = sample })
+			recorder.SetObserver(func(sample q.AttemptSample) {
+				if !sample.FinishedAt.IsZero() {
+					row = sample
+				}
+			})
 			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), schedAttemptRecorder: recorder}
 			account := selection.Account
 			a := svc.beginSchedAttempt(c.Request.Context(), account, nil, 0, false)
@@ -204,6 +301,7 @@ func TestCaptureReviewResponsesOutcomeAgreement(t *testing.T) {
 			failure      bool
 		}{
 			{"empty_error", `"status":"completed","error":{}`, false},
+			{"completed_error", `"status":"completed","error":{"message":"fixture failure"}`, false},
 			{"json_with_sse_header", `"status":"completed"`, false},
 			{"json_without_status", `"type":"response"`, false},
 			{"incomplete", `"status":"incomplete","incomplete_details":{"reason":"fixture_failure"}`, true},
@@ -233,7 +331,11 @@ func TestCaptureReviewResponsesOutcomeAgreement(t *testing.T) {
 					if tc.failure || tc.name == "benign" {
 						event = "response.incomplete"
 					}
-					wire = m7ReviewWire(`{"type":"` + event + `","response":` + wire + `}`)
+					extra := ""
+					if tc.name == "completed_error" {
+						extra = `,"error":{"message":"fixture failure"}`
+					}
+					wire = m7ReviewWire(`{"type":"` + event + `","response":` + wire + extra + `}`)
 					contentType = "text/event-stream"
 				}
 				svc := newOpenAIRejectedFieldTestService(&httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(wire))}})
@@ -241,13 +343,15 @@ func TestCaptureReviewResponsesOutcomeAgreement(t *testing.T) {
 				svc.SetSchedAttemptRecorder(rec)
 				result, err := svc.Forward(ctx, c, account, body)
 				require.Len(t, rec.samples, 1)
-				if tc.failure {
+				if tc.name == "completed_error" {
+					require.Equal(t, q.OutcomeAccountFault, rec.samples[0].Outcome)
+				} else if tc.failure {
 					require.NoError(t, err, "delivery of non-benign incomplete must retain its existing behavior")
 					require.NotNil(t, result)
 					require.Equal(t, 4, result.Usage.InputTokens)
 					require.Equal(t, 2, result.Usage.OutputTokens)
 					require.Equal(t, q.OutcomeAccountFault, rec.samples[0].Outcome)
-					require.Equal(t, "OUTPUT_INCOMPLETE", rec.samples[0].Detail)
+					require.Equal(t, SchedAttemptDetailOutputIncomplete, rec.samples[0].Detail)
 				} else {
 					require.NoError(t, err)
 					require.True(t, result.CompletedForDelivery())

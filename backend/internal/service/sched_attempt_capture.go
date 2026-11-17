@@ -17,6 +17,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// SchedAttemptDetailOutputIncomplete identifies delivered output that did not
+// end normally; error attribution maps it to an interrupted output.
+const SchedAttemptDetailOutputIncomplete = "OUTPUT_INCOMPLETE"
+
 // SetSchedAttemptRecorder is called once during assembly, before serving requests.
 func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 	s.schedAttemptRecorder = r
@@ -125,6 +129,41 @@ func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 		a.usage = usage
 	}
 }
+
+// classifySchedTerminal adapts only capture evidence. Forwarding keeps its SSE
+// envelope validation: bare JSON must not become an SSE terminal there.
+func classifySchedTerminal(data []byte) OpenAIResponsesTerminal {
+	terminal := ClassifyOpenAIResponsesTerminal("", data)
+	if !gjson.ValidBytes(data) {
+		return terminal
+	}
+	root := gjson.ParseBytes(data)
+	typ := root.Get("type").String()
+	if !root.IsObject() || root.Get("response").Exists() {
+		return terminal
+	}
+	var envelope []byte
+	if typ == "" || typ == "response" {
+		switch status := root.Get("status").String(); status {
+		case "completed", "incomplete", "failed", "cancelled", "canceled":
+			envelope = []byte(`{"type":"response.` + status + `","response":` + string(data) + `}`)
+		}
+	} else if isOpenAIWSTerminalEvent(typ) {
+		// WS readers accept terminal types without a response shell. HTTP
+		// readers can still reject them: their returned error wins in finish.
+		envelope = []byte(`{"type":"` + typ + `","response":{}}`)
+		if typ == "response.done" {
+			envelope = []byte(`{"type":"response.done","response":{"status":"completed"}}`)
+		}
+	}
+	if envelope != nil {
+		adapted := ClassifyOpenAIResponsesTerminal("", envelope)
+		adapted.ErrorPresent = adapted.ErrorPresent || terminal.ErrorPresent
+		return adapted
+	}
+	return terminal
+}
+
 func (a *schedAttemptCapture) observe(data []byte) {
 	if a == nil {
 		return
@@ -152,7 +191,7 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.markTerminal()
 		}
 	}
-	terminal := ClassifyOpenAIResponsesTerminal("", data)
+	terminal := classifySchedTerminal(data)
 	if terminal.Seen {
 		a.mu.Lock()
 		a.terminalEvent = terminal.EventType
@@ -242,14 +281,14 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.done {
-		return
-	}
 	if result != nil {
 		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
 		if result.UpstreamTerminalEvent == "" {
 			result.UpstreamTerminalEvent = a.terminalEvent
 		}
+	}
+	if a.done {
+		return
 	}
 	if err == nil {
 		err = a.sendErr
@@ -289,9 +328,9 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
-			terminal := ClassifyOpenAIResponsesTerminal("", failure.Body)
+			terminal := classifySchedTerminal(failure.Body)
 			if failure.Source == resilience.SourceStreamEvent && terminal.Valid && terminal.Status == "incomplete" && !terminal.BenignIncomplete() {
-				detail = "OUTPUT_INCOMPLETE"
+				detail = SchedAttemptDetailOutputIncomplete
 			}
 		}
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
