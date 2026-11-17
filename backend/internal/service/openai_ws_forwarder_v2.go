@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 )
@@ -36,7 +37,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	agentTaskRecoveryTried *bool,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -213,6 +217,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
 	defer acquireCancel()
+	acquireCtx, schedDial := withSchedWSDialObservation(acquireCtx, ctx, s, account, reqStream)
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
 		Account: account,
@@ -364,11 +369,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
 	learnCapability := s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))
-	if s.schedAttemptRecorder != nil {
+	// This boundary belongs to every real application send, even when quality
+	// recording is disabled. A failed first send must precede the next send.
+	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
+	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
 		body := payloadAsJSONBytes(wirePayload)
-		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
+		schedCapture = schedDial.beginSend(body, reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
+		schedCapture.noteWSNetworkError(err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -602,6 +611,7 @@ readLoop:
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
 		}
 		if readErr != nil {
+			schedCapture.noteWSNetworkError(readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(

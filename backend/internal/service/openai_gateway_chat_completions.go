@@ -90,7 +90,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if c != nil {
 		c.Set(m7ResponsesWireBodyKey, nil)
 		defer c.Set(m7ResponsesWireBodyKey, nil)
@@ -479,11 +482,12 @@ retryChatResponsesWire:
 		})
 	}
 	defer func(a *schedAttemptCapture) {
+		defer closeAttempt()
+		rethrowSchedAttemptPanic(a, recover())
 		// Freeze this send before cleanup can cancel its upstream reader.
 		if a == schedCapture {
 			a.finish(schedResult, schedErr)
 		}
-		closeAttempt()
 	}(schedCapture)
 
 	// 8. Handle error response with failover
