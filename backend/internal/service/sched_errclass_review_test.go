@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -201,3 +202,134 @@ func (r *errclassFailingReadBody) Read(p []byte) (int, error) {
 	return n, err
 }
 func (*errclassFailingReadBody) Close() error { return nil }
+
+func TestErrclassScannerLimitIsGatewayFailure(t *testing.T) {
+	for _, earlyExit := range []bool{false, true} {
+		t.Run(fmt.Sprint(earlyExit), func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: 1})
+			ctx := resilience.WithRequestState(context.Background(), st)
+			rec := &errclassRecorder{}
+			svc := &OpenAIGatewayService{schedAttemptRecorder: rec}
+			capture := svc.beginSchedAttempt(ctx, &Account{ID: 1, Platform: PlatformOpenAI}, nil, 0, true)
+			capture.httpStatus = 200
+			scanner := bufio.NewScanner(strings.NewReader(strings.Repeat("x", 64)))
+			scanner.Buffer(make([]byte, 8), 8)
+			require.False(t, scanner.Scan())
+			require.ErrorIs(t, scanner.Err(), bufio.ErrTooLong)
+			capture.noteNetworkError(fmt.Errorf("read stream: %w", scanner.Err()))
+			require.Nil(t, capture.networkErr)
+			if earlyExit {
+				FinishSchedAttemptAtHandlerExit(ctx)
+			} else {
+				capture.finish(nil, &UpstreamFailoverError{StatusCode: 502})
+			}
+			require.Len(t, rec.finishes, 1)
+			require.Equal(t, schedquality.ClassGateway, rec.finishes[0].Class)
+			require.Equal(t, 200, rec.finishes[0].HTTPStatus)
+			require.Equal(t, schedquality.OriginUpstream, rec.finishes[0].StatusOrigin)
+		})
+	}
+}
+
+func TestErrclassWebSearchReplayStillFails(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			resetWebSearchDeclarations(t)
+			up := &httpUpstreamRecorder{responses: []*http.Response{webSearchRejectionStream(), {StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_api_key"}}`))}}}
+			svc := newOpenAIImageGenerationControlTestService(up)
+			account := webSearchReplayAccount(passthrough)
+			req := newWebSearchReplayRequest(t)
+			st := resilience.StateFrom(req.ctx)
+			st.EnableGatewayRequest(time.Now())
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "synthetic-model"})
+			rec := &errclassRecorder{}
+			svc.SetSchedAttemptRecorder(rec)
+			_, err := svc.Forward(req.ctx, req.c, account, []byte(openAIWebSearchHistoryCompactionBody))
+			require.Error(t, err)
+			FinishSchedAttemptAtHandlerExit(req.ctx)
+			require.Len(t, up.requests, 2)
+			require.Len(t, rec.finishes, 2)
+			require.Equal(t, schedquality.ClassRepairStep, rec.finishes[0].Class)
+			require.Equal(t, schedquality.ClassAccountAccess, rec.finishes[1].Class)
+			require.Equal(t, rec.starts[0].RequestID, rec.starts[1].RequestID)
+			st.CompleteGatewayForward(false, false)
+			meta, _ := st.ClaimGatewayRequest(false)
+			require.Equal(t, resilience.RequestFailed, meta.Result)
+		})
+	}
+}
+
+func TestErrclassWebSearchPreparedWithoutSend(t *testing.T) {
+	withResilienceSettings(t, nil)
+	resetWebSearchDeclarations(t)
+	req := newWebSearchReplayRequest(t)
+	st := resilience.StateFrom(req.ctx)
+	account := webSearchReplayAccount(false)
+	st.EnableGatewayRequest(time.Now())
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "synthetic-model"})
+	original := []byte(openAIWebSearchHistoryCompactionBody)
+	replay, body := armOpenAIWebSearchReplay(req.c, account, original, false)
+	require.NotNil(t, replay)
+	up := &httpUpstreamRecorder{resp: webSearchRejectionStream()}
+	rec := &errclassRecorder{}
+	svc := newOpenAIImageGenerationControlTestService(up)
+	svc.SetSchedAttemptRecorder(rec)
+	wire, err := http.NewRequestWithContext(req.ctx, "POST", "https://synthetic.invalid/v1/responses", nil)
+	require.NoError(t, err)
+	var first, second *schedAttemptCapture
+	resp, err := svc.sendSchedHTTP(req.ctx, account, wire, "", body, true, &first)
+	require.NoError(t, err)
+	payload := []byte(`{"type":"error","error":{"message":"response protection is unavailable","type":"internal_error"}}`)
+	first.observe(payload)
+	signal := newOpenAIWebSearchReplaySignal(req.c, account, payload, "response protection is unavailable", 0)
+	require.NotNil(t, signal)
+	first.finish(nil, signal)
+	require.Empty(t, rec.finishes)
+	next, err := svc.openAIWebSearchReplayAfterSignal(req.ctx, req.c, account, replay, body, resp, signal)
+	require.NoError(t, err)
+	require.NotEmpty(t, next)
+	require.Empty(t, rec.finishes)
+	expired, cancel := context.WithDeadline(req.ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = svc.sendSchedHTTP(expired, account, wire.Clone(expired), "", next, true, &second)
+	require.Error(t, err)
+	require.Nil(t, second)
+	require.Len(t, up.requests, 1)
+	FinishSchedAttemptAtHandlerExit(req.ctx)
+	require.Len(t, rec.finishes, 1)
+	require.Equal(t, schedquality.ClassUnknown, rec.finishes[0].Class)
+	st.CompleteGatewayForward(false, false)
+	meta, _ := st.ClaimGatewayRequest(false)
+	require.Equal(t, resilience.RequestFailed, meta.Result)
+}
+
+func TestErrclassEventStatusControlsAttribution(t *testing.T) {
+	for _, tc := range []struct {
+		status     int
+		want       schedquality.ErrorClass
+		capability bool
+	}{
+		{503, schedquality.ClassUpstream, false}, {429, schedquality.ClassUnknown, false}, {400, schedquality.ClassCapability, true}, {404, schedquality.ClassCapability, true}, {401, schedquality.ClassUnknown, false},
+	} {
+		for _, field := range []string{"status", "status_code"} {
+			t.Run(fmt.Sprintf("%s=%d", field, tc.status), func(t *testing.T) {
+				payload := []byte(fmt.Sprintf(`{"type":"response.failed","response":{"error":{"code":"model_not_found",%q:%d}}}`, field, tc.status))
+				require.Equal(t, tc.status, UpstreamErrorEventStatus(payload))
+				require.Equal(t, tc.capability, IsUpstreamCapabilityEventFailure(payload))
+				in := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: 200, Body: payload}, false)
+				require.Equal(t, tc.want, in.Class)
+				require.Equal(t, 200, in.HTTPStatus)
+				require.Equal(t, schedquality.OriginUpstream, in.StatusOrigin)
+				if tc.status == 503 {
+					require.True(t, in.Class.Counted())
+				}
+			})
+		}
+	}
+	for _, payload := range []string{`{"error":{"code":"model_not_found"}}`, `{"error":{"status":"503","code":"model_not_found"}}`, `{"error":{"status":503.5,"code":"model_not_found"}}`, `{"input":{"status":503},"error":{"code":"model_not_found"}}`} {
+		require.Equal(t, 400, UpstreamErrorEventStatus([]byte(payload)))
+		require.True(t, IsUpstreamCapabilityEventFailure([]byte(payload)))
+	}
+}

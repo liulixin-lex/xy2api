@@ -42,9 +42,15 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 	if message == "" {
 		message = schedErrorMessage(o.Body)
 	}
-	capabilityStatus := o.StatusCode
-	if o.Source == resilience.SourceStreamEvent {
-		capabilityStatus = http.StatusBadRequest
+	isEvent := o.Source == resilience.SourceStreamEvent
+	if isEvent {
+		// HTTPStatus above remains the actual response head (usually 200).
+		// An explicit event status controls attribution only.
+		o.StatusCode = UpstreamErrorEventStatus(o.Body)
+	}
+	capability := IsUpstreamCapabilityFailure(o.StatusCode, o.Body)
+	if isEvent {
+		capability = IsUpstreamCapabilityEventFailure(o.Body)
 	}
 	result := classifyUpstreamOutcome(o)
 	switch {
@@ -52,7 +58,7 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassInterrupted
 	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
 		in.Class = schedquality.ClassMigration400
-	case IsUpstreamCapabilityFailure(capabilityStatus, o.Body):
+	case capability:
 		in.Class = schedquality.ClassCapability
 	case result.Category == resilience.CategoryBalance && strings.Contains(strings.ToLower(message), "upstream image account"):
 		in.Class = schedquality.ClassUpstream
@@ -64,7 +70,7 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassRequest
 	case result.Category == resilience.CategoryCapacityShed:
 		in.Class = schedquality.ClassUpstream
-	case o.Source == resilience.SourceHTTP && o.StatusCode >= 500:
+	case (o.Source == resilience.SourceHTTP || isEvent) && o.StatusCode >= 500:
 		in.Class = schedquality.ClassUpstream
 	case o.Source == resilience.SourceNetwork && o.Err != nil && !errors.Is(o.Err, context.Canceled) && !errors.Is(o.Err, context.DeadlineExceeded):
 		in.Class = schedquality.ClassUpstream
@@ -205,3 +211,21 @@ func schedErrorMessage(body []byte) string {
 var schedAccountLimitTemplate = regexp.MustCompile(`\baccount(?: \S+)? limit reached\b`)
 var schedPoolTemplate = regexp.MustCompile(`(?:^all available accounts are .+ please retry\b|^all credentials for model \S+ are .+)`)
 var schedProtocolTemplate = regexp.MustCompile(`(?:\bfrontend requests .+ are not supported on this .+|\bsupports text and https input_image content only\b)`)
+
+// UpstreamErrorEventStatus is shared by quality attribution and capability
+// learning. Only explicit integer 400..599 values in supported error envelopes
+// count; an event without one uses the established 400 fallback. This semantic
+// status never replaces the real HTTP response head in a captured sample.
+func UpstreamErrorEventStatus(payload []byte) int {
+	if status, ok := openAIModelAvailabilityExplicitStatus(payload); ok {
+		return status
+	}
+	return http.StatusBadRequest
+}
+
+// IsUpstreamCapabilityEventFailure excludes the HTTP 401 compatibility
+// exception: an in-band event has not established that account qualification.
+func IsUpstreamCapabilityEventFailure(payload []byte) bool {
+	status := UpstreamErrorEventStatus(payload)
+	return status != http.StatusUnauthorized && IsUpstreamCapabilityFailure(status, payload)
+}

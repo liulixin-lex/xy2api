@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -91,6 +92,9 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	if a.repairStep {
 		in.Class = schedquality.ClassRepairStep
+	}
+	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && !a.first && errors.Is(a.sendErr, bufio.ErrTooLong) {
+		in.Class = schedquality.ClassGateway
 	}
 	in = classifySchedAttempt(in, a.failure, a.first)
 	if in.HTTPStatus == 0 {
@@ -401,7 +405,7 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		}
 	}
 	failure := a.failure
-	if a.networkErr == nil && a.httpStatus == 0 {
+	if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
 		a.networkErr = a.sendErr
 	}
 	if failure == nil && a.networkErr != nil {
@@ -461,7 +465,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
-		if a.networkErr == nil && a.httpStatus == 0 {
+		if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
 			a.networkErr = a.sendErr
 		}
 		if a.failure == nil && a.networkErr != nil {
@@ -740,6 +744,9 @@ func (a *schedAttemptCapture) noteNetworkError(err error) {
 		return
 	}
 	a.noteError(err)
+	if errors.Is(err, bufio.ErrTooLong) {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.done && a.networkErr == nil {
