@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -174,9 +173,8 @@ func (s *OpenAIGatewayService) capabilityFailureLearner(ctx context.Context, acc
 	}
 	var once sync.Once
 	state := resilience.StateFrom(ctx)
-	outputStart := state.ClientOutputBytes()
 	return func(status int, refusal []byte) {
-		if state.ClientOutputBytes() > outputStart || !IsUpstreamCapabilityFailure(status, refusal) || resilience.IsStreamOnlyFailure(status, refusal) {
+		if !state.SemanticOutputAt().IsZero() || !IsUpstreamCapabilityFailure(status, refusal) || resilience.IsStreamOnlyFailure(status, refusal) {
 			return
 		}
 		fields := schedErrorFields(refusal)
@@ -209,12 +207,8 @@ func (s *OpenAIGatewayService) capabilityWSFailureLearner(ctx context.Context, a
 }
 
 func observeCapabilityFailure(learn func(int, []byte), payload []byte) {
-	if learn != nil && ClassifyOpenAIResponsesTerminal("", payload).QualityFailure() {
-		status := http.StatusBadRequest
-		if explicit, ok := openAIModelAvailabilityExplicitStatus(payload); ok {
-			status = explicit
-		}
-		learn(status, payload)
+	if learn != nil && ClassifyOpenAIResponsesTerminal("", payload).QualityFailure() && IsUpstreamCapabilityEventFailure(payload) {
+		learn(UpstreamErrorEventStatus(payload), payload)
 	}
 }
 

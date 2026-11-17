@@ -323,8 +323,9 @@ func TestCapabilityMarksAfterOutputAreInterrupted(t *testing.T) {
 	ctx := resilience.WithRequestState(context.Background(), state)
 	capture := svc.beginSchedAttempt(ctx, account, nil, 0, true)
 	capture.learnCapability = svc.capabilityFailureLearner(ctx, account, []byte(`{"model":"synthetic-model","stream":true}`), "responses")
-	capture.MarkOutput(OutputValid, time.Now())
-	state.NoteClientOutputBytes(5)
+	at := time.Now()
+	capture.MarkOutput(OutputValid, at)
+	state.NoteSemanticOutput(at)
 	capture.observe([]byte(`{"type":"response.failed","response":{"error":{"code":"MODEL_UNSUPPORTED"}}}`))
 	capture.finish(nil, nil)
 	require.Zero(t, repo.writes)
@@ -453,7 +454,7 @@ func TestCapabilityMarksExcludeExplicitImagesAndNativeCompact(t *testing.T) {
 }
 
 func TestCapabilityMarksStreamRespectsExplicitErrorStatus(t *testing.T) {
-	for _, status := range []int{400, 404, 429, 503} {
+	for _, status := range []int{400, 401, 404, 429, 503} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			account := capabilityTestAccount(1)
 			repo := &capabilityRepo{accounts: map[int64]*Account{1: account}}
@@ -461,6 +462,42 @@ func TestCapabilityMarksStreamRespectsExplicitErrorStatus(t *testing.T) {
 			learn := svc.capabilityFailureLearner(context.Background(), account, []byte(`{"model":"synthetic-model","stream":true}`), "responses")
 			observeCapabilityFailure(learn, []byte(fmt.Sprintf(`{"type":"response.failed","response":{"error":{"code":"model_not_found","status_code":%d}}}`, status)))
 			require.Equal(t, status == 400 || status == 404, account.CapabilityMarked("synthetic-model", "responses", "stream", time.Now()) != nil)
+		})
+	}
+}
+
+func TestCapabilityMarksWebSocketPreludeAndSemanticOutput(t *testing.T) {
+	for _, effective := range []bool{false, true} {
+		t.Run(fmt.Sprint("semantic_output=", effective), func(t *testing.T) {
+			account := capabilityTestAccount(1)
+			repo := &capabilityRepo{accounts: map[int64]*Account{1: account}}
+			recorder := &errclassRecorder{}
+			svc := &OpenAIGatewayService{accountRepo: repo, schedAttemptRecorder: recorder}
+			state := resilience.NewRequestState()
+			state.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "synthetic-model"})
+			ctx := resilience.WithRequestState(context.Background(), state)
+			capture := svc.beginSchedAttempt(ctx, account, nil, 0, true)
+			capture.learnCapability = svc.capabilityWSFailureLearner(ctx, account, []byte(`{"type":"response.create","model":"synthetic-model"}`))
+			created := []byte(`{"type":"response.created","response":{"id":"fixture-response"}}`)
+			capture.observe(created)
+			noteGatewayWSOutput(ctx, created)
+			require.Positive(t, state.ClientOutputBytes())
+			require.True(t, state.SemanticOutputAt().IsZero(), "response.created carries no effective output")
+			if effective {
+				content := []byte(`{"type":"response.output_text.delta","delta":"fixture"}`)
+				markSchedWSOutput(capture, content)
+				noteGatewayWSOutput(ctx, content)
+				require.False(t, state.SemanticOutputAt().IsZero())
+			}
+			capture.observe([]byte(`{"type":"response.failed","response":{"error":{"code":"MODEL_UNSUPPORTED"}}}`))
+			capture.finish(nil, nil)
+			require.Equal(t, !effective, account.CapabilityMarked("synthetic-model", "responses", "stream", time.Now()) != nil)
+			require.Len(t, recorder.finishes, 1)
+			want := schedquality.ClassCapability
+			if effective {
+				want = schedquality.ClassInterrupted
+			}
+			require.Equal(t, want, recorder.finishes[0].Class)
 		})
 	}
 }
