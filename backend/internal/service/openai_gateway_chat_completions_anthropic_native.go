@@ -223,7 +223,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
-		if !errors.Is(err, io.EOF) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
 			noteSchedError(c, err)
 		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -467,7 +467,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
-		if !errors.Is(err, io.EOF) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
 			noteSchedError(c, err)
 		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
