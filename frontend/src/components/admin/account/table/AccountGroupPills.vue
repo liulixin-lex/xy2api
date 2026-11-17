@@ -149,7 +149,7 @@ const props = defineProps<{
   /** The account's quality summary; null for accounts without quality data. */
   quality: (AccountQualityView & Pick<BackendAccountSummary, 'ttfo'>) | null
   readonly?: boolean
-  /** Quality scheduling is switched off (the summary's global_enabled): an unknown dot says the gate is off. */
+  /** Quality scheduling is switched off (a fresh summary's global_enabled; a stale one cannot tell): an unknown dot says so. */
   gateOff?: boolean
   /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
   card?: boolean

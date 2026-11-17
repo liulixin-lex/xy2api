@@ -32,7 +32,7 @@ const props = defineProps<{
   sourceGroups?: number[]
   /** A group's name by id; the id when unknown. */
   groupName?: (id: number) => string | undefined
-  /** The gate judges nothing here (switched off): the head says so, and the statistical causes are not why. */
+  /** The group's gate is off, so nothing here is judged: the head says so, and the statistical causes are not why. */
   gateOff?: boolean
 }>()
 const { t, te } = useI18n()

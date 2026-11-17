@@ -122,7 +122,7 @@
                     :groups="groupsOf(row)"
                     :quality="row.platform === 'openai' ? row.quality ?? null : null"
                     :readonly="!canPlaceGroups"
-                    :gate-off="qualityMeta?.global_enabled === false"
+                    :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                     @open-quality="(groupId: number) => openQuality(row, groupId)"
                     @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                   />
@@ -169,7 +169,7 @@
                   :groups="groupsOf(row)"
                   :quality="row.platform === 'openai' ? row.quality ?? null : null"
                   :readonly="!canPlaceGroups"
-                  :gate-off="qualityMeta?.global_enabled === false"
+                  :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                 />

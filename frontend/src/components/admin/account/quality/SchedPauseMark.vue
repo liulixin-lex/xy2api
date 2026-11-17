@@ -23,9 +23,11 @@ import { vTip } from '@/utils/tip'
 // Weak mark shown where quality scheduling is off or its view is stale (design spec 0.3); nothing else changes.
 const props = defineProps<{ globalEnabled?: boolean | null; stale?: boolean | null }>()
 const { t } = useI18n()
+// Stale first: before the engine's first cycle the backend answers stale with global_enabled false, which is not the
+// switch being off.
 const label = computed(() => {
-  if (props.globalEnabled === false) return t('admin.schedQuality.tip.globalOff')
   if (props.stale) return t('admin.schedQuality.tip.stale')
+  if (props.globalEnabled === false) return t('admin.schedQuality.tip.globalOff')
   return ''
 })
 </script>

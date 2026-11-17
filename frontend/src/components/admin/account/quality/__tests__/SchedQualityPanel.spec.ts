@@ -496,35 +496,55 @@ describe('SchedQualityPanel', () => {
     expect(tipOf('[data-qp-trigger="reset"]')).toBe('')
   })
 
-  // A gate that judges nothing says so, not "not enough evidence" (P9): switched off for everything, or in this group.
-  it('says the gate is off instead of 证据不够: switched off for everything, or in one group', async () => {
+  // Why a line is unknown besides the evidence (P9): this group's gate is off (not judged at all), or quality scheduling
+  // is switched off (judging goes on, selection ignores the layers), or the view is stale.
+  it('says the gate is off instead of 证据不够: in one group (not judged), or switched off for everything (judged as usual)', async () => {
     const value = detail()
     value.groups[1].policy = { ...policy, enabled: false }
-    value.groups[1].by_model = []
+    value.groups[1].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ causes: ['mass_insufficient'] }) })
     api.accountDetail.mockResolvedValue(value)
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-a' })
     const unknownTip = (groupId: number) => groupRow(groupId).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')
+    const opened = async (groupId: number) => {
+      document.querySelector<HTMLElement>(`[data-qp-expand="${groupId}"]`)!.click()
+      await flushPromises()
+      return document.querySelector(`[data-qp-group-detail="${groupId}"] [data-qp-line="ttfo"]`)!
+    }
     expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
     expect(unknownTip(54)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGroup')
-    document.querySelector<HTMLElement>('[data-qp-expand="54"]')!.click()
-    await flushPromises()
-    expect(document.querySelector('[data-qp-group-detail="54"] .qp-note')!.textContent).toBe('admin.schedQuality.panel.noData:{"why":"admin.schedQuality.identity.gateOffGroup"}')
+    // Not judged in that group: the statistical causes are not why; the numbers stay.
+    const notJudged = await opened(54)
+    expect(notJudged.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.gateOffGroup')
+    expect(notJudged.querySelector('[data-qp-evidence-item="n"]')).not.toBeNull()
+    expect(notJudged.querySelector('[data-qp-evidence-why]')).toBeNull()
 
     closeSchedDrawer()
     await flushPromises()
-    // Switched off everywhere: the expanded evidence keeps its numbers but not the statistical causes of "unknown".
     const off = { ...detail(), global_enabled: false }
     off.groups[0].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ causes: ['mass_insufficient'] }) })
     api.accountDetail.mockResolvedValue(off)
     await openOn(7, { model: 'gpt-a' })
     expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGlobal')
-    document.querySelector<HTMLElement>('[data-qp-expand="53"]')!.click()
-    await flushPromises()
-    const ttfo = document.querySelector('[data-qp-group-detail="53"] [data-qp-line="ttfo"]')!
-    expect(ttfo.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.gateOffGlobal')
-    expect(ttfo.querySelector('[data-qp-evidence-item="n"]')).not.toBeNull()
-    expect(ttfo.querySelector('[data-qp-evidence-why]')).toBeNull()
+    // Judging goes on with the switch off, so its causes still say why the line is unknown.
+    const judged = await opened(53)
+    expect(judged.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.gateOffGlobal')
+    expect(judged.querySelector('[data-qp-evidence-why]')).not.toBeNull()
+  })
+
+  // Before the engine's first cycle the backend answers stale with global_enabled false: that is not the switch.
+  it('says the data is stale, not that quality scheduling is off, while the view is stale', async () => {
+    const value = detail()
+    value.groups[1].by_model = []
+    api.accountDetail.mockResolvedValue({ ...value, stale: true, global_enabled: false, at: '' })
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    expect(groupRow(54).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')).toBe(
+      'admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.tip.stale'
+    )
+    expect(document.querySelector('[data-sq-pause]')!.getAttribute('aria-label')).toBe('admin.schedQuality.tip.stale')
+    expect(document.body.textContent).not.toContain('gateOffGlobal')
+    expect(document.body.textContent).not.toContain('tip.globalOff')
   })
 
   it('opens a group row to each line\'s evidence, with why an unknown first output is unknown', async () => {

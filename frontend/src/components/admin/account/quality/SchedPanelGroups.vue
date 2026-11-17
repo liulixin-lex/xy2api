@@ -89,7 +89,7 @@
               :evidence="item.row.lines[mark.dim].evidence"
               :source-groups="item.row.lines[mark.dim].source_groups"
               :group-name="groupName"
-              :gate-off="item.gateOff !== null"
+              :gate-off="item.gateOff === 'group'"
             />
           </div>
         </div>
@@ -134,6 +134,13 @@ const { t, te } = useI18n()
 const word = (table: string, value: string) => schedWord(table, value, t, te)
 const detailIdPrefix = `qp-gdet-${useId()}`
 
+// An unknown line's words: a stale view says so (the panel cannot tell more), then the gate switched off, then evidence.
+const UNKNOWN_WHY = {
+  stale: 'admin.schedQuality.tip.stale',
+  global: 'admin.schedQuality.identity.gateOffGlobal',
+  group: 'admin.schedQuality.identity.gateOffGroup',
+  evidence: 'admin.schedQuality.identity.unknownWhy'
+} as const
 const PLACE_TONES: Record<PanelPlace, StatusDotTone> = { front: 'ok', trial: 'info', rear: 'back', exempt: 'exempt', stopped: 'off' }
 /** Rear stay of each level, minutes. */
 const STAY_MINUTES = [20, 40, 60, 90, 120]
@@ -170,7 +177,7 @@ const rows = computed(() =>
     const place = groupPlace(props.detail, group, props.model)
     const row = modelRow(group, props.model)
     const off = gateOff(props.detail, group)
-    const unknownWhy = t(off === 'global' ? 'admin.schedQuality.identity.gateOffGlobal' : off === 'group' ? 'admin.schedQuality.identity.gateOffGroup' : 'admin.schedQuality.identity.unknownWhy')
+    const unknownWhy = t(UNKNOWN_WHY[off ?? 'evidence'])
     const marks = RECENT_DIMS.map((dim) => {
       const line = row?.lines[dim]
       const identity = lineIdentity(row, dim)
