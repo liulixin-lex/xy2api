@@ -210,8 +210,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// the outbound request (for example GLM xhigh is forwarded as max).
 	var reasoningEffort *string
 	var schedCapture *schedAttemptCapture
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity, &reasoningEffort, &schedCapture)
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err
 	}

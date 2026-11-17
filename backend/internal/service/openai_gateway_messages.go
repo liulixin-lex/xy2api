@@ -36,7 +36,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(forwardResult, forwardErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(forwardResult, forwardErr)
+	}()
 	if c != nil {
 		c.Set(m7ResponsesWireBodyKey, nil)
 		defer c.Set(m7ResponsesWireBodyKey, nil)
@@ -515,11 +518,12 @@ retryMessagesResponsesWire:
 		)
 	}
 	defer func(a *schedAttemptCapture) {
+		defer resp.Body.Close()
+		rethrowSchedAttemptPanic(a, recover())
 		// Completion belongs to the consumer, before transport cleanup.
 		if a == schedCapture {
 			a.finish(forwardResult, forwardErr)
 		}
-		_ = resp.Body.Close()
 	}(schedCapture)
 
 	// 8. Handle error response with failover
@@ -1564,6 +1568,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser m7CompatSSEFrameParser
 		for scanner.Scan() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
 			line := scanner.Text()
 			if isOpenAICompatDoneSentinelLine(line) {
 				return missingTerminalErr()
@@ -1682,6 +1689,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				}
 				handleScanErr(ev.err)
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
+			}
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := ev.line
 			if isOpenAICompatDoneSentinelLine(line) {

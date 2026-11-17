@@ -46,7 +46,7 @@ export default {
       allExempt: '全部豁免',
       tabBack: '该模型下有后排分组',
       evidenceToggle: '{name} 的判定证据',
-      noData: '该分组还没有这个模型的数据：三条线都是未知（证据不够）。',
+      noData: '该分组还没有这个模型的数据：三条线都是未知（{why}）。',
       recentLines: {
         ttfo: '首个有效输出',
         firstEvent: '首个事件',
@@ -60,6 +60,7 @@ export default {
       autoRecheck: '{time} 后复检',
       exemptAllTip: '所有分组强制正常参与调度',
       recoverTip: '清除后排和可清除的自动状态，回到自动调度',
+      recoverNone: '没有可恢复的状态：不在后排或试用，也没有可清除的自动状态',
     },
     col: {
       group: '分组',
@@ -170,6 +171,8 @@ export default {
       trial: '试用',
       rear: '后排',
       unknownWhy: '证据不够',
+      gateOffGlobal: '门槛已关闭：质量调度总开关关闭，不做判定',
+      gateOffGroup: '门槛已关闭：本分组没有开质量门槛，不做判定',
       trialLeft: '试用剩 {time}',
       rearUntil: '停留 {minutes} 分钟，{time} 到期复核',
       rearStay: '停留 {minutes} 分钟',
@@ -199,6 +202,7 @@ export default {
       summaryFromGateway: '从进入网关 P50 {p50} / P90 {p90}',
       summaryFromBody: '从读完请求体 P50 {p50} / P90 {p90}',
       summaryMigration: '迁移造成的 400：{n} 次',
+      summaryMigrationNone: '迁移造成的 400：—',
       excluded: '不用 · {reason}',
     },
     evidence: {
@@ -309,6 +313,8 @@ export default {
       savedRelaxed: '首字线已清零 {n} 个状态，并按新设置重判',
       invalidOnSave: '首字线判定的数不合法，设置没有保存',
       notSaved: '首字线判定没有保存，其余设置已保存',
+      declined: '其余设置已保存，首字线判定没有保存',
+      unsaved: '未保存：标出的数会放宽首字线判定，保存时在确认框里选“保存并重判”才会生效；改回原值则不再提示。',
       confirmTitle: '放宽首字线判定',
       confirmMessage: '调高任何一个数都会让账号更不容易进后排。保存后，全部首字线的后排和试用清零，并按新设置当场重判；仍不达标的号从第一档重新进后排。',
       confirmSave: '保存并重判',

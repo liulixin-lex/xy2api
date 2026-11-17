@@ -46,14 +46,12 @@ func markSchedFirstEvent(a *schedAttemptCapture, start time.Time, ms *int) *int 
 }
 
 // openAIStreamCommitsOutput preserves legacy commitment when operators disable
-// either existing prelude setting. Quality sampling always uses ClassifyOutput.
+// the master or native whitelist setting. Compatibility-only prelude staging
+// does not control native Responses or passthrough commitment.
 func openAIStreamCommitsOutput(event string, payload []byte, terminal OpenAIResponsesTerminal) bool {
 	settings := resilience.Current()
 	if !settings.Enabled {
 		return openAIStreamDataStartsClientOutput(string(payload), event)
-	}
-	if !settings.Stream.PreludeStaging {
-		return true
 	}
 	if !resilience.Current().NativePreludeWhitelistOn() {
 		return openAIStreamDataStartsClientOutput(string(payload), event)

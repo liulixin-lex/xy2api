@@ -33,7 +33,7 @@ export default {
           cacheTurns: 'Cache · continuation turns (judged)',
           cacheAll: 'Cache · every successful request'
         },
-        dotStates: { ok: 'Normal', back: 'Back of queue', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt', stopped: 'Stopped' },
+        dotStates: { ok: 'Normal', back: 'Rear', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt', stopped: 'Stopped' },
         pillTip: '{name} · {state}',
         pillNoQuality: 'No quality data',
         pillBackUntil: 'back in {time}',
@@ -83,7 +83,7 @@ export default {
         searchPlaceholder: 'Search name, notes, ID',
         filterLabels: { platform: 'Platform', status: 'Status', group: 'Group', quality: 'Quality', type: 'Type', privacy: 'Privacy', iq: 'IQ', category: 'Category' },
         any: 'All',
-        quality: { normal: 'Normal', rear: 'Back of queue', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt' },
+        quality: { normal: 'Normal', rear: 'Rear', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt' },
         moreFilters: 'More filters',
         folded: '{n} more active filters are folded in here',
         foldedTitle: 'Active filters',

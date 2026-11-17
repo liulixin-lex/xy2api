@@ -56,7 +56,11 @@ func (r *capabilityRepo) UpdateExtra(_ context.Context, id int64, updates map[st
 		return nil
 	}
 	for k, v := range updates {
-		a.Extra[k] = v
+		if v == nil {
+			delete(a.Extra, k)
+		} else {
+			a.Extra[k] = v
+		}
 	}
 	r.writes++
 	return nil

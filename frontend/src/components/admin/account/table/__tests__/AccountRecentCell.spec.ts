@@ -6,6 +6,7 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountRecentCell from '../AccountRecentCell.vue'
 import { formatShortTime } from '../accountTime'
+import { recentExtras, recentValue } from '../accountRecent'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { TipContent } from '@/utils/tip'
 
@@ -35,6 +36,16 @@ describe('AccountRecentCell', () => {
       { dim: 'error', text: '12%', cls: [] },
       { dim: 'cache', text: '80%', cls: [] }
     ])
+  })
+
+  // Under a second in ms: 100 / 50 / 50 ms all read "0.1s" otherwise. The cell, its card and the panel share these.
+  it('writes first token, first event and their gap under a second in ms, and seconds from 1s up', () => {
+    const fast = quality({ ttfo: { first_event_p50_ms: 50, first_output_p50_ms: 100, gap_p50_ms: 50, n: 30 } })
+    expect(recentValue(fast, 'ttfo').text).toBe('100ms')
+    expect(recentExtras(fast)).toMatchObject({ firstEvent: '50ms', gap: '50ms' })
+    const edge = quality({ ttfo: { first_event_p50_ms: 999.6, first_output_p50_ms: 1000, gap_p50_ms: 0, n: 30 } })
+    expect(recentValue(edge, 'ttfo').text).toBe('1.0s')
+    expect(recentExtras(edge)).toMatchObject({ firstEvent: '1.0s', gap: '0ms' })
   })
 
   // One tip card for the whole cell (12.7): the window, then each value with its samples. First token is the first

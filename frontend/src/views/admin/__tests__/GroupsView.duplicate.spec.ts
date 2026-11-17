@@ -443,6 +443,26 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  it('leaves a bad rate floor to the page check: no native step or min constraint blocks the save first', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const floor = wrapper.get('[data-testid="edit-min-upstream-rate"]')
+
+    for (const [value, key] of [['1.12345', 'floorPrecisionError'], ['-1', 'floorRangeError']]) {
+      showError.mockClear()
+      await floor.setValue(value)
+      // The browser would show its own bubble and never run the page's save for an input it finds invalid.
+      expect((floor.element as HTMLInputElement).checkValidity()).toBe(true)
+      expect(floor.attributes('aria-invalid')).toBe('true')
+      await wrapper.get('#edit-group-form').trigger('submit')
+      expect(showError).toHaveBeenCalledWith(`admin.groups.profitControl.${key}`)
+    }
+    expect(updateGroup).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('updates manifest controls immediately and submits the displayed selection', async () => {
     vi.useFakeTimers()
     vi.mocked(adminAPI.accounts.list).mockResolvedValue({

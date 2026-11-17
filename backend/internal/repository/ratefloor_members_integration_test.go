@@ -33,3 +33,11 @@ func TestRatefloorCopyConcurrentSourceChangeIntegration(t *testing.T) {
 func TestRatefloorMembershipLockOrderIntegration(t *testing.T) {
 	runRatefloorMembershipLockOrder(t, integrationEntClient, integrationDB)
 }
+
+func TestRatefloorSourceSnapshotBeforeAccountWaitIntegration(t *testing.T) {
+	runRatefloorSourceSnapshotBeforeAccountWait(t, integrationEntClient, integrationDB)
+}
+
+func TestRatefloorDeleteAccountConcurrentPinIntegration(t *testing.T) {
+	runRatefloorDeleteAccountConcurrentPin(t, integrationEntClient, integrationDB)
+}

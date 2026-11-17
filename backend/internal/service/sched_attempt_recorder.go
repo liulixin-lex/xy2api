@@ -53,6 +53,7 @@ type SchedAttemptRecorderService struct {
 	droppedWriteFailed atomic.Uint64
 	lastQueueWarning   atomic.Int64
 	lastWriteWarning   atomic.Int64
+	lastStoppedWarning atomic.Int64
 }
 
 var _ SchedAttemptRecorder = (*SchedAttemptRecorderService)(nil)
@@ -102,10 +103,18 @@ func (s *SchedAttemptRecorderService) SetObserver(fn func(schedquality.AttemptSa
 }
 
 func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
+	return s.beginAt(in, time.Time{})
+}
+
+// beginAt preserves a request-owned physical dial start without publishing a
+// provisional attempt for a dial that is later canceled locally.
+func (s *SchedAttemptRecorderService) beginAt(in SchedAttemptStart, at time.Time) SchedAttempt {
 	if s == nil || s.stopped.Load() || s.store == nil {
 		return schedAttemptNoop{}
 	}
-	at := s.now()
+	if at.IsZero() {
+		at = s.now()
+	}
 	row := schedquality.AttemptSample{
 		AttemptID: uuid.Must(uuid.NewV7()).String(), StartedAt: at,
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
@@ -199,6 +208,13 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 
 func (s *SchedAttemptRecorderService) enqueue(row schedquality.AttemptSample) {
 	s.queueMu.Lock()
+	// Check under the queue lock so an accepted row precedes the shutdown drain.
+	if s.stopped.Load() {
+		s.queueMu.Unlock()
+		s.droppedWriteFailed.Add(1)
+		s.warnDrop("stopped", &s.lastStoppedWarning, nil)
+		return
+	}
 	dropped := s.count == len(s.queue)
 	if dropped {
 		s.head = (s.head + 1) % len(s.queue)

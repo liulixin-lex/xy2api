@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
@@ -37,6 +38,7 @@ type schedAttemptCapture struct {
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
 	accountID                                  int64
+	allowModel401                              bool
 	attempt                                    SchedAttempt
 	sendErr                                    error
 	networkErr                                 error
@@ -61,6 +63,10 @@ type schedAttemptCapture struct {
 }
 
 func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
+	return s.beginSchedAttemptAt(ctx, account, body, bodyBytes, stream, time.Time{})
+}
+
+func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool, started time.Time) *schedAttemptCapture {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -71,7 +77,10 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
+	a := &schedAttemptCapture{allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
+	if !started.IsZero() {
+		a.started = started
+	}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
@@ -84,7 +93,13 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
 		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
-	a.attempt = s.schedAttemptRecorder.Begin(in)
+	if recorder, ok := s.schedAttemptRecorder.(interface {
+		beginAt(SchedAttemptStart, time.Time) SchedAttempt
+	}); ok && !started.IsZero() {
+		a.attempt = recorder.beginAt(in, started)
+	} else {
+		a.attempt = s.schedAttemptRecorder.Begin(in)
+	}
 	if handle, ok := a.attempt.(*schedAttemptHandle); ok {
 		a.attemptID = handle.row.AttemptID
 	}
@@ -96,10 +111,11 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	if a.repairStep {
 		in.Class = schedquality.ClassRepairStep
 	}
-	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && !a.first && errors.Is(a.sendErr, bufio.ErrTooLong) {
+	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && (!a.first && errors.Is(a.sendErr, bufio.ErrTooLong) || errors.Is(a.sendErr, coderws.ErrMessageTooBig)) {
 		in.Class = schedquality.ClassGateway
 	}
-	in = classifySchedAttempt(in, a.failure, a.first)
+	in = classifySchedAttempt(in, a.failure, a.first, a.allowModel401)
+	learnFinalCapabilityFailure(a.learnCapability, in, a.failure)
 	if in.HTTPStatus == 0 {
 		if a.httpStatus > 0 {
 			in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
@@ -282,9 +298,6 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	if !terminal.QualityFailure() {
 		return
 	}
-	if a.learnCapability != nil {
-		observeCapabilityFailure(a.learnCapability, data)
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.done {
@@ -296,11 +309,7 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 		return
 	}
 	o := resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: a.httpStatus, Body: append([]byte(nil), data...)}
-	errRoot := root.Get("response.error")
-	if !errRoot.IsObject() {
-		errRoot = root.Get("error")
-	}
-	o.Code, o.Type, o.Message = errRoot.Get("code").String(), errRoot.Get("type").String(), errRoot.Get("message").String()
+	o.Code, o.Type, o.Message = openAIStreamErrorField(data, "code").String(), openAIStreamErrorField(data, "type").String(), schedErrorMessage(data)
 	a.failure = &o
 	a.errorSource = "upstream_event"
 }
@@ -417,7 +426,7 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		}
 	}
 	failure := a.failure
-	if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+	if a.networkErr == nil && a.httpStatus == 0 && !schedLocalReadLimit(a.sendErr) {
 		a.networkErr = a.sendErr
 	}
 	if failure == nil && a.networkErr != nil {
@@ -477,7 +486,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
-		if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+		if a.networkErr == nil && a.httpStatus == 0 && !schedLocalReadLimit(a.sendErr) {
 			a.networkErr = a.sendErr
 		}
 		if a.failure == nil && a.networkErr != nil {
@@ -681,12 +690,16 @@ type schedWSTurnCapture struct {
 	active *schedAttemptCapture
 }
 
-func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte) {
+func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte, dial ...*schedWSDialObservation) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
-	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
+	if len(dial) > 0 && dial[0] != nil {
+		t.active = dial[0].beginSend(payload, true)
+	} else {
+		t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
+	}
 	if t.active != nil {
 		t.active.learnCapability = s.capabilityWSFailureLearner(ctx, account, payload)
 	}
@@ -761,7 +774,7 @@ func (a *schedAttemptCapture) noteNetworkError(err error) {
 		return
 	}
 	a.noteError(err)
-	if errors.Is(err, bufio.ErrTooLong) {
+	if schedLocalReadLimit(err) {
 		return
 	}
 	a.mu.Lock()
@@ -769,4 +782,68 @@ func (a *schedAttemptCapture) noteNetworkError(err error) {
 	if !a.done && a.networkErr == nil {
 		a.networkErr = err
 	}
+}
+
+// WS consumers call this before wrapping transport failures. Read/write budget
+// deadlines and the normal close after a terminal are not upstream evidence.
+func (a *schedAttemptCapture) noteWSNetworkError(err error) {
+	if a == nil || err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, errOpenAIWSPassthroughFirstOutputTimeout) || errors.Is(err, errOpenAIWSPassthroughActiveTurnTimeout) {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.done || a.terminal || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() {
+		return
+	}
+	a.sendErr = err
+	if schedLocalReadLimit(err) {
+		return
+	}
+	if a.networkErr == nil {
+		a.networkErr = err
+	}
+	a.errorSource = "upstream_ws_read_or_write"
+}
+
+func (t *schedWSTurnCapture) noteNetworkError(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active.noteWSNetworkError(err)
+}
+
+// A remote close with status 1009 is not this local reader-limit sentinel.
+func schedLocalReadLimit(err error) bool {
+	return errors.Is(err, bufio.ErrTooLong) || errors.Is(err, coderws.ErrMessageTooBig)
+}
+
+// recover must be called directly by the owning defer. Never swallow or replace
+// the panic value: the handler retains its existing recovery and response policy.
+func rethrowSchedAttemptPanic(owner interface{ finishPanic() }, recovered any) {
+	if recovered != nil {
+		owner.finishPanic()
+		panic(recovered)
+	}
+}
+
+func (a *schedAttemptCapture) finishPanic() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.done {
+		return
+	}
+	a.done = true
+	a.errorSource = "gateway_panic"
+	noteOpenAIStickyAttemptOutcome(a, false)
+	a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassGateway, Detail: "GATEWAY_PANIC", Usage: a.usage})
+	a.state.ClearCurrentAttemptIf(a)
+}
+
+func (t *schedWSTurnCapture) finishPanic() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active.finishPanic()
 }

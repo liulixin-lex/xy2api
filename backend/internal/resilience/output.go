@@ -16,8 +16,8 @@ type OutputClass struct {
 	Answer bool
 }
 
-// ClassifyOutput is the single content rule for attempt timing, first-output
-// deadlines and request-level semantic delivery (HTTP and WebSocket). Strings
+// ClassifyOutput is the single content rule for attempt timing and request-level
+// semantic delivery. Transport commitment may retain legacy exceptions. Strings
 // must contain a nonblank, visible code point; format-only frames are preludes.
 // An empty protocol infers the protocol from a complete upstream JSON event.
 func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
@@ -28,7 +28,7 @@ func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
 		return OutputClass{}
 	}
 	root := gjson.ParseBytes(payload)
-	if !root.IsObject() {
+	if !root.IsObject() || !outputHasUniqueFields(root, 0) {
 		return OutputClass{}
 	}
 	typ := root.Get("type").String()
@@ -95,6 +95,20 @@ func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
 	return OutputClass{}
 }
 
+// Duplicate keys are ambiguous to clients and gjson. Reuse the transport's
+// object check at every level and leave ambiguous events to its legacy policy.
+func outputHasUniqueFields(value gjson.Result, depth int) bool {
+	if !value.IsObject() && !value.IsArray() {
+		return true
+	}
+	if depth > responsesEmptyFieldMaxDepth || value.IsObject() && !responsesObjectHasUniqueFields(value) {
+		return false
+	}
+	unique := true
+	value.ForEach(func(_, child gjson.Result) bool { unique = outputHasUniqueFields(child, depth+1); return unique })
+	return unique
+}
+
 func classifyResponsesOutput(typ string, root gjson.Result) OutputClass {
 	switch typ {
 	case "response.output_text.delta":
@@ -141,6 +155,12 @@ func classifyResponsesOutput(typ string, root gjson.Result) OutputClass {
 }
 
 func (o *OutputClass) merge(other OutputClass) {
+	// A partially understood event is unknown as a whole, including when a
+	// recognized sibling contains output. Transport applies its legacy policy.
+	if !o.Known || !other.Known {
+		*o = OutputClass{}
+		return
+	}
 	o.Valid = o.Valid || other.Valid
 	o.Answer = o.Answer || other.Answer
 }
@@ -163,7 +183,8 @@ func outputTool(tool gjson.Result) OutputClass {
 
 func hasOutputCodePoint(text string) bool {
 	for _, r := range text {
-		if !unicode.IsSpace(r) && !unicode.Is(unicode.Cf, r) && !unicode.IsControl(r) {
+		if !unicode.IsSpace(r) && !unicode.Is(unicode.Cf, r) && !unicode.IsControl(r) &&
+			!unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) && !unicode.Is(unicode.Variation_Selector, r) {
 			return true
 		}
 	}
@@ -193,7 +214,7 @@ func outputItem(item gjson.Result) OutputClass {
 	case "reasoning":
 		out := outputBlocks(item.Get("summary"))
 		out.merge(outputBlocks(item.Get("content")))
-		out.Valid = out.Valid || nonemptyOutputString(item.Get("encrypted_content"))
+		out.merge(outputText(item.Get("encrypted_content"), false))
 		out.Answer = false
 		return out
 	case "tool_call":
@@ -206,7 +227,9 @@ func outputItem(item gjson.Result) OutputClass {
 		out := outputTool(item)
 		out.Valid = out.Valid || nonemptyOutputString(item.Get("input"))
 		return out
-	case "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_list_tools", "mcp_approval_request":
+	case "mcp_call", "mcp_approval_request":
+		return outputTool(item)
+	case "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call":
 		return OutputClass{Known: true, Valid: true}
 	case "compaction":
 		return outputText(item.Get("encrypted_content"), false)

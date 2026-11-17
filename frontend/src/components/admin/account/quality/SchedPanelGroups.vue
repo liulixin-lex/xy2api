@@ -76,7 +76,7 @@
       </div>
       <div v-if="expanded.has(item.group.group_id)" :id="`${detailIdPrefix}-${item.group.group_id}`" class="gdet" role="row" :data-qp-group-detail="item.group.group_id">
         <div role="cell" class="gdet__cell">
-          <p v-if="!item.row" class="qp-note">{{ t('admin.schedQuality.panel.noData') }}</p>
+          <p v-if="!item.row" class="qp-note">{{ t('admin.schedQuality.panel.noData', { why: item.unknownWhy }) }}</p>
           <div v-for="mark in item.marks" :key="mark.dim" class="gdet__line" :data-qp-line="mark.dim">
             <div class="gdet__head">
               <span class="gdet__k">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
@@ -116,7 +116,7 @@ import { RECENT_DIMS } from '@/components/admin/account/table/accountRecent'
 import { fmtCountdown, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 import SchedEvidence from './SchedEvidence.vue'
-import { groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
+import { gateOff, groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
 
 const props = defineProps<{
   detail: BackendAccountDetail
@@ -147,10 +147,13 @@ function toggle(groupId: number) {
 
 const groupName = (id: number) => props.groupInfo(id)?.name ?? props.detail.groups.find((group) => group.group_id === id)?.name
 
-/** What follows the identity word: why it is unknown, the trial's time left, the rear stay and its end. */
-function lineStatus(line: BackendLine | undefined, left: number | null): string {
+/**
+ * What follows the identity word: why it is unknown (the gate switched off for everything or for this group, else not
+ * enough evidence), the trial's time left, the rear stay and its end.
+ */
+function lineStatus(line: BackendLine | undefined, left: number | null, unknownWhy: string): string {
   const identity = line?.identity ?? 'unknown'
-  if (identity === 'unknown') return t('admin.schedQuality.identity.unknownWhy')
+  if (identity === 'unknown') return unknownWhy
   if (identity === 'trial') return left === null ? '' : t('admin.schedQuality.identity.trialLeft', { time: fmtCountdown(left) })
   if (identity === 'rear' && line) {
     const minutes = STAY_MINUTES[Math.min(Math.max(line.level, 0), STAY_MINUTES.length - 1)]
@@ -165,11 +168,13 @@ const rows = computed(() =>
   props.detail.groups.map((group) => {
     const place = groupPlace(props.detail, group, props.model)
     const row = modelRow(group, props.model)
+    const off = gateOff(props.detail, group)
+    const unknownWhy = t(off === 'global' ? 'admin.schedQuality.identity.gateOffGlobal' : off === 'group' ? 'admin.schedQuality.identity.gateOffGroup' : 'admin.schedQuality.identity.unknownWhy')
     const marks = RECENT_DIMS.map((dim) => {
       const line = row?.lines[dim]
       const identity = lineIdentity(row, dim)
       const left = lineSecondsLeft(line, props.now)
-      const status = lineStatus(line, left)
+      const status = lineStatus(line, left, unknownWhy)
       const name = word('identity', identity)
       return { dim, identity, left, status, word: name, tip: [t(`admin.schedQuality.dim.${dim}`), name, status].filter(Boolean).join(' · ') }
     })
@@ -183,7 +188,7 @@ const rows = computed(() =>
         ? t('admin.schedQuality.panel.exemptUntil', { time: formatShortTime(group.exemption.expires_at) })
         : t('admin.schedQuality.panel.exemptForever')
     }
-    return { group, row, info: props.groupInfo(group.group_id) ?? { name: group.name }, place, extra, marks }
+    return { group, row, info: props.groupInfo(group.group_id) ?? { name: group.name }, place, extra, marks, unknownWhy }
   })
 )
 </script>

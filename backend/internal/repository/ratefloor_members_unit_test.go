@@ -49,7 +49,11 @@ func TestRatefloorMemberPersistence(t *testing.T) {
 	client := dbent.NewClient(dbent.Driver(driver))
 	ctx := context.Background()
 	require.NoError(t, migrate.Create(ctx, migrate.NewSchema(driver), []*schema.Table{migrate.ProxiesTable, migrate.AccountsTable, migrate.GroupsTable, migrate.AccountGroupsTable}, migrate.WithForeignKeys(false)))
+	_, err = db.ExecContext(ctx, `CREATE TABLE scheduled_test_plans(account_id BIGINT)`)
+	require.NoError(t, err)
 	runRatefloorMemberPersistence(t, client, db)
 	runRatefloorCopyConcurrentSourceChange(t, client, db)
 	runRatefloorMembershipLockOrder(t, client, db)
+	runRatefloorSourceSnapshotBeforeAccountWait(t, client, db)
+	runRatefloorDeleteAccountConcurrentPin(t, client, db)
 }

@@ -420,9 +420,9 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		eventCancel()
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox handle failed: id=%d type=%s err=%v", event.ID, event.EventType, err)
-			return
+		} else {
+			ids = append(ids, event.ID)
 		}
-		ids = append(ids, event.ID)
 		// Long batches have no aggregate deadline. Each completed event renews
 		// the idle lease; a single slow event may still outlive it safely.
 		if leaseErr == nil {
@@ -439,12 +439,14 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	if leaseErr != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox lease lost; acknowledging %d processed events: %v", len(ids), leaseErr)
 	}
-	ackCtx, ackCancel := context.WithTimeout(ctx, 10*time.Second)
-	err = s.outboxRepo.DeleteProcessed(ackCtx, ids)
-	ackCancel()
-	if err != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox acknowledgement failed: %v", err)
-		return
+	if len(ids) > 0 {
+		ackCtx, ackCancel := context.WithTimeout(ctx, 10*time.Second)
+		err = s.outboxRepo.DeleteProcessed(ackCtx, ids)
+		ackCancel()
+		if err != nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox acknowledgement failed: %v", err)
+			return
+		}
 	}
 	lease.Release() // autocommit acknowledgement completed; release before rebuilding
 	// Only pending rows contribute to lag/backlog, including late small IDs.
@@ -466,7 +468,9 @@ func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event 
 	case SchedulerOutboxEventGroupChanged:
 		return s.handleGroupEvent(ctx, event.GroupID, seen)
 	case SchedulerOutboxEventFullRebuild:
-		return s.triggerFullRebuild("outbox")
+		// Do not coalesce with a periodic run whose skip-on-busy policy cannot
+		// establish that this event was projected.
+		return s.rebuildFullSnapshot(context.WithValue(ctx, schedulerEventRebuildKey{}, true), "outbox")
 	default:
 		return nil
 	}
@@ -635,7 +639,7 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		sort.Slice(platformGroupIDs, func(i, j int) bool { return platformGroupIDs[i] < platformGroupIDs[j] })
 		buckets = append(buckets, s.bucketsForPlatform(platform, platformGroupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, "account_bulk_change")
+	return s.rebuildEventBuckets(ctx, buckets, "account_bulk_change", seen)
 }
 
 func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accountID *int64, payload map[string]any, seen map[batchSeenKey]struct{}) error {
@@ -810,7 +814,7 @@ func (s *SchedulerSnapshotService) rebuildByAccount(ctx context.Context, account
 		buckets = append(buckets, s.bucketsForPlatform(PlatformAnthropic, groupIDs, seen)...)
 		buckets = append(buckets, s.bucketsForPlatform(PlatformGemini, groupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, reason)
+	return s.rebuildEventBuckets(ctx, buckets, reason, seen)
 }
 
 // schedulerSnapshotPlatforms 返回需要维护调度快照的全部具体平台（平台清单）。
@@ -861,7 +865,7 @@ func (s *SchedulerSnapshotService) rebuildByGroupIDs(ctx context.Context, groupI
 	for _, platform := range schedulerSnapshotPlatforms() {
 		buckets = append(buckets, s.bucketsForPlatform(platform, groupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, reason)
+	return s.rebuildEventBuckets(ctx, buckets, reason, seen)
 }
 
 func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs []int64, seen map[batchSeenKey]struct{}) []SchedulerBucket {
@@ -879,7 +883,6 @@ func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs 
 			if _, exists := seen[key]; exists {
 				continue
 			}
-			seen[key] = struct{}{}
 		}
 		buckets = append(buckets, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeSingle})
 		buckets = append(buckets, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeForced})
@@ -888,6 +891,22 @@ func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs 
 		}
 	}
 	return buckets
+}
+
+// Event projections must be published before their IDs can be acknowledged.
+// A periodic full rebuild keeps its existing skip-on-busy behavior.
+type schedulerEventRebuildKey struct{}
+
+func (s *SchedulerSnapshotService) rebuildEventBuckets(ctx context.Context, buckets []SchedulerBucket, reason string, seen map[batchSeenKey]struct{}) error {
+	if err := s.rebuildBuckets(context.WithValue(ctx, schedulerEventRebuildKey{}, true), buckets, reason); err != nil {
+		return err
+	}
+	for _, bucket := range buckets {
+		if seen != nil {
+			seen[batchSeenKey{groupID: bucket.GroupID, platform: bucket.Platform}] = struct{}{}
+		}
+	}
+	return nil
 }
 
 func (s *SchedulerSnapshotService) rebuildBuckets(ctx context.Context, buckets []SchedulerBucket, reason string) error {
@@ -951,6 +970,8 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 		return ErrSchedulerCacheNotReady
 	}
 	bucket := task.bucket
+	eventDriven, _ := ctx.Value(schedulerEventRebuildKey{}).(bool)
+	strict = strict || eventDriven
 	ok, err := s.cache.TryLockBucket(ctx, bucket, 30*time.Second)
 	if err != nil {
 		return err
@@ -1184,7 +1205,7 @@ func (s *SchedulerSnapshotService) prepareAndRebuildFullSnapshot(
 	reason string,
 ) error {
 	// 首个 DB 查询前必须完成全部普通 bucket 的 token 预备；任何预备错误都不会留下部分发布。
-	// fresh Reopen task 保持严格锁与 fencing 语义，普通 captured task 继续沿用 lock busy/fence 跳过语义。
+	// fresh Reopen task 始终严格；普通 captured task 只有定时重建可跳过 busy/fence，事件必须完成投影。
 	preparedBuckets := make(map[SchedulerBucket]struct{}, len(captured)+len(reopened))
 	for _, task := range captured {
 		preparedBuckets[task.bucket] = struct{}{}

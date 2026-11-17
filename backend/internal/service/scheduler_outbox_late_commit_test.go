@@ -88,12 +88,13 @@ func TestSchedulerOutboxPartialBatchReplayAndConsumerExclusion(t *testing.T) {
 	require.Equal(t, 1, cache.calls)
 	close(resume)
 	<-done
-	require.Len(t, repo.events, 2, "a partial batch must not be acknowledged")
+	require.Len(t, repo.events, 1, "only the failed event remains pending")
+	require.Equal(t, int64(2), repo.events[0].ID)
 	require.Equal(t, map[int64]time.Time{1: time.Unix(100, 0)}, cache.last)
 	second.pollOutbox() // replay after failure or process restart
 	require.Empty(t, repo.events)
 	require.Equal(t, map[int64]time.Time{1: time.Unix(100, 0), 2: time.Unix(100, 0)}, cache.last)
-	require.Equal(t, 4, cache.calls, "the first projection was replayed without accumulating a side effect")
+	require.Equal(t, 3, cache.calls, "the completed projection must not replay")
 	first.pollOutbox()
-	require.Equal(t, 4, cache.calls)
+	require.Equal(t, 3, cache.calls)
 }

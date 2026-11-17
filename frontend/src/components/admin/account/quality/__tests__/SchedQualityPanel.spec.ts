@@ -470,6 +470,45 @@ describe('SchedQualityPanel', () => {
     expect(Array.from(groupRow(54).querySelectorAll<HTMLElement>('[data-qp-mark]'), (mark) => mark.dataset.identity)).toEqual(['unknown', 'unknown', 'unknown'])
   })
 
+  it('says why 恢复 is disabled when the account has nothing to recover', async () => {
+    const tipOf = () => (document.querySelector('[data-qp-trigger="reset"]') as unknown as { __tipText: string }).__tipText
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!.disabled).toBe(false)
+    expect(tipOf()).toBe('admin.schedQuality.panel.recoverTip')
+
+    closeSchedDrawer()
+    await flushPromises()
+    const calm = detail()
+    calm.groups.forEach((group) => group.by_model.forEach((row) => { row.placement = 'front' }))
+    api.accountDetail.mockResolvedValue(calm)
+    await openOn()
+    expect(document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!.disabled).toBe(true)
+    expect(tipOf()).toBe('admin.schedQuality.panel.recoverNone')
+  })
+
+  // A gate that judges nothing says so, not "not enough evidence" (P9): switched off for everything, or in this group.
+  it('says the gate is off instead of 证据不够: switched off for everything, or in one group', async () => {
+    const value = detail()
+    value.groups[1].policy = { ...policy, enabled: false }
+    value.groups[1].by_model = []
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    const unknownTip = (groupId: number) => groupRow(groupId).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')
+    expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
+    expect(unknownTip(54)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGroup')
+    document.querySelector<HTMLElement>('[data-qp-expand="54"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-qp-group-detail="54"] .qp-note')!.textContent).toBe('admin.schedQuality.panel.noData:{"why":"admin.schedQuality.identity.gateOffGroup"}')
+
+    closeSchedDrawer()
+    await flushPromises()
+    api.accountDetail.mockResolvedValue({ ...detail(), global_enabled: false })
+    await openOn(7, { model: 'gpt-a' })
+    expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGlobal')
+  })
+
   it('opens a group row to each line\'s evidence, with why an unknown first output is unknown', async () => {
     const value = detail()
     value.groups[1].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ n: 4.25, s: 1, causes: ['mass_insufficient', 'no_peers'] }), source_groups: [53, 54] })

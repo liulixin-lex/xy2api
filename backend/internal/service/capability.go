@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -23,11 +24,12 @@ const (
 	capabilityLearnedChatKey      = "capability_learned_chat"
 	// CapabilityManualExtraKey is reserved for separately managed overrides.
 	// This release neither writes nor interprets manual capability settings.
-	CapabilityManualExtraKey = "capability_manual"
-	CapabilityOnlyMessage    = `No available account in this group supports non-streaming requests; retry with "stream": true`
-	CapabilityMarksExtraKey  = resilience.CapabilityMarksExtraKey
-	CapabilityMarkTTL        = resilience.CapabilityMarkTTL
-	CapabilityMarkLimit      = 32
+	CapabilityManualExtraKey    = "capability_manual"
+	CapabilityOnlyMessage       = `No available account in this group supports non-streaming requests; retry with "stream": true`
+	CapabilityMarksExtraKey     = resilience.CapabilityMarksExtraKey
+	CapabilityMarkTTL           = resilience.CapabilityMarkTTL
+	CapabilityMarkLimit         = 32
+	CapabilityMarkWriteInterval = time.Hour
 )
 
 type CapabilityMark = resilience.CapabilityMark
@@ -97,7 +99,20 @@ func (s *OpenAIGatewayService) LearnCapabilityMark(ctx context.Context, account 
 	if mark.Fingerprint == "" {
 		return errors.New("cannot fingerprint capability account")
 	}
-	mark.ExpiresAt = time.Now().UTC().Add(CapabilityMarkTTL)
+	now := time.Now().UTC()
+	key := capabilityMarkExtraKey(mark.Model, mark.Protocol, mark.Shape)
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	// A fresh read catches repeated evidence even when selection supplied an
+	// older snapshot. Return before UpdateExtra opens its write transaction.
+	current, err := s.accountRepo.GetByID(stateCtx, account.ID)
+	if err != nil {
+		return err
+	}
+	if current != nil && capabilityMarkRecentlyWritten(current.Extra[key], mark, now) {
+		return nil
+	}
+	mark.ExpiresAt = now.Add(CapabilityMarkTTL)
 	raw, err := json.Marshal(mark)
 	if err != nil {
 		return err
@@ -109,21 +124,33 @@ func (s *OpenAIGatewayService) LearnCapabilityMark(ctx context.Context, account 
 	// Numeric expiry also allows atomic database pruning without parsing arbitrary
 	// administrator-supplied strings as PostgreSQL timestamps.
 	record["expires_at_unix"] = float64(mark.ExpiresAt.UnixNano()) / float64(time.Second)
-	stateCtx, cancel := resilienceStateContext(ctx)
-	defer cancel()
-	if err = s.accountRepo.UpdateExtra(stateCtx, account.ID, map[string]any{capabilityMarkExtraKey(mark.Model, mark.Protocol, mark.Shape): record}); err != nil {
+	if err = s.accountRepo.UpdateExtra(stateCtx, account.ID, map[string]any{key: record}); err != nil {
 		return err
 	}
 	s.resilience.invalidateAccountGroups(account)
 	return nil
 }
 
+func capabilityMarkRecentlyWritten(value any, incoming CapabilityMark, now time.Time) bool {
+	// Every write sets a fixed 24-hour expiry, so its write time is recoverable
+	// without adding another persisted timestamp or changing existing records.
+	mark := capabilityMarkFromExtra(value)
+	return mark != nil && mark.Model == incoming.Model && mark.Protocol == incoming.Protocol && mark.Shape == incoming.Shape &&
+		mark.Fingerprint == incoming.Fingerprint && mark.ExpiresAt.After(now) &&
+		now.Before(mark.ExpiresAt.Add(-CapabilityMarkTTL).Add(CapabilityMarkWriteInterval))
+}
+
 // LimitCapabilityMarkUpdates must use the locked database row, in the same
-// transaction as the merge. Renewals remain allowed when the account is full.
+// transaction as the merge. New marks evict the earliest expiry at capacity.
 func LimitCapabilityMarkUpdates(current, updates map[string]any, accountID int64, now time.Time) map[string]any {
 	result, accepted := maps.Clone(updates), maps.Clone(current)
 	if accepted == nil {
 		accepted = map[string]any{}
+	}
+	for key, value := range updates {
+		if value == nil {
+			delete(accepted, key)
+		}
 	}
 	for key, value := range updates {
 		if !strings.HasPrefix(key, CapabilityMarksExtraKey+"_") || value == nil {
@@ -133,7 +160,12 @@ func LimitCapabilityMarkUpdates(current, updates map[string]any, accountID int64
 		if incoming == nil {
 			continue
 		}
-		count, renewal := 0, false
+		if capabilityMarkRecentlyWritten(accepted[key], *incoming, now) {
+			delete(result, key)
+			continue
+		}
+		count, renewal, oldestKey := 0, false, ""
+		var oldest time.Time
 		for existingKey, existing := range accepted {
 			if !strings.HasPrefix(existingKey, CapabilityMarksExtraKey+"_") {
 				continue
@@ -142,12 +174,15 @@ func LimitCapabilityMarkUpdates(current, updates map[string]any, accountID int64
 			if mark != nil && mark.ExpiresAt.After(now) && mark.Fingerprint == incoming.Fingerprint {
 				count++
 				renewal = renewal || existingKey == key
+				if oldestKey == "" || mark.ExpiresAt.Before(oldest) || mark.ExpiresAt.Equal(oldest) && existingKey < oldestKey {
+					oldestKey, oldest = existingKey, mark.ExpiresAt
+				}
 			}
 		}
 		if !renewal && count >= CapabilityMarkLimit {
-			delete(result, key)
-			slog.Info("sched_quality.capability_mark_limit", "account_id", accountID, "limit", CapabilityMarkLimit)
-			continue
+			result[oldestKey] = nil
+			delete(accepted, oldestKey)
+			slog.Info("sched_quality.capability_mark_evicted", "account_id", accountID, "limit", CapabilityMarkLimit)
 		}
 		accepted[key] = value
 	}
@@ -174,21 +209,12 @@ func (s *OpenAIGatewayService) capabilityFailureLearner(ctx context.Context, acc
 	var once sync.Once
 	state := resilience.StateFrom(ctx)
 	return func(status int, refusal []byte) {
-		if !state.SemanticOutputAt().IsZero() || !IsUpstreamCapabilityFailure(status, refusal) || resilience.IsStreamOnlyFailure(status, refusal) {
-			return
-		}
-		fields := schedErrorFields(refusal)
-		code := strings.ToLower(fields.Get("code").String() + " " + fields.Get("type").String())
-		message := strings.ToLower(schedErrorMessage(refusal))
-		// Input modality and frontend identity are absent from the tuple.
-		// These rejections remain ClassCapability but must not exclude text.
-		if strings.Contains(code, "unsupported_input_capability") || strings.Contains(code, "unsupported_frontend") ||
-			strings.Contains(message, "unsupported input capability") || strings.Contains(message, "unsupported frontend") {
+		scope := ClassifyUpstreamCapabilityFailure(account, status, refusal)
+		if !state.SemanticOutputAt().IsZero() || !scope.Markable() || resilience.IsStreamOnlyFailure(status, refusal) {
 			return
 		}
 		once.Do(func() {
-			if resilience.IsModelUnsupportedResponse(status, refusal) || strings.Contains(code, "model") ||
-				schedUnsupportedModelMessage.MatchString(strings.ToLower(strings.Join(strings.Fields(message), " "))) {
+			if scope == UpstreamCapabilityModel {
 				mark.Reason = "model_unsupported"
 			}
 			if err := s.LearnCapabilityMark(ctx, account, mark); err != nil {
@@ -207,8 +233,79 @@ func (s *OpenAIGatewayService) capabilityWSFailureLearner(ctx context.Context, a
 }
 
 func observeCapabilityFailure(learn func(int, []byte), payload []byte) {
-	if learn != nil && ClassifyOpenAIResponsesTerminal("", payload).QualityFailure() && IsUpstreamCapabilityEventFailure(payload) {
+	if learn != nil && ClassifyOpenAIResponsesTerminal("", payload).QualityFailure() && ClassifyUpstreamCapabilityEventFailure(payload).Markable() {
 		learn(UpstreamErrorEventStatus(payload), payload)
+	}
+}
+
+// Native WS forwarding can run without a quality capture. Keep its provisional
+// refusal local until the forwarding consumer has chosen the final outcome.
+type capabilityStreamFailure struct {
+	learn   func(int, []byte)
+	pending []byte
+}
+
+func (p *capabilityStreamFailure) observe(payload []byte) {
+	if p.learn == nil {
+		return
+	}
+	terminal := ClassifyOpenAIResponsesTerminal("", payload)
+	if terminal.Success {
+		p.pending = nil
+		return
+	}
+	if !terminal.QualityFailure() {
+		return
+	}
+	p.pending = nil
+	if ClassifyUpstreamCapabilityEventFailure(payload).Markable() {
+		p.pending = append([]byte(nil), payload...)
+	}
+}
+
+// Forwarding exits supply facts from their read/write boundary. Return-value
+// projections and incomplete result values are not refusal evidence.
+type capabilityStreamFinish struct {
+	UpstreamFailure    bool
+	ClientDisconnected bool
+	ContextDone        bool
+	GatewayDeadline    bool
+	LocalFailure       bool
+	EffectiveOutput    bool
+}
+
+// Only errors from the upstream socket can confirm an upstream failure.
+// Local reader limits use the same sentinel boundary as quality capture;
+// a remote close with code 1009 remains an upstream error.
+func (f *capabilityStreamFinish) noteIOError(err error, upstream bool) {
+	if err == nil {
+		return
+	}
+	local := !upstream || schedLocalReadLimit(err)
+	canceled := errors.Is(err, context.Canceled)
+	deadline := errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, errOpenAIWSPassthroughFirstOutputTimeout) || errors.Is(err, errOpenAIWSPassthroughActiveTurnTimeout)
+	f.LocalFailure = f.LocalFailure || local
+	f.ContextDone = f.ContextDone || canceled
+	f.GatewayDeadline = f.GatewayDeadline || deadline
+	f.UpstreamFailure = upstream && !local && !canceled && !deadline
+}
+
+func (p *capabilityStreamFailure) finish(final capabilityStreamFinish) {
+	payload := p.pending
+	p.pending = nil
+	if len(payload) == 0 || !final.UpstreamFailure || final.ClientDisconnected || final.ContextDone || final.GatewayDeadline || final.LocalFailure {
+		return
+	}
+	failure := &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: UpstreamErrorEventStatus(payload), Body: payload}
+	finish := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, failure, final.EffectiveOutput, false)
+	learnFinalCapabilityFailure(p.learn, finish, failure)
+}
+
+// Sampled attempts and independent WS consumers share the final attribution gate.
+func learnFinalCapabilityFailure(learn func(int, []byte), final SchedAttemptFinish, failure *resilience.Outcome) {
+	if final.Outcome != schedquality.OutcomeOK && final.Class == schedquality.ClassCapability && failure != nil && failure.Source == resilience.SourceStreamEvent {
+		observeCapabilityFailure(learn, failure.Body)
 	}
 }
 

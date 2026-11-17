@@ -11866,10 +11866,16 @@ async function saveSettings() {
     // Save web search emulation config separately (errors handled internally)
     const wsOk = await saveWebSearchConfig();
     // 首字线三个数单独保存；放宽时先确认，失败或冲突显示在它自己的位置。
-    const ttftRuleOk = (await ttftRuleRef.value?.save()) !== false;
-    if (!ttftRuleOk && ttftRuleRef.value?.failed) {
+    // 确认框里取消：其余设置已保存，规则框里的值留着并标为未保存，同样切到网关页说明。
+    const ttftRule = ttftRuleRef.value;
+    const ttftRuleOk = (await ttftRule?.save()) !== false;
+    if (!ttftRuleOk && ttftRule && (ttftRule.failed || ttftRule.unsaved)) {
       activeTab.value = "gateway";
-      appStore.showError(t("admin.schedQuality.ttftRule.notSaved"));
+      if (ttftRule.failed) {
+        appStore.showError(t("admin.schedQuality.ttftRule.notSaved"));
+      } else {
+        appStore.showWarning(t("admin.schedQuality.ttftRule.declined"));
+      }
     }
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);

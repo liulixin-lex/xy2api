@@ -1,8 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed } from 'vue'
 import AccountStreamOnlyBadge from '../AccountStreamOnlyBadge.vue'
 
-const mocks = vi.hoisted(() => ({ clear: vi.fn(), showSuccess: vi.fn(), showError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ clear: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), manage: true }))
+vi.mock('@/composables/useAdminPermission', () => ({ useAdminPermission: () => ({ canManage: computed(() => mocks.manage) }) }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
 }))
@@ -17,6 +19,7 @@ describe('account stream-only badge', () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: NOW, toFake: ['Date', 'setInterval', 'clearInterval'] })
     vi.clearAllMocks()
+    mocks.manage = true
   })
   afterEach(() => { vi.useRealTimers() })
 
@@ -80,5 +83,20 @@ describe('account stream-only badge', () => {
     expect(vi.getTimerCount()).toBe(0)
     w.unmount()
   })
-})
 
+  // 1440 and 1280 cut the label: the button stays in the cell and the tip has the label whole.
+  it('cuts the label rather than the clear button, with the whole label in the tip', () => {
+    const w = mount(AccountStreamOnlyBadge, { props: { account: { id: 7, capability_learned: [{ protocol: 'chat', mode: 'stream_only', expires_at: at(3 * H) }] } } })
+    expect(w.get('[data-test="stream-only-badge"]').classes()).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full']))
+    expect(w.get('[data-test="stream-only-label"]').classes()).toEqual(expect.arrayContaining(['min-w-0', 'truncate']))
+    expect(w.get('[data-test="stream-only-clear"]').classes()).toContain('shrink-0')
+    expect(w.get('[data-test="stream-only-badge"]').attributes('title')).toContain('admin.resilience.capability.badge')
+  })
+
+  it('shows a read-only operator the state without the clear button', () => {
+    mocks.manage = false
+    const w = mount(AccountStreamOnlyBadge, { props: { account: { id: 7, capability_learned: [{ protocol: 'chat', mode: 'stream_only', expires_at: at(H) }] } } })
+    expect(w.find('[data-test="stream-only-badge"]').exists()).toBe(true)
+    expect(w.find('[data-test="stream-only-clear"]').exists()).toBe(false)
+  })
+})

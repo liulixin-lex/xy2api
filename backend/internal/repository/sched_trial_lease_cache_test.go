@@ -273,3 +273,32 @@ func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
+	for _, mode := range []string{"missing", "expired", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			leases, rdb, _, now := newTrialLeaseTestCache(t)
+			ctx := context.Background()
+			request, session := service.TrialLeaseRequestMember("request"), service.TrialLeaseSessionMember("committed")
+			if mode == "expired" {
+				requireTrialAcquire(t, leases, 7, request, now)
+				now = now.Add(service.TrialLeaseIdle)
+			}
+			if mode == "full" {
+				for i := 0; i < service.TrialLeaseLimit; i++ {
+					requireTrialAcquire(t, leases, 7, service.TrialLeaseSessionMember(fmt.Sprint(i)), now)
+				}
+			}
+			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, request, session, now))
+			members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
+			require.NoError(t, err)
+			require.Contains(t, members, "7:"+session)
+			require.NotContains(t, members, "7:"+request)
+			want := 1
+			if mode == "full" {
+				want = service.TrialLeaseLimit + 1
+			}
+			require.Len(t, members, want)
+		})
+	}
+}

@@ -39,7 +39,10 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	startTime := time.Now()
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
@@ -104,9 +107,10 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func(a *schedAttemptCapture) {
+		defer resp.Body.Close()
+		rethrowSchedAttemptPanic(a, recover())
 		// Completion belongs to the consumer, before transport cleanup.
 		a.finish(schedResult, schedErr)
-		_ = resp.Body.Close()
 	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
@@ -271,6 +275,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	forwardUsage := claudeUsageToOpenAIUsage(usage)
+	// A failed client write finishes capture immediately, before the result is returned.
+	currentSchedAttempt(ctx).noteUsage(&forwardUsage)
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
@@ -294,7 +301,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
 		UpstreamHeaders:  resp.Header,
-		Usage:            claudeUsageToOpenAIUsage(usage),
+		Usage:            forwardUsage,
 		Model:            originalModel,
 		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,

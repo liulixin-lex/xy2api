@@ -37,6 +37,12 @@ const placesAccount = (detail: Partial<Pick<BackendAccountDetail, 'global_enable
 
 type PlaceDetail = Pick<BackendAccountDetail, 'stop'> & Partial<Pick<BackendAccountDetail, 'global_enabled' | 'stale'>>
 
+/** Why the gate judges nothing in a group: quality scheduling switched off, or the group's policy; null while it judges. */
+export function gateOff(detail: Partial<Pick<BackendAccountDetail, 'global_enabled'>>, group: BackendDetailGroup): 'global' | 'group' | null {
+  if (detail.global_enabled === false) return 'global'
+  return group.policy.enabled === false ? 'group' : null
+}
+
 export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model: string | null): PanelPlace {
   if (detail.stop) return 'stopped'
   const row = modelRow(group, model)

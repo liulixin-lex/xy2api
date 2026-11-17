@@ -187,6 +187,28 @@ describe('GroupSchedPolicyField', () => {
     expect(w.get('[data-sq-trial-failed]').text()).toBe('admin.schedQuality.result.failed')
   })
 
+  it('lists an account with several models changing once, naming the models, with every change in the tip', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({
+      changed: [
+        { account_id: 1, name: 'acc-01', model: 'gpt-a', line: 'ttfo', from: 'pass', to: 'fail' },
+        { account_id: 2, name: 'acc-02', model: 'gpt-a', line: 'ttfo', from: 'pass', to: 'fail' },
+        { account_id: 1, name: 'acc-01', model: 'gpt-b', line: 'ttfo', from: 'unknown', to: 'fail' },
+        { account_id: 1, name: 'acc-01', model: 'gpt-a', line: 'error', from: 'pass', to: 'unknown' }
+      ]
+    }))
+    const w = await mountField()
+    await ttft(w).setValue('8')
+    await settle()
+    const spans = w.findAll('[data-sq-trial-names] > span')
+    expect(spans.map((el) => el.text())).toEqual(['acc-01 · gpt-a, gpt-b', 'acc-02'])
+    expect((spans[0].element as HTMLElement & { __tipText?: string }).__tipText).toBe([
+      'gpt-a · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.pass → admin.schedQuality.verdict.fail',
+      'gpt-b · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.unknown → admin.schedQuality.verdict.fail',
+      'gpt-a · admin.schedQuality.dim.error · admin.schedQuality.verdict.pass → admin.schedQuality.verdict.unknown'
+    ].join('\n'))
+  })
+
   it('saves with the version, and on a conflict shows failed + reload, which reads the server values back', async () => {
     const w = await mountField()
     await ttft(w).setValue('12.5')

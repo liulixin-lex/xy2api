@@ -880,6 +880,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	agentTaskRecoveryTried := false
+	currentDialPayload := firstPayload.payloadRaw
+	var schedDial *schedWSDialObservation
 	var acquireTurnLease func(int, string, bool, bool) (*openAIWSConnLease, error)
 	acquireTurnLease = func(turn int, preferred string, forcePreferredConn bool, forceNewConn bool) (*openAIWSConnLease, error) {
 		req := cloneOpenAIWSAcquireRequest(baseAcquireReq)
@@ -889,6 +891,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// 上游读写失败后的重试同样新建，避免再拿到同批陈旧的空闲连接。
 		req.ForceNewConn = dedicatedMode || forceNewConn
 		acquireCtx, acquireCancel := context.WithTimeout(ctx, acquireTimeout)
+		acquireCtx, schedDial = withSchedWSDialObservation(acquireCtx, ctx, s, account, true)
+		schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, currentDialPayload)
 		lease, acquireErr := pool.Acquire(acquireCtx, req)
 		acquireCancel()
 		var dialErr *openAIWSDialError
@@ -990,7 +994,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	turnHasEncryptedContent := false
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (schedResult *OpenAIForwardResult, schedErr error) {
 		var schedCapture *schedAttemptCapture
-		defer func() { schedCapture.finish(schedResult, schedErr) }()
+		var learnCapability *capabilityStreamFailure
+		learningFinal := capabilityStreamFinish{}
+		defer func() {
+			rethrowSchedAttemptPanic(schedCapture, recover())
+			if learnCapability != nil {
+				learningFinal.ContextDone = learningFinal.ContextDone || ctx.Err() != nil
+				learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
+				learnCapability.finish(learningFinal)
+			}
+			schedCapture.finish(schedResult, schedErr)
+		}()
 		postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)
 		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 		if lease == nil {
@@ -1005,9 +1019,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
 		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 		stickyTurnSent = true
-		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
-		learnCapability := s.capabilityWSFailureLearner(ctx, account, wirePayload)
+		schedCapture = schedDial.beginSend(wirePayload, true)
+		learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wirePayload)}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
+			learningFinal.noteIOError(err, true)
+			schedCapture.noteWSNetworkError(err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
@@ -1057,6 +1073,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
+				learningFinal.noteIOError(readErr, true)
+				schedCapture.noteWSNetworkError(readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",
@@ -1070,7 +1088,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 
-			observeCapabilityFailure(learnCapability, upstreamMessage)
+			learnCapability.observe(upstreamMessage)
 			schedCapture.observe(upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
@@ -1236,8 +1254,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				markSchedWSOutput(schedCapture, clientMessage)
 				if err := writeClientMessage(clientMessage); err != nil {
+					learningFinal.noteIOError(err, false)
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
+						learningFinal.ClientDisconnected = true
 						schedCapture.cancel()
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 						logOpenAIWSModeInfo(
@@ -1261,6 +1281,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			if isTerminalEvent {
+				learningFinal.UpstreamFailure = ClassifyOpenAIResponsesTerminal("", upstreamMessage).QualityFailure()
 				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {
@@ -1729,6 +1750,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		forcePreferredConn := isStrictAffinityTurn(currentPayload)
 		if sessionLease == nil {
+			currentDialPayload = currentPayload
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
 			if acquireErr != nil {
 				return fmt.Errorf("acquire upstream websocket: %w", acquireErr)
@@ -1837,6 +1859,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				resetSessionLease(true)
 
+				currentDialPayload = currentPayload
 				acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, false)
 				if acquireErr != nil {
 					return fmt.Errorf("acquire upstream websocket after preflight ping fail: %w", acquireErr)

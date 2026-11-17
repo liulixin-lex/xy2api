@@ -2552,17 +2552,13 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	reqLog *zap.Logger,
 	writeError openAISlotErrorWriter,
 ) (release func(), outcome openAISlotAcquireResult) {
-	defer func() {
-		if selection == nil || selection.Acquired {
-			return
-		}
-		cleanup := service.CombineSelectionRelease(selection, release)
-		if outcome == openAISlotAcquireOK {
-			release = wrapReleaseOnDone(c.Request.Context(), cleanup)
-		} else {
-			cleanup()
-		}
-	}()
+	guard := newAdmissionReleaseGuard(service.CombineSelectionRelease(selection, nil))
+	defer func() { guard.cleanup() }()
+	handoff := func(ctx context.Context) func() {
+		release := wrapReleaseOnDone(ctx, guard.release)
+		guard.transfer()
+		return release
+	}
 	if writeError == nil {
 		writeError = func(status int, errType, code, message string) {
 			h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, *streamStarted, false)
@@ -2586,9 +2582,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if selection.Acquired {
 		latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, false)
 		if vetoed {
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
+			guard.release()
 			reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			return nil, openAISlotAcquireProfitVetoed
 		}
@@ -2601,7 +2595,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), openAISlotAcquireOK
+		return handoff(ctx), openAISlotAcquireOK
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -2621,13 +2615,12 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		return nil, openAISlotAcquireFailed
 	}
 	if fastAcquired {
+		guard = newAdmissionReleaseGuard(service.CombineSelectionRelease(selection, fastReleaseFunc))
 		// 快速取槽复用刚读取的账号；若选号内部已等待则刷新权威状态。
 		// 拒绝时释放槽位并排除重选，不绑定粘连。
 		latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, false)
 		if vetoed {
-			if fastReleaseFunc != nil {
-				fastReleaseFunc()
-			}
+			guard.release()
 			reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			return nil, openAISlotAcquireProfitVetoed
 		}
@@ -2638,7 +2631,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return fastReleaseFunc, openAISlotAcquireOK
+		return handoff(ctx), openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -2684,15 +2677,14 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		return nil, openAISlotAcquireFailed
 	}
 
+	guard = newAdmissionReleaseGuard(service.CombineSelectionRelease(selection, accountReleaseFunc))
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
 	// WaitPlan 排队成功后刷新账号及分组准入条件；不再符合条件时
 	// 释放槽位并交由调用方排除重选，不绑定粘连。
 	latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, true)
 	if vetoed {
-		if accountReleaseFunc != nil {
-			accountReleaseFunc()
-		}
+		guard.release()
 		reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 		return nil, openAISlotAcquireProfitVetoed
 	}
@@ -2703,7 +2695,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 	}
-	return accountReleaseFunc, openAISlotAcquireOK
+	return handoff(ctx), openAISlotAcquireOK
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
@@ -3157,6 +3149,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		admissionCtx := service.ContextWithSelectionProfitGate(ctx, selection)
 		accountReleaseFunc := selection.ReleaseFunc
 		if selection.Acquired {
+			guard := newAdmissionReleaseGuard(accountReleaseFunc)
+			accountReleaseFunc = guard.release
+			currentAccountRelease = wrapReleaseOnDone(ctx, guard.transfer())
 			// 已取槽结果复用刚完成的准入；只有选号内部等待过才重新读库。
 			latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(admissionCtx, selection, false)
 			if vetoed {
@@ -3196,7 +3191,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 				return
 			}
-			fastReleaseFunc = service.CombineSelectionRelease(selection, fastReleaseFunc)
+			fastReleaseFunc = newAdmissionReleaseGuard(service.CombineSelectionRelease(selection, fastReleaseFunc)).release
+			currentAccountRelease = wrapReleaseOnDone(ctx, fastReleaseFunc)
 			// WS 快速抢槽复查准入，若内部等待过则刷新账号；拒绝时释放
 			// 槽位、排除该账号重新选号，全池耗尽由下一轮选号关闭连接。
 			latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(admissionCtx, selection, false)
@@ -3402,6 +3398,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if !userAcquired {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
 				}
+				userGuard := newAdmissionReleaseGuard(userReleaseFunc)
+				defer userGuard.cleanup()
+				userReleaseFunc = userGuard.release
 				if err := checkSimpleModeTurnBilling(); err != nil {
 					if userReleaseFunc != nil {
 						userReleaseFunc()
@@ -3423,9 +3422,18 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// A full account gets the sticky short wait before the client
 				// is asked to reconnect; the user's own limit above does not.
 				var accountReleaseFunc func()
+				var accountGuard *admissionReleaseGuard
+				defer func() {
+					if accountGuard != nil {
+						accountGuard.cleanup()
+					}
+				}()
 				accountAcquired, err := service.WaitOpenAIStickyCapacity(ctx, func() (bool, error) {
 					release, acquired, acquireErr := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
-					accountReleaseFunc = release
+					if acquired {
+						accountGuard = newAdmissionReleaseGuard(release)
+						accountReleaseFunc = accountGuard.release
+					}
 					return acquired, acquireErr
 				})
 				if err != nil {
@@ -3463,6 +3471,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
+				userGuard.transfer()
+				accountGuard.transfer()
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {

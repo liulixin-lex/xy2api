@@ -140,3 +140,34 @@ func TestDomainFunctionsPreserveInputs(t *testing.T) {
 		t.Fatal("assessment changed caller-owned samples")
 	}
 }
+
+func TestSummaryGapClampsEachPairedSample(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pairs [][2]int
+		want  int
+	}{
+		{"mixed", [][2]int{{200, 100}, {10, 40}, {0, 50}}, 30},
+		{"mostly earlier output", [][2]int{{200, 100}, {300, 100}, {0, 50}}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := machineSamples(5)
+			for i, pair := range tc.pairs {
+				rows[i].FirstEventMs = machineInt(pair[0])
+				rows[i].TTFOMs = machineInt(pair[1])
+			}
+			rows[3].FirstEventMs = nil
+			rows[3].TTFOMs = machineInt(9999)
+			rows[4].FirstEventMs = machineInt(9999)
+			rows[4].TTFOMs = nil
+			out := SummarizeAccount(rows, 1, time.Time{}, machineNow)
+			if out.GapP50Ms == nil || *out.GapP50Ms != tc.want || out.FirstOutputN != len(tc.pairs) {
+				t.Fatalf("gap=%v count=%d want=%d/%d", out.GapP50Ms, out.FirstOutputN, tc.want, len(tc.pairs))
+			}
+			out = SummarizeAccount(rows[3:], 1, time.Time{}, machineNow)
+			if out.GapP50Ms != nil || out.FirstOutputN != 0 {
+				t.Fatalf("unpaired times entered median: %+v", out)
+			}
+		})
+	}
+}

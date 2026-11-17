@@ -41,6 +41,7 @@ const {
   adminSettingsFetch,
   showError,
   showSuccess,
+  showWarning,
   testWebSearchEmulation,
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
@@ -83,6 +84,7 @@ const {
   adminSettingsFetch: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
+  showWarning: vi.fn(),
   testWebSearchEmulation: vi.fn(),
 }));
 
@@ -131,7 +133,7 @@ vi.mock("@/stores", () => ({
   useAppStore: () => ({
     showError,
     showSuccess,
-    showWarning: vi.fn(),
+    showWarning,
     showInfo: vi.fn(),
     fetchPublicSettings,
   }),
@@ -510,7 +512,7 @@ const baseSettingsResponse = {
   },
 };
 
-function mountView() {
+function mountView(stubs: Record<string, unknown> = {}) {
   return mount(SettingsView, {
     global: {
       stubs: {
@@ -528,6 +530,7 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         CodexTicketProxyPool: true,
+        ...stubs,
       },
     },
   });
@@ -1414,6 +1417,33 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(updateProvider).toHaveBeenCalledWith(7, { enabled: true });
     expect(getProviders).toHaveBeenCalledTimes(2);
+  });
+
+  // The first-output rule saves after the page: a refused save and a relaxation declined in its confirm dialog both
+  // say the other settings were saved and switch to the gateway tab where the rule field shows why.
+  it.each([
+    ["a refused save", { failed: true, unsaved: false }, showError, "admin.schedQuality.ttftRule.notSaved"],
+    ["a declined relaxation", { failed: false, unsaved: true }, showWarning, "admin.schedQuality.ttftRule.declined"],
+  ] as const)("says the first-output rule was not saved after %s", async (_, state, toast, message) => {
+    const RuleStub = defineComponent({
+      setup(_props, { expose }) {
+        expose({ save: async () => false, valid: true, focusInvalid: () => undefined, ...state });
+        return () => h("div");
+      },
+    });
+    showWarning.mockReset();
+    const wrapper = mountView({ SchedTTFTRuleField: RuleStub });
+    await flushPromises();
+    // The tabs are v-show: the gateway tab shows when no ancestor of its switch is hidden.
+    const gatewayShown = () => wrapper.get('[data-testid="sched-quality-enabled"]').element.closest('[style*="display: none"]') === null;
+    expect(gatewayShown()).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(message);
+    expect(showSuccess).not.toHaveBeenCalled();
+    expect(gatewayShown()).toBe(true);
+    wrapper.unmount();
   });
 
   // Backend 0.6.5 dropped the quality test switch (sched_quality_test_enabled): one quality switch is left.

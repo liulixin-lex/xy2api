@@ -329,6 +329,6 @@ func TestErrclassDeliveredIncompleteQuality(t *testing.T) {
 	}
 	// No first-output marker is required: the non-benign terminal itself
 	// establishes that output did not complete normally (ruling J).
-	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: SchedAttemptDetailOutputIncomplete}, nil, false)
+	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: SchedAttemptDetailOutputIncomplete}, nil, false, false)
 	require.Equal(t, schedquality.ClassInterrupted, got.Class)
 }

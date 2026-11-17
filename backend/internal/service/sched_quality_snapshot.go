@@ -15,6 +15,7 @@ type schedQualityKey struct {
 	group   int64
 }
 type schedQualityData struct {
+	replayStats   schedReplayStats
 	now           time.Time
 	samples       map[SchedAccountModel][]q.AttemptSample
 	globalEnabled bool
@@ -77,6 +78,9 @@ func (s *SchedQualitySnapshot) RowsForAccount(id int64) []SchedGroupRow { return
 
 func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.LineState, overrides []SchedOverride, resets map[int64]time.Time, evaluatedAt time.Time) map[int64]time.Time {
 	version := s.snapshot.Load().Version + 1
+	// Administrative rebuilds can run after a failed bootstrap page too.
+	// Never activate layering from that incomplete evidence window.
+	enabled := d.globalEnabled && s.loaded
 	active := make(map[int64][]SchedOverride)
 	var copied []SchedOverride
 	for _, o := range overrides {
@@ -90,7 +94,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		copied = append(copied, o)
 		active[o.AccountID] = append(active[o.AccountID], o)
 	}
-	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
+	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: enabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
 	keys, previous := s.rowKeys(d, states)
 	groupRows := make(map[int64][]SchedGroupRow)
 	// Display uses the same bucket membership as replay, without changing it.
@@ -164,13 +168,19 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			}
 		}
 	}
+	// Finished observations already have a result, even before the ledger write.
+	// In-flight attempts are not completed rounds and cannot block migration.
+	unpersisted := make(map[string]bool)
 	for _, r := range d.running {
-		sessions.add(schedQualityCloneSample(r))
+		if !r.FinishedAt.IsZero() && !r.FinishedAt.After(d.now) {
+			sessions.add(schedQualityCloneSample(r))
+			unpersisted[r.AttemptID] = true
+		}
 	}
 	sessions.sort()
 	view.sessions = make(map[schedSessionKey][]q.AttemptSample)
 	for k, rows := range sessions {
-		view.sessions[k] = schedSessionRounds(rows)
+		view.sessions[k] = schedSessionRounds(rows, unpersisted)
 	}
 	members := make(map[int64][]int64)
 	for group, ids := range s.members {
@@ -222,7 +232,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			return a.Requests > b.Requests
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: d.globalEnabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {
@@ -358,9 +368,10 @@ func schedStateUntil(v q.StateView) time.Time {
 	return until
 }
 
-// Retries share a logical request/turn. A switched first turn is a boundary,
-// so older history cannot be joined across a move away and back to an account.
-func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
+// Retries share a logical request/turn and the final finished attempt determines
+// its result. Preserve ledger-confirmed boundaries unless an unpersisted
+// predecessor supplements the ledger; observed rounds use merged history.
+func schedSessionRounds(attempts []q.AttemptSample, unpersisted map[string]bool) []q.AttemptSample {
 	type roundKey struct {
 		id      string
 		attempt bool
@@ -390,7 +401,16 @@ func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
 		return rows[i].StartedAt.Before(rows[j].StartedAt)
 	})
 	var tail []q.AttemptSample
-	for _, r := range rows {
+	for i, r := range rows {
+		if i > 0 && (unpersisted[r.AttemptID] || unpersisted[rows[i-1].AttemptID]) {
+			r.Switched = rows[i-1].AccountID != r.AccountID
+		} else if i == 0 && unpersisted[r.AttemptID] {
+			// Without a predecessor, this observation may be a cold first round.
+			// Exclude only this round; later completed rounds can still qualify.
+			r.Switched = true
+		}
+		// Otherwise preserve the durable round's confirmed marker: its true
+		// predecessor may have expired before an older, overlapping request.
 		if r.Switched {
 			tail = nil
 			continue

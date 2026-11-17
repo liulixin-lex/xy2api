@@ -137,7 +137,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	requestedModel := reqModel
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
@@ -2490,7 +2493,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// writes the pre-output heartbeats itself, so a failed heartbeat is seen
 	// as a departed client (PM7).
 	guarded := resilience.Current().StrictTerminalOn()
-	stagePrelude := !resilience.Current().Enabled || resilience.Current().Stream.PreludeStaging
 	firstOutputTimeout := time.Duration(0)
 	var firstOutputPlan resilience.TimeoutPlan
 	if guarded && account != nil && account.Platform == PlatformOpenAI {
@@ -2684,6 +2686,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// the scanner directly or, with the deadline or stall check, from a read
 	// pump.
 	processResponseLine := func(line string) passthroughLineStep {
+		lineHasValidOutput := false
 		if guarded && !clientOutputStarted {
 			if err := reqCtx.Err(); err != nil {
 				return passthroughReturn(resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err))
@@ -2762,6 +2765,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			observeOpenAIPreludeCreated(preludeTrace, sourceEventType)
 			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			lineHasValidOutput = resilience.ClassifyOutput("", pendingSSEEventType, dataBytes).Valid
 			if account == nil || account.Platform != PlatformOpenAI {
 				commitsOutput = openAIStreamDataStartsClientOutput(data, sourceEventType)
 			}
@@ -2957,7 +2961,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
 			}
-			lineStartsClientOutput = !stagePrelude || forceFlushFailedEvent || commitsOutput
+			lineStartsClientOutput = forceFlushFailedEvent || commitsOutput
 			// Content stops the first-output deadline even after a failed
 			// heartbeat, so it cannot cut the drain of the usage (PM7).
 			firstOutputSeen = firstOutputSeen || lineStartsClientOutput && !suppressCurrentEvent
@@ -3003,7 +3007,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if responsesEOF && line == "" {
 				wireLine = ""
 			}
-			if stagePrelude && !clientOutputStarted && !lineStartsClientOutput {
+			if !clientOutputStarted && !lineStartsClientOutput {
 				if _, err := pendingStage.WriteString(wireLine); err != nil {
 					message := "OpenAI first-output staging failed"
 					if errors.Is(err, errOpenAIFirstOutputStageLimit) {
@@ -3037,6 +3041,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			written, writeErr := io.WriteString(w, wireLine)
+			if written == len(wireLine) && writeErr == nil && lineHasValidOutput {
+				deliveryWriterFrom(c).noteClassifiedSemanticOutput()
+			}
 			if written > 0 {
 				if data, ok := extractOpenAISSEDataLine(line); ok && resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).SemanticOutput {
 					clientSawSemanticOutput = true

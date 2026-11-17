@@ -200,3 +200,45 @@ func TestScopedAdminAccountListIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestScopedAdminAccountListRejectsQualityFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		query  string
+		status int
+		code   string
+	}{
+		{"", 200, ""}, {"sched_quality=", 200, ""}, {"sched_quality=%20", 200, ""},
+		{"sched_quality=rear", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=trial", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=normal", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=unknown", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=exempt", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=&sched_quality=rear", 403, "SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED"},
+		{"sched_quality=observing", 400, "INVALID_SCHED_QUALITY"},
+		{"sched_quality=substandard", 400, "INVALID_SCHED_QUALITY"},
+		{"sched_quality=invalid", 400, "INVALID_SCHED_QUALITY"},
+		{"sched_quality=rear&sched_quality=substandard", 400, "INVALID_SCHED_QUALITY"},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			svc := &scopedIDsAccountService{}
+			h := &AccountHandler{adminService: svc}
+			principal := &adminaccess.Principal{Policy: adminaccess.Policy{Rules: []adminaccess.Rule{{Permissions: []string{"accounts.read"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}}}}}
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), principal))
+			})
+			r.Use(h.ScopedAdminKeyAccounts)
+			r.GET("/api/v1/admin/accounts", func(c *gin.Context) { t.Fatal("ordinary list must not run") })
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?"+tc.query, nil))
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			if tc.code != "" {
+				require.Zero(t, svc.listCalls)
+				require.Contains(t, w.Body.String(), tc.code)
+			} else {
+				require.Equal(t, 1, svc.listCalls)
+			}
+		})
+	}
+}
