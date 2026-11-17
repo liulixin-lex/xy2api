@@ -314,6 +314,107 @@ func TestSelectionMergedFinishedRoundsBoundaries(t *testing.T) {
 	}
 }
 
+func TestSelectionRetentionEdgePreservesLedgerSwitch(t *testing.T) {
+	for _, switched := range []bool{true, false} {
+		t.Run(fmt.Sprint(switched), func(t *testing.T) {
+			f := newQualityFixture(t)
+			rows := engineSamples(4, f.now.Add(-time.Second), true)
+			for i := range rows {
+				rows[i].SessionKey = "session"
+			}
+			// Q expires before the older, longer P. The ledger still knows Q is
+			// R's true predecessor; P is only its neighbor inside the window.
+			rows[0].StartedAt, rows[0].FinishedAt = f.now.Add(-252*time.Minute), f.now.Add(-248*time.Minute)
+			rows[1].StartedAt, rows[1].FinishedAt = f.now.Add(-251*time.Minute-30*time.Second), f.now.Add(-251*time.Minute)
+			rows[2].StartedAt, rows[2].FinishedAt = f.now.Add(-250*time.Minute-30*time.Second), f.now.Add(-249*time.Minute-30*time.Second)
+			if switched {
+				rows[1].AccountID = 2
+			} else {
+				rows[0].AccountID = 2
+			}
+			for i := range rows {
+				rows[i].InsertedAt = rows[i].FinishedAt
+			}
+			f.ledger.Rows = rows
+			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
+			f.cycle()
+			require.Equal(t, rows[1].AttemptID, f.e.window.previous[rows[2].AttemptID].AttemptID)
+			for _, samples := range f.e.window.samples {
+				for _, r := range samples {
+					require.NotEqual(t, rows[1].AttemptID, r.AttemptID, "Q is outside the 250-minute retention window")
+					if r.AttemptID == rows[2].AttemptID {
+						require.Equal(t, switched, r.Switched)
+					}
+				}
+			}
+			selectionRequireSnapshotMigration(t, f, !switched)
+			tail := f.e.Snapshot().View.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+			if switched {
+				require.Len(t, tail, 1, "R remains a cold first round; only S qualifies")
+				require.Equal(t, rows[3].AttemptID, tail[0].AttemptID)
+			} else {
+				require.Equal(t, []string{rows[2].AttemptID, rows[3].AttemptID}, []string{tail[0].AttemptID, tail[1].AttemptID})
+			}
+		})
+	}
+}
+
+func TestSelectionDuplicateLedgerAndObserverIsOneRound(t *testing.T) {
+	for _, missingRequestID := range []bool{false, true} {
+		t.Run(fmt.Sprint(missingRequestID), func(t *testing.T) {
+			f := newQualityFixture(t)
+			row := engineSamples(1, f.now.Add(-time.Minute), true)[0]
+			row.SessionKey = "session"
+			if missingRequestID {
+				row.RequestID = ""
+			}
+			f.ledger.Rows = []q.AttemptSample{row}
+			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
+			for i := 0; i < 2; i++ {
+				// First cycle has both sources; the second includes a late duplicate.
+				f.e.Observe(row)
+				f.e.Observe(row)
+				f.cycle()
+				require.Empty(t, f.e.window.running)
+				tail := f.e.Snapshot().View.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+				require.Len(t, tail, 1)
+				require.Equal(t, row.AttemptID, tail[0].AttemptID)
+				selectionRequireSnapshotMigration(t, f, false)
+				f.now = f.now.Add(time.Second)
+			}
+		})
+	}
+}
+
+func TestSelectionEqualStartRoundsHaveStableOrder(t *testing.T) {
+	for _, order := range [][]int{{1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {2, 3, 1}, {3, 1, 2}, {3, 2, 1}} {
+		t.Run(fmt.Sprint(order), func(t *testing.T) {
+			f := newQualityFixture(t)
+			rows := engineSamples(4, f.now.Add(-time.Minute), true)
+			for i := range rows {
+				rows[i].SessionKey = "session"
+				if i > 0 {
+					rows[i].AttemptID = fmt.Sprintf("tie-%d", i)
+					rows[i].StartedAt = f.now.Add(-5 * time.Second)
+					rows[i].FinishedAt = f.now.Add(-time.Duration(i) * time.Second)
+				}
+			}
+			fast := 100
+			rows[1].TTFOMs = &fast
+			f.ledger.Rows = rows[:1]
+			for _, i := range order {
+				f.e.Observe(rows[i])
+			}
+			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
+			f.cycle()
+			tail := f.e.Snapshot().View.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+			require.Len(t, tail, 2)
+			require.Equal(t, []string{"tie-2", "tie-3"}, []string{tail[0].AttemptID, tail[1].AttemptID}, "equal starts use AttemptID, independent of arrival and completion order")
+			selectionRequireSnapshotMigration(t, f, true)
+		})
+	}
+}
+
 type selectionPromoteFailure struct {
 	*selectionTrialLeaseFake
 	applied bool

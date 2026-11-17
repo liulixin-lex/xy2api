@@ -365,8 +365,8 @@ func schedStateUntil(v q.StateView) time.Time {
 }
 
 // Retries share a logical request/turn and the final finished attempt determines
-// its result. Resolve switch boundaries between these merged rounds, since the
-// ledger may not yet contain a closer predecessor seen by the observer.
+// its result. Preserve ledger-confirmed boundaries unless an unpersisted
+// predecessor supplements the ledger; observed rounds use merged history.
 func schedSessionRounds(attempts []q.AttemptSample, unpersisted map[string]bool) []q.AttemptSample {
 	type roundKey struct {
 		id      string
@@ -398,15 +398,15 @@ func schedSessionRounds(attempts []q.AttemptSample, unpersisted map[string]bool)
 	})
 	var tail []q.AttemptSample
 	for i, r := range rows {
-		if i > 0 {
+		if i > 0 && (unpersisted[r.AttemptID] || unpersisted[rows[i-1].AttemptID]) {
 			r.Switched = rows[i-1].AccountID != r.AccountID
-		} else if unpersisted[r.AttemptID] {
+		} else if i == 0 && unpersisted[r.AttemptID] {
 			// Without a predecessor, this observation may be a cold first round.
 			// Exclude only this round; later completed rounds can still qualify.
 			r.Switched = true
 		}
-		// The first durable round retains its confirmed ledger switch marker,
-		// including a predecessor outside the retained history.
+		// Otherwise preserve the durable round's confirmed marker: its true
+		// predecessor may have expired before an older, overlapping request.
 		if r.Switched {
 			tail = nil
 			continue
