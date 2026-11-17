@@ -1181,6 +1181,11 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
+	// Match membership writers: hold the account before deleting its memberships.
+	if _, err := txClient.ExecContext(ctx, `/* ratefloor_account_delete_lock */ SELECT id FROM accounts WHERE id=$1 FOR UPDATE`, id); err != nil {
+		return err
+	}
+
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
