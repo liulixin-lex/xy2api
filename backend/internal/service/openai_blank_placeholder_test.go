@@ -372,7 +372,7 @@ func TestResponsesMalformedEventFailsClosedAtAllOutputChecks(t *testing.T) {
 			require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
 			require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
 			require.False(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
-			require.Equal(t, gjson.Valid(payload), openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
+			require.Equal(t, strings.Contains(payload, `"item_id":[]`), openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
 			c, state := newSSEDeliveryContext(t, "text/event-stream")
 			start := time.Now().Add(-time.Second)
 			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})

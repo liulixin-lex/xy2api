@@ -111,7 +111,7 @@ func TestFirstoutRequestClockAndDispatchPhases(t *testing.T) {
 }
 
 func TestFirstoutManagedToolsAndEventIdentity(t *testing.T) {
-	for _, kind := range []string{"web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_list_tools", "mcp_approval_request"} {
+	for _, kind := range []string{"web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call"} {
 		for _, phase := range []string{"added", "done"} {
 			raw := []byte(fmt.Sprintf(`{"type":"response.output_item.%s","item":{"type":%q}}`, phase, kind))
 			require.Equal(t, OutputClass{Known: true, Valid: true}, ClassifyOutput("responses", "", raw))
@@ -161,4 +161,56 @@ func TestFirstoutUndispatchedTimingDoesNotIncludeGeneration(t *testing.T) {
 	sent.NoteGatewaySend(123)
 	sent.FinishRejectedDispatch(start.Add(time.Minute))
 	require.Empty(t, sent.Timing().DispatchPhases, "uninstrumented provider sends must not publish generation as dispatch time")
+}
+
+func TestFirstoutMCPListAndDuplicateKeysAreUnknown(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"response.output_item.added","item":{"type":"mcp_list_tools","tools":[{"name":"fixture"}]}}`,
+		`{"type":"response.output_item.done","item":{"type":"mcp_list_tools","tools":[]}}`,
+		`{"type":"response.output_text.delta","delta":" ","delta":"answer"}`,
+		`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":" ","text":"answer"}]}}`,
+		`{"choices":[{"delta":{"content":" ","content":"answer"}}]}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":" ","text":"answer"}}`,
+	} {
+		require.Equal(t, OutputClass{}, ClassifyOutput("", "", []byte(payload)), payload)
+	}
+	// Repeated names in distinct objects are not duplicate keys.
+	require.Equal(t, OutputClass{Known: true, Valid: true, Answer: true}, ClassifyOutput("", "", []byte(`{"choices":[{"delta":{"content":"a"}},{"delta":{"content":"b"}}]}`)))
+}
+
+func TestFirstoutNestedUnknownIsNotEmpty(t *testing.T) {
+	for _, fields := range []string{
+		`"type":"message","role":"assistant","content":[{"type":"vendor_text","text":"answer"}]`,
+		`"type":"message","content":[{"type":"output_text","text":"answer"},{"type":"vendor_text"}]`,
+		`"type":"message","content":[{"type":"vendor_text"},{"type":"output_text","text":"answer"}]`,
+		`"type":"reasoning","summary":[{"type":"vendor_summary","text":"answer"}]`,
+		`"type":"reasoning","content":[{"type":"vendor_thought"}],"encrypted_content":"opaque"`,
+	} {
+		raw := []byte(`{"type":"response.output_item.added","item":{` + fields + `}}`)
+		require.Equal(t, OutputClass{}, ClassifyOutput("responses", "", raw), string(raw))
+		terminal := []byte(`{"type":"response.completed","response":{"output":[{` + fields + `}]}}`)
+		require.Equal(t, OutputClass{}, ClassifyOutput("responses", "", terminal), string(terminal))
+	}
+}
+
+func TestFirstoutMCPRequiresNameOrArguments(t *testing.T) {
+	for _, kind := range []string{"mcp_call", "mcp_approval_request"} {
+		for _, phase := range []string{"added", "done"} {
+			for _, fields := range []string{``, `,"name":" ","arguments":""`, `,"name":"\u034f\ufe0f","arguments":"\u200b"`, `,"name":"tool"`, `,"arguments":"{}"`} {
+				raw := []byte(fmt.Sprintf(`{"type":"response.output_item.%s","item":{"type":%q,"id":"only-id"%s}}`, phase, kind, fields))
+				valid := fields == `,"name":"tool"` || fields == `,"arguments":"{}"`
+				require.Equal(t, OutputClass{Known: true, Valid: valid}, ClassifyOutput("responses", "", raw), string(raw))
+			}
+		}
+	}
+}
+
+func TestFirstoutDefaultIgnorableCharacters(t *testing.T) {
+	for _, invisible := range []string{"\u034f", "\ufe0f", "\U000e0100", "\u115f", "\u3164", "\u17b4", "\u034f\ufe0f"} {
+		for _, visible := range []string{"", "a", "字", "❤"} {
+			raw, err := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": visible + invisible})
+			require.NoError(t, err)
+			require.Equal(t, OutputClass{Known: true, Valid: visible != "", Answer: visible != ""}, ClassifyOutput("responses", "", raw), string(raw))
+		}
+	}
 }
