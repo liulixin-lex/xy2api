@@ -38,15 +38,24 @@
               v-tip="allExemption ? '' : t('admin.schedQuality.panel.exemptAllTip')"
               @click="onHeaderExempt($event)"
             >{{ allExemption ? t('admin.schedQuality.action.undoExempt') : t('admin.schedQuality.action.exempt') }}</button>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="!recoverable || recovering"
-              :aria-busy="recovering"
-              data-qp-trigger="reset"
-              v-tip="t(recoverable ? 'admin.schedQuality.panel.recoverTip' : 'admin.schedQuality.panel.recoverNone')"
-              @click="startRecover"
-            >{{ t('admin.schedQuality.action.reset') }}</button>
+            <!-- A disabled button takes no focus and, in some browsers, no mouse events: the reason sits on this wrapper
+                 (reachable by Tab then), and the disabled button lets the pointer through to it. -->
+            <span
+              v-tip="recoverable ? '' : t('admin.schedQuality.panel.recoverNone')"
+              class="inline-flex"
+              :tabindex="recoverable ? undefined : 0"
+              data-qp-recover
+            >
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm disabled:pointer-events-none"
+                :disabled="!recoverable || recovering"
+                :aria-busy="recovering"
+                data-qp-trigger="reset"
+                v-tip="recoverable ? t('admin.schedQuality.panel.recoverTip') : ''"
+                @click="startRecover"
+              >{{ t('admin.schedQuality.action.reset') }}</button>
+            </span>
           </div>
         </header>
 
@@ -830,7 +839,8 @@ onScopeDispose(() => running?.kill())
   .qp-body {
     padding: 16px 16px 32px;
   }
-  .qp-actions .btn {
+  .qp-actions .btn,
+  .qp-actions [data-qp-recover] {
     height: 36px;
     flex: 1;
   }

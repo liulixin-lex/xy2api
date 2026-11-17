@@ -470,12 +470,16 @@ describe('SchedQualityPanel', () => {
     expect(Array.from(groupRow(54).querySelectorAll<HTMLElement>('[data-qp-mark]'), (mark) => mark.dataset.identity)).toEqual(['unknown', 'unknown', 'unknown'])
   })
 
-  it('says why 恢复 is disabled when the account has nothing to recover', async () => {
-    const tipOf = () => (document.querySelector('[data-qp-trigger="reset"]') as unknown as { __tipText: string }).__tipText
+  // A disabled button takes no focus and may get no mouse events: the reason is on its wrapper, which Tab reaches.
+  it('says why 恢复 is disabled on the element around it when the account has nothing to recover', async () => {
+    const tipOf = (selector: string) => (document.querySelector(selector) as unknown as { __tipText: string }).__tipText
+    const wrapper = () => document.querySelector<HTMLElement>('[data-qp-recover]')!
     mount(Panel, { attachTo: document.body })
     await openOn()
     expect(document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!.disabled).toBe(false)
-    expect(tipOf()).toBe('admin.schedQuality.panel.recoverTip')
+    expect(tipOf('[data-qp-trigger="reset"]')).toBe('admin.schedQuality.panel.recoverTip')
+    expect(tipOf('[data-qp-recover]')).toBe('')
+    expect(wrapper().hasAttribute('tabindex')).toBe(false)
 
     closeSchedDrawer()
     await flushPromises()
@@ -483,8 +487,12 @@ describe('SchedQualityPanel', () => {
     calm.groups.forEach((group) => group.by_model.forEach((row) => { row.placement = 'front' }))
     api.accountDetail.mockResolvedValue(calm)
     await openOn()
-    expect(document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!.disabled).toBe(true)
-    expect(tipOf()).toBe('admin.schedQuality.panel.recoverNone')
+    const button = document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!
+    expect(button.disabled).toBe(true)
+    expect(button.parentElement).toBe(wrapper())
+    expect(tipOf('[data-qp-recover]')).toBe('admin.schedQuality.panel.recoverNone')
+    expect(wrapper().getAttribute('tabindex')).toBe('0')
+    expect(tipOf('[data-qp-trigger="reset"]')).toBe('')
   })
 
   // A gate that judges nothing says so, not "not enough evidence" (P9): switched off for everything, or in this group.
