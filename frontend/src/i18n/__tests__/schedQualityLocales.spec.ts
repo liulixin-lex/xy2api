@@ -46,6 +46,24 @@ it('says what each gate-off really stops', () => {
   expect([enGlobal.includes('judging goes on'), enGlobal.includes('nothing is judged'), enGroup.includes('judged')]).toEqual([true, false, true])
 })
 
+// N3: the no-data note takes each reason an unknown line can have; none of them may put brackets inside brackets.
+it('writes the no-data note without brackets inside brackets, whatever the reason', () => {
+  const depth = (text: string) => {
+    let deepest = 0
+    let open = 0
+    for (const char of text) {
+      if ('(（'.includes(char)) deepest = Math.max(deepest, ++open)
+      if (')）'.includes(char)) open--
+    }
+    return deepest
+  }
+  const reasons = ['schedQuality.identity.unknownWhy', 'schedQuality.identity.gateOffGlobal', 'schedQuality.identity.gateOffGroup', 'schedQuality.tip.stale']
+  const notes = [zh, en].flatMap((messages) =>
+    reasons.map((key) => String(lookup(messages, 'admin.schedQuality.panel.noData')).replace('{why}', String(lookup(messages, `admin.${key}`))))
+  )
+  expect(notes.filter((note) => depth(note) > 1)).toEqual([])
+})
+
 describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_locale, messages) => {
   it('names every identity, place, layer, action, unknown cause and evidence field the backend sends', () => {
     const missing = Object.entries(VALUES).flatMap(([prefix, values]) =>
