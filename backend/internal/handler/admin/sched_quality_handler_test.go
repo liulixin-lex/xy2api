@@ -108,6 +108,9 @@ func schedAdminHandlerRoutes(r *gin.Engine, h *SchedQualityHandler) {
 	g.POST("/accounts/summary", h.Summary)
 	g.GET("/accounts/attention", h.Attention)
 	g.GET("/accounts/:id", h.Detail)
+	g.GET("/accounts/:id/decisions", h.Decisions)
+	g.GET("/ttft-rule", h.TTFTRule)
+	g.PUT("/ttft-rule", h.UpdateTTFTRule)
 	g.POST("/accounts/:id/reset", h.Reset)
 	g.PUT("/accounts/:id/override", h.SetOverride)
 	g.DELETE("/accounts/:id/override", h.ClearOverride)
@@ -144,7 +147,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		keys               []string
-	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"substandard", "exempt", "observing"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "status", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"now", "after", "changed"}}}
+	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"rear", "trial", "unknown", "exempt"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"relaxed_lines", "lines", "changed"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h, _, repo := schedAdminHandlerFixture()
@@ -258,7 +261,7 @@ func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
 		method, path string
 		module       operatoraccess.Module
 		level        operatoraccess.Level
-	}{{"POST", "/accounts/summary", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/attention", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/:id", "accounts", operatoraccess.LevelView}, {"POST", "/accounts/:id/reset", "accounts", operatoraccess.LevelManage}, {"PUT", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/auto-states/*key", "accounts", operatoraccess.LevelManage}, {"GET", "/groups/:id/policy", "groups", operatoraccess.LevelView}, {"PUT", "/groups/:id/policy", "groups", operatoraccess.LevelManage}, {"GET", "/groups/:id/order", "groups", operatoraccess.LevelView}, {"POST", "/groups/summary", "groups", operatoraccess.LevelView}, {"POST", "/groups/:id/policy/preview", "groups", operatoraccess.LevelView}}
+	}{{"POST", "/accounts/summary", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/attention", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/:id", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/:id/decisions", "accounts", operatoraccess.LevelView}, {"POST", "/accounts/:id/reset", "accounts", operatoraccess.LevelManage}, {"PUT", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/auto-states/*key", "accounts", operatoraccess.LevelManage}, {"GET", "/groups/:id/policy", "groups", operatoraccess.LevelView}, {"PUT", "/groups/:id/policy", "groups", operatoraccess.LevelManage}, {"GET", "/groups/:id/order", "groups", operatoraccess.LevelView}, {"POST", "/groups/summary", "groups", operatoraccess.LevelView}, {"POST", "/groups/:id/policy/preview", "groups", operatoraccess.LevelView}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			path := "/api/v1/admin/sched-quality" + tc.path
@@ -327,11 +330,11 @@ func (s *schedAdminPermissionService) Summary(context.Context, []int64) (service
 }
 func (s *schedAdminPermissionService) Attention(context.Context) (service.SchedAdminAttention, error) {
 	s.calls++
-	return service.SchedAdminAttention{Substandard: []int64{}}, nil
+	return service.SchedAdminAttention{Rear: []int64{}}, nil
 }
 func (s *schedAdminPermissionService) AccountFilter(_ context.Context, quality string) (service.SchedQualityFilter, error) {
 	s.calls++
-	return service.SchedAdminAttention{Substandard: []int64{}}.Filter(quality, nil), nil
+	return service.SchedAdminAttention{Rear: []int64{}}.Filter(quality, nil), nil
 }
 func (s *schedAdminPermissionService) Detail(context.Context, int64) (service.SchedAdminAccountDetail, error) {
 	s.calls++
@@ -357,9 +360,9 @@ func (s *schedAdminPermissionService) Policy(context.Context, int64) (service.Sc
 	s.calls++
 	return service.SchedAdminPolicy{}, nil
 }
-func (s *schedAdminPermissionService) UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicy, error) {
+func (s *schedAdminPermissionService) UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicySaved, error) {
 	s.calls++
-	return service.SchedAdminPolicy{}, nil
+	return service.SchedAdminPolicySaved{}, nil
 }
 func (s *schedAdminPermissionService) Order(context.Context, int64, string) (service.SchedAdminOrder, error) {
 	s.calls++
@@ -432,4 +435,78 @@ func TestSchedQualityDemoteAndRemovedEndpoints(t *testing.T) {
 	require.Equal(t, 400, schedAdminHandlerRequest(r, "PUT", "/accounts/1/override", `{"group_id":0,"mode":"demote"}`).Code)
 	require.Equal(t, 404, schedAdminHandlerRequest(r, "POST", "/accounts/1/test", `{}`).Code)
 	require.Equal(t, 404, schedAdminHandlerRequest(r, "GET", "/groups/1/board", "").Code)
+}
+
+func (r *schedAdminHandlerAccounts) SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]service.SchedAdminGroupLast60, error) {
+	return map[int64]service.SchedAdminGroupLast60{}, nil
+}
+func (r *schedAdminHandlerAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]service.SchedAdminDecision, error) {
+	return []service.SchedAdminDecision{}, nil
+}
+func (e *schedAdminHandlerEngine) TTFTRule(context.Context) (service.SchedTTFTRuleRecord, error) {
+	return service.SchedTTFTRuleRecord{Version: e.version, Params: schedquality.DefaultRuleBParams()}, nil
+}
+func (e *schedAdminHandlerEngine) UpdateTTFTRule(_ context.Context, v int64, p schedquality.RuleBParams) (service.SchedTTFTRuleUpdate, error) {
+	if v != e.version {
+		return service.SchedTTFTRuleUpdate{}, service.ErrSchedPolicyConflict
+	}
+	change, err := schedquality.CompareRuleBParams(schedquality.DefaultRuleBParams(), p)
+	return service.SchedTTFTRuleUpdate{SchedTTFTRuleRecord: service.SchedTTFTRuleRecord{Version: v + 1, Params: p}, Change: change, Cleared: 3}, err
+}
+func (s *schedAdminPermissionService) TTFTRule(context.Context) (service.SchedAdminTTFTRule, error) {
+	s.calls++
+	return service.SchedAdminTTFTRule{}, nil
+}
+func (s *schedAdminPermissionService) UpdateTTFTRule(context.Context, int64, schedquality.RuleBParams, int64) (service.SchedAdminTTFTRuleSaved, error) {
+	s.calls++
+	return service.SchedAdminTTFTRuleSaved{}, nil
+}
+func (s *schedAdminPermissionService) Decisions(context.Context, int64, int, int64) ([]service.SchedAdminDecision, error) {
+	s.calls++
+	return []service.SchedAdminDecision{}, nil
+}
+func TestSchedQualityTTFTRuleJSONValidationAndChange(t *testing.T) {
+	h, _, _ := schedAdminHandlerFixture()
+	r := schedAdminHandlerRouter(h)
+	data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "GET", "/ttft-rule", ""))
+	require.Len(t, data, 6)
+	require.JSONEq(t, `{"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, string(data["defaults"]))
+	require.JSONEq(t, `{"confidence":[0.8,0.95],"tolerance":[0.2,0.25],"peer_margin":[0.05,0.15]}`, string(data["replayed"]))
+	for _, tc := range []struct{ body, change string }{{`{"expected_version":63,"confidence":0.9,"tolerance":0.2,"peer_margin":0.05}`, "relax"}, {`{"expected_version":63,"confidence":0.7,"tolerance":0.2,"peer_margin":0.05}`, "tighten"}, {`{"expected_version":63,"confidence":0.9,"tolerance":0.1,"peer_margin":0.05}`, "mixed"}, {`{"expected_version":63,"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, "none"}} {
+		data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "PUT", "/ttft-rule", tc.body))
+		require.Len(t, data, 8)
+		require.Equal(t, `"`+tc.change+`"`, string(data["change"]))
+		require.Equal(t, "3", string(data["cleared"]))
+	}
+	for _, body := range []string{`{}`, `{"expected_version":-1,"confidence":0.8,"tolerance":0.2,"peer_margin":0}`, `{"expected_version":63,"confidence":0.5,"tolerance":0.2,"peer_margin":0}`, `{"expected_version":63,"confidence":1,"tolerance":0.2,"peer_margin":0}`, `{"expected_version":63,"confidence":0.8,"tolerance":0,"peer_margin":0}`, `{"expected_version":63,"confidence":0.8,"tolerance":1,"peer_margin":0}`, `{"expected_version":63,"confidence":0.8,"tolerance":0.2,"peer_margin":-0.1}`, `{"expected_version":63,"confidence":0.8,"tolerance":0.2,"peer_margin":1}`, `{"expected_version":63,"confidence":1e999,"tolerance":0.2,"peer_margin":0}`, `{"expected_version":63,"confidence":null,"tolerance":0.2,"peer_margin":0}`} {
+		w := schedAdminHandlerRequest(r, "PUT", "/ttft-rule", body)
+		require.Equal(t, 400, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), "INVALID_TTFT_RULE")
+	}
+	w := schedAdminHandlerRequest(r, "PUT", "/ttft-rule", `{"expected_version":1,"confidence":0.8,"tolerance":0.2,"peer_margin":0}`)
+	require.Equal(t, 409, w.Code)
+	w = schedAdminHandlerRequest(r, "GET", "/accounts/1/decisions", "")
+	require.Equal(t, 200, w.Code)
+	require.Contains(t, w.Body.String(), `"data":[]`)
+	for _, query := range []string{"?limit=0", "?limit=201", "?before_id=-1", "?before_id=oops"} {
+		require.Equal(t, 400, schedAdminHandlerRequest(r, "GET", "/accounts/1/decisions"+query, "").Code)
+	}
+}
+func TestSchedQualityTTFTRuleRequiresAdministrator(t *testing.T) {
+	for _, method := range []string{"GET", "PUT"} {
+		entry, ok := operatoraccess.Lookup(method + " /sched-quality/ttft-rule")
+		require.True(t, ok)
+		require.Equal(t, operatoraccess.KindSuperOnly, entry.Kind)
+		fake := &schedAdminPermissionService{}
+		r := gin.New()
+		r.Use(func(c *gin.Context) {
+			c.Set("user_role", service.RoleOperator)
+			c.Request = c.Request.WithContext(operatoraccess.WithScope(c.Request.Context(), &operatoraccess.Scope{UserID: 7, Perms: operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{"accounts": operatoraccess.LevelManage, "groups": operatoraccess.LevelManage}}}))
+			c.Next()
+		}, middleware.AdminPermission())
+		schedAdminHandlerRoutes(r, NewSchedQualityHandler(fake))
+		w := schedAdminHandlerRequest(r, method, "/ttft-rule", `{"expected_version":1,"confidence":0.8,"tolerance":0.2,"peer_margin":0}`)
+		require.Equal(t, 403, w.Code)
+		require.Zero(t, fake.calls)
+	}
 }

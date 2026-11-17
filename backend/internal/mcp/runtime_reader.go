@@ -238,8 +238,7 @@ func (r *runtimeReader) qualityState(ctx context.Context, q *readerQuery) error 
 		override, _ := item.row.View.EffectiveOverride(q.result.GeneratedAt)
 		detail := service.SchedAdminGroupModel(item.row, override.Mode == schedquality.OverrideExempt)
 		row := map[string]any{"group_id": item.row.GroupID, "account_id": item.account, "model": detail.Model,
-			"failing": detail.Failing, "dims": detail.Dims, "level": detail.Level, "since": detail.Since, "until": detail.Until, "other_group_ids": detail.OtherGroupIDs, "exempt": detail.Exempt,
-			"ttfo": detail.TTFO, "error": detail.Error, "cache": detail.Cache,
+			"placement": detail.Placement, "exempt": detail.Exempt, "lines": detail.Lines,
 			"generated_at": snap.At, "stale": stale, "global_enabled": snap.GlobalEnabled, "policy_version": snap.Policies[item.row.GroupID].Version}
 
 		if in.IncludePolicies {

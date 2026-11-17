@@ -1,7 +1,20 @@
 {
- "account_id": 1,
- "reset_at": "2026-11-11T12:00:00Z",
- "cleared": ["quality", "session_avoid", "model_transient"],
- "kept": [{"kind":"iq_gate","until":null}],
- "failed": [{"kind":"rate_limit"}]
+  "account_id": 1,
+  "reset_at": "2026-11-01T12:00:00Z",
+  "cleared": [
+    "quality",
+    "session_avoid",
+    "model_transient"
+  ],
+  "kept": [
+    {
+      "kind": "iq_gate",
+      "until": null
+    }
+  ],
+  "failed": [
+    {
+      "kind": "rate_limit"
+    }
+  ]
 }

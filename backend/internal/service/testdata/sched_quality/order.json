@@ -1,76 +1,117 @@
 {
-  "group_id": 53,
-  "model": "gpt-6.1-sol",
+  "group_id": 1,
+  "model": "model-a",
   "models": [
-    "gpt-6.1-sol",
-    "gpt-6-astra"
+    "model-a"
   ],
-  "at": "2026-11-11T12:00:00Z",
+  "at": "2026-11-01T12:00:00Z",
   "stale": false,
   "global_enabled": true,
   "rows": [
     {
       "rank": 1,
-      "account_id": 7,
-      "name": "acc-7",
-      "layer": "normal",
-      "dims": [],
+      "account_id": 1,
+      "name": "synthetic-1",
+      "layer": "front",
+      "lines": {
+        "ttfo": "pass",
+        "error": "unknown",
+        "cache": "unknown"
+      },
       "until": null,
       "exempt": false,
+      "pinned": true,
+      "excluded": null,
       "priority": 1,
-      "rate": 0.075,
-      "load_rate": 10,
-      "in_flight": 1,
+      "rate": 0.1,
+      "load_rate": 0,
+      "in_flight": 0,
       "concurrency": 10,
-      "last_used_at": "2026-11-11T11:59:00Z"
+      "last_used_at": null
     },
     {
       "rank": 2,
-      "account_id": 5,
-      "name": "acc-5",
-      "layer": "normal",
-      "dims": [],
-      "until": null,
-      "exempt": true,
+      "account_id": 2,
+      "name": "synthetic-2",
+      "layer": "trial",
+      "lines": {
+        "ttfo": "trial",
+        "error": "unknown",
+        "cache": "unknown"
+      },
+      "until": "2026-11-01T12:20:00Z",
+      "exempt": false,
+      "pinned": false,
+      "excluded": null,
       "priority": 2,
       "rate": 0.1,
-      "load_rate": 50,
-      "in_flight": 5,
+      "load_rate": 0,
+      "in_flight": 0,
       "concurrency": 10,
       "last_used_at": null
     },
     {
       "rank": 3,
       "account_id": 3,
-      "name": "acc-3",
-      "layer": "below",
-      "dims": [
-        "ttfo",
-        "cache"
-      ],
-      "until": "2026-11-11T12:30:00Z",
+      "name": "synthetic-3",
+      "layer": "trial_full",
+      "lines": {
+        "ttfo": "trial",
+        "error": "unknown",
+        "cache": "unknown"
+      },
+      "until": "2026-11-01T12:20:00Z",
       "exempt": false,
-      "priority": 1,
-      "rate": 0.075,
+      "pinned": false,
+      "excluded": null,
+      "priority": 3,
+      "rate": 0.1,
       "load_rate": 0,
       "in_flight": 0,
       "concurrency": 10,
-      "last_used_at": "2026-11-11T11:40:00Z"
+      "last_used_at": null
     },
     {
       "rank": 4,
-      "account_id": 9,
-      "name": "acc-9",
+      "account_id": 4,
+      "name": "synthetic-4",
+      "layer": "rear",
+      "lines": {
+        "ttfo": "rear",
+        "error": "unknown",
+        "cache": "unknown"
+      },
+      "until": "2026-11-01T12:20:00Z",
+      "exempt": false,
+      "pinned": false,
+      "excluded": null,
+      "priority": 4,
+      "rate": 0.1,
+      "load_rate": 0,
+      "in_flight": 0,
+      "concurrency": 10,
+      "last_used_at": null
+    },
+    {
+      "rank": 0,
+      "account_id": 5,
+      "name": "synthetic-5",
       "layer": "stopped",
-      "dims": [],
+      "lines": {
+        "ttfo": "unknown",
+        "error": "unknown",
+        "cache": "unknown"
+      },
       "until": null,
       "exempt": false,
-      "priority": 1,
-      "rate": 0.075,
-      "load_rate": 100,
-      "in_flight": 10,
+      "pinned": false,
+      "excluded": "profit_floor",
+      "priority": 5,
+      "rate": 0.1,
+      "load_rate": 0,
+      "in_flight": 0,
       "concurrency": 10,
-      "last_used_at": "2026-11-11T11:58:00Z"
+      "last_used_at": null
     }
   ]
 }

@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -51,9 +52,15 @@ func TestRuntimeQualityUsesSnapshotAndPolicy(t *testing.T) {
 	require.Equal(t, 1, engine.reads)
 	require.Len(t, q.result.Items, 1)
 	require.Equal(t, "a", q.result.Items[0]["model"])
-	require.Equal(t, true, q.result.Items[0]["failing"])
-	require.Equal(t, []schedquality.Dimension{schedquality.DimensionTTFO}, q.result.Items[0]["dims"])
+	require.Equal(t, "rear", q.result.Items[0]["placement"])
+	require.Equal(t, "rear", q.result.Items[0]["lines"].(service.SchedAdminLines).TTFO.Identity)
 	require.NotContains(t, q.result.Items[0], "state")
+	raw, err := json.Marshal(q.result.Items[0])
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"placement":"rear"`)
+	require.Contains(t, string(raw), `"identity":"rear"`)
+	require.NotContains(t, string(raw), `"dims"`)
+	require.NotContains(t, string(raw), `"failing"`)
 	require.Equal(t, int64(7), q.result.Items[0]["policy_version"])
 	require.Equal(t, service.SchedAdminPolicyPolicy{TTFTSeconds: 15}, q.result.Items[0]["policy"])
 	require.Equal(t, []string{"process.sched_quality_snapshot"}, q.result.Source)
@@ -97,7 +104,7 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	require.Equal(t, 1, engine.reads)
 	row := q.result.Items[0]
 	require.NotContains(t, row, "model")
-	require.Equal(t, 120, *row["first_output"].(service.SchedAdminAccountSummaryTTFO).P50Ms)
+	require.Equal(t, 120, *row["first_output"].(service.SchedAdminAccountSummaryTTFO).FirstOutputP50Ms)
 	require.Equal(t, 0.1, *row["failure"].(service.SchedAdminAccountSummaryError).Rate)
 	require.Equal(t, 0.9, *row["cache"].(service.SchedAdminAccountSummaryCache).Ratio)
 	require.Equal(t, &amount, row["balance"].(map[string]any)["amount_usd"])

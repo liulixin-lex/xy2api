@@ -3,231 +3,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
-	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
 )
 
-func TestSchedAdminSummaryAllModelsMarksAndStatus(t *testing.T) {
-	s, e, r := schedAdminFixture()
-	p := e.snapshot
-	now := s.d.Now()
-	p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
-	p.Accounts[1] = schedquality.AccountSummary{FirstOutputP50Ms: schedAdminInt(120), ErrorN: 60, ErrorBad: 6, CacheTurns: 5, CacheRatio: schedAdminFloat(.8)}
-	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Cache: schedquality.LineView{Identity: schedquality.IdentityRear, Until: now.Add(time.Minute)}}}, {GroupID: 1, Model: "b", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear, Until: now.Add(time.Minute)}}}}
-	p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
-	p.ResetAt = map[int64]time.Time{1: now.Add(-time.Minute)}
-	for _, id := range []int64{2, 3, 4, 5} {
-		a := *r.rows[1]
-		a.ID = id
-		r.rows[id] = &a
-	}
-	r.rows[2].Schedulable = false
-	r.rows[3].Platform = PlatformAnthropic
-	out, err := s.Summary(context.Background(), []int64{1, 2, 3, 4, 999, 1})
-	require.NoError(t, err)
-	require.Len(t, out.Accounts, 4)
-	a := out.Accounts[0]
-	require.Equal(t, "normal", a.Status)
-	require.Equal(t, 120, *a.TTFO.P50Ms)
-	require.False(t, a.TTFO.Short)
-	require.False(t, a.TTFO.Red)
-	require.True(t, a.Error.Red)
-	require.False(t, a.Error.Short)
-	require.True(t, a.Cache.Red)
-	require.True(t, a.Cache.Short)
-	require.Len(t, a.Substandard, 2)
-	require.True(t, a.Substandard[0].Exempt)
-	require.Equal(t, schedAdminTime(p.ResetAt[1]), a.ResetAt)
-	require.Equal(t, "disabled", out.Accounts[1].Status)
-	require.Equal(t, "manual", out.Accounts[1].Stop.Source)
-	require.Equal(t, "normal", out.Accounts[2].Status)
-	require.Nil(t, out.Accounts[2].TTFO.P50Ms)
-	require.Zero(t, out.Accounts[2].TTFO.N)
-	require.Equal(t, "observing", out.Accounts[3].Status)
-	attention, err := s.Attention(context.Background())
-	require.NoError(t, err)
-	require.Empty(t, attention.Substandard)
-	require.Equal(t, []int64{1}, attention.Exempt)
-	require.Equal(t, []int64{4, 5}, attention.Observing)
-	p.Overrides = nil
-	attention, err = s.Attention(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{1}, attention.Substandard)
-}
-
-func TestSchedAdminInactiveAccountIsManualOff(t *testing.T) {
-	s, _, repo := schedAdminFixture()
-	repo.rows[1].Status = StatusInactive
-	repo.rows[1].Schedulable = true
-
-	out, err := s.Summary(context.Background(), []int64{1})
-	require.NoError(t, err)
-	require.Len(t, out.Accounts, 1)
-	require.Equal(t, "disabled", out.Accounts[0].Status)
-	require.Equal(t, &SchedAdminStop{Source: "manual", Reason: "manual_off"}, out.Accounts[0].Stop)
-}
-
-func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		configure func(*SchedQualitySnapshot, *Account)
-		below     bool
-		effective bool
-	}{
-		{"enabled", func(*SchedQualitySnapshot, *Account) {}, true, true},
-		{"global off", func(p *SchedQualitySnapshot, _ *Account) { p.GlobalEnabled = false }, false, false},
-		{"group off", func(p *SchedQualitySnapshot, _ *Account) { p.Policies[1] = SchedPolicyRecord{} }, false, false},
-		{"missing policy", func(p *SchedQualitySnapshot, _ *Account) { delete(p.Policies, 1) }, false, false},
-		{"fresh boundary", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge) }, true, true},
-		{"stale", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge - time.Nanosecond) }, false, false},
-		{"exempt", func(p *SchedQualitySnapshot, _ *Account) {
-			p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
-		}, false, false},
-		{"stopped", func(_ *SchedQualitySnapshot, a *Account) { a.Schedulable = false }, false, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s, e, r := schedAdminFixture()
-			p := e.snapshot
-			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
-			p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "synthetic", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
-			s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
-			s.d.Usage = &schedAdminUsage{}
-			tc.configure(p, r.rows[1])
-			attention, err := s.Attention(context.Background())
-			require.NoError(t, err)
-			require.Equal(t, tc.below, len(attention.Substandard) == 1)
-			groups, err := s.GroupsSummary(context.Background(), []int64{1})
-			require.NoError(t, err)
-			require.Equal(t, len(attention.Substandard), groups.Groups[0].Accounts.Below)
-			summary, err := s.Summary(context.Background(), []int64{1})
-			require.NoError(t, err)
-			require.True(t, summary.Accounts[0].Error.Red)
-			require.Len(t, summary.Accounts[0].Substandard, 1)
-			require.Equal(t, tc.effective, summary.Accounts[0].Substandard[0].Effective)
-		})
-	}
-}
-
-func TestSchedAdminAccountFilterNormalUsesSummaryConditions(t *testing.T) {
-	for _, tc := range []struct {
-		name            string
-		globalEnabled   bool
-		stale           bool
-		groupPolicy     bool
-		wantNormal      []int64
-		wantSubstandard []int64
-	}{
-		{name: "attention buckets", globalEnabled: true, groupPolicy: true, wantNormal: []int64{1}, wantSubstandard: []int64{4}},
-		{name: "global quality disabled", globalEnabled: false, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
-		{name: "stale view", globalEnabled: true, stale: true, groupPolicy: true, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
-		{name: "group policy disabled", globalEnabled: true, groupPolicy: false, wantNormal: []int64{1, 4}, wantSubstandard: []int64{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s, e, repo := schedAdminFixture()
-			repo.allPlatforms = true
-			p := e.snapshot
-			now := s.d.Now()
-			p.GlobalEnabled = tc.globalEnabled
-			if tc.stale {
-				p.At = now.Add(-schedquality.ViewMaxAge - time.Nanosecond)
-			}
-			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: tc.groupPolicy}}
-			for id := int64(2); id <= 7; id++ {
-				account := *repo.rows[1]
-				account.ID = id
-				repo.rows[id] = &account
-			}
-			repo.rows[2].Schedulable = false
-			repo.rows[7].Platform = PlatformAnthropic
-			for _, id := range []int64{1, 2, 4, 5, 6} {
-				p.Accounts[id] = schedquality.AccountSummary{FirstOutputP50Ms: schedAdminInt(100)}
-			}
-			p.GroupRows[4] = []SchedGroupRow{{GroupID: 1, Model: "failing", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
-			p.GroupRows[5] = []SchedGroupRow{{GroupID: 1, Model: "group-exempt", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
-			p.GroupRows[6] = []SchedGroupRow{{GroupID: 1, Model: "all-groups-exempt", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
-			p.Overrides = []SchedOverride{
-				{AccountID: 5, GroupID: 1, Mode: schedquality.OverrideExempt},
-				{AccountID: 6, GroupID: 0, Mode: schedquality.OverrideExempt},
-			}
-
-			filter, err := s.AccountFilter(context.Background(), "normal")
-			require.NoError(t, err)
-			require.False(t, filter.Exclude)
-
-			ids := []int64{1, 2, 3, 4, 5, 6, 7}
-			summary, err := s.Summary(context.Background(), ids)
-			require.NoError(t, err)
-			byID := make(map[int64]SchedAdminAccountSummary, len(summary.Accounts))
-			wantFromSummary := []int64{}
-			for _, item := range summary.Accounts {
-				byID[item.AccountID] = item
-				hasEffectiveRow := false
-				for _, row := range item.Substandard {
-					hasEffectiveRow = hasEffectiveRow || row.Effective
-				}
-				if repo.rows[item.AccountID].Platform != PlatformOpenAI || item.Status != "normal" || item.Stop != nil || len(item.Exemptions) > 0 || hasEffectiveRow {
-					continue
-				}
-				wantFromSummary = append(wantFromSummary, item.AccountID)
-			}
-			require.Equal(t, tc.wantNormal, filter.IDs)
-			require.Equal(t, tc.wantNormal, wantFromSummary)
-			require.Equal(t, tc.globalEnabled && !tc.stale && tc.groupPolicy, byID[4].Substandard[0].Effective)
-			require.False(t, byID[5].Substandard[0].Effective)
-			require.False(t, byID[6].Substandard[0].Effective)
-			for _, category := range []struct {
-				quality string
-				want    []int64
-			}{
-				{quality: "substandard", want: tc.wantSubstandard},
-				{quality: "exempt", want: []int64{5, 6}},
-				{quality: "observing", want: []int64{3}},
-			} {
-				filter, err := s.AccountFilter(context.Background(), category.quality)
-				require.NoError(t, err)
-				require.False(t, filter.Exclude)
-				require.Equal(t, category.want, filter.IDs)
-			}
-
-			attention, err := s.Attention(context.Background())
-			require.NoError(t, err)
-			require.Equal(t, tc.wantSubstandard, attention.Substandard)
-			require.Equal(t, []int64{5, 6}, attention.Exempt)
-			require.Equal(t, []int64{3}, attention.Observing)
-		})
-	}
-}
-
-func TestSchedAdminDetailEvidenceAndEmptyLists(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	p := e.snapshot
-	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear, Level: 2, Until: s.d.Now().Add(time.Minute)}}, SourceGroups: []int64{2}, TTFT: schedquality.TTFTEvidence{N: 20, K: 8}, TTFTVerdict: schedquality.VerdictFail, Error: schedquality.ErrorAssessment{Verdict: schedquality.VerdictUnknown}}}
-
-	out, err := s.Detail(context.Background(), 1)
-	require.NoError(t, err)
-	require.Len(t, out.Groups, 1)
-	m := out.Groups[0].ByModel[0]
-	require.True(t, m.Failing)
-	require.Equal(t, "merged", m.TTFO.Scope)
-	require.Equal(t, 240, m.TTFO.WindowMin)
-	require.Equal(t, 8, m.TTFO.Bad)
-	require.Equal(t, "fail", m.TTFO.Verdict)
-	require.Equal(t, "unknown", m.Error.Verdict)
-	require.Equal(t, 0.0, *m.Error.LCB)
-	require.Equal(t, []int64{2}, m.OtherGroupIDs)
-	raw, err := json.Marshal(out)
-	require.NoError(t, err)
-	require.Contains(t, string(raw), `"exemptions":[]`)
-	require.NotContains(t, string(raw), "p90")
-	require.NotContains(t, string(raw), "testing")
-}
+func schedAdminInt(v int) *int { return &v }
 
 type schedAdminGroupMembers struct {
 	schedAdminGroups
@@ -237,117 +26,214 @@ type schedAdminGroupMembers struct {
 func (g schedAdminGroupMembers) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	return g.ids, nil
 }
-
-type schedAdminUsage struct {
-	calls int
-	at    time.Time
-}
-
-func (u *schedAdminUsage) GroupLast60(_ context.Context, ids []int64, at time.Time) (map[int64]usagestats.GroupLast60, error) {
-	u.calls++
-	u.at = at
-	return map[int64]usagestats.GroupLast60{1: {Requests: 7, FailedRate: schedAdminFloat(1.0 / 7)}}, nil
-}
-func (e *schedAdminEngine) PreviewPolicy(_ context.Context, g int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+	e.previewCalls = append(e.previewCalls, p)
+	if e.preview != nil {
+		return e.preview(p)
+	}
 	return e.changes, nil
 }
-func TestSchedAdminUnconfiguredPolicyUsesEngineDefaults(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
-	s.d.Usage = &schedAdminUsage{}
-	check := func(expected schedquality.Policy) {
-		t.Helper()
-		detail, err := s.Detail(context.Background(), 1)
-		require.NoError(t, err)
-		require.Equal(t, schedAdminPolicyFields(expected), detail.Groups[0].Policy)
-		groups, err := s.GroupsSummary(context.Background(), []int64{1})
-		require.NoError(t, err)
-		require.Equal(t, schedAdminPolicyFields(expected), groups.Groups[0].SchedAdminPolicyPolicy)
-	}
-	check(schedquality.DefaultPolicy())
-	configured := schedquality.DefaultPolicy()
-	configured.TakeoverIdleSeconds = 0
-	e.snapshot.Policies[1] = SchedPolicyRecord{Policy: configured}
-	check(configured)
+func (r *schedAdminAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error) {
+	return []SchedAdminDecision{}, nil
 }
-func TestSchedAdminGroupCountsAndPreview(t *testing.T) {
-	s, e, r := schedAdminFixture()
-	now := s.d.Now()
-	p := e.snapshot
-	for id := int64(2); id <= 5; id++ {
-		a := *r.rows[1]
-		a.ID = id
-		a.Name = "synthetic"
-		a.Extra = map[string]any{}
-		r.rows[id] = &a
-	}
-	r.rows[3].Schedulable = false
-	r.rows[4].Extra["model_rate_limits"] = map[string]any{"m": map[string]any{"rate_limit_reset_at": now.Add(time.Hour).Format(time.RFC3339)}}
-	s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1, 2, 3, 4, 5}}
-	usage := &schedAdminUsage{}
-	s.d.Usage = usage
-	policy := schedquality.Policy{Enabled: true, TTFTSeconds: 10, MaxErrorRate: .05, MinCacheRatio: .5, TakeoverIdleSeconds: 900}
-	p.Policies[1] = SchedPolicyRecord{GroupID: 1, Version: 7, Policy: policy}
-	e.policy = p.Policies[1]
-	for _, id := range []int64{1, 2, 3} {
-		p.GroupRows[id] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}, {GroupID: 1, Model: "b", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
-	}
-	p.Overrides = []SchedOverride{{AccountID: 2, GroupID: 1, Mode: schedquality.OverrideExempt}}
-	out, err := s.GroupsSummary(context.Background(), []int64{1, 1})
-	require.NoError(t, err)
-	require.Len(t, out.Groups, 1)
-	require.Equal(t, SchedAdminCounts{Normal: 3, Below: 1, Stopped: 1}, out.Groups[0].Accounts)
-	require.EqualValues(t, 7, out.Groups[0].Last60.Requests)
-	require.Equal(t, 1, usage.calls)
-	require.Equal(t, now, usage.at)
-	e.changes = []SchedPolicyChange{{AccountID: 2, Model: "c"}, {AccountID: 3, Model: "c"}, {AccountID: 4, Model: "a", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionError: schedquality.VerdictFail}}, {AccountID: 4, Model: "b", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionCache: schedquality.VerdictFail}}}
-	before := append([]SchedGroupRow(nil), p.GroupRows[1]...)
-	preview, err := s.PreviewPolicy(context.Background(), 1, 7, policy)
-	require.NoError(t, err)
-	require.Equal(t, SchedAdminPreviewCounts{Normal: 3, Below: 1}, preview.Now)
-	require.Equal(t, SchedAdminPreviewCounts{Normal: 2, Below: 2}, preview.After)
-	require.Len(t, preview.Changed, 2)
-	require.Equal(t, r.rows[4].Name, preview.Changed[0].Name)
-	require.Equal(t, before, p.GroupRows[1], "preview must not mutate the published snapshot")
-	_, err = s.PreviewPolicy(context.Background(), 1, 6, policy)
-	require.ErrorIs(t, err, ErrSchedPolicyConflict)
-	policy.Enabled = false
-	preview, err = s.PreviewPolicy(context.Background(), 1, 7, policy)
-	require.NoError(t, err)
-	require.Empty(t, preview.Changed)
-	require.Equal(t, SchedAdminPreviewCounts{Normal: 4}, preview.After)
+func (r *schedAdminAccounts) SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error) {
+	return map[int64]SchedAdminGroupLast60{}, nil
 }
-func TestSchedAdminOrderUsesBoardFieldsAndDefaultModel(t *testing.T) {
-	s, e, _ := schedAdminFixture()
-	now := s.d.Now()
-	e.snapshot.GroupModels = map[int64][]SchedModelCount{1: {{Model: "popular", Requests: 10}, {Model: "other", Requests: 2}}}
-	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Name: "synthetic", Rank: 1, Layer: "below", Dims: []schedquality.Dimension{schedquality.DimensionTTFO}, LoadRate: 80, LastUsedAt: &now}}}
-	s.d.Board = board
-	out, err := s.Order(context.Background(), 1, "")
+func schedAdminJSON(t *testing.T, v any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(v)
 	require.NoError(t, err)
-	require.Equal(t, "popular", board.model)
-	require.Equal(t, []string{"popular", "other"}, out.Models)
-	require.Equal(t, 80, out.Rows[0].LoadRate)
-	require.Equal(t, "synthetic", out.Rows[0].Name)
-	require.Equal(t, schedAdminTime(now), out.Rows[0].LastUsedAt)
-	e.snapshot.GroupModels = nil
-	board.model = ""
-	out, err = s.Order(context.Background(), 1, "")
-	require.NoError(t, err)
-	require.Empty(t, out.Rows)
-	require.Empty(t, board.model)
-}
-func TestSchedAdminDemoteRejected(t *testing.T) {
-	s, _, _ := schedAdminFixture()
-	err := s.SetOverride(context.Background(), SchedOverride{AccountID: 1, Mode: schedquality.Override(2)})
-	require.Error(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(raw, &out))
+	return out
 }
 
-func TestSchedAdminPreviewMatchesEngineWithoutMutation(t *testing.T) {
+func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	now := s.d.Now()
+	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "model-a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear, Level: 2, Until: now.Add(time.Minute)}, Cache: schedquality.LineView{Trial: true, TrialUntil: now.Add(2 * time.Minute)}}, TTFT: schedquality.TTFTEvidence{N: 20, K: 8}, TTFTVerdict: schedquality.VerdictFail, Error: schedquality.ErrorAssessment{Verdict: schedquality.VerdictPass, SourceGroups: []int64{2}}, Cache: schedquality.CacheAssessment{SourceGroups: []int64{3}}}}
+	out, err := s.Detail(context.Background(), 1)
+	require.NoError(t, err)
+	raw := schedAdminJSON(t, out)
+	groups := raw["groups"].([]any)
+	model := groups[0].(map[string]any)["by_model"].([]any)[0].(map[string]any)
+	require.ElementsMatch(t, []string{"model", "placement", "exempt", "lines"}, schedAdminJSONKeys(model))
+	require.Equal(t, "rear", model["placement"])
+	lines := model["lines"].(map[string]any)
+	ttfo := lines["ttfo"].(map[string]any)
+	require.Equal(t, "rear", ttfo["identity"])
+	require.Equal(t, "fail", ttfo["verdict"])
+	require.EqualValues(t, 2, ttfo["level"])
+	evidence := ttfo["evidence"].(map[string]any)
+	require.ElementsMatch(t, []string{"limit_s", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
+	for _, key := range []string{"p_rel", "u", "z"} {
+		require.Nil(t, evidence[key])
+	}
+	require.Equal(t, []any{}, evidence["causes"])
+	require.Equal(t, []any{}, ttfo["source_groups"])
+	require.Equal(t, []any{float64(2)}, lines["error"].(map[string]any)["source_groups"])
+	require.Equal(t, "trial", lines["cache"].(map[string]any)["identity"])
+	require.Equal(t, now.Add(time.Minute), schedAdminRearUntil(e.snapshot.GroupRows[1][0].View))
+	require.ElementsMatch(t, []string{"limit", "clear", "failed", "unknown", "padded", "lower_fail", "lower_pass"}, schedAdminJSONKeys(lines["error"].(map[string]any)["evidence"].(map[string]any)))
+	require.ElementsMatch(t, []string{"min_ratio", "turns", "ratio", "sessions", "low_sessions"}, schedAdminJSONKeys(lines["cache"].(map[string]any)["evidence"].(map[string]any)))
+	require.Nil(t, e.snapshot.GroupRows[1][0].TTFT.Causes, "must not mutate the snapshot")
+}
+func schedAdminJSONKeys(m map[string]any) []string {
+	out := []string{}
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
+	s, e, r := schedAdminFixture()
+	p := e.snapshot
+	now := s.d.Now()
+	p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
+	for id := int64(2); id <= 6; id++ {
+		a := *r.rows[1]
+		a.ID = id
+		r.rows[id] = &a
+	}
+	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityPass}}}}
+	p.GroupRows[2] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear, Until: now.Add(time.Minute)}}}}
+	p.GroupRows[3] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Cache: schedquality.LineView{Trial: true, TrialUntil: now.Add(time.Minute)}}}}
+	p.Overrides = []SchedOverride{{AccountID: 5, Mode: schedquality.OverrideExempt}}
+	r.rows[6].Schedulable = false
+	p.Accounts[1] = schedquality.AccountSummary{FirstEventP50Ms: schedAdminInt(100), FirstOutputP50Ms: schedAdminInt(120), GapP50Ms: schedAdminInt(20), FirstOutputN: 7, CacheTurns: 21, CacheRatio: schedAdminFloat(.8), CacheAllRequests: 25, CacheAllRatio: schedAdminFloat(.9)}
+	out, err := s.Summary(context.Background(), []int64{1, 2, 3, 4, 5, 6})
+	require.NoError(t, err)
+	item := schedAdminJSON(t, out.Accounts[0])
+	require.NotContains(t, item, "status")
+	require.NotContains(t, item, "substandard")
+	require.Equal(t, map[string]any{"first_event_p50_ms": float64(100), "first_output_p50_ms": float64(120), "gap_p50_ms": float64(20), "n": float64(7)}, item["ttfo"])
+	require.Equal(t, map[string]any{"ratio": .8, "turns": float64(21), "all_ratio": .9, "all_requests": float64(25)}, item["cache"])
+	require.Equal(t, []any{}, item["rear"])
+	require.Equal(t, []any{}, item["trial"])
+	require.Equal(t, "rear", out.Accounts[1].GroupStatus["1"])
+	require.True(t, out.Accounts[1].Rear[0].Effective)
+	require.Equal(t, "trial", out.Accounts[2].GroupStatus["1"])
+	require.Len(t, out.Accounts[2].Trial, 1)
+	for _, tc := range []struct {
+		quality string
+		ids     []int64
+	}{{"normal", []int64{1}}, {"rear", []int64{2}}, {"trial", []int64{3}}, {"unknown", []int64{4, 5, 6}}, {"exempt", []int64{5}}} {
+		filter, err := s.AccountFilter(context.Background(), tc.quality)
+		require.NoError(t, err)
+		require.Equal(t, tc.ids, filter.IDs)
+		require.True(t, ValidSchedQualityFilter(tc.quality))
+	}
+	require.False(t, ValidSchedQualityFilter("substandard"))
+	require.False(t, ValidSchedQualityFilter("observing"))
+	p.At = now.Add(-schedquality.ViewMaxAge - time.Nanosecond)
+	out, err = s.Summary(context.Background(), []int64{2})
+	require.NoError(t, err)
+	require.False(t, out.Accounts[0].Rear[0].Effective)
+	require.Equal(t, "unknown", out.Accounts[0].GroupStatus["1"])
+	p.At = now
+	policy := p.Policies[1]
+	policy.Policy.Enabled = false
+	p.Policies[1] = policy
+	out, err = s.Summary(context.Background(), []int64{2})
+	require.NoError(t, err)
+	require.Equal(t, "unknown", out.Accounts[0].GroupStatus["1"])
+	require.False(t, out.Accounts[0].Rear[0].Effective)
+}
+
+type schedAdminStatsAccounts struct {
+	*schedAdminAccounts
+	calls int
+	err   error
+}
+
+func (r *schedAdminStatsAccounts) SchedAdminGroupLast60(_ context.Context, ids []int64, _ time.Time) (map[int64]SchedAdminGroupLast60, error) {
+	r.calls++
+	return map[int64]SchedAdminGroupLast60{}, r.err
+}
+func TestSchedAdminV2GroupsJSONAndCache(t *testing.T) {
+	s, e, r := schedAdminFixture()
+	now := s.d.Now()
+	s.d.Now = func() time.Time { return now }
+	repo := &schedAdminStatsAccounts{schedAdminAccounts: r}
+	s.d.Accounts = repo
+	s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
+	e.snapshot.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
+	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "pass", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityPass}}}, {GroupID: 1, Model: "unknown"}, {GroupID: 1, Model: "trial", View: schedquality.StateView{Error: schedquality.LineView{Trial: true}}}, {GroupID: 1, Model: "rear", View: schedquality.StateView{Cache: schedquality.LineView{Identity: schedquality.IdentityRear}}}}
+	out, err := s.GroupsSummary(context.Background(), []int64{1})
+	require.NoError(t, err)
+	group := schedAdminJSON(t, out.Groups[0])
+	require.ElementsMatch(t, []string{"group_id", "accounts", "last60"}, schedAdminJSONKeys(group))
+	require.Equal(t, map[string]any{"pass": float64(1), "unknown": float64(1), "trial": float64(1), "rear": float64(1)}, group["accounts"])
+	last := group["last60"].(map[string]any)
+	require.Len(t, last, 6)
+	for _, v := range last {
+		require.Nil(t, v)
+	}
+	_, err = s.GroupsSummary(context.Background(), []int64{1})
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.calls)
+	now = now.Add(45 * time.Second)
+	_, err = s.GroupsSummary(context.Background(), []int64{1})
+	require.NoError(t, err)
+	require.Equal(t, 2, repo.calls)
+	policy := e.snapshot.Policies[1]
+	policy.Policy.Enabled = false
+	e.snapshot.Policies[1] = policy
+	out, err = s.GroupsSummary(context.Background(), []int64{1})
+	require.NoError(t, err)
+	require.Equal(t, SchedAdminCounts{Pass: 1, Unknown: 3}, out.Groups[0].Accounts)
+}
+func TestSchedAdminV2PreviewJSONAndConflict(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	policy := schedquality.DefaultPolicy()
+	e.policy = SchedPolicyRecord{GroupID: 1, Version: 7, Policy: policy}
+	s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
+	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "a", TTFTVerdict: schedquality.VerdictPass}}
+	e.changes = []SchedPolicyChange{{AccountID: 1, Model: "a", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionTTFO: schedquality.VerdictFail}}}
+	saved := policy
+	policy.TTFTSeconds *= 2
+	e.preview = func(p schedquality.Policy) ([]SchedPolicyChange, error) {
+		ttfo := schedquality.VerdictPass
+		if p.TTFTSeconds > saved.TTFTSeconds {
+			ttfo = schedquality.VerdictFail
+		}
+		return []SchedPolicyChange{{AccountID: 1, Model: "a", Lines: map[schedquality.Dimension]schedquality.Verdict{schedquality.DimensionTTFO: ttfo, schedquality.DimensionError: schedquality.VerdictPass}}}, nil
+	}
+	reads := e.reads
+	out, err := s.PreviewPolicy(context.Background(), 1, 7, policy)
+	require.NoError(t, err)
+	raw := schedAdminJSON(t, out)
+	require.ElementsMatch(t, []string{"relaxed_lines", "lines", "changed"}, schedAdminJSONKeys(raw))
+	require.Equal(t, []any{"ttfo"}, raw["relaxed_lines"])
+	require.Equal(t, SchedAdminVerdictCounts{Pass: 1}, out.Lines[schedquality.DimensionTTFO].Now)
+	require.Equal(t, SchedAdminVerdictCounts{Fail: 1}, out.Lines[schedquality.DimensionTTFO].After)
+	require.Equal(t, []any{map[string]any{"account_id": float64(1), "name": "one", "model": "a", "line": "ttfo", "from": "pass", "to": "fail"}}, raw["changed"])
+	_, err = s.PreviewPolicy(context.Background(), 1, 6, policy)
+	require.ErrorIs(t, err, ErrSchedPolicyConflict)
+	require.Equal(t, schedquality.VerdictPass, e.snapshot.GroupRows[1][0].TTFTVerdict)
+	require.Equal(t, reads, e.reads, "preview must not read old published conclusions")
+	require.Equal(t, []schedquality.Policy{saved, policy}, e.previewCalls)
+	require.Equal(t, SchedAdminVerdictCounts{Pass: 1}, out.Lines[schedquality.DimensionError].Now)
+	require.Equal(t, out.Lines[schedquality.DimensionError].Now, out.Lines[schedquality.DimensionError].After)
+}
+func TestSchedAdminV2OrderJSON(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	e.snapshot.GroupModels = map[int64][]SchedModelCount{1: {{Model: "a", Requests: 10}}}
+	s.d.Board = &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Layer: "front", Rank: 1}}}
+	out, err := s.Order(context.Background(), 1, "")
+	require.NoError(t, err)
+	row := schedAdminJSON(t, out.Rows[0])
+	require.NotContains(t, row, "dims")
+	require.Contains(t, row, "pinned")
+	require.Nil(t, row["excluded"])
+	require.Equal(t, map[string]any{"ttfo": "unknown", "error": "unknown", "cache": "unknown"}, row["lines"])
+}
+
+func TestSchedAdminV2PreviewUsesEngineAndDoesNotChangeIdentity(t *testing.T) {
 	f := newQualityFixture(t)
 	f.badTTFT()
 	f.ledger.Rows = f.ledger.Rows[80:]
-
 	rows := engineSamples(80, f.now.Add(-time.Minute), true)
 	for i := range rows {
 		value := 500
@@ -367,20 +253,58 @@ func TestSchedAdminPreviewMatchesEngineWithoutMutation(t *testing.T) {
 	require.NoError(t, err)
 	proposed := current.Policy
 	proposed.TTFTSeconds = .1
-	expected, err := f.e.PreviewPolicy(context.Background(), 10, proposed)
-	require.NoError(t, err)
-	require.Len(t, expected, 2)
+	before := f.view()
 	decisions := len(f.store.Decisions)
-	state := f.view()
 	out, err := s.PreviewPolicy(context.Background(), 10, current.Version, proposed)
 	require.NoError(t, err)
-	require.Equal(t, SchedAdminPreviewCounts{Normal: 1}, out.Now)
-	require.Equal(t, SchedAdminPreviewCounts{Below: 1}, out.After)
-	require.Len(t, out.Changed, 1)
-	require.Equal(t, schedFailedLines(expected[0].Lines), out.Changed[0].Dims)
-	require.Equal(t, expected[0].Model, out.Changed[0].Model)
-	require.Equal(t, decisions, len(f.store.Decisions))
-	require.Equal(t, state, f.view())
+	require.NotEmpty(t, out.Changed)
+	require.Equal(t, 0, out.Lines[schedquality.DimensionTTFO].Now.Fail)
+	require.Positive(t, out.Lines[schedquality.DimensionTTFO].After.Fail)
+	require.Empty(t, out.RelaxedLines)
+	require.Equal(t, before, f.view())
+	require.Len(t, f.store.Decisions, decisions)
 }
 
-func schedAdminInt(v int) *int { return &v }
+func TestSchedAdminV2PolicySavedJSONAndChangeLog(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	policy := schedquality.DefaultPolicy()
+	e.policy = SchedPolicyRecord{GroupID: 1, Version: 7, Policy: policy}
+	policy.TTFTSeconds *= 2
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	out, err := s.UpdatePolicy(context.Background(), 1, 7, policy, 42)
+	require.NoError(t, err)
+	raw := schedAdminJSON(t, out)
+	require.ElementsMatch(t, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}, schedAdminJSONKeys(raw))
+	require.Equal(t, []any{"ttfo"}, raw["relaxed_lines"])
+	require.EqualValues(t, 8, raw["version"])
+	var event map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &event))
+	require.Equal(t, "sched_quality.policy_changed", event["msg"])
+	require.EqualValues(t, 42, event["operator_id"])
+	require.Contains(t, event, "old")
+	require.Contains(t, event, "new")
+	require.Equal(t, []any{"ttfo"}, event["affected_lines"])
+	require.EqualValues(t, 0, event["cleared"])
+}
+
+func TestSchedAdminV2RuleRejectsNonfiniteBeforeEngine(t *testing.T) {
+	s, _, _ := schedAdminFixture()
+	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		for _, field := range []string{"confidence", "tolerance", "peer_margin"} {
+			p := schedquality.DefaultRuleBParams()
+			switch field {
+			case "confidence":
+				p.Confidence = v
+			case "tolerance":
+				p.Tolerance = v
+			case "peer_margin":
+				p.PeerMargin = v
+			}
+			_, err := s.UpdateTTFTRule(context.Background(), 7, p, 42)
+			require.Error(t, err)
+		}
+	}
+}

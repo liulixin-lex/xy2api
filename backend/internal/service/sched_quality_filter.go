@@ -21,17 +21,19 @@ func SchedQualityAccountFilter(ctx context.Context) (SchedQualityFilter, bool) {
 }
 
 func ValidSchedQualityFilter(quality string) bool {
-	return quality == "" || quality == "substandard" || quality == "normal" || quality == "exempt" || quality == "observing"
+	return quality == "" || quality == "rear" || quality == "normal" || quality == "exempt" || quality == "trial" || quality == "unknown"
 }
 
 func (a SchedAdminAttention) Filter(quality string, normal []int64) SchedQualityFilter {
 	switch quality {
-	case "substandard":
-		return SchedQualityFilter{IDs: a.Substandard}
+	case "rear":
+		return SchedQualityFilter{IDs: a.Rear}
 	case "exempt":
 		return SchedQualityFilter{IDs: a.Exempt}
-	case "observing":
-		return SchedQualityFilter{IDs: a.Observing}
+	case "trial":
+		return SchedQualityFilter{IDs: a.Trial}
+	case "unknown":
+		return SchedQualityFilter{IDs: a.Unknown}
 	case "normal":
 		return SchedQualityFilter{IDs: append([]int64{}, normal...)}
 	}

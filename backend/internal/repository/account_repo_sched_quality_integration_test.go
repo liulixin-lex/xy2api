@@ -18,7 +18,7 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 		_, err := s.client.AccountGroup.Create().SetAccountID(id).SetGroupID(group.ID).Save(s.ctx)
 		s.Require().NoError(err)
 	}
-	attention := service.SchedAdminAttention{Substandard: []int64{substandard.ID}, Exempt: []int64{exempt.ID}, Observing: []int64{observing.ID}}
+	attention := service.SchedAdminAttention{Rear: []int64{substandard.ID}, Exempt: []int64{exempt.ID}, Unknown: []int64{observing.ID}}
 	normalIDs := []int64{normal.ID}
 	for _, tc := range []struct {
 		name, quality string
@@ -27,17 +27,17 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 		empty         bool
 		want          []int64
 	}{
-		{name: "substandard", quality: "substandard", want: []int64{substandard.ID}},
+		{name: "rear", quality: "rear", want: []int64{substandard.ID}},
 		{name: "exempt_ungrouped", quality: "exempt", want: []int64{exempt.ID}},
-		{name: "observing", quality: "observing", want: []int64{observing.ID}},
+		{name: "unknown", quality: "unknown", want: []int64{observing.ID}},
 		{name: "normal_excludes_other_platforms", quality: "normal", want: []int64{normal.ID}},
 		{name: "normal_group", quality: "normal", group: group.ID, want: []int64{normal.ID}},
 		{name: "normal_platform", quality: "normal", platform: service.PlatformOpenAI, want: []int64{normal.ID}},
 		{name: "exempt_group_no_match", quality: "exempt", group: group.ID, want: []int64{}},
-		{name: "observing_group", quality: "observing", group: group.ID, want: []int64{observing.ID}},
-		{name: "empty_substandard", quality: "substandard", empty: true, want: []int64{}},
+		{name: "observing_group", quality: "unknown", group: group.ID, want: []int64{observing.ID}},
+		{name: "empty_substandard", quality: "rear", empty: true, want: []int64{}},
 		{name: "empty_exempt", quality: "exempt", empty: true, want: []int64{}},
-		{name: "empty_observing", quality: "observing", empty: true, want: []int64{}},
+		{name: "empty_observing", quality: "unknown", empty: true, want: []int64{}},
 		{name: "normal_empty", quality: "normal", empty: true, want: []int64{}},
 	} {
 		s.Run(tc.name, func() {

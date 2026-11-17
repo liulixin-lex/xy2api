@@ -1,0 +1,27 @@
+{
+  "version": 8,
+  "confidence": 0.9,
+  "tolerance": 0.2,
+  "peer_margin": 0.05,
+  "defaults": {
+    "confidence": 0.8,
+    "tolerance": 0.2,
+    "peer_margin": 0.05
+  },
+  "replayed": {
+    "confidence": [
+      0.8,
+      0.95
+    ],
+    "tolerance": [
+      0.2,
+      0.25
+    ],
+    "peer_margin": [
+      0.05,
+      0.15
+    ]
+  },
+  "change": "relax",
+  "cleared": 3
+}

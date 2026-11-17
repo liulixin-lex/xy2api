@@ -3,8 +3,10 @@ package service
 import (
 	"cmp"
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -18,6 +20,8 @@ type SchedAdminAccountRepository interface {
 	GetByID(context.Context, int64) (*Account, error)
 	GetByIDs(context.Context, []int64) ([]*Account, error)
 	SchedAdminAccountIDs(context.Context) ([]int64, error)
+	SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error)
+	SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error)
 	SchedAdminClearError(context.Context, int64, string) (bool, error)
 	SchedAdminClear429(context.Context, int64, *time.Time, *time.Time) (bool, error)
 	SchedAdminClearOverload(context.Context, int64, *time.Time) (bool, error)
@@ -50,13 +54,21 @@ type SchedAdminDependencies struct {
 	Thresholds func(context.Context) map[string]int
 	Now        func() time.Time
 }
-type SchedAdminService struct{ d SchedAdminDependencies }
+type schedAdminStatsEntry struct {
+	at    time.Time
+	value SchedAdminGroupLast60
+}
+type SchedAdminService struct {
+	d       SchedAdminDependencies
+	statsMu sync.Mutex
+	stats   map[int64]schedAdminStatsEntry
+}
 
 func NewSchedAdminService(d SchedAdminDependencies) *SchedAdminService {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &SchedAdminService{d: d}
+	return &SchedAdminService{d: d, stats: map[int64]schedAdminStatsEntry{}}
 }
 func (s *SchedAdminService) snapshot() *SchedQualitySnapshot {
 	if p := s.d.Engine.Snapshot(); p != nil {
@@ -213,23 +225,95 @@ func (s *SchedAdminService) Policy(ctx context.Context, g int64) (SchedAdminPoli
 	r, e := s.d.Engine.Policy(ctx, g)
 	return schedAdminPolicy(r), e
 }
-func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, p schedquality.Policy, op int64) (SchedAdminPolicy, error) {
-	group, e := s.group(ctx, g)
-	if e != nil {
-		return SchedAdminPolicy{}, e
+func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, p schedquality.Policy, op int64) (SchedAdminPolicySaved, error) {
+	group, err := s.group(ctx, g)
+	if err != nil {
+		return SchedAdminPolicySaved{}, err
 	}
 	if group.Platform != PlatformOpenAI {
-		return SchedAdminPolicy{}, infraerrors.BadRequest("INVALID_GROUP_PLATFORM", "Only OpenAI groups support scheduling policies")
+		return SchedAdminPolicySaved{}, infraerrors.BadRequest("INVALID_GROUP_PLATFORM", "Only OpenAI groups support scheduling policies")
 	}
 	if version < 0 {
-		return SchedAdminPolicy{}, infraerrors.BadRequest("INVALID_SCHED_POLICY", "Invalid expected version")
+		return SchedAdminPolicySaved{}, infraerrors.BadRequest("INVALID_SCHED_POLICY", "expected_version must be nonnegative")
 	}
-	if e := ValidateSchedQualityPolicy(p); e != nil {
-		return SchedAdminPolicy{}, e
+	if err := ValidateSchedQualityPolicy(p); err != nil {
+		return SchedAdminPolicySaved{}, err
 	}
-	r, e := s.d.Engine.UpdatePolicy(ctx, g, version, p)
-	if e != nil {
-		return SchedAdminPolicy{}, e
+	old, err := s.d.Engine.Policy(ctx, g)
+	if err != nil {
+		return SchedAdminPolicySaved{}, err
 	}
-	return schedAdminPolicy(r.SchedPolicyRecord), nil
+	r, err := s.d.Engine.UpdatePolicy(ctx, g, version, p)
+	if err != nil {
+		return SchedAdminPolicySaved{}, err
+	}
+	lines := []schedquality.Dimension{}
+	if old.Policy.Enabled != p.Enabled || old.Policy.TTFTSeconds != p.TTFTSeconds {
+		lines = append(lines, schedquality.DimensionTTFO)
+	}
+	if old.Policy.Enabled != p.Enabled || old.Policy.MaxErrorRate != p.MaxErrorRate {
+		lines = append(lines, schedquality.DimensionError)
+	}
+	if old.Policy.Enabled != p.Enabled || old.Policy.MinCacheRatio != p.MinCacheRatio {
+		lines = append(lines, schedquality.DimensionCache)
+	}
+	if old.Policy != p {
+		slog.InfoContext(ctx, "sched_quality.policy_changed", "component", "sched_quality", "group_id", g, "operator_id", op, "old", schedAdminPolicyFields(old.Policy), "new", schedAdminPolicyFields(p), "affected_lines", lines, "cleared", r.Cleared)
+	}
+	return SchedAdminPolicySaved{SchedAdminPolicy: schedAdminPolicy(r.SchedPolicyRecord), RelaxedLines: append([]schedquality.Dimension{}, r.RelaxedLines...), Cleared: r.Cleared}, nil
+}
+func schedAdminRule(r SchedTTFTRuleRecord) SchedAdminTTFTRule {
+	return SchedAdminTTFTRule{Version: r.Version, RuleBParams: r.Params, Defaults: schedquality.DefaultRuleBParams(), Replayed: map[string][2]float64{"confidence": {.8, .95}, "tolerance": {.2, .25}, "peer_margin": {.05, .15}}}
+}
+func (s *SchedAdminService) TTFTRule(ctx context.Context) (SchedAdminTTFTRule, error) {
+	r, err := s.d.Engine.TTFTRule(ctx)
+	return schedAdminRule(r), err
+}
+func (s *SchedAdminService) UpdateTTFTRule(ctx context.Context, version int64, p schedquality.RuleBParams, op int64) (SchedAdminTTFTRuleSaved, error) {
+	if version < 0 {
+		return SchedAdminTTFTRuleSaved{}, infraerrors.BadRequest("INVALID_TTFT_RULE", "expected_version must be nonnegative")
+	}
+	if err := p.Validate(); err != nil {
+		return SchedAdminTTFTRuleSaved{}, infraerrors.BadRequest("INVALID_TTFT_RULE", err.Error())
+	}
+	old, err := s.d.Engine.TTFTRule(ctx)
+	if err != nil {
+		return SchedAdminTTFTRuleSaved{}, err
+	}
+	r, err := s.d.Engine.UpdateTTFTRule(ctx, version, p)
+	if err != nil {
+		return SchedAdminTTFTRuleSaved{}, err
+	}
+	change := map[schedquality.RuleBParamChange]string{schedquality.RuleBUnchanged: "none", schedquality.RuleBRelaxed: "relax", schedquality.RuleBTightened: "tighten", schedquality.RuleBMixed: "mixed"}[r.Change]
+	if old.Params != p {
+		slog.InfoContext(ctx, "sched_quality.policy_changed", "component", "sched_quality", "operator_id", op, "old", old.Params, "new", p, "affected_lines", []string{"ttfo"}, "cleared", r.Cleared)
+	}
+	return SchedAdminTTFTRuleSaved{SchedAdminTTFTRule: schedAdminRule(r.SchedTTFTRuleRecord), Change: change, Cleared: r.Cleared}, nil
+}
+func (s *SchedAdminService) Decisions(ctx context.Context, id int64, limit int, before int64) ([]SchedAdminDecision, error) {
+	if limit < 1 || limit > 200 || before < 0 {
+		return nil, infraerrors.BadRequest("INVALID_DECISION_PAGE", "limit must be 1..200 and before_id nonnegative")
+	}
+	if _, err := s.account(ctx, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.d.Accounts.SchedAdminDecisions(ctx, id, limit, before)
+	return append([]SchedAdminDecision{}, rows...), err
+}
+func SchedAdminDecisionBasis(b schedquality.Basis) *SchedAdminBasis {
+	out := &SchedAdminBasis{RuleVersion: b.RuleVersion, Line: b.Line, Kind: b.Kind, Cut: schedAdminTime(b.Cut), Threshold: b.Threshold, SourceGroups: append([]int64{}, b.SourceGroups...)}
+	if b.TTFT != nil {
+		e := *b.TTFT
+		e.Causes = append([]schedquality.RuleBUnknownReason{}, e.Causes...)
+		out.TTFT = &e
+	}
+	if b.Error != nil {
+		e := schedAdminErrorEvidence(*b.Error)
+		out.Error = &e
+	}
+	if b.Cache != nil {
+		e := schedAdminCacheEvidence(*b.Cache)
+		out.Cache = &e
+	}
+	return out
 }
