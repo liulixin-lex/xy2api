@@ -102,9 +102,10 @@ func (s *SchedAdminService) groupLast60(ctx context.Context, ids []int64, now ti
 	owned := make(map[int64]*schedAdminStatsFlight)
 	missing := make([]int64, 0, len(ids))
 	s.statsMu.Lock()
+	cacheNow := s.d.Now()
 	for _, id := range ids {
 		if e, ok := s.stats[id]; ok {
-			if age := now.Sub(e.at); age >= 0 && age < 45*time.Second {
+			if age := cacheNow.Sub(e.at); age >= 0 && age < 45*time.Second {
 				out[id] = e.value
 				continue
 			}
@@ -121,10 +122,9 @@ func (s *SchedAdminService) groupLast60(ctx context.Context, ids []int64, now ti
 	}
 	s.statsMu.Unlock()
 	if len(missing) > 0 {
-		// Keep one caller's cancellation from aborting a shared query for others,
-		// but retain its original request deadline, including pre-query work.
-		deadline, _ := ctx.Deadline()
-		queryCtx, stop := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		// Shared queries have their own bounded lifetime; each caller waits only
+		// for its own request budget, including pre-query work.
+		queryCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		go func() { defer stop(); s.loadGroupLast60(queryCtx, missing, owned, now) }()
 	}
 	for id, f := range waiting {
