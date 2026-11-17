@@ -174,6 +174,10 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 	} else if message := schedErrorMessage(body); message != "" {
 		encoded, _ := json.Marshal(message)
 		modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
+	} else {
+		// Shared legacy helpers also accept root fields. Do not let that
+		// broaden the qualified error-envelope boundary established above.
+		return UpstreamCapabilityNone
 	}
 	if status == http.StatusUnauthorized {
 		if allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {

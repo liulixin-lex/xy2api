@@ -35,6 +35,9 @@ func TestUpstreamCapabilityScope(t *testing.T) {
 		{"endpoint ambiguous", `{"error":{"message":"This endpoint does not support this request"}}`, UpstreamCapabilityRequestFeature},
 		{"chinese ambiguous", `{"error":"站点不支持这种请求"}`, UpstreamCapabilityRequestFeature},
 		{"flat model", `{"type":"error","status_code":400,"code":"model_not_found","message":"Unavailable"}`, UpstreamCapabilityModel},
+		{"flat stream mode", `{"type":"error","code":"stream_only","message":"Only supports streaming requests"}`, UpstreamCapabilityProtocol},
+		{"ordinary output stream code", `{"type":"output","code":"stream_only","message":"Only supports streaming requests"}`, UpstreamCapabilityNone},
+		{"ordinary input stream code", `{"type":"input","code":"stream_only","message":"Only supports streaming requests"}`, UpstreamCapabilityNone},
 		{"ordinary output", `{"type":"output","status_code":400,"code":"model_not_found","message":"Unavailable"}`, UpstreamCapabilityNone},
 		{"ordinary input", `{"input":{"type":"error","code":"model_not_found"}}`, UpstreamCapabilityNone},
 	} {
