@@ -128,15 +128,18 @@ func TestCapabilityNativeWSExplicitFinalExits(t *testing.T) {
 			svc, account, repo := capabilityFinalityService(t, conn)
 			state := resilience.NewRequestState()
 			ctx := resilience.WithRequestState(context.Background(), state)
-			expired, release := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-			defer release()
 			hooks := &OpenAIWSIngressHooks{ClientLifecycleContext: context.Background()}
+			// An expired context alone is not a deterministic failed socket
+			// write: coder/websocket may flush a small frame before its async
+			// cancellation callback runs. Fail the actual terminal socket write.
+			gate := &stickyWSWriteGate{entered: make(chan struct{}), release: make(chan struct{}), err: context.DeadlineExceeded}
+			t.Cleanup(gate.unblock)
 			peers := make(chan *coderws.Conn, 1)
 			done := make(chan error, 1)
 			writeDeadlineReached := false
 			disconnectObserved := false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				downstream, err := coderws.Accept(w, r, nil)
+				downstream, err := coderws.Accept(&stickyWSGatedWriter{ResponseWriter: w, gate: gate}, r, nil)
 				if err != nil {
 					done <- err
 					return
@@ -152,7 +155,8 @@ func TestCapabilityNativeWSExplicitFinalExits(t *testing.T) {
 						disconnectObserved = readErr != nil
 					}
 					if mode == "success_then_write_deadline" && strings.Contains(string(b), "response.completed") {
-						hooks.ClientLifecycleContext = expired
+						gate.armed.Store(true)
+						gate.unblock()
 						writeDeadlineReached = true
 					}
 				}
@@ -183,6 +187,11 @@ func TestCapabilityNativeWSExplicitFinalExits(t *testing.T) {
 				if mode == "success_then_write_deadline" {
 					require.True(t, writeDeadlineReached)
 					require.ErrorIs(t, finalErr, context.DeadlineExceeded)
+					select {
+					case <-gate.entered:
+					default:
+						t.Fatal("terminal must reach the failing production socket write")
+					}
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("production WS turn did not finish")
