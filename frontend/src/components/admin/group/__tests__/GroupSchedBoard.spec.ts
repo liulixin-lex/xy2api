@@ -311,6 +311,41 @@ describe('GroupSchedBoard', () => {
     expect(text('migration')).toBe('admin.schedQuality.board.summaryMigrationNone')
   })
 
+  // I1: account 7 is in both groups. An answer for another group, or for an earlier opening, leaves nothing behind.
+  it('keeps a late pin answer from another group or an earlier opening off the board', async () => {
+    perms.granted = ['accounts:view', 'groups:view', 'groups:manage']
+    let succeed!: (value: unknown) => void
+    let fail!: (reason: unknown) => void
+    groupsApi.setMemberPinned
+      .mockReturnValueOnce(new Promise((resolve) => { succeed = resolve }))
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject }))
+    mount(Board, { attachTo: document.body })
+    const pin = () => document.querySelector<HTMLButtonElement>('[data-sq-pin="7"]')!
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    pin().click()
+    await flushPromises()
+    expect(groupsApi.setMemberPinned).toHaveBeenLastCalledWith(53, 7, true)
+    openSchedBoard({ id: 54, name: '北辰组' })
+    await flushPromises()
+    // Not busy here either: the request in flight is the other group's.
+    expect([pin().getAttribute('aria-checked'), pin().disabled]).toEqual(['false', false])
+    succeed({ group_id: 53, account_id: 7, pinned: true })
+    await flushPromises()
+    expect(pin().getAttribute('aria-checked')).toBe('false')
+
+    pin().click()
+    await flushPromises()
+    expect(groupsApi.setMemberPinned).toHaveBeenLastCalledWith(54, 7, true)
+    closeSchedBoard()
+    await flushPromises()
+    openSchedBoard({ id: 54, name: '北辰组' })
+    await flushPromises()
+    fail({ status: 400, message: 'account 7 is not a member of group 54' })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-pin-failed="7"]')).toBeNull()
+  })
+
   it('drops a pin failure once the board has had PIN_HOLD_MS to follow the backend', async () => {
     vi.useFakeTimers()
     onTestFinished(() => { vi.useRealTimers() })

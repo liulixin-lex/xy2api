@@ -86,8 +86,8 @@
                 <AccountSwitch
                   v-if="canManageGroups"
                   :checked="pinnedOf(row)"
-                  :busy="pinBusy.has(row.account_id)"
-                  :disabled="pinBusy.has(row.account_id)"
+                  :busy="pinBusy.has(rowKey(row))"
+                  :disabled="pinBusy.has(rowKey(row))"
                   :label="t('admin.schedQuality.board.pinLabel', { name: row.name })"
                   :data-sq-pin="row.account_id"
                   @toggle="(next) => setPinned(row, next)"
@@ -226,43 +226,52 @@ function stateOf(row: BackendOrderRow): { text: string; cls: string } {
 // backend's reason (not a member, not an OpenAI group) until the next try, or until the same PIN_HOLD_MS is over (the
 // board has followed the backend by then).
 const PIN_HOLD_MS = 30_000
-const pinBusy = reactive(new Set<number>())
-const pinFailed = reactive(new Map<number, { message: string; at: number }>())
-const pinShown = reactive(new Map<number, { pinned: boolean; at: number }>())
-const held = (accountId: number) => {
-  const shown = pinShown.get(accountId)
+// Each state belongs to a group and an account (an account can be in several groups). Opening another group or closing
+// the board starts a new opening: an answer from an earlier one leaves nothing behind (the write itself went through).
+const pinKey = (groupId: number | null, accountId: number) => `${groupId}:${accountId}`
+const rowKey = (row: BackendOrderRow) => pinKey(board.groupId, row.account_id)
+const pinBusy = reactive(new Set<string>())
+const pinFailed = reactive(new Map<string, { message: string; at: number }>())
+const pinShown = reactive(new Map<string, { pinned: boolean; at: number }>())
+let opening = 0
+const held = (key: string) => {
+  const shown = pinShown.get(key)
   return shown && now.value - shown.at <= PIN_HOLD_MS ? shown : null
 }
 watch(() => boardData.data, (value) => {
   for (const row of value?.rows ?? []) {
     // The board agrees, or the hold is over: the backend's value stands.
-    const shown = held(row.account_id)
-    if (!shown || shown.pinned === row.pinned) pinShown.delete(row.account_id)
+    const key = pinKey(value!.group_id, row.account_id)
+    const shown = held(key)
+    if (!shown || shown.pinned === row.pinned) pinShown.delete(key)
   }
 })
 watch(() => board.groupId, () => {
+  opening++
   pinShown.clear()
   pinFailed.clear()
 })
-const pinnedOf = (row: BackendOrderRow) => held(row.account_id)?.pinned ?? row.pinned
+const pinnedOf = (row: BackendOrderRow) => held(rowKey(row))?.pinned ?? row.pinned
 const pinFailedOf = (row: BackendOrderRow) => {
-  const failure = pinFailed.get(row.account_id)
+  const failure = pinFailed.get(rowKey(row))
   return failure && now.value - failure.at <= PIN_HOLD_MS ? failure.message : null
 }
 
 async function setPinned(row: BackendOrderRow, pinned: boolean) {
   const groupId = board.groupId
-  if (groupId === null || !canManageGroups.value || pinBusy.has(row.account_id)) return
-  pinBusy.add(row.account_id)
-  pinFailed.delete(row.account_id)
+  const key = rowKey(row)
+  if (groupId === null || !canManageGroups.value || pinBusy.has(key)) return
+  const asked = opening
+  pinBusy.add(key)
+  pinFailed.delete(key)
   try {
     const result = await adminAPI.groups.setMemberPinned(groupId, row.account_id, pinned)
-    pinShown.set(row.account_id, { pinned: result.pinned, at: now.value })
+    if (asked === opening) pinShown.set(key, { pinned: result.pinned, at: now.value })
     void markSchedChanged()
   } catch (error) {
-    pinFailed.set(row.account_id, { message: extractApiErrorMessage(error, ''), at: now.value })
+    if (asked === opening) pinFailed.set(key, { message: extractApiErrorMessage(error, ''), at: now.value })
   } finally {
-    pinBusy.delete(row.account_id)
+    pinBusy.delete(key)
   }
 }
 </script>
