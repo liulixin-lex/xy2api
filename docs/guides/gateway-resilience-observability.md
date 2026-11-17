@@ -23,7 +23,7 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 | `GET /api/v1/admin/resilience/stats?window=15m` | 当前实例的计数，窗口为 Go 时长格式，最长 1 小时；响应含 `counters` 与派发时剩余预算直方图 `resilience_dispatch_remaining_seconds` |
 | `GET /api/v1/admin/resilience/undelivered?page=&page_size=&user_id=&api_key_id=&group_id=&since=&until=` | 未送达请求列表，时间为 RFC3339 |
 | `GET /api/v1/admin/resilience/groups/:id/explain?session_hash=&model=&protocol=&stream=` | 选号解释；`protocol`（`responses` 或 `chat`）与 `stream`（`true` 或 `false`）须成对出现，否则 400 |
-| `DELETE /api/v1/admin/accounts/:id/capability-learning` | 清除账号的仅流式学习记录 |
+| `DELETE /api/v1/admin/accounts/:id/capability-learning` | 清除账号的仅流式学习记录与能力不兼容标记 |
 | `GET` / `PUT /api/v1/admin/settings/gateway-resilience` | 读写设置，见 [设置参考](gateway-resilience-settings.md) |
 
 - 账号列表与详情带 `capability_learned`：`[{protocol, mode: "stream_only", expires_at}]`，没有记录时为空数组。
@@ -93,7 +93,7 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 | `resilience.wrapped_error_malformed` | 识别到形似中转包装帧但字段不一致的错误帧 |
 | `openai_model_transient_state` | OpenAI API Key 账号 × 模型的普通瞬时失败或明确模型不可用，含 `failure_streak`、`cooldown_ms`、`reason` |
 | `anthropic_account_latency_hold_started`、`anthropic_account_latency_sticky_migrated` | Claude 账号进入判慢期、会话迁出 |
-| `sched_quality.view_stale` | OpenAI 选号读到的质量视图超过 60 秒没有更新（这段时间不达标暂不影响选号），最多每分钟一条，含 `view_at` |
+| `sched_quality.view_stale` | OpenAI 选号读到的质量视图超过 60 秒没有更新（这段时间质量后排与试用限制暂不影响选号），最多每分钟一条，含 `view_at` |
 
 以 `_failed` 结尾的事件（如 `resilience.balance_lift_failed`、`resilience.capability_learning_failed`、`resilience.last_resort_verify_failed`、`resilience.settings_refresh_failed`）表示存储或查询失败，功能降级为原有行为。
 
@@ -103,54 +103,51 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 
 ### 质量状态
 
-OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下面四种日志，都带组件 `sched_quality`。Info 级的也写入运维监控的系统日志，可按组件筛选。字段只有数值、短的取值与内部 ID，不含请求或响应内容、错误原文、凭据、邮箱或 IP。
+OpenAI 质量判定、换号与尝试收尾使用以下事件。主要运行事件带组件 `sched_quality`；部分存储告警只有事件名，检索时也应按事件名找。事件字段不记录请求或响应正文、凭据与完整会话值。Info 级的组件日志也可在运维监控的系统日志里筛选；成功尝试的 Debug 记录需启用对应日志级别。
 
-| 事件 | 何时写 | 级别 |
+| 事件 | 级别 | 何时写 / 关键字段 |
 |---|---|---|
-| `sched_quality.summary` | 每个实例每 5 分钟一条（启动 5 分钟后第一条） | Info |
-| `sched_quality.state` | 每次判定：进入不达标、续期、到点放回、管理员恢复 | Info |
-| `sched_quality.takeover` | 会话改绑成功一条；改绑失败不写 | Info |
-| `sched_quality.cleanup` | 每次清理真正执行一条 | Info；失败为 Error |
+| `sched_quality.summary` | Info | 每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`clear` |
+| `sched_quality.state` | Info | 产生判定动作时；含 `at`、`rule_version`、`account_id`、`model`、`group_id`、`action`、`line`、`level`、`until`、`basis`、`attempt_ids` |
+| `sched_quality.session_switch` | Info | 会话绑定事务结束，成功、失败、取消、冲突均可写；见下表 |
+| `sched_quality.attempt_finished` | 成功 Debug，其余 Info | 尝试收尾；请求、尝试 ID、分类、状态来源、终态及实际输出字节，见下文 |
+| `sched_quality.policy_changed` | Info | 保存分组门槛或全局首字规则；`operator_id`、`old`、`new`、`affected_lines`、`cleared`，分组门槛另有 `group_id` |
+| `sched_quality.cleanup` | Info；失败 Error | 清理真正执行时；`kind=ledger` 为超过 7 天的尝试，`kind=decisions` 为超过 30 天的判定；含 `rows`，尝试清理另有 `duration_ms`，失败有 `error` |
+| `sched_quality.cycle` | Warn / Error | 评估超过 5 秒时 Warn，含 `duration_ms`，每 5 分钟最多一次；评估失败为 Error，含 `error` |
+| `sched_quality.view_stale` | Warn | 质量视图超过 60 秒未更新，暂停自动分层；含 `view_at`、`view_version`，最多每分钟一次 |
+| `sched_quality.ttft_assessment` | Warn | 首字评估计算失败，保持未知；`account_id`、`model`、`group_id`、`error` |
+| `sched_quality.delivery_capture_mismatch` | Warn | 请求已交付，但单次发送的质量采样为失败；`request_id`、`sends`、`sample_error_class`，不把这次交付误标为救回 |
+| `sched_quality.invalid_policy` | Warn | 读取到无效分组门槛；`group_id`、`error` |
+| `sched_quality.invalid_reset_time` | Warn | 账号重置时间无法读取；`account_id` |
+| `sched_quality.binding_alias_failed` | Warn | 保存绑定别名失败；`account_id`、`error` |
+| `sched_quality.takeover_avoid_failed` | Warn | 换号失败后写会话避让失败；`account_id`、`error` |
+| `sched_quality.takeover_commit_failed` | Warn | 会话绑定提交存储失败；`account_id`、`error` |
+| `sched_quality.trial_room_failed` | Warn | 试用名额查询失败，按满额降层；`account_id`、`error` |
+| `sched_quality.trial_acquire_failed` | Warn | 试用名额获取失败，按满额继续选号；`error`，部分调用另带 `account_id` |
+| `sched_quality.trial_touch_failed` | Warn | 试用名额续期失败；`error`，部分调用另带 `account_id` |
+| `sched_quality.trial_promote_failed` | Warn | 已提交绑定后，请求名额转会话名额失败；`account_id`、`error`，随后尽力释放请求名额 |
+| `sched_quality.trial_release_failed` | Warn | 单个名额释放失败；`account_id`、`group_id`、`error` |
+| `sched_quality.release_trial_group` | Warn | 试用结束后整组名额释放失败；`account_id`、`model`、`group_id`、`error` |
+| `sched_quality.capability_mark_limit` | Info | 能力标记已满时拒绝新增；`account_id`、`limit` |
 
-另有 `sched_quality.cycle`：单次评估超过 5 秒时写一条 Warn（`duration_ms`），同一个 5 分钟内只写第一条；评估本身失败仍记 Error。
+`summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入、续期、试用失败；`released` 计到期达标、试用达标、试用超时；`trial` 计进入试用，`clear` 计档位清零。只统计提交成功的变化，管理员恢复不计入这些变化数。
 
-**`sched_quality.summary`**：
+`state` 的 `line` 是 `ttfo`、`error` 或 `cache`，一次动作对应一条线。动作包括 `enter`、`renew`、`release`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，含义见 [判定记录](group-quality-gate.md#判定记录)。`level` 为 0–4，对应 20、40、60、90、120 分钟。`until` 仅在进入 / 续期 / 试用失败时写后排期限，进入试用时写试用期限，其余为空。`basis` 包含门槛、证据来源和该线的证据；`attempt_ids` 最多 50 个。首字证据有时间折扣与同伴比较，不能只看 P50 推断判定。
+
+**`sched_quality.session_switch`**：
 
 | 字段 | 含义 |
 |---|---|
-| `cycles`、`cycles_failed` | 这 5 分钟里的评估次数与失败次数；每个实例每 5 秒评估一次，正常约 60 |
-| `cycle_ms_max` | 最慢一次评估的毫秒数 |
-| `cooled`、`released` | 进入不达标（含续期）、到点放回的行次。只计提交成功的变化，多实例时只记在写入的那个实例上；管理员恢复不计 |
-
-**`sched_quality.state`**（与判定记录表 `sched_decisions` 的一行同内容）：
-
-| 字段 | 含义 |
-|---|---|
-| `at`、`rule_version` | 判定时刻与规则版本 |
-| `account_id`、`model`、`group_id` | 判定范围；`model` 是调度模型名 |
-| `action` | `enter`（进入不达标）、`renew`（到点续期）、`release`（到点放回）、`reset`（管理员恢复） |
-| `dims` | 触发的线：`ttfo`、`error`、`cache` |
-| `level`、`until` | 阶梯级（1–5）与这一轮的恢复时间 |
-| `basis` | 每条触发线的门槛、窗口、证据来源（本组 / 全部组 / 其他组）、样本数、超限或报错数、比例 |
-| `attempt_ids` | 涉及的尝试，最多 50 个 |
-
-**`sched_quality.takeover`**：
-
-| 字段 | 含义 |
-|---|---|
-| `kind` | `takeover`（接管到更高优先级的账号）或 `migrate`（属主不达标或不可用时换号） |
-| `gateway_request_id` | 触发改绑的请求的网关本地 ID |
+| `gateway_request_id` | 触发绑定事务的网关本地请求 ID |
 | `group_id`、`model` | 分组与调度模型名 |
-| `from_account_id`、`to_account_id` | 原属主与新属主 |
+| `from`、`to` | 原账号与目标账号 |
+| `kind` | 如 `create`（新绑定）、`migrate`（迁移）、`takeover`（接管） |
+| `reason` | 换号原因；首字和报错迁移分别为 `quality_migration_ttfo`、`quality_migration_error`；无单独原因时取 `kind` |
+| `committed` | 是否实际提交绑定；`false` 不代表已经换号成功，需结合尝试结果及提交告警 |
 
-**`sched_quality.cleanup`**：
+**`sched_quality.attempt_finished`**：`request_id` 是网关本地 ID，`attempt_id` 标识本次发送；`outcome`、`class` 是采样结果与归责类别，`http_status`、`status_origin` 分开记录状态与来源。`client_disconnect`、`terminal_seen`、`terminal_event`、`terminal_failed`、`error_source`、`send_error`、`context_done` 用于区分终态、网络、取消与清理。`terminal_ms`、`finished_ms` 相对本次尝试开始；`first_output_request_ms` 是请求级端到端首输出；`output_bytes` 是实际写给客户端的字节，含已写前奏，不等同语义输出字节。
 
-| 字段 | 含义 |
-|---|---|
-| `kind` | `ledger`（超过 7 天的尝试记录）、`decisions`（超过 30 天的判定记录） |
-| `rows` | 删除的行数 |
-| `duration_ms` | 耗时毫秒数（`ledger`） |
-| `error` | 只在失败时出现 |
+以下同前缀名称是管理审计动作，不是上述运行日志事件：`sched_quality.reset`、`sched_quality.override`、`sched_quality.clear_override`、`sched_quality.clear_auto_state`、`sched_quality.policy`、`sched_quality.ttft_rule`。恢复审计记录已清、保留及失败数量；配置保存的运行依据看 `sched_quality.policy_changed`。
 
 ### 请求关联字段
 
@@ -188,10 +185,10 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **非流式请求总是 503 并提示改用 stream**：账号被学为仅流式。在账号列表清除学习记录，或让客户端改发流式请求。
 
-**OpenAI 账号的不达标、恢复或会话搬动看不明白**：在运维监控的系统日志里按组件 `sched_quality` 筛选（字段见 [质量状态](#质量状态)）。
+**OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：在运维监控的系统日志里按组件 `sched_quality` 筛选（字段见 [质量状态](#质量状态)）。
 
 1. 先看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 次评估；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明评估变慢或失败，多半是数据库慢。
-2. 再按账号看 `sched_quality.state`：何时进入不达标、哪条线、依据来自哪里（`basis`）、`until` 恢复时间，以及到点放回或续期。
-3. 会话搬动看 `sched_quality.takeover`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发改绑的那条请求（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
+2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及到期复核结果。
+3. 会话搬动看 `sched_quality.session_switch`，先确认 `committed`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发绑定事务的请求；再用 `sched_quality.attempt_finished` 的 `request_id` / `attempt_id` 区分首输出截止、真实上游失败、取消和修复重发（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
