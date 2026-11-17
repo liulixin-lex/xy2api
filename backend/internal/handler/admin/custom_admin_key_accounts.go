@@ -88,6 +88,25 @@ func (h *AccountHandler) ScopedAdminKeyAccounts(c *gin.Context) {
 	}
 	c.Abort()
 	base := "/api/v1/admin/accounts"
+	// Scoped keys cannot access quality state: reject a filter before querying accounts.
+	if path == base && c.Request.Method == "GET" {
+		requested := false
+		for _, raw := range c.QueryArray("sched_quality") {
+			quality := strings.TrimSpace(raw)
+			if quality == "" {
+				continue
+			}
+			if !service.ValidSchedQualityFilter(quality) {
+				response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "invalid sched_quality filter"))
+				return
+			}
+			requested = true
+		}
+		if requested {
+			response.ErrorFrom(c, infraerrors.Forbidden("SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED", "Scoped admin keys do not support sched_quality filtering"))
+			return
+		}
+	}
 	// 静态默认映射不读取任何账户；权限独立于账户查看及凭证写入。
 	if path == base+"/antigravity/default-model-mapping" && c.Request.Method == "GET" {
 		if !adminaccess.RouteAllowed(principal.Policy, c.Request.Method, path) {

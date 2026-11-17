@@ -241,7 +241,11 @@ func TestSchedQualityWritesAuditWithOperator(t *testing.T) {
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "DELETE", "/accounts/1/override?group_id=0", "").Code)
 	repo.a.Status = service.StatusError
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "DELETE", "/accounts/1/auto-states/error", "").Code)
-	require.Equal(t, 200, schedAdminHandlerRequest(r, "POST", "/accounts/1/reset", "").Code)
+	repo.a.Schedulable = false
+	resetData := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "POST", "/accounts/1/reset", ""))
+	var kept []service.SchedAdminResetKept
+	require.NoError(t, json.Unmarshal(resetData["kept"], &kept))
+	require.NotEmpty(t, kept)
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`).Code)
 	auditService.Stop()
 	require.Len(t, audit.rows, 5)
@@ -249,6 +253,10 @@ func TestSchedQualityWritesAuditWithOperator(t *testing.T) {
 		require.Equal(t, int64(7), *a.ActorUserID)
 	}
 	require.Contains(t, audit.rows[0].RequestBody, `"reason":"repair"`)
+	require.EqualValues(t, len(kept), audit.rows[3].Extra["preserved_count"])
+	require.NotContains(t, audit.rows[3].Extra, "kept_count")
+	require.Contains(t, audit.rows[3].Extra, "cleared_count")
+	require.Contains(t, audit.rows[3].Extra, "failed_count")
 	for i, action := range []string{"override", "clear_override", "clear_auto_state", "reset", "policy"} {
 		require.Equal(t, "sched_quality."+action, audit.rows[i].Action)
 		require.NotEmpty(t, audit.rows[i].Method)

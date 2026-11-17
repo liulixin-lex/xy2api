@@ -26,6 +26,8 @@ func schedAdminEffective(p *SchedQualitySnapshot, now time.Time, enabled bool) b
 	return p.GlobalEnabled && now.Sub(p.At) <= schedquality.ViewMaxAge && enabled
 }
 func (s *SchedAdminService) GroupsSummary(ctx context.Context, ids []int64) (SchedAdminGroupsSummary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	out := SchedAdminGroupsSummary{Groups: []SchedAdminGroupSummary{}}
 	ids, err := schedAdminIDs(ids)
 	if err != nil {
@@ -87,37 +89,84 @@ func (s *SchedAdminService) GroupsSummary(ctx context.Context, ids []int64) (Sch
 	return out, nil
 }
 
-// Serialize cache misses as well as writes, so concurrent boards share one query.
+// Register misses per group under a short lock, while querying each newly missing
+// batch once. A slow group cannot block cache hits or queries for other groups.
 func (s *SchedAdminService) groupLast60(ctx context.Context, ids []int64, now time.Time) (map[int64]SchedAdminGroupLast60, error) {
-	s.statsMu.Lock()
-	defer s.statsMu.Unlock()
-	out := map[int64]SchedAdminGroupLast60{}
-	missing := []int64{}
-	for id, e := range s.stats {
-		if now.Sub(e.at) >= 45*time.Second || now.Before(e.at) {
-			delete(s.stats, id)
-		}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	out := make(map[int64]SchedAdminGroupLast60, len(ids))
+	waiting := make(map[int64]*schedAdminStatsFlight)
+	owned := make(map[int64]*schedAdminStatsFlight)
+	missing := make([]int64, 0, len(ids))
+	s.statsMu.Lock()
 	for _, id := range ids {
 		if e, ok := s.stats[id]; ok {
-			out[id] = e.value
-		} else {
+			if age := now.Sub(e.at); age >= 0 && age < 45*time.Second {
+				out[id] = e.value
+				continue
+			}
+			delete(s.stats, id)
+		}
+		f := s.statsFlights[id]
+		if f == nil {
+			f = &schedAdminStatsFlight{done: make(chan struct{})}
+			s.statsFlights[id] = f
+			owned[id] = f
 			missing = append(missing, id)
 		}
+		waiting[id] = f
 	}
+	s.statsMu.Unlock()
 	if len(missing) > 0 {
-		stats, err := s.d.Accounts.SchedAdminGroupLast60(ctx, missing, now)
-		if err != nil {
+		// Keep one caller's cancellation from aborting a shared query for others,
+		// but retain its original request deadline, including pre-query work.
+		deadline, _ := ctx.Deadline()
+		queryCtx, stop := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		go func() { defer stop(); s.loadGroupLast60(queryCtx, missing, owned, now) }()
+	}
+	for id, f := range waiting {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.done:
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		for _, id := range missing {
-			value := stats[id]
-			s.stats[id] = schedAdminStatsEntry{at: now, value: value}
-			out[id] = value
+		if f.err != nil {
+			return nil, f.err
 		}
+		out[id] = f.value
 	}
 	return out, nil
 }
+
+func (s *SchedAdminService) loadGroupLast60(ctx context.Context, ids []int64, flights map[int64]*schedAdminStatsFlight, now time.Time) {
+	var values map[int64]SchedAdminGroupLast60
+	err := ctx.Err()
+	if err == nil {
+		values, err = s.d.Accounts.SchedAdminGroupLast60(ctx, ids, now)
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	completed := s.d.Now()
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	for _, id := range ids {
+		f := flights[id]
+		f.value, f.err = values[id], err
+		if err == nil {
+			s.stats[id] = schedAdminStatsEntry{at: completed, value: f.value}
+		}
+		delete(s.statsFlights, id)
+		close(f.done)
+	}
+}
+
 func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64, policy schedquality.Policy) (SchedAdminPolicyPreview, error) {
 	out := SchedAdminPolicyPreview{RelaxedLines: []schedquality.Dimension{}, Lines: map[schedquality.Dimension]SchedAdminPreviewLine{}, Changed: []SchedAdminPolicyChange{}}
 	dims := []schedquality.Dimension{schedquality.DimensionTTFO, schedquality.DimensionError, schedquality.DimensionCache}
