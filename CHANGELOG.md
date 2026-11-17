@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-11-17
+
 本版将 OpenAI 分组质量门槛改为首字、报错、缓存三条线独立判断的新规则，配套调整选号与会话迁移，加入倍率下限、固定号、能力不兼容标记和首个有效输出记录，更新后台接口与界面，并修复排队准入、调度事件消费和软冷却三项调度缺陷。升级会执行迁移 313–316、318。
 
 ### 调度与账号
@@ -2369,7 +2371,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/liulixin-lex/xy2api/compare/v0.6.5...v0.6.6
