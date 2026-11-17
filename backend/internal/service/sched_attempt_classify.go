@@ -175,6 +175,12 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 		encoded, _ := json.Marshal(message)
 		modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
 	}
+	if status == http.StatusUnauthorized {
+		if allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
+			return UpstreamCapabilityModel
+		}
+		return UpstreamCapabilityNone
+	}
 	message := strings.ToLower(strings.Join(strings.Fields(schedErrorMessage(body)), " "))
 	// These templates describe dimensions absent from capability routing keys.
 	if status == 400 || status == 404 {
@@ -207,7 +213,7 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 	if resilience.IsStreamOnlyFailure(status, modelBody) {
 		return UpstreamCapabilityProtocol
 	}
-	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
+	if resilience.IsModelUnsupportedResponse(status, modelBody) {
 		return UpstreamCapabilityModel
 	}
 	if status != http.StatusBadRequest && status != http.StatusNotFound {

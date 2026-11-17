@@ -61,6 +61,7 @@ func TestCapability401RequiresQualifiedAccount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{ID: 1, Platform: tc.platform, Type: tc.kind}
 			require.Equal(t, tc.want, ClassifyUpstreamCapabilityFailure(account, 401, body))
+			require.Equal(t, UpstreamCapabilityNone, ClassifyUpstreamCapabilityFailure(account, 401, []byte(`{"error":{"code":"unsupported_protocol"}}`)), "the qualified401 exception only covers model availability")
 			if tc.platform != PlatformOpenAI {
 				return
 			}
