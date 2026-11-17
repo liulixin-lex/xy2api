@@ -85,7 +85,7 @@
 
 - **做什么**：同一会话在同一账号上 10 分钟内连续失败 2 次后改绑，并在 10 分钟内避开该账号。OpenAI 账号另有“输出后首次失败即改绑”（`post_output_rebind`）：已开始输出后的流内失败、读流出错或缺终态第一次发生就改绑。客户端错误（包括工具历史 400 与原生 HTTP 续接的四类错误）、内容安全拒绝、客户端断开与计划内的首输出截止不计入。
 - **主要字段**：`streak_threshold` 2、`streak_window_seconds` 600、`avoid_seconds` 600、`post_output_rebind` true。
-- **何时关闭**：只想观察失败、不想让会话离开原账号时关闭。关闭 `session.enabled` 会同时停用输出后首次失败改绑与 Claude 判慢迁出；OpenAI 分组的不达标换号与接管不受它影响（见 [调度](scheduling.md#openai-会话的去留)）。
+- **何时关闭**：只想观察失败、不想让会话离开原账号时关闭。关闭 `session.enabled` 会同时停用输出后首次失败改绑与 Claude 判慢迁出；OpenAI 分组的质量迁移与接管不受它影响（见 [调度](scheduling.md#openai-会话的去留)）。
 - **计费与客户端**：不影响计费。改绑会让会话换到新账号，上游提示缓存需要重新建立。
 - **观测**：计数 `session_rebind`；日志 `resilience.session_rebind`（原因 `resil_failure_streak`、`post_output_first_failure`、`terminal_rejection_streak`）。
 
@@ -98,7 +98,7 @@
 - **前提**：需要 `gateway.scheduling.load_batch_enabled`（默认 true）；会话迁出还需要“会话失败改绑”开启。
 - **观测**：`anthropic_account_latency_hold_started`、`anthropic_account_latency_sticky_migrated`、`anthropic_account_latency_sticky_kept`。
 
-OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字线与快速通道处理。
+OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字线按有效输出和同伴证据判定。
 
 ### 同站断流暂停 `same_site_hold`
 
