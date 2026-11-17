@@ -122,6 +122,7 @@ export default {
       post_output: 'Post-output fails',
       proxy_circuit: 'Proxy isolation',
       capability_learned: 'Stream only',
+      capability_marked: 'Capability mismatch',
       manual_off: 'Disabled',
       expired: 'Expired',
       quota: 'Quota used',

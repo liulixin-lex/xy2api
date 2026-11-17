@@ -23,7 +23,8 @@ const VALUES: Record<string, string[]> = {
   'admin.schedQuality.evidence.cache': lineEvidence('cache', cacheEvidence()).map((item) => item.key),
   'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
   'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
-  'admin.schedQuality.reject': ['profit_floor']
+  'admin.schedQuality.reject': ['profit_floor'],
+  'admin.schedQuality.kind': ['capability_marked']
 }
 
 const lookup = (messages: unknown, path: string): unknown =>
