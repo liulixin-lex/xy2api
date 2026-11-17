@@ -59,8 +59,7 @@ func TestSchedulerOutboxRepositoryOldestPendingCreatedAtReturnsNotFound(t *testi
 }
 
 func expectOutboxTransaction(mock sqlmock.Sqlmock, acquired bool) {
-	mock.ExpectBegin()
-	mock.ExpectExec("SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("BEGIN; SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))")).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(acquired))
 }
 func TestSchedulerOutboxRepositoryAcknowledgesExactIDsOutsideLease(t *testing.T) {
@@ -70,7 +69,7 @@ func TestSchedulerOutboxRepositoryAcknowledgesExactIDsOutsideLease(t *testing.T)
 	expectOutboxTransaction(mock, true)
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])")).WithArgs("{2,9}").WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"alive"}).AddRow(1))
-	mock.ExpectRollback()
+	mock.ExpectExec("ROLLBACK").WillReturnResult(sqlmock.NewResult(0, 0))
 	repo := &schedulerOutboxRepository{db: db}
 	lease, acquired, err := repo.TryAcquireConsumerLock(context.Background())
 	require.NoError(t, err)
@@ -87,7 +86,7 @@ func TestSchedulerOutboxRepositoryTransactionRollsBack(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { _ = db.Close() }()
 			expectOutboxTransaction(mock, acquired)
-			mock.ExpectRollback()
+			mock.ExpectExec("ROLLBACK").WillReturnResult(sqlmock.NewResult(0, 0))
 			lease, got, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, acquired, got)

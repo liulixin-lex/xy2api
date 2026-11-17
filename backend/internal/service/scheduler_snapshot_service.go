@@ -413,6 +413,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	}
 	seen := make(map[batchSeenKey]struct{})
 	ids := make([]int64, 0, len(events))
+	var leaseErr error
 	for _, event := range events {
 		eventCtx, eventCancel := context.WithTimeout(ctx, outboxEventTimeout)
 		err := s.handleOutboxEvent(eventCtx, event, seen)
@@ -424,13 +425,17 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		ids = append(ids, event.ID)
 		// Long batches have no aggregate deadline. Each completed event renews
 		// the idle lease; a single slow event may still outlive it safely.
-		heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, 5*time.Second)
-		_ = lease.KeepAlive(heartbeatCtx)
-		heartbeatCancel()
+		if leaseErr == nil {
+			heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, 5*time.Second)
+			leaseErr = lease.KeepAlive(heartbeatCtx)
+			heartbeatCancel()
+		}
 	}
-	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
-	leaseErr := lease.KeepAlive(checkCtx)
-	checkCancel()
+	if leaseErr == nil {
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		leaseErr = lease.KeepAlive(checkCtx)
+		checkCancel()
+	}
 	if leaseErr != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox lease lost; acknowledging %d processed events: %v", len(ids), leaseErr)
 	}

@@ -58,7 +58,7 @@ func TestSchedulerOutboxTerminatedLeaseStillAcknowledgesAndReleasesLock(t *testi
 	require.NoError(t, err)
 	require.True(t, acquired)
 	defer lease.Release()
-	tx := lease.(*schedulerOutboxConsumerLease).tx
+	tx := lease.(*schedulerOutboxConsumerLease).conn
 	var idle, statement string
 	require.NoError(t, tx.QueryRowContext(ctx, "SHOW idle_in_transaction_session_timeout").Scan(&idle))
 	require.NoError(t, tx.QueryRowContext(ctx, "SHOW statement_timeout").Scan(&statement))

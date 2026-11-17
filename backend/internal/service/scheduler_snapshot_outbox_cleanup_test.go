@@ -801,7 +801,7 @@ func TestSchedulerOutboxLostLeaseStillAcknowledgesBatch(t *testing.T) {
 	svc.pollOutbox()
 	require.Empty(t, repo.events, "successful projections must not replay forever when the lease expires")
 	require.Equal(t, [][]int64{{1}}, repo.deleteCalls)
-	require.Equal(t, 2, repo.heartbeats, "renew after the event and check again before acknowledgement")
+	require.Equal(t, 1, repo.heartbeats, "stop heartbeat attempts once lease loss is known")
 	require.False(t, repo.batchDeadline, "each event has a budget, not the whole batch")
 	require.Equal(t, 1, repo.pendingReads, "lag inspection must still follow a successful acknowledgement")
 	require.False(t, repo.healthUnderLock)

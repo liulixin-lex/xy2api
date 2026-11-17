@@ -9,8 +9,7 @@ import (
 )
 
 // Model the database's dedup-key ownership: an autocommit read releases the
-// key immediately, whereas a read through the lock transaction retains it
-// until that transaction ends. The same fixture exercises both contracts.
+// key immediately; a producer waiting for the key reports that explicitly.
 type producerIsolationRepo struct {
 	outboxCleanupRepo
 	keyReleased chan struct{}
@@ -45,26 +44,10 @@ func (r *producerIsolationRepo) enqueueSameKey(attempted chan<- bool) {
 
 type producerIsolationLease struct {
 	repo *producerIsolationRepo
-	ids  []int64
 }
 
 func (l *producerIsolationLease) KeepAlive(context.Context) error { return nil }
 func (l *producerIsolationLease) Release()                        { l.repo.releaseDedupKey() }
-
-// These methods deliberately model the rejected whole-batch transaction.
-// They let the regression run against the parent revision with identical input.
-func (l *producerIsolationLease) ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error) {
-	return l.repo.outboxCleanupRepo.ListPendingAndReleaseDedup(ctx, limit)
-}
-func (l *producerIsolationLease) DeleteProcessed(_ context.Context, ids []int64) error {
-	l.ids = append([]int64(nil), ids...)
-	return nil
-}
-func (l *producerIsolationLease) Commit() error {
-	err := l.repo.outboxCleanupRepo.DeleteProcessed(context.Background(), l.ids)
-	l.Release()
-	return err
-}
 
 type producerIsolationAccountRepo struct{ outboxCleanupAccountRepo }
 
