@@ -199,6 +199,7 @@ export default {
       summaryFromGateway: '从进入网关 P50 {p50} / P90 {p90}',
       summaryFromBody: '从读完请求体 P50 {p50} / P90 {p90}',
       summaryMigration: '迁移造成的 400：{n} 次',
+      summaryMigrationNone: '迁移造成的 400：—',
       excluded: '不用 · {reason}',
     },
     evidence: {

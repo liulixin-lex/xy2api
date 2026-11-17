@@ -199,6 +199,7 @@ export default {
       summaryFromGateway: 'from entering the gateway P50 {p50} / P90 {p90}',
       summaryFromBody: 'from the end of the request body P50 {p50} / P90 {p90}',
       summaryMigration: '400s from migration: {n}',
+      summaryMigrationNone: '400s from migration: —',
       excluded: 'Not used · {reason}',
     },
     evidence: {

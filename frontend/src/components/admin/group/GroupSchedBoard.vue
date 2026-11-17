@@ -3,7 +3,7 @@
     ref="shellRef"
     :show="board.groupId !== null"
     :title="board.groupName"
-    width="wide"
+    width="extra-wide"
     :close-on-click-outside="true"
     :raise-key="board.raise"
     @close="closeSchedBoard"
@@ -94,13 +94,14 @@
                 />
                 <span v-else-if="row.pinned" data-sq-pinned>{{ t('admin.schedQuality.board.pinned') }}</span>
                 <span v-else class="sq-text-3">{{ DASH }}</span>
+                <!-- Cut short so a long reason cannot widen the column; the tip has it whole. -->
                 <span
-                  v-if="pinFailed.has(row.account_id)"
-                  v-tip="pinFailed.get(row.account_id)"
-                  class="sq-fail-word inline-block max-w-[200px] truncate text-xs"
+                  v-if="pinFailedOf(row) !== null"
+                  v-tip="pinFailedOf(row)"
+                  class="sq-fail-word inline-block max-w-[9rem] truncate align-middle text-xs"
                   role="status"
                   :data-sq-pin-failed="row.account_id"
-                >{{ [t('admin.schedQuality.result.failed'), pinFailed.get(row.account_id)].filter(Boolean).join(' · ') }}</span>
+                >{{ [t('admin.schedQuality.result.failed'), pinFailedOf(row)].filter(Boolean).join(' · ') }}</span>
               </span>
             </td>
             <td class="sq-r sq-num">{{ row.priority }}</td>
@@ -188,7 +189,10 @@ const summaryText = computed(() => {
       : t('admin.schedQuality.board.summaryWaitRequests', { n: last60.requests }, last60.requests),
     e2e: t('admin.schedQuality.board.summaryFromGateway', { p50: wait(last60?.e2e_first_output_p50_ms), p90: wait(last60?.e2e_first_output_p90_ms) }),
     body: t('admin.schedQuality.board.summaryFromBody', { p50: wait(last60?.body_first_output_p50_ms), p90: wait(last60?.body_first_output_p90_ms) }),
-    migration: t('admin.schedQuality.board.summaryMigration', { n: count(last60?.migration_400) })
+    // No count, no unit: "—" alone.
+    migration: last60?.migration_400 == null
+      ? t('admin.schedQuality.board.summaryMigrationNone')
+      : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 })
   }
 })
 
@@ -206,8 +210,9 @@ const unused = (row: BackendOrderRow) => stopped(row) || !!row.excluded
 function stateOf(row: BackendOrderRow): { text: string; cls: string } {
   const left = secondsUntil(row.until, now.value)
   const timed = (text: string) => (left ? `${text} ${fmtCountdown(left)}` : text)
-  if (stopped(row)) return { text: timed(rejectName('not_schedulable', t, te)), cls: '' }
+  // The backend sends an excluded account as stopped with the reason (profit_floor | profit_threshold).
   if (row.excluded) return { text: t('admin.schedQuality.board.excluded', { reason: rejectName(row.excluded, t, te) }), cls: '' }
+  if (stopped(row)) return { text: timed(rejectName('not_schedulable', t, te)), cls: '' }
   if (row.exempt) return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
   const layer = word('layer', row.layer)
   if (row.layer === 'rear') return { text: timed(layer), cls: 'sq-cool' }
@@ -218,10 +223,11 @@ function stateOf(row: BackendOrderRow): { text: string; cls: string } {
 // ---- Pinning: saved at once. The board reads the scheduler's snapshot, which follows a change a few seconds later,
 // so the switch keeps the saved state until an answer agrees (not just the next one), for at most PIN_HOLD_MS; after
 // that the backend's value stands (someone changed it back, or the board never shows it). A failure shows the
-// backend's reason (not a member, not an OpenAI group) until the next try.
+// backend's reason (not a member, not an OpenAI group) until the next try, or until the same PIN_HOLD_MS is over (the
+// board has followed the backend by then).
 const PIN_HOLD_MS = 30_000
 const pinBusy = reactive(new Set<number>())
-const pinFailed = reactive(new Map<number, string>())
+const pinFailed = reactive(new Map<number, { message: string; at: number }>())
 const pinShown = reactive(new Map<number, { pinned: boolean; at: number }>())
 const held = (accountId: number) => {
   const shown = pinShown.get(accountId)
@@ -239,6 +245,10 @@ watch(() => board.groupId, () => {
   pinFailed.clear()
 })
 const pinnedOf = (row: BackendOrderRow) => held(row.account_id)?.pinned ?? row.pinned
+const pinFailedOf = (row: BackendOrderRow) => {
+  const failure = pinFailed.get(row.account_id)
+  return failure && now.value - failure.at <= PIN_HOLD_MS ? failure.message : null
+}
 
 async function setPinned(row: BackendOrderRow, pinned: boolean) {
   const groupId = board.groupId
@@ -250,7 +260,7 @@ async function setPinned(row: BackendOrderRow, pinned: boolean) {
     pinShown.set(row.account_id, { pinned: result.pinned, at: now.value })
     void markSchedChanged()
   } catch (error) {
-    pinFailed.set(row.account_id, extractApiErrorMessage(error, ''))
+    pinFailed.set(row.account_id, { message: extractApiErrorMessage(error, ''), at: now.value })
   } finally {
     pinBusy.delete(row.account_id)
   }
