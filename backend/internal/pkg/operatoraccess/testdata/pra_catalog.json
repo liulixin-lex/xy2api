@@ -8143,5 +8143,63 @@
   "fields": null,
   "redact": [],
   "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/sched-quality/accounts/:id/decisions",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": "accounts",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "account"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/sched-quality/ttft-rule",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "PUT",
+  "path": "/sched-quality/ttft-rule",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "PUT",
+  "path": "/groups/:id/members/:account_id",
+  "group": "admin",
+  "reg": "registerGroupRoutes",
+  "module": "groups",
+  "level": "manage",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
  }
 ]

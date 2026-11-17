@@ -28,7 +28,7 @@
               v-if="showCloseButton"
               @click="emit('close')"
               class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
-              aria-label="Close modal"
+              :aria-label="closeLabel"
             >
               <Icon name="x" size="md" />
             </button>
@@ -54,7 +54,7 @@ let dialogIdCounter = 0
 </script>
 
 <script setup lang="ts">
-import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'vue'
+import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId, getCurrentInstance } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 import { closeOverlay, holdFocus, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
 
@@ -97,6 +97,11 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+
+// The close button's name in the page language, from the app's i18n when it is installed (unit tests often mount
+// without it).
+const appT = getCurrentInstance()?.appContext.config.globalProperties.$t as ((key: string) => string) | undefined
+const closeLabel = computed(() => appT?.('common.close') ?? 'Close')
 
 // 层级由打开顺序决定（utils/overlayStack），后打开的在上
 const stackZ = ref<number>()

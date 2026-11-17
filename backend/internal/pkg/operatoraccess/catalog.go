@@ -75,6 +75,9 @@ var ServiceEnforcedFields = map[FieldRule]bool{
 }
 
 var catalog = map[string]Entry{
+	"GET /sched-quality/accounts/:id/decisions":           {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
+	"GET /sched-quality/ttft-rule":                        {Kind: KindSuperOnly},
+	"PUT /sched-quality/ttft-rule":                        {Kind: KindSuperOnly},
 	"POST /sched-quality/accounts/summary":                {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
 	"GET /sched-quality/accounts/attention":               {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
 	"GET /sched-quality/accounts/:id":                     {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
@@ -332,6 +335,7 @@ var catalog = map[string]Entry{
 	"POST /groups":                                                             {Kind: KindModule, Module: "groups", Level: LevelManage, Fields: "group_create"},
 	"DELETE /groups/:id":                                                       {Kind: KindModule, Module: "groups", Level: LevelManage, Target: "group_members", Fields: "group_delete"},
 	"GET /groups/:id":                                                          {Kind: KindModule, Module: "groups", Level: LevelView},
+	"PUT /groups/:id/members/:account_id":                                      {Kind: KindModule, Module: "groups", Level: LevelManage},
 	"PUT /groups/:id":                                                          {Kind: KindModule, Module: "groups", Level: LevelManage, Fields: "group_update"},
 	"GET /groups/:id/api-keys":                                                 {Kind: KindModule, Module: "groups", Level: LevelView, Redact: []Redaction{"api_key"}},
 	"GET /groups/:id/composite-routes":                                         {Kind: KindModule, Module: "groups", Level: LevelView},

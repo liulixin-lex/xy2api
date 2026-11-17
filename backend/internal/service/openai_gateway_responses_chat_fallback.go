@@ -137,8 +137,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	var schedCapture *schedAttemptCapture
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &reasoningEffort, &schedCapture)
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +322,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
-			FirstTokenMs:                scan.FirstTokenMs,
+			FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	s.cacheReasoningItemsFromEvents(finalEvents)
@@ -359,7 +362,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
-		FirstTokenMs:                scan.FirstTokenMs,
+		FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 	}, nil
 }
 

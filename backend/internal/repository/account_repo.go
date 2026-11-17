@@ -337,15 +337,18 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 	if len(groups) > 0 {
+		pins := make([]bool, len(groups))
 		for i := range groups {
 			groups[i].AccountID = account.ID
+			pins[i] = groups[i].Pinned
 		}
 		if _, err := txClient.ExecContext(ctx,
-			`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
-			account.ID, pq.Array(groupIDs)); err != nil {
+			`INSERT INTO account_groups (account_id, group_id, pinned, created_at) SELECT $1, group_id, pinned, NOW() FROM unnest($2::bigint[], $3::boolean[]) AS m(group_id, pinned)`,
+			account.ID, pq.Array(groupIDs), pq.Array(pins)); err != nil {
 			return err
 		}
 	}
+
 	account.GroupIDs = groupIDs
 	account.AccountGroups = append([]service.AccountGroup(nil), groups...)
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
@@ -1178,6 +1181,11 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
+	// Match membership writers: hold the account before deleting its memberships.
+	if _, err := txClient.ExecContext(ctx, `/* ratefloor_account_delete_lock */ SELECT id FROM accounts WHERE id=$1 FOR UPDATE`, id); err != nil {
+		return err
+	}
+
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
@@ -1306,11 +1314,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 		q = q.Where(dbaccount.IDIn(ids...))
 	}
 	if filter, enabled := service.SchedQualityAccountFilter(ctx); enabled {
-		if !filter.Exclude {
-			q = q.Where(dbaccount.IDIn(filter.IDs...))
-		} else if len(filter.IDs) > 0 {
-			q = q.Where(dbaccount.IDNotIn(filter.IDs...))
-		}
+		q = q.Where(dbaccount.IDIn(filter.IDs...))
 	}
 	q = applyAccountGroupCategoryFilter(ctx, q)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
@@ -2181,36 +2185,36 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		// 已处于外部事务中（ErrTxStarted），复用当前 client
 		txClient = r.client
 	}
+	if err := bumpAccountMembershipRevision(ctx, txClient, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
 
-	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
+	groupIDs = uniquePositiveInt64s(groupIDs)
+	deletion := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID))
+	if len(groupIDs) > 0 {
+		deletion = deletion.Where(dbaccountgroup.GroupIDNotIn(groupIDs...))
+	}
+	if _, err := deletion.Exec(ctx); err != nil {
 		return err
 	}
-
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
-	}
-
-	if _, err := txClient.ExecContext(ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW()`,
-		accountID, pq.Array(groupIDs)); err != nil {
-		return err
-	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	if len(groupIDs) > 0 {
+		if _, err := txClient.ExecContext(ctx,
+			`INSERT INTO account_groups (account_id, group_id, created_at) SELECT $1, unnest($2::bigint[]), NOW() ON CONFLICT (account_id, group_id) DO NOTHING`,
+			accountID, pq.Array(groupIDs)); err != nil {
 			return err
 		}
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
 	}
+	if tx != nil {
+		return tx.Commit()
+	}
+
 	return nil
 }
 
@@ -3013,8 +3017,12 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
 		}
 	}
+	hasCapabilityMarks := false
+	for key := range updates {
+		hasCapabilityMarks = hasCapabilityMarks || strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_")
+	}
 	ensureCompatSeed := service.ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0 || ensureCompatSeed
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0 || ensureCompatSeed || hasCapabilityMarks
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -3030,6 +3038,25 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
 		}
+	}
+	for key := range updates {
+		if !strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_") {
+			continue
+		}
+		// Serialize eviction and merge; simultaneous new keys must keep the
+		// account bounded without losing either update to an old snapshot.
+		updates, err = limitCapabilityMarkUpdates(ctx, client, id, updates)
+		if err != nil {
+			return err
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		payload, err = json.Marshal(updates)
+		if err != nil {
+			return err
+		}
+		break
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if _, hasLimits := updates["model_rate_limits"]; hasLimits {
@@ -3052,6 +3079,16 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 		extraArgs = append(extraArgs, pq.Array(rotationIDs))
 		extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "$3")
+	}
+	// Prune only this managed namespace, after the atomic top-level merge. A
+	// cleanup based on a scheduler snapshot could erase a concurrently renewed
+	// mark. Numeric expiries are written by LearnCapabilityMark; malformed or
+	// explicitly cleared marks are removed without timestamp casts.
+	for key := range updates {
+		if strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_") {
+			extraExpression = "COALESCE((SELECT jsonb_object_agg(mark.key, mark.value) FROM jsonb_each(" + extraExpression + ") AS mark WHERE left(mark.key, 17) <> 'capability_marks_' OR CASE WHEN jsonb_typeof(mark.value->'expires_at_unix') = 'number' THEN (mark.value->>'expires_at_unix')::numeric > EXTRACT(EPOCH FROM clock_timestamp()) ELSE false END), '{}'::jsonb)"
+			break
+		}
 	}
 	identityChanged := false
 	if len(iqConditions) > 0 {
@@ -3804,7 +3841,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 	}
 
 	groups, err := q.
-		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+		Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 		Order(
 			dbaccountgroup.ByAccountField(dbaccount.FieldPriority),
 			dbaccountgroup.ByAccountID(),
@@ -3954,7 +3991,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			end = len(accountIDs)
 		}
 		entries, err := r.client.AccountGroup.Query().
-			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldCreatedAt).
+			Select(dbaccountgroup.FieldAccountID, dbaccountgroup.FieldGroupID, dbaccountgroup.FieldPinned, dbaccountgroup.FieldCreatedAt).
 			Where(dbaccountgroup.AccountIDIn(accountIDs[start:end]...)).
 			Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByGroupID()).
 			All(ctx)
@@ -3975,6 +4012,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 			agSvc := service.AccountGroup{
 				AccountID: ag.AccountID,
 				GroupID:   ag.GroupID,
+				Pinned:    ag.Pinned,
 				CreatedAt: ag.CreatedAt,
 				Group:     groupSvc,
 			}

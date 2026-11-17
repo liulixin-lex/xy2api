@@ -45,7 +45,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	startTime := time.Now()
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
@@ -150,7 +153,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		defer func() { _ = resp.Body.Close() }()
+		rethrowSchedAttemptPanic(a, recover())
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(schedResult, schedErr)
+	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -218,6 +226,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai responses via native anthropic buffered: read error",
 				zap.Error(err),
@@ -243,7 +254,6 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -263,7 +273,6 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -349,15 +358,19 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	}
 	// 非流式响应必须是 application/json（上游被强制流式，透传头会污染）。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if respBytes, err := json.Marshal(responsesResp); err == nil {
-		respBytes = reverseToolNamesIfPresent(c, respBytes)
-		respBytes, _, err = apicompat.RestoreResponsesClientToolPayload(respBytes, clientToolMapping)
-		if err != nil {
-			return nil, fmt.Errorf("restore responses client tools: %w", err)
-		}
-		c.Data(http.StatusOK, "application/json; charset=utf-8", respBytes)
-	} else {
-		c.JSON(http.StatusOK, responsesResp)
+	respBytes, err := json.Marshal(responsesResp)
+	if err != nil {
+		return nil, err
+	}
+	respBytes = reverseToolNamesIfPresent(c, respBytes)
+	respBytes, _, err = apicompat.RestoreResponsesClientToolPayload(respBytes, clientToolMapping)
+	if err != nil {
+		return nil, fmt.Errorf("restore responses client tools: %w", err)
+	}
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(respBytes)
+	if writeErr != nil {
+		cancelSchedClient(c)
 	}
 
 	return &OpenAIForwardResult{
@@ -370,8 +383,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		UpstreamEndpoint: "/v1/messages",
 		ReasoningEffort:  reasoningEffort,
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleResponsesStreamingFromNativeAnthropic reads Anthropic SSE events, converts
@@ -440,7 +454,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			ReasoningEffort:  reasoningEffort,
 			Stream:           true,
 			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
+			FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 			ClientDisconnect: clientDisconnected,
 		}
 	}
@@ -456,6 +470,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai responses via native anthropic stream: read error",
 				zap.Error(err),
@@ -482,6 +499,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, &ms)
 		}
 
 		if event.Type == "message_delta" && event.Usage != nil {
@@ -536,7 +554,6 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -554,7 +571,6 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}

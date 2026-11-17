@@ -51,6 +51,7 @@ const (
 	SelectionReasonPrivacyNotSet              SelectionReason = "privacy_not_set"
 	SelectionReasonShadowParentUnhealthy      SelectionReason = "shadow_parent_unhealthy"
 	SelectionReasonChannelUpstreamRestricted  SelectionReason = "channel_upstream_restricted"
+	SelectionReasonProfitFloor                SelectionReason = "profit_floor"
 	SelectionReasonProfitThreshold            SelectionReason = "profit_threshold"
 	SelectionReasonProfitInvalidAccountRate   SelectionReason = "profit_invalid_account_rate"
 	SelectionReasonRateLimited                SelectionReason = "rate_limited"

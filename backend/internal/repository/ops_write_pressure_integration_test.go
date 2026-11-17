@@ -59,7 +59,12 @@ func TestEnqueueSchedulerOutbox_DeduplicatesIdempotentEvents(t *testing.T) {
 
 	var firstID int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM scheduler_outbox WHERE event_type = $1", service.SchedulerOutboxEventAccountChanged).Scan(&firstID))
-	events, err := NewSchedulerOutboxRepository(integrationDB).ListAfterAndReleaseDedup(ctx, 0, 100)
+	repo := NewSchedulerOutboxRepository(integrationDB)
+	lease, acquired, err := repo.TryAcquireConsumerLock(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer lease.Release()
+	events, err := repo.ListPendingAndReleaseDedup(ctx, 100)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Equal(t, firstID, events[0].ID)
@@ -69,18 +74,28 @@ func TestEnqueueSchedulerOutbox_DeduplicatesIdempotentEvents(t *testing.T) {
 	require.Equal(t, 2, count)
 }
 
-func TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFlight(t *testing.T) {
+func TestSchedulerOutbox_ListPendingAndReleaseDedup_AllowsSameKeyWhileEventInFlight(t *testing.T) {
 	ctx := context.Background()
 	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox RESTART IDENTITY")
 
 	accountID := int64(17345)
 	require.NoError(t, enqueueSchedulerOutbox(ctx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
 
-	events, err := NewSchedulerOutboxRepository(integrationDB).ListAfterAndReleaseDedup(ctx, 0, 100)
+	repo := NewSchedulerOutboxRepository(integrationDB)
+	lease, acquired, err := repo.TryAcquireConsumerLock(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer lease.Release()
+	events, err := repo.ListPendingAndReleaseDedup(ctx, 100)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 
-	require.NoError(t, enqueueSchedulerOutbox(ctx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
+	// The lease is deliberately still open. This write must finish without
+	// waiting for the event projection or for the lock transaction to end.
+	producerCtx, producerCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer producerCancel()
+	require.NoError(t, enqueueSchedulerOutbox(producerCtx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
+	require.NoError(t, lease.KeepAlive(ctx))
 
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = $1", service.SchedulerOutboxEventAccountChanged).Scan(&count))
@@ -89,6 +104,11 @@ func TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFligh
 	var pendingKeys int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE dedup_key IS NOT NULL").Scan(&pendingKeys))
 	require.Equal(t, 1, pendingKeys)
+	require.NoError(t, repo.DeleteProcessed(ctx, []int64{events[0].ID}))
+	pending, err := repo.ListPendingAndReleaseDedup(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Greater(t, pending[0].ID, events[0].ID, "new same-key write must survive acknowledgement of the old event")
 }
 
 func TestEnqueueSchedulerOutbox_CoalescesAccountStateBurst(t *testing.T) {

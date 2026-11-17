@@ -2020,6 +2020,8 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	admissionPanicExpected string
+	configureAdmission     func(*openAIWSUsageHandlerAccountRepoStub, *concurrencyCacheMock)
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
@@ -2045,6 +2047,8 @@ type openAIResponsesWSUsageLogCase struct {
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
 	qualityView           schedquality.View
+	trialLeases           service.SchedTrialLeases
+	sessionID             string
 	gatewayCache          service.GatewayCache
 	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
 	acquireAccountSlot func() bool
@@ -2093,7 +2097,7 @@ func (wsPinnedQualityView) At() time.Time                            { return ti
 func (wsPinnedQualityView) GlobalEnabled() bool                      { return true }
 func (wsPinnedQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (wsPinnedQualityView) StateOf(int64, int64, string) schedquality.StateView {
-	return schedquality.StateView{Failing: true}
+	return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 }
 
 func wsResponseAccountCacheKey(responseID string) string {
@@ -2165,7 +2169,7 @@ func (*wsTurnQualityView) GlobalEnabled() bool                      { return tru
 func (*wsTurnQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (v *wsTurnQualityView) StateOf(int64, int64, string) schedquality.StateView {
 	if v.failing.Load() {
-		return schedquality.StateView{Failing: true}
+		return schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 	}
 	return schedquality.StateView{}
 }
@@ -2195,7 +2199,8 @@ func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T)
 
 type openAIWSUsageHandlerAccountRepoStub struct {
 	service.AccountRepository
-	account service.Account
+	account       service.Account
+	lookupAccount func(service.Account) service.Account
 }
 
 func (s *openAIWSUsageHandlerAccountRepoStub) ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
@@ -2214,6 +2219,9 @@ func (s *openAIWSUsageHandlerAccountRepoStub) GetByID(ctx context.Context, id in
 		return nil, nil
 	}
 	account := s.account
+	if s.lookupAccount != nil {
+		account = s.lookupAccount(account)
+	}
 	return &account, nil
 }
 
@@ -3277,7 +3285,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil, // userPlatformQuotaRepo
 	)
 	if tc.qualityView != nil {
-		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView })
+		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView }, tc.trialLeases)
 	}
 
 	cache := &concurrencyCacheMock{
@@ -3288,6 +3296,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return tc.acquireAccountSlot == nil || tc.acquireAccountSlot(), nil
 		},
 	}
+	if tc.configureAdmission != nil {
+		tc.configureAdmission(accountRepo, cache)
+	}
+
 	h := &OpenAIGatewayHandler{
 		cfg:                 cfg,
 		compositeResolver:   tc.compositeResolver,
@@ -3316,20 +3328,31 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	router := gin.New()
 	handlerDone := make(chan struct{})
+	admissionPanic := make(chan any, 1)
 	router.Use(func(c *gin.Context) {
+		defer close(handlerDone)
+		if tc.admissionPanicExpected != "" {
+			defer func() {
+				if p := recover(); p != nil {
+					admissionPanic <- p
+				}
+			}()
+		}
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
 		if tc.apiKeyService != nil && apiKey.Group != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
 		}
 		c.Next()
-		close(handlerDone)
 	})
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
 	headers := http.Header{}
+	if tc.sessionID != "" {
+		headers.Set("session-id", tc.sessionID)
+	}
 	if tc.userAgent != nil {
 		headers.Set("User-Agent", *tc.userAgent)
 	}
@@ -3400,6 +3423,21 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.secondPayload))
 		cancelWrite()
 		require.NoError(t, err)
+		if tc.admissionPanicExpected != "" {
+			select {
+			case <-handlerDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("admission panic did not unwind handler")
+			}
+			select {
+			case p := <-admissionPanic:
+				require.Equal(t, tc.admissionPanicExpected, p)
+			default:
+				t.Fatal("expected admission dependency panic")
+			}
+			require.Len(t, upstreamPayloadCh, 1)
+			return openAIResponsesWSUsageLogResult{upstreamPayloads: [][]byte{<-upstreamPayloadCh}}
+		}
 		if tc.secondTurnCloseExpected {
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 			_, _, readErr := clientConn.Read(readCtx)
@@ -3765,3 +3803,7 @@ func (s *openAIWSUsageHandlerAccountRepoStub) ListModelAvailabilityCandidates(_ 
 	}
 	return nil, nil
 }
+
+func (wsPinnedQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }
+
+func (*wsTurnQualityView) SessionSlowTwice(int64, int64, string, string) bool { return false }

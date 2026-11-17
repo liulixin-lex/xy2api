@@ -45,7 +45,10 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	startTime := time.Now()
 
 	// 1. Parse Chat Completions request
@@ -149,7 +152,12 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		defer func() { _ = resp.Body.Close() }()
+		rethrowSchedAttemptPanic(a, recover())
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(schedResult, schedErr)
+	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -219,6 +227,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai cc via native anthropic buffered: read error",
 				zap.Error(err),
@@ -244,7 +255,6 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -265,7 +275,6 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -352,11 +361,15 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	}
 	// 非流式响应必须是 application/json（上游被强制流式，透传头会污染）。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if respBytes, err := json.Marshal(ccResp); err == nil {
-		respBytes = reverseToolNamesIfPresent(c, respBytes)
-		c.Data(http.StatusOK, "application/json; charset=utf-8", respBytes)
-	} else {
-		c.JSON(http.StatusOK, ccResp)
+	respBytes, err := json.Marshal(ccResp)
+	if err != nil {
+		return nil, err
+	}
+	respBytes = reverseToolNamesIfPresent(c, respBytes)
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(respBytes)
+	if writeErr != nil {
+		cancelSchedClient(c)
 	}
 
 	return &OpenAIForwardResult{
@@ -369,8 +382,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		UpstreamEndpoint: "/v1/messages",
 		ReasoningEffort:  reasoningEffort,
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleCCStreamingFromNativeAnthropic reads Anthropic SSE events, converts each
@@ -441,7 +455,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			ReasoningEffort:  reasoningEffort,
 			Stream:           true,
 			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
+			FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 			ClientDisconnect: clientDisconnected,
 		}
 	}
@@ -457,6 +471,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai cc via native anthropic stream: read error",
 				zap.Error(err),
@@ -500,6 +517,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, &ms)
 		}
 
 		// usage 恒累计（含客户端断开后的排水阶段，payg 上游照常计费）。
@@ -552,7 +570,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -571,7 +588,6 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 				return onIdle()
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
-			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}

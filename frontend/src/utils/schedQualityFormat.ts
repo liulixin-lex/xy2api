@@ -22,17 +22,20 @@ export function fmtCountdown(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${rest}` : `${m}:${rest}`
 }
 
-/** Auto-state name; codes not in the copy table show the fallback word. */
-export function kindName(kind: string, t: Translate, te: HasKey): string {
-  const key = `admin.schedQuality.kind.${kind}`
+/**
+ * The word for a value the backend sends (an identity, a place, a layer, an action, a reason …) from the copy table
+ * `admin.schedQuality.<table>`; a value the table does not know shows the fallback word 其他, never a key.
+ */
+export function schedWord(table: string, value: string, t: Translate, te: HasKey): string {
+  const key = `admin.schedQuality.${table}.${value}`
   return te(key) ? t(key) : t('admin.schedQuality.unknown')
 }
 
+/** Auto-state name; codes not in the copy table show the fallback word. */
+export const kindName = (kind: string, t: Translate, te: HasKey) => schedWord('kind', kind, t, te)
+
 /** Hard-admission reason word on the board; unknown codes show the fallback word. */
-export function rejectName(reject: string, t: Translate, te: HasKey): string {
-  const key = `admin.schedQuality.reject.${reject}`
-  return te(key) ? t(key) : t('admin.schedQuality.unknown')
-}
+export const rejectName = (reject: string, t: Translate, te: HasKey) => schedWord('reject', reject, t, te)
 
 /** Parent account id from a `parent_blocked:<id>` auto-state key. */
 export function parentIdFromKey(key: string): number | null {

@@ -504,6 +504,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, infraerrors.BadRequest("INVALID_PEAK_RATE_CONFIG", err.Error())
 	}
 
+	if err := ValidateMinUpstreamRate(platform, input.MinUpstreamRate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+	}
+	minUpstreamRate := input.MinUpstreamRate
+	if minUpstreamRate != nil && *minUpstreamRate == 0 {
+		minUpstreamRate = nil
+	}
 	profitMinMargin := 0.0
 	if input.ProfitMinMargin != nil {
 		profitMinMargin = *input.ProfitMinMargin
@@ -554,8 +561,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	allowImageGeneration := input.AllowImageGeneration || defaultAllowImageGenerationForPlatform(platform)
 	allowBatchImageGeneration := input.AllowBatchImageGeneration && allowImageGeneration && platform == PlatformGemini
 
-	// 如果指定了复制账号的源分组，先获取账号 ID 列表
-	var accountIDsToCopy []int64
+	// Validate source groups before creating the destination. Memberships are
+	// read once by the repository in the copy transaction.
+	var copySourceGroupIDs []int64
 	if len(input.CopyAccountsFromGroupIDs) > 0 {
 		// 去重源分组 IDs
 		seen := make(map[int64]struct{})
@@ -566,6 +574,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 				uniqueSourceGroupIDs = append(uniqueSourceGroupIDs, srcGroupID)
 			}
 		}
+
+		copySourceGroupIDs = uniqueSourceGroupIDs
 
 		// 校验源分组的平台是否与新分组一致
 		for _, srcGroupID := range uniqueSourceGroupIDs {
@@ -578,12 +588,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			}
 		}
 
-		// 获取所有源分组的账号（去重）
-		var err error
-		accountIDsToCopy, err = s.groupRepo.GetAccountIDsByGroupIDs(ctx, uniqueSourceGroupIDs)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
-		}
 	}
 
 	// 白名单在创建路径同样收口：开启但为空、通配位置非法都会 400。
@@ -624,6 +628,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		PeakRateMultiplier:              peakRateMultiplier,
 		ProfitControlEnabled:            profitControlEnabled,
 		ProfitMinMargin:                 profitMinMargin,
+		MinUpstreamRate:                 minUpstreamRate,
 		ProfitSafetyBuffer:              profitSafetyBuffer,
 		ImagePrice1K:                    imagePrice1K,
 		ImagePrice2K:                    imagePrice2K,
@@ -671,33 +676,12 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		return nil, err
 	}
 
-	// require_oauth_only: 过滤掉 apikey 类型账号
-	if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) && len(accountIDsToCopy) > 0 {
-		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
+	if len(input.CopyAccountsFromGroupIDs) > 0 {
+		count, err := s.copyGroupAccountMembers(ctx, group.ID, copySourceGroupIDs, group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform), false)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
+			return nil, fmt.Errorf("failed to copy account members: %w", err)
 		}
-		oauthIDs := make(map[int64]struct{}, len(accounts))
-		for _, acc := range accounts {
-			if acc.Type != AccountTypeAPIKey {
-				oauthIDs[acc.ID] = struct{}{}
-			}
-		}
-		var filtered []int64
-		for _, aid := range accountIDsToCopy {
-			if _, ok := oauthIDs[aid]; ok {
-				filtered = append(filtered, aid)
-			}
-		}
-		accountIDsToCopy = filtered
-	}
-
-	// 如果有需要复制的账号，绑定到新分组
-	if len(accountIDsToCopy) > 0 {
-		if err := s.groupRepo.BindAccountsToGroup(ctx, group.ID, accountIDsToCopy); err != nil {
-			return nil, fmt.Errorf("failed to bind accounts to new group: %w", err)
-		}
-		group.AccountCount = int64(len(accountIDsToCopy))
+		group.AccountCount = count
 	}
 
 	return group, nil
@@ -963,6 +947,18 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	// 利润控制与高峰同一收口：按合并后的最终平台归一化（转到不支持平台时静默重置），
 	// 再对合并后的最终配置统一校验，防止部分字段更新拼出非法组合入库。
+	if err := ValidateMinUpstreamRate(group.Platform, input.MinUpstreamRate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+	}
+	if input.MinUpstreamRate != nil {
+		group.MinUpstreamRate = input.MinUpstreamRate
+		if *input.MinUpstreamRate == 0 {
+			group.MinUpstreamRate = nil
+		}
+	}
+	if group.Platform != PlatformOpenAI {
+		group.MinUpstreamRate = nil
+	}
 	group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer = NormalizeProfitControlConfig(group.Platform, group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer)
 	if err := ValidateProfitControlConfig(group.Platform, group.ProfitControlEnabled, group.ProfitMinMargin, group.ProfitSafetyBuffer); err != nil {
 		return nil, err
@@ -1186,44 +1182,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			}
 		}
 
-		// 获取所有源分组的账号（去重）
-		accountIDsToCopy, err := s.groupRepo.GetAccountIDsByGroupIDs(ctx, uniqueSourceGroupIDs)
+		count, err := s.copyGroupAccountMembers(ctx, id, uniqueSourceGroupIDs, group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform), true)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
+			return nil, fmt.Errorf("failed to copy account members: %w", err)
 		}
+		group.AccountCount = count
 
-		// 先清空当前分组的所有账号绑定
-		if _, err := s.groupRepo.DeleteAccountGroupsByGroupID(ctx, id); err != nil {
-			return nil, fmt.Errorf("failed to clear existing account bindings: %w", err)
-		}
-
-		// require_oauth_only: 过滤掉 apikey 类型账号
-		if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) && len(accountIDsToCopy) > 0 {
-			accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
-			}
-			oauthIDs := make(map[int64]struct{}, len(accounts))
-			for _, acc := range accounts {
-				if acc.Type != AccountTypeAPIKey {
-					oauthIDs[acc.ID] = struct{}{}
-				}
-			}
-			var filtered []int64
-			for _, aid := range accountIDsToCopy {
-				if _, ok := oauthIDs[aid]; ok {
-					filtered = append(filtered, aid)
-				}
-			}
-			accountIDsToCopy = filtered
-		}
-
-		// 再绑定源分组的账号
-		if len(accountIDsToCopy) > 0 {
-			if err := s.groupRepo.BindAccountsToGroup(ctx, id, accountIDsToCopy); err != nil {
-				return nil, fmt.Errorf("failed to bind accounts to group: %w", err)
-			}
-		}
 	}
 
 	return group, nil

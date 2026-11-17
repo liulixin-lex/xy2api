@@ -23,6 +23,7 @@ func TestIsTransientDatabaseInitializationError(t *testing.T) {
 		want bool
 	}{
 		{name: "postgres is starting", err: transientDatabaseError("57P03"), want: true},
+		{name: "migration lock timeout", err: fmt.Errorf("wrapped: %w", transientDatabaseError("55P03")), want: true},
 		{name: "connection failure", err: fmt.Errorf("wrapped: %w", transientDatabaseError("08006")), want: true},
 		{name: "authentication failure", err: transientDatabaseError("28P01"), want: false},
 		{name: "migration error", err: errors.New("migration checksum mismatch"), want: false},
@@ -52,6 +53,24 @@ func TestInitializeDatabaseWithRetryEventuallySucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 4, attempts)
 	require.Equal(t, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, delays)
+}
+
+func TestInitializeDatabaseWithRetryRetriesLockTimeout(t *testing.T) {
+	attempts := 0
+	var delays []time.Duration
+	err := initializeDatabaseWithRetryWithWait(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return fmt.Errorf("apply migration 313: %w", transientDatabaseError("55P03"))
+		}
+		return nil
+	}, func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	require.Equal(t, []time.Duration{time.Second}, delays)
 }
 
 func TestInitializeDatabaseWithRetryFailsFastForPermanentError(t *testing.T) {

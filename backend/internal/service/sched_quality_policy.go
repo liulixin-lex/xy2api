@@ -48,24 +48,221 @@ func (s *SchedQualityEngineService) Policy(ctx context.Context, groupID int64) (
 	return p, nil
 }
 
-func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error) {
-	if err := ValidateSchedQualityPolicy(p); err != nil {
-		return SchedPolicyRecord{}, err
+func relaxedPolicyLines(old, next schedquality.Policy) []schedquality.Dimension {
+	var lines []schedquality.Dimension
+	if next.TTFTSeconds > old.TTFTSeconds {
+		lines = append(lines, schedquality.DimensionTTFO)
+	}
+	if next.MaxErrorRate > old.MaxErrorRate {
+		lines = append(lines, schedquality.DimensionError)
+	}
+	if next.MinCacheRatio < old.MinCacheRatio {
+		lines = append(lines, schedquality.DimensionCache)
+	}
+	return lines
+}
+func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (result SchedPolicyUpdate, err error) {
+	if err = ValidateSchedQualityPolicy(p); err != nil {
+		return
 	}
 	s.mu.Lock()
 	var notifications map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(notifications) }()
-	// The store verifies the group platform before saving.
-	r, err := s.store.SavePolicy(ctx, groupID, expectedVersion, p)
-	if err != nil {
-		return r, err
+	now := s.now()
+	s.window.take(now)
+	if err = s.loadEvidence(ctx, now); err != nil {
+		return
 	}
 	s.configAt = time.Time{}
-	notifications, err = s.rebuild(ctx)
-	if err != nil {
-		return r, err
+	d, e := s.inputs(ctx, now, s.window.samples)
+	if e != nil {
+		return result, e
 	}
-	return r, nil
+	oldPolicies := cloneSchedPolicies(s.policies)
+	oldRule := s.rule
+	var batch *schedReplayBatch
+	var states []schedquality.LineState
+	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
+		var e error
+		batch, e = s.replayTx(ctx, tx, d)
+		if e != nil {
+			return e
+		}
+		states = batch.states
+		result.RelaxedLines = relaxedPolicyLines(s.policies[groupID].Policy, p)
+		result.SchedPolicyRecord, e = tx.SavePolicy(groupID, expectedVersion, p)
+		if e != nil {
+			return e
+		}
+		for group, record := range s.policies {
+			record.Version = result.Version
+			s.policies[group] = record
+		}
+		s.policies[groupID] = result.SchedPolicyRecord
+		states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
+			return k.GroupID == groupID && slices.Contains(result.RelaxedLines, k.Line)
+		}, func(k schedquality.LineKey) bool { return k.GroupID == groupID && !p.Enabled })
+		return e
+	})
+	if err != nil {
+		s.policies = oldPolicies
+		s.rule = oldRule
+		return
+	}
+	s.configAt = time.Time{}
+	s.commitReplay(ctx, batch, states)
+	notifications = s.publish(d, states, batch.overrides, batch.resets, now)
+	return
+}
+
+func (s *SchedQualityEngineService) TTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.store.LoadTTFTRule(ctx)
+	return r, err
+}
+func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expectedVersion int64, p schedquality.RuleBParams) (result SchedTTFTRuleUpdate, err error) {
+	if e := p.Validate(); e != nil {
+		return result, infraerrors.BadRequest("INVALID_TTFT_RULE", e.Error())
+	}
+	s.mu.Lock()
+	var notifications map[int64]time.Time
+	defer func() { s.mu.Unlock(); s.notify(notifications) }()
+	now := s.now()
+	s.window.take(now)
+	if err = s.loadEvidence(ctx, now); err != nil {
+		return
+	}
+	s.configAt = time.Time{}
+	d, e := s.inputs(ctx, now, s.window.samples)
+	if e != nil {
+		return result, e
+	}
+	oldRule := s.rule
+	oldPolicies := cloneSchedPolicies(s.policies)
+	var batch *schedReplayBatch
+	var states []schedquality.LineState
+	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
+		var e error
+		batch, e = s.replayTx(ctx, tx, d)
+		if e != nil {
+			return e
+		}
+		states = batch.states
+		result.Change, e = schedquality.CompareRuleBParams(s.rule.Params, p)
+		if e != nil {
+			return e
+		}
+		result.SchedTTFTRuleRecord, e = tx.SaveTTFTRule(expectedVersion, p)
+		if e != nil {
+			return e
+		}
+		s.rule = result.SchedTTFTRuleRecord
+		if result.Change == schedquality.RuleBRelaxed || result.Change == schedquality.RuleBMixed {
+			states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+		}
+		return e
+	})
+	if err != nil {
+		s.rule = oldRule
+		s.policies = oldPolicies
+		return
+	}
+	s.configAt = time.Time{}
+	s.commitReplay(ctx, batch, states)
+	notifications = s.publish(d, states, batch.overrides, batch.resets, now)
+	return
+}
+
+// rejudge first clears every affected row, then freezes that entire cleared
+// population, then evaluates. No intermediate configuration can be published.
+func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, relax, remove func(schedquality.LineKey) bool) ([]schedquality.LineState, int, error) {
+	keys, rows := s.rowKeys(d, states)
+	old := make(map[schedquality.LineKey]schedquality.LineState)
+	for _, r := range states {
+		old[r.LineKey] = r
+	}
+	var deleted []schedquality.LineKey
+	cleared := 0
+	for _, r := range states {
+		if remove(r.LineKey) || relax(r.LineKey) && (!s.isMember(r.GroupID, r.AccountID) || !s.policies[r.GroupID].Policy.Enabled) {
+			deleted = append(deleted, r.LineKey)
+			delete(rows, r.LineKey)
+		} else if relax(r.LineKey) {
+			cleared++
+		}
+	}
+	for _, k := range keys {
+		if remove(k) || !s.policies[k.GroupID].Policy.Enabled {
+			continue
+		}
+		if relax(k) {
+			rows[k] = schedquality.Relaxed(k)
+		}
+	}
+	peerRows := make(map[schedquality.LineKey]schedquality.LineState)
+	for _, k := range keys {
+		if !remove(k) && s.policies[k.GroupID].Policy.Enabled {
+			r := rows[k]
+			r.LineKey = k
+			peerRows[k] = r
+		}
+	}
+	d.displayPeers(d.now, peerRows)
+	// Only relaxed TTFO keys may replace identities within an existing bucket;
+	// error/cache changes keep all first-output peers frozen as they were.
+	var clearedPeers map[schedquality.LineKey]schedquality.LineState
+	for k, r := range peerRows {
+		if k.Line == schedquality.DimensionTTFO && relax(k) {
+			if clearedPeers == nil {
+				clearedPeers = make(map[schedquality.LineKey]schedquality.LineState, len(d.peers.rows))
+				for pk, pr := range d.peers.rows {
+					clearedPeers[pk] = pr
+				}
+			}
+			clearedPeers[k] = schedquality.LineState{LineKey: k, Identity: r.Identity, Epoch: r.Epoch}
+		}
+	}
+	if clearedPeers != nil {
+		d.peers = &peerBucket{at: d.peers.at, rows: clearedPeers}
+		if _, frozen := d.peerBuckets[d.peers.at]; frozen {
+			d.peerBuckets[d.peers.at] = d.peers
+		}
+	}
+	var changed []schedquality.LineState
+	var decisions []schedquality.Decision
+	for _, k := range keys {
+		if remove(k) || !relax(k) || !s.policies[k.GroupID].Policy.Enabled {
+			continue
+		}
+		r := rows[k]
+		r.LineKey = k
+		verdict, basis := s.assessLine(d, r, schedquality.EventRegular, d.now, resets)
+		basis.Kind = "relax"
+		next, action := schedquality.Step(r, schedquality.EventRegular, verdict, basis, d.now)
+		rows[k] = next
+		changed = append(changed, next)
+		if old[k].Identity == schedquality.IdentityRear || old[k].Trial {
+			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: schedquality.ActionRelax, Basis: basis})
+		}
+		if action != "" {
+			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
+		}
+	}
+	if err := tx.Delete(deleted); err != nil {
+		return nil, 0, err
+	}
+	if err := tx.Upsert(changed); err != nil {
+		return nil, 0, err
+	}
+	if err := tx.InsertDecisions(decisions); err != nil {
+		return nil, 0, err
+	}
+	out := make([]schedquality.LineState, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r)
+	}
+	return out, cleared, nil
 }
 
 func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.Time) error {
@@ -80,40 +277,59 @@ func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.
 	if err != nil {
 		return err
 	}
-	s.policies, s.members, s.configAt = policies, members, now
+	rule, err := s.store.LoadTTFTRule(ctx)
+	if err != nil {
+		return err
+	}
+	s.policies, s.members, s.configAt, s.rule = policies, members, now, rule
 	return nil
 }
 
-// PreviewPolicy evaluates only ordinary rules at the last processed UTC minute.
-// The admin service adds account names, hard admission and exemption counts.
+// PreviewPolicy reports current per-line verdicts without changing stored state.
 func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
 	if err := ValidateSchedQualityPolicy(p); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.refreshConfig(ctx, s.now()); err != nil {
+	now := s.now()
+	d, err := s.inputs(ctx, now, s.window.samples)
+	if err != nil {
 		return nil, err
 	}
 	if _, ok := s.members[group]; !ok {
 		return nil, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
 	}
-	snapshot := s.snapshot.Load()
-	at := s.processedAt
-	if at.IsZero() {
-		at = snapshot.At.Add(-10 * time.Second)
+	states, _, resets, err := s.store.LoadRows(ctx)
+	if err != nil {
+		return nil, err
 	}
-	at = at.Truncate(time.Minute)
-	out := make([]SchedPolicyChange, 0)
-	for _, account := range s.members[group] {
-		for _, row := range snapshot.RowsForAccount(account) {
-			if row.GroupID != group || row.View.Failing {
-				continue
-			}
-			evaluation := schedquality.EvaluateAt(s.window.samples[SchedAccountModel{account, row.Model}], schedquality.Scope{AccountID: account, GroupID: group, Model: row.Model}, p, row.View.EvidenceSince, at, schedquality.EvaluateRegular)
-			if dims := evaluation.Dimensions(); len(dims) > 0 {
-				out = append(out, SchedPolicyChange{AccountID: account, Model: row.Model, Dims: dims})
-			}
+	keys, rows := s.rowKeys(d, states)
+	d.displayPeers(now, rows)
+	old := s.policies[group]
+	s.policies[group] = SchedPolicyRecord{GroupID: group, Policy: p}
+	defer func() { s.policies[group] = old }()
+	byPair := make(map[SchedAccountModel]*SchedPolicyChange)
+	var out []SchedPolicyChange
+	for _, k := range keys {
+		if k.GroupID != group {
+			continue
+		}
+		r := rows[k]
+		r.LineKey = k
+		pair := SchedAccountModel{k.AccountID, k.Model}
+		change := byPair[pair]
+		if change == nil {
+			change = &SchedPolicyChange{AccountID: k.AccountID, Model: k.Model, Lines: make(map[schedquality.Dimension]schedquality.Verdict)}
+			byPair[pair] = change
+		}
+		change.Lines[k.Line], _ = s.assessLine(d, r, schedquality.EventRegular, now, resets)
+	}
+	for _, k := range keys {
+		pair := SchedAccountModel{k.AccountID, k.Model}
+		if change := byPair[pair]; change != nil {
+			out = append(out, *change)
+			delete(byPair, pair)
 		}
 	}
 	return out, nil

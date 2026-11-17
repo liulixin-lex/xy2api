@@ -38,15 +38,24 @@
               v-tip="allExemption ? '' : t('admin.schedQuality.panel.exemptAllTip')"
               @click="onHeaderExempt($event)"
             >{{ allExemption ? t('admin.schedQuality.action.undoExempt') : t('admin.schedQuality.action.exempt') }}</button>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="!recoverable || recovering"
-              :aria-busy="recovering"
-              data-qp-trigger="reset"
-              v-tip="t('admin.schedQuality.panel.recoverTip')"
-              @click="startRecover"
-            >{{ t('admin.schedQuality.action.reset') }}</button>
+            <!-- A disabled button takes no focus and, in some browsers, no mouse events: the reason sits on this wrapper
+                 (reachable by Tab then), and the disabled button lets the pointer through to it. -->
+            <span
+              v-tip="recoverable ? '' : t('admin.schedQuality.panel.recoverNone')"
+              class="inline-flex"
+              :tabindex="recoverable ? undefined : 0"
+              data-qp-recover
+            >
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm disabled:pointer-events-none"
+                :disabled="!recoverable || recovering"
+                :aria-busy="recovering"
+                data-qp-trigger="reset"
+                v-tip="recoverable ? t('admin.schedQuality.panel.recoverTip') : ''"
+                @click="startRecover"
+              >{{ t('admin.schedQuality.action.reset') }}</button>
+            </span>
           </div>
         </header>
 
@@ -107,6 +116,8 @@
               />
             </section>
 
+            <SchedDecisions :account-id="detail.account.id" :group-name="groupName" />
+
             <section class="qp-section" data-qp-section="auto">
               <h3 class="qp-h">{{ t('admin.schedQuality.drawer.autoStates') }}</h3>
               <div v-if="detail.auto_states.length" class="alist">
@@ -142,10 +153,10 @@
                 <span class="qp-h-note">{{ t('admin.schedQuality.panel.recentNote') }}</span>
               </h3>
               <div class="rlist">
-                <div v-for="line in recentLines" :key="line.dim" class="rrow" :data-qp-recent="line.dim">
-                  <span class="rrow__k">{{ t(`admin.schedQuality.dim.${line.dim}`) }}</span>
+                <div v-for="line in recentLines" :key="line.key" class="rrow" :data-qp-recent="line.key">
+                  <span class="rrow__k">{{ line.label }}</span>
                   <span class="rrow__v" :class="line.cls">{{ line.text }}</span>
-                  <span class="rrow__g">{{ t('admin.schedQuality.panel.threshold', { value: line.threshold }) }}</span>
+                  <span class="rrow__g">{{ line.note }}</span>
                 </div>
                 <div v-if="ratio" class="rrow" data-qp-recent="ratio">
                   <span class="rrow__k">{{ t('admin.schedQuality.panel.ratio') }}</span>
@@ -212,6 +223,7 @@ import Icon from '@/components/icons/Icon.vue'
 import SchedPauseMark from './SchedPauseMark.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
+import SchedDecisions from './SchedDecisions.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'
@@ -223,7 +235,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
 import { probeFailureText, upstreamRateView } from '@/components/account/upstreamBillingRate'
-import { RECENT_DIMS, formatThreshold, recentValue, strictestThresholds } from '@/components/admin/account/table/accountRecent'
+import { RECENT_DIMS, formatThreshold, recentExtras, recentValue, strictestThresholds } from '@/components/admin/account/table/accountRecent'
 import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { platformLabel } from '@/utils/platformColors'
@@ -404,6 +416,7 @@ function applyRequest(toTop: boolean) {
 }
 
 const groupInfo = (id: number) => props.groupInfo?.(id)
+const groupName = (id: number) => groupInfo(id)?.name ?? detail.value?.groups.find((group) => group.group_id === id)?.name
 const scopeGroups = computed(() => detail.value?.groups.map((group) => ({ id: group.group_id, name: group.name })) ?? [])
 
 // ---- Exemptions ----
@@ -528,14 +541,44 @@ watch(canManage, (allowed) => {
 
 // ---- Thresholds, recent values and the upstream ratio (also readable on touch) ----
 // The values are the whole account's over the last hour; the threshold beside each is the strictest of the groups'
-// policies, which judge per group and model (the groups' marks above): no comparison of the two, no "over the line"
-// here (7k-1).
+// policies, which judge per group and model (the groups' rows above): no comparison of the two, no "over the line"
+// here (7k-1). First token and cache show what the lines judge (first useful output, continuation turns) with the
+// other view under it (first event and the gap, every successful request).
 const recentLines = computed(() => {
   const thresholds = strictestThresholds(detail.value?.groups.map((group) => group.policy) ?? [])
-  return RECENT_DIMS.map((dim) => {
-    const recent = summary.value ? recentValue(summary.value, dim) : null
-    const short = !recent?.text || recent.mark.short
-    return { dim, text: recent?.text ?? '—', cls: short ? 'rrow__v--na' : '', threshold: formatThreshold(dim, thresholds[dim]) }
+  const quality = summary.value
+  const extras = quality ? recentExtras(quality) : null
+  const muted = (text: string | null | undefined, short = false) => (!text || short ? 'rrow__v--na' : '')
+  return RECENT_DIMS.flatMap((dim) => {
+    const recent = quality ? recentValue(quality, dim) : null
+    const main = {
+      key: dim,
+      label: t(`admin.schedQuality.panel.recentLines.${dim}`),
+      text: recent?.text ?? '—',
+      cls: muted(recent?.text, recent?.short),
+      note: t('admin.schedQuality.panel.threshold', { value: formatThreshold(dim, thresholds[dim]) })
+    }
+    if (dim === 'ttfo') {
+      const gap = extras?.gap
+      return [main, {
+        key: 'ttfo_event',
+        label: t('admin.schedQuality.panel.recentLines.firstEvent'),
+        text: extras?.firstEvent ?? '—',
+        cls: muted(extras?.firstEvent),
+        note: gap ? t('admin.schedQuality.panel.gap', { value: gap }) : ''
+      }]
+    }
+    if (dim === 'cache') {
+      const n = extras?.cacheAllRequests ?? 0
+      return [main, {
+        key: 'cache_all',
+        label: t('admin.schedQuality.panel.recentLines.cacheAll'),
+        text: extras?.cacheAll ?? '—',
+        cls: muted(extras?.cacheAll),
+        note: t('admin.schedQuality.panel.allRequests', { n }, n)
+      }]
+    }
+    return [main]
   })
 })
 
@@ -758,6 +801,13 @@ onScopeDispose(() => running?.kill())
   white-space: nowrap;
 }
 
+/* From 1280px: 40px more, all of it for the group name column (45px at 460, a group name of four to six characters
+   needs about 72px); the other columns are fixed widths. */
+@media (min-width: 1280px) {
+  .qpanel {
+    width: calc(var(--sidebar-width) + 40px);
+  }
+}
 /* Below 1024px (prototype): the whole screen, an obvious 44px close button. */
 @media (max-width: 1023px) {
   .qpanel {
@@ -789,7 +839,8 @@ onScopeDispose(() => running?.kill())
   .qp-body {
     padding: 16px 16px 32px;
   }
-  .qp-actions .btn {
+  .qp-actions .btn,
+  .qp-actions [data-qp-recover] {
     height: 36px;
     flex: 1;
   }
@@ -894,7 +945,7 @@ onScopeDispose(() => running?.kill())
 /* Thresholds, recent values and the upstream ratio */
 .rrow {
   display: grid;
-  grid-template-columns: 72px auto minmax(0, 1fr);
+  grid-template-columns: 88px auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-height: 36px;

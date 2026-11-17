@@ -5097,6 +5097,8 @@
                   />
                 </div>
               </div>
+              <!-- 首字线判定的三个全局数：单独的请求，页面保存后再保存（蓝图第 4 节） -->
+              <SchedTTFTRuleField ref="ttftRuleRef" />
             </div>
           </div>
 
@@ -9058,6 +9060,7 @@ import {
   type SiteBillingMode,
 } from "@/utils/siteBillingMode";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import SchedTTFTRuleField from "@/components/admin/settings/SchedTTFTRuleField.vue";
 import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
 import GroupBadge from "@/components/common/GroupBadge.vue";
@@ -9224,6 +9227,7 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+const ttftRuleRef = ref<InstanceType<typeof SchedTTFTRuleField> | null>(null);
 // OAuth 倍率：留空（用各账号自己的倍率），或非负数字（设计 D.4）。
 const oauthRateValid = computed(() => {
   const value = form.openai_oauth_scheduling_rate_multiplier;
@@ -11416,6 +11420,14 @@ async function saveSettings() {
       document.getElementById("openai-oauth-scheduling-rate-multiplier")?.focus();
       return;
     }
+    // 首字线三个数不合法时输入框旁已标出合法范围，不保存；在别的标签页保存时先切到它所在的网关页。
+    if (ttftRuleRef.value && !ttftRuleRef.value.valid) {
+      activeTab.value = "gateway";
+      appStore.showError(t("admin.schedQuality.ttftRule.invalidOnSave"));
+      await nextTick();
+      ttftRuleRef.value.focusInvalid();
+      return;
+    }
 
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
@@ -11853,10 +11865,22 @@ async function saveSettings() {
     }
     // Save web search emulation config separately (errors handled internally)
     const wsOk = await saveWebSearchConfig();
+    // 首字线三个数单独保存；放宽时先确认，失败或冲突显示在它自己的位置。
+    // 确认框里取消：其余设置已保存，规则框里的值留着并标为未保存，同样切到网关页说明。
+    const ttftRule = ttftRuleRef.value;
+    const ttftRuleOk = (await ttftRule?.save()) !== false;
+    if (!ttftRuleOk && ttftRule && (ttftRule.failed || ttftRule.unsaved)) {
+      activeTab.value = "gateway";
+      if (ttftRule.failed) {
+        appStore.showError(t("admin.schedQuality.ttftRule.notSaved"));
+      } else {
+        appStore.showWarning(t("admin.schedQuality.ttftRule.declined"));
+      }
+    }
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
-    if (wsOk) {
+    if (wsOk && ttftRuleOk) {
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {

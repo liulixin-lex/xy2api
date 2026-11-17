@@ -12,13 +12,42 @@ const OpenAIUpstreamProtocolErrorCode = "upstream_protocol_error"
 
 type OpenAIResponsesTerminal struct {
 	Seen, Valid, Success, Failure      bool
+	ErrorPresent                       bool
 	EventType, Status, Reason, Message string
 	WrappedStatus                      int
 }
 
-func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIResponsesTerminal {
+// BenignIncomplete separates expected output limits from interrupted generation.
+func (t OpenAIResponsesTerminal) BenignIncomplete() bool {
+	return t.Valid && t.Status == "incomplete" && (t.Reason == "max_output_tokens" || t.Reason == "content_filter")
+}
+
+// QualityFailure is independent of Failure, which preserves the forwarding
+// protocol's decision to deliver incomplete responses without retrying them.
+func (t OpenAIResponsesTerminal) QualityFailure() bool {
+	return t.Seen && t.Failure || t.ErrorPresent || t.Valid && t.Status == "incomplete" && !t.BenignIncomplete()
+}
+
+func openAIResponsesMeaningfulError(errObj gjson.Result) bool {
+	if !errObj.IsObject() {
+		return false
+	}
+	for _, key := range []string{"message", "type", "code"} {
+		v := errObj.Get(key)
+		if v.Type == gjson.String && strings.TrimSpace(v.Str) != "" || key == "code" && v.Type == gjson.Number {
+			return true
+		}
+	}
+	return false
+}
+
+func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) (result OpenAIResponsesTerminal) {
 	eventName = strings.TrimSpace(eventName)
-	result := OpenAIResponsesTerminal{}
+	defer func() {
+		if gjson.ValidBytes(data) {
+			result.ErrorPresent = openAIResponsesMeaningfulError(gjson.GetBytes(data, "error"))
+		}
+	}()
 	candidate := func(kind string) bool {
 		switch kind {
 		case "response.completed", "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "response.done", "error", "proxy.upstream_error":
@@ -98,17 +127,10 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) OpenAIRespon
 		kind = e
 	}
 	result.EventType = kind
-	// An untyped structured error is failure evidence, never a trusted HTTP code.
-	if (kind == "" || kind == "error") && root.Get("error").IsObject() {
+	// Preserve the forwarding decision for typed Responses envelopes.
+	if kind == "" || kind == "error" {
 		errObj := root.Get("error")
-		meaningful := false
-		for _, key := range []string{"message", "type", "code"} {
-			v := errObj.Get(key)
-			if v.Type == gjson.String && strings.TrimSpace(v.Str) != "" || key == "code" && v.Type == gjson.Number {
-				meaningful = true
-			}
-		}
-		if meaningful {
+		if openAIResponsesMeaningfulError(errObj) {
 			return OpenAIResponsesTerminal{Seen: true, Valid: true, Failure: true, EventType: "error", Reason: "upstream_failed", Message: errObj.Get("message").String()}
 		}
 	}

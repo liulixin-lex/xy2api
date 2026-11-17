@@ -122,6 +122,7 @@
                     :groups="groupsOf(row)"
                     :quality="row.platform === 'openai' ? row.quality ?? null : null"
                     :readonly="!canPlaceGroups"
+                    :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                     @open-quality="(groupId: number) => openQuality(row, groupId)"
                     @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                   />
@@ -168,6 +169,7 @@
                   :groups="groupsOf(row)"
                   :quality="row.platform === 'openai' ? row.quality ?? null : null"
                   :readonly="!canPlaceGroups"
+                  :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                 />
@@ -1051,9 +1053,11 @@ const panelGroupInfo = (id: number) => groupsById.value.get(id)
 /** The panel's top edge follows the table's. */
 const panelAnchor = () => accountTableRef.value
 const sqOpenAIGroups = computed(() => groups.value.filter((group) => group.platform === 'openai').map((group) => ({ id: group.id, name: group.name })))
-/** The pill's dot: the quality panel on that group, with the tab of its model at the back when it has one. */
+/** The pill's dot: the quality panel on that group, with the tab of its model at the back, else on trial, when it has one. */
 const openQuality = (row: LiveAccount, groupId: number) => {
-  const model = row.quality?.substandard.find((item) => item.group_id === groupId && item.effective)?.model ?? null
+  const quality = row.quality
+  const model = quality?.rear?.find((item) => item.group_id === groupId && item.effective)?.model ??
+    quality?.trial?.find((item) => item.group_id === groupId)?.model ?? null
   openSchedDrawer({ id: row.id, name: row.name }, { groupId, model })
 }
 const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {

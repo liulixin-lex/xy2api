@@ -14,7 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
-const apiKeyAuthSnapshotVersion = 27 // v27: API key Anthropic cache TTL preference
+const apiKeyAuthSnapshotVersion = 28 // v28: group minimum upstream rate
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -439,6 +439,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			PeakEnd:                         apiKey.Group.PeakEnd,
 			PeakRateMultiplier:              apiKey.Group.PeakRateMultiplier,
 			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			MinUpstreamRate:                 apiKey.Group.MinUpstreamRate,
 			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
@@ -547,6 +548,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			PeakEnd:                         snapshot.Group.PeakEnd,
 			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
 			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			MinUpstreamRate:                 snapshot.Group.MinUpstreamRate,
 			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
 			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 		}

@@ -33,7 +33,8 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 		{"missing_terminal", true, false, false, false, "missing", "sse"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			row := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, RequestID: "fixture", Model: "fixture", CreatedAt: time.Now().UTC(), RequestScope: resilience.GatewayRequestScopeText, ConversionNotices: []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}}, PricingSource: json.RawMessage(`{"matched_key":"fixture","source":"litellm","revision":"fixture-revision","effective_prices":{"input":0}}`)}
+			row := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, RequestID: "fixture", Model: "fixture", CreatedAt: time.Now().UTC(), RequestScope: resilience.GatewayRequestScopeText, ConversionNotices: []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}}, ProfitBasis: json.RawMessage(`{"admitted":{"account_id":3,"sell":1,"upstream":0.4,"source":"stored","ceiling":null,"floor":0.2,"verdict":"pass"}}`), PricingSource: json.RawMessage(`{"matched_key":"fixture","source":"litellm","revision":"fixture-revision","effective_prices":{"input":0}}`)}
+			row.DispatchPhases = json.RawMessage(`{"body_decode_ms":12,"upstream_prepare_ms":34}`)
 			if tc.known {
 				row.UsageObserved = &tc.present
 				row.UsageSource = &tc.source
@@ -48,6 +49,10 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			require.NoError(t, json.Unmarshal(payload, &restored))
 			row.ConversionNotices[0].Field = "mutated"
 			row.PricingSource[2] = 'X'
+			row.ProfitBasis[2] = 'X'
+			require.True(t, json.Valid(frozen.ProfitBasis))
+			row.DispatchPhases[2] = 'X'
+			require.JSONEq(t, `{"body_decode_ms":12,"upstream_prepare_ms":34}`, string(frozen.DispatchPhases))
 			require.Equal(t, "stop", frozen.ConversionNotices[0].Field)
 			require.True(t, json.Valid(frozen.PricingSource))
 			prepared := prepareUsageLogInsert(restored.Usage)
@@ -55,7 +60,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			key := usageLogBatchKey("fixture", 2)
 			batch, _ := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
 			best, _ := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
-			for _, column := range []string{"request_scope", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type", "degradations", "pricing_source"} {
+			for _, column := range []string{"request_scope", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type", "degradations", "pricing_source", "profit_basis", "dispatch_phases"} {
 				require.Equal(t, 3, strings.Count(batch, column))
 				require.Equal(t, 3, strings.Count(best, column))
 			}
@@ -75,6 +80,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			mock.ExpectQuery("SELECT fixture").WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
 			got, err := scanUsageLog(db.QueryRow("SELECT fixture"))
 			require.NoError(t, err)
+			require.JSONEq(t, string(frozen.ProfitBasis), string(got.ProfitBasis))
 			require.Equal(t, frozen.RequestScope, got.RequestScope)
 			require.Equal(t, frozen.UsageObserved, got.UsageObserved)
 			require.Equal(t, frozen.UsageSource, got.UsageSource)
@@ -83,6 +89,7 @@ func TestGatewayUsageFactsSurviveIntentAndSQL(t *testing.T) {
 			require.Equal(t, frozen.ResponseBodyType, got.ResponseBodyType)
 			require.Equal(t, frozen.ConversionNotices, got.ConversionNotices)
 			require.JSONEq(t, string(frozen.PricingSource), string(got.PricingSource))
+			require.JSONEq(t, string(frozen.DispatchPhases), string(got.DispatchPhases))
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -117,9 +124,9 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			require.NoError(t, err)
 			defer db.Close()
 			notices := []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}, {Field: "reasoning.effort", Action: "map"}}
-			row := &service.GatewayUnbilledRequest{RequestID: "failed-no-usage", CreatedAt: time.Now(), Result: result, ConversionNotices: notices}
+			row := &service.GatewayUnbilledRequest{RequestID: "failed-no-usage", CreatedAt: time.Now(), Result: result, ConversionNotices: notices, ProfitBasis: json.RawMessage(`{"vetoes":[{"account_id":8,"sell":1,"upstream":0.1,"source":"stored","ceiling":null,"floor":0.4,"verdict":"profit_floor"}]}`)}
 			capture := &noticeArgument{}
-			args := make([]driver.Value, 28)
+			args := make([]driver.Value, 30)
 			for i := range args {
 				args[i] = sqlmock.AnyArg()
 			}
@@ -127,9 +134,13 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 				args[i] = nil
 			}
 			args[27] = capture
+			profitCapture := &noticeArgument{}
+			args[28] = profitCapture
+			args[29] = nil // dispatch_phases is absent in this unbilled fixture.
 			mock.ExpectExec("INSERT INTO gateway_unbilled_requests").WithArgs(args...).WillReturnResult(sqlmock.NewResult(1, 1))
 			repo := newUsageLogRepositoryWithSQL(nil, db)
 			require.NoError(t, repo.CreateUnbilledRequest(context.Background(), row))
+			require.JSONEq(t, string(row.ProfitBasis), string(profitCapture.raw))
 			require.NotEmpty(t, capture.raw)
 			mock.ExpectQuery("SELECT degradations, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type FROM gateway_unbilled_requests").WillReturnRows(sqlmock.NewRows([]string{"degradations", "usage_observed", "usage_source", "terminal_event_seen", "terminal_event_valid", "response_body_type"}).AddRow(capture.raw, nil, nil, nil, nil, nil))
 			var raw []byte
@@ -142,12 +153,13 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			require.False(t, observed.Valid || source.Valid || seen.Valid || valid.Valid || kind.Valid)
 			ops := &opsRepository{db: db}
 			input := &service.OpsInsertErrorLogInput{RequestID: row.RequestID, GatewayRequestID: row.RequestID, CreatedAt: row.CreatedAt, ConversionNotices: notices}
-			opsArgs := make([]driver.Value, 45)
+			opsArgs := make([]driver.Value, 47)
 			for i := range opsArgs {
 				opsArgs[i] = sqlmock.AnyArg()
 			}
 			opsCapture := &noticeArgument{}
 			opsArgs[44] = opsCapture
+			opsArgs[45], opsArgs[46] = nil, nil // Unknown provenance and wire status stay NULL.
 			mock.ExpectQuery("INSERT INTO ops_error_logs").WithArgs(opsArgs...).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
 			id, err := ops.InsertErrorLog(context.Background(), input)
 			require.NoError(t, err)

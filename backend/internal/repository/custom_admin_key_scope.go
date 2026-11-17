@@ -208,6 +208,9 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 	if len(added) == 0 && len(removed) == 0 {
 		return nil
 	}
+	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, r.client, added); err != nil {
 		return err
 	}

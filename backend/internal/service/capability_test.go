@@ -51,8 +51,16 @@ func (r *capabilityRepo) UpdateExtra(_ context.Context, id int64, updates map[st
 	if a.Extra == nil {
 		a.Extra = map[string]any{}
 	}
+	updates = LimitCapabilityMarkUpdates(a.Extra, updates, id, time.Now())
+	if len(updates) == 0 {
+		return nil
+	}
 	for k, v := range updates {
-		a.Extra[k] = v
+		if v == nil {
+			delete(a.Extra, k)
+		} else {
+			a.Extra[k] = v
+		}
 	}
 	r.writes++
 	return nil

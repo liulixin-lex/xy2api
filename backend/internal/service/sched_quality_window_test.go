@@ -20,7 +20,7 @@ func TestQualityWindowCompletionRetentionAndNoSampleCap(t *testing.T) {
 	w := schedQualityWindow{}
 	w.merge(append(rows, rows...), now)
 	require.Len(t, w.samples[SchedAccountModel{1, "synthetic-model"}], 250)
-	w.take(now.Add(180 * time.Minute))
+	w.take(now.Add(250 * time.Minute))
 	require.Empty(t, w.samples)
 }
 
@@ -36,7 +36,7 @@ func (s *previousCountingStore) LoadPreviousAttempts(ctx context.Context, rows [
 
 func TestQualityWindowCrossAccountPredecessorAndSupplementCache(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	old := engineSamples(1, now.Add(-181*time.Minute), true)[0]
+	old := engineSamples(1, now.Add(-5*time.Minute), true)[0]
 	old.SessionKey = "session"
 	current := engineSamples(1, now.Add(-time.Minute), true)[0]
 	current.SessionKey = "session"
@@ -75,4 +75,45 @@ func TestQualityWindowStrictEarlierAndFinishedPredecessor(t *testing.T) {
 	for _, r := range w.samples[SchedAccountModel{1, "synthetic-model"}] {
 		require.False(t, r.Continuation)
 	}
+}
+
+func TestQualityWindowObserverOnlyTracksInFlight(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	a := engineSamples(1, now, true)[0]
+	a.FinishedAt = time.Time{}
+	w := schedQualityWindow{}
+	w.add(a)
+	w.take(now)
+	require.Empty(t, w.samples)
+	require.Contains(t, w.running, a.AttemptID)
+	a.FinishedAt = now.Add(time.Second)
+	w.add(a)
+	w.take(now.Add(2 * time.Second))
+	require.Empty(t, w.samples)
+	require.Equal(t, a.FinishedAt, w.running[a.AttemptID].FinishedAt)
+	// Finish is not durable evidence, and a delayed Begin cannot erase it.
+	begin := a
+	begin.FinishedAt = time.Time{}
+	w.add(begin)
+	w.take(now.Add(3 * time.Second))
+	require.Equal(t, a.FinishedAt, w.running[a.AttemptID].FinishedAt)
+	a.InsertedAt = now.Add(30 * time.Second)
+	w.merge([]q.AttemptSample{a}, now.Add(31*time.Second))
+	require.Empty(t, w.running)
+	require.Equal(t, a.InsertedAt, schedAvailableAt(w.samples[SchedAccountModel{1, "synthetic-model"}][0]))
+	w.add(a)
+	w.take(now.Add(32 * time.Second))
+	require.Empty(t, w.running, "ledger-backed attempts cannot be resurrected")
+	orphan := a
+	orphan.AttemptID = "orphan"
+	w.add(orphan)
+	w.take(now.Add(2 * time.Minute))
+	require.Contains(t, w.running, orphan.AttemptID)
+	w.take(now.Add(2*time.Minute + time.Second))
+	require.NotContains(t, w.running, orphan.AttemptID)
+	begin.AttemptID = "never-finished"
+	begin.StartedAt = now
+	w.add(begin)
+	w.take(now.Add(2 * time.Hour))
+	require.Empty(t, w.running)
 }

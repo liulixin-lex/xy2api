@@ -1217,7 +1217,9 @@
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(createForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <!-- 新建没有可预览的对象，不做“无号可用”的确认；提交期间同样冻结利润块 -->
             <input
+              :disabled="submitting"
               v-model="createForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -1240,6 +1242,7 @@
               <label for="create-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 id="create-profit-min-margin"
+                :disabled="submitting"
                 v-model.number="createForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -1249,6 +1252,28 @@
                 :placeholder="String(DEFAULT_PROFIT_MIN_MARGIN_PERCENT)"
               />
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
+            </div>
+          </div>
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效。step=any、不设 min：范围和小数位由页面校验并提示，不让浏览器原生气泡先拦 -->
+          <div
+            v-if="isMinUpstreamRatePlatform(createForm.platform)"
+            class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <div>
+              <label for="create-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
+              <input
+                id="create-min-upstream-rate"
+                :disabled="submitting"
+                v-model.number="createForm.min_upstream_rate"
+                type="number"
+                step="any"
+                :class="['input', { 'input-error': validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable) }]"
+                :aria-invalid="!!validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable)"
+                @input="createFloorUnreadable = isUnreadableNumberInput($event)"
+                :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
+                data-testid="create-min-upstream-rate"
+              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.floorHint") }}</p>
             </div>
           </div>
         </div>
@@ -2906,8 +2931,9 @@
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <!-- 保存进行中冻结利润块：提交的值与用来判断是否要确认的预览是同一份 -->
             <input
-              :disabled="!canAdjustBalance"
+              :disabled="!canAdjustBalance || submitting"
               v-model="editForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2930,7 +2956,7 @@
               <label for="edit-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 id="edit-profit-min-margin"
-                :disabled="!canAdjustBalance"
+                :disabled="!canAdjustBalance || submitting"
                 v-model.number="editForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -2942,13 +2968,39 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
-          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（五个利润平台共用线上成本口径） -->
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效。step=any、不设 min：范围和小数位由页面校验并提示，不让浏览器原生气泡先拦 -->
+          <div
+            v-if="isMinUpstreamRatePlatform(editForm.platform)"
+            class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <div>
+              <label for="edit-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
+              <input
+                id="edit-min-upstream-rate"
+                :disabled="!canAdjustBalance || submitting"
+                v-model.number="editForm.min_upstream_rate"
+                type="number"
+                step="any"
+                :class="['input', { 'input-error': validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable) }]"
+                :aria-invalid="!!validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable)"
+                @input="editFloorUnreadable = isUnreadableNumberInput($event)"
+                :placeholder="t('admin.groups.profitControl.floorPlaceholder')"
+                data-testid="edit-min-upstream-rate"
+              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.floorHint") }}</p>
+            </div>
+          </div>
+          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（五个利润平台共用线上成本口径），
+               以及下限排除的号、固定号；利润开关关闭但设了下限时只预览下限 -->
           <GroupProfitControlPreview
-            v-if="editForm.profit_control_enabled && editingGroup"
-            ref="editProfitPreviewRef"
+            v-if="editingGroup && (editForm.profit_control_enabled || editFloorSet)"
             class="mb-3"
             :group-id="editingGroup.id"
             :margin-percent="editForm.profit_min_margin_percent"
+            :profit-enabled="editForm.profit_control_enabled"
+            :floor="isMinUpstreamRatePlatform(editForm.platform) ? editForm.min_upstream_rate : ''"
+            :floor-unreadable="isMinUpstreamRatePlatform(editForm.platform) && editFloorUnreadable"
+            :rate-unsaved="groupRateSignature(editForm) !== groupRateSignature(editingGroup)"
           />
         </div>
 
@@ -3861,8 +3913,8 @@
 
     <ConfirmDialog
       :show="showZeroPassProfitConfirm"
-      :title="t('admin.groups.profitControl.zeroPassConfirmTitle')"
-      :message="t('admin.groups.profitControl.zeroPassConfirmMessage')"
+      :title="t(`admin.groups.profitControl.${zeroPassProfitCopy}ConfirmTitle`)"
+      :message="t(`admin.groups.profitControl.${zeroPassProfitCopy}ConfirmMessage`)"
       :confirm-text="t('admin.groups.profitControl.zeroPassConfirm')"
       :cancel-text="t('common.cancel')"
       :danger="true"
@@ -4476,12 +4528,23 @@ import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
   PROFIT_SAFETY_BUFFER,
   effectiveProfitMarginPercent,
+  isMinUpstreamRatePlatform,
   isProfitControlPlatform,
+  minUpstreamRateForCreate,
+  minUpstreamRateForUpdate,
+  minUpstreamRateFormValue,
   profitMarginPercentFromGroup,
   profitMarginPercentOnEnable,
   profitPercentToDecimal,
+  validateMinUpstreamRate,
+  isUnreadableNumberInput,
   validateProfitControlFormState,
+  groupRateSignature,
+  profitBlockReason,
+  profitSaveCheck,
   type ProfitControlFormState,
+  type ProfitSaveCheck,
+  type ProfitSaveRisk,
 } from "./groupsProfitControl";
 import {
   normalizeReasoningEffortForPlatform,
@@ -4615,6 +4678,7 @@ const operatorGroupPriceFields = [
   "profit_control_enabled",
   "profit_min_margin",
   "profit_safety_buffer",
+  "min_upstream_rate",
   "image_price_1k",
   "image_price_2k",
   "image_price_4k",
@@ -5224,7 +5288,6 @@ type CodexManifestAccountsFieldExpose = {
   resetValidation: () => void;
 };
 const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
-const editProfitPreviewRef = ref<InstanceType<typeof GroupProfitControlPreview> | null>(null);
 const editSchedPolicyRef = ref<InstanceType<typeof GroupSchedPolicyField> | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
@@ -5325,6 +5388,7 @@ const createForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
+  min_upstream_rate: "" as number | string,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5695,6 +5759,7 @@ const editForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
+  min_upstream_rate: "" as number | string,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5725,6 +5790,17 @@ const editForm = reactive({
   max_reasoning_effort_over_limit: reasoningEffortOverLimitDowngrade,
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
+
+// 下限框里是读不出数的内容（type=number 时 value 为 ""）：不当成留空，校验不通过，编辑时也不提交清除。
+const createFloorUnreadable = ref(false);
+const editFloorUnreadable = ref(false);
+
+// 编辑弹窗里填了最低上游倍率（OpenAI 分组）：利润开关关闭时也显示预览，只看与下限有关的几行。
+const editFloorSet = computed(
+  () =>
+    isMinUpstreamRatePlatform(editForm.platform) &&
+    (editFloorUnreadable.value || String(editForm.min_upstream_rate ?? "").trim() !== ""),
+);
 
 type ImagePricingFormState = {
   platform: GroupPlatform;
@@ -6043,6 +6119,8 @@ const closeCreateModal = () => {
   createForm.peak_rate_multiplier = 1.0;
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
+  createForm.min_upstream_rate = "";
+  createFloorUnreadable.value = false;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -6106,10 +6184,23 @@ const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
 };
 
 // 利润门预览显示没有成员能通过时，保存前要求确认。
+// 下限把区间压空、或设了下限后没有成员能用时，换用说明下限的文案。
 const showZeroPassProfitConfirm = ref(false);
+// 拿不到能代表这次提交的预览（失败、超时、取消，或倍率也改了）时用通用文案，同样要确认才保存。
+const zeroPassProfitCopy = ref<"zeroPass" | "floorRangeEmpty" | "floorNoneUsable" | "unverified" | "rateChanged">("zeroPass");
 let zeroPassProfitResolve: ((confirmed: boolean) => void) | null = null;
-const confirmZeroPassProfit = () =>
+const confirmZeroPassProfit = (risk: ProfitSaveRisk, check: ProfitSaveCheck) =>
   new Promise<boolean>((resolve) => {
+    zeroPassProfitCopy.value =
+      risk === "unverified"
+        ? "unverified"
+        : risk === "rate_changed"
+          ? "rateChanged"
+          : risk === "range_empty"
+            ? "floorRangeEmpty"
+            : check.profitEnabled && check.floor === 0
+              ? "zeroPass"
+              : "floorNoneUsable";
     zeroPassProfitResolve = resolve;
     showZeroPassProfitConfirm.value = true;
   });
@@ -6119,8 +6210,33 @@ const settleZeroPassProfitConfirm = (confirmed: boolean) => {
   zeroPassProfitResolve = null;
 };
 
-const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
-  const errorKey = validateProfitControlFormState(form);
+// 这次提交会不会让分组没有号可用：按提交的参数单独取一次预览（不看预览区当时显示的结果，后来的预览也取消不了它）。
+// 倍率也改了时预览不能代表提交后的结果（接口按已保存的倍率算）；请求失败、超时或被取消（页面卸载）时同样不能
+// 当作没问题。卸载后不再保存。
+let profitCheckController: AbortController | null = null;
+let viewUnmounted = false;
+const profitSaveRisk = async (groupId: number, check: ProfitSaveCheck): Promise<ProfitSaveRisk | null> => {
+  if (check.rateChanged) return "rate_changed";
+  const controller = (profitCheckController = new AbortController());
+  try {
+    const preview = await adminAPI.groups.getProfitControlPreview(groupId, check.margin, check.floor, { signal: controller.signal });
+    return profitBlockReason(preview, check.profitEnabled);
+  } catch {
+    return "unverified";
+  } finally {
+    if (profitCheckController === controller) profitCheckController = null;
+  }
+};
+
+const validateProfitControlForm = (
+  form: ProfitControlFormState & { min_upstream_rate: number | string },
+  floorUnreadable: boolean,
+): boolean => {
+  const errorKey =
+    validateProfitControlFormState(form) ??
+    (isMinUpstreamRatePlatform(form.platform)
+      ? validateMinUpstreamRate(form.min_upstream_rate, floorUnreadable)
+      : null);
   if (errorKey) {
     appStore.showError(t(`admin.groups.profitControl.${errorKey}`));
     return false;
@@ -6156,7 +6272,7 @@ const handleCreateGroup = async () => {
   ) {
     return;
   }
-  if (!validateProfitControlForm(createForm)) {
+  if (!validateProfitControlForm(createForm, createFloorUnreadable.value)) {
     return;
   }
   if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
@@ -6233,8 +6349,16 @@ const handleCreateGroup = async () => {
         createForm.profit_control_enabled,
       profit_min_margin: profitMarginToDecimal(createForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
+      // 最低上游倍率：仅 OpenAI 分组，不填就不传
+      min_upstream_rate: minUpstreamRateForCreate(
+        createForm.platform,
+        createForm.min_upstream_rate,
+      ),
     };
     delete (requestData as Record<string, unknown>).profit_min_margin_percent;
+    if (requestData.min_upstream_rate === undefined) {
+      delete (requestData as Record<string, unknown>).min_upstream_rate;
+    }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
@@ -6372,6 +6496,8 @@ const handleEdit = async (group: AdminGroup) => {
     group.profit_min_margin,
     group.profit_safety_buffer,
   );
+  editForm.min_upstream_rate = minUpstreamRateFormValue(group.min_upstream_rate);
+  editFloorUnreadable.value = false;
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -6466,6 +6592,8 @@ const closeEditModal = () => {
   editForm.peak_rate_multiplier = 1.0;
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
+  editForm.min_upstream_rate = "";
+  editFloorUnreadable.value = false;
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -6492,6 +6620,8 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
+  // 一次保存（含它的确认）还在进行时再触发直接忽略：两次并行会抢同一个确认框。
+  if (submitting.value) return;
   if (editSystemPromptRef.value && !editSystemPromptRef.value.validate()) return;
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
@@ -6509,7 +6639,7 @@ const handleUpdateGroup = async () => {
   ) {
     return;
   }
-  if (!validateProfitControlForm(editForm)) {
+  if (!validateProfitControlForm(editForm, editFloorUnreadable.value)) {
     return;
   }
   if (editSchedPolicyRef.value && !editSchedPolicyRef.value.valid) return;
@@ -6608,8 +6738,18 @@ const handleUpdateGroup = async () => {
         editForm.profit_control_enabled,
       profit_min_margin: profitMarginToDecimal(editForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
+      // 最低上游倍率：仅 OpenAI 分组；清空已设的下限时提交 0（与 availability_fallback_group_id 同样的写法）
+      min_upstream_rate: minUpstreamRateForUpdate(
+        editForm.platform,
+        editForm.min_upstream_rate,
+        editingGroup.value.min_upstream_rate,
+        editFloorUnreadable.value,
+      ),
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
+    if (payload.min_upstream_rate === undefined) {
+      delete (payload as Record<string, unknown>).min_upstream_rate;
+    }
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
@@ -6679,15 +6819,18 @@ const handleUpdateGroup = async () => {
     // 门槛保存失败时对话框保留，再次保存时分组没改就不重复提交（也不再做利润门确认）。
     const groupRequestKey = JSON.stringify(requestData);
     if (groupRequestKey !== savedEditGroupRequestKey) {
-      // 利润门在保存后会挡住全部成员时先确认；简洁模式与无权改价格的管理员提交时不带利润字段，不用确认。
-      if (
-        !authStore.isSimpleMode &&
-        canAdjustBalance.value &&
-        editProfitPreviewRef.value &&
-        (await editProfitPreviewRef.value.blocksAllMembers()) &&
-        !(await confirmZeroPassProfit())
-      ) {
-        return;
+      // 保存后可能没有号可用时先确认，按这次提交的参数（requestData 本身）判断；简洁模式与无权改价格的管理员
+      // 提交时不带利润字段，不用确认。利润开关、毛利率、下限、倍率都没动时不检查。
+      if (!authStore.isSimpleMode && canAdjustBalance.value) {
+        // 非简洁模式下 requestData 就是 payload。
+        const check = profitSaveCheck(payload, editingGroup.value);
+        if (check) {
+          const risk = await profitSaveRisk(groupId, check);
+          if (viewUnmounted) return;
+          if (risk && !(await confirmZeroPassProfit(risk, check))) return;
+          // 确认之后、发出之前页面可能已经离开。
+          if (viewUnmounted) return;
+        }
       }
       await adminAPI.groups.update(groupId, requestData);
       savedEditGroupRequestKey = groupRequestKey;
@@ -7028,6 +7171,10 @@ watch(
       createForm.profit_control_enabled = false;
       createForm.profit_min_margin_percent = 0;
     }
+    if (!isMinUpstreamRatePlatform(newVal)) {
+      createForm.min_upstream_rate = "";
+      createFloorUnreadable.value = false;
+    }
     createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
       createForm.max_reasoning_effort,
@@ -7083,6 +7230,10 @@ watch(
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
       editForm.profit_min_margin_percent = 0;
+    }
+    if (!isMinUpstreamRatePlatform(newVal)) {
+      editForm.min_upstream_rate = "";
+      editFloorUnreadable.value = false;
     }
     editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
@@ -7210,6 +7361,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  viewUnmounted = true;
+  profitCheckController?.abort();
+  // 还挂着的确认按取消结束，不保存。
+  if (zeroPassProfitResolve) settleZeroPassProfitConfirm(false);
   document.removeEventListener("click", handleClickOutside);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();

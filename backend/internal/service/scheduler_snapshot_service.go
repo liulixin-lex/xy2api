@@ -25,13 +25,12 @@ var (
 
 const (
 	outboxEventTimeout                    = 2 * time.Minute
-	schedulerOutboxCleanupBatch           = 5000
 	schedulerGroupLifecycleTimeout        = 30 * time.Second
 	schedulerGroupLifecycleLeaseTTL       = 60 * time.Second
 	schedulerGroupLifecycleReleaseTimeout = 2 * time.Second
 	outboxRebuildRetryBaseDelay           = 5 * time.Second
 	outboxRebuildRetryMaxDelay            = 5 * time.Minute
-	outboxMaxIDErrorLogSampleInterval     = time.Minute
+	outboxCountErrorLogSampleInterval     = time.Minute
 )
 
 // batchSeenKey tracks completed per-platform rebuilds and group lifecycle work
@@ -137,7 +136,9 @@ type SchedulerSnapshotService struct {
 	outboxRebuildRetryAt         time.Time
 	outboxRebuildRetryReason     string
 	outboxLagWarningActive       bool
-	outboxMaxIDErrorLastLoggedAt time.Time
+	outboxCountErrorLastLoggedAt time.Time
+	outboxLockBusySince          time.Time
+	outboxLockWarnedAt           time.Time
 
 	fullRebuildRunMu     sync.Mutex
 	fullRebuildStateMu   sync.Mutex
@@ -376,93 +377,82 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	if s.outboxRepo == nil || s.cache == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	watermark, err := s.cache.GetOutboxWatermark(ctx)
+	// All event effects target the shared Redis snapshot, not process-local
+	// state. Serialize consumers until the exact successful batch is deleted.
+	lease, acquired, err := s.outboxRepo.TryAcquireConsumerLock(ctx)
 	if err != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox watermark read failed: %v", err)
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lock failed: %v", err)
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.inspectOutboxLag(healthCtx, false)
+		healthCancel()
 		return
 	}
-
-	events, err := s.outboxRepo.ListAfterAndReleaseDedup(ctx, watermark, 200)
+	if !acquired {
+		if s.noteOutboxLockContention(time.Now(), true) {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lock unavailable for at least 30s")
+		}
+		healthCtx, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.inspectOutboxLag(healthCtx, false)
+		healthCancel()
+		return
+	}
+	s.noteOutboxLockContention(time.Now(), false)
+	defer lease.Release()
+	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
+	events, err := s.outboxRepo.ListPendingAndReleaseDedup(readCtx, 200)
+	readCancel()
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox poll failed: %v", err)
 		return
 	}
 	if len(events) == 0 {
-		// The outbox query itself proves there is no event after the watermark.
-		// Clear degraded/retry state without adding two more repository queries to
-		// the healthy one-second poll path.
 		s.clearOutboxDegradedEpisode()
 		return
 	}
-
 	seen := make(map[batchSeenKey]struct{})
+	ids := make([]int64, 0, len(events))
+	var leaseErr error
 	for _, event := range events {
-		eventCtx, cancel := context.WithTimeout(context.Background(), outboxEventTimeout)
+		eventCtx, eventCancel := context.WithTimeout(ctx, outboxEventTimeout)
 		err := s.handleOutboxEvent(eventCtx, event, seen)
-		cancel()
+		eventCancel()
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox handle failed: id=%d type=%s err=%v", event.ID, event.EventType, err)
-			return
+		} else {
+			ids = append(ids, event.ID)
+		}
+		// Long batches have no aggregate deadline. Each completed event renews
+		// the idle lease; a single slow event may still outlive it safely.
+		if leaseErr == nil {
+			heartbeatCtx, heartbeatCancel := context.WithTimeout(ctx, 5*time.Second)
+			leaseErr = lease.KeepAlive(heartbeatCtx)
+			heartbeatCancel()
 		}
 	}
-
-	lastID := events[len(events)-1].ID
-	var wmErr error
-	for i := range 3 {
-		wmCtx, wmCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		wmErr = s.cache.SetOutboxWatermark(wmCtx, lastID)
-		wmCancel()
-		if wmErr == nil {
-			break
-		}
-		if i < 2 {
-			time.Sleep(200 * time.Millisecond)
-		}
+	if leaseErr == nil {
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		leaseErr = lease.KeepAlive(checkCtx)
+		checkCancel()
 	}
-	if wmErr != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox watermark write failed: %v", wmErr)
-		return
+	if leaseErr != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox lease lost; acknowledging %d processed events: %v", len(ids), leaseErr)
 	}
-	s.cleanupConsumedOutbox(lastID)
-
-	// 只有 watermark 成功推进后，当前批次才算已消费。延迟必须按下一条待消费事件计算，
-	// 否则本批次处理越慢，越容易误触发一次更慢的全量重建，形成正反馈。
-	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	s.checkOutboxLag(lagCtx, lastID)
-	lagCancel()
-}
-
-func (s *SchedulerSnapshotService) cleanupConsumedOutbox(watermark int64) {
-	if s == nil || s.outboxRepo == nil || watermark <= 0 {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	lease, acquired, err := s.outboxRepo.TryAcquireCleanupLock(ctx)
-	if err != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox cleanup lock failed: %v", err)
-		return
-	}
-	if !acquired {
-		return
-	}
-	defer lease.Release()
-
-	for {
-		deleted, err := s.outboxRepo.DeleteConsumedUpTo(ctx, watermark, schedulerOutboxCleanupBatch)
+	if len(ids) > 0 {
+		ackCtx, ackCancel := context.WithTimeout(ctx, 10*time.Second)
+		err = s.outboxRepo.DeleteProcessed(ackCtx, ids)
+		ackCancel()
 		if err != nil {
-			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox cleanup failed: watermark=%d err=%v", watermark, err)
-			return
-		}
-		if deleted == 0 || deleted < schedulerOutboxCleanupBatch {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox acknowledgement failed: %v", err)
 			return
 		}
 	}
+	lease.Release() // autocommit acknowledgement completed; release before rebuilding
+	// Only pending rows contribute to lag/backlog, including late small IDs.
+	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	s.checkOutboxLag(lagCtx)
+	lagCancel()
 }
 
 func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent, seen map[batchSeenKey]struct{}) error {
@@ -478,7 +468,9 @@ func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event 
 	case SchedulerOutboxEventGroupChanged:
 		return s.handleGroupEvent(ctx, event.GroupID, seen)
 	case SchedulerOutboxEventFullRebuild:
-		return s.triggerFullRebuild("outbox")
+		// Do not coalesce with a periodic run whose skip-on-busy policy cannot
+		// establish that this event was projected.
+		return s.rebuildFullSnapshot(context.WithValue(ctx, schedulerEventRebuildKey{}, true), "outbox")
 	default:
 		return nil
 	}
@@ -647,7 +639,7 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		sort.Slice(platformGroupIDs, func(i, j int) bool { return platformGroupIDs[i] < platformGroupIDs[j] })
 		buckets = append(buckets, s.bucketsForPlatform(platform, platformGroupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, "account_bulk_change")
+	return s.rebuildEventBuckets(ctx, buckets, "account_bulk_change", seen)
 }
 
 func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accountID *int64, payload map[string]any, seen map[batchSeenKey]struct{}) error {
@@ -822,7 +814,7 @@ func (s *SchedulerSnapshotService) rebuildByAccount(ctx context.Context, account
 		buckets = append(buckets, s.bucketsForPlatform(PlatformAnthropic, groupIDs, seen)...)
 		buckets = append(buckets, s.bucketsForPlatform(PlatformGemini, groupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, reason)
+	return s.rebuildEventBuckets(ctx, buckets, reason, seen)
 }
 
 // schedulerSnapshotPlatforms 返回需要维护调度快照的全部具体平台（平台清单）。
@@ -873,7 +865,7 @@ func (s *SchedulerSnapshotService) rebuildByGroupIDs(ctx context.Context, groupI
 	for _, platform := range schedulerSnapshotPlatforms() {
 		buckets = append(buckets, s.bucketsForPlatform(platform, groupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, reason)
+	return s.rebuildEventBuckets(ctx, buckets, reason, seen)
 }
 
 func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs []int64, seen map[batchSeenKey]struct{}) []SchedulerBucket {
@@ -891,7 +883,6 @@ func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs 
 			if _, exists := seen[key]; exists {
 				continue
 			}
-			seen[key] = struct{}{}
 		}
 		buckets = append(buckets, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeSingle})
 		buckets = append(buckets, SchedulerBucket{GroupID: gid, Platform: platform, Mode: SchedulerModeForced})
@@ -900,6 +891,22 @@ func (s *SchedulerSnapshotService) bucketsForPlatform(platform string, groupIDs 
 		}
 	}
 	return buckets
+}
+
+// Event projections must be published before their IDs can be acknowledged.
+// A periodic full rebuild keeps its existing skip-on-busy behavior.
+type schedulerEventRebuildKey struct{}
+
+func (s *SchedulerSnapshotService) rebuildEventBuckets(ctx context.Context, buckets []SchedulerBucket, reason string, seen map[batchSeenKey]struct{}) error {
+	if err := s.rebuildBuckets(context.WithValue(ctx, schedulerEventRebuildKey{}, true), buckets, reason); err != nil {
+		return err
+	}
+	for _, bucket := range buckets {
+		if seen != nil {
+			seen[batchSeenKey{groupID: bucket.GroupID, platform: bucket.Platform}] = struct{}{}
+		}
+	}
+	return nil
 }
 
 func (s *SchedulerSnapshotService) rebuildBuckets(ctx context.Context, buckets []SchedulerBucket, reason string) error {
@@ -963,6 +970,8 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 		return ErrSchedulerCacheNotReady
 	}
 	bucket := task.bucket
+	eventDriven, _ := ctx.Value(schedulerEventRebuildKey{}).(bool)
+	strict = strict || eventDriven
 	ok, err := s.cache.TryLockBucket(ctx, bucket, 30*time.Second)
 	if err != nil {
 		return err
@@ -1108,7 +1117,7 @@ func (s *SchedulerSnapshotService) rebuildFullSnapshot(ctx context.Context, reas
 
 		// A prior full_rebuild event can observe the active state committed for a
 		// later group_changed event. Recover here under fresh authority so the
-		// earlier event cannot block the outbox watermark before that event runs.
+		// earlier event cannot block acknowledgement before that event runs.
 		knownHistorical := registeredByGroup[groupID]
 		if knownHistorical == nil {
 			knownHistorical = []SchedulerBucket{}
@@ -1196,7 +1205,7 @@ func (s *SchedulerSnapshotService) prepareAndRebuildFullSnapshot(
 	reason string,
 ) error {
 	// 首个 DB 查询前必须完成全部普通 bucket 的 token 预备；任何预备错误都不会留下部分发布。
-	// fresh Reopen task 保持严格锁与 fencing 语义，普通 captured task 继续沿用 lock busy/fence 跳过语义。
+	// fresh Reopen task 始终严格；普通 captured task 只有定时重建可跳过 busy/fence，事件必须完成投影。
 	preparedBuckets := make(map[SchedulerBucket]struct{}, len(captured)+len(reopened))
 	for _, task := range captured {
 		preparedBuckets[task.bucket] = struct{}{}
@@ -1284,12 +1293,32 @@ func (s *SchedulerSnapshotService) coalesceFullRebuild(run func() error) error {
 	return err
 }
 
-func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context, watermark int64) {
+func (s *SchedulerSnapshotService) noteOutboxLockContention(now time.Time, busy bool) bool {
+	s.lagMu.Lock()
+	defer s.lagMu.Unlock()
+	if !busy {
+		s.outboxLockBusySince = time.Time{}
+		s.outboxLockWarnedAt = time.Time{}
+		return false
+	}
+	if s.outboxLockBusySince.IsZero() {
+		s.outboxLockBusySince = now
+	}
+	if now.Sub(s.outboxLockBusySince) < 30*time.Second || !s.outboxLockWarnedAt.IsZero() && now.Sub(s.outboxLockWarnedAt) < time.Minute {
+		return false
+	}
+	s.outboxLockWarnedAt = now
+	return true
+}
+
+func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context) { s.inspectOutboxLag(ctx, true) }
+
+func (s *SchedulerSnapshotService) inspectOutboxLag(ctx context.Context, allowRebuild bool) {
 	if s.cfg == nil || s.outboxRepo == nil {
 		return
 	}
 	now := time.Now()
-	oldestCreatedAt, ok, err := s.outboxRepo.FirstCreatedAtAfter(ctx, watermark)
+	oldestCreatedAt, ok, err := s.outboxRepo.OldestPendingCreatedAt(ctx)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox pending event read failed: %v", err)
 		return
@@ -1311,17 +1340,23 @@ func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context, watermark
 	backlogKnown := true
 	var backlog int64
 	if backlogThreshold > 0 {
-		maxID, maxErr := s.outboxRepo.MaxID(ctx)
-		if maxErr != nil {
+		pending, countErr := s.outboxRepo.PendingCount(ctx)
+		if countErr != nil {
 			backlogKnown = false
-			if s.shouldLogOutboxMaxIDError(now) {
-				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox max id read failed: %v", maxErr)
+			if s.shouldLogOutboxCountError(now) {
+				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox pending count failed: %v", countErr)
 			}
 		} else {
-			backlog = maxID - watermark
+			backlog = pending
 		}
 	}
 	backlogDegraded := backlogKnown && backlogThreshold > 0 && backlog >= int64(backlogThreshold)
+	if !allowRebuild {
+		if s.shouldLogOutboxLagWarning(lagWarning || backlogDegraded) {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox pending while consumer busy: lag=%s backlog=%d", lag, backlog)
+		}
+		return
+	}
 
 	// A successful rebuild latches the degraded episode until recovery. A failed
 	// rebuild remains retryable, but only after an exponentially backed-off
@@ -1450,13 +1485,13 @@ func (s *SchedulerSnapshotService) clearOutboxDegradedEpisode() {
 	s.lagMu.Unlock()
 }
 
-func (s *SchedulerSnapshotService) shouldLogOutboxMaxIDError(now time.Time) bool {
+func (s *SchedulerSnapshotService) shouldLogOutboxCountError(now time.Time) bool {
 	s.lagMu.Lock()
 	defer s.lagMu.Unlock()
-	if !s.outboxMaxIDErrorLastLoggedAt.IsZero() && now.Sub(s.outboxMaxIDErrorLastLoggedAt) < outboxMaxIDErrorLogSampleInterval {
+	if !s.outboxCountErrorLastLoggedAt.IsZero() && now.Sub(s.outboxCountErrorLastLoggedAt) < outboxCountErrorLogSampleInterval {
 		return false
 	}
-	s.outboxMaxIDErrorLastLoggedAt = now
+	s.outboxCountErrorLastLoggedAt = now
 	return true
 }
 

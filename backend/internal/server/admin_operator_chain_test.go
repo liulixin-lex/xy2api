@@ -217,15 +217,7 @@ func (r *chainGroups) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64
 	return []int64{10}, nil
 }
 func (r *chainGroups) GetAccountCount(context.Context, int64) (int64, int64, error) { return 0, 0, nil }
-func (r *chainGroups) DeleteAccountGroupsByGroupID(ctx context.Context, _ int64) (int64, error) {
-	r.w.record(ctx, "group.clear_bindings")
-	return 0, nil
-}
-func (r *chainGroups) BindAccountsToGroup(ctx context.Context, _ int64, _ []int64) error {
-	r.w.record(ctx, "group.bind")
-	return nil
-}
-func (r *chainGroups) ExistsByName(context.Context, string) (bool, error) { return false, nil }
+func (r *chainGroups) ExistsByName(context.Context, string) (bool, error)           { return false, nil }
 func (r *chainGroups) ListActiveByPlatform(context.Context, string) ([]service.Group, error) {
 	return []service.Group{{ID: 1, Name: "openai-default"}}, nil
 }
@@ -1412,5 +1404,14 @@ func (r *chainIdempotency) ExtendProcessingLock(context.Context, int64, string, 
 	return true, nil
 }
 func (r *chainIdempotency) MarkFailedRetryable(context.Context, int64, string, time.Time, time.Time) error {
+	return nil
+}
+
+func (r *chainGroups) CopyAccountMembers(ctx context.Context, _ int64, _ []int64, _, _ bool) (int64, error) {
+	r.w.record(ctx, "group.bind")
+	return 1, nil
+}
+func (r *chainGroups) SetMemberPinned(ctx context.Context, _, _ int64, _ bool) error {
+	r.w.record(ctx, "group.pin")
 	return nil
 }

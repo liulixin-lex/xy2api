@@ -106,13 +106,14 @@ type fakeSchedQualityStore struct {
 	mu           sync.Mutex
 	lock         sync.Mutex
 	lockReleased chan struct{}
-	Rows         []schedquality.StateRow
+	Rows         []schedquality.LineState
 	Decisions    []schedquality.Decision
 	OverrideRows []SchedOverride
 	Resets       map[int64]time.Time
 	Members      map[int64][]int64
 	Policies     map[int64]SchedPolicyRecord
 	Version      int64
+	Rule         SchedTTFTRuleRecord
 	Now          func() time.Time
 }
 
@@ -123,8 +124,9 @@ func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQuality
 	defer f.releaseLock()
 	f.mu.Lock()
 	tx := &fakeSchedQualityTx{
-		store:     f,
-		rows:      append([]schedquality.StateRow(nil), f.Rows...),
+		store:    f,
+		rows:     append([]schedquality.LineState(nil), f.Rows...),
+		policies: cloneSchedPolicies(f.Policies), version: f.Version, rule: f.Rule,
 		overrides: append([]SchedOverride(nil), f.OverrideRows...),
 		resets:    make(map[int64]time.Time, len(f.Resets)),
 	}
@@ -141,6 +143,7 @@ func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQuality
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Rows = tx.rows
+	f.Policies, f.Version, f.Rule = tx.policies, tx.version, tx.rule
 	f.Decisions = append(f.Decisions, tx.decisions...)
 	now := f.now()
 	for _, expired := range tx.expired {
@@ -200,7 +203,7 @@ func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Ti
 		f.Resets = map[int64]time.Time{}
 	}
 	f.Resets[id] = now
-	var rows []schedquality.StateRow
+	var rows []schedquality.LineState
 	for _, r := range f.Rows {
 		if r.AccountID != id {
 			rows = append(rows, r)
@@ -209,14 +212,14 @@ func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Ti
 	f.Rows = rows
 	return now, nil
 }
-func (f *fakeSchedQualityStore) LoadRows(_ context.Context) ([]schedquality.StateRow, []SchedOverride, map[int64]time.Time, error) {
+func (f *fakeSchedQualityStore) LoadRows(_ context.Context) ([]schedquality.LineState, []SchedOverride, map[int64]time.Time, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	resets := map[int64]time.Time{}
 	for k, v := range f.Resets {
 		resets[k] = v
 	}
-	return append([]schedquality.StateRow(nil), f.Rows...), append([]SchedOverride(nil), f.OverrideRows...), resets, nil
+	return append([]schedquality.LineState(nil), f.Rows...), append([]SchedOverride(nil), f.OverrideRows...), resets, nil
 }
 func (f *fakeSchedQualityStore) LoadMembers(_ context.Context) (map[int64][]int64, error) {
 	f.mu.Lock()
@@ -278,17 +281,20 @@ func (f *fakeSchedQualityStore) SavePolicy(_ context.Context, g, version int64, 
 // fakeSchedQualityTx stages changes until a successful cycle commits them.
 type fakeSchedQualityTx struct {
 	store     *fakeSchedQualityStore
-	rows      []schedquality.StateRow
+	rows      []schedquality.LineState
 	decisions []schedquality.Decision
 	overrides []SchedOverride
 	resets    map[int64]time.Time
 	expired   []SchedOverride
+	policies  map[int64]SchedPolicyRecord
+	version   int64
+	rule      SchedTTFTRuleRecord
 }
 
-func (f *fakeSchedQualityTx) States() ([]schedquality.StateRow, error) {
+func (f *fakeSchedQualityTx) States() ([]schedquality.LineState, error) {
 	f.store.mu.Lock()
 	defer f.store.mu.Unlock()
-	return append([]schedquality.StateRow(nil), f.rows...), nil
+	return append([]schedquality.LineState(nil), f.rows...), nil
 }
 func (f *fakeSchedQualityTx) Overrides() ([]SchedOverride, error) {
 	f.store.mu.Lock()
@@ -304,13 +310,13 @@ func (f *fakeSchedQualityTx) ResetTimes() (map[int64]time.Time, error) {
 	}
 	return m, nil
 }
-func (f *fakeSchedQualityTx) Upsert(rows []schedquality.StateRow) error {
+func (f *fakeSchedQualityTx) Upsert(rows []schedquality.LineState) error {
 	f.store.mu.Lock()
 	defer f.store.mu.Unlock()
 	for _, row := range rows {
 		found := false
 		for i, r := range f.rows {
-			if r.AccountID == row.AccountID && r.Model == row.Model && r.GroupID == row.GroupID {
+			if r.LineKey == row.LineKey {
 				f.rows[i] = row
 				found = true
 				break
@@ -322,13 +328,13 @@ func (f *fakeSchedQualityTx) Upsert(rows []schedquality.StateRow) error {
 	}
 	return nil
 }
-func (f *fakeSchedQualityTx) Delete(keys []schedquality.StateRow) error {
+func (f *fakeSchedQualityTx) Delete(keys []schedquality.LineKey) error {
 	f.store.mu.Lock()
 	defer f.store.mu.Unlock()
 	for _, k := range keys {
-		var rows []schedquality.StateRow
+		var rows []schedquality.LineState
 		for _, r := range f.rows {
-			if r.AccountID != k.AccountID || r.Model != k.Model || r.GroupID != k.GroupID {
+			if r.LineKey != k {
 				rows = append(rows, r)
 			}
 		}
@@ -448,4 +454,90 @@ func (f *fakeSchedAttemptStore) LoadPreviousAttempts(_ context.Context, current 
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeSchedQualityStore) LoadTTFTRule(context.Context) (SchedTTFTRuleRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.Rule
+	if r.Params.Confidence == 0 {
+		r.Params = schedquality.DefaultRuleBParams()
+	}
+	return r, nil
+}
+func (f *fakeSchedQualityStore) RunExclusive(ctx context.Context, fn func(SchedQualityTx) error) error {
+	// Test calls are synchronous unless a test explicitly holds the leader lock.
+	for {
+		locked, err := f.RunCycle(ctx, fn)
+		if locked || err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+func (f *fakeSchedQualityTx) SavePolicy(g, version int64, p schedquality.Policy) (SchedPolicyRecord, error) {
+	if f.version != version {
+		return SchedPolicyRecord{}, ErrSchedPolicyConflict
+	}
+	f.version++
+	r := SchedPolicyRecord{GroupID: g, Version: f.version, Policy: p}
+	if f.policies == nil {
+		f.policies = make(map[int64]SchedPolicyRecord)
+	}
+	f.policies[g] = r
+	return r, nil
+}
+func (f *fakeSchedQualityTx) SaveTTFTRule(version int64, p schedquality.RuleBParams) (SchedTTFTRuleRecord, error) {
+	if f.rule.Version != version {
+		return SchedTTFTRuleRecord{}, ErrSchedPolicyConflict
+	}
+	old := f.rule
+	if old.Params.Confidence == 0 {
+		old.Params = schedquality.DefaultRuleBParams()
+	}
+	if old.Params == p {
+		return old, nil
+	}
+	f.rule = SchedTTFTRuleRecord{Version: version + 1, Params: p}
+	return f.rule, nil
+}
+func (*fakeSchedView) SessionSlowTwice(int64, int64, string, string) bool { return false }
+
+func (f *fakeSchedQualityTx) Policies() (map[int64]SchedPolicyRecord, error) {
+	policies := cloneSchedPolicies(f.policies)
+	for id, r := range policies {
+		r.Version = f.version
+		policies[id] = r
+	}
+	return policies, nil
+}
+func (f *fakeSchedQualityTx) TTFTRule() (SchedTTFTRuleRecord, error) {
+	r := f.rule
+	if r.Params.Confidence == 0 {
+		r.Params = schedquality.DefaultRuleBParams()
+	}
+	return r, nil
+}
+func (f *fakeSchedAttemptStore) LoadFinishedPage(ctx context.Context, since, through time.Time, after SchedAttemptCursor, limit int) ([]schedquality.AttemptSample, error) {
+	rows, err := f.LoadFinishedSince(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	var out []schedquality.AttemptSample
+	for _, r := range rows {
+		if !r.FinishedAt.After(through) && (r.FinishedAt.After(after.At) || r.FinishedAt.Equal(after.At) && r.AttemptID > after.AttemptID) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FinishedAt.Equal(out[j].FinishedAt) {
+			return out[i].AttemptID < out[j].AttemptID
+		}
+		return out[i].FinishedAt.Before(out[j].FinishedAt)
+	})
+	return out[:min(len(out), limit)], nil
 }

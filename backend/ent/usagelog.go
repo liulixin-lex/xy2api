@@ -58,6 +58,10 @@ type UsageLog struct {
 	Degradations jsontext.Value `json:"degradations,omitempty"`
 	// PricingSource holds the value of the "pricing_source" field.
 	PricingSource jsontext.Value `json:"pricing_source,omitempty"`
+	// ProfitBasis holds the value of the "profit_basis" field.
+	ProfitBasis jsontext.Value `json:"profit_basis,omitempty"`
+	// DispatchPhases holds the value of the "dispatch_phases" field.
+	DispatchPhases jsontext.Value `json:"dispatch_phases,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
 	// RequestedModel holds the value of the "requested_model" field.
@@ -271,7 +275,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
 		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUsageObserved, usagelog.FieldTerminalEventSeen, usagelog.FieldTerminalEventValid, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
@@ -419,6 +423,22 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.PricingSource); err != nil {
 					return fmt.Errorf("unmarshal field pricing_source: %w", err)
+				}
+			}
+		case usagelog.FieldProfitBasis:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field profit_basis", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ProfitBasis); err != nil {
+					return fmt.Errorf("unmarshal field profit_basis: %w", err)
+				}
+			}
+		case usagelog.FieldDispatchPhases:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field dispatch_phases", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.DispatchPhases); err != nil {
+					return fmt.Errorf("unmarshal field dispatch_phases: %w", err)
 				}
 			}
 		case usagelog.FieldModel:
@@ -989,6 +1009,12 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("pricing_source=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PricingSource))
+	builder.WriteString(", ")
+	builder.WriteString("profit_basis=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ProfitBasis))
+	builder.WriteString(", ")
+	builder.WriteString("dispatch_phases=")
+	builder.WriteString(fmt.Sprintf("%v", _m.DispatchPhases))
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)

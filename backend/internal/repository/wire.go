@@ -86,6 +86,7 @@ func ProvideStateReadyAccountRepository(client *ent.Client, db *sql.DB, cache se
 var ProviderSet = wire.NewSet(
 	NewSchedAttemptRepository,
 	NewSchedQualityRepository,
+	NewSchedTrialLeaseCache,
 	NewSchedAdminAccountRepository,
 	NewUsageExportEngine,
 	NewUserRepository,

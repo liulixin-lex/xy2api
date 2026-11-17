@@ -38,6 +38,7 @@ func profitAuthTestAPIKey() *APIKey {
 			SubscriptionType:     SubscriptionTypeStandard,
 			PeakRateEnabled:      false,
 			ProfitControlEnabled: true,
+			MinUpstreamRate:      floatPtr(0.2),
 			ProfitMinMargin:      0.2,
 			ProfitSafetyBuffer:   0.05,
 		},
@@ -67,6 +68,7 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.NotNil(t, materialized.Group)
 	require.True(t, materialized.Group.Hydrated)
 	require.True(t, materialized.Group.ProfitControlEnabled)
+	require.Equal(t, 0.2, *materialized.Group.MinUpstreamRate)
 	require.InDelta(t, 0.2, materialized.Group.ProfitMinMargin, 1e-12)
 	require.InDelta(t, 0.05, materialized.Group.ProfitSafetyBuffer, 1e-12)
 	require.InDelta(t, 0.06, materialized.Group.RateMultiplier, 1e-12)

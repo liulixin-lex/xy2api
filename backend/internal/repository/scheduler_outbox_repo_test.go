@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSchedulerOutboxRepositoryFirstCreatedAtAfter(t *testing.T) {
+func TestSchedulerOutboxRepositoryOldestPendingCreatedAt(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -20,15 +21,13 @@ func TestSchedulerOutboxRepositoryFirstCreatedAtAfter(t *testing.T) {
 	const expectedSQL = `
 		SELECT created_at
 		FROM scheduler_outbox
-		WHERE id > $1
-		ORDER BY id ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT 1
 	`
 	mock.ExpectQuery(regexp.QuoteMeta(expectedSQL)).
-		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}).AddRow(createdAt))
 
-	got, ok, err := repo.FirstCreatedAtAfter(context.Background(), 42)
+	got, ok, err := repo.OldestPendingCreatedAt(context.Background())
 
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -36,7 +35,7 @@ func TestSchedulerOutboxRepositoryFirstCreatedAtAfter(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound(t *testing.T) {
+func TestSchedulerOutboxRepositoryOldestPendingCreatedAtReturnsNotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -45,15 +44,13 @@ func TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound(t *testing.
 	const expectedSQL = `
 		SELECT created_at
 		FROM scheduler_outbox
-		WHERE id > $1
-		ORDER BY id ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT 1
 	`
 	mock.ExpectQuery(regexp.QuoteMeta(expectedSQL)).
-		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
 
-	got, ok, err := repo.FirstCreatedAtAfter(context.Background(), 42)
+	got, ok, err := repo.OldestPendingCreatedAt(context.Background())
 
 	require.NoError(t, err)
 	require.False(t, ok)
@@ -61,86 +58,46 @@ func TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound(t *testing.
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestSchedulerOutboxRepositoryDeleteConsumedUpToUsesBoundedCTE(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	repo := &schedulerOutboxRepository{db: db}
-	const expectedSQL = `
-		WITH doomed AS (
-			SELECT id
-			FROM scheduler_outbox
-			WHERE id <= $1
-				AND created_at < NOW() - INTERVAL '10 seconds'
-			ORDER BY id ASC
-			LIMIT $2
-		)
-		DELETE FROM scheduler_outbox o
-		USING doomed d
-		WHERE o.id = d.id
-	`
-	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).
-		WithArgs(int64(42), 5000).
-		WillReturnResult(sqlmock.NewResult(0, 17))
-
-	deleted, err := repo.DeleteConsumedUpTo(context.Background(), 42, 5000)
-
-	require.NoError(t, err)
-	require.EqualValues(t, 17, deleted)
-	require.NoError(t, mock.ExpectationsWereMet())
+func expectOutboxTransaction(mock sqlmock.Sqlmock, acquired bool) {
+	mock.ExpectExec("BEGIN; SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))")).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(acquired))
 }
-
-func TestSchedulerOutboxRepositoryDeleteConsumedUpToSkipsNonPositiveWatermark(t *testing.T) {
+func TestSchedulerOutboxRepositoryAcknowledgesExactIDsOutsideLease(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-
+	expectOutboxTransaction(mock, true)
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])")).WithArgs("{2,9}").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"alive"}).AddRow(1))
+	mock.ExpectExec("ROLLBACK").WillReturnResult(sqlmock.NewResult(0, 0))
 	repo := &schedulerOutboxRepository{db: db}
-
-	deleted, err := repo.DeleteConsumedUpTo(context.Background(), 0, 5000)
-
-	require.NoError(t, err)
-	require.EqualValues(t, 0, deleted)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestSchedulerOutboxRepositoryTryAcquireCleanupLock(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_unlock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
+	lease, acquired, err := repo.TryAcquireConsumerLock(context.Background())
 	require.NoError(t, err)
 	require.True(t, acquired)
-	require.NotNil(t, lease)
-
-	lease.Release()
-
+	require.NoError(t, repo.DeleteProcessed(context.Background(), []int64{2, 9}))
+	require.NoError(t, lease.KeepAlive(context.Background()))
+	lease.Release() // only the advisory lock lives in this transaction
 	require.NoError(t, mock.ExpectationsWereMet())
 }
-
-func TestSchedulerOutboxRepositoryTryAcquireCleanupLockUnavailable(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-
-	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(false))
-
-	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
-	require.NoError(t, err)
-	require.False(t, acquired)
-	require.Nil(t, lease)
-
-	require.NoError(t, mock.ExpectationsWereMet())
+func TestSchedulerOutboxRepositoryTransactionRollsBack(t *testing.T) {
+	for _, acquired := range []bool{true, false} {
+		t.Run(fmt.Sprint(acquired), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			expectOutboxTransaction(mock, acquired)
+			mock.ExpectExec("ROLLBACK").WillReturnResult(sqlmock.NewResult(0, 0))
+			lease, got, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, acquired, got)
+			if acquired {
+				lease.Release()
+			} else {
+				require.Nil(t, lease)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 // buildSchedulerGroupPayload 在 groupIDs 为空时必须返回 untyped nil（any），

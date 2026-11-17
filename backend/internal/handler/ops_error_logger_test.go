@@ -565,7 +565,8 @@ func TestOpsErrorLoggerMiddleware_StreamFailureUsesTerminalErrorOverAttemptConte
 	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
 	require.Equal(t, "invalid_request_error", job.entry.ErrorType)
 	require.NotNil(t, job.entry.UpstreamStatusCode)
-	require.Equal(t, http.StatusBadRequest, *job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusBadGateway, *job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusOK, job.entry.ClientStatus)
 	require.NotNil(t, job.entry.UpstreamErrorMessage)
 	require.Equal(t, "input exceeds the context window", *job.entry.UpstreamErrorMessage)
 }
@@ -605,7 +606,12 @@ func TestOpsErrorLoggerMiddleware_GatewayTerminalUsesWrittenStatus(t *testing.T)
 			job := <-opsErrorLogQueue
 			require.Equal(t, http.StatusRequestEntityTooLarge, job.entry.StatusCode)
 			require.NotNil(t, job.entry.UpstreamStatusCode)
-			require.Equal(t, http.StatusRequestEntityTooLarge, *job.entry.UpstreamStatusCode)
+			wantUpstream := http.StatusRequestEntityTooLarge
+			if streamStarted {
+				wantUpstream = http.StatusBadRequest
+			}
+			require.Equal(t, wantUpstream, *job.entry.UpstreamStatusCode)
+			require.Equal(t, wantWireStatus, job.entry.ClientStatus)
 		})
 	}
 }
@@ -647,7 +653,8 @@ func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus(t *
 	job := <-opsErrorLogQueue
 	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
 	require.NotNil(t, job.entry.UpstreamStatusCode)
-	require.Equal(t, http.StatusBadRequest, *job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusRequestEntityTooLarge, *job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusOK, job.entry.ClientStatus)
 }
 
 func TestOpsErrorLoggerMiddleware_PrefersContextRequestID(t *testing.T) {

@@ -1,0 +1,80 @@
+[
+  {
+    "id": 3,
+    "at": "2026-11-01T12:01:00Z",
+    "group_id": 1,
+    "model": "model-a",
+    "line": "ttfo",
+    "action": "trial_fail",
+    "level": 1,
+    "until": "2026-11-01T12:41:00Z",
+    "basis": {
+      "rule_version": "3.0",
+      "line": "ttfo",
+      "kind": "trial",
+      "threshold": 10,
+      "source_groups": [],
+      "ttft": {
+        "limit_s": 10,
+        "n": 25,
+        "k": 8,
+        "x": 0,
+        "s": 3,
+        "d": 2,
+        "prior_mu": 0.2,
+        "peer_nu": 0.15,
+        "p_abs": 0.95,
+        "p_rel": null,
+        "u": null,
+        "z": null,
+        "causes": [
+          "no_peers"
+        ]
+      }
+    }
+  },
+  {
+    "id": 2,
+    "at": "2026-11-01T12:00:00Z",
+    "group_id": 1,
+    "model": "model-a",
+    "line": "ttfo",
+    "action": "trial",
+    "level": 0,
+    "until": "2026-11-01T13:00:00Z",
+    "basis": {
+      "rule_version": "3.0",
+      "line": "ttfo",
+      "kind": "review",
+      "threshold": 10,
+      "source_groups": [],
+      "ttft": {
+        "limit_s": 10,
+        "n": 25,
+        "k": 8,
+        "x": 0,
+        "s": 3,
+        "d": 2,
+        "prior_mu": 0.2,
+        "peer_nu": 0.15,
+        "p_abs": 0.95,
+        "p_rel": null,
+        "u": null,
+        "z": null,
+        "causes": [
+          "no_peers"
+        ]
+      }
+    }
+  },
+  {
+    "id": 1,
+    "at": "2026-11-01T11:00:00Z",
+    "group_id": 1,
+    "model": "model-a",
+    "line": "",
+    "action": "enter",
+    "level": 1,
+    "until": null
+  }
+]

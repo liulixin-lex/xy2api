@@ -182,7 +182,7 @@ const FIELD: Record<ToolbarFilterKey, keyof ToolbarFilters> = {
   iq: 'iq_status',
   category: 'group_category'
 }
-const QUALITY_TONES: Record<string, StatusDotTone> = { normal: 'ok', substandard: 'back', exempt: 'exempt', observing: 'observe' }
+const QUALITY_TONES: Record<string, StatusDotTone> = { normal: 'ok', rear: 'back', trial: 'info', unknown: 'observe', exempt: 'exempt' }
 
 const label = (key: ToolbarFilterKey) => t(`admin.accounts.table.filterLabels.${key}`)
 

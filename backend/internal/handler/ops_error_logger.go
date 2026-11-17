@@ -227,6 +227,9 @@ func enqueueOpsErrorLog(ops *service.OpsService, entry *service.OpsInsertErrorLo
 	if ops == nil || entry == nil {
 		return
 	}
+	if entry.UpstreamStatusCode == nil {
+		entry.StatusOrigin = 0
+	}
 	applyBudgetCutErrorOwner(entry)
 	entry.UserAgent = normalizeOpsPersistentUserAgent(entry.UserAgent)
 	if entry.ErrorBody != "" {
@@ -1267,6 +1270,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		ErrorType:         normalizedType,
 		Severity:          classifyOpsSeverity(normalizedType, status),
 		StatusCode:        status,
+		ClientStatus:      opsClientStatus(c),
 		IsBusinessLimited: isBusinessLimited,
 		IsCountTokens:     isCountTokensRequest(c),
 
@@ -1283,10 +1287,6 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 	if parsed.StreamFailure {
 		if message := strings.TrimSpace(parsed.Message); message != "" {
 			entry.UpstreamErrorMessage = &message
-		}
-		if status >= 400 {
-			finalStatus := status
-			entry.UpstreamStatusCode = &finalStatus
 		}
 	}
 	suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
@@ -1321,7 +1321,7 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		return
 	}
 
-	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus}
+	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus, ClientStatus: opsClientStatus(c)}
 	applyOpsUpstreamFieldsFromContext(c, entry)
 	if len(entry.UpstreamErrors) > 0 {
 		visibleEvents := make([]*service.OpsUpstreamErrorEvent, 0, len(entry.UpstreamErrors))
@@ -1590,6 +1590,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		ErrorType:         normalizedType,
 		Severity:          classifyOpsSeverity(normalizedType, classifyStatus),
 		StatusCode:        recordedStatus,
+		ClientStatus:      opsClientStatus(c),
 		IsBusinessLimited: isBusinessLimited,
 		IsCountTokens:     isCountTokensRequest(c),
 
@@ -1645,6 +1646,7 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 		return
 	}
 	entry.GatewayRequestID = streamErr.GatewayRequestID
+	entry.StatusOrigin = streamErr.StatusOrigin
 	if streamErr.AccountID > 0 {
 		accountID := streamErr.AccountID
 		entry.AccountID = &accountID
@@ -1664,6 +1666,14 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 		entry.UpstreamErrorDetail = &detail
 	}
 	entry.UpstreamErrors = streamErr.UpstreamErrors
+	for i := len(streamErr.UpstreamErrors) - 1; i >= 0; i-- {
+		if event := streamErr.UpstreamErrors[i]; event != nil {
+			if event.UpstreamStatusCode == streamErr.UpstreamStatus {
+				entry.StatusOrigin = event.StatusOrigin
+			}
+			break
+		}
+	}
 	lastStage := ""
 	for i := len(streamErr.UpstreamErrors) - 1; i >= 0; i-- {
 		if streamErr.UpstreamErrors[i] != nil {
@@ -1741,6 +1751,9 @@ func applyOpsUpstreamFieldsFromContext(c *gin.Context, entry *service.OpsInsertE
 		return
 	}
 	applyOpsConversionNoticesFromContext(c, entry)
+	if origin, ok := c.Get(service.OpsUpstreamStatusOriginKey); ok {
+		entry.StatusOrigin, _ = origin.(int16)
+	}
 	if v, ok := c.Get(service.OpsUpstreamStatusCodeKey); ok {
 		switch t := v.(type) {
 		case int:
@@ -1801,6 +1814,7 @@ func applyOpsUpstreamErrorEvents(entry *service.OpsInsertErrorLogInput, events [
 		return
 	}
 
+	entry.StatusOrigin = 0
 	entry.UpstreamStatusCode = nil
 	entry.UpstreamErrorMessage = nil
 	entry.UpstreamErrorDetail = nil
@@ -1810,6 +1824,7 @@ func applyOpsUpstreamErrorEvents(entry *service.OpsInsertErrorLogInput, events [
 	} else if last.UpstreamStatusCode > 0 {
 		code := last.UpstreamStatusCode
 		entry.UpstreamStatusCode = &code
+		entry.StatusOrigin = last.StatusOrigin
 	}
 	if message := strings.TrimSpace(last.Message); message != "" {
 		entry.UpstreamErrorMessage = &message
@@ -1826,6 +1841,7 @@ func suppressOpsUpstreamAttributionForLocalModelConfiguration(c *gin.Context, en
 	entry.AccountID = nil
 	entry.UpstreamEndpoint = ""
 	entry.UpstreamModel = ""
+	entry.StatusOrigin = 0
 	entry.UpstreamStatusCode = nil
 	entry.UpstreamErrorMessage = nil
 	entry.UpstreamErrorDetail = nil
@@ -2606,4 +2622,12 @@ func shouldSkipOpsClientClosed(c *gin.Context, ops *service.OpsService, status i
 // 统一落一条 status=403 的错误请求，故中间件跳过自身落库，避免双写。
 func shouldSkipOpsErrorLogForCyber(c *gin.Context) bool {
 	return service.GetOpsCyberPolicy(c) != nil
+}
+
+// Gin defaults to 200 even before a response has been committed.
+func opsClientStatus(c *gin.Context) int {
+	if c == nil || c.Writer == nil || !c.Writer.Written() {
+		return 0
+	}
+	return c.Writer.Status()
 }

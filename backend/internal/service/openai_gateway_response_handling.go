@@ -56,6 +56,10 @@ type openAISemanticWriteTracker struct {
 	semanticStart int64
 	semanticEnd   int64
 	sawOutput     bool
+	// Unlike semanticStart/End (legacy replay safety), validEnd is the end of
+	// a complete data line classified as quality output, including its newline.
+	validEnd  int64
+	noteValid func()
 }
 
 func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
@@ -64,6 +68,10 @@ func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
 		w.sawOutput = true
 	}
 	w.written += int64(n)
+	if w.validEnd > 0 && w.written >= w.validEnd && w.noteValid != nil {
+		w.noteValid()
+		w.noteValid = nil
+	}
 	return n, err
 }
 
@@ -187,7 +195,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var firstTokenMs *int
 	ttftMode := s.openAITTFTMode(ctx)
 	firstOutputProgressObserved := false
-	delivery := &openAISemanticWriteTracker{Writer: w}
+	delivery := &openAISemanticWriteTracker{Writer: w, noteValid: deliveryWriterFrom(c).noteClassifiedSemanticOutput}
 	bufferedWriter := bufio.NewWriterSize(delivery, 4*1024)
 	var queuedBytes int64
 	var firstOutputStage *openAIFirstOutputStage
@@ -233,6 +241,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		bufferedWriter.Reset(delivery)
 		queuedBytes = delivery.written
+		delivery.validEnd = 0
 		return nil
 	}
 
@@ -396,14 +405,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 			}
 		}
-		if completedProgressEvent && !firstOutputProgressObserved {
-			firstOutputScanGuard.Store(false)
-			firstOutputProgressObserved = true
-			stopFirstOutputTimer()
-		}
+
 		if completedTTFTEvent && firstTokenMs == nil {
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode))
 		}
 		eventStartsClientOutput = false
 		eventStartsTTFTOutput = false
@@ -466,7 +472,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			TerminalSeen:     observedTerminal.Seen,
 			TerminalValid:    observedTerminal.Valid,
 			usage:            usage,
-			firstTokenMs:     relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode),
+			firstTokenMs:     schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode)),
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
@@ -580,6 +586,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			result, err := finalizeStream()
 			return result, err, true
 		}
+		schedCapture.noteNetworkError(scanErr)
 		// 客户端断开/取消请求时，上游读取往往会返回 context canceled。
 		// /v1/responses 的 SSE 事件必须符合 OpenAI 协议；这里不注入自定义 error event，避免下游 SDK 解析失败。
 		if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
@@ -683,7 +690,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
-			observeSchedPayload(c, dataBytes, eventType)
+			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			validOutput := resilience.ClassifyOutput("", pendingSSEEventType, dataBytes).Valid
+			observeSchedPayload(c, dataBytes, pendingSSEEventType)
+
 			observer.ObserveOpenAI(dataBytes, eventType)
 			// 初始上游 data 的 type 只解析一次：原始值保持终止事件的精确匹配，规范化值供后续分支复用。
 			if currentTerminal.Seen && currentTerminal.Valid || strings.TrimSpace(data) == "[DONE]" {
@@ -921,7 +931,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 				return
 			}
-			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			startsClientOutput := forceFlushFailedEvent || commitsOutput
+			if account == nil || account.Platform != PlatformOpenAI {
+				startsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			}
+			if startsClientOutput && !suppressCurrentEvent {
+				firstOutputProgressObserved = true
+				firstOutputScanGuard.Store(false)
+				stopFirstOutputTimer()
+			}
 			if startsClientOutput && !clientOutputStarted {
 				releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)
 			}
@@ -952,8 +970,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					delivery.semanticStart = queuedBytes
 					delivery.semanticEnd = queuedBytes + int64(len(line))
 				}
+				if delivery.noteValid != nil && delivery.validEnd == 0 && validOutput {
+					delivery.validEnd = queuedBytes + int64(len(line)) + 1
+				}
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
-				if firstTokenMs == nil && startsVisibleOutput {
+				if firstTokenMs == nil && startsVisibleOutput && (clientOutputStarted || startsClientOutput) {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。
 					shouldFlush = true
 				}
@@ -975,10 +996,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 
 			// Record first token time
-			if !guardFirstOutput && firstTokenMs == nil && startsTTFTOutput {
+			if (!guardFirstOutput || !stageFirstOutput) && firstTokenMs == nil && startsTTFTOutput {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
-				stopFirstOutputTimer()
+				schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, ttftMode))
 			}
 			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 			return
@@ -1095,7 +1116,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			typedBareErrorRecoverable = false
 			resilience.StateFrom(ctx).SetUpstreamRecoveryHint(nil)
 		}
-		if !currentTerminal.Failure && openAIStreamDataStartsClientOutput(frame.Data, effectiveOpenAISSEEventType([]byte(frame.Data), frame.EventType)) {
+		if !currentTerminal.Failure && (!stageFirstOutput || openAIStreamCommitsOutput(frame.EventType, []byte(frame.Data), currentTerminal)) {
 			firstOutputScanGuard.Store(false)
 			if releaseFrameScan != nil {
 				releaseFrameScan()
@@ -1353,7 +1374,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-firstOutputCh:
-			if firstOutputProgressObserved {
+			if firstOutputProgressObserved || clientOutputStarted {
 				stopFirstOutputTimer()
 				continue
 			}
@@ -2034,14 +2055,18 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
 	return OpenAIUsage{
-		CacheReadSource:          counts.CacheReadSource,
-		CacheWriteSource:         counts.CacheWriteSource,
-		InputTokens:              int(inputTokens),
-		ImageInputTokens:         imageInputTokens,
-		OutputTokens:             int(outputTokens),
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
-		ImageOutputTokens:        int(imageOutputTokens),
+		InputTokensPresent:              counts.InputTokensPresent,
+		OutputTokensPresent:             counts.OutputTokensPresent,
+		CacheReadInputTokensPresent:     counts.CacheReadSource != "" && value.Get(counts.CacheReadSource).Num >= 0,
+		CacheCreationInputTokensPresent: counts.CacheWriteSource != "" && value.Get(counts.CacheWriteSource).Num >= 0,
+		CacheReadSource:                 counts.CacheReadSource,
+		CacheWriteSource:                counts.CacheWriteSource,
+		InputTokens:                     int(inputTokens),
+		ImageInputTokens:                imageInputTokens,
+		OutputTokens:                    int(outputTokens),
+		CacheCreationInputTokens:        cacheCreationTokens,
+		CacheReadInputTokens:            cacheReadTokens,
+		ImageOutputTokens:               int(imageOutputTokens),
 	}, true
 }
 

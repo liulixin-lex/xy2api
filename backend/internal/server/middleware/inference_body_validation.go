@@ -7,10 +7,12 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/requestmodel"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // InferenceBodyValidation runs after authentication and before routing rewrites.
@@ -36,6 +38,7 @@ func InferenceBodyValidation(maxBodyBytes int64, onReadError ...func(*gin.Contex
 		scanRequest := c.Request.Clone(c.Request.Context())
 		scanRequest.Body = io.NopCloser(io.TeeReader(c.Request.Body, &wire))
 		body, err := httputil.ReadRequestBodyWithPrealloc(scanRequest)
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("ingress_validation_ms", time.Now())
 		if err != nil {
 			readError(c, err)
 			return
@@ -56,6 +59,7 @@ func InferenceBodyValidation(maxBodyBytes int64, onReadError ...func(*gin.Contex
 			inferenceBodyValidationError(c, "duplicate_model", "model", "Duplicate top-level field: model")
 			return
 		}
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("routing_validation_ms", time.Now())
 		c.Next()
 	}
 }

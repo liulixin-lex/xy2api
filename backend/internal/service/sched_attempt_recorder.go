@@ -53,6 +53,7 @@ type SchedAttemptRecorderService struct {
 	droppedWriteFailed atomic.Uint64
 	lastQueueWarning   atomic.Int64
 	lastWriteWarning   atomic.Int64
+	lastStoppedWarning atomic.Int64
 }
 
 var _ SchedAttemptRecorder = (*SchedAttemptRecorderService)(nil)
@@ -102,22 +103,40 @@ func (s *SchedAttemptRecorderService) SetObserver(fn func(schedquality.AttemptSa
 }
 
 func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
+	return s.beginAt(in, time.Time{})
+}
+
+// beginAt preserves a request-owned physical dial start without publishing a
+// provisional attempt for a dial that is later canceled locally.
+func (s *SchedAttemptRecorderService) beginAt(in SchedAttemptStart, at time.Time) SchedAttempt {
 	if s == nil || s.stopped.Load() || s.store == nil {
 		return schedAttemptNoop{}
 	}
-	at := s.now()
+	if at.IsZero() {
+		at = s.now()
+	}
 	row := schedquality.AttemptSample{
 		AttemptID: uuid.Must(uuid.NewV7()).String(), StartedAt: at,
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
 		SessionKey: in.SessionKey, RequestID: in.RequestID,
 	}
+	s.observe(row)
 	return &schedAttemptHandle{recorder: s, row: row}
+}
+
+func (s *SchedAttemptRecorderService) observe(row schedquality.AttemptSample) {
+	s.observerMu.RLock()
+	observer := s.observer
+	s.observerMu.RUnlock()
+	if observer != nil {
+		observer(row)
+	}
 }
 
 type schedAttemptNoop struct{}
 
-func (schedAttemptNoop) MarkFirstOutput(time.Time) {}
-func (schedAttemptNoop) Finish(SchedAttemptFinish) {}
+func (schedAttemptNoop) MarkOutput(SchedOutputKind, time.Time) {}
+func (schedAttemptNoop) Finish(SchedAttemptFinish)             {}
 
 type schedAttemptHandle struct {
 	recorder *SchedAttemptRecorderService
@@ -126,12 +145,26 @@ type schedAttemptHandle struct {
 	row      schedquality.AttemptSample
 }
 
-func (h *schedAttemptHandle) MarkFirstOutput(at time.Time) {
+func (h *schedAttemptHandle) MarkOutput(kind SchedOutputKind, at time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.finished.Load() && h.row.TTFOMs == nil {
+	if h.finished.Load() {
+		return
+	}
+	var target **int
+	switch kind {
+	case OutputFirstEvent:
+		target = &h.row.FirstEventMs
+	case OutputValid:
+		target = &h.row.TTFOMs
+	case OutputAnswer:
+		target = &h.row.FirstAnswerMs
+	default:
+		return
+	}
+	if *target == nil {
 		ms := int(at.Sub(h.row.StartedAt).Milliseconds())
-		h.row.TTFOMs = &ms
+		*target = &ms
 	}
 }
 
@@ -145,6 +178,13 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	row := h.row
 	h.mu.Unlock()
 	row.FinishedAt, row.Outcome = h.recorder.now(), outcome
+	row.Class, row.StatusOrigin = in.Class, in.StatusOrigin
+	if in.HTTPStatus != 0 {
+		status := in.HTTPStatus
+		row.HTTPStatus = &status
+	}
+	outputBytes := in.OutputBytes
+	row.OutputBytes = &outputBytes
 	if r := []rune(detail); len(r) > 32 {
 		detail = string(r[:32])
 	}
@@ -156,20 +196,25 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	row.ClientCanceled = outcome == schedquality.Outcome(5)
 	if u != nil {
 		prompt, input, cached, creation := u.PromptTokens, u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens
-		row.PromptTokens, row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens = &prompt, &input, &cached, &creation
+		row.PromptTokens, row.InputTokens, row.CacheCreationTokens = &prompt, &input, &creation
+		if u.CacheReadTokensPresent {
+			row.CacheReadTokens = &cached
+		}
 	}
 	s := h.recorder
-	s.observerMu.RLock()
-	observer := s.observer
-	s.observerMu.RUnlock()
-	if observer != nil {
-		observer(row)
-	}
+	s.observe(row)
 	s.enqueue(row)
 }
 
 func (s *SchedAttemptRecorderService) enqueue(row schedquality.AttemptSample) {
 	s.queueMu.Lock()
+	// Check under the queue lock so an accepted row precedes the shutdown drain.
+	if s.stopped.Load() {
+		s.queueMu.Unlock()
+		s.droppedWriteFailed.Add(1)
+		s.warnDrop("stopped", &s.lastStoppedWarning, nil)
+		return
+	}
 	dropped := s.count == len(s.queue)
 	if dropped {
 		s.head = (s.head + 1) % len(s.queue)

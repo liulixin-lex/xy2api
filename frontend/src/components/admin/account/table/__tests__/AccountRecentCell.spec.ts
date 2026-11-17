@@ -6,6 +6,7 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountRecentCell from '../AccountRecentCell.vue'
 import { formatShortTime } from '../accountTime'
+import { recentExtras, recentValue } from '../accountRecent'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { TipContent } from '@/utils/tip'
 
@@ -17,9 +18,9 @@ vi.mock('vue-i18n', async () => ({
 type Quality = Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'>
 const quality = (patch: Partial<Quality> = {}): Quality => ({
   reset_at: null,
-  ttfo: { n: 30, short: false, red: false, p50_ms: 2800 },
+  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
   error: { n: 100, short: false, red: false, rate: 0.042 },
-  cache: { n: 40, short: false, red: false, ratio: 0.8 },
+  cache: { ratio: 0.8, turns: 40, all_ratio: 0.6, all_requests: 120 },
   ...patch
 })
 enableAutoUnmount(afterEach)
@@ -37,9 +38,21 @@ describe('AccountRecentCell', () => {
     ])
   })
 
-  // One tip card for the whole cell (12.7): the window, then a row per dimension with its value and sample count.
-  it('has one card: the last hour, each dimension\'s value and samples, muted with too few samples, "—" without a value', () => {
-    const cell = mountCell(quality({ cache: { n: 3, short: true, red: false, ratio: 0.2 }, error: { n: 0, short: true, red: false, rate: null } }))
+  // Under a second in ms: 100 / 50 / 50 ms all read "0.1s" otherwise. The cell, its card and the panel share these.
+  it('writes first token, first event and their gap under a second in ms, and seconds from 1s up', () => {
+    const fast = quality({ ttfo: { first_event_p50_ms: 50, first_output_p50_ms: 100, gap_p50_ms: 50, n: 30 } })
+    expect(recentValue(fast, 'ttfo').text).toBe('100ms')
+    expect(recentExtras(fast)).toMatchObject({ firstEvent: '50ms', gap: '50ms' })
+    const edge = quality({ ttfo: { first_event_p50_ms: 999.6, first_output_p50_ms: 1000, gap_p50_ms: 0, n: 30 } })
+    expect(recentValue(edge, 'ttfo').text).toBe('1.0s')
+    expect(recentExtras(edge)).toMatchObject({ firstEvent: '1.0s', gap: '0ms' })
+  })
+
+  // One tip card for the whole cell (12.7): the window, then each value with its samples. First token is the first
+  // useful output, with the first event and the gap under it; cache is the continuation turns, with every successful
+  // request under it (N14).
+  it('has one card: the last hour, both views of first token and cache, muted with too few samples, "—" without a value', () => {
+    const cell = mountCell(quality({ cache: { ratio: 0.2, turns: 3, all_ratio: 0.6, all_requests: 120 }, error: { n: 0, short: true, red: false, rate: null } }))
     expect(cell.findAll('.recent__v').some((value) => '__tipHandlers' in value.element)).toBe(false)
     vi.useFakeTimers()
     cell.element.dispatchEvent(new Event('mouseenter'))
@@ -48,9 +61,12 @@ describe('AccountRecentCell', () => {
     const tip = document.getElementById('sq-tip')!
     expect(tip.querySelector('.sq-tip__title')!.textContent).toBe('admin.accounts.table.tip.recentTitle')
     expect(Array.from(tip.querySelectorAll('.sq-tip__c'), (el) => el.textContent)).toEqual([
-      'admin.accounts.table.dims.ttfo', '2.8s', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.recent.firstOutput', '2.8s', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.recent.firstEvent', '1.2s', '',
+      'admin.accounts.table.recent.gap', '1.6s', '',
       'admin.accounts.table.dims.error', '—', 'admin.accounts.table.tip.countShort:{"n":0}',
-      'admin.accounts.table.dims.cache', '20%', 'admin.accounts.table.tip.countShort:{"n":3}'
+      'admin.accounts.table.recent.cacheTurns', '20%', 'admin.accounts.table.tip.turnsShort:{"n":3}',
+      'admin.accounts.table.recent.cacheAll', '60%', 'admin.accounts.table.tip.count:{"n":120}'
     ])
     expect(Array.from(tip.querySelectorAll('.sq-tip__tone--muted'), (el) => el.textContent)).toEqual(['—', '20%'])
     cell.element.dispatchEvent(new Event('mouseleave'))
@@ -67,6 +83,41 @@ describe('AccountRecentCell', () => {
     expect(card(null)).toBe('')
   })
 
+  // N1: the cell is 72px (label 24 + gap 8 + value ≤ 40): "100ms" (~42px) does not fit, so the cell writes a time under
+  // a second in hundredths; the tip card keeps "100ms". The widest values the cell can show stay "0.99s", "59.9s", "100%".
+  it('writes first token compactly in the 72px cell and in full in its card', () => {
+    // A variable, not a literal: Vite rewrites new URL('<literal>', import.meta.url) into an asset URL.
+    const file = '../AccountRecentCell.vue'
+    const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
+    expect(source).toMatch(/\.recent \{[^}]*width: 72px;[^}]*\}/)
+    // Label ≤ 25 + gap 6 + value ≤ 36.3 (system fonts) in 72px; a wider label gives way with an ellipsis, never the value.
+    expect(source).toMatch(/\.recent \{[^}]*grid-template-columns: minmax\(0, auto\) auto;[^}]*column-gap: 6px;/)
+    expect(source).toMatch(/\.recent__k \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/)
+    vi.useFakeTimers()
+    const cell = mountCell(quality({ ttfo: { first_event_p50_ms: 50, first_output_p50_ms: 100, gap_p50_ms: 50, n: 30 } }))
+    expect(cell.get('[data-dim="ttfo"]').text()).toBe('0.10s')
+    cell.element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    vi.useRealTimers()
+    expect(Array.from(document.getElementById('sq-tip')!.querySelectorAll('.sq-tip__c'), (el) => el.textContent).slice(0, 8)).toEqual([
+      'admin.accounts.table.recent.firstOutput', '100ms', 'admin.accounts.table.tip.count:{"n":30}',
+      'admin.accounts.table.recent.firstEvent', '50ms', '',
+      'admin.accounts.table.recent.gap', '50ms'
+    ])
+    const ttfo = (ms: number) => cells(quality({ ttfo: { first_event_p50_ms: null, first_output_p50_ms: ms, gap_p50_ms: null, n: 30 } }))[0].text
+    expect([50, 994, 996, 1000, 59_940, 99_960, 123_400].map(ttfo)).toEqual(['0.05s', '0.99s', '1.0s', '1.0s', '59.9s', '100s', '123s'])
+  })
+
+  // English "Errors"/"Cache" (34/36px) leave no room in 72px: the table cell has short labels, the card and tip the full ones.
+  it('labels the table cell with the short names and the card and its tip with the full ones', () => {
+    const labels = (card: boolean) =>
+      mount(AccountRecentCell, { attachTo: document.body, props: { quality: quality(), card } }).findAll('.recent__k').map((el) => el.text())
+    expect(labels(false)).toEqual(['admin.accounts.table.dimsShort.ttfo', 'admin.accounts.table.dimsShort.error', 'admin.accounts.table.dimsShort.cache'])
+    expect(labels(true)).toEqual(['admin.accounts.table.dims.ttfo', 'admin.accounts.table.dims.error', 'admin.accounts.table.dims.cache'])
+    const tip = (mountCell(quality()).element as HTMLElement & { __tipText?: () => { rows: unknown[][] } }).__tipText!()
+    expect(tip.rows.map((row) => row[0])).toContain('admin.accounts.table.dims.error')
+  })
+
   it('takes its column\'s size, never the viewport\'s: 72px, 84px only when the table has the roomy widths (7q-5)', () => {
     const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
     // An optional column keeps a 1920px screen in the compact widths: 84px there cut "0.7s" to "0.".
@@ -75,7 +126,9 @@ describe('AccountRecentCell', () => {
   })
 
   it('reads muted with too few samples, and "—" without data', () => {
-    expect(cells(quality({ cache: { n: 3, short: true, red: true, ratio: 0.2 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['recent__v--na'] })
+    // The cache line judges from 20 continuation turns; fewer read muted.
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 19, all_ratio: 0.6, all_requests: 120 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['recent__v--na'] })
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 20, all_ratio: 0.6, all_requests: 120 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: [] })
     expect(cells(null).map((cell) => [cell.text, cell.cls])).toEqual([['—', ['recent__v--na']], ['—', ['recent__v--na']], ['—', ['recent__v--na']]])
   })
 })

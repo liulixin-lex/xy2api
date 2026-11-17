@@ -11,7 +11,7 @@ func TestWilsonLower(t *testing.T) {
 	for _, c := range []struct {
 		bad, n int
 		want   float64
-	}{{0, 20, 0}, {0, 0, 0}, {1, 0, 0}, {5, 10, 0.23658959361548731}} {
+	}{{0, 20, 0}, {0, 0, 0}, {1, 0, 0}, {5, 10, 0.23659308901147937084281607125823810026354993350724}} {
 		if c.want == 0 && WilsonLower(c.bad, c.n) != 0 {
 			t.Fatal("zero must be exact")
 		}

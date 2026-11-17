@@ -26,7 +26,10 @@ type SchedQualityAdmin interface {
 	ClearOverride(context.Context, int64, int64, int64) error
 	ClearAutoState(context.Context, int64, string, int64) (bool, error)
 	Policy(context.Context, int64) (service.SchedAdminPolicy, error)
-	UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicy, error)
+	UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicySaved, error)
+	Decisions(context.Context, int64, int, int64) ([]service.SchedAdminDecision, error)
+	TTFTRule(context.Context) (service.SchedAdminTTFTRule, error)
+	UpdateTTFTRule(context.Context, int64, schedquality.RuleBParams, int64) (service.SchedAdminTTFTRuleSaved, error)
 	Order(context.Context, int64, string) (service.SchedAdminOrder, error)
 	GroupsSummary(context.Context, []int64) (service.SchedAdminGroupsSummary, error)
 	PreviewPolicy(context.Context, int64, int64, schedquality.Policy) (service.SchedAdminPolicyPreview, error)
@@ -100,7 +103,7 @@ func (h *SchedQualityHandler) Reset(c *gin.Context) {
 		schedQualityReply(c, nil, e)
 		return
 	}
-	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "kept_count": len(v.Kept), "failed_count": len(v.Failed)})
+	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "preserved_count": len(v.Kept), "failed_count": len(v.Failed)})
 	schedQualityReply(c, v, nil)
 }
 func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
@@ -240,3 +243,66 @@ func (h *SchedQualityHandler) PreviewPolicy(c *gin.Context) {
 }
 
 var _ SchedQualityAdmin = (*service.SchedAdminService)(nil)
+
+func (h *SchedQualityHandler) Decisions(c *gin.Context) {
+	id, ok := schedQualityID(c)
+	if !ok {
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil || limit < 1 || limit > 200 {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_DECISION_PAGE", "limit must be 1..200"))
+		return
+	}
+	before := int64(0)
+	if raw, ok := c.GetQuery("before_id"); ok {
+		before, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || before <= 0 {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_DECISION_PAGE", "before_id must be positive"))
+			return
+		}
+	}
+	rows, err := h.service.Decisions(c.Request.Context(), id, limit, before)
+	schedQualityReply(c, rows, err)
+}
+func (h *SchedQualityHandler) TTFTRule(c *gin.Context) {
+	v, err := h.service.TTFTRule(c.Request.Context())
+	schedQualityReply(c, v, err)
+}
+func (h *SchedQualityHandler) UpdateTTFTRule(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.ttft_rule")
+	var r struct {
+		Version    *int64   `json:"expected_version"`
+		Confidence *float64 `json:"confidence"`
+		Tolerance  *float64 `json:"tolerance"`
+		PeerMargin *float64 `json:"peer_margin"`
+	}
+	invalid := func(message string) { response.ErrorFrom(c, infraerrors.BadRequest("INVALID_TTFT_RULE", message)) }
+	if err := c.ShouldBindJSON(&r); err != nil {
+		invalid("expected_version, confidence, tolerance and peer_margin must be finite numbers")
+		return
+	}
+	if r.Version == nil || *r.Version < 0 {
+		invalid("expected_version must be nonnegative")
+		return
+	}
+	if r.Confidence == nil {
+		invalid("confidence is required")
+		return
+	}
+	if r.Tolerance == nil {
+		invalid("tolerance is required")
+		return
+	}
+	if r.PeerMargin == nil {
+		invalid("peer_margin is required")
+		return
+	}
+	p := schedquality.RuleBParams{Confidence: *r.Confidence, Tolerance: *r.Tolerance, PeerMargin: *r.PeerMargin}
+	if err := p.Validate(); err != nil {
+		invalid(err.Error())
+		return
+	}
+	v, err := h.service.UpdateTTFTRule(c.Request.Context(), *r.Version, p, schedQualityOperator(c))
+	schedQualityReply(c, v, err)
+}

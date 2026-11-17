@@ -29,7 +29,7 @@ func qualityRepoFixture(t *testing.T) (*schedQualityRepository, int64, int64) {
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, account, group)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		for _, query := range []string{`DELETE FROM sched_states WHERE account_id=$1`, `DELETE FROM account_quality_overrides WHERE account_id=$1`, `DELETE FROM account_groups WHERE account_id=$1`, `DELETE FROM accounts WHERE id=$1`} {
+		for _, query := range []string{`DELETE FROM sched_line_states WHERE account_id=$1`, `DELETE FROM account_quality_overrides WHERE account_id=$1`, `DELETE FROM account_groups WHERE account_id=$1`, `DELETE FROM accounts WHERE id=$1`} {
 			_, err := integrationDB.ExecContext(ctx, query, account)
 			require.NoError(t, err)
 		}
@@ -47,10 +47,10 @@ func TestSchedQualityRunCycleLockAndRollback(t *testing.T) {
 		err    error
 	}
 	done := make(chan result, 1)
-	row := q.StateRow{AccountID: a, GroupID: g, Model: "m", State: q.StateCooling, Level: 1, Since: time.Now(), Until: time.Now().Add(time.Minute)}
+	row := q.LineState{LineKey: q.LineKey{AccountID: a, GroupID: g, Model: "m", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Level: 1, Entry: time.Now(), Until: time.Now().Add(time.Minute)}
 	go func() {
 		locked, err := r.RunCycle(ctx, func(tx service.SchedQualityTx) error {
-			if err := tx.Upsert([]q.StateRow{row}); err != nil {
+			if err := tx.Upsert([]q.LineState{row}); err != nil {
 				return err
 			}
 			close(entered)
@@ -72,7 +72,7 @@ func TestSchedQualityRunCycleLockAndRollback(t *testing.T) {
 	require.Len(t, states, 1)
 	require.Equal(t, row.Level, states[0].Level)
 	locked, err = r.RunCycle(ctx, func(tx service.SchedQualityTx) error {
-		require.NoError(t, tx.Delete([]q.StateRow{row}))
+		require.NoError(t, tx.Delete([]q.LineKey{row.LineKey}))
 		return fmt.Errorf("rollback")
 	})
 	require.True(t, locked)
@@ -89,7 +89,7 @@ func TestSchedQualityResetUsesDatabaseTimeAfterLock(t *testing.T) {
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, schedQualityCycleLockID)
 	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `INSERT INTO sched_states(account_id,model,group_id,failing,level,dims,since,until) VALUES($1,'m',$2,true,1,ARRAY['ttfo'],NOW(),NOW()+INTERVAL '1 minute')`, a, g)
+	_, err = tx.ExecContext(ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,level,entry,until) VALUES($1,'m',$2,'ttfo',2,1,NOW(),NOW()+INTERVAL '1 minute')`, a, g)
 	require.NoError(t, err)
 	var begin time.Time
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&begin))
@@ -146,12 +146,12 @@ func TestSchedQualityPolicyConflictAndPreservesRawJSON(t *testing.T) {
 	require.Equal(t, int64(7), policies[g].Version)
 	require.Equal(t, float64(15), policies[g].Policy.TTFTSeconds)
 	p := q.Policy{Enabled: true, TTFTSeconds: 12.5, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 900}
-	saved, err := r.SavePolicy(ctx, g, 7, p)
+	saved, err := saveQualityPolicyInTx(ctx, r, g, 7, p)
 	require.NoError(t, err)
 	require.Equal(t, int64(8), saved.Version)
-	_, err = r.SavePolicy(ctx, g2, 7, p)
+	_, err = saveQualityPolicyInTx(ctx, r, g2, 7, p)
 	require.ErrorIs(t, err, service.ErrSchedPolicyConflict)
-	_, err = r.SavePolicy(ctx, other, 8, p)
+	_, err = saveQualityPolicyInTx(ctx, r, other, 8, p)
 	require.Error(t, err)
 	var after string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&after))
@@ -180,7 +180,7 @@ func TestSchedQualityConcurrentPolicyCAS(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
-		go func() { <-start; _, err := r.SavePolicy(ctx, g, 0, p); results <- err }()
+		go func() { <-start; _, err := saveQualityPolicyInTx(ctx, r, g, 0, p); results <- err }()
 	}
 	close(start)
 	var passed, conflicts int
@@ -242,7 +242,7 @@ func TestSchedQualityLoadRowsConsistentRead(t *testing.T) {
 		}
 		defer tx.Rollback()
 		at := time.Unix(int64(level), 0).UTC()
-		_, err = tx.ExecContext(ctx, `INSERT INTO sched_states(account_id,model,group_id,failing,level,since) VALUES($1,'consistent',$2,false,$3,$4) ON CONFLICT(account_id,model,group_id) DO UPDATE SET level=$3,since=$4`, a, g, level, at)
+		_, err = tx.ExecContext(ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,level,epoch) VALUES($1,'consistent',$2,'ttfo',0,$3,$4) ON CONFLICT(account_id,model,group_id,line) DO UPDATE SET level=$3,epoch=$4`, a, g, level, at)
 		if err != nil {
 			return err
 		}
@@ -366,7 +366,7 @@ func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
 			require.Equal(t, p, policies[validV4].Policy, "unused invalid v3 must not mask a valid v4")
 			require.Equal(t, tc.want, policies[invalid].Policy)
 			require.Equal(t, int64(7), policies[invalid].Version)
-			saved, err := r.SavePolicy(ctx, valid, 7, p)
+			saved, err := saveQualityPolicyInTx(ctx, r, valid, 7, p)
 			require.NoError(t, err, "an unrelated invalid entry cannot prevent CAS writes")
 			require.Equal(t, int64(8), saved.Version)
 			var after string
@@ -375,4 +375,9 @@ func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
 		})
 	}
 	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"sched_quality.invalid_policy"`))
+}
+
+func saveQualityPolicyInTx(ctx context.Context, r *schedQualityRepository, g, version int64, p q.Policy) (result service.SchedPolicyRecord, err error) {
+	err = r.RunExclusive(ctx, func(tx service.SchedQualityTx) error { var e error; result, e = tx.SavePolicy(g, version, p); return e })
+	return
 }

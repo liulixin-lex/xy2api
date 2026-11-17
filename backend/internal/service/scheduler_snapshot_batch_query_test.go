@@ -622,7 +622,7 @@ func TestSchedulerRebuildBatchPreservesLockBusyAndFencingPolicy(t *testing.T) {
 	single := SchedulerBucket{GroupID: groupID, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
 	forced := SchedulerBucket{GroupID: groupID, Platform: PlatformOpenAI, Mode: SchedulerModeForced}
 
-	t.Run("ordinary lock busy skips only that bucket", func(t *testing.T) {
+	t.Run("periodic rebuild lock busy skips only that bucket", func(t *testing.T) {
 		cache := newBatchSnapshotCache()
 		cache.lockBusy[single] = true
 		repo := newBatchAccountQueryRepo()
@@ -635,6 +635,19 @@ func TestSchedulerRebuildBatchPreservesLockBusyAndFencingPolicy(t *testing.T) {
 		require.Zero(t, singleAttempts)
 		require.Equal(t, 1, forcedAttempts)
 		require.Equal(t, 1, forcedVersion)
+	})
+
+	t.Run("event lock busy retains unfinished platform", func(t *testing.T) {
+		cache := newBatchSnapshotCache()
+		cache.lockBusy[single] = true
+		svc := newBatchQueryTestService(cache, newBatchAccountQueryRepo(), config.RunModeStandard)
+		seen := make(map[batchSeenKey]struct{})
+		require.ErrorIs(t, svc.rebuildByAccount(context.Background(), &Account{Platform: PlatformOpenAI}, []int64{groupID}, "account_change", seen), ErrSchedulerBucketRebuildBusy)
+		require.Empty(t, seen, "a partially published platform cannot be marked completed")
+		_, attempts, _, _ := cache.bucketState(single)
+		require.Zero(t, attempts)
+		_, attempts, _, _ = cache.bucketState(forced)
+		require.Equal(t, 1, attempts)
 	})
 
 	t.Run("strict lock busy is returned while ordinary work continues", func(t *testing.T) {

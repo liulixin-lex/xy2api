@@ -39,7 +39,10 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	startTime := time.Now()
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
@@ -103,7 +106,12 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		defer func() { _ = resp.Body.Close() }()
+		rethrowSchedAttemptPanic(a, recover())
+		// Completion belongs to the consumer, before transport cleanup.
+		a.finish(schedResult, schedErr)
+	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -267,6 +275,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	forwardUsage := claudeUsageToOpenAIUsage(usage)
+	// A failed client write finishes capture immediately, before the result is returned.
+	currentSchedAttempt(ctx).noteUsage(&forwardUsage)
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
@@ -280,20 +291,26 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 		contentType = "application/json"
 	}
 	body = reverseToolNamesIfPresent(c, body)
-	c.Data(resp.StatusCode, contentType, body)
+	c.Header("Content-Type", contentType)
+	c.Status(resp.StatusCode)
+	_, writeErr := c.Writer.Write(body)
+	if writeErr != nil {
+		cancelSchedClient(c)
+	}
 
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
 		UpstreamHeaders:  resp.Header,
-		Usage:            claudeUsageToOpenAIUsage(usage),
+		Usage:            forwardUsage,
 		Model:            originalModel,
 		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
 		UpstreamEndpoint: "/v1/messages",
 		Stream:           false,
+		ClientDisconnect: writeErr != nil,
 		ReasoningEffort:  reasoningEffort,
 		Duration:         time.Since(startTime),
-	}, nil
+	}, writeErr
 }
 
 // handleNativeAnthropicStreamingResponse 处理流式原生 Anthropic 响应：
@@ -361,7 +378,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	sendEvent := func(ev scanEvent) bool {
@@ -384,7 +400,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}(scanBuf)
@@ -491,6 +506,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				if sawTerminalEvent {
 					return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), nil
 				}
+				noteSchedError(c, ev.err)
 				if clientDisconnected {
 					return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
 						fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
@@ -520,6 +536,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
+					schedFirstEvent(c, startTime, &ms)
 				}
 				parseSSEUsagePassthrough(data, usage)
 				schedUsage := claudeUsageToOpenAIUsage(usage)
@@ -612,7 +629,7 @@ func (s *OpenAIGatewayService) nativeAnthropicStreamResult(
 		Stream:           true,
 		ReasoningEffort:  reasoningEffort,
 		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
+		FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 		ClientDisconnect: clientDisconnect,
 	}
 }

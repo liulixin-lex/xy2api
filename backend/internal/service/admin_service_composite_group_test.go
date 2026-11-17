@@ -22,21 +22,19 @@ func (s *accountRepoStubForCompositeModelsList) ListSchedulableByGroupID(_ conte
 func TestAdminService_CreateCompositeGroupCopiesAccountsFromConcreteGroups(t *testing.T) {
 	var copiedFrom []int64
 	var boundGroupID int64
-	var boundAccountIDs []int64
+
 	groupRepo := &groupRepoStubForAdmin{
 		createID: 99,
 		getByIDByID: map[int64]*Group{
 			10: {ID: 10, Platform: PlatformOpenAI},
 			20: {ID: 20, Platform: PlatformGemini},
 		},
-		getAccountIDsByGroupIDsFn: func(groupIDs []int64) ([]int64, error) {
-			copiedFrom = append([]int64{}, groupIDs...)
-			return []int64{101, 202}, nil
-		},
-		bindAccountsToGroupFn: func(groupID int64, accountIDs []int64) error {
+		copyAccountMembersFn: func(groupID int64, sources []int64, oauthOnly, replace bool) (int64, error) {
+			copiedFrom = append([]int64{}, sources...)
+			require.False(t, oauthOnly)
+			require.False(t, replace)
 			boundGroupID = groupID
-			boundAccountIDs = append([]int64{}, accountIDs...)
-			return nil
+			return 2, nil
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: groupRepo}
@@ -62,32 +60,26 @@ func TestAdminService_CreateCompositeGroupCopiesAccountsFromConcreteGroups(t *te
 	require.Equal(t, int64(2), group.AccountCount)
 	require.ElementsMatch(t, []int64{10, 20}, copiedFrom)
 	require.Equal(t, int64(99), boundGroupID)
-	require.ElementsMatch(t, []int64{101, 202}, boundAccountIDs)
 }
 
 func TestAdminService_UpdateCompositeGroupCopiesAccountsFromConcreteGroups(t *testing.T) {
-	var clearedGroupID int64
+	var replacesMembers bool
 	var copiedFrom []int64
 	var boundGroupID int64
-	var boundAccountIDs []int64
+
 	groupRepo := &groupRepoStubForAdmin{
 		getByIDByID: map[int64]*Group{
 			10: {ID: 10, Platform: PlatformOpenAI},
 			20: {ID: 20, Platform: PlatformGrok},
 			99: {ID: 99, Platform: PlatformComposite, RateMultiplier: 1, SubscriptionType: SubscriptionTypeStandard},
 		},
-		deleteAccountGroupsByGroupIDFn: func(groupID int64) (int64, error) {
-			clearedGroupID = groupID
-			return 2, nil
-		},
-		getAccountIDsByGroupIDsFn: func(groupIDs []int64) ([]int64, error) {
-			copiedFrom = append([]int64{}, groupIDs...)
-			return []int64{301, 302}, nil
-		},
-		bindAccountsToGroupFn: func(groupID int64, accountIDs []int64) error {
+
+		copyAccountMembersFn: func(groupID int64, sources []int64, oauthOnly, replace bool) (int64, error) {
+			copiedFrom = append([]int64{}, sources...)
+			require.False(t, oauthOnly)
+			replacesMembers = replace
 			boundGroupID = groupID
-			boundAccountIDs = append([]int64{}, accountIDs...)
-			return nil
+			return 2, nil
 		},
 	}
 	svc := &adminServiceImpl{groupRepo: groupRepo}
@@ -107,10 +99,9 @@ func TestAdminService_UpdateCompositeGroupCopiesAccountsFromConcreteGroups(t *te
 	require.Equal(t, "low", group.MaxReasoningEffort)
 	require.Equal(t, ReasoningEffortOverLimitDeny, group.MaxReasoningEffortOverLimit)
 	require.Equal(t, reasoningEffortMappings, group.ReasoningEffortMappings)
-	require.Equal(t, int64(99), clearedGroupID)
+	require.True(t, replacesMembers, "member replacement is one repository transaction preserving retained pins")
 	require.ElementsMatch(t, []int64{10, 20}, copiedFrom)
 	require.Equal(t, int64(99), boundGroupID)
-	require.ElementsMatch(t, []int64{301, 302}, boundAccountIDs)
 }
 
 func TestAdminService_CreateAccountAllowsCompositeGroupAssignment(t *testing.T) {

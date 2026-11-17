@@ -14,18 +14,21 @@ type SchedulerOutboxEvent struct {
 	CreatedAt time.Time
 }
 
-// SchedulerOutboxRepository 提供调度 outbox 的读取接口。
+// SchedulerOutboxRepository performs each queue operation in autocommit mode.
+// Reading releases dedup keys before event handling, so same-key producers do
+// not wait for the consumer's lease or for its external projection writes.
 type SchedulerOutboxRepository interface {
-	ListAfterAndReleaseDedup(ctx context.Context, afterID int64, limit int) ([]SchedulerOutboxEvent, error)
-	// FirstCreatedAtAfter 返回指定水位之后第一条待消费事件的创建时间，不领取事件或修改去重键。
-	FirstCreatedAtAfter(ctx context.Context, afterID int64) (time.Time, bool, error)
-	MaxID(ctx context.Context) (int64, error)
-	DeleteConsumedUpTo(ctx context.Context, watermark int64, limit int) (int64, error)
-	TryAcquireCleanupLock(ctx context.Context) (SchedulerOutboxCleanupLease, bool, error)
+	ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error)
+	DeleteProcessed(ctx context.Context, ids []int64) error
+	OldestPendingCreatedAt(ctx context.Context) (time.Time, bool, error)
+	PendingCount(ctx context.Context) (int64, error)
+	TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error)
 }
 
-// SchedulerOutboxCleanupLease holds the PostgreSQL advisory lock used by
-// scheduler outbox cleanup.
-type SchedulerOutboxCleanupLease interface {
+// SchedulerOutboxConsumerLease owns a transaction used only for its advisory
+// lock. It never locks or updates queue rows. A lost lease permits duplicate
+// idempotent processing, but must not prevent acknowledging completed events.
+type SchedulerOutboxConsumerLease interface {
+	KeepAlive(ctx context.Context) error
 	Release()
 }

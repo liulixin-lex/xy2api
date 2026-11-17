@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 // GatewayUnbilledRequest belongs here only when no billing task was arranged.
 // RequestID is the gateway UUID, never a billing or client correlation key.
 type GatewayUnbilledRequest struct {
+	ProfitBasis        json.RawMessage
+	DispatchPhases     json.RawMessage
 	RequestScope       resilience.GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool
@@ -75,6 +78,7 @@ func applyGatewayRequestMetadata(ctx context.Context, row *UsageLog) {
 	row.TerminalEventSeen = cloneUsageFactValue(meta.TerminalEventSeen)
 	row.TerminalEventValid = cloneUsageFactValue(meta.TerminalEventValid)
 	row.ResponseBodyType = cloneUsageFactValue(meta.ResponseBodyType)
+	row.ProfitBasis = marshalProfitBasis(meta.ProfitBasis)
 	row.ConversionNotices = copyConversionNotices(meta.ConversionNotices)
 }
 

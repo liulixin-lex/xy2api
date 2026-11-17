@@ -53,6 +53,7 @@ func profitSlotTestAccount(id int64, rate float64) *service.Account {
 	now := time.Now()
 	return &service.Account{
 		ID:             id,
+		GroupIDs:       []int64{50},
 		Platform:       service.PlatformOpenAI,
 		Type:           service.AccountTypeAPIKey,
 		Status:         service.StatusActive,
@@ -144,18 +145,25 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 	})
 
 	t.Run("image intent suppression keeps official behavior", func(t *testing.T) {
+		account := profitSlotTestAccount(3, 0.8)
+		repo := &openAIWSUsageHandlerAccountRepoStub{account: *account}
+		gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		ctx := profitSlotTestContext(t, gateway, groupID, true)
+		selection, err := gateway.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", nil)
+		require.NoError(t, err)
+		require.Equal(t, []int64{groupID}, selection.Account.GroupIDs)
 		cache := &profitCountingConcurrencyCache{}
 		h := newHandler(cache)
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(profitSlotTestContext(t, gw, groupID, true))
-		streamStarted := false
-
-		release, result := h.acquireResponsesAccountSlot(c, &groupID, "", newSelection(profitSlotTestAccount(3, 0.8)), false, &streamStarted, zap.NewNop())
-		require.Equal(t, openAISlotAcquireOK, result, "生图意图跳门：过贵账号照常获取（图片边界不装门）")
+		h.gatewayService = gateway
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+		started := false
+		release, result := h.acquireResponsesAccountSlot(c, &groupID, "", selection, false, &started, zap.NewNop())
+		require.Equal(t, openAISlotAcquireOK, result)
 		require.NotNil(t, release)
 		release()
 	})
+
 	for _, path := range []string{"acquired", "quick", "queued"} {
 		t.Run("quality does not veto/"+path, func(t *testing.T) {
 			qualityGateway := &service.OpenAIGatewayService{}

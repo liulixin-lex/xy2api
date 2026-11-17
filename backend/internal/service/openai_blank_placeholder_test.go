@@ -224,6 +224,7 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 		name, event, payload string
 		wantPrelude          bool
 		wantBlankPlaceholder bool
+		wantValid            bool
 	}{
 		{
 			name:        "reasoning item with empty extra field",
@@ -277,9 +278,10 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_extension":"value"}`,
 		},
 		{
-			name:    "visible delta with extra boolean",
-			event:   "response.output_text.delta",
-			payload: `{"type":"response.output_text.delta","delta":"ok","vendor_flag":true}`,
+			name:      "visible delta with extra boolean",
+			wantValid: true,
+			event:     "response.output_text.delta",
+			payload:   `{"type":"response.output_text.delta","delta":"ok","vendor_flag":true}`,
 		},
 		{
 			name:        "reasoning item with nested empty object",
@@ -335,22 +337,22 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 
 			var compatEvent apicompat.ResponsesStreamEvent
 			require.NoError(t, json.Unmarshal(payload, &compatEvent))
-			require.Equal(t, tc.wantPrelude, openAICompatPreludeEvent(&compatEvent, payload))
+			require.Equal(t, !tc.wantValid, openAICompatPreludeEvent(&compatEvent, payload))
 			require.Equal(t, !tc.wantPrelude, resilience.ClassifyStreamEvent("responses", event, payload).Kind == resilience.Content)
 			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsClientOutput(tc.payload, event))
 			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsVisibleOutput(tc.payload, event))
 			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsSemanticTTFT(tc.payload, event))
 			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsTTFT(tc.payload, event, false, OpenAITTFTModeVisible))
-			require.Equal(t, !tc.wantPrelude, semanticSSEBlock([]byte("event: "+event+"\ndata:"+tc.payload)))
+			require.Equal(t, tc.wantValid, semanticSSEBlock([]byte("event: "+event+"\ndata:"+tc.payload)))
 
 			c, state := newSSEDeliveryContext(t, "text/event-stream")
 			start := time.Now().Add(-time.Second)
 			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9023, AttemptStart: start})
 			_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + tc.payload + "\n\n")
 			require.NoError(t, err)
-			require.Equal(t, !tc.wantPrelude, !state.SemanticOutputAt().IsZero())
-			require.Equal(t, !tc.wantPrelude, state.AttemptFirstOutputMs() != nil)
-			require.Equal(t, !tc.wantPrelude, !state.FirstOutput().IsZero())
+			require.Equal(t, tc.wantValid, !state.SemanticOutputAt().IsZero())
+			require.Equal(t, tc.wantValid, state.AttemptFirstOutputMs() != nil)
+			require.Equal(t, tc.wantValid, !state.FirstOutput().IsZero())
 		})
 	}
 }
@@ -369,15 +371,15 @@ func TestResponsesMalformedEventFailsClosedAtAllOutputChecks(t *testing.T) {
 			require.True(t, openAIStreamDataStartsClientOutput(payload, event))
 			require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
 			require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
-			require.True(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
-			require.False(t, openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
+			require.False(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
+			require.Equal(t, strings.Contains(payload, `"item_id":[]`), openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
 			c, state := newSSEDeliveryContext(t, "text/event-stream")
 			start := time.Now().Add(-time.Second)
 			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})
 			_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + payload + "\n\n")
 			require.NoError(t, err)
-			require.False(t, state.SemanticOutputAt().IsZero())
-			require.NotNil(t, state.AttemptFirstOutputMs())
+			require.True(t, state.SemanticOutputAt().IsZero())
+			require.Nil(t, state.AttemptFirstOutputMs())
 		})
 	}
 }
@@ -573,40 +575,36 @@ func TestResponsesBlankPlaceholderStageResetDropsMemoryAndSpool(t *testing.T) {
 	}
 }
 
-type placeholderOutputMarker struct {
-	at    time.Time
-	calls int
-}
-
-func (m *placeholderOutputMarker) MarkFirstOutput(at time.Time) { m.at = at; m.calls++ }
-
 func TestResponsesBlankPlaceholderMarksOnlyRealOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, visible := range []bool{false, true} {
 		c, state := newSSEDeliveryContext(t, "text/event-stream")
 		account := &Account{ID: 9029, Platform: PlatformOpenAI}
 		start := time.Now().Add(-11 * time.Second)
-		marker := &placeholderOutputMarker{}
-		state.SetCurrentAttempt(marker)
+		marker := &schedAttemptHandle{}
+		marker.row.StartedAt = start
+		state.SetCurrentAttempt(&schedAttemptCapture{state: state, attempt: marker, stream: true})
 		state.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: start, Warm: true, Stream: true})
+		observeSchedPayload(c, []byte(`{"type":"response.output_text.delta","delta":" "}`))
 		_, err := c.Writer.WriteString("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" \"}\n\n")
 		require.NoError(t, err)
 		require.True(t, state.FirstOutput().IsZero())
-		require.Zero(t, marker.calls)
+		require.Nil(t, marker.row.TTFOMs)
 		if visible {
+			observeSchedPayload(c, []byte(`{"type":"response.output_text.done","text":" result"}`))
 			_, err = c.Writer.WriteString("event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"text\":\" result\"}\n\n")
 			require.NoError(t, err)
 		}
 		_, err = c.Writer.WriteString("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 		require.NoError(t, err)
 		if visible {
-			require.Equal(t, 1, marker.calls)
-			require.GreaterOrEqual(t, marker.at.Sub(start), 11*time.Second)
+			require.NotNil(t, marker.row.TTFOMs)
+			require.GreaterOrEqual(t, *marker.row.TTFOMs, 11000)
 			require.GreaterOrEqual(t, *state.AttemptFirstOutputMs(), int64(11000))
 		} else {
 			require.Nil(t, state.AttemptFirstOutputMs())
-			require.Zero(t, marker.calls)
-			require.True(t, marker.at.IsZero())
+			require.Nil(t, marker.row.TTFOMs)
+			require.Nil(t, marker.row.FirstAnswerMs)
 		}
 	}
 }

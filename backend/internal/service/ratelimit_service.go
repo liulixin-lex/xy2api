@@ -2348,7 +2348,9 @@ func (s *RateLimitService) GetTempUnschedStatus(ctx context.Context, accountID i
 			return nil, err
 		}
 		if state != nil && state.UntilUnix > now {
-			return state, nil
+			copy := *state
+			copy.ErrorMessage = DisplayTempUnschedulableReason(copy.ErrorMessage)
+			return &copy, nil
 		}
 	}
 
@@ -2375,7 +2377,7 @@ func (s *RateLimitService) GetTempUnschedStatus(ctx context.Context, accountID i
 			}
 			state = &parsed
 		} else {
-			state.ErrorMessage = account.TempUnschedulableReason
+			state.ErrorMessage = DisplayTempUnschedulableReason(account.TempUnschedulableReason)
 		}
 	}
 

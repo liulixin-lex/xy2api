@@ -97,6 +97,9 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 		SetProfitControlEnabled(g.ProfitControlEnabled).
 		SetProfitMinMargin(g.ProfitMinMargin).
 		SetProfitSafetyBuffer(g.ProfitSafetyBuffer)
+	if g.MinUpstreamRate != nil {
+		create.SetMinUpstreamRate(*g.MinUpstreamRate)
+	}
 	if g.Description != "" {
 		create.SetDescription(g.Description)
 	}

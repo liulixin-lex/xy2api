@@ -285,9 +285,16 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if len(plans) > 0 {
 		plan = plans[0]
 	}
-	currentSchedAttempt(ctx).timeout(plan)
+	attempt := currentSchedAttempt(ctx)
+	elapsedStart := startTime
+	if attempt != nil {
+		// A handler/response stage can start earlier than this account's send.
+		// Censored wait and diagnostic elapsed must use the attempt's clock.
+		elapsedStart = attempt.started
+	}
+	attempt.timeout(plan)
 	noteTimeoutPlan(ctx, account, plan)
-	elapsed := time.Since(startTime)
+	elapsed := time.Since(elapsedStart)
 	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)
 	logger.LegacyPrintf(
 		"service.openai_gateway",

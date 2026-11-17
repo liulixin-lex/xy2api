@@ -56,7 +56,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	}
 	platform := NormalizeOpenAICompatiblePlatform(req.Platform)
 	gate := s
-	gateCtx := withResilienceLastResortGate(ctx)
+	gateCtx := withResilienceLastResortGate(context.WithValue(ctx, openAISelectionRequestKey{}, req))
 	now := s.selectionNow()
 	var cands []lastResortCandidate
 	meta := lastResortLogMeta{candidates: len(accounts)}
@@ -147,7 +147,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		verified = append(verified, c)
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
-			latest, vetoed, _ := s.SelectionAdmissionVetoLatest(gateCtx, acc)
+			latest, vetoed, _ := s.SelectionAdmissionVeto(gateCtx, acc)
 			if vetoed || latest == nil {
 				result.ReleaseFunc()
 				verified = verified[:len(verified)-1]

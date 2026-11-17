@@ -28,7 +28,15 @@ func (s *OpenAIGatewayService) selectionNow() time.Time {
 }
 
 func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) selectionRequest {
-	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, Loads: loads, OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	request := selectionRequest{Session: req.SessionHash, ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, Loads: loads, OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	trial, _ := ctx.Value(selectionTrialContextKey{}).(*selectionTrial)
+	if trial == nil {
+		trial = s.newSelectionTrial(ctx, req, req.StickyAccountID)
+	}
+	request.Owner = trial.owner
+	request.Borrow = trial.borrowing(ctx)
+	request.Room = func(id int64, model string) bool { return trial.room(ctx, id, model) }
+	return request
 }
 
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {
@@ -39,12 +47,15 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 		keys[account.ID] = buildSelectionKey(view, derefGroupID(req.GroupID), req.RequestedModel, account, request, now)
 	}
 	sort.SliceStable(accounts, func(i, j int) bool {
+		// Compact capability routing predates quality ranking and applies only
+		// to RequireCompact: confirmed support precedes unknown, then the quality key.
 		if req.RequireCompact {
 			a, b := openAICompactSupportTier(accounts[i]), openAICompactSupportTier(accounts[j])
 			if a != b {
 				return a > b
 			}
 		}
+
 		return selectionLess(keys[accounts[i].ID], keys[accounts[j].ID])
 	})
 }
@@ -101,23 +112,55 @@ func (s *OpenAIGatewayService) recheckSelectionAccount(ctx context.Context, req 
 	if account == nil {
 		return nil
 	}
-	if _, excluded := req.ExcludedIDs[account.ID]; excluded {
-		observeSelectionFailure(ctx, account.ID, "excluded", nil)
-		return nil
+	var fresh *Account
+	if s.accountRepo != nil {
+		var err error
+		fresh, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || fresh == nil {
+			observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
+			return nil
+		}
+	} else {
+		fresh = s.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 	}
-	fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-	if fresh == nil {
-		return nil
-	}
-	fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) {
-		return nil
-	}
-	if !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
-		observeSelectionFailure(ctx, fresh.ID, "transport_incompatible", nil)
+	fresh, reason := s.recheckSelectionAdmission(ctx, req, fresh)
+	if reason != "" {
 		return nil
 	}
 	return fresh
+}
+
+// recheckSelectionAdmission is the shared normal-selection and post-slot gate.
+// New eligibility conditions belong here so queued requests see them as well.
+func (s *OpenAIGatewayService) recheckSelectionAdmission(ctx context.Context, req OpenAIAccountScheduleRequest, latest *Account) (*Account, string) {
+	if latest == nil {
+		return nil, "account_nil"
+	}
+	if latest.IsGrok() && len(s.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*latest})) == 0 {
+		return latest, "quota_auto_pause"
+	}
+	if _, excluded := req.ExcludedIDs[latest.ID]; excluded {
+		return latest, "excluded"
+	}
+	if resilienceLastResortGate(ctx) {
+		// Re-evaluate the current penalty; rescue may bypass soft restrictions
+		// but must never revive a newly disabled or hard-paused account.
+		now := time.Now()
+		if tier, _, _ := s.resilienceOpenAIPenaltyOf(latest, req.RequestedModel, now); tier == resilience.TierHard {
+			return latest, "not_schedulable"
+		}
+		latest = withoutSoftPenalties(*latest, now)
+	}
+	if s.recheckLatestOpenAIAccount(ctx, latest, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability) == nil {
+		return latest, "selection_ineligible"
+	}
+	if ok, reason := s.isAccountRequestCompatibleReason(ctx, latest, req); !ok {
+		return latest, reason
+	}
+	if !s.isAccountTransportCompatible(latest, req.RequiredTransport) {
+		return latest, "transport_incompatible"
+	}
+	return latest, ""
 }
 
 func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {
@@ -151,9 +194,9 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	}
 	now, view := s.selectionNow(), s.selectionView()
 	gid := derefGroupID(req.GroupID)
-	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandBack
+	migrate := selectionMigrateOwner(view, gid, owner, req.RequestedModel, req.SessionHash, now)
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt}
+	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt, leases: s.selectionTrialLeases()}
 	bindingKey := s.openAISessionCacheKey(req.SessionHash)
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key
@@ -172,7 +215,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		if a.Platform != req.Platform || req.RequestedModel != "" && !a.IsModelSupported(req.RequestedModel) {
 			continue
 		}
-		if a.ID != owner.ID && a.Priority < owner.Priority && (schedquality.StandingOf(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandFront) && !s.selectionFullMarks.Recently(a.ID, now) {
+		if a.ID != owner.ID && a.Priority < owner.Priority && (selectionState(view, gid, a, req.RequestedModel).Placement(selectionAuto(view, gid, now), now) == schedquality.PlaceFront) && !s.selectionFullMarks.Recently(a.ID, now) {
 			possible = true
 			break
 		}
@@ -191,16 +234,13 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		if fresh == nil {
 			return nil
 		}
-		latest, vetoed, _ := s.SelectionAdmissionVetoLatest(ctx, fresh)
+		latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
 		if vetoed {
 			return nil
 		}
 		return latest
 	}
 	selection := session.selectOwner(ctx, gid, req.SessionHash, req.RequestedModel, owner, candidates, s.selectionRequest(ctx, req, loads))
-	if selection != nil {
-		resilience.StateFrom(ctx).NoteStickyBypassReason("quality_migration")
-	}
 	return selection
 }
 

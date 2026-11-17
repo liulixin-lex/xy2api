@@ -419,7 +419,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	writeClientMessage func([]byte) error,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -675,7 +678,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
 			ResponseHeaders:               cloneHeader(resp.Header),
 			Duration:                      time.Since(turnStart),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  markSchedFirstEvent(schedCapture, turnStart, firstTokenMs),
 		}
 		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
@@ -788,6 +791,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if firstTokenMs == nil {
 				ms := int(time.Since(turnStart).Milliseconds())
 				firstTokenMs = &ms
+				markSchedFirstEvent(schedCapture, turnStart, &ms)
 			}
 		}
 		if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {

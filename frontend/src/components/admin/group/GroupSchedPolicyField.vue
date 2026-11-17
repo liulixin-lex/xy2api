@@ -39,16 +39,18 @@
           <span v-if="preview.state === 'failed'" class="sq-fail-word text-sm" data-sq-trial-failed>{{ t('admin.schedQuality.result.failed') }}</span>
           <span v-else-if="!preview.value" class="skeleton inline-block h-3.5 w-40 align-middle" />
           <template v-else>
-            <div :class="['flex flex-wrap gap-x-4 gap-y-1 text-[13px]', { 'opacity-60': preview.state === 'loading' }]">
-              <span v-for="item in previewCounts" :key="item.kind" class="inline-flex items-center gap-1.5" :data-sq-trial="item.kind">
-                <span :class="['sq-shape', item.kind === 'normal' ? 'sq-shape--pass' : 'sq-shape--fail']" aria-hidden="true" />
-                <span class="sq-num text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.trialCount', { state: t(`admin.schedQuality.state.${item.kind}`), now: item.now, after: item.after }) }}</span>
-              </span>
+            <div :class="['grid gap-1 text-[13px]', { 'opacity-60': preview.state === 'loading' }]">
+              <div v-for="item in previewLines" :key="item.line" class="flex flex-wrap items-baseline gap-x-3 gap-y-1" :data-sq-trial="item.line">
+                <span class="w-10 shrink-0 text-gray-500 dark:text-gray-400">{{ t(`admin.schedQuality.dim.${item.line}`) }}</span>
+                <span class="sq-num text-gray-700 dark:text-gray-300">{{ item.text }}</span>
+                <span v-if="item.relaxed" class="text-xs text-amber-700 dark:text-amber-400" data-sq-trial-relaxed>{{ t('admin.schedQuality.policy.trialRelaxed') }}</span>
+              </div>
             </div>
             <div v-if="preview.value.changed.length" class="mt-2 flex max-w-[520px] flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-700 dark:text-gray-300" data-sq-trial-names>
-              <span v-for="item in shownChanged" :key="`${item.account_id}:${item.model}`" v-tip="item.model">{{ item.name }}</span>
-              <span v-if="preview.value.changed.length > shownChanged.length" class="sq-text-3">{{ t('admin.schedQuality.more', { n: preview.value.changed.length - shownChanged.length }) }}</span>
+              <span v-for="item in shownChanged" :key="item.account_id" v-tip="item.tip">{{ item.text }}</span>
+              <span v-if="changedAccounts.length > shownChanged.length" class="sq-text-3">{{ t('admin.schedQuality.more', { n: changedAccounts.length - shownChanged.length }) }}</span>
             </div>
+            <p class="mt-2 max-w-[520px] text-xs text-gray-500 dark:text-gray-400" data-sq-trial-note>{{ t('admin.schedQuality.policy.trialNote') }}</p>
           </template>
         </div>
       </template>
@@ -62,14 +64,18 @@ import { useI18n } from 'vue-i18n'
 import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { BackendGroupPolicy, BackendPolicy, BackendPolicyPreview, SchedTakeoverIdleSeconds } from '@/api/admin/schedQualityTypes'
+import type { BackendDim, BackendGroupPolicy, BackendPolicy, BackendPolicyPreview, BackendVerdictCounts, SchedTakeoverIdleSeconds } from '@/api/admin/schedQualityTypes'
+import { useAppStore } from '@/stores/app'
+import { DASH, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 
 // Quality gate block of the OpenAI group edit dialog (design spec D.1, D.2). Saved on its own with the policy
 // version; a 409 shows "失败 + 重新载入", any other error "失败".
-// The per-class limits of v0.6.4 are gone with the request classes. The trial no longer recomputes verdicts in the
-// browser from the board's numbers (the backend dropped them in 0.6.5): while the thresholds differ from the saved
-// ones, it asks the server preview what they would do, and shows the counts now → after and the accounts that turn.
+// While the thresholds differ from the saved ones, the trial asks the server what each line would say on the current
+// evidence with the saved and the new thresholds (pass, unknown, fail: now → after), lists the keys whose verdict
+// turns, and says what saving does: a relaxed line is cleared and judged again at once; a tightened one keeps the
+// identities, later assessments use the new threshold. After a save that relaxed lines, a toast says how many line
+// states were cleared.
 // The ranges below are the ones the backend accepts now: first output any positive number, errors from 5 %.
 const TAKEOVER_VALUES: SchedTakeoverIdleSeconds[] = [-1, 0, 300, 900, 1800]
 /** Typing pauses this long before the preview is asked for. */
@@ -79,7 +85,8 @@ const PREVIEW_NAMES = 12
 const MIN_ERROR_PCT = 5
 
 const props = defineProps<{ groupId: number }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+const appStore = useAppStore()
 const ids = { ttft: `sq-ttft-${useId()}`, error: `sq-err-${useId()}`, cache: `sq-cache-${useId()}` }
 
 const record = shallowRef<BackendGroupPolicy | null>(null)
@@ -194,15 +201,42 @@ watch([previewShown, current], ([shown]) => {
   previewTimer = setTimeout(() => { previewTimer = null; void runPreview(groupId, version, policy) }, PREVIEW_DELAY_MS)
 })
 onScopeDispose(stopPreview)
-const previewCounts = computed(() => {
+// Per line: the verdicts on the current evidence with the saved and the new thresholds (not a forecast of identities),
+// and whether saving relaxes it. A line missing from the answer reads "—".
+const LINES: BackendDim[] = ['ttfo', 'error', 'cache']
+const previewLines = computed(() => {
   const value = preview.value
   if (!value) return []
-  return [
-    { kind: 'normal' as const, now: value.now.normal, after: value.after.normal },
-    { kind: 'cooling' as const, now: value.now.below, after: value.after.below }
-  ]
+  return LINES.map((line) => {
+    const counts = value.lines?.[line]
+    const pair = (verdict: keyof BackendVerdictCounts) =>
+      counts ? `${counts.now?.[verdict] ?? DASH}→${counts.after?.[verdict] ?? DASH}` : DASH
+    return {
+      line,
+      relaxed: value.relaxed_lines.includes(line),
+      text: t('admin.schedQuality.policy.trialLine', { pass: pair('pass'), unknown: pair('unknown'), fail: pair('fail') })
+    }
+  })
 })
-const shownChanged = computed(() => preview.value?.changed.slice(0, PREVIEW_NAMES) ?? [])
+// One entry per account: an account with several models changing names them, so the same name is not listed twice;
+// the tip has every change on its own line.
+const changedAccounts = computed(() => {
+  const byAccount = new Map<number, { account_id: number; name: string; models: string[]; changes: string[] }>()
+  for (const item of preview.value?.changed ?? []) {
+    let entry = byAccount.get(item.account_id)
+    if (!entry) byAccount.set(item.account_id, (entry = { account_id: item.account_id, name: item.name, models: [], changes: [] }))
+    if (!entry.models.includes(item.model)) entry.models.push(item.model)
+    entry.changes.push([item.model, t(`admin.schedQuality.dim.${item.line}`), `${schedWord('verdict', item.from, t, te)} → ${schedWord('verdict', item.to, t, te)}`].join(' · '))
+  }
+  return [...byAccount.values()]
+})
+const shownChanged = computed(() =>
+  changedAccounts.value.slice(0, PREVIEW_NAMES).map((entry) => ({
+    account_id: entry.account_id,
+    text: entry.models.length > 1 ? `${entry.name} · ${entry.models.join(t('admin.schedQuality.evidence.joiner'))}` : entry.name,
+    tip: entry.changes.join('\n')
+  }))
+)
 
 /** Saves the policy when it changed. Returns false when it was not saved (invalid, conflict, failure). */
 async function save(): Promise<boolean> {
@@ -212,8 +246,18 @@ async function save(): Promise<boolean> {
   if (!isValid.value) return false
   saveFailed.value = false
   try {
-    record.value = await schedQualityAPI.updateGroupPolicy(props.groupId, { expected_version: record.value.version, policy: current.value })
+    const saved = record.value
+    const result = await schedQualityAPI.updateGroupPolicy(props.groupId, { expected_version: saved.version, policy: current.value })
+    // Merged: an answer without some field keeps what was there.
+    record.value = { ...saved, ...result, policy: { ...saved.policy, ...result?.policy } }
     conflict.value = false
+    const relaxed = result?.relaxed_lines ?? []
+    if (relaxed.length) {
+      appStore.showInfo(t('admin.schedQuality.policy.savedRelaxed', {
+        lines: relaxed.map((line) => t(`admin.schedQuality.lineName.${line}`)).join(t('admin.schedQuality.evidence.joiner')),
+        n: result?.cleared ?? 0
+      }), 6000)
+    }
     return true
   } catch (error) {
     if ((error as { status?: number })?.status === 409) conflict.value = true

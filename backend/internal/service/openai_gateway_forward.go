@@ -22,7 +22,10 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(result, forwardErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(result, forwardErr)
+	}()
 	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
 	finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)
 	defer func() {
@@ -1570,7 +1573,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			Stream:                        reqStream,
 			OpenAIWSMode:                  false,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  firstTokenMs,
+			FirstTokenMs:                  schedFirstEvent(c, startTime, firstTokenMs),
 		}
 		if imageCount > 0 {
 			forwardResult.ImageCount = imageCount

@@ -210,8 +210,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// the outbound request (for example GLM xhigh is forwarded as max).
 	var reasoningEffort *string
 	var schedCapture *schedAttemptCapture
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity, &reasoningEffort, &schedCapture)
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +439,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				if firstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) {
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
+					schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())))
 				}
 			}
 		}
@@ -530,12 +534,13 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
+			FirstTokenMs:                  schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context()))),
 		}
 	}
 
 	scanErr := scanner.Err()
-	noteSchedError(c, scanErr)
+	// The consumer below decides whether the read error invalidates this
+	// response; a reset after finish_reason cannot undo a completed stream.
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),
@@ -577,6 +582,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	if !clientAborted && (terminal.IsTruncated(clientOutputStarted) || scanErr != nil && !terminal.Terminated()) {
 		partialFailure = true
 		cause := scanErr
+		if scanErr != nil {
+			noteSchedError(c, scanErr)
+		}
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
 		}

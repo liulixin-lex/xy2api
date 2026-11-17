@@ -17,7 +17,7 @@ func TestSelectionRetryAfterFailedChange(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			f.cache.sessionBindings["openai:session"] = 10
 			if kind == "migrate" {
-				f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Failing: true}
+				f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 			}
 			state := resilience.NewRequestState()
 			ctx := resilience.WithRequestState(context.Background(), state)
@@ -40,7 +40,11 @@ func TestSelectionRetryAfterFailedChange(t *testing.T) {
 			}
 			next := selectNext(map[int64]struct{}{first.Account.ID: {}})
 			require.EqualValues(t, 2, next.Account.ID, "a failed migration must not strand this request on the below-standard owner")
-			require.Equal(t, "migrate", pendingOpenAIStickyChange(ctx).kind)
+			expectedKind := "migrate"
+			if kind == "takeover" {
+				expectedKind = "owner_released"
+			}
+			require.Equal(t, expectedKind, pendingOpenAIStickyChange(ctx).kind)
 			fallback, takeover := state.SchedSelectionFlags(next.Account.ID)
 			require.False(t, fallback)
 			require.False(t, takeover, "a hard-unavailable replacement is not the earlier takeover")
@@ -53,7 +57,7 @@ func TestSelectionRetryAfterFailedChange(t *testing.T) {
 
 func TestSelectionActiveMigrationKeepsItsPendingTarget(t *testing.T) {
 	f := selectionNewSessionFixture()
-	f.state(10, schedquality.StateView{Failing: true})
+	f.state(10, schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}})
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 	first := f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{})
 	require.NotNil(t, first)

@@ -27,7 +27,9 @@ func TestOpenAISelectionComparator(t *testing.T) {
 		name string
 		a, b selectionKey
 	}{
-		{"standing", selectionKey{Standing: 0, Priority: 2}, selectionKey{Standing: 1, Priority: 1}},
+		{"tier_before_pinned", selectionKey{Tier: 0, Priority: 2}, selectionKey{Tier: 1, Pinned: true, Priority: 1}},
+		{"full_trial_before_rear", selectionKey{Tier: 1, Priority: 99}, selectionKey{Tier: 2, Pinned: true, Priority: 0}},
+		{"pinned", selectionKey{Pinned: true, Priority: 100}, selectionKey{Priority: 0}},
 		{"priority", selectionKey{Priority: 1, Rate: 100, LoadRate: 100}, selectionKey{Priority: 2, Rate: 0, LoadRate: 0}},
 		{"rate", selectionKey{RateKnown: true, Rate: 1, LoadRate: 100}, selectionKey{RateKnown: true, Rate: 2}},
 		{"known_before_unknown_rate", selectionKey{RateKnown: true, Rate: 100, LoadRate: 100}, selectionKey{}},
@@ -51,16 +53,20 @@ func TestOpenAISelectionStanding(t *testing.T) {
 		state   schedquality.StateView
 		enabled bool
 		age     time.Duration
-		want    schedquality.Standing
+		want    int
+		req     selectionRequest
 	}{
-		{"normal", schedquality.StateView{}, true, 0, schedquality.StandFront},
-		{"below", schedquality.StateView{Failing: true}, true, 0, schedquality.StandBack},
-		{"disabled", schedquality.StateView{Failing: true}, false, 0, schedquality.StandFront},
-		{"stale_below", schedquality.StateView{Failing: true}, true, 61 * time.Second, schedquality.StandFront},
-		{"exactly_60_seconds", schedquality.StateView{Failing: true}, true, 60 * time.Second, schedquality.StandBack},
-		{"exempt_failing", schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
-		{"expired_exempt", schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}}, true, 0, schedquality.StandBack},
-		{"expired_group_falls_back_to_all", schedquality.StateView{Failing: true, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
+		{"normal", schedquality.StateView{}, true, 0, 0, selectionRequest{}},
+		{"below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 0, 2, selectionRequest{}},
+		{"disabled", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, false, 0, 0, selectionRequest{}},
+		{"stale_below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 61 * time.Second, 0, selectionRequest{}},
+		{"exactly_60_seconds", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 60 * time.Second, 2, selectionRequest{}},
+		{"exempt_failing", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, 0, selectionRequest{}},
+		{"expired_exempt", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}}, true, 0, 2, selectionRequest{}},
+		{"expired_group_falls_back_to_all", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, 0, selectionRequest{}},
+		{"trial_owner", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 0, selectionRequest{Session: "raw-session", Owner: 1}},
+		{"trial_room", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 0, selectionRequest{Room: func(int64, string) bool { return true }}},
+		{"trial_full", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 1, selectionRequest{Room: func(int64, string) bool { return false }}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,14 +75,14 @@ func TestOpenAISelectionStanding(t *testing.T) {
 			account := selectionTestAccount(1, 1)
 			account.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "outbound"}}
 			view.States[fakeSchedViewKey{7, 1, "outbound"}] = tt.state
-			key := buildSelectionKey(view, 7, "alias", account, selectionRequest{}, now)
-			require.Equal(t, int(tt.want), key.Standing)
+			key := buildSelectionKey(view, 7, "alias", account, tt.req, now)
+			require.Equal(t, tt.want, key.Tier)
 		})
 	}
 	t.Run("override_in_other_group", func(t *testing.T) {
 		view := selectionTestView(now)
-		view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}, Failing: true}
-		require.Equal(t, 0, buildSelectionKey(view, 8, "m", selectionTestAccount(1, 1), selectionRequest{}, now).Standing)
+		view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}, Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
+		require.Equal(t, 0, buildSelectionKey(view, 8, "m", selectionTestAccount(1, 1), selectionRequest{}, now).Tier)
 	})
 }
 

@@ -158,6 +158,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
+		SetNillableMinUpstreamRate(groupIn.MinUpstreamRate).
 		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
 		SetProfitMinMargin(groupIn.ProfitMinMargin).
 		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
@@ -224,27 +225,34 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	if err := createGroupRecord(ctx, txClient, groupIn); err != nil {
 		return err
 	}
-	result, err := txClient.ExecContext(
-		ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at)
-		 SELECT ag.account_id, $2, NOW()
-		 FROM account_groups ag
-		 JOIN accounts a ON a.id = ag.account_id
-		 WHERE ag.group_id = $1
-		   AND a.deleted_at IS NULL
-		   AND (NOT $3 OR a.type <> $4)
-		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		sourceGroupID,
-		groupIn.ID,
-		groupIn.RequireOAuthOnly,
-		service.AccountTypeAPIKey,
-	)
+	// The newly inserted group is private to this transaction. Once its ID is
+	// allocated, take the copy lock before the explicit account/group locks.
+	// INSERT may already hold KEY SHARE on referenced fallback groups via FKs.
+	if err := lockMemberReplacement(ctx, txClient, groupIn.ID); err != nil {
+		return err
+	}
+	snapshot, err := lockMemberCopyAccounts(ctx, txClient, groupIn.ID, []int64{sourceGroupID}, groupIn.RequireOAuthOnly)
 	if err != nil {
 		return err
 	}
-	if count, countErr := result.RowsAffected(); countErr == nil {
-		groupIn.AccountCount = count
+	if err := lockLiveGroups(ctx, txClient, []int64{groupIn.ID}); err != nil {
+		return err
 	}
+	var count int64
+	err = scanSingleRow(ctx, txClient, `WITH added AS (
+ INSERT INTO account_groups(account_id,group_id,pinned,created_at)
+ SELECT source.account_id,$1,source.pinned,NOW()
+ FROM unnest($2::bigint[], $3::boolean[]) AS source(account_id,pinned)
+ ON CONFLICT(account_id,group_id) DO NOTHING RETURNING account_id
+ ), revised AS (
+ UPDATE accounts SET updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
+ WHERE id IN (SELECT account_id FROM added) RETURNING id
+ ) SELECT COUNT(*) FROM added`, []any{groupIn.ID, pq.Array(snapshot.sourceIDs), pq.Array(snapshot.sourcePinned)}, &count)
+	if err != nil {
+		return err
+	}
+	groupIn.AccountCount = count
+
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		return err
 	}
@@ -343,9 +351,14 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
+		SetNillableMinUpstreamRate(groupIn.MinUpstreamRate).
 		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
 		SetProfitMinMargin(groupIn.ProfitMinMargin).
 		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
+
+	if groupIn.MinUpstreamRate == nil {
+		builder = builder.ClearMinUpstreamRate()
+	}
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.DailyLimitUSD != nil {
@@ -854,18 +867,6 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 	return
 }
 
-func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
-	}
-	return affected, nil
-}
-
 func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
 	return r.deleteCascade(ctx, id, false)
 }
@@ -1088,51 +1089,6 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 	}
 
 	return accountIDs, nil
-}
-
-// BindAccountsToGroup 将多个账号绑定到指定分组（批量插入，忽略已存在的绑定）
-func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error {
-	if len(accountIDs) == 0 {
-		return nil
-	}
-
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-	exec := sqlExecutor(r.client)
-	if tx != nil {
-		defer func() { _ = tx.Rollback() }()
-		exec = tx.Client()
-	}
-	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
-		return err
-	}
-
-	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
-	_, err = exec.ExecContext(
-		ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at)
-		 SELECT unnest($1::bigint[]), $2, NOW()
-		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		pq.Array(accountIDs),
-		groupID,
-	)
-	if err != nil {
-		return err
-	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	// 发送调度器事件
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
-	}
-
-	return nil
 }
 
 // UpdateSortOrders 批量更新分组排序

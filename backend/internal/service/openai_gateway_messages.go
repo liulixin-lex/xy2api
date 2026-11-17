@@ -36,7 +36,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(forwardResult, forwardErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(forwardResult, forwardErr)
+	}()
 	if c != nil {
 		c.Set(m7ResponsesWireBodyKey, nil)
 		defer c.Set(m7ResponsesWireBodyKey, nil)
@@ -514,7 +517,14 @@ retryMessagesResponsesWire:
 			zap.String("upstream_error_preview", truncateOpenAIWSLogValue(string(respBody), 240)),
 		)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func(a *schedAttemptCapture) {
+		defer func() { _ = resp.Body.Close() }()
+		rethrowSchedAttemptPanic(a, recover())
+		// Completion belongs to the consumer, before transport cleanup.
+		if a == schedCapture {
+			a.finish(forwardResult, forwardErr)
+		}
+	}(schedCapture)
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
@@ -792,7 +802,12 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, anthropicResp)
+	payload, err := json.Marshal(anthropicResp)
+	if err != nil {
+		return nil, err
+	}
+	c.Status(http.StatusOK)
+	_, writeErr := c.Writer.Write(payload)
 
 	result = &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -806,6 +821,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		Stream:                        false,
+		ClientDisconnect:              writeErr != nil,
 		Duration:                      time.Since(startTime),
 	}
 	// Grok /v1/messages uses Responses upstream; count native search for surcharge.
@@ -815,6 +831,10 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				result.SearchCount = n
 			}
 		}
+	}
+	if writeErr != nil {
+		cancelSchedClient(c)
+		return result, writeErr
 	}
 	return result, nil
 }
@@ -944,7 +964,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	go func() {
@@ -957,7 +976,6 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			select {
 			case events <- scanEvent{err: err}:
 			case <-done:
@@ -1030,6 +1048,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 						return response, usage, acc, err
 					}
 				}
+				noteSchedError(c, ev.err)
 				return nil, usage, acc, &openAICompatBufferedReadError{cause: ev.err}
 			}
 			if isOpenAICompatDoneSentinelLine(ev.line) {
@@ -1122,7 +1141,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		resetKeepaliveTimer()
 	}
 	stopPreludeCancel := func() bool { return false }
+	stagePrelude := resilience.Current().PreludeStagingOn()
 	writeClient := func(data string) error {
+		if !stagePrelude && !openAICompatFirstEventOf(resp).disarm() {
+			return s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, openAICompatFirstEventOf(resp), "first_output", resp.Header)
+		}
 		n, err := fmt.Fprint(c.Writer, data)
 		if n > 0 {
 			clientOutputStarted = true
@@ -1134,7 +1157,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		return err
 	}
-	stagePrelude := resilience.Current().PreludeStagingOn()
 	var pendingPrelude openAICompatPreludeBuffer
 	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	// preludeBodyClosed is set before the cancel AfterFunc closes the body.
@@ -1230,7 +1252,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
-			FirstTokenMs:                  relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())),
+			FirstTokenMs:                  schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context()))),
 			ClientDisconnect:              clientDisconnected,
 		}
 		if searchCount > 0 {
@@ -1240,12 +1262,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
-	processDataLine := func(payload string, terminal OpenAIResponsesTerminal) bool {
+	processDataLine := func(payload string, terminal OpenAIResponsesTerminal, sourceEvent string) bool {
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, relayLive.firstTokenMs(firstTokenMs, startTime, s.openAITTFTMode(c.Request.Context())))
 		}
 		if countSearch {
 			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
@@ -1268,7 +1291,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
-		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload))
+		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload), sourceEvent)
+		if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
+			streamFailoverErr = s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_output", resp.Header)
+			return true
+		}
 		if stagePrelude && !clientOutputStarted && terminal.Failure {
 			pendingPrelude.take()
 		}
@@ -1277,14 +1304,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				streamNonFailoverErr = err
 				return true
 			}
-			// Stop the guard on content even after a downstream write failure,
-			// so the first-output deadline cannot truncate usage draining.
-			if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
-				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header, firstEvent.plan)
-				return true
-			}
 		}
-		observeSchedPayload(c, []byte(payload))
+		observeSchedPayload(c, []byte(payload), sourceEvent)
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 
 		eventType := strings.TrimSpace(event.Type)
@@ -1534,7 +1555,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if !terminal.Failure {
 			payload = openAICompatPayloadWithEventType(payload, frame.EventType)
 		}
-		return processDataLine(payload, terminal)
+		return processDataLine(payload, terminal, frame.EventType)
 	}
 
 	// ── Determine keepalive interval ──
@@ -1595,7 +1616,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		line string
 		err  error
 	}
-	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	var lastReadAt int64
@@ -1617,7 +1637,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}()
@@ -1655,6 +1674,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
+				noteSchedError(c, ev.err)
 				if cancelErr := canceledPrelude(); cancelErr != nil {
 					return nil, cancelErr
 				}

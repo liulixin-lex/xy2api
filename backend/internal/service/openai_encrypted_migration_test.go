@@ -106,7 +106,7 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSelectionEntrypoints(t *testing.T) 
 					rateLimitService: newOpenAISelectionRateLimitService(),
 				}
 				view := selectionTestView(time.Now())
-				view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{Failing: true}
+				view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 				NewOpenAISelectionBoard(svc, func() schedquality.View { return view })
 				ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 				ctx = WithOpenAIEncryptedContentMigrationGuard(ctx, []byte(tc.body))

@@ -16,6 +16,9 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
+	clientOutputBytes     atomic.Int64
+	upstreamHTTPStatus    int
+	upstreamHTTPAccount   int64
 	upstreamRecoveryHint  *UpstreamRecoveryHint
 	accountRetryNotBefore map[int64]UpstreamRecoveryHint
 	upstreamAttemptTarget *UpstreamAttemptTarget
@@ -54,7 +57,7 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	currentAttempt       AttemptMarker
+	currentAttempt       any
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -180,10 +183,13 @@ type SessionRecorder interface {
 	Success(ctx context.Context, groupID int64, sessionHash string, accountID int64)
 }
 
-// SetSession records the sticky session of the request and its recorder.
+// SetSession records the selected group even when there is no sticky session.
 func (s *RequestState) SetSession(groupID int64, sessionHash string, rec SessionRecorder) {
-	if s == nil || sessionHash == "" || rec == nil {
+	if s == nil {
 		return
+	}
+	if sessionHash == "" {
+		rec = nil
 	}
 	s.mu.Lock()
 	s.sessionGroupID, s.sessionHash, s.sessionRec = groupID, sessionHash, rec
@@ -509,8 +515,6 @@ type SchedSelection struct {
 	StickyWarm bool
 }
 
-type AttemptMarker interface{ MarkFirstOutput(at time.Time) }
-
 func (s *RequestState) SetSchedSelection(v SchedSelection) {
 	if s == nil {
 		return
@@ -527,7 +531,7 @@ func (s *RequestState) SchedSelection() (SchedSelection, bool) {
 	defer s.mu.Unlock()
 	return s.schedSelection, s.schedSelectionSet
 }
-func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
+func (s *RequestState) SetCurrentAttempt(m any) {
 	if s == nil {
 		return
 	}
@@ -535,7 +539,7 @@ func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
 	s.currentAttempt = m
 	s.mu.Unlock()
 }
-func (s *RequestState) CurrentAttempt() AttemptMarker {
+func (s *RequestState) CurrentAttempt() any {
 	if s == nil {
 		return nil
 	}
@@ -543,7 +547,7 @@ func (s *RequestState) CurrentAttempt() AttemptMarker {
 	defer s.mu.Unlock()
 	return s.currentAttempt
 }
-func (s *RequestState) ClearCurrentAttemptIf(m AttemptMarker) {
+func (s *RequestState) ClearCurrentAttemptIf(m any) {
 	if s == nil {
 		return
 	}

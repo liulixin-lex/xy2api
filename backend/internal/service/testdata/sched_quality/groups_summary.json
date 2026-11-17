@@ -1,0 +1,23 @@
+{
+  "at": "2026-11-01T12:00:00Z",
+  "stale": false,
+  "groups": [
+    {
+      "group_id": 1,
+      "accounts": {
+        "pass": 3,
+        "unknown": 1,
+        "trial": 1,
+        "rear": 1
+      },
+      "last60": {
+        "e2e_first_output_p50_ms": 1200,
+        "e2e_first_output_p90_ms": 3000,
+        "body_first_output_p50_ms": 1100,
+        "body_first_output_p90_ms": 2900,
+        "requests": 50,
+        "migration_400": 2
+      }
+    }
+  ]
+}

@@ -73,7 +73,7 @@ func TestSchedV2UpgradeFrom064PreservesRollbackData(t *testing.T) {
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM account_quality_tests WHERE account_id=$1`, account).Scan(&count))
 	require.Equal(t, 1, count)
-	for _, table := range []string{"sched_states", "sched_decisions"} {
+	for _, table := range []string{"sched_states", "sched_line_states", "sched_decisions"} {
 		require.NoError(t, db.QueryRow("SELECT count(*) FROM "+table).Scan(&count))
 		require.Zero(t, count)
 	}

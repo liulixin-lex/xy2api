@@ -218,6 +218,18 @@ func (_c *UsageLogCreate) SetPricingSource(v jsontext.Value) *UsageLogCreate {
 	return _c
 }
 
+// SetProfitBasis sets the "profit_basis" field.
+func (_c *UsageLogCreate) SetProfitBasis(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetProfitBasis(v)
+	return _c
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (_c *UsageLogCreate) SetDispatchPhases(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetDispatchPhases(v)
+	return _c
+}
+
 // SetModel sets the "model" field.
 func (_c *UsageLogCreate) SetModel(v string) *UsageLogCreate {
 	_c.mutation.SetModel(v)
@@ -1503,6 +1515,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
 		_node.PricingSource = value
 	}
+	if value, ok := _c.mutation.ProfitBasis(); ok {
+		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
+		_node.ProfitBasis = value
+	}
+	if value, ok := _c.mutation.DispatchPhases(); ok {
+		_spec.SetField(usagelog.FieldDispatchPhases, field.TypeJSON, value)
+		_node.DispatchPhases = value
+	}
 	if value, ok := _c.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
@@ -2183,6 +2203,42 @@ func (u *UsageLogUpsert) UpdatePricingSource() *UsageLogUpsert {
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (u *UsageLogUpsert) ClearPricingSource() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldPricingSource)
+	return u
+}
+
+// SetProfitBasis sets the "profit_basis" field.
+func (u *UsageLogUpsert) SetProfitBasis(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldProfitBasis, v)
+	return u
+}
+
+// UpdateProfitBasis sets the "profit_basis" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateProfitBasis() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldProfitBasis)
+	return u
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (u *UsageLogUpsert) ClearProfitBasis() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldProfitBasis)
+	return u
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (u *UsageLogUpsert) SetDispatchPhases(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldDispatchPhases, v)
+	return u
+}
+
+// UpdateDispatchPhases sets the "dispatch_phases" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateDispatchPhases() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldDispatchPhases)
+	return u
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (u *UsageLogUpsert) ClearDispatchPhases() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldDispatchPhases)
 	return u
 }
 
@@ -3813,6 +3869,48 @@ func (u *UsageLogUpsertOne) UpdatePricingSource() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearPricingSource() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetProfitBasis sets the "profit_basis" field.
+func (u *UsageLogUpsertOne) SetProfitBasis(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProfitBasis(v)
+	})
+}
+
+// UpdateProfitBasis sets the "profit_basis" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateProfitBasis() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProfitBasis()
+	})
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (u *UsageLogUpsertOne) ClearProfitBasis() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearProfitBasis()
+	})
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (u *UsageLogUpsertOne) SetDispatchPhases(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDispatchPhases(v)
+	})
+}
+
+// UpdateDispatchPhases sets the "dispatch_phases" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateDispatchPhases() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDispatchPhases()
+	})
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (u *UsageLogUpsertOne) ClearDispatchPhases() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDispatchPhases()
 	})
 }
 
@@ -5816,6 +5914,48 @@ func (u *UsageLogUpsertBulk) UpdatePricingSource() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearPricingSource() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetProfitBasis sets the "profit_basis" field.
+func (u *UsageLogUpsertBulk) SetProfitBasis(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProfitBasis(v)
+	})
+}
+
+// UpdateProfitBasis sets the "profit_basis" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateProfitBasis() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProfitBasis()
+	})
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (u *UsageLogUpsertBulk) ClearProfitBasis() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearProfitBasis()
+	})
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (u *UsageLogUpsertBulk) SetDispatchPhases(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDispatchPhases(v)
+	})
+}
+
+// UpdateDispatchPhases sets the "dispatch_phases" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateDispatchPhases() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDispatchPhases()
+	})
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (u *UsageLogUpsertBulk) ClearDispatchPhases() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDispatchPhases()
 	})
 }
 

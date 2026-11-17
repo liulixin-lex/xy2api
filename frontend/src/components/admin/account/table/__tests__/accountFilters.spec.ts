@@ -5,56 +5,56 @@ import { accountMatchesFilters, qualityMatches } from '../accountFilters'
 import type { AccountQualityView } from '../accountGroups'
 
 const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView => ({
-  status: 'normal',
+  group_status: { 1: 'pass' },
   stop: null,
-  substandard: [],
+  rear: [],
+  trial: [],
   exemptions: [],
   ...patch
 })
-const substandard = (effective = true) => ({ group_id: 1, model: 'gpt-6', dims: ['error' as const], until: '', other_group: false, exempt: !effective, effective })
 const stop = { source: 'auto', reason: 'error', until: null }
+const exempt = [{ group_id: 0, expires_at: null, reason: '' }]
 
-// The four options as the backend filters them (sched_admin_summary.go, attention), spec 7e and 9.5–9.6.
+// The five options as the backend filters them (H.11), from the groups' identities.
 describe('quality filter', () => {
-  it('matches each of normal, back of queue, exempt and observing the way the backend filters', () => {
-    expect(qualityMatches('openai', quality(), 'normal')).toBe(true)
-    expect(qualityMatches('openai', quality({ substandard: [substandard()] }), 'substandard')).toBe(true)
-    expect(qualityMatches('openai', quality({ substandard: [substandard()] }), 'normal')).toBe(false)
-    expect(qualityMatches('openai', quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }] }), 'exempt')).toBe(true)
-    expect(qualityMatches('openai', quality({ status: 'observing' }), 'observing')).toBe(true)
-    expect(qualityMatches('openai', quality({ status: 'observing' }), 'normal')).toBe(false)
+  it('matches rear, trial and unknown by any group with that identity, exempt by any exemption', () => {
+    const mixed = quality({ group_status: { 1: 'pass', 2: 'rear', 3: 'trial' } })
+    expect(['normal', 'rear', 'trial', 'unknown', 'exempt'].map((filter) => qualityMatches('openai', mixed, filter))).toEqual([false, true, true, false, false])
+    const unknown = quality({ group_status: { 1: 'unknown' }, exemptions: exempt })
+    expect(['normal', 'rear', 'trial', 'unknown', 'exempt'].map((filter) => qualityMatches('openai', unknown, filter))).toEqual([false, false, false, true, true])
   })
 
-  it('takes only records in effect for the back of queue, and none while the account is stopped', () => {
-    expect(qualityMatches('openai', quality({ substandard: [substandard(false)] }), 'substandard')).toBe(false)
-    expect(qualityMatches('openai', quality({ substandard: [substandard(false)] }), 'normal')).toBe(true)
-    expect(qualityMatches('openai', quality({ status: 'disabled', stop, substandard: [substandard()] }), 'substandard')).toBe(false)
+  it('calls normal only an account not stopped with every group passing, exemptions aside, and at least one group', () => {
+    expect(qualityMatches('openai', quality({ group_status: { 1: 'pass', 2: 'pass' } }), 'normal')).toBe(true)
+    expect(qualityMatches('openai', quality({ group_status: { 1: 'pass' }, exemptions: exempt }), 'normal')).toBe(true)
+    expect(qualityMatches('openai', quality({ group_status: { 1: 'pass', 2: 'unknown' } }), 'normal')).toBe(false)
+    expect(qualityMatches('openai', quality({ group_status: {} }), 'normal')).toBe(false)
+    expect(qualityMatches('openai', quality({ stop }), 'normal')).toBe(false)
   })
 
-  it('calls normal only an OpenAI account with status normal, no exemption and no record in effect', () => {
-    expect(qualityMatches('openai', quality({ exemptions: [{ group_id: 1, expires_at: null, reason: '' }] }), 'normal')).toBe(false)
-    expect(qualityMatches('openai', quality({ status: 'disabled', stop }), 'normal')).toBe(false)
-    expect(qualityMatches('gemini', quality(), 'normal')).toBe(false)
-    expect(qualityMatches('openai', null, 'normal')).toBe(false)
+  it('takes no stopped account for the rear, while trial and unknown still read the identity', () => {
+    const stopped = quality({ stop, group_status: { 1: 'rear', 2: 'trial' } })
+    expect(qualityMatches('openai', stopped, 'rear')).toBe(false)
+    expect(qualityMatches('openai', stopped, 'trial')).toBe(true)
   })
 
-  it('matches none of the four for an account outside OpenAI or without a summary', () => {
-    for (const filter of ['normal', 'substandard', 'exempt', 'observing']) {
-      expect(qualityMatches('anthropic', quality({ exemptions: [{ group_id: 0, expires_at: null, reason: '' }], status: 'observing' }), filter)).toBe(false)
+  it('matches none of the five for an account outside OpenAI or without a summary', () => {
+    for (const filter of ['normal', 'rear', 'trial', 'unknown', 'exempt']) {
+      expect(qualityMatches('anthropic', quality({ exemptions: exempt, group_status: { 1: 'rear', 2: 'trial', 3: 'unknown' } }), filter)).toBe(false)
       expect(qualityMatches('openai', null, filter)).toBe(false)
     }
   })
 
   it('judges nothing before the row\'s first summary is in', () => {
-    expect(qualityMatches('openai', undefined, 'substandard')).toBe(true)
+    expect(qualityMatches('openai', undefined, 'rear')).toBe(true)
     expect(qualityMatches('openai', undefined, 'normal')).toBe(true)
   })
 
   it('takes part in the row match next to the other filters', () => {
     const account = { id: 1, name: 'a', platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [1] } as unknown as Account
     const context = { now: () => Date.now(), currentTime: () => Date.now(), matchesCategory: () => true }
-    expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality({ substandard: [substandard()] }) })).toBe(true)
-    expect(accountMatchesFilters(account, { sched_quality: 'substandard' }, { ...context, quality: quality() })).toBe(false)
+    expect(accountMatchesFilters(account, { sched_quality: 'rear' }, { ...context, quality: quality({ group_status: { 1: 'rear' } }) })).toBe(true)
+    expect(accountMatchesFilters(account, { sched_quality: 'rear' }, { ...context, quality: quality() })).toBe(false)
     expect(accountMatchesFilters(account, { platform: 'gemini' }, { ...context, quality: quality() })).toBe(false)
   })
 })

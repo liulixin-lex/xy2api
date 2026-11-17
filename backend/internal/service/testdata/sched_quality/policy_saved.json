@@ -1,0 +1,15 @@
+{
+  "group_id": 1,
+  "version": 63,
+  "policy": {
+    "enabled": true,
+    "ttft_seconds": 10,
+    "max_error_rate": 0.05,
+    "min_cache_ratio": 0.9,
+    "takeover_idle_seconds": 900
+  },
+  "relaxed_lines": [
+    "ttfo"
+  ],
+  "cleared": 3
+}

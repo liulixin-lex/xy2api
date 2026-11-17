@@ -83,7 +83,7 @@ Docker Compose 只把 Compose 文件里列出的变量传进容器，其他变�
 | `server.trusted_proxies` | `SERVER_TRUSTED_PROXIES` | 未设置 | 直接连接 XY2API 的反向代理地址，见 [反向代理](reverse-proxy.md) |
 | `server.max_request_body_size` | `SERVER_MAX_REQUEST_BODY_SIZE` | `268435456`（256 MiB） | 全局请求体上限 |
 | `server.restart_drain_seconds` | `SERVER_RESTART_DRAIN_SECONDS` | `30` | 在线更新后重启时等待在途请求的秒数，0–600 |
-| `database.max_open_conns` / `max_idle_conns` | `DATABASE_MAX_OPEN_CONNS` / `DATABASE_MAX_IDLE_CONNS` | `256` / `128` | 连接池。所有实例的上限之和要小于 PostgreSQL 的 `max_connections` |
+| `database.max_open_conns` / `max_idle_conns` | `DATABASE_MAX_OPEN_CONNS` / `DATABASE_MAX_IDLE_CONNS` | `256` / `128` | 连接池；`max_open_conns` 至少为 2，小于 2 启动报错。调度事件消费租约独占一条连接，读队列和更新快照还需其他连接；默认值 256 不受影响。所有实例的上限之和要小于 PostgreSQL 的 `max_connections` |
 | `redis.pool_size` / `min_idle_conns` | `REDIS_POOL_SIZE` / `REDIS_MIN_IDLE_CONNS` | `1024` / `128` | Redis 连接池 |
 | `jwt.access_token_expire_minutes` | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `0` | 大于 0 时按分钟计，优先于 `jwt.expire_hour` |
 | `timezone` | `TZ` | `Asia/Shanghai` | 影响统计的“今日”边界、订阅到期等 |

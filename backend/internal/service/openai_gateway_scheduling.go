@@ -1051,6 +1051,11 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 
+	if openAIProfitFloorExcluded(ctx, account) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(openAIProfitFilterReasonFloor)
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		return nil
+	}
 	if _, excluded := excludedIDs[accountID]; excluded {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 		return nil
@@ -1085,7 +1090,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
-	account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	account, transient, profitReason := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 	if transient {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_recheck_transient")
 		return nil
@@ -1093,6 +1098,13 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		return nil
+	}
+	if profitReason != "" {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(profitReason)
+		if profitReason == openAIProfitFilterReasonFloor {
+			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		}
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
@@ -1185,6 +1197,8 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
+	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
@@ -1198,7 +1212,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
-		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
 	}
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()
@@ -1217,10 +1230,17 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
 	}
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
 	if sessionHash != "" && s.cache != nil {
 		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
 	}
+	trial := s.newSelectionTrial(ctx, req, stickyAccountID)
+	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
+	defer func() {
+		planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection)
+		trial.finish(ctx, selection)
+	}()
 	var accounts []Account
 	var membersErr error
 	loaded := false
@@ -1243,6 +1263,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			} else if account == nil {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_unavailable")
 			}
+			if err == nil && account != nil {
+				if openAIProfitFloorExcluded(ctx, account) {
+					resilience.StateFrom(ctx).NoteStickyBypassReason(openAIProfitFilterReasonFloor)
+					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					account = nil
+				}
+			}
 			if err == nil && account != nil && isExcluded(accountID) {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 			}
@@ -1264,7 +1291,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				}
 				if eligible {
 					var transient bool
-					account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+					var profitReason string
+					account, transient, profitReason = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						if !transient {
 							resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
@@ -1275,6 +1303,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					} else if profitReason != "" {
+						resilience.StateFrom(ctx).NoteStickyBypassReason(profitReason)
+						if profitReason == openAIProfitFilterReasonFloor {
+							_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						}
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
@@ -1324,10 +1357,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary(""), stats.capabilityOnly())
 	}
 	loadRequests := selectionLoadRequests(candidates)
+	checked := make(map[int64]*Account)
 	tryAcquire := func(loads map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
 		available := s.selectionAvailable(ctx, candidates, loads)
 		s.sortSelectionAccounts(ctx, available, req, loads)
-		for _, a := range available {
+		attempted := len(available) > 0
+		for len(available) > 0 {
+			a := available[0]
+			available = available[1:]
 			if ctx.Err() != nil {
 				return nil, true, ctx.Err()
 			}
@@ -1335,25 +1372,36 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if fresh == nil {
 				continue
 			}
+			checked[fresh.ID] = fresh
 			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err != nil || slot == nil || !slot.Acquired {
 				continue
 			}
-			latest, vetoed, _ := s.SelectionAdmissionVetoLatest(ctx, fresh)
+			latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
 			if vetoed || latest == nil {
+				delete(checked, fresh.ID) // a changed cached rate cannot reuse its earlier wait-plan row
 				slot.ReleaseFunc()
 				continue
 			}
+			full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
+			reservation, accepted := trial.reserve(ctx, latest, full)
+			if !accepted {
+				slot.ReleaseFunc()
+				available = append(available, latest)
+				s.sortSelectionAccounts(ctx, available, req, loads)
+				continue
+			}
+			trial.selected = reservation
 			selected, err := s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
 			if err != nil {
 				return nil, true, err
 			}
-			if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
+			if sessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
 				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
 			}
 			return selected, true, nil
 		}
-		return nil, len(available) > 0, nil
+		return nil, attempted, nil
 	}
 	var loads map[int64]*AccountLoadInfo
 	var loadErr error
@@ -1387,11 +1435,25 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return selected, err
 	}
 	s.sortSelectionAccounts(ctx, candidates, req, loads)
-	for _, a := range candidates {
-		fresh := s.recheckSelectionAccount(ctx, req, a)
+	for len(candidates) > 0 {
+		a := candidates[0]
+		candidates = candidates[1:]
+		fresh := checked[a.ID]
+		if fresh == nil {
+			fresh = s.recheckSelectionAccount(ctx, req, a)
+		}
+
 		if fresh == nil {
 			continue
 		}
+		full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, fresh, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
+		reservation, accepted := trial.reserve(ctx, fresh, full)
+		if !accepted {
+			candidates = append(candidates, fresh)
+			s.sortSelectionAccounts(ctx, candidates, req, loads)
+			continue
+		}
+		trial.selected = reservation
 		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{AccountID: fresh.ID, MaxConcurrency: fresh.Concurrency, Timeout: cfg.FallbackWaitTimeout, MaxWaiting: cfg.FallbackMaxWaiting})
 	}
 	if requireCompact {
@@ -1564,7 +1626,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 
 // recheckLatestOpenAIAccount applies the DB recheck to an account just read.
 func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, latest *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
-	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+	if unknown, _ := ctx.Value(openAIAdmissionUnknownGroupKey{}).(bool); !unknown && !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
 		observeSelectionFailure(ctx, latest.ID, "excluded", nil)
 		return nil
 	}
@@ -1572,14 +1634,20 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 		observeSelectionFailure(ctx, latest.ID, "privacy_not_set", nil)
 		return nil
 	}
-	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s) {
-		return nil
+	if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s); reason != "" {
+		compactOutbound := ""
+		if requireCompact {
+			compactOutbound = s.openAICodexTicketOutboundModel(latest, requestedModel, true)
+		}
+		if reason != "model_rate_limited" || !lastResortModelLimitSoft(ctx, latest, requestedModel, requireCompact, compactOutbound) {
+			return nil
+		}
 	}
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
 		observeSelectionFailure(ctx, latest.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+	if !resilienceLastResortGate(ctx) && s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
 		observeSelectionFailure(ctx, latest.ID, "runtime_blocked", nil)
 		return nil
 	}
@@ -1587,7 +1655,7 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 		observeSelectionFailure(ctx, latest.ID, "account_scheduling_threshold", nil)
 		return nil
 	}
-	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
+	if !resilienceLastResortGate(ctx) && s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		observeSelectionFailure(ctx, latest.ID, "proxy_stream_quarantined", nil)
 		return nil
 	}
@@ -1613,6 +1681,11 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	}
 	if err != nil || account == nil {
 		return account, err
+	}
+	if change := pendingOpenAIStickyChange(ctx); change != nil && change.expected.AccountID == account.ID {
+		if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+			change.fromModel = OpenAIAttemptModel(account, req.RequestedModel)
+		}
 	}
 	state := resilience.StateFrom(ctx)
 	if account.ID == state.StickyOwner() {
@@ -1726,19 +1799,91 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 	}
 }
 
-// SelectionAdmissionVetoLatest shares the profit-gate refresh and checks the
-// current account after acquiring a slot, including after a wait plan.
-// Quality is an ordering signal and never vetoes an already selected account.
-func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context, account *Account) (*Account, bool, string) {
-	latest, vetoed, reason := s.ProfitControlVetoLatest(ctx, account)
-	if vetoed {
-		if account != nil {
-			observeSelectionFailure(ctx, account.ID, reason, nil)
-		}
-		return latest, vetoed, reason
-	}
-	return latest, false, ""
+// SelectionAdmissionVeto evaluates the account just read by selection without
+// repeating authoritative reads on an immediate slot acquisition.
+func (s *OpenAIGatewayService) SelectionAdmissionVeto(ctx context.Context, account *Account) (*Account, bool, string) {
+	return s.selectionAdmissionVeto(ctx, account, true)
 }
+
+// A post-wait database read already owns the newest membership projection.
+// Only immediate admission refreshes its cost/account snapshot from cache.
+func (s *OpenAIGatewayService) selectionAdmissionVeto(ctx context.Context, account *Account, refreshCache bool) (*Account, bool, string) {
+	if account == nil {
+		return nil, true, "account_nil"
+	}
+	// Preserve the existing profit-gate refresh from shared cache, without the
+	// snapshot service's DB fallback. An immediate request must never repeat
+	// its authoritative read just because a cache entry is missing.
+	if refreshCache && s != nil && gatewayProfitControlGateActive(ctx) && s.schedulerSnapshot != nil && s.schedulerSnapshot.cache != nil {
+		cached, err := s.schedulerSnapshot.cache.GetAccount(ctx, account.ID)
+		if err == nil && cached != nil && !cached.UpdatedAt.Before(account.UpdatedAt) {
+			account = cached
+		}
+	}
+	req, known := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if !known {
+		req.Platform = account.Platform
+		ctx = context.WithValue(ctx, openAIAdmissionUnknownGroupKey{}, true)
+	}
+	if known {
+		if _, cached := ctx.Value(openAIGroupPrivacyRequirementContextKey{}).(openAIGroupPrivacyRequirement); !cached {
+			ctx = context.WithValue(ctx, openAIGroupPrivacyRequirementContextKey{}, openAIGroupPrivacyRequirement{groupID: derefGroupID(req.GroupID), required: req.RequirePrivacySet})
+		}
+	}
+	latest, reason := s.recheckSelectionAdmission(ctx, req, account)
+	if reason != "" {
+		observeSelectionFailure(ctx, account.ID, reason, nil)
+	}
+	return latest, reason != "", reason
+}
+
+// SelectionAdmissionVetoLatest is reserved for a slot reached after waiting or
+// a subsequent WebSocket turn. Normal immediate selection uses its fresh row.
+func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context, account *Account) (*Account, bool, string) {
+	if account == nil {
+		return nil, true, "account_nil"
+	}
+	if req, known := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); known {
+		req.RequirePrivacySet = s.loadOpenAIGroupRequiresPrivacySet(ctx, req.GroupID)
+		ctx = context.WithValue(ctx, openAIGroupPrivacyRequirementContextKey{}, openAIGroupPrivacyRequirement{groupID: derefGroupID(req.GroupID), required: req.RequirePrivacySet})
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
+	}
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	latest := account
+	if s != nil && s.accountRepo != nil {
+		var err error
+		latest, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
+			return account, true, string(SelectionReasonDependencyError)
+		}
+	} else if s != nil && s.schedulerSnapshot != nil {
+		var err error
+		latest, err = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		if err != nil || latest == nil {
+			return account, true, string(SelectionReasonDependencyError)
+		}
+	}
+	latest, vetoed, reason := s.selectionAdmissionVeto(ctx, latest, false)
+	if reason == openAIProfitFilterReasonFloor {
+		if req, known := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); known && req.SessionHash != "" {
+			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+			_ = s.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, req.SessionHash, account.ID)
+		}
+	}
+	return latest, vetoed, reason
+}
+
+// SelectionAdmissionForResult refreshes only when this result has waited since
+// its last account read, including a sticky retry before reaching the handler.
+func (s *OpenAIGatewayService) SelectionAdmissionForResult(ctx context.Context, selection *AccountSelectionResult, waited bool) (*Account, bool, string) {
+	if waited || selection.admissionWaited {
+		return s.SelectionAdmissionVetoLatest(ctx, selection.Account)
+	}
+	return s.SelectionAdmissionVeto(ctx, selection.Account)
+}
+
+type openAIAdmissionUnknownGroupKey struct{}
 
 // OpenAIQualityTurnPinned uses the same chain ownership predicate as
 // AdvanceOpenAIQualityTurn, before that method can update routing state.
@@ -1764,7 +1909,13 @@ var (
 
 // selectOpenAIStickyCapacity is shared by all three sticky saturation paths.
 // The short retry never joins a queue; only the returned final wait plan does.
-func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (selection *AccountSelectionResult, selectionErr error) {
+	waited := false
+	defer func() {
+		if selection != nil && selection.Account.ID == account.ID {
+			selection.admissionWaited = waited
+		}
+	}()
 	if req.NoWait || openAISelectionNoWait(ctx) {
 		if req.DisableStickyEscape || req.PreviousResponseID != "" {
 			return nil, ErrNoAvailableAccounts
@@ -1823,6 +1974,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, a
 			timer.Stop()
 			return nil, ctx.Err()
 		case <-timer.C:
+			waited = true
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -1848,9 +2000,9 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, a
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	selection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)
-	if err != nil || selection != nil {
-		return selection, err
+	borrowed, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)
+	if err != nil || borrowed != nil {
+		return borrowed, err
 	}
 	return wait()
 }
@@ -1867,13 +2019,22 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx contex
 	return s.selectOpenAIStickyCapacityResult(ctx, account, req, true)
 }
 
-func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (selection *AccountSelectionResult, selectionErr error) {
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	if req.NoWait || openAISelectionNoWait(ctx) {
 		fallbackWait = false
 	}
 	if account == nil {
 		return nil, nil
 	}
+	trial := s.newSelectionTrial(ctx, req, account.ID)
+	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
+	defer func() {
+		if selection != nil && selection.Account != nil && selection.Account.ID != account.ID {
+			trial.selected, _ = trial.reserve(ctx, selection.Account, true)
+			trial.finish(ctx, selection)
+		}
+	}()
 	cfg := s.schedulingConfig()
 	accounts, err := s.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
@@ -1989,7 +2150,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 			result.ReleaseFunc()
 			continue
 		}
-		latest, vetoed, _ := s.SelectionAdmissionVetoLatest(ctx, fresh)
+		latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
 		if vetoed || latest == nil {
 			result.ReleaseFunc()
 			continue

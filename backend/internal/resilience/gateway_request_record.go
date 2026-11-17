@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -18,6 +20,7 @@ const (
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
 // later websocket turn and client cancellation without consulting mutable state.
 type GatewayRequestMetadata struct {
+	ProfitBasis        *ProfitBasis
 	RequestScope       GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool
@@ -39,6 +42,7 @@ type GatewayRequestMetadata struct {
 }
 
 type gatewayRequestTrace struct {
+	profit             *profitTrace
 	RequestScope       GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool
@@ -50,6 +54,8 @@ type gatewayRequestTrace struct {
 
 	started                    time.Time
 	sends                      int
+	failedBeforeSend           bool
+	currentFailed              bool
 	lastAccount                int64
 	switches                   int16
 	fallback, takeover         bool
@@ -74,7 +80,7 @@ func (s *RequestState) EnableGatewayRequest(at time.Time, scopes ...GatewayReque
 		scope = scopes[0]
 	}
 	switch scope {
-	case GatewayRequestScopeText, GatewayRequestScopeImage, GatewayRequestScopeEmbedding:
+	case GatewayRequestScopeText, GatewayRequestScopeImage, GatewayRequestScopeEmbedding, GatewayRequestScopeSearch:
 	default:
 		return
 	}
@@ -140,6 +146,11 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 }
 
 func (s *RequestState) noteGatewaySendLocked(accountID int64) {
+	// A later send (including a WebSocket turn) cannot inherit HTTP headers
+	// from the preceding attempt, even when request statistics are disabled.
+	if accountID > 0 {
+		s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, 0
+	}
 	r := s.gatewayRecord
 	if r == nil || r.final != nil || accountID <= 0 {
 		return
@@ -148,8 +159,13 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 		r.switches++
 	}
 	r.lastAccount = accountID
+	r.profit.noteSend(accountID)
 	r.fallback = s.selectionFlags.accountID == accountID && s.selectionFlags.fallback
 	r.takeover = s.selectionFlags.accountID == accountID && s.selectionFlags.takeover
+	if r.sends > 0 && r.currentFailed {
+		r.failedBeforeSend = true
+	}
+	r.currentFailed = false
 	r.sends++
 	r.complete = false
 	r.UsageObserved, r.UsageSource = nil, nil
@@ -167,17 +183,25 @@ func (s *RequestState) NoteGatewaySend(accountID int64) {
 }
 
 func (s *RequestState) NoteGatewayAttempt(success bool, detail string, input, read, creation *int) {
+	s.NoteGatewayAttemptForRequest("", success, detail, input, read, creation)
+}
+
+// NoteGatewayAttemptForRequest prevents a late previous-turn capture from
+// adding failure or usage facts to a new WebSocket request. An empty ID denotes
+// the synchronous current-request callers of NoteGatewayAttempt.
+func (s *RequestState) NoteGatewayAttemptForRequest(requestID string, success bool, detail string, input, read, creation *int) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.gatewayRecord
-	if r == nil || r.final != nil {
+	if r == nil || r.final != nil || requestID != "" && requestID != s.requestID {
 		return
 	}
 	if !success {
 		r.failed = true
+		r.currentFailed = true
 		r.errorClass = detail
 	}
 	addKnown := func(dst **int, value *int) {
@@ -209,6 +233,7 @@ func (s *RequestState) CompleteGatewayForward(complete, canceled bool) {
 	r.complete, r.canceled = complete && !canceled, canceled
 	if !complete && r.sends > 0 {
 		r.failed = true
+		r.currentFailed = true
 	}
 }
 
@@ -220,6 +245,14 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	}
 	first := s.EndToEndFirstOutputMs()
 	canceled := s.ClientCanceled()
+	waived := false
+	if !billing {
+		s.d.mu.Lock()
+		// Only billing's explicit undelivered waiver records usage with billed=false.
+		// Neither an unattempted/failed bill nor a zero-cost usage row is a waiver.
+		waived = s.d.disconnected && !s.d.delivered && !s.d.abuse && len(s.d.usageJSON) > 0 && !s.d.billed
+		s.d.mu.Unlock()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.gatewayRecord
@@ -231,22 +264,39 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 		switch {
 		case r.canceled || !r.complete && canceled:
 			result = RequestCanceled
-		case r.complete && r.failed:
+		case r.complete && r.sends >= 2 && r.failedBeforeSend:
 			result = RequestRescued
 		case r.complete:
 			result = RequestSuccess
+			if r.failed {
+				logger.L().Warn("sched_quality.delivery_capture_mismatch", zap.String("component", "sched_quality"),
+					zap.String("request_id", s.requestID), zap.Int("sends", r.sends), zap.String("sample_error_class", r.errorClass))
+			}
 		}
 		r.final = cloneGatewayRequest(&GatewayRequestMetadata{RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
+			ProfitBasis:   r.profit.snapshot(),
 			UsageObserved: r.UsageObserved, UsageSource: r.UsageSource, TerminalEventSeen: r.TerminalEventSeen,
 			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing
 	}
+	if !billing && r.billing && waived && gatewayRequestWaiverTailEnabled(r.RequestScope) {
+		// Inline billing has explicitly declined both settlement and a usage row.
+		// Cancellation may arrive after the billing claim froze a failed write.
+		// Normalize only the waived tail's result; retain all other frozen facts.
+		r.final.Result = RequestCanceled
+		r.billing, r.claimed = false, false
+	}
 	writeUnbilled := !r.billing && !r.claimed && (!r.excluded || r.RequestScope != "")
 	r.claimed = true
 	return cloneGatewayRequest(r.final), writeUnbilled
+}
+
+// Roll out waiver audit rows by scope; legacy text billing ownership is unchanged.
+func gatewayRequestWaiverTailEnabled(scope GatewayRequestScope) bool {
+	return scope == GatewayRequestScopeSearch
 }
 
 func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
@@ -254,6 +304,7 @@ func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
 		return nil
 	}
 	v := *in
+	v.ProfitBasis = CloneProfitBasis(in.ProfitBasis)
 	copyInt := func(p *int) *int {
 		if p == nil {
 			return nil
@@ -309,6 +360,7 @@ const (
 	GatewayRequestScopeText      GatewayRequestScope = "text"
 	GatewayRequestScopeImage     GatewayRequestScope = "image"
 	GatewayRequestScopeEmbedding GatewayRequestScope = "embedding"
+	GatewayRequestScopeSearch    GatewayRequestScope = "search"
 )
 
 func (s *RequestState) GatewayRequestScope() (GatewayRequestScope, bool) {
@@ -353,4 +405,44 @@ func (s *RequestState) SetGatewayResponseFacts(accountID int64, known, usagePres
 	r.UsageObserved, r.UsageSource = &usagePresent, &usageSource
 	r.TerminalEventSeen, r.TerminalEventValid, r.ResponseBodyType = &terminalSeen, &terminalValid, &bodyKind
 	return true
+}
+
+// NoteUpstreamHTTPStatus stores only the actual response head for the active
+// send. A zero status resets it before transport; semantic error projections
+// must never be passed here.
+func (s *RequestState) NoteUpstreamHTTPStatus(accountID int64, status int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, status
+}
+
+func (s *RequestState) UpstreamHTTPStatus(accountID int64) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if accountID != 0 && accountID != s.upstreamHTTPAccount {
+		return 0
+	}
+	return s.upstreamHTTPStatus
+}
+
+// NoteClientOutputBytes records confirmed client payload writes, independently
+// of semantic-output eligibility. HTTP supplies Write's n; WebSocket supplies
+// the payload size only after a successful frame write.
+func (s *RequestState) NoteClientOutputBytes(n int) {
+	if s != nil && n > 0 {
+		s.clientOutputBytes.Add(int64(n))
+	}
+}
+
+func (s *RequestState) ClientOutputBytes() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.clientOutputBytes.Load()
 }

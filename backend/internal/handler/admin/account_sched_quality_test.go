@@ -36,7 +36,7 @@ func (s *schedQualityListAdmin) selectAccounts(ctx context.Context, group int64)
 		if group > 0 && !member {
 			continue
 		}
-		if s.filtered && slices.Contains(s.filter.IDs, id) == s.filter.Exclude {
+		if s.filtered && !slices.Contains(s.filter.IDs, id) {
 			continue
 		}
 		s.matched = append(s.matched, id)
@@ -74,7 +74,7 @@ func (s schedQualityAttention) AccountFilter(_ context.Context, quality string) 
 
 func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	attention := service.SchedAdminAttention{Substandard: []int64{1, 2}, Exempt: []int64{2, 3}, Observing: []int64{4}}
+	attention := service.SchedAdminAttention{Rear: []int64{1, 2}, Trial: []int64{1}, Exempt: []int64{2, 3}, Unknown: []int64{4}}
 	for _, route := range []struct {
 		name, method, path, query string
 		register                  func(*gin.Engine, *AccountHandler)
@@ -94,19 +94,20 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 			code                 int
 			want                 []int64
 		}{
-			{name: "substandard", quality: "substandard", code: 200, want: []int64{1, 2}},
+			{name: "rear", quality: "rear", code: 200, want: []int64{1, 2}},
 			{name: "exempt", quality: "exempt", code: 200, want: []int64{2, 3}},
-			{name: "observing", quality: "observing", code: 200, want: []int64{4}},
+			{name: "unknown", quality: "unknown", code: 200, want: []int64{4}},
+			{name: "trial", quality: "trial", code: 200, want: []int64{1}},
 			{name: "normal", quality: "normal", code: 200, want: []int64{5, 6}},
 			{name: "exempt_group", quality: "exempt", group: "1", code: 200, want: []int64{2}},
-			{name: "observing_group", quality: "observing", group: "1", code: 200, want: []int64{4}},
+			{name: "observing_group", quality: "unknown", group: "1", code: 200, want: []int64{4}},
 			{name: "normal_group", quality: "normal", group: "1", code: 200, want: []int64{6}},
-			{name: "empty_substandard", quality: "substandard", empty: true, code: 200, want: []int64{}},
+			{name: "empty_substandard", quality: "rear", empty: true, code: 200, want: []int64{}},
 			{name: "empty_exempt", quality: "exempt", empty: true, code: 200, want: []int64{}},
-			{name: "empty_observing", quality: "observing", empty: true, code: 200, want: []int64{}},
+			{name: "empty_observing", quality: "unknown", empty: true, code: 200, want: []int64{}},
 			{name: "normal_empty", quality: "normal", empty: true, code: 200, want: []int64{}},
 			{name: "unfiltered", code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
-			{name: "invalid", quality: "unknown", code: 400},
+			{name: "invalid", quality: "invalid", code: 400},
 			{name: "unavailable", quality: "normal", unavailable: true, code: 503},
 			{name: "attention_error", quality: "exempt", err: errors.New("attention unavailable"), code: 500},
 		} {
@@ -142,7 +143,6 @@ func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 				}
 				require.Equal(t, 1, admin.calls)
 				require.Equal(t, tc.quality != "", admin.filtered)
-				require.Equal(t, false, admin.filter.Exclude)
 				require.Equal(t, tc.want, admin.matched)
 				if tc.quality == "normal" && !tc.empty {
 					require.Equal(t, []int64{5, 6}, admin.filter.IDs)

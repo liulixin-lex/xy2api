@@ -3,17 +3,15 @@ package service
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 type outboxCleanupCache struct {
-	watermark       int64
-	setWatermarks   []int64
 	updateErr       error
 	listBucketErr   error
 	listBuckets     []SchedulerBucket
@@ -77,31 +75,21 @@ func (c *outboxCleanupCache) ListBuckets(ctx context.Context) ([]SchedulerBucket
 	return c.listBuckets, c.listBucketErr
 }
 
-func (c *outboxCleanupCache) GetOutboxWatermark(ctx context.Context) (int64, error) {
-	return c.watermark, nil
-}
-
-func (c *outboxCleanupCache) SetOutboxWatermark(ctx context.Context, id int64) error {
-	c.watermark = id
-	c.setWatermarks = append(c.setWatermarks, id)
-	return nil
-}
-
-type outboxCleanupDeleteCall struct {
-	watermark int64
-	limit     int
-}
-
 type outboxCleanupRepo struct {
-	events              []SchedulerOutboxEvent
-	rows                []int64
-	maxIDCalls          int
-	maxIDErr            error
-	lockAcquired        bool
-	lockAttempts        int
-	releaseCount        int
-	deleteCalls         []outboxCleanupDeleteCall
-	firstCreatedAfterID []int64
+	events          []SchedulerOutboxEvent
+	rows            []int64
+	countCalls      int
+	countErr        error
+	lockUnavailable bool
+	lockAttempts    int
+	releaseCount    int
+	deleteCalls     [][]int64
+	deleteErr       error
+	pendingReads    int
+	healthUnderLock bool
+	leaseErr        error
+	heartbeats      int
+	batchDeadline   bool
 }
 
 type outboxCleanupAccountRepo struct {
@@ -138,222 +126,131 @@ func (c *blockingOutboxCleanupCache) listCalls() int {
 	return c.calls
 }
 
-func (r *outboxCleanupRepo) ListAfterAndReleaseDedup(ctx context.Context, afterID int64, limit int) ([]SchedulerOutboxEvent, error) {
-	events := make([]SchedulerOutboxEvent, 0, len(r.events))
-	for _, event := range r.events {
-		if event.ID <= afterID {
-			continue
-		}
-		events = append(events, event)
-		if limit > 0 && len(events) >= limit {
-			break
-		}
+func (r *outboxCleanupRepo) ListPendingAndReleaseDedup(_ context.Context, limit int) ([]SchedulerOutboxEvent, error) {
+	events := append([]SchedulerOutboxEvent(nil), r.events...)
+	if limit > 0 && len(events) > limit {
+		events = events[:limit]
 	}
 	return events, nil
 }
-
-func (r *outboxCleanupRepo) FirstCreatedAtAfter(ctx context.Context, afterID int64) (time.Time, bool, error) {
-	r.firstCreatedAfterID = append(r.firstCreatedAfterID, afterID)
-	for _, event := range r.events {
-		if event.ID > afterID {
-			return event.CreatedAt, true, nil
+func (r *outboxCleanupRepo) OldestPendingCreatedAt(context.Context) (time.Time, bool, error) {
+	r.pendingReads++
+	r.healthUnderLock = r.lockUnavailable
+	if len(r.events) == 0 {
+		return time.Time{}, false, nil
+	}
+	oldest := r.events[0].CreatedAt
+	for _, e := range r.events {
+		if e.CreatedAt.Before(oldest) {
+			oldest = e.CreatedAt
 		}
 	}
-	return time.Time{}, false, nil
+	return oldest, true, nil
 }
-
-func (r *outboxCleanupRepo) MaxID(ctx context.Context) (int64, error) {
-	r.maxIDCalls++
-	if r.maxIDErr != nil {
-		return 0, r.maxIDErr
-	}
-	var maxID int64
-	for _, id := range r.rows {
-		if id > maxID {
-			maxID = id
-		}
-	}
-	return maxID, nil
+func (r *outboxCleanupRepo) PendingCount(context.Context) (int64, error) {
+	r.countCalls++
+	return int64(len(r.rows)), r.countErr
 }
-
-func (r *outboxCleanupRepo) DeleteConsumedUpTo(ctx context.Context, watermark int64, limit int) (int64, error) {
-	r.deleteCalls = append(r.deleteCalls, outboxCleanupDeleteCall{
-		watermark: watermark,
-		limit:     limit,
-	})
-	if watermark <= 0 || limit <= 0 {
-		return 0, nil
+func (r *outboxCleanupRepo) DeleteProcessed(_ context.Context, ids []int64) error {
+	r.deleteCalls = append(r.deleteCalls, append([]int64(nil), ids...))
+	if r.deleteErr != nil {
+		return r.deleteErr
 	}
-
-	deleted := int64(0)
-	kept := make([]int64, 0, len(r.rows))
+	consumed := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		consumed[id] = true
+	}
+	kept := r.rows[:0]
 	for _, id := range r.rows {
-		if id <= watermark && deleted < int64(limit) {
-			deleted++
-			continue
+		if !consumed[id] {
+			kept = append(kept, id)
 		}
-		kept = append(kept, id)
 	}
 	r.rows = kept
-	return deleted, nil
+	events := r.events[:0]
+	for _, event := range r.events {
+		if !consumed[event.ID] {
+			events = append(events, event)
+		}
+	}
+	r.events = events
+	return nil
 }
-
-func (r *outboxCleanupRepo) TryAcquireCleanupLock(ctx context.Context) (SchedulerOutboxCleanupLease, bool, error) {
+func (r *outboxCleanupRepo) TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error) {
+	_, r.batchDeadline = ctx.Deadline()
 	r.lockAttempts++
-	if !r.lockAcquired {
+	if r.lockUnavailable {
 		return nil, false, nil
 	}
-	return outboxCleanupLease{release: func() {
-		r.releaseCount++
-	}}, true, nil
+	r.lockUnavailable = true
+	return &outboxCleanupLease{repo: r}, true, nil
 }
 
 type outboxCleanupLease struct {
-	release func()
+	repo     *outboxCleanupRepo
+	released bool
 }
 
-func (l outboxCleanupLease) Release() {
-	if l.release != nil {
-		l.release()
+func (l *outboxCleanupLease) KeepAlive(context.Context) error {
+	l.repo.heartbeats++
+	return l.repo.leaseErr
+}
+func (l *outboxCleanupLease) Release() {
+	if !l.released {
+		l.released = true
+		l.repo.lockUnavailable = false
+		l.repo.releaseCount++
 	}
 }
 
-func TestSchedulerSnapshotServicePollOutboxCleansConsumedRowsAfterWatermark(t *testing.T) {
+func TestSchedulerSnapshotServicePollOutboxAcknowledgesOnlySelectedIDs(t *testing.T) {
 	cache := &outboxCleanupCache{}
-	repo := &outboxCleanupRepo{
-		events: []SchedulerOutboxEvent{
-			{ID: 10000, EventType: SchedulerOutboxEventAccountLastUsed},
-		},
-		rows:         int64Range(1, 10003),
-		lockAcquired: true,
-	}
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 3, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1, 2, 3, 4}}
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
-
 	svc.pollOutbox()
-
-	if cache.watermark != 10000 {
-		t.Fatalf("expected watermark 10000, got %d", cache.watermark)
-	}
-	if !reflect.DeepEqual(cache.setWatermarks, []int64{10000}) {
-		t.Fatalf("unexpected watermark writes: %#v", cache.setWatermarks)
-	}
-	if !reflect.DeepEqual(repo.rows, []int64{10001, 10002, 10003}) {
-		t.Fatalf("expected rows above watermark to remain, got %#v", repo.rows)
-	}
-	if repo.lockAttempts != 1 || repo.releaseCount != 1 {
-		t.Fatalf("expected one lock acquire/release, got acquire=%d release=%d", repo.lockAttempts, repo.releaseCount)
-	}
-	if len(repo.deleteCalls) != 3 {
-		t.Fatalf("expected cleanup to loop until a short batch, got %d calls", len(repo.deleteCalls))
-	}
-	for _, call := range repo.deleteCalls {
-		if call.watermark != 10000 || call.limit != schedulerOutboxCleanupBatch {
-			t.Fatalf("unexpected cleanup call: %#v", call)
-		}
+	require.Equal(t, []int64{1, 2, 4}, repo.rows)
+	require.Equal(t, [][]int64{{3}}, repo.deleteCalls)
+	require.Equal(t, 1, repo.releaseCount)
+}
+func TestSchedulerSnapshotServicePollOutboxSkipsLockedConsumer(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 3}}, rows: []int64{3}, lockUnavailable: true}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, nil)
+	svc.pollOutbox()
+	require.Empty(t, repo.deleteCalls)
+	require.Equal(t, []int64{3}, repo.rows)
+	require.Zero(t, repo.releaseCount)
+}
+func TestSchedulerSnapshotServicePollOutboxRetainsBatchOnFailure(t *testing.T) {
+	for _, stage := range []string{"handle", "ack"} {
+		t.Run(stage, func(t *testing.T) {
+			cache := &outboxCleanupCache{}
+			repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 5, EventType: SchedulerOutboxEventAccountLastUsed, Payload: map[string]any{"last_used": map[string]any{"101": int64(123)}}}}, rows: []int64{5, 6}}
+			if stage == "handle" {
+				cache.updateErr = errors.New("cache failed")
+			} else {
+				repo.deleteErr = errors.New("ack failed")
+			}
+			svc := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
+			svc.pollOutbox()
+			require.Equal(t, []int64{5, 6}, repo.rows)
+			require.Len(t, repo.events, 1)
+			require.Equal(t, 1, repo.releaseCount)
+			cache.updateErr, repo.deleteErr = nil, nil
+			svc.pollOutbox()
+			require.Equal(t, []int64{6}, repo.rows)
+			require.Empty(t, repo.events)
+		})
 	}
 }
-
-func TestSchedulerSnapshotServicePollOutboxSkipsCleanupWhenLockUnavailable(t *testing.T) {
-	cache := &outboxCleanupCache{}
-	repo := &outboxCleanupRepo{
-		events: []SchedulerOutboxEvent{
-			{ID: 3, EventType: SchedulerOutboxEventAccountLastUsed},
-		},
-		rows:         []int64{1, 2, 3, 4},
-		lockAcquired: false,
-	}
-	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
-
-	svc.pollOutbox()
-
-	if cache.watermark != 3 {
-		t.Fatalf("expected watermark 3, got %d", cache.watermark)
-	}
-	if !reflect.DeepEqual(repo.rows, []int64{1, 2, 3, 4}) {
-		t.Fatalf("expected cleanup to skip all rows, got %#v", repo.rows)
-	}
-	if repo.lockAttempts != 1 {
-		t.Fatalf("expected one lock attempt, got %d", repo.lockAttempts)
-	}
-	if len(repo.deleteCalls) != 0 {
-		t.Fatalf("expected no delete calls, got %#v", repo.deleteCalls)
-	}
-	if repo.releaseCount != 0 {
-		t.Fatalf("expected no release without lock, got %d", repo.releaseCount)
-	}
-}
-
-func TestSchedulerSnapshotServicePollOutboxDoesNotCleanupOnHandleFailure(t *testing.T) {
-	cache := &outboxCleanupCache{
-		updateErr: errors.New("cache update failed"),
-	}
-	repo := &outboxCleanupRepo{
-		events: []SchedulerOutboxEvent{
-			{
-				ID:        5,
-				EventType: SchedulerOutboxEventAccountLastUsed,
-				Payload: map[string]any{
-					"last_used": map[string]any{"101": float64(123)},
-				},
-			},
-		},
-		rows:         []int64{1, 2, 3, 4, 5, 6},
-		lockAcquired: true,
-	}
-	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
-
-	svc.pollOutbox()
-
-	if len(cache.setWatermarks) != 0 {
-		t.Fatalf("expected no watermark write on handle failure, got %#v", cache.setWatermarks)
-	}
-	if repo.lockAttempts != 0 {
-		t.Fatalf("expected cleanup lock not to be attempted, got %d", repo.lockAttempts)
-	}
-	if len(repo.deleteCalls) != 0 {
-		t.Fatalf("expected no delete calls, got %#v", repo.deleteCalls)
-	}
-	if !reflect.DeepEqual(repo.rows, []int64{1, 2, 3, 4, 5, 6}) {
-		t.Fatalf("expected rows unchanged, got %#v", repo.rows)
-	}
-}
-
 func TestSchedulerSnapshotServicePollOutboxDoesNotUseConsumedEventForLag(t *testing.T) {
 	cache := &outboxCleanupCache{}
-	repo := &outboxCleanupRepo{
-		events: []SchedulerOutboxEvent{
-			{
-				ID:        7,
-				EventType: SchedulerOutboxEventAccountLastUsed,
-				CreatedAt: time.Now().Add(-time.Hour),
-			},
-		},
-	}
-	cfg := &config.Config{
-		Gateway: config.GatewayConfig{
-			Scheduling: config.GatewaySchedulingConfig{
-				OutboxLagWarnSeconds:     1,
-				OutboxLagRebuildSeconds:  1,
-				OutboxLagRebuildFailures: 1,
-			},
-		},
-	}
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 7, EventType: SchedulerOutboxEventAccountLastUsed, CreatedAt: time.Now().Add(-time.Hour)}}}
+	cfg := &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxLagWarnSeconds: 1, OutboxLagRebuildSeconds: 1, OutboxLagRebuildFailures: 1}}}
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
-
 	svc.pollOutbox()
-
-	if cache.watermark != 7 {
-		t.Fatalf("expected watermark 7, got %d", cache.watermark)
-	}
-	if !reflect.DeepEqual(repo.firstCreatedAfterID, []int64{7}) {
-		t.Fatalf("expected lag check after consumed watermark, got %#v", repo.firstCreatedAfterID)
-	}
-	if cache.listBucketCalls != 0 {
-		t.Fatalf("expected consumed event not to trigger full rebuild, got %d attempts", cache.listBucketCalls)
-	}
-	if svc.lagFailures != 0 {
-		t.Fatalf("expected lag failures to remain reset, got %d", svc.lagFailures)
-	}
+	require.Equal(t, 1, repo.pendingReads)
+	require.Zero(t, cache.listBucketCalls)
+	require.Zero(t, svc.lagFailures)
 }
 
 func TestSchedulerSnapshotServiceCheckOutboxLagLatchesPersistentDegradation(t *testing.T) {
@@ -373,13 +270,13 @@ func TestSchedulerSnapshotServiceCheckOutboxLagLatchesPersistentDegradation(t *t
 		{
 			name:             "backlog",
 			createdAt:        time.Now(),
-			rows:             []int64{100},
+			rows:             int64Range(1, 100),
 			backlogThreshold: 50,
 		},
 		{
 			name:             "lag_and_backlog",
 			createdAt:        time.Now().Add(-time.Hour),
-			rows:             []int64{100},
+			rows:             int64Range(1, 100),
 			lagSeconds:       1,
 			backlogThreshold: 50,
 		},
@@ -404,7 +301,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagLatchesPersistentDegradation(t *t
 			svc := NewSchedulerSnapshotService(cache, repo, &outboxCleanupAccountRepo{}, nil, cfg)
 
 			for range 3 {
-				svc.checkOutboxLag(context.Background(), 0)
+				svc.checkOutboxLag(context.Background())
 			}
 
 			if cache.listBucketCalls != 1 {
@@ -430,16 +327,17 @@ func TestSchedulerSnapshotServiceCheckOutboxLagFailedRebuildRearmsAfterRecovery(
 	}
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
 
-	svc.checkOutboxLag(context.Background(), 0)
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected a failed rebuild to stay bounded within the episode, got %d attempts", cache.listBucketCalls)
 	}
 
-	svc.checkOutboxLag(context.Background(), 1)
+	repo.events, repo.rows = nil, nil
+	svc.checkOutboxLag(context.Background())
 	repo.events = append(repo.events, SchedulerOutboxEvent{ID: 2, CreatedAt: time.Now().Add(-time.Hour)})
 	repo.rows = []int64{2}
-	svc.checkOutboxLag(context.Background(), 1)
+	svc.checkOutboxLag(context.Background())
 
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected recovery to rearm a failed rebuild for the next episode, got %d attempts", cache.listBucketCalls)
@@ -466,9 +364,9 @@ func TestSchedulerSnapshotServiceCheckOutboxLagFailedRebuildRetriesAfterCooldown
 	}
 	svc := NewSchedulerSnapshotService(cache, repo, &outboxCleanupAccountRepo{}, nil, cfg)
 
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	for range 3 {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 	}
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected failed rebuild polls to be rate limited, got %d attempts", cache.listBucketCalls)
@@ -480,13 +378,13 @@ func TestSchedulerSnapshotServiceCheckOutboxLagFailedRebuildRetriesAfterCooldown
 	}
 	svc.outboxRebuildRetryAt = time.Now().Add(-time.Second)
 	svc.lagMu.Unlock()
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected persistent degradation to retry after cooldown, got %d attempts", cache.listBucketCalls)
 	}
 
 	for range 3 {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 	}
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected repeated rebuild failures to stay rate limited, got %d attempts", cache.listBucketCalls)
@@ -496,13 +394,13 @@ func TestSchedulerSnapshotServiceCheckOutboxLagFailedRebuildRetriesAfterCooldown
 	svc.outboxRebuildRetryAt = time.Now().Add(-time.Second)
 	svc.lagMu.Unlock()
 	cache.listBucketErr = nil
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 3 {
 		t.Fatalf("expected degraded episode to retry after cooldown, got %d attempts", cache.listBucketCalls)
 	}
 
 	for range 3 {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 	}
 	if cache.listBucketCalls != 3 {
 		t.Fatalf("expected successful retry to latch the degraded episode, got %d attempts", cache.listBucketCalls)
@@ -513,7 +411,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetryDoesNotBypassNewLagTh
 	cache := &outboxCleanupCache{listBucketErr: errors.New("list buckets failed")}
 	repo := &outboxCleanupRepo{
 		events: []SchedulerOutboxEvent{{ID: 1, CreatedAt: time.Now()}},
-		rows:   []int64{100},
+		rows:   int64Range(1, 100),
 	}
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
@@ -527,7 +425,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetryDoesNotBypassNewLagTh
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
 
 	// Start with backlog-only degradation and leave its failed rebuild retry due.
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected the backlog degradation to attempt one rebuild, got %d", cache.listBucketCalls)
 	}
@@ -539,13 +437,13 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetryDoesNotBypassNewLagTh
 	// retry must not make the first lag observation bypass its failure threshold.
 	repo.rows = []int64{1}
 	repo.events[0].CreatedAt = time.Now().Add(-time.Hour)
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected the new lag episode to start at its own threshold, got %d rebuild attempts", cache.listBucketCalls)
 	}
 
-	svc.checkOutboxLag(context.Background(), 0)
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected lag rebuild only after three lag observations, got %d attempts", cache.listBucketCalls)
 	}
@@ -569,7 +467,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagLagRetryDoesNotDelayOrEscalateNew
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
 
 	// Start with lag-only degradation and a failed rebuild in cooldown.
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected the lag degradation to attempt one rebuild, got %d", cache.listBucketCalls)
 	}
@@ -577,8 +475,8 @@ func TestSchedulerSnapshotServiceCheckOutboxLagLagRetryDoesNotDelayOrEscalateNew
 	// Lag recovers while backlog becomes newly degraded. It must start immediately
 	// and its first failure must use the base retry generation, not lag's count.
 	repo.events[0].CreatedAt = time.Now()
-	repo.rows = []int64{100}
-	svc.checkOutboxLag(context.Background(), 0)
+	repo.rows = int64Range(1, 100)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected the new backlog degradation not to inherit lag cooldown, got %d rebuild attempts", cache.listBucketCalls)
 	}
@@ -594,7 +492,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetrySurvivesUnknownBacklo
 	cache := &outboxCleanupCache{listBucketErr: errors.New("list buckets failed")}
 	repo := &outboxCleanupRepo{
 		events: []SchedulerOutboxEvent{{ID: 1, CreatedAt: time.Now()}},
-		rows:   []int64{100},
+		rows:   int64Range(1, 100),
 	}
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
@@ -606,7 +504,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetrySurvivesUnknownBacklo
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
 
 	// A failed backlog rebuild starts a reason-scoped cooldown.
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected one initial backlog rebuild, got %d", cache.listBucketCalls)
 	}
@@ -618,8 +516,8 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetrySurvivesUnknownBacklo
 	}
 
 	// A temporary MaxID failure makes backlog health unknown, not recovered.
-	repo.maxIDErr = errors.New("max id unavailable")
-	svc.checkOutboxLag(context.Background(), 0)
+	repo.countErr = errors.New("max id unavailable")
+	svc.checkOutboxLag(context.Background())
 	svc.lagMu.Lock()
 	retryReason := svc.outboxRebuildRetryReason
 	failures := svc.outboxRebuildFailures
@@ -631,15 +529,15 @@ func TestSchedulerSnapshotServiceCheckOutboxLagBacklogRetrySurvivesUnknownBacklo
 
 	// When MaxID recovers and backlog remains degraded, the original cooldown
 	// still applies; only an expired cooldown may trigger the retry.
-	repo.maxIDErr = nil
-	svc.checkOutboxLag(context.Background(), 0)
+	repo.countErr = nil
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected backlog recovery before cooldown to stay rate limited, got %d attempts", cache.listBucketCalls)
 	}
 	svc.lagMu.Lock()
 	svc.outboxRebuildRetryAt = time.Now().Add(-time.Second)
 	svc.lagMu.Unlock()
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected backlog retry after cooldown expiry, got %d attempts", cache.listBucketCalls)
 	}
@@ -649,7 +547,7 @@ func TestSchedulerSnapshotServiceCheckOutboxLagPreemptsUnknownBacklogRetryAtThre
 	cache := &outboxCleanupCache{listBucketErr: errors.New("list buckets failed")}
 	repo := &outboxCleanupRepo{
 		events: []SchedulerOutboxEvent{{ID: 1, CreatedAt: time.Now()}},
-		rows:   []int64{100},
+		rows:   int64Range(1, 100),
 	}
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
@@ -663,22 +561,22 @@ func TestSchedulerSnapshotServiceCheckOutboxLagPreemptsUnknownBacklogRetryAtThre
 	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
 
 	// Backlog starts the first failed rebuild generation and remains unknown.
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 1 {
 		t.Fatalf("expected one initial backlog rebuild, got %d", cache.listBucketCalls)
 	}
-	repo.maxIDErr = errors.New("max id unavailable")
+	repo.countErr = errors.New("max id unavailable")
 	repo.events[0].CreatedAt = time.Now().Add(-time.Hour)
 
 	// A known lag degradation must keep accumulating independently of the active
 	// backlog cooldown and preempt it only after reaching its own threshold.
 	for observation := 1; observation <= 2; observation++ {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 		if cache.listBucketCalls != 1 {
 			t.Fatalf("expected lag observation %d to stay below threshold, got %d rebuild attempts", observation, cache.listBucketCalls)
 		}
 	}
-	svc.checkOutboxLag(context.Background(), 0)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected lag to preempt backlog cooldown at its threshold, got %d attempts", cache.listBucketCalls)
 	}
@@ -727,20 +625,20 @@ func TestSchedulerSnapshotServicePollOutboxEmptyBatchClearsDegradedEpisode(t *te
 	}
 	svc := NewSchedulerSnapshotService(cache, repo, &outboxCleanupAccountRepo{}, nil, cfg)
 
-	svc.checkOutboxLag(context.Background(), 0)
-	cache.watermark = 1
+	svc.checkOutboxLag(context.Background())
+	repo.events, repo.rows = nil, nil
 	svc.pollOutbox()
 
-	if !reflect.DeepEqual(repo.firstCreatedAfterID, []int64{0}) {
-		t.Fatalf("expected empty poll to use the empty batch as recovery evidence, got watermarks %#v", repo.firstCreatedAfterID)
+	if repo.pendingReads != 1 {
+		t.Fatalf("expected empty poll to use the empty batch as recovery evidence, got reads %#v", repo.pendingReads)
 	}
-	if repo.maxIDCalls != 1 {
-		t.Fatalf("expected empty poll to skip a redundant backlog query, got %d health checks", repo.maxIDCalls)
+	if repo.countCalls != 1 {
+		t.Fatalf("expected empty poll to skip a redundant backlog query, got %d health checks", repo.countCalls)
 	}
 
 	repo.events = append(repo.events, SchedulerOutboxEvent{ID: 2, CreatedAt: time.Now().Add(-time.Hour)})
 	repo.rows = []int64{2}
-	svc.checkOutboxLag(context.Background(), 1)
+	svc.checkOutboxLag(context.Background())
 	if cache.listBucketCalls != 2 {
 		t.Fatalf("expected empty-poll recovery to rearm the next degraded episode, got %d attempts", cache.listBucketCalls)
 	}
@@ -766,18 +664,18 @@ func TestSchedulerSnapshotServiceOutboxLagWarningIsTransitionLimited(t *testing.
 	}
 }
 
-func TestSchedulerSnapshotServiceCheckOutboxLagSamplesMaxIDErrors(t *testing.T) {
+func TestSchedulerSnapshotServiceCheckOutboxLagSamplesCountErrors(t *testing.T) {
 	svc := NewSchedulerSnapshotService(nil, nil, nil, nil, nil)
 	now := time.Now()
 
-	if !svc.shouldLogOutboxMaxIDError(now) {
-		t.Fatal("expected the first MaxID error to log")
+	if !svc.shouldLogOutboxCountError(now) {
+		t.Fatal("expected the first PendingCount error to log")
 	}
-	if svc.shouldLogOutboxMaxIDError(now.Add(outboxMaxIDErrorLogSampleInterval / 2)) {
-		t.Fatal("expected MaxID errors inside the sample interval to be suppressed")
+	if svc.shouldLogOutboxCountError(now.Add(outboxCountErrorLogSampleInterval / 2)) {
+		t.Fatal("expected PendingCount errors inside the sample interval to be suppressed")
 	}
-	if !svc.shouldLogOutboxMaxIDError(now.Add(outboxMaxIDErrorLogSampleInterval)) {
-		t.Fatal("expected MaxID error logging to rearm after the sample interval")
+	if !svc.shouldLogOutboxCountError(now.Add(outboxCountErrorLogSampleInterval)) {
+		t.Fatal("expected PendingCount error logging to rearm after the sample interval")
 	}
 }
 
@@ -797,17 +695,16 @@ func TestSchedulerSnapshotServicePollOutboxHealthyEmptyBatchSkipsLagHealthQuerie
 
 	svc.pollOutbox()
 
-	if len(repo.firstCreatedAfterID) != 0 {
-		t.Fatalf("expected healthy empty poll to skip lag query, got watermarks %#v", repo.firstCreatedAfterID)
+	if repo.pendingReads != 0 {
+		t.Fatalf("expected healthy empty poll to skip lag query, got reads %#v", repo.pendingReads)
 	}
-	if repo.maxIDCalls != 0 {
-		t.Fatalf("expected healthy empty poll to skip backlog query, got %d calls", repo.maxIDCalls)
+	if repo.countCalls != 0 {
+		t.Fatalf("expected healthy empty poll to skip backlog query, got %d calls", repo.countCalls)
 	}
 }
 
 func TestSchedulerSnapshotServiceEmptyPollDoesNotReleaseRunningRebuild(t *testing.T) {
 	baseCache := &outboxCleanupCache{
-		watermark:   1,
 		listBuckets: []SchedulerBucket{{Platform: PlatformOpenAI, Mode: SchedulerModeSingle}},
 	}
 	cache := &blockingOutboxCleanupCache{
@@ -831,7 +728,7 @@ func TestSchedulerSnapshotServiceEmptyPollDoesNotReleaseRunningRebuild(t *testin
 
 	firstDone := make(chan struct{})
 	go func() {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 		close(firstDone)
 	}()
 	select {
@@ -842,11 +739,12 @@ func TestSchedulerSnapshotServiceEmptyPollDoesNotReleaseRunningRebuild(t *testin
 
 	// The empty batch proves recovery for episode/retry state, but it must not
 	// release ownership of the still-running rebuild.
+	repo.events, repo.rows = nil, nil
 	svc.pollOutbox()
 
 	secondDone := make(chan struct{})
 	go func() {
-		svc.checkOutboxLag(context.Background(), 0)
+		svc.checkOutboxLag(context.Background())
 		close(secondDone)
 	}()
 	select {
@@ -865,30 +763,55 @@ func TestSchedulerSnapshotServiceEmptyPollDoesNotReleaseRunningRebuild(t *testin
 	}
 }
 
-func TestSchedulerSnapshotServiceCleanupSkipsNonPositiveWatermark(t *testing.T) {
-	repo := &outboxCleanupRepo{
-		rows:         []int64{1, 2, 3},
-		lockAcquired: true,
-	}
-	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, nil)
-
-	svc.cleanupConsumedOutbox(0)
-
-	if repo.lockAttempts != 0 {
-		t.Fatalf("expected no lock attempt for non-positive watermark, got %d", repo.lockAttempts)
-	}
-	if len(repo.deleteCalls) != 0 {
-		t.Fatalf("expected no delete calls, got %#v", repo.deleteCalls)
-	}
-	if !reflect.DeepEqual(repo.rows, []int64{1, 2, 3}) {
-		t.Fatalf("expected rows unchanged, got %#v", repo.rows)
-	}
-}
-
 func int64Range(start, end int64) []int64 {
 	values := make([]int64, 0, end-start+1)
 	for id := start; id <= end; id++ {
 		values = append(values, id)
 	}
 	return values
+}
+
+func TestSchedulerOutboxLockContentionHealthAndWarnings(t *testing.T) {
+	repo := &outboxCleanupRepo{lockUnavailable: true, events: []SchedulerOutboxEvent{{ID: 1, CreatedAt: time.Now().Add(-time.Hour)}}, rows: []int64{1}}
+	cache := &outboxCleanupCache{}
+	cfg := &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxLagWarnSeconds: 1, OutboxLagRebuildSeconds: 1, OutboxLagRebuildFailures: 1, OutboxBacklogRebuildRows: 1}}}
+	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, cfg)
+	svc.pollOutbox()
+	require.Equal(t, 1, repo.pendingReads)
+	require.Equal(t, 1, repo.countCalls)
+	require.Zero(t, cache.listBucketCalls, "contending instances inspect health without synchronously rebuilding")
+	now := time.Unix(1000, 0)
+	svc.noteOutboxLockContention(now, false)
+	require.False(t, svc.noteOutboxLockContention(now, true))
+	require.True(t, svc.noteOutboxLockContention(now.Add(30*time.Second), true))
+	require.False(t, svc.noteOutboxLockContention(now.Add(45*time.Second), true))
+	require.True(t, svc.noteOutboxLockContention(now.Add(90*time.Second), true))
+}
+func TestSchedulerOutboxReleasesTransactionBeforeLagCheck(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, &config.Config{})
+	svc.pollOutbox()
+	require.Equal(t, 1, repo.pendingReads)
+	require.False(t, repo.healthUnderLock)
+	require.Equal(t, 1, repo.releaseCount)
+}
+func TestSchedulerOutboxLostLeaseStillAcknowledgesBatch(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}, leaseErr: errors.New("idle transaction terminated")}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, &config.Config{})
+	svc.pollOutbox()
+	require.Empty(t, repo.events, "successful projections must not replay forever when the lease expires")
+	require.Equal(t, [][]int64{{1}}, repo.deleteCalls)
+	require.Equal(t, 1, repo.heartbeats, "stop heartbeat attempts once lease loss is known")
+	require.False(t, repo.batchDeadline, "each event has a budget, not the whole batch")
+	require.Equal(t, 1, repo.pendingReads, "lag inspection must still follow a successful acknowledgement")
+	require.False(t, repo.healthUnderLock)
+}
+
+func TestSchedulerOutboxRenewsLeaseAfterEveryEvent(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1}, {ID: 2}, {ID: 3}}, rows: []int64{1, 2, 3}}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, nil)
+	svc.pollOutbox()
+	require.Equal(t, 4, repo.heartbeats)
+	require.False(t, repo.batchDeadline)
+	require.Empty(t, repo.events)
 }

@@ -2,7 +2,11 @@ package repository
 
 import (
 	"context"
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -44,4 +48,42 @@ func TestCapabilityAccountSaveKeepsLockedLearningState(t *testing.T) {
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+type capabilityEvictionArgument struct{}
+
+func (capabilityEvictionArgument) Match(value driver.Value) bool {
+	payload, ok := value.(string)
+	if !ok {
+		return false
+	}
+	updates := map[string]any{}
+	if json.Unmarshal([]byte(payload), &updates) != nil {
+		return false
+	}
+	oldest, removed := updates["capability_marks_0"]
+	return removed && oldest == nil && updates["capability_marks_overflow"] != nil && len(updates) == 2
+}
+
+func TestCapabilityMarkLimitLocksCurrentRowAndEvictsEarliest(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	current := map[string]any{}
+	now := time.Now()
+	for i := 0; i < service.CapabilityMarkLimit; i++ {
+		current[fmt.Sprintf("capability_marks_%d", i)] = service.CapabilityMark{Model: fmt.Sprintf("fixture-%d", i), Protocol: "responses", Shape: "*", Reason: "model_unsupported", Fingerprint: "synthetic-fingerprint", ExpiresAt: now.Add(time.Duration(i+1) * time.Hour)}
+	}
+	raw, err := json.Marshal(current)
+	require.NoError(t, err)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT extra FROM accounts WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE`).WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"extra"}).AddRow(raw))
+	mock.ExpectExec(`(?s)UPDATE accounts SET extra = .*jsonb_object_agg`).WithArgs(capabilityEvictionArgument{}, int64(41)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO scheduler_outbox`).WithArgs(service.SchedulerOutboxEventAccountChanged, int64(41), nil, nil, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	incoming := service.CapabilityMark{Model: "overflow-fixture", Protocol: "responses", Shape: "*", Reason: "model_unsupported", Fingerprint: "synthetic-fingerprint", ExpiresAt: now.Add(24 * time.Hour)}
+	require.NoError(t, repo.UpdateExtra(context.Background(), 41, map[string]any{"capability_marks_overflow": incoming}))
+	require.NoError(t, mock.ExpectationsWereMet())
 }

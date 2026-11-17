@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,15 +21,17 @@ import (
 
 type schedAdminEngine struct {
 	SchedQualityEngine
-	snapshot  *SchedQualitySnapshot
-	reads     int
-	resetAt   time.Time
-	resetErr  error
-	callback  func(int64, time.Time)
-	overrides []SchedOverride
-	policy    SchedPolicyRecord
-	policyErr error
-	changes   []SchedPolicyChange
+	snapshot     *SchedQualitySnapshot
+	reads        int
+	resetAt      time.Time
+	resetErr     error
+	callback     func(int64, time.Time)
+	overrides    []SchedOverride
+	policy       SchedPolicyRecord
+	policyErr    error
+	changes      []SchedPolicyChange
+	preview      func(schedquality.Policy) ([]SchedPolicyChange, error)
+	previewCalls []schedquality.Policy
 }
 
 func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
@@ -60,8 +63,16 @@ func (e *schedAdminEngine) ClearOverride(_ context.Context, a, g int64) error {
 func (e *schedAdminEngine) Policy(_ context.Context, _ int64) (SchedPolicyRecord, error) {
 	return e.policy, e.policyErr
 }
-func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedquality.Policy) (SchedPolicyRecord, error) {
-	return e.policy, e.policyErr
+func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedquality.Policy) (SchedPolicyUpdate, error) {
+	if e.policyErr != nil {
+		return SchedPolicyUpdate{}, e.policyErr
+	}
+	if v != e.policy.Version {
+		return SchedPolicyUpdate{}, ErrSchedPolicyConflict
+	}
+	lines := relaxedPolicyLines(e.policy.Policy, p)
+	e.policy = SchedPolicyRecord{GroupID: g, Version: v + 1, Policy: p}
+	return SchedPolicyUpdate{SchedPolicyRecord: e.policy, RelaxedLines: lines}, nil
 }
 
 type schedAdminAccounts struct {
@@ -415,6 +426,19 @@ func (c *schedAdminCapabilityClear) ClearAccountCapabilityLearning(context.Conte
 	c.calls++
 	delete(c.account.Extra, capabilityLearnedResponsesKey)
 	delete(c.account.Extra, capabilityLearnedChatKey)
+	return nil
+}
+
+func (c *schedAdminCapabilityClear) ClearAccountStreamOnlyLearning(ctx context.Context, id int64) error {
+	return c.ClearAccountCapabilityLearning(ctx, id)
+}
+func (c *schedAdminCapabilityClear) ClearAccountCapabilityMarks(context.Context, int64) error {
+	c.calls++
+	for key := range c.account.Extra {
+		if strings.HasPrefix(key, CapabilityMarksExtraKey+"_") {
+			delete(c.account.Extra, key)
+		}
+	}
 	return nil
 }
 

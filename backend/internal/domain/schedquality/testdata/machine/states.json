@@ -1,0 +1,1982 @@
+[
+  {
+    "name": "configuration-1/case-01",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-02",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-03",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-04",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-05",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-06",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-07",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-08",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-09",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-10",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-11",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-12",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-13",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-14",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-15",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-16",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-17",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-18",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-19",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-20",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-21",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-22",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-23",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-24",
+    "at": 86760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-25",
+    "at": 90360,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 89160.0,
+      "until": 90360.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-26",
+    "at": 90660,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90360.0,
+      "until": 92760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-27",
+    "at": 91560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90360.0,
+      "until": 92760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-28",
+    "at": 92460,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90360.0,
+      "until": 92760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-29",
+    "at": 97560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 96360.0,
+      "until": 101760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-30",
+    "at": 98460,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 96360.0,
+      "until": 101760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-31",
+    "at": 100260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 99060.0,
+      "until": 100260.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-32",
+    "at": 100560,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 100260.0,
+      "entry": 99060.0,
+      "until": 100260.0,
+      "trial_until": 103860.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-33",
+    "at": 101160,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 96360.0,
+      "until": 101760.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-34",
+    "at": 102060,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 101760.0,
+      "entry": 96360.0,
+      "until": 101760.0,
+      "trial_until": 105360.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-35",
+    "at": 103260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 102960.0,
+      "until": 106560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-36",
+    "at": 112722.623902082,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 106216.625252008,
+      "entry": 112312.624422073,
+      "until": 119512.624422073,
+      "trial_until": 109816.625252008
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-37",
+    "at": 115949.624545097,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 100860.0,
+      "entry": 112260.0,
+      "until": 117660.0,
+      "trial_until": 104460.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-38",
+    "at": 118418.624058962,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 100860.0,
+      "entry": 116160.0,
+      "until": 123360.0,
+      "trial_until": 104460.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-39",
+    "at": 119461.624636889,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 106216.625252008,
+      "entry": 112312.624422073,
+      "until": 119512.624422073,
+      "trial_until": 109816.625252008
+    },
+    "five_min": false,
+    "verdict": -1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-40",
+    "at": 147060,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 106260.0,
+      "entry": 142560.0,
+      "until": 147960.0,
+      "trial_until": 109860.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-1/case-41",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-42",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": 200160.0,
+      "entry": 198960.0,
+      "until": 200160.0,
+      "trial_until": 203760.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-1/case-43",
+    "at": 320460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-1/case-44",
+    "at": 320760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-01",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-02",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-03",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-04",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-05",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-06",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-07",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-08",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-09",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-10",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-11",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-12",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-13",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-14",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-15",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-16",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-17",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-18",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-19",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-20",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-21",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-22",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-23",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-24",
+    "at": 86760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-25",
+    "at": 90360,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-26",
+    "at": 90660,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90360.0,
+      "until": 91560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-27",
+    "at": 91560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90360.0,
+      "until": 91560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-28",
+    "at": 92460,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 91260.0,
+      "until": 92460.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-29",
+    "at": 97560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 93960.0,
+      "until": 97560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-30",
+    "at": 98460,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 94860.0,
+      "until": 98460.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-31",
+    "at": 100260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 99360.0,
+      "until": 100560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-32",
+    "at": 100560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 99360.0,
+      "until": 100560.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-33",
+    "at": 101160,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 97560.0,
+      "entry": 93960.0,
+      "until": 97560.0,
+      "trial_until": 101160.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-34",
+    "at": 102060,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 98460.0,
+      "entry": 94860.0,
+      "until": 98460.0,
+      "trial_until": 102060.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-35",
+    "at": 103260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 102060.0,
+      "until": 103260.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-36",
+    "at": 112722.623902082,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 111960.0,
+      "entry": 110760.0,
+      "until": 111960.0,
+      "trial_until": 115560.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-37",
+    "at": 115949.624545097,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 115860.0,
+      "entry": 113460.0,
+      "until": 115860.0,
+      "trial_until": 119460.0
+    },
+    "five_min": false,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-38",
+    "at": 118418.624058962,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 118260.0,
+      "entry": 114660.0,
+      "until": 118260.0,
+      "trial_until": 121860.0
+    },
+    "five_min": false,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-39",
+    "at": 119461.624636889,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 118722.623902082,
+      "entry": 115122.623902082,
+      "until": 118722.623902082,
+      "trial_until": 122322.623902082
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-2/case-40",
+    "at": 147060,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 141360.0,
+      "entry": 143460.0,
+      "until": 147060.0,
+      "trial_until": 144960.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-41",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-42",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-2/case-43",
+    "at": 320460,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-2/case-44",
+    "at": 320760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-01",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-02",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-03",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-04",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-05",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-06",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-07",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-08",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-09",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-10",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-11",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-12",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-13",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-14",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-15",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-16",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-17",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-18",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-19",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-20",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-21",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-22",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-23",
+    "at": 86460,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-24",
+    "at": 86760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-25",
+    "at": 90360,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 89460.0,
+      "until": 90660.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-26",
+    "at": 90660,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 89460.0,
+      "until": 90660.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-27",
+    "at": 91560,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90660.0,
+      "until": 93060.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-28",
+    "at": 92460,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 90960.0,
+      "until": 93360.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-29",
+    "at": 97560,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 96660.0,
+      "entry": 93060.0,
+      "until": 96660.0,
+      "trial_until": 100260.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-30",
+    "at": 98460,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 96960.0,
+      "entry": 93360.0,
+      "until": 96960.0,
+      "trial_until": 100560.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-31",
+    "at": 100260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 99060.0,
+      "until": 100260.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-32",
+    "at": 100560,
+    "before": {
+      "identity": -1,
+      "trial": true,
+      "epoch": 100260.0,
+      "entry": 99060.0,
+      "until": 100260.0,
+      "trial_until": 103860.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-33",
+    "at": 101160,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": 96660.0,
+      "entry": 93060.0,
+      "until": 96660.0,
+      "trial_until": 100260.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-34",
+    "at": 102060,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": 96960.0,
+      "entry": 93360.0,
+      "until": 96960.0,
+      "trial_until": 100560.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-35",
+    "at": 103260,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 102060.0,
+      "until": 103260.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-36",
+    "at": 112722.623902082,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 110760.0,
+      "entry": 112038.624591112,
+      "until": 115638.624591112,
+      "trial_until": 114360.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-37",
+    "at": 115949.624545097,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 111060.0,
+      "entry": 115747.623886108,
+      "until": 121147.623886108,
+      "trial_until": 114660.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-38",
+    "at": 118418.624058962,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 117702.623893976,
+      "entry": 118205.62411499,
+      "until": 123605.62411499,
+      "trial_until": 121302.623893976
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-39",
+    "at": 119461.624636889,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 110760.0,
+      "entry": 115638.624591112,
+      "until": 121038.624591112,
+      "trial_until": 114360.0
+    },
+    "five_min": false,
+    "verdict": 1,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-40",
+    "at": 147060,
+    "before": {
+      "identity": 1,
+      "trial": false,
+      "epoch": 142560.0,
+      "entry": 143130.624465942,
+      "until": 148530.624465942,
+      "trial_until": 146160.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 1
+  },
+  {
+    "name": "configuration-3/case-41",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-42",
+    "at": 269760,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": 0,
+    "identity": 0
+  },
+  {
+    "name": "configuration-3/case-43",
+    "at": 320460,
+    "before": {
+      "identity": 0,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  },
+  {
+    "name": "configuration-3/case-44",
+    "at": 320760,
+    "before": {
+      "identity": -1,
+      "trial": false,
+      "epoch": -1e+20,
+      "entry": 0.0,
+      "until": 0.0,
+      "trial_until": 0.0
+    },
+    "five_min": true,
+    "verdict": -1,
+    "identity": -1
+  }
+]

@@ -887,14 +887,15 @@ func ProvideAPIKeyService(
 
 func ProvideSchedObs(obs *SchedObservabilityService) SchedObs { return obs }
 
-func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, settings *SettingService, lock LeaderLockCache, db *sql.DB, obs SchedObs) *SchedQualityEngineService {
+func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, settings *SettingService, lock LeaderLockCache, db *sql.DB, obs SchedObs, leases SchedTrialLeases) *SchedQualityEngineService {
 	engine := NewSchedQualityEngineService(store, attempts, settings, nil, obs)
 	engine.SetLeaderLock(lock, db)
+	engine.SetTrialLeases(leases)
 	return engine
 }
 
 func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQualityEngineService) *OpenAISelectionBoard {
-	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View })
+	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View }, engine.leases)
 }
 
 func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTransientAdmin {

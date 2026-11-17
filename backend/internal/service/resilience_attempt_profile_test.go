@@ -150,7 +150,8 @@ func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache(t *testing.T
 			_, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, &group.ID, "", "", model, nil,
 				OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, false)
 			require.Equal(t, baselineErr == nil, err == nil)
-			require.Equal(t, 1, baselineRepo.reads)
+			expectedReads := 1 // immediate slots reuse initial eligibility
+			require.Equal(t, expectedReads, baselineRepo.reads)
 			require.Equal(t, baselineRepo.reads, repo.reads, "installing the gate adds no group query")
 			gate := resilienceOpenAIEligibility(ctx, group.ID, model)
 			require.NotNil(t, gate)
@@ -168,7 +169,7 @@ func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache(t *testing.T
 	_, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, &group.ID, "", "", model, nil,
 		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, false)
 	require.NoError(t, err, "legacy empty cache records are misses")
-	require.Equal(t, 1, repo.reads, "invalid cache entries do not skip privacy eligibility")
+	require.Equal(t, 1, repo.reads, "immediate slots reuse initial privacy eligibility")
 	require.NotNil(t, resilienceOpenAIEligibility(ctx, group.ID, model))
 }
 
