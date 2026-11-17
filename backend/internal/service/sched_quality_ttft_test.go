@@ -282,7 +282,8 @@ func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
 	bucket := f.now.UTC().Truncate(q.RegularInterval)
 	f.now = bucket.Add(3 * time.Second)
 	f.badTTFT()
-	event := bucket.Add(-3 * time.Second)
+	// Arrival after the old horizon rounds to a grid still before the bucket.
+	event := bucket.Add(-6 * time.Second)
 	for i := range f.ledger.Rows {
 		f.ledger.Rows[i].InsertedAt = event
 	}
@@ -299,7 +300,7 @@ func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
 	f.now = bucket.Add(13 * time.Second)
 	f.cycle()
 	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
-	require.Equal(t, event, f.line(q.DimensionTTFO).Entry)
+	require.Equal(t, bucket.Add(-5*time.Second), f.line(q.DimensionTTFO).Entry)
 	require.Contains(t, f.e.peerBuckets, bucket)
 	require.Equal(t, q.IdentityRear, f.e.peerBuckets[bucket].rows[key].Identity, "official membership includes the pre-boundary trial failure")
 }

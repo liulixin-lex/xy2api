@@ -93,15 +93,35 @@ func TestEngineSaveDrainsOldConfiguration(t *testing.T) {
 				p.Policy.MaxErrorRate = .9
 				f.store.Policies[10] = p
 				params := q.DefaultRuleBParams()
-				params.Tolerance, params.PeerMargin = .9, .99
+				params.Tolerance = .9
 				f.store.Rule.Params = params
-				f.ledger.Rows = engineSamples(6, start.Add(time.Minute), line == q.DimensionTTFO)
+				n := 6
+				if line == q.DimensionTTFO {
+					n = 80
+					f.store.Members[10] = []int64{1, 2}
+				}
+				f.ledger.Rows = engineSamples(n, start.Add(time.Minute), line == q.DimensionTTFO)
 				for i := range f.ledger.Rows {
 					a := &f.ledger.Rows[i]
 					a.InsertedAt = a.FinishedAt
 					a.Class = q.ClassUpstream
 					if line == q.DimensionError {
 						a.Outcome = q.OutcomeAccountFault
+					} else {
+						a.SessionKey = fmt.Sprintf("own-%d", i%3)
+						if i%2 == 0 {
+							ms := 100
+							a.TTFOMs = &ms
+						}
+					}
+				}
+				if line == q.DimensionTTFO {
+					for _, a := range append([]q.AttemptSample(nil), f.ledger.Rows...) {
+						a.AccountID = 2
+						a.AttemptID, a.RequestID, a.SessionKey = "peer-"+a.AttemptID, "peer-"+a.RequestID, "peer-"+a.SessionKey
+						ms := 100
+						a.TTFOMs = &ms
+						f.ledger.Rows = append(f.ledger.Rows, a)
 					}
 				}
 				f.now = start.Add(40*time.Minute + 10*time.Second)
@@ -195,6 +215,27 @@ func TestEngineReplayFailureAbortsConfigurationSave(t *testing.T) {
 			require.Same(t, before, f.e.Snapshot())
 		})
 	}
+}
+
+func TestEngineSavePublishesCatchupCountersAndLogs(t *testing.T) {
+	f := newQualityFixture(t)
+	output := captureSchedObsLogs(t)
+	obs := NewSchedObservabilityService()
+	f.e.obs = obs
+	start := f.now.Add(-10 * time.Second)
+	f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}, EvaluatedAt: start, Epoch: start, Trial: true, TrialUntil: start.Add(time.Hour), Admissions: 1}}
+	f.ledger.Rows = engineSamples(6, start.Add(time.Minute), false)
+	for i := range f.ledger.Rows {
+		a := &f.ledger.Rows[i]
+		a.Outcome, a.Class, a.InsertedAt = q.OutcomeAccountFault, q.ClassUpstream, a.FinishedAt
+	}
+	f.now = start.Add(40*time.Minute + 10*time.Second)
+	_, err := f.e.UpdatePolicy(context.Background(), 10, 0, f.store.Policies[10].Policy)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, obs.window.cooled)
+	require.Contains(t, output.String(), "trial_fail")
+	require.Len(t, f.store.Decisions, 1)
+	require.Equal(t, start.Add(time.Minute), f.store.Decisions[0].At)
 }
 
 func TestEngineUnknownTrialCoalescesArrivals(t *testing.T) {
