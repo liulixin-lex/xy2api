@@ -149,7 +149,7 @@ export default {
       quota_auto_pause_5h: '5h over',
       quota_auto_pause_7d: '7d over',
       model_not_supported: 'Unsupported',
-      profit_threshold: 'Profit gate',
+      profit_threshold: 'Above the rate ceiling',
       profit_floor: 'Below the rate floor',
       profit_invalid_account_rate: 'Bad rate',
       account_scheduling_threshold: 'Account gate',

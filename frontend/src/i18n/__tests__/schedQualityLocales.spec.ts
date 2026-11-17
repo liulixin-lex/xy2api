@@ -30,6 +30,12 @@ const VALUES: Record<string, string[]> = {
 const lookup = (messages: unknown, path: string): unknown =>
   path.split('.').reduce<unknown>((node, key) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined), messages)
 
+// The board's two rate-range exclusions read as the floor and the ceiling ("不用 · 低于下限 / 高于上限").
+it('names the rate-range exclusions as below the floor and above the ceiling', () => {
+  const words = (messages: unknown) => ['profit_floor', 'profit_threshold'].map((key) => lookup(messages, `admin.schedQuality.reject.${key}`))
+  expect([words(zh), words(en)]).toEqual([['低于下限', '高于上限'], ['Below the rate floor', 'Above the rate ceiling']])
+})
+
 describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_locale, messages) => {
   it('names every identity, place, layer, action, unknown cause and evidence field the backend sends', () => {
     const missing = Object.entries(VALUES).flatMap(([prefix, values]) =>

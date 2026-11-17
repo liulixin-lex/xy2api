@@ -149,7 +149,7 @@ export default {
       quota_auto_pause_5h: '5h 超限',
       quota_auto_pause_7d: '7d 超限',
       model_not_supported: '不支持',
-      profit_threshold: '利润门',
+      profit_threshold: '高于上限',
       profit_floor: '低于下限',
       profit_invalid_account_rate: '倍率无效',
       account_scheduling_threshold: '账号门槛',
