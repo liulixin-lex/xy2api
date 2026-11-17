@@ -132,6 +132,7 @@ func TestM8GatewayMetadataFreeze(t *testing.T) {
 		{"text", []GatewayRequestScope{GatewayRequestScopeText}, GatewayRequestScopeText, true},
 		{"image", []GatewayRequestScope{GatewayRequestScopeImage}, GatewayRequestScopeImage, false},
 		{"embedding", []GatewayRequestScope{GatewayRequestScopeEmbedding}, GatewayRequestScopeEmbedding, false},
+		{"search", []GatewayRequestScope{GatewayRequestScopeSearch}, GatewayRequestScopeSearch, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewRequestState()

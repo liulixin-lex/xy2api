@@ -152,6 +152,7 @@ const schedAdminLatencySQL = `SELECT group_id,
   FILTER (WHERE body_eof_ms IS NOT NULL AND body_eof_ms>=0 AND body_eof_ms<=end_to_end_first_output_ms),
  count(*) FROM usage_logs
  WHERE group_id=ANY($1::bigint[]) AND created_at>=$2 AND created_at<$3
+ AND (request_scope IS NULL OR request_scope = 'text')
  AND end_to_end_first_output_ms IS NOT NULL AND end_to_end_first_output_ms>=0
  GROUP BY group_id`
 const schedAdminMigrationSQL = `SELECT group_id,count(*) FILTER (WHERE error_class=$4)
