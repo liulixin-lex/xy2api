@@ -46,7 +46,7 @@ export default {
       allExempt: 'All exempt',
       tabBack: 'this model is at the rear in a group',
       evidenceToggle: 'Evidence for {name}',
-      noData: 'No data for this model in the group yet: all three lines are unknown ({why}).',
+      noData: 'No data for this model in the group yet, so all three lines are unknown — {why}.',
       recentLines: {
         ttfo: 'First output',
         firstEvent: 'First event',
@@ -171,7 +171,7 @@ export default {
       trial: 'Trial',
       rear: 'Rear',
       unknownWhy: 'not enough evidence',
-      gateOffGlobal: 'gate off: quality scheduling is switched off; selection ignores the quality layers (judging goes on)',
+      gateOffGlobal: 'gate off: quality scheduling is switched off, so selection ignores the quality layers; judging goes on',
       gateOffGroup: 'gate off: this group\'s quality gate is off; nothing in it is judged or layered by quality',
       trialLeft: '{time} of trial left',
       rearUntil: 'stays {minutes} min, review at {time}',

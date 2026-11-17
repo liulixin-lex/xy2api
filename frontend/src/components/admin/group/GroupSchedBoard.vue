@@ -94,14 +94,16 @@
                 />
                 <span v-else-if="row.pinned" data-sq-pinned>{{ t('admin.schedQuality.board.pinned') }}</span>
                 <span v-else class="sq-text-3">{{ DASH }}</span>
-                <!-- Cut short so a long reason cannot widen the column; the tip has it whole. -->
+                <!-- Only the word, so the column stays narrow at every width (1024 included); the tip has the backend's reason. -->
                 <span
                   v-if="pinFailedOf(row) !== null"
                   v-tip="pinFailedOf(row)"
-                  class="sq-fail-word inline-block max-w-[9rem] truncate align-middle text-xs"
+                  class="sq-fail-word whitespace-nowrap text-xs"
                   role="status"
+                  tabindex="0"
+                  :aria-label="[t('admin.schedQuality.result.failed'), pinFailedOf(row)].filter(Boolean).join(' · ')"
                   :data-sq-pin-failed="row.account_id"
-                >{{ [t('admin.schedQuality.result.failed'), pinFailedOf(row)].filter(Boolean).join(' · ') }}</span>
+                >{{ t('admin.schedQuality.result.failed') }}</span>
               </span>
             </td>
             <td class="sq-r sq-num">{{ row.priority }}</td>

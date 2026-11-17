@@ -46,7 +46,7 @@ export default {
       allExempt: '全部豁免',
       tabBack: '该模型下有后排分组',
       evidenceToggle: '{name} 的判定证据',
-      noData: '该分组还没有这个模型的数据：三条线都是未知（{why}）。',
+      noData: '该分组还没有这个模型的数据，三条线都是未知——{why}。',
       recentLines: {
         ttfo: '首个有效输出',
         firstEvent: '首个事件',
@@ -171,7 +171,7 @@ export default {
       trial: '试用',
       rear: '后排',
       unknownWhy: '证据不够',
-      gateOffGlobal: '门槛已关闭：质量调度总开关关闭，选号不按质量分层（判定照常进行）',
+      gateOffGlobal: '门槛已关闭：质量调度总开关关闭，选号不按质量分层，判定照常进行',
       gateOffGroup: '门槛已关闭：本分组没有开质量门槛，这组不做判定，也不按质量分层',
       trialLeft: '试用剩 {time}',
       rearUntil: '停留 {minutes} 分钟，{time} 到期复核',

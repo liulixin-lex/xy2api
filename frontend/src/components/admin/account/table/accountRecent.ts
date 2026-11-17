@@ -16,6 +16,17 @@ export function formatRecentSeconds(ms: number): string {
   return s < 100 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
 }
 
+/**
+ * The same time for the 72px recent cell, at most "0.99s" / "59.9s" wide: under a second in hundredths (0.10s, 0.05s;
+ * "100ms" does not fit the cell), from 1s as formatRecentSeconds but whole seconds already from 99.95s. The tip card
+ * and the panel keep formatRecentSeconds.
+ */
+export function formatRecentSecondsCompact(ms: number): string {
+  const s = ms / 1000
+  if (s < 0.995) return `${s.toFixed(2)}s`
+  return s < 99.95 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
+}
+
 /** 0%, 4.2%, 12%. */
 export function formatRecentPercent(ratio: number): string {
   const pct = ratio * 100

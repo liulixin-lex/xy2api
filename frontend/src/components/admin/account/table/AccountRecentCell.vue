@@ -21,7 +21,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
 import { vTip, type TipCard } from '@/utils/tip'
-import { RECENT_DIMS, recentExtras, recentValue } from './accountRecent'
+import { RECENT_DIMS, formatRecentSecondsCompact, recentExtras, recentValue } from './accountRecent'
 import { formatShortTime } from './accountTime'
 
 const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'> | null; card?: boolean }>()
@@ -32,10 +32,14 @@ const HOUR_MS = 3_600_000
 const lines = computed(() => {
   const q = props.quality
   return RECENT_DIMS.map((dim: BackendDim) => {
-    const label = t(`admin.accounts.table.dims.${dim}`)
+    // The 72px table cell takes the short labels (English "Errors"/"Cache" do not fit); the card has room for the full ones.
+    const label = t(`admin.accounts.table.${props.card ? 'dims' : 'dimsShort'}.${dim}`)
     const value = q ? recentValue(q, dim) : null
-    if (!value || value.text === null) return { dim, label, value, text: '—', muted: true }
-    return { dim, label, value, text: value.text, muted: value.short }
+    if (!value || value.text === null) return { dim, label, value, text: '—', full: '—', muted: true }
+    // The cell is 72px: first token is written compactly there (0.10s), the tip card keeps the full text (100ms).
+    const ms = dim === 'ttfo' ? q?.ttfo.first_output_p50_ms : null
+    const text = ms == null ? value.text : formatRecentSecondsCompact(ms)
+    return { dim, label, value, text, full: value.text, muted: value.short }
   })
 })
 
@@ -54,7 +58,7 @@ function tipCard(): TipCard | '' {
   const valueRow = (line: (typeof lines.value)[number], label: string) => {
     const n = line.value?.n ?? 0
     const key = `admin.accounts.table.tip.${COUNT_KEYS[line.dim]}${line.muted ? 'Short' : ''}`
-    return [label, line.muted ? { text: line.text, tone: 'muted' as const } : line.text, t(key, { n }, n)]
+    return [label, line.muted ? { text: line.full, tone: 'muted' as const } : line.full, t(key, { n }, n)]
   }
   const [ttfo, error, cache] = lines.value
   return {
@@ -63,7 +67,7 @@ function tipCard(): TipCard | '' {
       valueRow(ttfo, t('admin.accounts.table.recent.firstOutput')),
       [t('admin.accounts.table.recent.firstEvent'), plain(extras.firstEvent), ''],
       [t('admin.accounts.table.recent.gap'), plain(extras.gap), ''],
-      valueRow(error, error.label),
+      valueRow(error, t('admin.accounts.table.dims.error')),
       valueRow(cache, t('admin.accounts.table.recent.cacheTurns')),
       [
         t('admin.accounts.table.recent.cacheAll'),
@@ -78,14 +82,19 @@ function tipCard(): TipCard | '' {
 <style scoped>
 .recent {
   display: grid;
-  grid-template-columns: auto auto;
+  /* 72px = label ≤ 25 (two 12px characters, or "First") + gap 6 + value ≤ 36.3 ("100%"), measured with the system
+     fonts; were a label still wider, it gives way (ellipsis), never the value. */
+  grid-template-columns: minmax(0, auto) auto;
   justify-content: space-between;
-  column-gap: 12px;
+  column-gap: 6px;
   row-gap: 2px;
   width: 72px;
 }
 .recent__k {
+  overflow: hidden;
   color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-size-small);
   line-height: var(--line-height-body);
 }
