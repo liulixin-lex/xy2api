@@ -191,10 +191,18 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.markTerminal()
 		}
 	}
+	terminalEvent := typ
+	if terminalEvent == "" {
+		terminalEvent = "response." + root.Get("status").String()
+	}
+	if isOpenAIWSTerminalEvent(terminalEvent) || terminalEvent == "error" {
+		a.mu.Lock()
+		a.terminalEvent = terminalEvent
+		a.mu.Unlock()
+	}
 	terminal := classifySchedTerminal(data)
 	if terminal.Seen {
 		a.mu.Lock()
-		a.terminalEvent = terminal.EventType
 		a.terminal = a.terminal || terminal.Valid
 		// Some Responses transports accept a typed provisional error followed
 		// by a completed response. Keep their final decision: explicit failed
@@ -203,6 +211,11 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.failure = nil
 		}
 		a.mu.Unlock()
+	}
+	// Readers retain response.done as a successful envelope regardless of its
+	// nested status. A forwarding error still takes precedence in finish.
+	if typ == "response.done" {
+		return
 	}
 	if terminal.BenignIncomplete() {
 		a.mu.Lock()
