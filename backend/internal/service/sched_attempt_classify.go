@@ -24,7 +24,7 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 	}
 	in.Class = schedquality.ClassUnknown
 	if failure == nil {
-		if output || in.Detail == "OUTPUT_INCOMPLETE" {
+		if output || in.Detail == SchedAttemptDetailOutputIncomplete {
 			in.Class = schedquality.ClassInterrupted
 		}
 		return in
@@ -47,7 +47,7 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 	}
 	result := classifyUpstreamOutcome(o)
 	switch {
-	case output || in.Detail == "OUTPUT_INCOMPLETE":
+	case output || in.Detail == SchedAttemptDetailOutputIncomplete:
 		in.Class = schedquality.ClassInterrupted
 	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
 		in.Class = schedquality.ClassMigration400

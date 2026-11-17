@@ -1,6 +1,7 @@
 -- Existing evidence keeps version 1; only the corrected recorder writes version 2.
--- Fail before ALTER can queue behind live traffic.
-LOCK TABLE account_attempt_samples IN ACCESS EXCLUSIVE MODE NOWAIT;
+-- Bound the wait for live traffic and maintenance to release their locks.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE account_attempt_samples IN ACCESS EXCLUSIVE MODE;
 
 ALTER TABLE account_attempt_samples
     ADD COLUMN IF NOT EXISTS capture_version SMALLINT NOT NULL DEFAULT 1,

@@ -628,20 +628,6 @@ func (_c *UsageLogCreate) SetNillableDurationMs(v *int) *UsageLogCreate {
 	return _c
 }
 
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (_c *UsageLogCreate) SetFirstOutputMs(v int) *UsageLogCreate {
-	_c.mutation.SetFirstOutputMs(v)
-	return _c
-}
-
-// SetNillableFirstOutputMs sets the "first_output_ms" field if the given value is not nil.
-func (_c *UsageLogCreate) SetNillableFirstOutputMs(v *int) *UsageLogCreate {
-	if v != nil {
-		_c.SetFirstOutputMs(*v)
-	}
-	return _c
-}
-
 // SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
 func (_c *UsageLogCreate) SetEndToEndFirstOutputMs(v int64) *UsageLogCreate {
 	_c.mutation.SetEndToEndFirstOutputMs(v)
@@ -1644,10 +1630,6 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DurationMs(); ok {
 		_spec.SetField(usagelog.FieldDurationMs, field.TypeInt, value)
 		_node.DurationMs = &value
-	}
-	if value, ok := _c.mutation.FirstOutputMs(); ok {
-		_spec.SetField(usagelog.FieldFirstOutputMs, field.TypeInt, value)
-		_node.FirstOutputMs = &value
 	}
 	if value, ok := _c.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
@@ -2779,30 +2761,6 @@ func (u *UsageLogUpsert) AddDurationMs(v int) *UsageLogUpsert {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (u *UsageLogUpsert) ClearDurationMs() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldDurationMs)
-	return u
-}
-
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (u *UsageLogUpsert) SetFirstOutputMs(v int) *UsageLogUpsert {
-	u.Set(usagelog.FieldFirstOutputMs, v)
-	return u
-}
-
-// UpdateFirstOutputMs sets the "first_output_ms" field to the value that was provided on create.
-func (u *UsageLogUpsert) UpdateFirstOutputMs() *UsageLogUpsert {
-	u.SetExcluded(usagelog.FieldFirstOutputMs)
-	return u
-}
-
-// AddFirstOutputMs adds v to the "first_output_ms" field.
-func (u *UsageLogUpsert) AddFirstOutputMs(v int) *UsageLogUpsert {
-	u.Add(usagelog.FieldFirstOutputMs, v)
-	return u
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (u *UsageLogUpsert) ClearFirstOutputMs() *UsageLogUpsert {
-	u.SetNull(usagelog.FieldFirstOutputMs)
 	return u
 }
 
@@ -4562,34 +4520,6 @@ func (u *UsageLogUpsertOne) UpdateDurationMs() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearDurationMs() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
-	})
-}
-
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (u *UsageLogUpsertOne) SetFirstOutputMs(v int) *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.SetFirstOutputMs(v)
-	})
-}
-
-// AddFirstOutputMs adds v to the "first_output_ms" field.
-func (u *UsageLogUpsertOne) AddFirstOutputMs(v int) *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.AddFirstOutputMs(v)
-	})
-}
-
-// UpdateFirstOutputMs sets the "first_output_ms" field to the value that was provided on create.
-func (u *UsageLogUpsertOne) UpdateFirstOutputMs() *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.UpdateFirstOutputMs()
-	})
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (u *UsageLogUpsertOne) ClearFirstOutputMs() *UsageLogUpsertOne {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.ClearFirstOutputMs()
 	})
 }
 
@@ -6635,34 +6565,6 @@ func (u *UsageLogUpsertBulk) UpdateDurationMs() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearDurationMs() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
-	})
-}
-
-// SetFirstOutputMs sets the "first_output_ms" field.
-func (u *UsageLogUpsertBulk) SetFirstOutputMs(v int) *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.SetFirstOutputMs(v)
-	})
-}
-
-// AddFirstOutputMs adds v to the "first_output_ms" field.
-func (u *UsageLogUpsertBulk) AddFirstOutputMs(v int) *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.AddFirstOutputMs(v)
-	})
-}
-
-// UpdateFirstOutputMs sets the "first_output_ms" field to the value that was provided on create.
-func (u *UsageLogUpsertBulk) UpdateFirstOutputMs() *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.UpdateFirstOutputMs()
-	})
-}
-
-// ClearFirstOutputMs clears the value of the "first_output_ms" field.
-func (u *UsageLogUpsertBulk) ClearFirstOutputMs() *UsageLogUpsertBulk {
-	return u.Update(func(s *UsageLogUpsert) {
-		s.ClearFirstOutputMs()
 	})
 }
 

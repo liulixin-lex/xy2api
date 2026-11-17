@@ -145,10 +145,6 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("duration_ms").
 			Optional().
 			Nillable(),
-		field.Int("first_output_ms").
-			Optional().
-			Nillable().
-			Comment("Milliseconds from gateway entry to the first valid client output, including retries"),
 		field.Int64("end_to_end_first_output_ms").
 			Optional().
 			Nillable(),

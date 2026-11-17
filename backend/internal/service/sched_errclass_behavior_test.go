@@ -312,7 +312,7 @@ func TestErrclassDeliveredIncompleteQuality(t *testing.T) {
 				require.Len(t, rec.finishes, 1)
 				if reason == "" || reason == "interrupted" {
 					require.Equal(t, schedquality.ClassInterrupted, rec.finishes[0].Class)
-					require.Equal(t, "OUTPUT_INCOMPLETE", rec.finishes[0].Detail)
+					require.Equal(t, SchedAttemptDetailOutputIncomplete, rec.finishes[0].Detail)
 				} else {
 					require.Equal(t, schedquality.ClassNone, rec.finishes[0].Class)
 					require.Equal(t, schedquality.OutcomeOK, rec.finishes[0].Outcome)
@@ -329,6 +329,6 @@ func TestErrclassDeliveredIncompleteQuality(t *testing.T) {
 	}
 	// No first-output marker is required: the non-benign terminal itself
 	// establishes that output did not complete normally (ruling J).
-	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: "OUTPUT_INCOMPLETE"}, nil, false)
+	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: SchedAttemptDetailOutputIncomplete}, nil, false)
 	require.Equal(t, schedquality.ClassInterrupted, got.Class)
 }

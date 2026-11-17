@@ -63,7 +63,7 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) (result Open
 		return result
 	}
 	// A partial payload type identifies a candidate only; it never authenticates success.
-	result.Seen = candidate(eventName) || candidate(gjson.GetBytes(data, "type").String()) || candidate("response."+gjson.GetBytes(data, "status").String())
+	result.Seen = candidate(eventName) || candidate(gjson.GetBytes(data, "type").String())
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		return OpenAIResponsesTerminal{Reason: "missing_response_terminal"}
 	}
@@ -99,15 +99,6 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) (result Open
 		return OpenAIResponsesTerminal{Seen: true, Valid: true, Failure: true, EventType: "error", Reason: "upstream_failed", Message: root.Get("message").String(), WrappedStatus: wrapped}
 	}
 	response := root.Get("response")
-	// A non-streaming response carries the same terminal facts at the root.
-	// Keep structured error handling below identical for JSON and SSE.
-	jsonResponse := false
-	if !candidate(payloadType) && !response.IsObject() {
-		switch root.Get("status").String() {
-		case "completed", "incomplete", "failed", "cancelled", "canceled":
-			response, jsonResponse = root, true
-		}
-	}
 	rawStatus := response.Get("status")
 	status := ""
 	if rawStatus.Type == gjson.String {
@@ -152,10 +143,6 @@ func ClassifyOpenAIResponsesTerminal(eventName string, data []byte) (result Open
 		}
 		result.Seen = false
 		return result
-	}
-	if jsonResponse {
-		kind = "response." + status
-		result.EventType = kind
 	}
 	if !candidate(kind) {
 		return result
