@@ -27,6 +27,6 @@ func (h *AccountHandler) bindSchedQualityAccountFilter(c *gin.Context, quality s
 	if response.ErrorFrom(c, err) {
 		return false
 	}
-	c.Request = c.Request.WithContext(service.WithSchedQualityAccountFilter(c.Request.Context(), filter.IDs, filter.Exclude))
+	c.Request = c.Request.WithContext(service.WithSchedQualityAccountFilter(c.Request.Context(), filter.IDs))
 	return true
 }

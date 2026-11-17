@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -62,54 +63,123 @@ func (s *SchedAdminService) Summary(ctx context.Context, ids []int64) (SchedAdmi
 	return out, nil
 }
 func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualitySnapshot, a *Account, now time.Time) (SchedAdminAccountSummary, error) {
-	out := SchedAdminAccountSummary{AccountID: a.ID, Status: "normal", ResetAt: schedAdminTime(p.ResetAt[a.ID]), Substandard: []SchedAdminSubstandard{}, Exemptions: s.exemptions(ctx, p, a, now)}
-	out.TTFO.Short, out.Error.Short, out.Cache.Short = true, true, true
+	out := SchedAdminAccountSummary{AccountID: a.ID, GroupStatus: map[string]string{}, ResetAt: schedAdminTime(p.ResetAt[a.ID]), Rear: []SchedAdminRear{}, Trial: []SchedAdminTrial{}, Exemptions: s.exemptions(ctx, p, a, now)}
+	out.Error.Short = true
 	if a.Platform == PlatformOpenAI {
+		known := map[int64]bool{}
+		for _, g := range a.Groups {
+			if g != nil {
+				known[g.ID] = true
+				if g.Platform == PlatformOpenAI {
+					out.GroupStatus[strconv.FormatInt(g.ID, 10)] = "unknown"
+				}
+			}
+		}
+		for _, id := range a.GroupIDs {
+			if known[id] {
+				continue
+			}
+			if s.d.Groups == nil {
+				continue
+			}
+			g, err := s.group(ctx, id)
+			if err != nil {
+				return out, err
+			}
+			if g.Platform == PlatformOpenAI {
+				out.GroupStatus[strconv.FormatInt(id, 10)] = "unknown"
+			}
+		}
 		v := p.Account(a.ID)
-		out.TTFO = SchedAdminAccountSummaryTTFO{SchedAdminMark: SchedAdminMark{Short: v.FirstOutputP50Ms == nil}, P50Ms: v.FirstOutputP50Ms}
+		out.TTFO = SchedAdminAccountSummaryTTFO{FirstEventP50Ms: v.FirstEventP50Ms, FirstOutputP50Ms: v.FirstOutputP50Ms, GapP50Ms: v.GapP50Ms, N: v.FirstOutputN}
 		out.Error.SchedAdminMark = SchedAdminMark{N: v.ErrorN, Short: v.ErrorN < schedquality.ErrorMinClear}
 		if v.ErrorN > 0 {
 			out.Error.Rate = schedAdminFloat(float64(v.ErrorBad) / float64(v.ErrorN))
 		}
-		out.Cache.SchedAdminMark = SchedAdminMark{N: v.CacheTurns, Short: v.CacheTurns < schedquality.CacheMinTurns}
-		out.Cache.Ratio = v.CacheRatio
+		out.Cache = SchedAdminAccountSummaryCache{Ratio: v.CacheRatio, Turns: v.CacheTurns, AllRatio: v.CacheAllRatio, AllRequests: v.CacheAllRequests}
 		for _, r := range p.RowsForAccount(a.ID) {
-			if !schedAdminMember(a, r.GroupID) || len(schedRearLines(r.View)) == 0 {
+			key := strconv.FormatInt(r.GroupID, 10)
+			if _, ok := out.GroupStatus[key]; !ok {
 				continue
 			}
 			exempt := schedAdminExemption(out.Exemptions, r.GroupID) != nil
-			effective := schedAdminBelow(p, a.ID, r.GroupID, exempt, schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled))
-			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, schedRearLines(r.View)...), Until: schedAdminStamp(schedStateUntil(r.View)), OtherGroup: len(r.SourceGroups) > 0, Exempt: exempt, Effective: effective})
-			for _, d := range schedRearLines(r.View) {
-				switch string(d) {
-				case "ttfo":
-					out.TTFO.Red = true
-				case "error":
-					out.Error.Red = true
-				case "cache":
-					out.Cache.Red = true
+			effective := schedAdminEffective(p, now, schedAdminGroupPolicy(p, r.GroupID).Enabled)
+			status := schedAdminGroupStatus(r.View, exempt, effective)
+			if schedAdminStatusRank(status) > schedAdminStatusRank(out.GroupStatus[key]) {
+				out.GroupStatus[key] = status
+			}
+			rear := schedRearLines(r.View)
+			if len(rear) > 0 {
+				out.Rear = append(out.Rear, SchedAdminRear{GroupID: r.GroupID, Model: r.Model, Lines: append([]schedquality.Dimension{}, rear...), Until: schedAdminStamp(schedAdminRearUntil(r.View)), Exempt: exempt, Effective: !exempt && effective})
+			}
+			if r.View.Error.Identity == schedquality.IdentityRear {
+				out.Error.Red = true
+			}
+			if len(rear) == 0 && !exempt && effective {
+				var until time.Time
+				for _, l := range []schedquality.LineView{r.View.TTFO, r.View.Error, r.View.Cache} {
+					if l.Trial && (l.TrialUntil.After(until)) {
+						until = l.TrialUntil
+					}
+				}
+				if !until.IsZero() {
+					out.Trial = append(out.Trial, SchedAdminTrial{GroupID: r.GroupID, Model: r.Model, Until: schedAdminStamp(until)})
 				}
 			}
 		}
-		slices.SortFunc(out.Substandard, func(a, b SchedAdminSubstandard) int {
+		slices.SortFunc(out.Rear, func(a, b SchedAdminRear) int {
 			if a.GroupID != b.GroupID {
 				return cmp.Compare(a.GroupID, b.GroupID)
 			}
 			return cmp.Compare(a.Model, b.Model)
 		})
-		if out.TTFO.Short && len(out.Substandard) == 0 {
-			out.Status = "observing"
-		}
+		slices.SortFunc(out.Trial, func(a, b SchedAdminTrial) int {
+			if a.GroupID != b.GroupID {
+				return cmp.Compare(a.GroupID, b.GroupID)
+			}
+			return cmp.Compare(a.Model, b.Model)
+		})
 	}
 	states, err := s.autoStates(ctx, a, now)
 	if err != nil {
 		return out, err
 	}
 	out.Stop = schedAdminStop(states)
-	if out.Stop != nil {
-		out.Status = "disabled"
-	}
 	return out, nil
+}
+
+func schedAdminStatusRank(s string) int {
+	switch s {
+	case "rear":
+		return 3
+	case "trial":
+		return 2
+	case "pass":
+		return 1
+	}
+	return 0
+}
+
+// Dots and filters share the effective state, while line details retain raw evidence.
+func schedAdminGroupStatus(v schedquality.StateView, exempt, effective bool) string {
+	if !exempt && effective {
+		for _, l := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
+			if l.Identity == schedquality.IdentityRear {
+				return "rear"
+			}
+		}
+		for _, l := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
+			if l.Trial {
+				return "trial"
+			}
+		}
+	}
+	for _, l := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
+		if l.Identity == schedquality.IdentityPass {
+			return "pass"
+		}
+	}
+	return "unknown"
 }
 
 // Single-model restrictions and untriggered counters do not stop the entire account.
@@ -139,12 +209,11 @@ type schedAdminAttentionResult struct {
 }
 
 func (s *SchedAdminService) attention(ctx context.Context) (schedAdminAttentionResult, error) {
-	out := schedAdminAttentionResult{attention: SchedAdminAttention{Substandard: []int64{}, Exempt: []int64{}, Observing: []int64{}}, normal: []int64{}}
+	out := schedAdminAttentionResult{attention: SchedAdminAttention{Rear: []int64{}, Trial: []int64{}, Unknown: []int64{}, Exempt: []int64{}}, normal: []int64{}}
 	ids, err := s.d.Accounts.SchedAdminAccountIDs(ctx)
 	if err != nil {
 		return out, err
 	}
-	// Use one snapshot for all batches; no page can mix evaluation generations.
 	p, now := s.snapshot(), s.d.Now()
 	for start := 0; start < len(ids); start += 1000 {
 		accounts, err := s.d.Accounts.GetByIDs(ctx, ids[start:min(start+1000, len(ids))])
@@ -152,46 +221,41 @@ func (s *SchedAdminService) attention(ctx context.Context) (schedAdminAttentionR
 			return out, err
 		}
 		for _, a := range accounts {
-			if a == nil {
+			if a == nil || a.Platform != PlatformOpenAI {
 				continue
 			}
 			x, err := s.accountSummary(ctx, p, a, now)
 			if err != nil {
 				return out, err
 			}
-			if x.Status == "observing" {
-				out.attention.Observing = append(out.attention.Observing, a.ID)
-			}
 			if len(x.Exemptions) > 0 {
 				out.attention.Exempt = append(out.attention.Exempt, a.ID)
 			}
-			below := x.Stop == nil && schedAdminHasEffectiveSubstandard(x)
-			if below {
-				out.attention.Substandard = append(out.attention.Substandard, a.ID)
+			has := map[string]bool{}
+			allPass := len(x.GroupStatus) > 0
+			for _, status := range x.GroupStatus {
+				has[status] = true
+				allPass = allPass && status == "pass"
 			}
-			if a.Platform == PlatformOpenAI && x.Status == "normal" && len(x.Exemptions) == 0 && !below {
+			if x.Stop == nil && has["rear"] {
+				out.attention.Rear = append(out.attention.Rear, a.ID)
+			}
+			if has["trial"] {
+				out.attention.Trial = append(out.attention.Trial, a.ID)
+			}
+			if has["unknown"] {
+				out.attention.Unknown = append(out.attention.Unknown, a.ID)
+			}
+			if x.Stop == nil && allPass {
 				out.normal = append(out.normal, a.ID)
 			}
 		}
 	}
-	slices.Sort(out.attention.Substandard)
-	slices.Sort(out.attention.Exempt)
-	slices.Sort(out.attention.Observing)
-	slices.Sort(out.normal)
-	out.attention.Substandard = slices.Compact(out.attention.Substandard)
-	out.attention.Exempt = slices.Compact(out.attention.Exempt)
-	out.attention.Observing = slices.Compact(out.attention.Observing)
-	out.normal = slices.Compact(out.normal)
-	return out, nil
-}
-
-func schedAdminHasEffectiveSubstandard(summary SchedAdminAccountSummary) bool {
-	for _, r := range summary.Substandard {
-		if r.Effective {
-			return true
-		}
+	for _, ids := range []*[]int64{&out.attention.Rear, &out.attention.Trial, &out.attention.Unknown, &out.attention.Exempt, &out.normal} {
+		slices.Sort(*ids)
+		*ids = slices.Compact(*ids)
 	}
-	return false
+	return out, nil
 }
 
 func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention, error) {
@@ -218,7 +282,7 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 		return out, err
 	}
 	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
-	out.Status, out.Stop, out.ResetAt, out.Exemptions = summary.Status, summary.Stop, summary.ResetAt, summary.Exemptions
+	out.Stop, out.ResetAt, out.Exemptions = summary.Stop, summary.ResetAt, summary.Exemptions
 	rate, _ := openAISchedulingRate(a, now, s.d.Gateway.openAIOAuthSchedulingRateMultiplier(ctx))
 	out.Account = SchedAdminAccountDetailAccount{ID: id, Name: a.Name, Priority: a.Priority, Rate: rate, Concurrency: a.Concurrency}
 	if s.d.InFlight != nil {
@@ -255,14 +319,56 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 	return out, nil
 }
 
-// SchedAdminGroupModel temporarily projects the new evidence into the existing
-// response. The admin package supplies the full per-line API at integration.
+func schedAdminIdentity(v schedquality.LineView) string {
+	if v.Trial {
+		return "trial"
+	}
+	switch v.Identity {
+	case schedquality.IdentityRear:
+		return "rear"
+	case schedquality.IdentityPass:
+		return "pass"
+	}
+	return "unknown"
+}
+func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64) SchedAdminLine[E] {
+	return SchedAdminLine[E]{Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
+}
+func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvidence {
+	return SchedAdminErrorEvidence{Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
+}
+func schedAdminCacheEvidence(e schedquality.CacheAssessment) SchedAdminCacheEvidence {
+	return SchedAdminCacheEvidence{MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}
+}
+
+// SchedAdminGroupModel copies each line; it never mutates the published snapshot.
 func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailGroupsByModel {
-	out := SchedAdminAccountDetailGroupsByModel{Model: r.Model, Failing: len(schedRearLines(r.View)) > 0, Dims: schedRearLines(r.View), OtherGroupIDs: r.SourceGroups, Exempt: exempt, Level: max(r.View.TTFO.Level, max(r.View.Error.Level, r.View.Cache.Level))}
-	out.Until = schedAdminTime(schedStateUntil(r.View))
-	verdict := r.TTFTVerdict
-	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 240, N: int(r.TTFT.N), Verdict: verdict.String()}, Bad: int(r.TTFT.K)}
-	out.Error = SchedAdminCountDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 60, N: r.Error.Clear, LCB: schedAdminFloat(r.Error.LowerFail), Verdict: r.Error.Verdict.String()}, Bad: r.Error.Failed}
-	out.Cache = SchedAdminCacheDetail{SchedAdminDimDetail: SchedAdminDimDetail{Scope: "merged", WindowMin: 30, N: r.Cache.Turns, Verdict: r.Cache.Verdict.String()}, Ratio: schedAdminFloat(r.Cache.Ratio)}
-	return out
+	placement := "front"
+	if !exempt {
+		for _, l := range []schedquality.LineView{r.View.TTFO, r.View.Error, r.View.Cache} {
+			if l.Trial {
+				placement = "trial"
+			}
+		}
+		if len(schedRearLines(r.View)) > 0 {
+			placement = "rear"
+		}
+	}
+	ttft := r.TTFT
+	ttft.Causes = append([]schedquality.RuleBUnknownReason{}, ttft.Causes...)
+	return SchedAdminAccountDetailGroupsByModel{Model: r.Model, Placement: placement, Exempt: exempt, Lines: SchedAdminLines{
+		TTFO:  schedAdminLine(r.View.TTFO, r.TTFTVerdict, ttft, r.TTFTSourceGroups),
+		Error: schedAdminLine(r.View.Error, r.Error.Verdict, schedAdminErrorEvidence(r.Error), r.Error.SourceGroups),
+		Cache: schedAdminLine(r.View.Cache, r.Cache.Verdict, schedAdminCacheEvidence(r.Cache), r.Cache.SourceGroups)}}
+}
+
+// Composite rear ends when the last rear line expires; a concurrent trial does not extend it.
+func schedAdminRearUntil(v schedquality.StateView) time.Time {
+	var until time.Time
+	for _, l := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
+		if l.Identity == schedquality.IdentityRear && l.Until.After(until) {
+			until = l.Until
+		}
+	}
+	return until
 }

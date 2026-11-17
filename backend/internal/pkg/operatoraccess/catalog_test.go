@@ -14,7 +14,7 @@ import (
 
 func TestCatalogKeysAreWellFormed(t *testing.T) {
 	keys := Keys()
-	require.Len(t, keys, 547)
+	require.Len(t, keys, 550)
 	require.True(t, sort.StringsAreSorted(keys))
 	seen := map[string]bool{}
 	for _, key := range keys {
@@ -109,7 +109,7 @@ func TestCatalogMatchesApprovedTable(t *testing.T) {
 	raw, err := os.ReadFile("testdata/pra_catalog.json")
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &rows))
-	require.Len(t, rows, 547)
+	require.Len(t, rows, 550)
 	keys := []string{}
 	used := map[FieldRule]bool{}
 	for _, row := range rows {

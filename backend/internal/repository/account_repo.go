@@ -1309,11 +1309,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 		q = q.Where(dbaccount.IDIn(ids...))
 	}
 	if filter, enabled := service.SchedQualityAccountFilter(ctx); enabled {
-		if !filter.Exclude {
-			q = q.Where(dbaccount.IDIn(filter.IDs...))
-		} else if len(filter.IDs) > 0 {
-			q = q.Where(dbaccount.IDNotIn(filter.IDs...))
-		}
+		q = q.Where(dbaccount.IDIn(filter.IDs...))
 	}
 	q = applyAccountGroupCategoryFilter(ctx, q)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's

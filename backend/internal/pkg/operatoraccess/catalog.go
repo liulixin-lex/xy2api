@@ -75,6 +75,9 @@ var ServiceEnforcedFields = map[FieldRule]bool{
 }
 
 var catalog = map[string]Entry{
+	"GET /sched-quality/accounts/:id/decisions":           {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
+	"GET /sched-quality/ttft-rule":                        {Kind: KindSuperOnly},
+	"PUT /sched-quality/ttft-rule":                        {Kind: KindSuperOnly},
 	"POST /sched-quality/accounts/summary":                {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
 	"GET /sched-quality/accounts/attention":               {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
 	"GET /sched-quality/accounts/:id":                     {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},

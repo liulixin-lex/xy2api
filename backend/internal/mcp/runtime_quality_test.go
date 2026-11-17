@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -51,9 +52,15 @@ func TestRuntimeQualityUsesSnapshotAndPolicy(t *testing.T) {
 	require.Equal(t, 1, engine.reads)
 	require.Len(t, q.result.Items, 1)
 	require.Equal(t, "a", q.result.Items[0]["model"])
-	require.Equal(t, true, q.result.Items[0]["failing"])
-	require.Equal(t, []schedquality.Dimension{schedquality.DimensionTTFO}, q.result.Items[0]["dims"])
+	require.Equal(t, "rear", q.result.Items[0]["placement"])
+	require.Equal(t, "rear", q.result.Items[0]["lines"].(service.SchedAdminLines).TTFO.Identity)
 	require.NotContains(t, q.result.Items[0], "state")
+	raw, err := json.Marshal(q.result.Items[0])
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"placement":"rear"`)
+	require.Contains(t, string(raw), `"identity":"rear"`)
+	require.NotContains(t, string(raw), `"dims"`)
+	require.NotContains(t, string(raw), `"failing"`)
 	require.Equal(t, int64(7), q.result.Items[0]["policy_version"])
 	require.Equal(t, service.SchedAdminPolicyPolicy{TTFTSeconds: 15}, q.result.Items[0]["policy"])
 	require.Equal(t, []string{"process.sched_quality_snapshot"}, q.result.Source)
@@ -97,7 +104,7 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	require.Equal(t, 1, engine.reads)
 	row := q.result.Items[0]
 	require.NotContains(t, row, "model")
-	require.Equal(t, 120, *row["first_output"].(service.SchedAdminAccountSummaryTTFO).P50Ms)
+	require.Equal(t, 120, *row["first_output"].(service.SchedAdminAccountSummaryTTFO).FirstOutputP50Ms)
 	require.Equal(t, 0.1, *row["failure"].(service.SchedAdminAccountSummaryError).Rate)
 	require.Equal(t, 0.9, *row["cache"].(service.SchedAdminAccountSummaryCache).Ratio)
 	require.Equal(t, &amount, row["balance"].(map[string]any)["amount_usd"])
@@ -116,4 +123,36 @@ func (qualityHealthAccounts) GetByIDs(_ context.Context, ids []int64) ([]*servic
 		out = append(out, &service.Account{ID: id, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true})
 	}
 	return out, nil
+}
+
+func TestRuntimeQualityKeepsTrialDeadlineAndEvidence(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	key := schedquality.LineKey{AccountID: 1, GroupID: 2, Model: "model-a", Line: schedquality.DimensionTTFO}
+	entered, action := schedquality.Step(schedquality.Relaxed(key), schedquality.EventRegular, schedquality.VerdictFail, schedquality.Basis{}, now)
+	require.Equal(t, schedquality.ActionEnter, action)
+	trial, action := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictUnknown, schedquality.Basis{}, entered.Until)
+	require.Equal(t, schedquality.ActionTrial, action)
+	snapshot := &service.SchedQualitySnapshot{At: trial.EvaluatedAt, GlobalEnabled: true, Members: map[int64][]int64{1: {2}}, GroupRows: map[int64][]service.SchedGroupRow{1: {{GroupID: 2, Model: "model-a", View: schedquality.StateView{TTFO: schedquality.LineView{Identity: trial.Identity, Trial: trial.Trial, Level: trial.Level, Until: trial.Until, TrialUntil: trial.TrialUntil}}, TTFTSourceGroups: []int64{3}, TTFT: schedquality.TTFTEvidence{Causes: []schedquality.RuleBUnknownReason{schedquality.RuleBNoPeers}}}}}}
+	r := &runtimeReader{quality: &qualitySnapshotStub{snapshot: snapshot}}
+	q, err := newReaderQuery(QueryRequest{Tool: "xy2api.routing.get_quality_state", Actor: testReaderActor(), Input: QueryInput{AccountID: 1}}, trial.EvaluatedAt)
+	require.NoError(t, err)
+	require.NoError(t, r.qualityState(context.Background(), q))
+	raw, err := json.Marshal(q.result.Items[0])
+	require.NoError(t, err)
+	var row map[string]any
+	require.NoError(t, json.Unmarshal(raw, &row))
+	require.Equal(t, "trial", row["placement"])
+	ttfo := row["lines"].(map[string]any)["ttfo"].(map[string]any)
+	require.Equal(t, "trial", ttfo["identity"])
+	require.Nil(t, ttfo["until"])
+	require.Equal(t, trial.TrialUntil.Format(time.RFC3339Nano), ttfo["trial_until"])
+	require.Equal(t, []any{float64(3)}, ttfo["source_groups"])
+	evidence := ttfo["evidence"].(map[string]any)
+	require.Equal(t, []any{"no_peers"}, evidence["causes"])
+	for _, key := range []string{"p_rel", "u", "z"} {
+		require.Nil(t, evidence[key])
+	}
+	require.NotContains(t, row, "dims")
+	require.NotContains(t, row, "failing")
+	require.NotContains(t, row, "status")
 }

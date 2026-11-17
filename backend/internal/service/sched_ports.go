@@ -205,7 +205,6 @@ type SchedBoardRow struct {
 	Lines       map[string]string
 	Pinned      bool
 	Excluded    string
-	Dims        []schedquality.Dimension
 	Until       *time.Time
 	Exempt      bool
 	Priority    int

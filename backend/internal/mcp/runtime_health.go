@@ -52,10 +52,11 @@ func (r *runtimeReader) health(ctx context.Context, q *readerQuery, accounts []m
 		a["failure"] = health.Error
 		a["first_output"] = health.TTFO
 		a["cache"] = health.Cache
-		a["status"] = health.Status
+		a["group_status"] = health.GroupStatus
 		a["stop"] = health.Stop
 		a["reset_at"] = health.ResetAt
-		a["substandard"] = health.Substandard
+		a["rear"] = health.Rear
+		a["trial"] = health.Trial
 		a["exemptions"] = health.Exemptions
 		a["generated_at"] = summary.At
 		a["stale"] = summary.Stale

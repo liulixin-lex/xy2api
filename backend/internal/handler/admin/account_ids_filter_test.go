@@ -87,7 +87,6 @@ func TestAccountIDsListPreservesQualityLiteAndETag(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			require.Equal(t, []int64{1, 2}, svc.ids)
 			require.Equal(t, []int64{2}, svc.quality.IDs)
-			require.False(t, svc.quality.Exclude)
 			require.NotEmpty(t, w.Header().Get("ETag"))
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			req.Header.Set("If-None-Match", w.Header().Get("ETag"))

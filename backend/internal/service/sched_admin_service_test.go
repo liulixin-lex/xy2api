@@ -20,15 +20,17 @@ import (
 
 type schedAdminEngine struct {
 	SchedQualityEngine
-	snapshot  *SchedQualitySnapshot
-	reads     int
-	resetAt   time.Time
-	resetErr  error
-	callback  func(int64, time.Time)
-	overrides []SchedOverride
-	policy    SchedPolicyRecord
-	policyErr error
-	changes   []SchedPolicyChange
+	snapshot     *SchedQualitySnapshot
+	reads        int
+	resetAt      time.Time
+	resetErr     error
+	callback     func(int64, time.Time)
+	overrides    []SchedOverride
+	policy       SchedPolicyRecord
+	policyErr    error
+	changes      []SchedPolicyChange
+	preview      func(schedquality.Policy) ([]SchedPolicyChange, error)
+	previewCalls []schedquality.Policy
 }
 
 func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
@@ -61,7 +63,15 @@ func (e *schedAdminEngine) Policy(_ context.Context, _ int64) (SchedPolicyRecord
 	return e.policy, e.policyErr
 }
 func (e *schedAdminEngine) UpdatePolicy(_ context.Context, g, v int64, p schedquality.Policy) (SchedPolicyUpdate, error) {
-	return SchedPolicyUpdate{SchedPolicyRecord: e.policy}, e.policyErr
+	if e.policyErr != nil {
+		return SchedPolicyUpdate{}, e.policyErr
+	}
+	if v != e.policy.Version {
+		return SchedPolicyUpdate{}, ErrSchedPolicyConflict
+	}
+	lines := relaxedPolicyLines(e.policy.Policy, p)
+	e.policy = SchedPolicyRecord{GroupID: g, Version: v + 1, Policy: p}
+	return SchedPolicyUpdate{SchedPolicyRecord: e.policy, RelaxedLines: lines}, nil
 }
 
 type schedAdminAccounts struct {

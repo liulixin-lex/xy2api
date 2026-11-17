@@ -1,0 +1,53 @@
+{
+  "relaxed_lines": [
+    "ttfo"
+  ],
+  "lines": {
+    "ttfo": {
+      "now": {
+        "pass": 1,
+        "unknown": 1,
+        "fail": 1
+      },
+      "after": {
+        "pass": 2,
+        "unknown": 1,
+        "fail": 0
+      }
+    },
+    "error": {
+      "now": {
+        "pass": 1,
+        "unknown": 1,
+        "fail": 1
+      },
+      "after": {
+        "pass": 1,
+        "unknown": 1,
+        "fail": 1
+      }
+    },
+    "cache": {
+      "now": {
+        "pass": 1,
+        "unknown": 1,
+        "fail": 1
+      },
+      "after": {
+        "pass": 1,
+        "unknown": 1,
+        "fail": 1
+      }
+    }
+  },
+  "changed": [
+    {
+      "account_id": 1,
+      "name": "synthetic",
+      "model": "model-a",
+      "line": "ttfo",
+      "from": "fail",
+      "to": "pass"
+    }
+  ]
+}
