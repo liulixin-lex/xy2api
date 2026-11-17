@@ -184,6 +184,46 @@ export const floorOnlyPreviewLevel = (preview: {
 // 保存前要求确认的原因：区间为空，或没有成员能用。
 export type ProfitBlockReason = "range_empty" | "none_usable";
 
+/**
+ * 保存前确认的原因：预览显示的两种，加上拿不到能代表这次提交的预览——预览失败、超时或被取消（unverified），
+ * 或同时改了分组倍率（预览接口按已保存的倍率计算，rate_changed）。
+ */
+export type ProfitSaveRisk = ProfitBlockReason | "unverified" | "rate_changed";
+
+/** 这次提交要按哪组参数检查“会不会无号可用”：利润开关、毛利率（小数）、下限（0 = 不设）、倍率是否也改了。 */
+export type ProfitSaveCheck = { profitEnabled: boolean; margin: number; floor: number; rateChanged: boolean };
+
+/**
+ * 从这次提交的参数（与 PUT 的是同一份）和已保存的分组算出要检查什么；利润开关、毛利率、下限、倍率都没动，
+ * 或保存后既不开利润控制也不设下限（不可能因此无号可用）时为 null，不检查、不发预览请求。
+ * 毛利率只在开着利润控制时有意义，倍率只影响上限，同样只在开着时算改动。
+ */
+export const profitSaveCheck = (
+  payload: { profit_control_enabled?: boolean; profit_min_margin?: number; min_upstream_rate?: number; rate_multiplier?: number },
+  saved: {
+    profit_control_enabled?: boolean;
+    profit_min_margin?: number | null;
+    profit_safety_buffer?: number | null;
+    min_upstream_rate?: number | null;
+    rate_multiplier?: number;
+  },
+): ProfitSaveCheck | null => {
+  const profitEnabled = payload.profit_control_enabled === true;
+  const margin = profitEnabled ? (payload.profit_min_margin ?? 0) : 0;
+  const savedFloor = typeof saved.min_upstream_rate === "number" && saved.min_upstream_rate > 0 ? saved.min_upstream_rate : 0;
+  // 不传下限表示不改（或不是 OpenAI 分组）。
+  const floor = payload.min_upstream_rate === undefined ? savedFloor : payload.min_upstream_rate;
+  // 回显时缓冲并入毛利率，没改时提交的就是这个数。
+  const savedMargin = profitPercentToDecimal(profitMarginPercentFromGroup(saved.profit_min_margin, saved.profit_safety_buffer));
+  const rateChanged = payload.rate_multiplier !== undefined && Number(payload.rate_multiplier) !== Number(saved.rate_multiplier);
+  const changed =
+    profitEnabled !== (saved.profit_control_enabled === true) ||
+    floor !== savedFloor ||
+    (profitEnabled && (margin !== savedMargin || rateChanged));
+  if (!changed || (!profitEnabled && floor === 0)) return null;
+  return { profitEnabled, margin, floor, rateChanged: profitEnabled && rateChanged };
+};
+
 export const profitBlockReason = (
   preview: { schedulable: number; passing: number; below_floor: number; range_empty: boolean },
   profitEnabled: boolean,

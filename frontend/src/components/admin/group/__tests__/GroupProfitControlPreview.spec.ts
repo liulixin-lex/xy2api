@@ -24,11 +24,10 @@ const preview = (over: Partial<Preview> = {}): Preview => ({
   ...over
 })
 
-type Props = { marginPercent?: number | string | null; profitEnabled?: boolean; floor?: number | string | null; floorUnreadable?: boolean }
+type Props = { marginPercent?: number | string | null; profitEnabled?: boolean; floor?: number | string | null; floorUnreadable?: boolean; rateUnsaved?: boolean }
 const mountPreview = (props: Props = {}) =>
   mount(GroupProfitControlPreview, { props: { groupId: 53, marginPercent: 20, profitEnabled: true, floor: '', ...props } })
 const line = (w: ReturnType<typeof mount>) => w.get('[data-testid="profit-control-preview-line"]')
-const blockingReason = (w: ReturnType<typeof mount>) => (w.vm as unknown as { blockingReason: () => Promise<string | null> }).blockingReason()
 
 beforeEach(() => {
   api.getProfitControlPreview.mockReset().mockResolvedValue(preview())
@@ -63,34 +62,23 @@ describe('GroupProfitControlPreview', () => {
     expect(w.find('[data-testid="profit-control-preview-floor-invalid"]').exists()).toBe(true)
   })
 
-  it('marks an empty range as danger and asks for confirmation before saving', async () => {
+  it('marks an empty range as danger', async () => {
     api.getProfitControlPreview.mockResolvedValue(preview({ floor: 0.9, range_empty: true, passing: 0 }))
     const w = mountPreview({ floor: 0.9 })
     await flushPromises()
     expect(line(w).attributes('data-level')).toBe('danger')
     expect(line(w).text()).toContain('admin.groups.profitControl.floorRangeEmpty')
-    expect(await blockingReason(w)).toBe('range_empty')
   })
 
-  // B1: the save asks about floor 2; while that answer is on its way the box changes to 0.2 and its own preview lands
-  // first. The answer for 2 still decides (range empty → confirm), never "no confirmation needed".
-  it('judges the values being saved even when the input changes while that preview is on its way', async () => {
-    vi.useFakeTimers()
-    const forTwo: { resolve?: (value: Preview) => void } = {}
-    api.getProfitControlPreview.mockImplementation((_id: number, _margin: number, floor: number) =>
-      floor === 2
-        ? new Promise<Preview>((resolve) => { forTwo.resolve = resolve })
-        : Promise.resolve(preview({ floor, ceiling: 1, below_floor: 0 })))
-    const w = mountPreview({ floor: 0.1 })
+  // The preview endpoint uses the saved group multiplier: with another one in the form it says so.
+  it('says the preview uses the saved multiplier when the form has another one, with profit control on', async () => {
+    const w = mountPreview({ floor: 0.3, rateUnsaved: true })
     await flushPromises()
-    await w.setProps({ floor: 2 })
-    const saving = blockingReason(w)
-    await w.setProps({ floor: 0.2 })
-    await vi.advanceTimersByTimeAsync(400)
-    await flushPromises()
-    expect(api.getProfitControlPreview).toHaveBeenLastCalledWith(53, 0.2, 0.2, expect.anything())
-    forTwo.resolve!(preview({ floor: 2, ceiling: 1, below_floor: 6, passing: 0, range_empty: true }))
-    expect(await saving).toBe('range_empty')
+    expect(w.get('[data-testid="profit-control-preview-saved-rate"]').text()).toBe('admin.groups.profitControl.previewSavedRate')
+    await w.setProps({ rateUnsaved: false })
+    expect(w.find('[data-testid="profit-control-preview-saved-rate"]').exists()).toBe(false)
+    await w.setProps({ rateUnsaved: true, profitEnabled: false })
+    expect(w.find('[data-testid="profit-control-preview-saved-rate"]').exists()).toBe(false)
   })
 
   it('shows below-floor and pinned counts, and names pinned accounts above the ceiling', async () => {
@@ -105,7 +93,6 @@ describe('GroupProfitControlPreview', () => {
     expect(w.get('[data-testid="profit-control-preview-below-floor"]').text()).toContain('"n":2')
     expect(w.get('[data-testid="profit-control-preview-pinned"]').text()).toContain('"n":2')
     expect(w.get('[data-testid="profit-control-preview-pinned-loss"]').text()).toContain('acc-07')
-    expect(await blockingReason(w)).toBeNull()
   })
 
   it('with profit control off previews only the floor: margin 0, no ceiling line, no pinned loss', async () => {
@@ -121,6 +108,5 @@ describe('GroupProfitControlPreview', () => {
     expect(line(w).text()).toContain('admin.groups.profitControl.floorPreviewOnly')
     expect(line(w).attributes('data-level')).toBe('danger')
     expect(w.find('[data-testid="profit-control-preview-pinned-loss"]').exists()).toBe(false)
-    expect(await blockingReason(w)).toBe('none_usable')
   })
 })
