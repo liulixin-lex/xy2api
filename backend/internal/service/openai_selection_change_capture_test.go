@@ -18,6 +18,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func finishSchedRead(c *gin.Context, err error) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	// EOF may precede buffered delivery or a protocol conversion's final
+	// output. The forwarding function owns successful completion.
+	if !errors.Is(err, io.EOF) {
+		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
+	}
+}
+
 func TestStickyChangeUsesActualAttemptTerminal(t *testing.T) {
 	for _, evidence := range []string{"success", "failed_event", "partial", "unterminated", "read_error", "deadline", "internal_context_cancel", "timeout", "unfinished", "cancel_before_output", "cancel_after_output", "upstream_canceled", "max_output_tokens", "content_filter"} {
 		for _, recorder := range []bool{false, true} {

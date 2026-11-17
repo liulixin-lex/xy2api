@@ -169,7 +169,7 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		if len(rows) > 0 {
 			last := rows[len(rows)-1]
 			next := SchedAttemptCursor{At: last.FinishedAt, AttemptID: last.AttemptID}
-			if !next.At.After(s.finishedCursor.At) && !(next.At.Equal(s.finishedCursor.At) && next.AttemptID > s.finishedCursor.AttemptID) {
+			if !next.At.After(s.finishedCursor.At) && (!next.At.Equal(s.finishedCursor.At) || next.AttemptID <= s.finishedCursor.AttemptID) {
 				return errors.New("finished evidence cursor did not advance")
 			}
 			s.finishedCursor = next

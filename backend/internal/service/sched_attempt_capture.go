@@ -248,13 +248,14 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	if isOpenAIWSTerminalEvent(typ) || typ == "error" || typ == "message_stop" || strings.TrimSpace(string(data)) == "[DONE]" {
 		a.markTerminal()
 	}
-	if typ == "" {
+	switch typ {
+	case "":
 		var terminal openAIRawStreamTerminalState
 		terminal.ObserveDataLine(strings.TrimSpace(string(data)))
 		if terminal.Terminated() {
 			a.markTerminal()
 		}
-	} else if typ == "message_delta" {
+	case "message_delta":
 		// Native Anthropic readers also accept a valid stop_reason without
 		// message_stop. Use their protocol evidence, not transport EOF.
 		var terminal anthropicBufferedEvidence
@@ -667,17 +668,6 @@ func noteSchedStall(c *gin.Context) {
 		a.failure = &resilience.Outcome{Source: resilience.SourceStall}
 	}
 }
-func finishSchedRead(c *gin.Context, err error) {
-	if c == nil || c.Request == nil {
-		return
-	}
-	// EOF may precede buffered delivery or a protocol conversion's final
-	// output. The forwarding function owns successful completion.
-	if !errors.Is(err, io.EOF) {
-		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
-	}
-}
-
 func cancelSchedClient(c *gin.Context) {
 	if c != nil && c.Request != nil {
 		currentSchedAttempt(c.Request.Context()).cancel()

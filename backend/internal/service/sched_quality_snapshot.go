@@ -321,15 +321,6 @@ func schedLineLess(a, b q.LineKey) bool {
 	}
 	return a.Line < b.Line
 }
-func schedQualityLess(a, b schedQualityKey) bool {
-	if a.account != b.account {
-		return a.account < b.account
-	}
-	if a.model != b.model {
-		return a.model < b.model
-	}
-	return a.group < b.group
-}
 func (s *SchedQualityEngineService) isMember(group, account int64) bool {
 	for _, id := range s.members[group] {
 		if id == account {
@@ -354,18 +345,6 @@ func schedRearLines(v q.StateView) []q.Dimension {
 		}
 	}
 	return out
-}
-func schedStateUntil(v q.StateView) time.Time {
-	var until time.Time
-	for _, l := range []q.LineView{v.TTFO, v.Error, v.Cache} {
-		if l.Identity == q.IdentityRear && l.Until.After(until) {
-			until = l.Until
-		}
-		if l.Trial && l.TrialUntil.After(until) {
-			until = l.TrialUntil
-		}
-	}
-	return until
 }
 
 // Retries share a logical request/turn and the final finished attempt determines

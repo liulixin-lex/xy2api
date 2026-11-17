@@ -112,7 +112,7 @@ func (s *OpenAIGatewayService) recheckSelectionAccount(ctx context.Context, req 
 	if account == nil {
 		return nil
 	}
-	fresh := account
+	var fresh *Account
 	if s.accountRepo != nil {
 		var err error
 		fresh, err = s.accountRepo.GetByID(ctx, account.ID)

@@ -34,7 +34,7 @@ func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
 	typ := root.Get("type").String()
 	if typ == "" {
 		typ = event
-	} else if event != "" && typ != event && !(event == "response.metadata" && typ == "codex.response.metadata") {
+	} else if event != "" && typ != event && (event != "response.metadata" || typ != "codex.response.metadata") {
 		return OutputClass{}
 	}
 	if typ == "error" || typ == "ping" || typ == "keepalive" || ChatErrorField(root) {

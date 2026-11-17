@@ -538,7 +538,7 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 	clientFrameConn := &openAIWSClientFrameConn{interTurnStarted: make(chan struct{}, 1)}
 	clientFrameConn.markTurnCompleted()
 	lifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
-	lifecycle.beginTerminalWrite()
+	require.NoError(t, lifecycle.beginTerminalWrite())
 
 	admitted := make(chan bool, 1)
 	go func() {
@@ -560,7 +560,7 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 	require.False(t, clientFrameConn.waitingForNextTurn.Load(), "accepted next turn must win over terminal idle state")
 
 	lifecycle = newOpenAIWSPassthroughTurnLifecycle(true)
-	lifecycle.beginTerminalWrite()
+	require.NoError(t, lifecycle.beginTerminalWrite())
 	admitted = make(chan bool, 1)
 	go func() {
 		admitted <- lifecycle.beginResponseCreate(nil)

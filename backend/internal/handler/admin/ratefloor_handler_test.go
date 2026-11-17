@@ -45,7 +45,8 @@ func TestRatefloorMemberHandler(t *testing.T) {
 				require.Equal(t, 1, svc.calls)
 				var body map[string]any
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-				data := body["data"].(map[string]any)
+				data, ok := body["data"].(map[string]any)
+				require.True(t, ok)
 				require.Equal(t, svc.pinned, data["pinned"])
 				require.EqualValues(t, 42, data["account_id"])
 			} else {

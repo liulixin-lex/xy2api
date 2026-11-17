@@ -518,7 +518,7 @@ retryMessagesResponsesWire:
 		)
 	}
 	defer func(a *schedAttemptCapture) {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		rethrowSchedAttemptPanic(a, recover())
 		// Completion belongs to the consumer, before transport cleanup.
 		if a == schedCapture {

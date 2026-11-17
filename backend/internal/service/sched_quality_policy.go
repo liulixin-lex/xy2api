@@ -334,13 +334,3 @@ func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int
 	}
 	return out, nil
 }
-
-func schedFailedLines(lines map[schedquality.Dimension]schedquality.Verdict) []schedquality.Dimension {
-	var out []schedquality.Dimension
-	for _, line := range schedquality.Lines {
-		if lines[line] == schedquality.VerdictFail {
-			out = append(out, line)
-		}
-	}
-	return out
-}

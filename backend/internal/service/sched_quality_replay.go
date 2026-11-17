@@ -24,7 +24,11 @@ type schedReplayHeap []*schedReplayEvent
 func (h schedReplayHeap) Len() int           { return len(h) }
 func (h schedReplayHeap) Less(i, j int) bool { return h[i].at.Before(h[j].at) }
 func (h schedReplayHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *schedReplayHeap) Push(v any)        { *h = append(*h, v.(*schedReplayEvent)) }
+func (h *schedReplayHeap) Push(v any) {
+	// The replay queue only receives *schedReplayEvent values via heap.Push.
+	event, _ := v.(*schedReplayEvent)
+	*h = append(*h, event)
+}
 func (h *schedReplayHeap) Pop() any {
 	old := *h
 	n := len(old) - 1
@@ -165,7 +169,8 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		if err = ctx.Err(); err != nil {
 			return
 		}
-		e := heap.Pop(&queue).(*schedReplayEvent)
+		// schedReplayHeap.Pop returns the *schedReplayEvent stored in the queue.
+		e, _ := heap.Pop(&queue).(*schedReplayEvent)
 		delete(batches, e.at)
 		for pair := range e.pairs {
 			// Superseded arrivals or a trial which has already ended do no work.

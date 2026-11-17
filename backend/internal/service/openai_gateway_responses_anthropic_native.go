@@ -154,7 +154,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func(a *schedAttemptCapture) {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		rethrowSchedAttemptPanic(a, recover())
 		// Completion belongs to the consumer, before transport cleanup.
 		a.finish(schedResult, schedErr)
