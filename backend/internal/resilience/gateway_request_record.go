@@ -245,6 +245,14 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	}
 	first := s.EndToEndFirstOutputMs()
 	canceled := s.ClientCanceled()
+	waived := false
+	if !billing {
+		s.d.mu.Lock()
+		// Only billing's explicit undelivered waiver records usage with billed=false.
+		// Neither an unattempted/failed bill nor a zero-cost usage row is a waiver.
+		waived = s.d.disconnected && !s.d.delivered && !s.d.abuse && len(s.d.usageJSON) > 0 && !s.d.billed
+		s.d.mu.Unlock()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.gatewayRecord
@@ -274,9 +282,19 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			TerminalEventValid: r.TerminalEventValid, ResponseBodyType: r.ResponseBodyType})
 		r.billing = billing
 	}
+	if !billing && r.billing && waived && gatewayRequestWaiverTailEnabled(r.RequestScope) {
+		// Inline billing has explicitly declined both settlement and a usage row.
+		// Transfer ownership once, preserving the already-frozen request metadata.
+		r.billing, r.claimed = false, false
+	}
 	writeUnbilled := !r.billing && !r.claimed && (!r.excluded || r.RequestScope != "")
 	r.claimed = true
 	return cloneGatewayRequest(r.final), writeUnbilled
+}
+
+// Roll out waiver audit rows by scope; legacy text billing ownership is unchanged.
+func gatewayRequestWaiverTailEnabled(scope GatewayRequestScope) bool {
+	return scope == GatewayRequestScopeSearch
 }
 
 func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
