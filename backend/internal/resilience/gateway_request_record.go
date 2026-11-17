@@ -284,7 +284,9 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	}
 	if !billing && r.billing && waived && gatewayRequestWaiverTailEnabled(r.RequestScope) {
 		// Inline billing has explicitly declined both settlement and a usage row.
-		// Transfer ownership once, preserving the already-frozen request metadata.
+		// Cancellation may arrive after the billing claim froze a failed write.
+		// Normalize only the waived tail's result; retain all other frozen facts.
+		r.final.Result = RequestCanceled
 		r.billing, r.claimed = false, false
 	}
 	writeUnbilled := !r.billing && !r.claimed && (!r.excluded || r.RequestScope != "")

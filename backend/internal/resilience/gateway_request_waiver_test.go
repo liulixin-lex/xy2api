@@ -50,3 +50,50 @@ func TestGatewayRequestWaiverTailScopeAndEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestGatewayRequestLateWaiverResult(t *testing.T) {
+	previous := *Current()
+	Publish(Defaults())
+	t.Cleanup(func() { Publish(previous) })
+	for _, tc := range []struct {
+		name                     string
+		scope                    GatewayRequestScope
+		waived, billed, wantTail bool
+	}{
+		{"search", GatewayRequestScopeSearch, true, false, true},
+		{"text_legacy", GatewayRequestScopeText, true, false, false},
+		{"no_waiver", GatewayRequestScopeSearch, false, false, false},
+		{"billing_intent", GatewayRequestScopeSearch, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			st := NewRequestState()
+			st.InitDelivery(ctx, time.Now(), func() int64 { return 0 })
+			st.EnableGatewayRequest(time.Now(), tc.scope)
+			st.SetSchedSelectionFlags(42, true, true)
+			st.NoteGatewaySend(42)
+			input, read, creation := 17, 3, 2
+			st.NoteGatewayAttempt(false, "write_failed", &input, &read, &creation)
+			st.CompleteGatewayForward(false, false)
+			before, write := st.ClaimGatewayRequest(true)
+			require.False(t, write)
+			require.Equal(t, RequestFailed, before.Result)
+			cancel()
+			st.ResolveDisconnect()
+			if tc.waived {
+				st.NoteUndeliveredUsage([]byte(`{"input_tokens":17}`), 0, tc.billed)
+			}
+			after, write := st.ClaimGatewayRequest(false)
+			require.Equal(t, tc.wantTail, write)
+			expected := *before
+			if tc.wantTail {
+				expected.Result = RequestCanceled
+			}
+			require.Equal(t, &expected, after, "only the waived search tail result may change")
+			require.Equal(t, RequestFailed, before.Result, "the billing caller's frozen copy stays immutable")
+			_, write = st.ClaimGatewayRequest(false)
+			require.False(t, write)
+		})
+	}
+}
