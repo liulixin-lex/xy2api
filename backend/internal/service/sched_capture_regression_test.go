@@ -37,7 +37,11 @@ func TestCaptureCacheReadPresence(t *testing.T) {
 			rec.Start(context.Background())
 			t.Cleanup(rec.Stop)
 			var observed q.AttemptSample
-			rec.SetObserver(func(row q.AttemptSample) { observed = row })
+			rec.SetObserver(func(row q.AttemptSample) {
+				if !row.FinishedAt.IsZero() {
+					observed = row
+				}
+			})
 			u, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"usage":` + tc.usage + `}`))
 			require.True(t, ok)
 			st := resilience.NewRequestState()
