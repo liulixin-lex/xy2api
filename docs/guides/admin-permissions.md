@@ -68,7 +68,7 @@ XY2API 后台有两种管理员：超级管理员可以使用全部功能；普�
 
 [分组质量门槛](group-quality-gate.md#管理接口)：账号的质量摘要、三线详情与判定记录需要 `accounts:view`；恢复、豁免与清除自动状态需要 `accounts:manage`。分组门槛、汇总、选号顺序与逐线试算需要 `groups:view`；保存门槛和成员“固定”开关需要 `groups:manage`。全局首字线的把握、容忍、比同伴高出三个参数仅超级管理员可读写。普通管理员仍受原有资源范围与字段限制；倍率下限属于价格字段，额外要求“加减余额”能力。
 
-账号列表的质量身份筛选为 `normal`、`rear`、`trial`、`unknown`、`exempt`，按有效身份匹配；`normal` 要求未停调且每个 OpenAI 分组均达标。受限后台密钥带非空 `sched_quality` 时明确拒绝，不支持在受限账号列表按质量身份筛选。
+账号列表的质量身份筛选为 `normal`、`rear`、`trial`、`unknown`、`exempt`，按有效身份匹配；`normal` 要求未停调、至少有一个 OpenAI 分组且各组状态均正常。豁免仅取消覆盖分组的后排或试用效力；有一条线达标的组为正常，否则未知，因此“正常”或“未知”结果里也可能显示豁免圆点；`exempt` 单独匹配有豁免的号。受限后台密钥的非空 `sched_quality` 非法值返回 400 `INVALID_SCHED_QUALITY`，合法值返回 403 `SCOPED_ADMIN_QUALITY_FILTER_UNSUPPORTED`。
 
 **跨模块读取**：页面上的下拉选择不需要单独勾选模块。
 

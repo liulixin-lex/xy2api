@@ -10,7 +10,7 @@
   - 选择“Responses 非流式”或“Chat 非流式”时，被学为仅流式的账号标为跳过（原因 `capability_stream_only`，恢复时间为学习到期时间）；不选则看整体健康。
   - 常见原因：`unavailable`（停用或不可调度）、`expired`、`quota_exceeded`、`balance_exhausted`（上游余额不足）、`temp_unschedulable`、`rate_limited`、`overloaded`、`model_rate_limited`、`model_transient`（非 OpenAI 账号的模型级冷却，只反映当前实例）、`capability_stream_only`。
   - 末位兜底账号的判断不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。OpenAI 的按模型瞬时屏蔽与质量状态不显示在选号解释中，OpenAI 分组的当前名次与层看分组详情的“选号顺序”（见 [分组页](group-quality-gate.md#分组页)）。
-- **账号管理**：余额暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文，“恢复状态”立即放回；被学为仅流式的账号在状态列下方显示“仅流式（自动学习，剩余 X 小时）”，可点“清除”。
+- **账号管理**：余额暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文，“恢复状态”立即放回；被学为仅流式的账号在状态列下方显示“仅流式（自动学习，剩余 X 小时）”，有管理权限时“清除”按钮保持可见，文字过长可悬停看完整说明。
 - **运维错误详情**：每次上游尝试带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`），按完整上游载荷计算，与换号决策一致。
 - **使用记录**：由兜底分组服务的请求，管理端主标签显示原分组，下方提示“兜底 → 兜底组名”，悬停说明“按兜底分组计费”。
 
@@ -107,12 +107,14 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 
 - 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选。
 - Warn 及以上会落库，但以下日志不带 `component`，须按事件名找：`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error。
-- 不带 `component` 的 Info 只在应用标准输出里，包括 `sched_quality.capability_mark_limit` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录；不能在系统日志中查到。
+- 不带 `component` 的 Info 只在应用标准输出里，包括 `sched_quality.capability_mark_evicted` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录；不能在系统日志中查到。
 
 成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
 
 | 事件 | 级别 | 何时写 / 关键字段 |
 |---|---|---|
+| `sched_quality.loading` | 进度 / 完成 Info，加载失败 Warn | 带 `component=sched_quality`；`status` 为 `page`、`complete` 或 `incomplete`、累计 `rows`、`pages`；`page` 和 `incomplete` 另有 `layering=false`，失败有 `error`；加载完成前不分层 |
+| `sched_quality.replay` | Debug | 处理积压的事务提交后；带组件，`horizon` 为处理水位，`batches`、`assessments` 为补跑批次与判定次数，需启用 Debug |
 | `sched_quality.summary` | Info | 每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`clear` |
 | `sched_quality.state` | Info | 产生判定动作时；含 `at`、`rule_version`、`account_id`、`model`、`group_id`、`action`、`line`、`level`、`until`、`basis`、`attempt_ids` |
 | `sched_quality.session_switch` | Info | 会话绑定事务结束，成功、失败、取消、冲突均可写；见下表 |
@@ -134,7 +136,7 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 | `sched_quality.trial_promote_failed` | Warn | 已提交绑定后，请求名额转会话名额失败；`account_id`、`error`，随后尽力释放请求名额 |
 | `sched_quality.trial_release_failed` | Warn | 单个名额释放失败；`account_id`、`group_id`、`error` |
 | `sched_quality.release_trial_group` | Warn | 试用结束后整组名额释放失败；`account_id`、`model`、`group_id`、`error` |
-| `sched_quality.capability_mark_limit` | Info | 能力标记已满时拒绝新增；`account_id`、`limit` |
+| `sched_quality.capability_mark_evicted` | Info | 能力标记满额时替换最早到期的一条；`account_id`、`limit`；不带组件，仅应用标准输出 |
 
 `summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入、续期、试用失败；`released` 计到期达标、试用达标、试用超时；`trial` 计进入试用，`clear` 计档位清零。只统计提交成功的变化，管理员恢复不计入这些变化数。
 
@@ -154,6 +156,10 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 **`sched_quality.attempt_finished`**：`request_id` 是网关本地 ID，`attempt_id` 标识本次发送；`outcome`、`class` 是采样结果与归责类别，`http_status`、`status_origin` 分开记录状态与来源。`client_disconnect`、`terminal_seen`、`terminal_event`、`terminal_failed`、`error_source`、`send_error`、`context_done` 用于区分终态、网络、取消与清理。`terminal_ms`、`finished_ms` 相对本次尝试开始；`first_output_request_ms` 是请求级端到端首输出；`output_bytes` 是实际写给客户端的字节，含已写前奏，不等同语义输出字节。
 
 以下同前缀名称是管理审计动作，不是上述运行日志事件：`sched_quality.reset`、`sched_quality.override`、`sched_quality.clear_override`、`sched_quality.clear_auto_state`、`sched_quality.policy`、`sched_quality.ttft_rule`。恢复审计记录已清、保留及失败数量；配置保存的运行依据看 `sched_quality.policy_changed`。
+
+### 采样写入丢弃
+
+`sched_attempt.dropped` 为 Warn，组件 `service.sched_attempt_recorder`，可在系统日志按该组件或事件名查。`reason=stopped` 表示记录器停止后才到达的完成记录，计入 `dropped_write_failed`；`queue_full` 表示队列满导致丢样，计入 `dropped_queue_full`；`write_failed` 表示写入失败后丢弃，也计入 `dropped_write_failed`。日志另含 `error`，按原因限频，不会为每条丢样各写一条。关停超期未结束的请求可能在这里留下丢弃记录。
 
 ### 请求关联字段
 
@@ -193,7 +199,7 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
-1. 先看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
+1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
 2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及到期复核结果。
 3. 会话搬动看 `sched_quality.session_switch`，先确认 `committed`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发绑定事务的请求；再用 `sched_quality.attempt_finished` 的 `request_id` / `attempt_id` 区分首输出截止、真实上游失败、取消和修复重发（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
