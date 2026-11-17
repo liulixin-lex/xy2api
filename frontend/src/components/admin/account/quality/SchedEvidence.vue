@@ -7,7 +7,7 @@
           {{ t(`admin.schedQuality.evidence.${dim}.${item.key}`, { v: item.value }) }}
         </li>
       </ul>
-      <p v-if="causes.length" class="ev__why" data-qp-evidence-why>
+      <p v-if="causes.length && !gateOff" class="ev__why" data-qp-evidence-why>
         {{ t('admin.schedQuality.evidence.why', { reasons: causes.join(t('admin.schedQuality.evidence.reasonJoiner')) }) }}
       </p>
     </template>
@@ -32,6 +32,8 @@ const props = defineProps<{
   sourceGroups?: number[]
   /** A group's name by id; the id when unknown. */
   groupName?: (id: number) => string | undefined
+  /** The gate judges nothing here (switched off): the head says so, and the statistical causes are not why. */
+  gateOff?: boolean
 }>()
 const { t, te } = useI18n()
 

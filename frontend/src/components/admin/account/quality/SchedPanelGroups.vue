@@ -89,6 +89,7 @@
               :evidence="item.row.lines[mark.dim].evidence"
               :source-groups="item.row.lines[mark.dim].source_groups"
               :group-name="groupName"
+              :gate-off="item.gateOff !== null"
             />
           </div>
         </div>
@@ -188,7 +189,7 @@ const rows = computed(() =>
         ? t('admin.schedQuality.panel.exemptUntil', { time: formatShortTime(group.exemption.expires_at) })
         : t('admin.schedQuality.panel.exemptForever')
     }
-    return { group, row, info: props.groupInfo(group.group_id) ?? { name: group.name }, place, extra, marks, unknownWhy }
+    return { group, row, info: props.groupInfo(group.group_id) ?? { name: group.name }, place, extra, marks, unknownWhy, gateOff: off }
   })
 )
 </script>

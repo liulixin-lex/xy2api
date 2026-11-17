@@ -504,9 +504,18 @@ describe('SchedQualityPanel', () => {
 
     closeSchedDrawer()
     await flushPromises()
-    api.accountDetail.mockResolvedValue({ ...detail(), global_enabled: false })
+    // Switched off everywhere: the expanded evidence keeps its numbers but not the statistical causes of "unknown".
+    const off = { ...detail(), global_enabled: false }
+    off.groups[0].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ causes: ['mass_insufficient'] }) })
+    api.accountDetail.mockResolvedValue(off)
     await openOn(7, { model: 'gpt-a' })
     expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGlobal')
+    document.querySelector<HTMLElement>('[data-qp-expand="53"]')!.click()
+    await flushPromises()
+    const ttfo = document.querySelector('[data-qp-group-detail="53"] [data-qp-line="ttfo"]')!
+    expect(ttfo.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.gateOffGlobal')
+    expect(ttfo.querySelector('[data-qp-evidence-item="n"]')).not.toBeNull()
+    expect(ttfo.querySelector('[data-qp-evidence-why]')).toBeNull()
   })
 
   it('opens a group row to each line\'s evidence, with why an unknown first output is unknown', async () => {

@@ -149,6 +149,8 @@ const props = defineProps<{
   /** The account's quality summary; null for accounts without quality data. */
   quality: (AccountQualityView & Pick<BackendAccountSummary, 'ttfo'>) | null
   readonly?: boolean
+  /** Quality scheduling is switched off (the summary's global_enabled): an unknown dot says the gate is off. */
+  gateOff?: boolean
   /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
   card?: boolean
 }>()
@@ -220,8 +222,11 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
     const rows = [[t('admin.accounts.table.tip.exemptUntil'), exemptEnd(exemption?.expires_at)]]
     return exemption?.reason ? [...rows, [t('admin.accounts.table.tip.reason'), exemption.reason]] : rows
   }
-  // Unknown may come from any of the three lines: the panel has each line's evidence.
-  if (state === 'unknown') return [[t('admin.accounts.table.tip.reason'), t('admin.accounts.table.tip.unknownWhy')]]
+  // Unknown may come from any of the three lines: the panel has each line's evidence. With quality scheduling switched
+  // off nothing is judged, as the panel says (a group's own gate is not in the summary).
+  if (state === 'unknown') {
+    return [[t('admin.accounts.table.tip.reason'), t(props.gateOff ? 'admin.schedQuality.identity.gateOffGlobal' : 'admin.accounts.table.tip.unknownWhy')]]
+  }
   if (state === 'stopped' && quality.stop) {
     const rows = [
       [t('admin.accounts.table.tip.reason'), kindName(quality.stop.reason, t, te)],
