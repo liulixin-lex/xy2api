@@ -292,7 +292,7 @@ func (s *GroupRepoSuite) TestDeleteCascadeIfEmptyIgnoresBindingsToSoftDeletedAcc
 	s.Require().ErrorIs(err, service.ErrGroupNotFound)
 }
 
-func TestBindAccountsToGroupWaitingBehindGuardedDeleteCannotCommit(t *testing.T) {
+func TestCopyAccountMembersWaitingBehindGuardedDeleteCannotCommit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -320,7 +320,7 @@ func TestBindAccountsToGroupWaitingBehindGuardedDeleteCannotCommit(t *testing.T)
 	bindDone := make(chan error, 1)
 	go func() {
 		bindDone <- newGroupRepositoryWithSQL(integrationEntClient, integrationDB).
-			BindAccountsToGroup(ctx, groupID, []int64{accountID})
+			CopyAccountMembers(ctx, groupID, []int64{groupID}, []int64{accountID}, false)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -1008,78 +1008,6 @@ func (s *GroupRepoSuite) TestListWithFilters_RateLimitedAccountCount() {
 	s.Assert().Equal(found.AccountCount, detail.AccountCount, "GetByID AccountCount must match ListWithFilters")
 	s.Assert().Equal(found.ActiveAccountCount, detail.ActiveAccountCount, "GetByID ActiveAccountCount must match ListWithFilters")
 	s.Assert().Equal(found.RateLimitedAccountCount, detail.RateLimitedAccountCount, "GetByID RateLimitedAccountCount must match ListWithFilters")
-}
-
-// --- DeleteAccountGroupsByGroupID ---
-
-func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID() {
-	g := &service.Group{
-		Name:             "g-del",
-		Platform:         service.PlatformAnthropic,
-		RateMultiplier:   1.0,
-		IsExclusive:      false,
-		Status:           service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeStandard,
-	}
-	s.Require().NoError(s.repo.Create(s.ctx, g))
-	var accountID int64
-	s.Require().NoError(scanSingleRow(
-		s.ctx,
-		s.tx,
-		"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
-		[]any{"acc-del", service.PlatformAnthropic, service.AccountTypeOAuth},
-		&accountID,
-	))
-	_, err := s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", accountID, g.ID, 1)
-	s.Require().NoError(err)
-
-	affected, err := s.repo.DeleteAccountGroupsByGroupID(s.ctx, g.ID)
-	s.Require().NoError(err, "DeleteAccountGroupsByGroupID")
-	s.Require().Equal(int64(1), affected, "expected 1 affected row")
-
-	count, _, err := s.repo.GetAccountCount(s.ctx, g.ID)
-	s.Require().NoError(err, "GetAccountCount")
-	s.Require().Equal(int64(0), count, "expected 0 account groups")
-}
-
-func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_MultipleAccounts() {
-	g := &service.Group{
-		Name:             "g-multi",
-		Platform:         service.PlatformAnthropic,
-		RateMultiplier:   1.0,
-		IsExclusive:      false,
-		Status:           service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeStandard,
-	}
-	s.Require().NoError(s.repo.Create(s.ctx, g))
-
-	insertAccount := func(name string) int64 {
-		var id int64
-		s.Require().NoError(scanSingleRow(
-			s.ctx,
-			s.tx,
-			"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
-			[]any{name, service.PlatformAnthropic, service.AccountTypeOAuth},
-			&id,
-		))
-		return id
-	}
-	a1 := insertAccount("a1")
-	a2 := insertAccount("a2")
-	a3 := insertAccount("a3")
-	_, err := s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", a1, g.ID, 1)
-	s.Require().NoError(err)
-	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", a2, g.ID, 2)
-	s.Require().NoError(err)
-	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", a3, g.ID, 3)
-	s.Require().NoError(err)
-
-	affected, err := s.repo.DeleteAccountGroupsByGroupID(s.ctx, g.ID)
-	s.Require().NoError(err)
-	s.Require().Equal(int64(3), affected)
-
-	count, _, _ := s.repo.GetAccountCount(s.ctx, g.ID)
-	s.Require().Zero(count)
 }
 
 // --- 软删除过滤测试 ---

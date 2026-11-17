@@ -82,14 +82,8 @@ func (groupRepoNoop) ExistsByName(context.Context, string) (bool, error) {
 func (groupRepoNoop) GetAccountCount(context.Context, int64) (int64, int64, error) {
 	panic("unexpected GetAccountCount call")
 }
-func (groupRepoNoop) DeleteAccountGroupsByGroupID(context.Context, int64) (int64, error) {
-	panic("unexpected DeleteAccountGroupsByGroupID call")
-}
 func (groupRepoNoop) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	panic("unexpected GetAccountIDsByGroupIDs call")
-}
-func (groupRepoNoop) BindAccountsToGroup(context.Context, int64, []int64) error {
-	panic("unexpected BindAccountsToGroup call")
 }
 func (groupRepoNoop) UpdateSortOrders(context.Context, []GroupSortOrderUpdate) error {
 	panic("unexpected UpdateSortOrders call")

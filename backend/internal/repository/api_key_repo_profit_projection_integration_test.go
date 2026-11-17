@@ -21,11 +21,13 @@ import (
 func TestGetByKeyForAuthCarriesProfitControlProjection(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
+	floor := 0.03
 	group := mustCreateGroup(t, integrationEntClient, &service.Group{
 		Name:                 fmt.Sprintf("profit-proj-group-%d", suffix),
 		Platform:             service.PlatformOpenAI,
 		RateMultiplier:       0.06,
 		ProfitControlEnabled: true,
+		MinUpstreamRate:      &floor,
 		ProfitMinMargin:      0.2,
 		ProfitSafetyBuffer:   0.05,
 	})
@@ -57,4 +59,6 @@ func TestGetByKeyForAuthCarriesProfitControlProjection(t *testing.T) {
 	require.True(t, got.Group.ProfitControlEnabled, "profit_control_enabled 必须进入认证投影（投影漏列会让门静默失效）")
 	require.InDelta(t, 0.2, got.Group.ProfitMinMargin, 1e-9)
 	require.InDelta(t, 0.05, got.Group.ProfitSafetyBuffer, 1e-9)
+	require.NotNil(t, got.Group.MinUpstreamRate)
+	require.InDelta(t, 0.03, *got.Group.MinUpstreamRate, 1e-9)
 }

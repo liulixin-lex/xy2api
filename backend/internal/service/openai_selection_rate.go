@@ -81,13 +81,21 @@ func openAISchedulingRate(account *Account, now time.Time, oauthSchedulingRateMu
 }
 
 func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, bool) {
-	if !isUpstreamBillingProbeAccount(account) {
+	data, ok := openAIFreshUpstreamBillingData(account, now)
+	if !ok {
 		return 0, false
+	}
+	return upstreamBillingRateAt(data, now)
+}
+
+func openAIFreshUpstreamBillingData(account *Account, now time.Time) (map[string]any, bool) {
+	if !isUpstreamBillingProbeAccount(account) {
+		return nil, false
 	}
 	snapshot := decodeUpstreamBillingProbeSnapshot(account.Extra)
 	if snapshot == nil || (snapshot.Status != UpstreamBillingProbeStatusOK && snapshot.Status != UpstreamBillingProbeStatusFailed) ||
 		snapshot.ReceivedAt == nil || snapshot.ReceivedAt.IsZero() {
-		return 0, false
+		return nil, false
 	}
 	receivedAt := *snapshot.ReceivedAt
 	freshUntil := snapshot.FreshUntil
@@ -98,9 +106,9 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 		}
 	}
 	if freshUntil == nil || !freshUntil.After(receivedAt) || now.Before(receivedAt) || now.After(*freshUntil) {
-		return 0, false
+		return nil, false
 	}
-	return upstreamBillingRateAt(snapshot.Data, now)
+	return snapshot.Data, true
 }
 
 const (

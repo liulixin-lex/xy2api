@@ -48,11 +48,9 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 	}
 	// A configured floor is a persistent owner exclusion, including while a
 	// temporary soft penalty or a previous attempt would otherwise keep affinity.
-	if gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); gate != nil && gate.floor > 0 {
-		if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
-			clearBinding(reason)
-			return nil, false, nil
-		}
+	if openAIProfitFloorExcluded(ctx, account) {
+		clearBinding(openAIProfitFilterReasonFloor)
+		return nil, false, nil
 	}
 	if _, excluded := req.ExcludedIDs[accountID]; excluded {
 		noteBypass("owner_excluded")
