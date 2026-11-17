@@ -131,6 +131,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
+	resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("user_admission_ms", routingStart)
 
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
 	if !acquired {
@@ -209,6 +210,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				requestPlatform,
 			)
 		}
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_selection_ms", time.Now())
 		selection, scheduleDecision, err := selectNext(c.Request.Context(), failedAccountIDs)
 		if err != nil {
 			recordSelectionExhausted(c.Request.Context())
@@ -249,6 +251,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_admission_ms", time.Now())
 		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, false, selectNext, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
@@ -266,6 +269,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
+		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("upstream_prepare_ms", forwardStart)
 
 		forwardBody := body
 		if channelMapping.Mapped {

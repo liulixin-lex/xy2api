@@ -19,14 +19,14 @@ func (r *usageLogRepository) CreateUnbilledRequest(ctx context.Context, row *ser
 	_, err := r.sql.ExecContext(ctx, `INSERT INTO gateway_unbilled_requests
 		(request_id, created_at, user_id, api_key_id, group_id, account_id, platform,
 		 model, stream, result, error_class, http_status, switches, fallback, takeover,
-		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens, request_type, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, profit_basis)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens, request_type, request_scope, usage_observed, usage_source, terminal_event_seen, terminal_event_valid, response_body_type, degradations, profit_basis, dispatch_phases)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
 		ON CONFLICT (request_id) DO NOTHING`,
 		row.RequestID, row.CreatedAt, row.UserID, row.APIKeyID, row.GroupID, row.AccountID,
 		row.Platform, row.Model, row.Stream, row.Result, row.ErrorClass, row.HTTPStatus,
 		row.Switches, row.Fallback, row.Takeover, row.FirstOutputMs, row.DurationMs,
 		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.RequestType,
-		gatewayScopeSQL(row.RequestScope), row.UsageObserved, row.UsageSource, row.TerminalEventSeen, row.TerminalEventValid, row.ResponseBodyType, gatewayNoticesSQL(row.ConversionNotices), nullableProfitBasis(row.ProfitBasis))
+		gatewayScopeSQL(row.RequestScope), row.UsageObserved, row.UsageSource, row.TerminalEventSeen, row.TerminalEventValid, row.ResponseBodyType, gatewayNoticesSQL(row.ConversionNotices), nullableProfitBasis(row.ProfitBasis), gatewayPricingSQL(row.DispatchPhases))
 	return err
 }
 

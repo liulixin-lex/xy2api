@@ -26,10 +26,8 @@ import (
 // cooling the account or counting the session failure.
 //
 // The first-output deadline of a converted stream now bounds the wait for
-// the upstream headers and, with prelude staging enabled, the first content
-// or terminal. Only identity is retained before that point, so an expired
-// attempt can fail over without repeating message_start or the role chunk.
-// With staging disabled the original first-line deadline is preserved.
+// the upstream headers and the first effective output. The content predicate
+// is independent of prelude staging and the usage-log TTFT mode.
 
 type openAICompatFirstEventKey struct{}
 
@@ -75,7 +73,7 @@ func openAICompatFirstEventOf(resp *http.Response) *openAICompatFirstEvent {
 	return fe
 }
 
-// expired reports a deadline that passed before the first upstream line.
+// expired reports a deadline that passed before effective output.
 func (fe *openAICompatFirstEvent) expired() bool {
 	if fe == nil || fe.disarmed.Load() {
 		return false
@@ -88,15 +86,15 @@ func (fe *openAICompatFirstEvent) expired() bool {
 	}
 }
 
-// ownsStall reports a guard still waiting for the first upstream line: the
+// ownsStall reports a guard still waiting for effective output: the
 // stall check leaves the attempt to it, as resilienceFirstOutputGuardOwnsStall
 // does for the Responses stream (review P1-C).
 func (fe *openAICompatFirstEvent) ownsStall() bool {
 	return fe != nil && !fe.disarmed.Load() && resilience.Current().StallOn()
 }
 
-// disarm stops the deadline at the first upstream line (or an error
-// status). It reports false when the deadline passed first: the attempt
+// disarm stops the deadline on effective output or terminal cleanup.
+// It reports false when the deadline passed first: the attempt
 // is cancelled and fails over.
 func (fe *openAICompatFirstEvent) disarm() bool {
 	if fe == nil || !fe.disarmed.CompareAndSwap(false, true) {
@@ -112,7 +110,7 @@ func (fe *openAICompatFirstEvent) close() {
 }
 
 // timeoutError is the failover error of an expired guard.
-func (s *OpenAIGatewayService) openAICompatFirstEventTimeout(ctx context.Context, c *gin.Context, account *Account, fe *openAICompatFirstEvent, phase string, header http.Header) error {
+func (s *OpenAIGatewayService) openAICompatFirstEventTimeout(ctx context.Context, c *gin.Context, account *Account, fe *openAICompatFirstEvent, phase string, header http.Header) *UpstreamFailoverError {
 	return s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 		fe.started, fe.model, fe.effort, fe.timeout, phase, header, fe.plan)
 }
@@ -134,12 +132,22 @@ func (s *OpenAIGatewayService) noteOpenAICompatStall(c *gin.Context, account *Ac
 // openAICompatPreludeEvent projects the upstream boundary onto compatibility
 // output. A tool identity already generates a tool_call/tool_use, even when its
 // arguments are still empty; unlike native Responses it cannot be replayed.
-func openAICompatPreludeEvent(event *apicompat.ResponsesStreamEvent, payload []byte) bool {
-	if event.Type == "response.output_item.added" && event.Item != nil &&
-		(event.Item.Type == "function_call" || event.Item.Type == "custom_tool_call") {
-		return false
+func openAICompatPreludeEvent(event *apicompat.ResponsesStreamEvent, payload []byte, sourceEvent ...string) bool {
+	typ := event.Type
+	if len(sourceEvent) > 0 {
+		typ = sourceEvent[0]
 	}
-	return resilience.ClassifyStreamEvent("responses", event.Type, payload).Kind == resilience.Prelude
+	if !resilience.Current().NativePreludeWhitelistOn() {
+		if event.Type == "response.output_item.added" && event.Item != nil && (event.Item.Type == "function_call" || event.Item.Type == "custom_tool_call") {
+			return false
+		}
+		return resilience.ClassifyStreamEvent("responses", event.Type, payload).Kind == resilience.Prelude
+	}
+	output := resilience.ClassifyOutput("responses", typ, payload)
+	if !output.Known {
+		return resilience.ClassifyStreamEvent("responses", typ, payload).Kind == resilience.Prelude
+	}
+	return !output.Valid && !ClassifyOpenAIResponsesTerminal(typ, payload).Valid
 }
 
 // openAICompatPreludeBuffer retains decoded events only until conversion may

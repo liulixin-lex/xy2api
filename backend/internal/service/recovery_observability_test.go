@@ -176,7 +176,7 @@ func TestEndToEndFirstOutputAcrossProtocols(t *testing.T) {
 	for _, payload := range []string{
 		`{"choices":[{"delta":{"content":"hi"}}]}`,
 		`{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`,
-		`{"type":"content_block_delta","delta":{"text":"hi"}}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`,
 		`{"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}}`,
 	} {
 		c, st := newSSEDeliveryContext(t, "text/event-stream")

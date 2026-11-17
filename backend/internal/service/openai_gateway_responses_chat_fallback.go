@@ -319,7 +319,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
-			FirstTokenMs:                scan.FirstTokenMs,
+			FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
 	s.cacheReasoningItemsFromEvents(finalEvents)
@@ -359,7 +359,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
-		FirstTokenMs:                scan.FirstTokenMs,
+		FirstTokenMs:                schedFirstEvent(c, startTime, scan.FirstTokenMs),
 	}, nil
 }
 

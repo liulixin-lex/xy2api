@@ -244,11 +244,11 @@ func TestHelperFunctionsCoverage(t *testing.T) {
 	require.True(t, isDisconnectError(errors.New("broken pipe")))
 	require.False(t, isDisconnectError(errors.New("unrelated")))
 
-	require.True(t, isTokenEvent("response.output_text.delta"))
-	require.True(t, isTokenEvent("response.output_audio.delta"))
-	require.False(t, isTokenEvent("response.completed"))
-	require.False(t, isTokenEvent(""))
-	require.False(t, isTokenEvent("response.created"))
+	require.True(t, IsTokenEvent("response.output_text.delta"))
+	require.True(t, IsTokenEvent("response.output_audio.delta"))
+	require.False(t, IsTokenEvent("response.completed"))
+	require.False(t, IsTokenEvent(""))
+	require.False(t, IsTokenEvent("response.created"))
 
 	require.Equal(t, 2*time.Second, minDuration(2*time.Second, 5*time.Second))
 	require.Equal(t, 2*time.Second, minDuration(5*time.Second, 2*time.Second))
@@ -580,19 +580,19 @@ func TestIsDisconnectErrorCoverage_CloseStatusesAndMessageBranches(t *testing.T)
 func TestIsTokenEventCoverageBranches(t *testing.T) {
 	t.Parallel()
 
-	require.False(t, isTokenEvent("response.in_progress"))
-	require.False(t, isTokenEvent("response.output_item.added"))
-	require.True(t, isTokenEvent("response.output_audio.delta"))
-	require.True(t, isTokenEvent("response.function_call_arguments.delta"))
-	require.True(t, isTokenEvent("response.reasoning_summary_text.delta"))
-	require.True(t, isTokenEvent("response.output_text.done"))
-	require.True(t, isTokenEvent("response.function_call_arguments.done"))
-	require.False(t, isTokenEvent("response.output"))
-	require.False(t, isTokenEvent("response.output_audio.done"))
-	require.False(t, isTokenEvent("response.content_part.done"))
-	require.False(t, isTokenEvent("response.output_item.done"))
-	require.False(t, isTokenEvent("response.output_text.annotation.added"))
-	require.False(t, isTokenEvent("response.done"))
+	require.False(t, IsTokenEvent("response.in_progress"))
+	require.False(t, IsTokenEvent("response.output_item.added"))
+	require.True(t, IsTokenEvent("response.output_audio.delta"))
+	require.True(t, IsTokenEvent("response.function_call_arguments.delta"))
+	require.True(t, IsTokenEvent("response.reasoning_summary_text.delta"))
+	require.True(t, IsTokenEvent("response.output_text.done"))
+	require.True(t, IsTokenEvent("response.function_call_arguments.done"))
+	require.False(t, IsTokenEvent("response.output"))
+	require.False(t, IsTokenEvent("response.output_audio.done"))
+	require.False(t, IsTokenEvent("response.content_part.done"))
+	require.False(t, IsTokenEvent("response.output_item.done"))
+	require.False(t, IsTokenEvent("response.output_text.annotation.added"))
+	require.False(t, IsTokenEvent("response.done"))
 }
 
 func TestTerminalAndTokenEventSetsAreDisjoint(t *testing.T) {
@@ -607,7 +607,7 @@ func TestTerminalAndTokenEventSetsAreDisjoint(t *testing.T) {
 		"response.canceled",
 	} {
 		require.True(t, isTerminalEvent(eventType), eventType)
-		require.False(t, isTokenEvent(eventType), eventType)
+		require.False(t, IsTokenEvent(eventType), eventType)
 	}
 }
 

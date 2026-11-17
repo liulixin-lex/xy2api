@@ -54,6 +54,9 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 	if !write || meta == nil {
 		return
 	}
+	if meta.Result == resilience.RequestFailed && meta.AccountID == 0 {
+		resilience.StateFrom(c.Request.Context()).FinishRejectedDispatch(time.Now())
+	}
 	key = service.BillingAPIKey(c.Request.Context(), key)
 	requestType := int16(service.RequestTypeFromLegacy(stream, ws))
 	status := c.Writer.Status()
@@ -62,8 +65,9 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 		profitBasis = nil
 	}
 	row := &service.GatewayUnbilledRequest{
-		ProfitBasis:  profitBasis,
-		RequestScope: meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
+		ProfitBasis:    profitBasis,
+		DispatchPhases: resilience.StateFrom(c.Request.Context()).Timing().DispatchPhases,
+		RequestScope:   meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
 		RequestID: meta.RequestID, CreatedAt: meta.StartedAt, UserID: key.UserID, APIKeyID: key.ID, GroupID: key.GroupID,
 		Model: model, Stream: stream, RequestType: &requestType, Result: meta.Result, ErrorClass: meta.ErrorClass,
 		HTTPStatus: &status, Switches: meta.Switches, Fallback: meta.Fallback, Takeover: meta.Takeover,

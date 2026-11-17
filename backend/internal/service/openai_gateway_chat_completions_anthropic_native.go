@@ -451,7 +451,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			ReasoningEffort:  reasoningEffort,
 			Stream:           true,
 			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
+			FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 			ClientDisconnect: clientDisconnected,
 		}
 	}
@@ -513,6 +513,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, &ms)
 		}
 
 		// usage 恒累计（含客户端断开后的排水阶段，payg 上游照常计费）。

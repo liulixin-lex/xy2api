@@ -17,6 +17,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	openaiwsv2 "github.com/liulixin-lex/xy2api/internal/service/openai_ws_v2"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -41,6 +42,7 @@ type schedAttemptCapture struct {
 	networkErr                                 error
 	started                                    time.Time
 	first, done, client                        bool
+	stream                                     bool
 	expectTerminal, terminal, benignIncomplete bool
 	terminalEvent                              string
 	failure                                    *resilience.Outcome
@@ -68,7 +70,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
+	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
@@ -136,11 +138,6 @@ func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {
 	a, _ := resilience.StateFrom(ctx).CurrentAttempt().(*schedAttemptCapture)
 	return a
 }
-func (a *schedAttemptCapture) MarkFirstOutput(at time.Time) {
-	// RequestState's dependency-free AttemptMarker uses the valid-output bridge.
-	a.MarkOutput(OutputValid, at)
-}
-
 func (a *schedAttemptCapture) MarkOutput(kind SchedOutputKind, at time.Time) {
 	if a == nil {
 		return
@@ -214,9 +211,17 @@ func classifySchedTerminal(data []byte) OpenAIResponsesTerminal {
 	return terminal
 }
 
-func (a *schedAttemptCapture) observe(data []byte) {
+func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	if a == nil {
 		return
+	}
+	typHint := ""
+	if len(eventType) > 0 {
+		typHint = eventType[0]
+	}
+	a.observeOutput(data, time.Now(), typHint)
+	if typHint != "" {
+		data = []byte(openAICompatPayloadWithEventType(string(data), typHint))
 	}
 	if u, ok := extractOpenAIUsageFromJSONBytes(data); ok {
 		a.noteUsage(&u)
@@ -484,21 +489,13 @@ func observeSchedPayload(c *gin.Context, data []byte, eventType ...string) {
 	if a == nil {
 		return
 	}
-	if len(eventType) > 0 {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType[0]))
-	}
-	a.observe(data)
+	a.observe(data, eventType...)
 }
 func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 	if a == nil {
 		return
 	}
-	root := gjson.ParseBytes(payload)
-	typ := strings.TrimSpace(root.Get("type").String())
-	disposition := resilience.ResponsesEventOutputDisposition(typ, payload)
-	if disposition.Visible || semanticJSONOutput(root) {
-		a.MarkOutput(OutputValid, time.Now())
-	}
+	a.observeOutput(payload, time.Now())
 }
 
 // sendSchedHTTP is used only by the enumerated text forwarding paths.
@@ -682,6 +679,13 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.active != nil {
+		typ := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+		if openaiwsv2.IsTokenEvent(typ) {
+			ms := int(time.Since(t.active.started).Milliseconds())
+			markSchedFirstEvent(t.active, t.active.started, &ms)
+		}
+	}
 	t.active.observe(payload)
 	markSchedWSOutput(t.active, payload)
 }
@@ -722,9 +726,7 @@ func (a *schedAttemptCapture) markTerminal() {
 // clock which measures receipt from upstream.
 func noteGatewayWSOutput(ctx context.Context, payload []byte) {
 	resilience.StateFrom(ctx).NoteClientOutputBytes(len(payload))
-	root := gjson.ParseBytes(payload)
-	disposition := resilience.ResponsesEventOutputDisposition(strings.TrimSpace(root.Get("type").String()), payload)
-	if disposition.Visible || semanticJSONOutput(root) {
+	if resilience.ClassifyOutput("responses", "", payload).Valid {
 		resilience.StateFrom(ctx).NoteSemanticOutput(time.Now())
 	}
 }

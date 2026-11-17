@@ -35,9 +35,6 @@ func (w *deliveryWriter) observeSemanticOutput(p []byte, at time.Time) {
 		st.noted.Store(true)
 		st.pending = nil
 		w.state.NoteSemanticOutput(time.Now())
-		if attempt := w.state.CurrentAttempt(); attempt != nil {
-			attempt.MarkFirstOutput(at)
-		}
 	}
 	if !stream {
 		if semanticJSONOutput(gjson.ParseBytes(st.pending)) {
@@ -81,71 +78,21 @@ func semanticSSEBlock(block []byte) bool {
 	if event == "error" || typ == "error" || typ == "response.failed" || resilience.ChatErrorField(root) {
 		return false
 	}
-	if strings.HasPrefix(typ, "response.") || strings.HasPrefix(event, "response.") {
-		return openAIStreamDataStartsVisibleOutput(string(data), event)
-	}
-	switch typ {
-	case "image_generation.partial_image", "image_generation.completed":
+	if typ == "image_generation.partial_image" || typ == "image_generation.completed" {
 		return root.Get("b64_json").String() != ""
-	case "content_block_start":
-		return semanticMessageBlock(root.Get("content_block"))
-	case "content_block_delta":
-		delta := root.Get("delta")
-		for _, key := range []string{"text", "thinking", "partial_json"} {
-			if delta.Get(key).String() != "" {
-				return true
-			}
-		}
-		return false
+	}
+	if typ != "" || root.Get("choices").IsArray() {
+		return resilience.ClassifyOutput("", event, data).Valid
 	}
 	return semanticJSONOutput(root)
-}
-
-func semanticMessageBlock(block gjson.Result) bool {
-	switch block.Get("type").String() {
-	case "text", "input_text", "output_text":
-		text := block.Get("text")
-		return text.Type == gjson.String && text.Str != ""
-	case "thinking":
-		return block.Get("thinking").String() != ""
-	case "tool_use", "server_tool_use":
-		return block.Get("name").String() != ""
-	default:
-		return block.Get("data").String() != "" || block.Get("source.data").String() != ""
-	}
 }
 
 func semanticJSONOutput(root gjson.Result) bool {
 	if resilience.ChatErrorField(root) {
 		return false
 	}
-	for _, item := range root.Get("output").Array() {
-		if openAIStreamItemHasVisibleOutput(item) {
-			return true
-		}
-	}
-	for _, block := range root.Get("content").Array() {
-		if semanticMessageBlock(block) {
-			return true
-		}
-	}
-	for _, ch := range root.Get("choices").Array() {
-		for _, key := range []string{"delta", "message"} {
-			msg := ch.Get(key)
-			for _, field := range []string{"content", "reasoning_content", "reasoning", "refusal"} {
-				if semanticChatContent(msg.Get(field)) {
-					return true
-				}
-			}
-			for _, call := range msg.Get("tool_calls").Array() {
-				if call.Get("function.name").String() != "" || call.Get("function.arguments").String() != "" {
-					return true
-				}
-			}
-		}
-		if ch.Get("text").String() != "" {
-			return true
-		}
+	if root.Get("output").IsArray() || root.Get("content").IsArray() || root.Get("choices").IsArray() {
+		return resilience.ClassifyOutput("", "", []byte(root.Raw)).Valid
 	}
 	for _, candidate := range root.Get("candidates").Array() {
 		for _, part := range candidate.Get("content.parts").Array() {
@@ -157,20 +104,6 @@ func semanticJSONOutput(root gjson.Result) bool {
 	for _, img := range root.Get("data").Array() {
 		if img.Get("b64_json").String() != "" || img.Get("url").String() != "" {
 			return true
-		}
-	}
-	return false
-}
-
-func semanticChatContent(value gjson.Result) bool {
-	if value.Type == gjson.String {
-		return value.Str != ""
-	}
-	if value.IsArray() {
-		for _, block := range value.Array() {
-			if semanticMessageBlock(block) {
-				return true
-			}
 		}
 	}
 	return false

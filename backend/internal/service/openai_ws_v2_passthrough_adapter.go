@@ -593,16 +593,7 @@ func (c *openAIWSPassthroughFirstOutputFrameConn) notifyDeadlineChanged() {
 }
 
 func openAIWSPassthroughStartsSemanticOutput(payload []byte) bool {
-	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	switch eventType {
-	case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
-		return true
-	case "", "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done":
-		return false
-	}
-	return strings.Contains(eventType, ".delta") ||
-		strings.HasPrefix(eventType, "response.output_text") ||
-		strings.HasPrefix(eventType, "response.output")
+	return resilience.ClassifyOutput("responses", "", payload).Valid
 }
 
 func openAIWSPassthroughIsTerminalOutput(payload []byte) bool {

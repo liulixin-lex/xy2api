@@ -16,6 +16,7 @@ import (
 // RequestID is the gateway UUID, never a billing or client correlation key.
 type GatewayUnbilledRequest struct {
 	ProfitBasis        json.RawMessage
+	DispatchPhases     json.RawMessage
 	RequestScope       resilience.GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
 	UsageObserved      *bool

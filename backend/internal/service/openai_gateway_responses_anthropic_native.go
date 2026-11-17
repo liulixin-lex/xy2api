@@ -450,7 +450,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			ReasoningEffort:  reasoningEffort,
 			Stream:           true,
 			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
+			FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 			ClientDisconnect: clientDisconnected,
 		}
 	}
@@ -495,6 +495,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
+			schedFirstEvent(c, startTime, &ms)
 		}
 
 		if event.Type == "message_delta" && event.Usage != nil {

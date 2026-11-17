@@ -529,6 +529,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
+					schedFirstEvent(c, startTime, &ms)
 				}
 				parseSSEUsagePassthrough(data, usage)
 				schedUsage := claudeUsageToOpenAIUsage(usage)
@@ -621,7 +622,7 @@ func (s *OpenAIGatewayService) nativeAnthropicStreamResult(
 		Stream:           true,
 		ReasoningEffort:  reasoningEffort,
 		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
+		FirstTokenMs:     schedFirstEvent(c, startTime, firstTokenMs),
 		ClientDisconnect: clientDisconnect,
 	}
 }
