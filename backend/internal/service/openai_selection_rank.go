@@ -22,6 +22,7 @@ type selectionKey struct {
 type selectionRequest struct {
 	Session             string
 	Owner               int64
+	Borrow              bool
 	Room                func(int64, string) bool
 	ManualOnly          bool
 	TokenBilled         bool
@@ -91,6 +92,9 @@ func selectionTier(view schedquality.View, groupID int64, model string, acc *Acc
 	case schedquality.PlaceRear:
 		return 2
 	case schedquality.PlaceTrial:
+		if req.Borrow && acc.ID != req.Owner {
+			return 3
+		}
 		if req.Session != "" && req.Owner == acc.ID || req.Room != nil && req.Room(acc.ID, OpenAIAttemptModel(acc, model)) {
 			return 0
 		}

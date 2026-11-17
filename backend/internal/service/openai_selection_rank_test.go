@@ -53,16 +53,20 @@ func TestOpenAISelectionStanding(t *testing.T) {
 		state   schedquality.StateView
 		enabled bool
 		age     time.Duration
-		want    schedquality.Placement
+		want    int
+		req     selectionRequest
 	}{
-		{"normal", schedquality.StateView{}, true, 0, schedquality.PlaceFront},
-		{"below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 0, schedquality.PlaceRear},
-		{"disabled", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, false, 0, schedquality.PlaceFront},
-		{"stale_below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 61 * time.Second, schedquality.PlaceFront},
-		{"exactly_60_seconds", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 60 * time.Second, schedquality.PlaceRear},
-		{"exempt_failing", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.PlaceFront},
-		{"expired_exempt", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}}, true, 0, schedquality.PlaceRear},
-		{"expired_group_falls_back_to_all", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.PlaceFront},
+		{"normal", schedquality.StateView{}, true, 0, 0, selectionRequest{}},
+		{"below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 0, 2, selectionRequest{}},
+		{"disabled", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, false, 0, 0, selectionRequest{}},
+		{"stale_below", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 61 * time.Second, 0, selectionRequest{}},
+		{"exactly_60_seconds", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}, true, 60 * time.Second, 2, selectionRequest{}},
+		{"exempt_failing", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, 0, selectionRequest{}},
+		{"expired_exempt", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}}, true, 0, 2, selectionRequest{}},
+		{"expired_group_falls_back_to_all", schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, 0, selectionRequest{}},
+		{"trial_owner", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 0, selectionRequest{Session: "raw-session", Owner: 1}},
+		{"trial_room", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 0, selectionRequest{Room: func(int64, string) bool { return true }}},
+		{"trial_full", schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}, true, 0, 1, selectionRequest{Room: func(int64, string) bool { return false }}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,8 +75,8 @@ func TestOpenAISelectionStanding(t *testing.T) {
 			account := selectionTestAccount(1, 1)
 			account.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "outbound"}}
 			view.States[fakeSchedViewKey{7, 1, "outbound"}] = tt.state
-			key := buildSelectionKey(view, 7, "alias", account, selectionRequest{}, now)
-			require.Equal(t, int(tt.want), key.Tier)
+			key := buildSelectionKey(view, 7, "alias", account, tt.req, now)
+			require.Equal(t, tt.want, key.Tier)
 		})
 	}
 	t.Run("override_in_other_group", func(t *testing.T) {

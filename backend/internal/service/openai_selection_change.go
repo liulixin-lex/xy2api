@@ -45,6 +45,7 @@ type openAIStickyChange struct {
 	kind             string
 	reason           string
 	fromModel        string
+	ownerLookup      func(context.Context, int64) *Account
 	trialSession     string
 	leases           SchedTrialLeases
 	trial            *selectionTrialReservation
@@ -163,7 +164,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
 		skipCommit:      unreadable,
 		resetAt:         s.resilience.sessionAccountResetAt,
-		leases:          s.selectionTrialLeases(), trialSession: session,
+		leases:          s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})
 }
 
@@ -191,7 +192,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 		skipCommit:      change.skipCommit,
 		ownerReleased:   change.ownerReleased,
 		resetAt:         change.resetAt,
-		leases:          change.leases, fromModel: change.fromModel, trialSession: change.trialSession, reason: resilience.StateFrom(ctx).StickyBypassReason(),
+		leases:          change.leases, fromModel: change.fromModel, ownerLookup: change.ownerLookup, trialSession: change.trialSession, reason: resilience.StateFrom(ctx).StickyBypassReason(),
 	})
 }
 
@@ -257,12 +258,18 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		return
 	}
 	committed = true
-	if change.expected.AccountID != change.target {
+	if change.leases != nil && change.expected.AccountID > 0 && change.expected.AccountID != change.target {
 		model := change.fromModel
-		if model == "" {
-			model = change.model
+		if model == "" && change.ownerLookup != nil {
+			if owner := change.ownerLookup(stateCtx, change.expected.AccountID); owner != nil {
+				model = OpenAIAttemptModel(owner, change.model)
+			}
 		}
-		releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, TrialLeaseSessionMember(change.trialSessionKey()))
+		// Without the owner's mapping, let the member expire instead of removing
+		// a member under the client model, which may name a different upstream key.
+		if model != "" {
+			releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, TrialLeaseSessionMember(change.trialSessionKey()))
+		}
 	}
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
 		if aliases, ok := change.cache.(OpenAIStickyAliasCache); ok {

@@ -27,7 +27,7 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 				ctx := resilience.WithRequestState(context.WithValue(context.Background(), ctxkey.RequestID, "client-chosen"), state)
 				result := f.selectNow(ctx)
 				require.NotNil(t, result)
-				defer result.ReleaseFunc()
+				defer func() { result.ReleaseFunc(); require.Zero(t, f.slots.held) }()
 				var events []map[string]any
 				for _, row := range schedObsLogRecords(t, output) {
 					if row["msg"] == "sched_quality.session_switch" {

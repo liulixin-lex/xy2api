@@ -132,17 +132,7 @@ func TestOpenAISelectionTrialExistingAndOtherGroup(t *testing.T) {
 		require.Equal(t, int64(1), f.selectNow(t, context.Background(), "new", nil).Account.ID)
 		require.Empty(t, leases.calls)
 	})
-	t.Run("borrow_cannot_open_trial", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1))
-		leases := newSelectionTrialLeaseFake()
-		selectionSetTrial(f, 1, leases)
-		f.cache.sessionBindings["openai:session"] = 10
-		f.loads.loadMap = map[int64]*AccountLoadInfo{10: {LoadRate: 100, CurrentConcurrency: 5}}
-		f.loads.acquireResults = map[int64]bool{10: false}
-		result := f.selectNow(t, context.Background(), "session", nil)
-		require.Equal(t, int64(10), result.Account.ID)
-		require.Empty(t, leases.held)
-	})
+
 }
 
 func TestOpenAISelectionTrialSessionLifecycle(t *testing.T) {
@@ -192,6 +182,7 @@ func TestOpenAISelectionMigrationLines(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := selectionNewSessionFixture()
 			f.candidates = f.candidates[:1]
+			f.view.Takeovers[7] = fakeSchedTakeover{} // Isolate migration from the independent idle takeover rule.
 			f.state(10, tc.state)
 			v := &selectionSlowView{fakeSchedView: f.view, slow: tc.slow}
 			f.session.view = func() schedquality.View { return v }

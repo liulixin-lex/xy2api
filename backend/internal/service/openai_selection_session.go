@@ -59,7 +59,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 	if migrate {
 		return selectionMigrateOwner(view, groupID, owner, model, req.Session, now) && (state.Placement(auto, now) == schedquality.PlaceFront || state.Placement(auto, now) == schedquality.PlaceTrial && req.Room != nil && req.Room(target.ID, OpenAIAttemptModel(target, model)))
 	}
-	return selectionLive(view, now) && selectionState(view, groupID, owner, model).Placement(auto, now) != schedquality.PlaceRear && target.Priority < owner.Priority && state.Placement(auto, now) == schedquality.PlaceFront && !s.marks.Recently(target.ID, now)
+	return selectionLive(view, now) && target.Priority < owner.Priority && state.Placement(auto, now) == schedquality.PlaceFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
@@ -83,6 +83,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	}
 	now, view := s.now(), s.view()
 	req.Session = sessionHash
+	req.Borrow = false // This path plans an actual migration or takeover.
 	migrate := selectionMigrateOwner(view, groupID, owner, model, sessionHash, now)
 	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
 		return nil

@@ -1263,11 +1263,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		accountID := stickyAccountID
 		if accountID > 0 {
 			account, err := s.getSchedulableAccount(ctx, accountID)
-			if account != nil {
-				if change := pendingOpenAIStickyChange(ctx); change != nil {
-					change.fromModel = OpenAIAttemptModel(account, requestedModel)
-				}
-			}
 			softOwner := false
 			if err != nil {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
@@ -1400,11 +1395,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				slot.ReleaseFunc()
 				continue
 			}
-			if !trial.allowed(ctx, latest) {
-				slot.ReleaseFunc()
-				continue
-			}
-			full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier == 1
+			full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
 			reservation, accepted := trial.reserve(ctx, latest, full)
 			if !accepted {
 				slot.ReleaseFunc()
@@ -1417,7 +1408,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if err != nil {
 				return nil, true, err
 			}
-			if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
+			if sessionHash != "" && !trial.borrowing(ctx) && !gatewayProfitControlGateActive(ctx) {
 				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
 			}
 			return selected, true, nil
@@ -1467,10 +1458,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if fresh == nil {
 			continue
 		}
-		if !trial.allowed(ctx, fresh) {
-			continue
-		}
-		full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, fresh, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier == 1
+		full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, fresh, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
 		reservation, accepted := trial.reserve(ctx, fresh, full)
 		if !accepted {
 			candidates = append(candidates, fresh)
@@ -1705,6 +1693,11 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	}
 	if err != nil || account == nil {
 		return account, err
+	}
+	if change := pendingOpenAIStickyChange(ctx); change != nil && change.expected.AccountID == account.ID {
+		if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+			change.fromModel = OpenAIAttemptModel(account, req.RequestedModel)
+		}
 	}
 	state := resilience.StateFrom(ctx)
 	if account.ID == state.StickyOwner() {
@@ -2038,7 +2031,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx contex
 	return s.selectOpenAIStickyCapacityResult(ctx, account, req, true)
 }
 
-func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (selection *AccountSelectionResult, selectionErr error) {
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	if req.NoWait || openAISelectionNoWait(ctx) {
 		fallbackWait = false
@@ -2046,6 +2039,14 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 	if account == nil {
 		return nil, nil
 	}
+	trial := s.newSelectionTrial(ctx, req, account.ID)
+	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
+	defer func() {
+		if selection != nil && selection.Account != nil && selection.Account.ID != account.ID {
+			trial.selected, _ = trial.reserve(ctx, selection.Account, true)
+			trial.finish(ctx, selection)
+		}
+	}()
 	cfg := s.schedulingConfig()
 	accounts, err := s.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
@@ -2062,10 +2063,6 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 	for i := range accounts {
 		acc := &accounts[i]
 		if !fallbackWait && acc.ID == account.ID {
-			continue
-		}
-		// Capacity borrowing never creates a new trial session.
-		if acc.ID != account.ID && s.newSelectionTrial(ctx, req, account.ID).isTrial(acc) {
 			continue
 		}
 		if _, excluded := req.ExcludedIDs[acc.ID]; excluded {

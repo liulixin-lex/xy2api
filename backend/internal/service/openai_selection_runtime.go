@@ -34,6 +34,7 @@ func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIA
 		trial = s.newSelectionTrial(ctx, req, req.StickyAccountID)
 	}
 	request.Owner = trial.owner
+	request.Borrow = trial.borrowing(ctx)
 	request.Room = func(id int64, model string) bool { return trial.room(ctx, id, model) }
 	return request
 }
