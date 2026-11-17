@@ -48,7 +48,7 @@
 - 计入连续失败的类别：`RATE_LIMIT`、`TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL`。客户端错误、内容安全拒绝、会话状态拒绝、客户端断开与计划内首输出截止不计。
 - 绑定账号只是普通软罚时保留绑定，本次由其他账号临时服务。
 - OpenAI 账号的 `session.post_output_rebind`：已确认输出后的流内失败事件（如 `response.failed`）、读流出错、缺终态第一次发生就改绑。输出前失败仍按连续阈值。HTTP 请求内同一失败只改绑一次，WebSocket 每个 turn 各计一次。
-- 请求 `input[]` 中的 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 带 `type=encrypted_content` 片段时，密文只能由原账号解开，这类请求退回连续阈值规则，也不做 OpenAI 的不达标换号与接管、Claude 的判慢迁出。
+- 请求 `input[]` 中的 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 带 `type=encrypted_content` 片段时，密文只能由原账号解开，这类请求退回连续阈值规则，也不做 OpenAI 的质量迁移与接管、Claude 的判慢迁出。
 - 上游在同一会话、同一账号上反复返回未知的终止拒绝（客户端错误类、且错误码不在已知清单内）时，达到连续阈值后暂避该账号（原因 `terminal_rejection_streak`），不罚号；同类拒绝在另一上游主机上也出现后停止暂避。
 
 ## 首输出截止
@@ -65,7 +65,7 @@
 
 - `budget.model_overrides` 按模型（精确名或 `前缀*`）覆盖档位，冷尝试同样取覆盖值与下限中较大者。
 - 非最后候选的截止不短于本请求到这次尝试开始时已耗费的时间，再受剩余预算约束：上游都慢时，被截断的尝试逐次放宽。
-- 截止到期按“计划内截止”处理：客户端行为不变（输出前换号，耗尽时 `error.type` 为 `first_output_timeout`），但不施加账号级流超时惩罚，不计入 API Key 健康熔断与会话失败。在 OpenAI 的[质量状态](group-quality-gate.md)里它照常算首输出超时（被预算截短且 `budget.budget_cut_attribution` 为 `enforce` 的改算报错）。
+- 截止到期按“计划内截止”处理：客户端行为不变（输出前换号，耗尽时 `error.type` 为 `first_output_timeout`），但不施加账号级流超时惩罚，不计入 API Key 健康熔断与会话失败。在 OpenAI 的[质量状态](group-quality-gate.md)里，普通首输出超时只有已等时间达到该组上限才算首字超限；被预算截短且 `budget.budget_cut_attribution=enforce` 的归网关截止，不计报错失败，也不提供首输出超时证据。
 - 判断“唯一能服务该模型”时，其他账号要通过本请求完整的选号资格（能力与传输方式、隐私、利润门）；软罚账号算替代，硬罚不算。
 - 要恢复更长的旧档位，直接修改 `budget.first_output_timeout_seconds`（例如 180/180/200/220），保存即生效。
 
@@ -81,7 +81,7 @@
 
 - 成功只在这次尝试的开始时间晚于最近一次失败时清除计数与屏蔽。
 - 屏蔽是软罚：组内没有其他可用账号时，末位兜底照常使用它；会话绑定保留。
-- 连续首输出超时不在这里处理，由质量门槛的快速通道判首字不达标（见 [判定](group-quality-gate.md#判定)）。
+- 连续首输出超时不在这里处理，由质量门槛按首个有效输出与同伴比较判定（见 [判定](group-quality-gate.md#判定)）。
 
 ## 模型级冷却（Anthropic、Gemini、Antigravity）
 
@@ -117,7 +117,7 @@
 
 ## 末位兜底
 
-- 顺序：先转投无号兜底分组；否则先尝试本会话未暂避的候选，暂避的账号留作最后选择。两类内部，OpenAI 分组按[选号顺序](scheduling.md#openai-分组的选号顺序)排序（不达标账号在后）；其他平台按优先级、再按罚期结束时间排序（同优先级内 Claude 判慢账号在后）。取第一个有空闲并发的账号；全部占满时排队等待排在第一的账号。
+- 顺序：先转投无号兜底分组；否则先尝试本会话未暂避的候选，暂避的账号留作最后选择。两类内部，OpenAI 分组按[选号顺序](scheduling.md#openai-分组的选号顺序)排序（有名额试用在第一层、满额试用在第二层、后排在第三层，层内先固定）；其他平台按优先级、再按罚期结束时间排序（同优先级内 Claude 判慢账号在后）。取第一个有空闲并发的账号；全部占满时排队等待排在第一的账号。
 - 门禁与正常选号相同，只放宽软罚；超过窗口费用或 RPM 硬上限的账号不会被选中。
 - OpenAI 会话换号失败的目标在 2 分钟内始终排除，末位兜底也不重试它。
 - 候选来自 2 秒的分组快照，派发前按账号当前状态再核对一次，快照之后被停用、删除、移出分组或进入硬罚的账号不会被选中。
@@ -137,5 +137,5 @@ OpenAI 账号的某个出站模型被 [智商检测](iq-check.md)判为降智后
 - 授权与限额按原分组：模型白名单与模型列表（`/v1/models` 等始终按原分组返回）、图片与 `/v1/messages` 资格、分组 RPM、用户 × 分组计数、API Key 额度和余额检查。原分组允许、兜底组不支持的能力按无号返回 503，错误信息不提兜底组。
 - 系统提示词用兜底组的配置。
 - 用量记录：`usage_logs.group_id` 为实际服务的兜底组，`origin_group_id` 为原分组；扣款仍针对原 Key 和用户。用户侧只显示原分组；管理端用量主标签显示原分组，下方提示“兜底 → 兜底组名”，筛选、统计、导出按服务分组。
-- 可服务数可用 `GET /api/v1/admin/groups/:id/profit-control-preview?margin=` 预览，返回 `{members, schedulable, passing, ceiling}`：成员总数、可调度成员数、其中通过利润门的成员数、价格换算上限。`margin` 取值 `[0,1)`，省略时用保存值；预览不保存配置。
+- 可服务数可用 `GET /api/v1/admin/groups/:id/profit-control-preview?margin=&floor=` 预览，返回成员、可调度与准入数及 `ceiling`、`floor`、`below_floor`、`pinned`、`range_empty`、`pinned_loss`。`margin` 取值 `[0,1)`；`floor=0` 表示不设下限，省略时用保存值。固定号免倍率上下限，质量后排仍只改变排序；预览不保存配置。
 - 带工具且需要 Responses 的 Chat 请求在兜底分组里同样只选能用 Responses 服务它的账号，耗尽后不再另换分组。
