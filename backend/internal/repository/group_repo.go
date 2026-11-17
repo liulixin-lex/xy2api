@@ -226,11 +226,12 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		return err
 	}
 	// The newly inserted group is private to this transaction. Once its ID is
-	// allocated, take the copy lock before locking any existing account/group.
+	// allocated, take the copy lock before the explicit account/group locks.
+	// INSERT may already hold KEY SHARE on referenced fallback groups via FKs.
 	if err := lockMemberReplacement(ctx, txClient, groupIn.ID); err != nil {
 		return err
 	}
-	accountIDs, err := lockMemberCopyAccounts(ctx, txClient, groupIn.ID, []int64{sourceGroupID}, groupIn.RequireOAuthOnly)
+	snapshot, err := lockMemberCopyAccounts(ctx, txClient, groupIn.ID, []int64{sourceGroupID}, groupIn.RequireOAuthOnly)
 	if err != nil {
 		return err
 	}
@@ -240,14 +241,13 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	var count int64
 	err = scanSingleRow(ctx, txClient, `WITH added AS (
  INSERT INTO account_groups(account_id,group_id,pinned,created_at)
- SELECT ag.account_id,$2,ag.pinned,NOW() FROM account_groups ag
- JOIN accounts a ON a.id=ag.account_id
- WHERE ag.group_id=$1 AND a.id=ANY($5::bigint[]) AND a.deleted_at IS NULL AND (NOT $3 OR a.type<>$4)
+ SELECT source.account_id,$1,source.pinned,NOW()
+ FROM unnest($2::bigint[], $3::boolean[]) AS source(account_id,pinned)
  ON CONFLICT(account_id,group_id) DO NOTHING RETURNING account_id
  ), revised AS (
  UPDATE accounts SET updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
  WHERE id IN (SELECT account_id FROM added) RETURNING id
- ) SELECT COUNT(*) FROM added`, []any{sourceGroupID, groupIn.ID, groupIn.RequireOAuthOnly, service.AccountTypeAPIKey, pq.Array(accountIDs)}, &count)
+ ) SELECT COUNT(*) FROM added`, []any{groupIn.ID, pq.Array(snapshot.sourceIDs), pq.Array(snapshot.sourcePinned)}, &count)
 	if err != nil {
 		return err
 	}
