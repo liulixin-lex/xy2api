@@ -110,6 +110,8 @@ func TestEngineStartupPagesResumeAfterFailure(t *testing.T) {
 	require.Same(t, initial, f.e.Snapshot())
 	require.False(t, f.e.Snapshot().GlobalEnabled, "partial evidence must not enable layering")
 	require.Len(t, f.e.window.samples[SchedAccountModel{1, "synthetic-model"}], schedQualityLedgerPageSize)
+	require.NoError(t, f.e.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}))
+	require.False(t, f.e.Snapshot().View.GlobalEnabled(), "an administrative rebuild cannot enable partial evidence")
 	checkpoint := f.e.finishedCursor
 	require.NotEmpty(t, checkpoint.AttemptID)
 	f.cycle()

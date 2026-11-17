@@ -77,6 +77,9 @@ func (s *SchedQualitySnapshot) RowsForAccount(id int64) []SchedGroupRow { return
 
 func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.LineState, overrides []SchedOverride, resets map[int64]time.Time, evaluatedAt time.Time) map[int64]time.Time {
 	version := s.snapshot.Load().Version + 1
+	// Administrative rebuilds can run after a failed bootstrap page too.
+	// Never activate layering from that incomplete evidence window.
+	enabled := d.globalEnabled && s.loaded
 	active := make(map[int64][]SchedOverride)
 	var copied []SchedOverride
 	for _, o := range overrides {
@@ -90,7 +93,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		copied = append(copied, o)
 		active[o.AccountID] = append(active[o.AccountID], o)
 	}
-	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
+	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: enabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
 	keys, previous := s.rowKeys(d, states)
 	groupRows := make(map[int64][]SchedGroupRow)
 	// Display uses the same bucket membership as replay, without changing it.
@@ -222,7 +225,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			return a.Requests > b.Requests
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: d.globalEnabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {
