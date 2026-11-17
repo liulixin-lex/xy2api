@@ -47,8 +47,8 @@
               </div>
             </div>
             <div v-if="preview.value.changed.length" class="mt-2 flex max-w-[520px] flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-700 dark:text-gray-300" data-sq-trial-names>
-              <span v-for="item in shownChanged" :key="`${item.account_id}:${item.model}:${item.line}`" v-tip="item.tip">{{ item.name }}</span>
-              <span v-if="preview.value.changed.length > shownChanged.length" class="sq-text-3">{{ t('admin.schedQuality.more', { n: preview.value.changed.length - shownChanged.length }) }}</span>
+              <span v-for="item in shownChanged" :key="item.account_id" v-tip="item.tip">{{ item.text }}</span>
+              <span v-if="changedAccounts.length > shownChanged.length" class="sq-text-3">{{ t('admin.schedQuality.more', { n: changedAccounts.length - shownChanged.length }) }}</span>
             </div>
             <p class="mt-2 max-w-[520px] text-xs text-gray-500 dark:text-gray-400" data-sq-trial-note>{{ t('admin.schedQuality.policy.trialNote') }}</p>
           </template>
@@ -218,10 +218,23 @@ const previewLines = computed(() => {
     }
   })
 })
+// One entry per account: an account with several models changing names them, so the same name is not listed twice;
+// the tip has every change on its own line.
+const changedAccounts = computed(() => {
+  const byAccount = new Map<number, { account_id: number; name: string; models: string[]; changes: string[] }>()
+  for (const item of preview.value?.changed ?? []) {
+    let entry = byAccount.get(item.account_id)
+    if (!entry) byAccount.set(item.account_id, (entry = { account_id: item.account_id, name: item.name, models: [], changes: [] }))
+    if (!entry.models.includes(item.model)) entry.models.push(item.model)
+    entry.changes.push([item.model, t(`admin.schedQuality.dim.${item.line}`), `${schedWord('verdict', item.from, t, te)} → ${schedWord('verdict', item.to, t, te)}`].join(' · '))
+  }
+  return [...byAccount.values()]
+})
 const shownChanged = computed(() =>
-  (preview.value?.changed ?? []).slice(0, PREVIEW_NAMES).map((item) => ({
-    ...item,
-    tip: [item.model, t(`admin.schedQuality.dim.${item.line}`), `${schedWord('verdict', item.from, t, te)} → ${schedWord('verdict', item.to, t, te)}`].join(' · ')
+  changedAccounts.value.slice(0, PREVIEW_NAMES).map((entry) => ({
+    account_id: entry.account_id,
+    text: entry.models.length > 1 ? `${entry.name} · ${entry.models.join(', ')}` : entry.name,
+    tip: entry.changes.join('\n')
   }))
 )
 

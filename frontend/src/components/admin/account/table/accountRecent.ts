@@ -9,8 +9,9 @@ import type { BackendAccountSummary, BackendDim, BackendPolicy } from '@/api/adm
 
 export const RECENT_DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
-/** 3.2s; whole seconds from 100s up. */
+/** 50ms under a second (0.1s would hide 50 against 100); 3.2s; whole seconds from 100s up. */
 export function formatRecentSeconds(ms: number): string {
+  if (Math.round(ms) < 1000) return `${Math.round(ms)}ms`
   const s = ms / 1000
   return s < 100 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
 }

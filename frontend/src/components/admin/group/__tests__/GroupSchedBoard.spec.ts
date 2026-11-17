@@ -126,13 +126,15 @@ describe('GroupSchedBoard', () => {
       rows: [
         row(4, { rank: 1, layer: 'trial', lines: { ...trialLines }, until: soon(600) }),
         row(6, { rank: 2, layer: 'trial_full', lines: { ...trialLines }, until: soon(60) }),
-        row(8, { rank: 3, excluded: 'profit_floor' })
+        row(8, { rank: 3, excluded: 'profit_floor' }),
+        // The backend's shape for an excluded account: stopped, with the reason.
+        row(2, { rank: 4, layer: 'stopped', excluded: 'profit_threshold' })
       ]
     })
     mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
-    const [trial, full, excluded] = rows()
+    const [trial, full, excluded, stoppedExcluded] = rows()
     const state = (tr: HTMLElement) => tr.querySelector('[data-sq-state]')!.textContent
     expect(state(trial)).toMatch(/^admin\.schedQuality\.layer\.trial (9:59|10:00)$/)
     expect(state(full)).toMatch(/^admin\.schedQuality\.layer\.trial_full (0:59|1:00)$/)
@@ -142,6 +144,9 @@ describe('GroupSchedBoard', () => {
     expect(state(excluded)).toBe('admin.schedQuality.board.excluded:{"reason":"admin.schedQuality.reject.profit_floor"}')
     expect(excluded.classList.contains('sq-weak')).toBe(true)
     expect(excluded.querySelector('td')!.textContent).toBe('—')
+    expect(state(stoppedExcluded)).toBe('admin.schedQuality.board.excluded:{"reason":"admin.schedQuality.reject.profit_threshold"}')
+    expect(stoppedExcluded.classList.contains('sq-weak')).toBe(true)
+    expect(stoppedExcluded.querySelector('td')!.textContent).toBe('—')
   })
 
   it('pins an account in the group at once with groups:manage; a failure leaves it and says so', async () => {
@@ -230,7 +235,7 @@ describe('GroupSchedBoard', () => {
     expect(text('accounts')).toBe('admin.schedQuality.board.summaryCounts:{"pass":"5","unknown":"2","trial":"1","rear":"1"}')
     expect(text('e2e')).toBe('admin.schedQuality.board.summaryFromGateway:{"p50":"3.2s","p90":"8.1s"}')
     expect(text('body')).toBe('admin.schedQuality.board.summaryFromBody:{"p50":"2.9s","p90":"—"}')
-    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":"3"}')
+    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":3}')
   })
 
   it('asks for the group summary on opening and on another group, then once a minute: not on the 5 s beat nor a model switch', async () => {
@@ -273,7 +278,7 @@ describe('GroupSchedBoard', () => {
     await flushPromises()
     expect(document.querySelector('[data-sq-board-failed]')).toBeNull()
     expect(rows()).toHaveLength(5)
-    expect(document.querySelector('[data-sq-summary="migration"]')!.textContent).toBe('admin.schedQuality.board.summaryMigration:{"n":"—"}')
+    expect(document.querySelector('[data-sq-summary="migration"]')!.textContent).toBe('admin.schedQuality.board.summaryMigrationNone')
   })
 
   it('holds a saved pin for at most 30 s while the board still shows the old state, then the backend\'s value stands', async () => {
@@ -303,7 +308,26 @@ describe('GroupSchedBoard', () => {
     const text = (key: string) => document.querySelector(`[data-sq-summary="${key}"]`)!.textContent
     expect(text('accounts')).toBe('admin.schedQuality.board.summaryCounts:{"pass":"—","unknown":"—","trial":"—","rear":"—"}')
     expect(text('e2e')).toBe('admin.schedQuality.board.summaryFromGateway:{"p50":"—","p90":"—"}')
-    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigration:{"n":"—"}')
+    expect(text('migration')).toBe('admin.schedQuality.board.summaryMigrationNone')
+  })
+
+  it('drops a pin failure once the board has had PIN_HOLD_MS to follow the backend', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    perms.granted = ['accounts:view', 'groups:view', 'groups:manage']
+    groupsApi.setMemberPinned.mockRejectedValue({ status: 409, message: 'account 7 changed meanwhile' })
+    api.groupBoard.mockImplementation(async () => board())
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await vi.advanceTimersByTimeAsync(0)
+    document.querySelector<HTMLButtonElement>('[data-sq-pin="7"]')!.click()
+    await vi.advanceTimersByTimeAsync(0)
+    const failure = () => document.querySelector('[data-sq-pin-failed="7"]')
+    expect(failure()!.textContent).toBe('admin.schedQuality.result.failed · account 7 changed meanwhile')
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(failure()).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(failure()).toBeNull()
   })
 
   it('shows a pinned account as text without groups:manage', async () => {

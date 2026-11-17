@@ -44,7 +44,7 @@
               :disabled="!recoverable || recovering"
               :aria-busy="recovering"
               data-qp-trigger="reset"
-              v-tip="t('admin.schedQuality.panel.recoverTip')"
+              v-tip="t(recoverable ? 'admin.schedQuality.panel.recoverTip' : 'admin.schedQuality.panel.recoverNone')"
               @click="startRecover"
             >{{ t('admin.schedQuality.action.reset') }}</button>
           </div>
@@ -792,6 +792,13 @@ onScopeDispose(() => running?.kill())
   white-space: nowrap;
 }
 
+/* From 1280px: 40px more, all of it for the group name column (45px at 460, a group name of four to six characters
+   needs about 72px); the other columns are fixed widths. */
+@media (min-width: 1280px) {
+  .qpanel {
+    width: calc(var(--sidebar-width) + 40px);
+  }
+}
 /* Below 1024px (prototype): the whole screen, an obvious 44px close button. */
 @media (max-width: 1023px) {
   .qpanel {
