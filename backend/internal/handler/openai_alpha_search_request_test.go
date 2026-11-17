@@ -21,28 +21,43 @@ import (
 
 type n12BillingRepo struct {
 	service.UsageBillingRepository
-	commands []*service.UsageBillingCommand
+	commands   []*service.UsageBillingCommand
+	applyError error
 }
 
 func (r *n12BillingRepo) Apply(_ context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
 	r.commands = append(r.commands, cmd)
+	if r.applyError != nil {
+		return nil, r.applyError
+	}
 	return &service.UsageBillingApplyResult{Applied: true}, nil
 }
 
 type n12AlphaResult struct {
-	usage   *requestRecordRepo
-	billing *n12BillingRepo
-	state   *resilience.RequestState
-	sends   int
-	again   func()
+	usage      *requestRecordRepo
+	billing    *n12BillingRepo
+	state      *resilience.RequestState
+	sends      int
+	again      func()
+	response   *httptest.ResponseRecorder
+	zeroWrites int
 }
 
 // Admission uses the fixture cache, while RecordUsage runs in standard mode and
 // reaches the atomic billing repository. No real balance or external service is touched.
-func n12RunAlpha(t *testing.T, outcome string) n12AlphaResult {
+func n12RunAlpha(t *testing.T, outcome string, options ...n12AlphaOptions) n12AlphaResult {
 	t.Helper()
 	withHandlerResilience(t, nil)
+	var opt n12AlphaOptions
+	if len(options) > 0 {
+		opt = options[0]
+	}
+	resilience.SetUndeliveredAbuseCheck(func(int64) bool { return opt.abuse })
+	t.Cleanup(func() { resilience.SetUndeliveredAbuseCheck(nil) })
 	price, accountRate := 0.02, 0.7
+	if opt.zeroPrice {
+		price = 0
+	}
 	group := &service.Group{ID: 4201, Platform: service.PlatformOpenAI, Hydrated: true, Status: service.StatusActive, RateMultiplier: 1.5, WebSearchPricePerCall: &price}
 	key := &service.APIKey{ID: 1801, UserID: 1701, GroupID: &group.ID, Group: group, User: &service.User{ID: 1701, Status: service.StatusActive, Balance: 100}}
 	accounts := &openAIImagesFailoverAccountRepo{}
@@ -67,9 +82,13 @@ func n12RunAlpha(t *testing.T, outcome string) n12AlphaResult {
 		}
 		resp := captureResponse(200, `{"results":[{"title":"fixture","url":"https://example.test"}]}`, false)
 		resp.Header.Set("X-Request-Id", "n12-financial-request")
+		if opt.cancelAfterBody {
+			resp.Body = &n12CancelAfterBody{ReadCloser: resp.Body, cancel: cancel}
+		}
 		return resp, nil
 	}}
 	usage, billing := &requestRecordRepo{}, &n12BillingRepo{}
+	billing.applyError = opt.applyError
 	h, _, router := captureFixture(t, service.Account{}, up, captureOptions{usage: usage, noRecorder: true})
 	cfg := &config.Config{RunMode: config.RunModeStandard}
 	cfg.Default.RateMultiplier = 1
@@ -78,6 +97,7 @@ func n12RunAlpha(t *testing.T, outcome string) n12AlphaResult {
 	var captured *gin.Context
 	router.POST("/v1/alpha/search", func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), key)
+		resilience.StateFrom(c.Request.Context()).SetAPIKey(key.ID)
 		captured = c
 		h.AlphaSearch(c)
 	})
@@ -88,13 +108,21 @@ func n12RunAlpha(t *testing.T, outcome string) n12AlphaResult {
 	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, req)
+	zeroWriter := &n12ZeroWriter{ResponseRecorder: response, short: opt.shortWrite}
+	if opt.cancelOnWrite {
+		zeroWriter.cancel = cancel
+	}
+	if opt.failWrite {
+		router.ServeHTTP(zeroWriter, req)
+	} else {
+		router.ServeHTTP(response, req)
+	}
 	wantSends := map[string]int{"success": 1, "failover": 2, "failure": 2, "passthrough": 1, "cancel": 1, "no_account": 0, "invalid": 0}[outcome]
 	require.Equal(t, wantSends, up.calls, response.Body.String())
 	if outcome == "success" || outcome == "failover" {
 		require.Equal(t, 200, response.Code, response.Body.String())
 	}
-	return n12AlphaResult{usage, billing, resilience.StateFrom(captured.Request.Context()), up.calls, func() { finishUnbilledGatewayRequest(captured, key, "gpt-5.1", false, false, h.gatewayService) }}
+	return n12AlphaResult{usage: usage, billing: billing, state: resilience.StateFrom(captured.Request.Context()), sends: up.calls, again: func() { finishUnbilledGatewayRequest(captured, key, "gpt-5.1", false, false, h.gatewayService) }, response: response, zeroWrites: zeroWriter.calls}
 }
 
 var n12AlphaOutcomes = []string{"success", "failover", "failure", "passthrough", "cancel", "no_account", "invalid"}
