@@ -31,6 +31,8 @@ type SchedAdminGroupRepository interface {
 }
 type SchedAdminCapability interface {
 	ClearAccountCapabilityLearning(context.Context, int64) error
+	ClearAccountCapabilityMarks(context.Context, int64) error
+	ClearAccountStreamOnlyLearning(context.Context, int64) error
 }
 
 type SchedAdminDependencies struct {

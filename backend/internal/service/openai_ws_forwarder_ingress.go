@@ -997,6 +997,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
 		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
+		learnCapability := s.capabilityWSFailureLearner(ctx, account, wirePayload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1060,6 +1061,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 
+			observeCapabilityFailure(learnCapability, upstreamMessage)
 			schedCapture.observe(upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {

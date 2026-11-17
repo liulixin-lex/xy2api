@@ -126,6 +126,19 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 		}
 		add("capability_learned", "capability_learned", &until, true, "")
 	}
+	var markedUntil time.Time
+	for key, value := range a.Extra {
+		if !strings.HasPrefix(key, CapabilityMarksExtraKey+"_") {
+			continue
+		}
+		mark := capabilityMarkFromExtra(value)
+		if mark != nil && mark.Fingerprint == capabilityFingerprint(a) && mark.ExpiresAt.After(now) && mark.ExpiresAt.After(markedUntil) {
+			markedUntil = mark.ExpiresAt
+		}
+	}
+	if !markedUntil.IsZero() {
+		add("capability_marked", "capability_marked", &markedUntil, true, "")
+	}
 	if !a.Schedulable || a.Status == StatusDisabled || a.Status == StatusInactive {
 		add("manual_off", "manual_off", nil, false, "manual_off")
 	}
@@ -229,11 +242,14 @@ func (s *SchedAdminService) clearState(ctx context.Context, a *Account, key stri
 			return false, nil
 		}
 		return s.d.Gateway.schedAdminClearProxy(*a.ProxyID), nil
-	case "capability_learned":
+	case "capability_learned", "capability_marked":
 		if s.d.Capability == nil {
 			return false, infraerrors.ServiceUnavailable("CAPABILITY_UNAVAILABLE", "Capability service is unavailable")
 		}
-		return true, s.d.Capability.ClearAccountCapabilityLearning(ctx, a.ID)
+		if key == "capability_marked" {
+			return true, s.d.Capability.ClearAccountCapabilityMarks(ctx, a.ID)
+		}
+		return true, s.d.Capability.ClearAccountStreamOnlyLearning(ctx, a.ID)
 	}
 	if strings.HasPrefix(key, "model_limit:") {
 		raw := strings.TrimPrefix(key, "model_limit:")
@@ -324,6 +340,12 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedAdmin
 	states = append(states, s.d.Resilience.schedAdminResetLocalStates(id)...)
 	if a.Extra[capabilityLearnedResponsesKey] != nil || a.Extra[capabilityLearnedChatKey] != nil {
 		states = append(states, SchedAutoState{Key: "capability_learned", Kind: "capability_learned"})
+	}
+	for key, value := range a.Extra {
+		if strings.HasPrefix(key, CapabilityMarksExtraKey+"_") && value != nil {
+			states = append(states, SchedAutoState{Key: "capability_marked", Kind: "capability_marked"})
+			break
+		}
 	}
 	sort.Slice(states, func(i, j int) bool { return states[i].Key < states[j].Key })
 	resetAt, e := s.d.Engine.Reset(ctx, id)

@@ -2,7 +2,10 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -44,4 +47,25 @@ func TestCapabilityAccountSaveKeepsLockedLearningState(t *testing.T) {
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+func TestCapabilityMarkLimitLocksCurrentRowAndDoesNotWriteOverflow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	current := map[string]any{}
+	for i := 0; i < service.CapabilityMarkLimit; i++ {
+		current[fmt.Sprintf("capability_marks_%d", i)] = service.CapabilityMark{Model: fmt.Sprintf("fixture-%d", i), Protocol: "responses", Shape: "*", Reason: "model_unsupported", Fingerprint: "synthetic-fingerprint", ExpiresAt: time.Now().Add(time.Hour)}
+	}
+	raw, err := json.Marshal(current)
+	require.NoError(t, err)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT extra FROM accounts WHERE id = \$1 AND deleted_at IS NULL FOR NO KEY UPDATE`).WithArgs(int64(41)).WillReturnRows(sqlmock.NewRows([]string{"extra"}).AddRow(raw))
+	// No UPDATE or outbox write is allowed when the locked row is full.
+	mock.ExpectRollback()
+	incoming := service.CapabilityMark{Model: "overflow-fixture", Protocol: "responses", Shape: "*", Reason: "model_unsupported", Fingerprint: "synthetic-fingerprint", ExpiresAt: time.Now().Add(time.Hour)}
+	require.NoError(t, repo.UpdateExtra(context.Background(), 41, map[string]any{"capability_marks_overflow": incoming}))
+	require.NoError(t, mock.ExpectationsWereMet())
 }

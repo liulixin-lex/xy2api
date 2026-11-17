@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -415,6 +416,19 @@ func (c *schedAdminCapabilityClear) ClearAccountCapabilityLearning(context.Conte
 	c.calls++
 	delete(c.account.Extra, capabilityLearnedResponsesKey)
 	delete(c.account.Extra, capabilityLearnedChatKey)
+	return nil
+}
+
+func (c *schedAdminCapabilityClear) ClearAccountStreamOnlyLearning(ctx context.Context, id int64) error {
+	return c.ClearAccountCapabilityLearning(ctx, id)
+}
+func (c *schedAdminCapabilityClear) ClearAccountCapabilityMarks(context.Context, int64) error {
+	c.calls++
+	for key := range c.account.Extra {
+		if strings.HasPrefix(key, CapabilityMarksExtraKey+"_") {
+			delete(c.account.Extra, key)
+		}
+	}
 	return nil
 }
 
