@@ -46,8 +46,10 @@ func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID
 	// The default preview and an explicit margin simulate the ceiling. An
 	// explicit floor-only request respects the saved ceiling switch.
 	previewGroup.ProfitControlEnabled = group.ProfitControlEnabled || margin != nil || floor == nil
-	if err := ValidateMinUpstreamRate(group.Platform, floor); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+	if floor != nil && *floor != 0 {
+		if err := ValidateMinUpstreamRate(group.Platform, floor); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+		}
 	}
 	if floor != nil {
 		previewGroup.MinUpstreamRate = floor
@@ -68,7 +70,7 @@ func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID
 	baseGroup := previewGroup
 	baseGroup.ProfitControlEnabled = false
 	baseGroup.MinUpstreamRate = nil
-	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling, Floor: floorRate, RangeEmpty: ceilingOn && floorRate > ceiling, PinnedLoss: []ProfitPinnedLoss{}}
+	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling, Floor: floorRate, RangeEmpty: ceilingOn && !profitVerdictAdmitted(profitRangeVerdict(floorRate, true, &ceiling, floorRate, false)), PinnedLoss: []ProfitPinnedLoss{}}
 	for i := range accounts {
 		account := &accounts[i]
 		if !groupMemberServable(&baseGroup, account, now, nil) {

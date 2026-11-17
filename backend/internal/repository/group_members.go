@@ -43,8 +43,8 @@ func (r *groupRepository) SetMemberPinned(ctx context.Context, groupID, accountI
 	return nil
 }
 
-// CopyAccountMembers preserves pins on retained target memberships and copies
-// a pin from any selected source membership. Removed accounts alone are deleted.
+// CopyAccountMembers preserves retained target pins. Newly added members start
+// unpinned because the target group can have different pricing from the source.
 func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64, sources, accounts []int64, replace bool) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -66,11 +66,10 @@ func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64,
 	}
 	if len(accounts) > 0 {
 		_, err := exec.ExecContext(ctx, `INSERT INTO account_groups (account_id,group_id,pinned,created_at)
-   SELECT ag.account_id,$1,bool_or(ag.pinned) AND g.platform='openai',NOW()
-   FROM account_groups ag CROSS JOIN groups g
-   WHERE ag.group_id=ANY($2::bigint[]) AND ag.account_id=ANY($3::bigint[]) AND g.id=$1
-   GROUP BY ag.account_id,g.platform
-   ON CONFLICT (account_id,group_id) DO UPDATE SET pinned=account_groups.pinned OR EXCLUDED.pinned`, groupID, pq.Array(sources), pq.Array(accounts))
+   SELECT DISTINCT ag.account_id,$1::bigint,FALSE,NOW()
+   FROM account_groups ag
+   WHERE ag.group_id=ANY($2::bigint[]) AND ag.account_id=ANY($3::bigint[])
+   ON CONFLICT (account_id,group_id) DO NOTHING`, groupID, pq.Array(sources), pq.Array(accounts))
 		if err != nil {
 			return err
 		}
