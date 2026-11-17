@@ -78,7 +78,10 @@ func TestFirstoutRealStreamCommitAndTimeout(t *testing.T) {
 					prelude := firstoutWire("response.created", `,"response":{"id":"fixture","status":"in_progress"}`) +
 						firstoutWire("response.reasoning_text.delta", `,"delta":""`) +
 						firstoutWire("response.output_text.delta", `,"delta":" \u200b"`) +
-						firstoutWire("response.web_search_call.in_progress", ``)
+						firstoutWire("response.web_search_call.in_progress", ``) +
+						firstoutWire("response.output_text.delta", `,"delta":"\u034f\ufe0f"`) +
+						firstoutWire("response.output_item.added", `,"item":{"type":"mcp_call","id":"only-id"}`) +
+						firstoutWire("response.output_item.added", `,"item":{"type":"mcp_approval_request","name":" ","arguments":""}`)
 					_, err := io.WriteString(writer, prelude)
 					require.NoError(t, err)
 					synctest.Wait()
@@ -226,44 +229,50 @@ func TestFirstoutFallbackSettingsDisarmAtCommit(t *testing.T) {
 func TestFirstoutUnknownCommitsWithoutQualitySample(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, passthrough := range []bool{false, true} {
-		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				c, wire := compatStreamContext("/v1/responses", `{}`)
-				start := time.Now()
-				state := resilience.NewRequestState()
-				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
-				InstallDeliveryTracking(c, start)
-				handle := &schedAttemptHandle{}
-				handle.row.StartedAt = start
-				state.SetCurrentAttempt(&schedAttemptCapture{state: state, attempt: handle, started: start, stream: true})
-				reader, writer := io.Pipe()
-				defer reader.Close()
-				defer writer.Close()
-				done := make(chan error, 1)
-				go func() {
-					_, err := runBlankPlaceholderAttempt(compatStreamService(nil, 1, 0, 0), c, &Account{ID: 1, Platform: PlatformOpenAI}, passthrough, reader, start)
-					done <- err
-				}()
-				unknown := firstoutWire("response.vendor", `,"message":"opaque"`)
-				_, err := io.WriteString(writer, unknown)
-				require.NoError(t, err)
-				synctest.Wait()
-				require.Contains(t, wire.Body.String(), unknown)
-				require.Nil(t, handle.row.TTFOMs)
-				require.Nil(t, state.EndToEndFirstOutputMs())
-				time.Sleep(2 * time.Second)
-				synctest.Wait()
-				select {
-				case err := <-done:
-					t.Fatalf("guard fired after unknown commitment: %v", err)
-				default:
-				}
-				_, err = io.WriteString(writer, firstoutWire("response.completed", `,"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
-				require.NoError(t, err)
-				require.NoError(t, writer.Close())
-				require.NoError(t, <-done)
+		for _, unknown := range []string{
+			firstoutWire("response.vendor", `,"message":"opaque"`),
+			firstoutWire("response.output_item.added", `,"item":{"type":"message","role":"assistant","content":[{"type":"vendor_text","text":"answer"}]}`),
+			firstoutWire("response.output_item.added", `,"item":{"type":"reasoning","summary":[{"type":"vendor_summary","text":"answer"}]}`),
+			firstoutWire("response.output_item.added", `,"item":{"type":"reasoning","content":[{"type":"vendor_thought","text":"answer"}]}`),
+		} {
+			t.Run(fmt.Sprint(passthrough)+"/"+unknown, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					c, wire := compatStreamContext("/v1/responses", `{}`)
+					start := time.Now()
+					state := resilience.NewRequestState()
+					c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+					InstallDeliveryTracking(c, start)
+					handle := &schedAttemptHandle{}
+					handle.row.StartedAt = start
+					state.SetCurrentAttempt(&schedAttemptCapture{state: state, attempt: handle, started: start, stream: true})
+					reader, writer := io.Pipe()
+					defer reader.Close()
+					defer writer.Close()
+					done := make(chan error, 1)
+					go func() {
+						_, err := runBlankPlaceholderAttempt(compatStreamService(nil, 1, 0, 0), c, &Account{ID: 1, Platform: PlatformOpenAI}, passthrough, reader, start)
+						done <- err
+					}()
+					_, err := io.WriteString(writer, unknown)
+					require.NoError(t, err)
+					synctest.Wait()
+					require.Contains(t, wire.Body.String(), unknown)
+					require.Nil(t, handle.row.TTFOMs)
+					require.Nil(t, state.EndToEndFirstOutputMs())
+					time.Sleep(2 * time.Second)
+					synctest.Wait()
+					select {
+					case err := <-done:
+						t.Fatalf("guard fired after unknown commitment: %v", err)
+					default:
+					}
+					_, err = io.WriteString(writer, firstoutWire("response.completed", `,"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+					require.NoError(t, err)
+					require.NoError(t, writer.Close())
+					require.NoError(t, <-done)
+				})
 			})
-		})
+		}
 	}
 }
 
@@ -275,6 +284,9 @@ func TestFirstoutCompatContentAndUnknownFrames(t *testing.T) {
 			valid         bool
 		}{
 			{"unknown", `{"type":"response.vendor","message":"opaque"}`, false},
+			{"nested_message", `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[{"type":"vendor_text","text":"answer"}]}}`, false},
+			{"nested_summary", `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[{"type":"vendor_summary","text":"answer"}]}}`, false},
+			{"nested_content", `{"type":"response.output_item.added","item":{"type":"reasoning","content":[{"type":"vendor_thought","text":"answer"}]}}`, false},
 			{"web_search", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"web_search_call"}}`, true},
 			{"image_generation", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"image_generation_call"}}`, true},
 			{"mcp_list_tools", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"mcp_list_tools","tools":[{"name":"fixture"}]}}`, false},

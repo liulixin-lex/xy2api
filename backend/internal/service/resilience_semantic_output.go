@@ -19,6 +19,21 @@ type semanticDeliveryState struct {
 	oversized bool
 }
 
+// noteClassifiedSemanticOutput records successful delivery of an event already
+// classified by the forwarding path. Spooling and chunk size cannot change the
+// content decision; the bounded byte parser remains a fallback for other paths.
+func (w *deliveryWriter) noteClassifiedSemanticOutput() {
+	if w == nil || w.state == nil || w.Status() >= 400 || w.semantic.noted.Load() {
+		return
+	}
+	w.semantic.mu.Lock()
+	defer w.semantic.mu.Unlock()
+	if !w.semantic.noted.Swap(true) {
+		w.semantic.pending = nil
+		w.state.NoteSemanticOutput(time.Now())
+	}
+}
+
 func (w *deliveryWriter) observeSemanticOutput(p []byte, at time.Time) {
 	st := &w.semantic
 	if st.noted.Load() || w.state == nil || w.Status() >= 400 {

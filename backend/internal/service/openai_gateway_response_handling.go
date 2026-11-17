@@ -56,6 +56,10 @@ type openAISemanticWriteTracker struct {
 	semanticStart int64
 	semanticEnd   int64
 	sawOutput     bool
+	// Unlike semanticStart/End (legacy replay safety), validEnd is the end of
+	// a complete data line classified as quality output, including its newline.
+	validEnd  int64
+	noteValid func()
 }
 
 func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
@@ -64,6 +68,10 @@ func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
 		w.sawOutput = true
 	}
 	w.written += int64(n)
+	if w.validEnd > 0 && w.written >= w.validEnd && w.noteValid != nil {
+		w.noteValid()
+		w.noteValid = nil
+	}
 	return n, err
 }
 
@@ -187,7 +195,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var firstTokenMs *int
 	ttftMode := s.openAITTFTMode(ctx)
 	firstOutputProgressObserved := false
-	delivery := &openAISemanticWriteTracker{Writer: w}
+	delivery := &openAISemanticWriteTracker{Writer: w, noteValid: deliveryWriterFrom(c).noteClassifiedSemanticOutput}
 	bufferedWriter := bufio.NewWriterSize(delivery, 4*1024)
 	var queuedBytes int64
 	var firstOutputStage *openAIFirstOutputStage
@@ -233,6 +241,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		bufferedWriter.Reset(delivery)
 		queuedBytes = delivery.written
+		delivery.validEnd = 0
 		return nil
 	}
 
@@ -681,6 +690,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				suppressCurrentEvent = true
 			}
 			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			validOutput := resilience.ClassifyOutput("", pendingSSEEventType, dataBytes).Valid
 			observeSchedPayload(c, dataBytes, pendingSSEEventType)
 
 			observer.ObserveOpenAI(dataBytes, eventType)
@@ -958,6 +968,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if delivery.semanticEnd == 0 && startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
 					delivery.semanticStart = queuedBytes
 					delivery.semanticEnd = queuedBytes + int64(len(line))
+				}
+				if delivery.noteValid != nil && delivery.validEnd == 0 && validOutput {
+					delivery.validEnd = queuedBytes + int64(len(line)) + 1
 				}
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
 				if firstTokenMs == nil && startsVisibleOutput && (clientOutputStarted || startsClientOutput) {

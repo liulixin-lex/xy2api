@@ -24,7 +24,7 @@ func TestFirstoutNonstreamDoesNotSample(t *testing.T) {
 	require.Nil(t, handle.row.FirstEventMs)
 }
 
-func TestFirstoutWebSocketUsesSameContentPredicate(t *testing.T) {
+func TestFirstoutWebSocketSeparatesGuardFromContentSampling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		state := resilience.NewRequestState()
@@ -36,12 +36,16 @@ func TestFirstoutWebSocketUsesSameContentPredicate(t *testing.T) {
 			return openAIWSPassthroughFirstOutputDeadline{startedAt: start, timeout: time.Second}
 		}}
 		conn.armDeadline(nil)
-		for _, payload := range []string{`{"type":"ping"}`, `{"type":"response.output_text.delta","delta":""}`, `{"type":"response.output_item.added","item":{"type":"function_call","id":"only-id"}}`} {
+		for i, payload := range []string{`{"type":"ping"}`, `{"type":"response.output_text.delta","delta":""}`, `{"type":"response.output_item.added","item":{"type":"function_call","id":"only-id"}}`} {
 			time.Sleep(10 * time.Millisecond)
 			conn.observeUpstreamActivity(coderws.MessageText, []byte(payload))
 			markSchedWSOutput(capture, []byte(payload))
 			noteGatewayWSOutput(ctx, []byte(payload))
-			require.Equal(t, openAIWSPassthroughDeadlinePhaseFirstSemantic, conn.deadlineState().deadline.phase)
+			if i == 0 {
+				require.Equal(t, openAIWSPassthroughDeadlinePhaseFirstSemantic, conn.deadlineState().deadline.phase)
+			} else {
+				require.Equal(t, openAIWSPassthroughDeadlinePhaseActiveRead, conn.deadlineState().deadline.phase)
+			}
 			require.Nil(t, handle.row.TTFOMs)
 			require.Nil(t, state.EndToEndFirstOutputMs())
 		}

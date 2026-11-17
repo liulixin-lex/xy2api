@@ -2683,6 +2683,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// the scanner directly or, with the deadline or stall check, from a read
 	// pump.
 	processResponseLine := func(line string) passthroughLineStep {
+		lineHasValidOutput := false
 		if guarded && !clientOutputStarted {
 			if err := reqCtx.Err(); err != nil {
 				return passthroughReturn(resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err))
@@ -2761,6 +2762,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			observeOpenAIPreludeCreated(preludeTrace, sourceEventType)
 			commitsOutput := openAIStreamCommitsOutput(pendingSSEEventType, dataBytes, currentTerminal)
+			lineHasValidOutput = resilience.ClassifyOutput("", pendingSSEEventType, dataBytes).Valid
 			if account == nil || account.Platform != PlatformOpenAI {
 				commitsOutput = openAIStreamDataStartsClientOutput(data, sourceEventType)
 			}
@@ -3036,6 +3038,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			written, writeErr := io.WriteString(w, wireLine)
+			if written == len(wireLine) && writeErr == nil && lineHasValidOutput {
+				deliveryWriterFrom(c).noteClassifiedSemanticOutput()
+			}
 			if written > 0 {
 				if data, ok := extractOpenAISSEDataLine(line); ok && resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).SemanticOutput {
 					clientSawSemanticOutput = true
