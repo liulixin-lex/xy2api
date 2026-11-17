@@ -125,7 +125,7 @@ WebSocket 请求继续沿用既有档位与计费规则，仅通过模型名后�
 
 | 列 / 标记 | 含义 |
 |---|---|
-| 结果 | 成功；已救回（至少实际发送两次，前次失败，最终完整交付）；失败（全部尝试失败、交付途中出错、号这一侧不可用）；已取消（用户自己断开）。升级前的记录与未接入的请求类型（视频、批量、live、WebSocket 二进制帧）显示“—” |
+| 结果 | 成功；已救回（至少实际发送两次，前次失败，最终完整交付）；失败（全部尝试失败、交付途中出错、号这一侧不可用）；已取消（用户自己断开）。升级前的记录与下列已知局限中未接入的请求类型显示“—” |
 | 换号 n 次 | 相邻两次尝试换了账号的次数；同号重试不算 |
 | 兜底 | 这次用的是该组此刻在后排的号（见 [分组质量门槛](group-quality-gate.md#选号)） |
 | 接管 | 这一轮是会话被接管到新账号的那一轮 |
@@ -137,7 +137,9 @@ WebSocket 请求继续沿用既有档位与计费规则，仅通过模型名后�
 - 筛选新增“结果”；“账号”筛选的是最终账号。计费类筛选只匹配有账单的行。
 - 顶部汇总：请求数、成功 / 已救回 / 失败、行原首字 P50、缓存、费用，与当前筛选同范围。
 - 没有账单的请求存在表 `gateway_unbilled_requests`，保留期与使用记录相同。
-- 通用 Chat/Responses、Images、Responses 生图与 Embeddings 在准入后都带同一个网关请求 ID；`request_scope` 为 `text`、`image` 或 `embedding`。图片与 Embeddings 的请求能关联到使用记录和错误记录，但不计入分组近 60 分钟的文本请求统计；升级前 `request_scope` 为空的记录按文本处理。
+- 通用 Chat/Responses、Images、Responses 生图、Embeddings 与 Alpha Search 在准入后追踪网关请求 ID；`request_scope` 分别为文本 `text`、图片 `image`、向量 `embedding`、Alpha Search `search`。后三类不计入分组近 60 分钟的文本请求统计；历史空范围仍按文本处理，不回填旧记录。
+- Alpha Search 的成功收费行保存 `gateway_request_id` 与 `result`；准入后失败或取消且没有账单时，写一条未计费尾记录。金额与扣费规则不变。
+- 已知局限：WebSocket 直通二进制帧、`count_tokens` / `input_tokens`、独立 Web/X Search、SystemOne、Grok 媒体/语音/Realtime、Live 与批量图片入口的计费记录没有请求编号和结果。
 - 每个请求只写一行：有账单时写使用记录，没有账单时写 `gateway_unbilled_requests`；记账失败时不再另补一行无账单记录。
 
 原生非流式 Images 按实际返回的有效图片数收费：同一对象的非空字符串 `url` 或 `b64_json` 只计一张，不沿用请求的 `n`。零张图片不收按图或按次组件，已观测的真实 token 用量仍独立结算；空产物按失败记录，不重放生图。
