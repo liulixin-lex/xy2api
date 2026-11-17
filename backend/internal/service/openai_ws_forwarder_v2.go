@@ -37,7 +37,17 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	agentTaskRecoveryTried *bool,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	var learnCapability *capabilityStreamFailure
+	learningFinal := capabilityStreamFinish{}
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		if learnCapability != nil {
+			learningFinal.ContextDone = ctx.Err() != nil
+			learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
+			learnCapability.finish(learningFinal)
+		}
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -214,6 +224,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
 	defer acquireCancel()
+	acquireCtx, schedDial := withSchedWSDialObservation(acquireCtx, ctx, s, account, reqStream)
+	schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(payload))
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
 		Account: account,
@@ -364,22 +376,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
-	learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
-	learningFinal := capabilityStreamFinish{}
-	defer func() {
-		if panicValue := recover(); panicValue != nil {
-			panic(panicValue) // no learning while the attempt unwinds
-		}
-		learningFinal.ContextDone = ctx.Err() != nil
-		learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
-		learnCapability.finish(learningFinal)
-	}()
+	learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
+
 	// This boundary belongs to every real application send, even when quality
 	// recording is disabled. A failed first send must precede the next send.
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
 		body := payloadAsJSONBytes(wirePayload)
-		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
+		schedCapture = schedDial.beginSend(body, reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		schedCapture.noteWSNetworkError(err)

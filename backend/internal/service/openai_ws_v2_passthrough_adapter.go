@@ -307,6 +307,13 @@ type openAIWSPassthroughFirstOutputDeadlineState struct {
 	deadline   openAIWSPassthroughFirstOutputDeadline
 }
 
+// Control writes execute inside the relay's read-client callback. Keep their
+// transport origin without settling an attempt before the terminal barrier.
+type openAIWSControlWriteError struct{ err error }
+
+func (e *openAIWSControlWriteError) Error() string { return e.err.Error() }
+func (e *openAIWSControlWriteError) Unwrap() error { return e.err }
+
 type openAIWSPassthroughTurnLifecycle struct {
 	mu                sync.Mutex
 	inFlight          bool
@@ -699,7 +706,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	wsDecision OpenAIWSProtocolDecision,
 ) (schedErr error) {
 	schedTurns := &schedWSTurnCapture{}
-	defer func() { schedTurns.finish(nil, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedTurns, recover())
+		schedTurns.finish(nil, schedErr)
+	}()
 	// The same request context survives scheduler failover attempts. Clear any
 	// reverse mapping installed by the prior account before processing frames.
 	setCodexToolNameReverse(c, nil)
@@ -914,6 +924,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("openai ws passthrough dialer is nil")
 	}
 
+	var schedDial *schedWSDialObservation
 	agentTaskRecoveryTried := false
 	var upstreamConn openAIWSClientConn
 	statusCode := 0
@@ -924,7 +935,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
-		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
+		dialCtx, schedDial = withSchedWSDialObservation(dialCtx, ctx, s, account, true)
+		schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, firstClientMessage)
+		upstreamConn, statusCode, handshakeHeaders, err = dialOpenAIWSWithSchedCapture(dialCtx, dialer, wsURL, headers, proxyURL)
 		cancelDial()
 		if err == nil {
 			break
@@ -973,7 +986,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	var schedBeforeSend func([]byte)
 	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
-		schedBeforeSend = func(payload []byte) { schedTurns.begin(s, ctx, account, payload) }
+		schedBeforeSend = func(payload []byte) {
+			schedTurns.begin(s, ctx, account, payload, schedDial)
+		}
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
@@ -1246,12 +1261,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
-				// This write runs inside ReadClientFrame, whose relay exit stage
-				// is read_client. Preserve and finish the upstream failure here
-				// before relay cleanup could mistake it for a client disconnect.
-				schedTurns.noteNetworkError(writeErr)
-				schedTurns.finish(nil, writeErr)
-				return msgType, payload, writeErr
+				return msgType, payload, &openAIWSControlWriteError{err: writeErr}
 			}
 		}
 	}
@@ -1369,6 +1379,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			BeforeClientWrite: func(msgType coderws.MessageType, payload []byte) {
 				if openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.beginTerminalWrite()
+					// Publish the terminal only after its write barrier exists.
+					schedTurns.observe(payload)
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
@@ -1396,13 +1408,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
 				turnLifecycle.waitTerminalWrite()
+				var controlWriteErr *openAIWSControlWriteError
+				upstreamWrite := errors.As(exit.Err, &controlWriteErr)
 				var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 				if errors.As(exit.Err, &timeoutErr) {
 					_ = recordFirstOutputTimeout(timeoutErr)
-				} else if resilience.StateFrom(ctx).ClientCanceled() || (exit.Stage == "read_client" || exit.Stage == "write_client") && gatewayWSClientCanceled(ctx, exit.Err) {
+				} else if resilience.StateFrom(ctx).ClientCanceled() || !upstreamWrite && (exit.Stage == "read_client" || exit.Stage == "write_client") && gatewayWSClientCanceled(ctx, exit.Err) {
 					schedTurns.cancel()
 				} else {
-					if exit.Stage == "read_upstream" || exit.Stage == "write_upstream" {
+					if upstreamWrite || exit.Stage == "read_upstream" || exit.Stage == "write_upstream" {
 						schedTurns.noteNetworkError(exit.Err)
 					}
 					schedTurns.finish(nil, exit.Err)
@@ -1428,13 +1442,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
 				if msgType == coderws.MessageBinary {
 					resilience.StateFrom(ctx).ExcludeGatewayRequest()
-					schedTurns.observe(payload)
+					if !openAIWSPassthroughIsTerminalOutput(payload) {
+						schedTurns.observe(payload)
+					}
 					return nil
 				}
 				if msgType != coderws.MessageText {
 					return nil
 				}
-				schedTurns.observe(payload)
+				if !openAIWSPassthroughIsTerminalOutput(payload) {
+					schedTurns.observe(payload)
+				}
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 				if observer := qualityObserver.Load(); observer != nil {
 					observer.inspectQualityDeclaration(payload, "response.model", "model")

@@ -39,6 +39,7 @@ func (d *errclassRealWSDialer) Dial(ctx context.Context, _ string, _ http.Header
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	conn.SetReadLimit(openAIWSMessageReadLimitBytes)
 	return &coderOpenAIWSClientConn{conn: conn}, resp.StatusCode, resp.Header, nil
 }
 
@@ -63,6 +64,12 @@ func errclassWSFixture(t *testing.T, mode string) (*OpenAIGatewayService, *Accou
 		}
 		n := sends.Add(1)
 		switch mode {
+		case "too_big":
+			_ = conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.output_text.delta","delta":"`+strings.Repeat("x", int(openAIWSMessageReadLimitBytes))+`"}`))
+			return
+		case "remote_too_big":
+			_ = conn.Close(coderws.StatusMessageTooBig, "synthetic remote limit")
+			return
 		case "disconnect":
 			return
 		case "retry":
@@ -126,7 +133,7 @@ func errclassWSFixture(t *testing.T, mode string) (*OpenAIGatewayService, *Accou
 }
 
 func TestErrclassRealHTTPToWSFailures(t *testing.T) {
-	for _, mode := range []string{"disconnect", "output_disconnect", "completed_close", "deadline", "client_disconnect"} {
+	for _, mode := range []string{"disconnect", "output_disconnect", "completed_close", "deadline", "client_disconnect", "too_big", "remote_too_big"} {
 		t.Run(mode, func(t *testing.T) {
 			withResilienceSettings(t, nil)
 			svc, account, st, rec, sends, release := errclassWSFixture(t, mode)
@@ -144,6 +151,8 @@ func TestErrclassRealHTTPToWSFailures(t *testing.T) {
 			require.Len(t, rec.finishes, 1)
 			want := schedquality.ClassUpstream
 			switch mode {
+			case "too_big":
+				want = schedquality.ClassGateway
 			case "output_disconnect":
 				want = schedquality.ClassInterrupted
 			case "completed_close":
@@ -199,7 +208,12 @@ func TestErrclassHTTPToWSRequestSendCounting(t *testing.T) {
 					require.Zero(t, sends.Load())
 					require.Equal(t, resilience.RequestFailed, meta.Result)
 					require.Zero(t, meta.AccountID)
-					require.Empty(t, rec.finishes)
+					if record {
+						require.Len(t, rec.finishes, 1)
+						require.Equal(t, schedquality.ClassUpstream, rec.finishes[0].Class)
+					} else {
+						require.Empty(t, rec.finishes)
+					}
 				}
 				if mode != "unsent" {
 					require.Equal(t, account.ID, meta.AccountID)
@@ -216,7 +230,7 @@ func TestErrclassHTTPToWSRequestSendCounting(t *testing.T) {
 
 func TestErrclassRealWSIngressFailures(t *testing.T) {
 	for _, route := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
-		for _, mode := range []string{"disconnect", "output_disconnect", "completed_close", "client_disconnect", "deadline"} {
+		for _, mode := range []string{"disconnect", "output_disconnect", "completed_close", "client_disconnect", "deadline", "too_big", "remote_too_big"} {
 			t.Run(route+"/"+mode, func(t *testing.T) {
 				withResilienceSettings(t, nil)
 				svc, account, st, rec, sends, release := errclassWSFixture(t, mode)
@@ -254,6 +268,8 @@ func TestErrclassRealWSIngressFailures(t *testing.T) {
 				require.NotEmpty(t, rec.finishes)
 				want := schedquality.ClassUpstream
 				switch mode {
+				case "too_big":
+					want = schedquality.ClassGateway
 				case "output_disconnect":
 					want = schedquality.ClassInterrupted
 				case "completed_close":
@@ -295,10 +311,14 @@ func TestErrclassTransientProcessingFailure(t *testing.T) {
 // write error must still be attributed to the active attempt, not the client.
 type errclassControlWriteFailureConn struct {
 	*stagedPassthroughConn
+	failed chan struct{}
 }
 
 func (c *errclassControlWriteFailureConn) WriteFrame(ctx context.Context, typ coderws.MessageType, payload []byte) error {
 	if strings.Contains(string(payload), "session.update") {
+		if c.failed != nil {
+			close(c.failed)
+		}
 		return io.ErrUnexpectedEOF
 	}
 	return c.stagedPassthroughConn.WriteFrame(ctx, typ, payload)
@@ -308,7 +328,7 @@ func TestErrclassPassthroughControlFrameUpstreamWriteFailure(t *testing.T) {
 	withResilienceSettings(t, nil)
 	upstream := newStagedPassthroughConn()
 	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
-	svc.openaiWSPassthroughDialer = &stagedPassthroughDialer{conn: &errclassControlWriteFailureConn{upstream}}
+	svc.openaiWSPassthroughDialer = &stagedPassthroughDialer{conn: &errclassControlWriteFailureConn{stagedPassthroughConn: upstream}}
 	rec := &errclassRecorder{}
 	svc.SetSchedAttemptRecorder(rec)
 	account := passthroughLifecycleAccount()

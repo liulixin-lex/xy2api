@@ -137,7 +137,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	requestedModel := reqModel
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
