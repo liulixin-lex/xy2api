@@ -74,19 +74,12 @@ func (c *snapshotHydrationCache) ListBuckets(ctx context.Context) ([]SchedulerBu
 	return nil, nil
 }
 
-func (c *snapshotHydrationCache) GetOutboxWatermark(ctx context.Context) (int64, error) {
-	return 0, nil
-}
-
-func (c *snapshotHydrationCache) SetOutboxWatermark(ctx context.Context, id int64) error {
-	return nil
-}
-
 func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedulerSnapshot(t *testing.T) {
 	cache := &snapshotHydrationCache{
 		snapshot: []*Account{
 			{
 				ID:          1,
+				GroupIDs:    []int64{2},
 				Platform:    PlatformOpenAI,
 				Type:        AccountTypeAPIKey,
 				Status:      StatusActive,
@@ -103,6 +96,7 @@ func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedul
 		accounts: map[int64]*Account{
 			1: {
 				ID:          1,
+				GroupIDs:    []int64{2},
 				Platform:    PlatformOpenAI,
 				Type:        AccountTypeAPIKey,
 				Status:      StatusActive,

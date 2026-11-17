@@ -33,7 +33,7 @@ type SchedQualityEngineService struct {
 	insertedAt  time.Time
 	configAt    time.Time
 	rule        SchedTTFTRuleRecord
-	peers       *peerBucket
+	peerBuckets map[time.Time]*peerBucket
 	leases      SchedTrialLeases
 	policies    map[int64]SchedPolicyRecord
 	members     map[int64][]int64
@@ -183,7 +183,7 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time, s
 	if err := s.refreshConfig(ctx, now); err != nil {
 		return nil, err
 	}
-	d := &schedQualityData{now: now, samples: samples, globalEnabled: true, running: s.window.running, peers: s.peers, ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
+	d := &schedQualityData{now: now, samples: samples, globalEnabled: true, running: s.window.running, peerBuckets: clonePeerBuckets(s.peerBuckets, now), ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
 	for pair, rows := range samples {
 		d.ruleSamples[pair] = ruleBSamples(rows)
 	}
@@ -281,23 +281,16 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	}
 	if !locked {
 		s.processedAt = time.Time{}
-		s.peers = nil
-		d.peers = nil
 		states, overrides, resets, err = s.store.LoadRows(ctx)
 		if err != nil {
 			return err
 		}
 	} else {
 		s.processedAt = horizon
-		s.peers = d.peers
 		s.releaseEndedTrials(ctx, previous, states)
 		for _, decision := range decisions {
 			LogSchedQualityDecision(ctx, decision)
-			if decision.Action == "enter" || decision.Action == "renew" {
-				s.obs.Count("cooled", 1)
-			} else {
-				s.obs.Count("released", 1)
-			}
+			s.countDecision(decision.Action)
 		}
 	}
 	s.window.newFinishedAt = time.Time{}
@@ -307,8 +300,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 
 // replay advances complete event batches in chronological order. EvaluatedAt is
 // persisted even when Step emits no decision, preventing repeat work on restart.
-func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, after, horizon time.Time) (kept, changed []schedquality.LineState, deleted []schedquality.LineKey, decisions []schedquality.Decision) {
+func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, after, horizon time.Time, order ...func([]schedquality.LineKey)) (kept, changed []schedquality.LineState, deleted []schedquality.LineKey, decisions []schedquality.Decision) {
 	keys, loaded := s.rowKeys(d, states)
+	if len(order) > 0 {
+		order[0](keys)
+	}
 	initial := make(map[schedquality.LineKey]schedquality.LineState)
 	for _, r := range states {
 		initial[r.LineKey] = r
@@ -326,7 +322,7 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 	keys = enabled
 	events := make(map[time.Time]map[SchedAccountModel]bool)
 	add := func(at time.Time) {
-		if !at.IsZero() && !at.After(horizon) && at.After(after) {
+		if !at.IsZero() && !at.After(horizon) {
 			if events[at] == nil {
 				events[at] = make(map[SchedAccountModel]bool)
 			}
@@ -338,6 +334,9 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 	for pair, samples := range d.samples {
 		for _, r := range samples {
 			at := schedAvailableAt(r)
+			if !at.After(after) {
+				continue
+			}
 			add(at)
 			if events[at] != nil {
 				events[at][pair] = true
@@ -345,15 +344,19 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 		}
 	}
 	schedule := func(r schedquality.LineState) {
-		for _, at := range []time.Time{r.Until, r.TrialUntil, r.LastRear.Add(schedquality.LevelClearQuiet)} {
+		deadlines := []time.Time{r.Until, r.TrialUntil}
+		if !r.LastRear.IsZero() && (r.Level > 0 || r.Admissions > 0) {
+			deadlines = append(deadlines, r.LastRear.Add(schedquality.LevelClearQuiet))
+		}
+		for _, at := range deadlines {
+			// Recover overdue persisted timers at their original instant. Moving a
+			// review to the restart watermark would grant a fresh hour of trial.
 			if at.After(r.EvaluatedAt) {
-				if !at.After(after) {
-					at = after.Add(time.Nanosecond)
-				}
 				add(at)
 			}
 		}
 	}
+
 	for _, r := range rows {
 		schedule(r)
 	}
@@ -367,11 +370,11 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 		touched := events[at]
 		delete(events, at)
 		bucket := at.UTC().Truncate(schedquality.RegularInterval)
-		if d.peers == nil || !d.peers.at.Equal(bucket) {
-			d.peers = freezePeers(at, rows)
-		}
-		fiveMin := at.Equal(bucket)
-		minute := at.Equal(at.Truncate(time.Minute))
+		d.usePeerBucket(at, rows)
+		// Overdue timers must not synthesize historical regular/minute ticks
+		// for newly discovered keys outside this cycle's replay window.
+		fiveMin := at.After(after) && at.Equal(bucket)
+		minute := at.After(after) && at.Equal(at.Truncate(time.Minute))
 		for _, k := range keys {
 			prev := rows[k]
 			if !at.After(prev.EvaluatedAt) || !at.After(resets[k.AccountID]) {
@@ -385,7 +388,7 @@ func (s *SchedQualityEngineService) replay(d *schedQualityData, states []schedqu
 			next, action := schedquality.Step(prev, kind, v, basis, at)
 			rows[k] = next
 			if action != "" {
-				decisions = append(decisions, schedquality.Decision{At: at, Key: k, Action: action, Level: next.Level, Until: next.Until, Basis: basis})
+				decisions = append(decisions, schedquality.Decision{At: at, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
 			}
 			schedule(next)
 		}
@@ -528,5 +531,29 @@ func (s *SchedQualityEngineService) releaseGroups(ctx context.Context, groups ma
 		if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
 			slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
 		}
+	}
+}
+
+// Each action records the deadline it actually starts, never a leftover state deadline.
+func schedDecisionUntil(action schedquality.Action, next schedquality.LineState) time.Time {
+	switch action {
+	case schedquality.ActionTrial:
+		return next.TrialUntil
+	case schedquality.ActionEnter, schedquality.ActionRenew, schedquality.ActionTrialFail:
+		return next.Until
+	default:
+		return time.Time{}
+	}
+}
+func (s *SchedQualityEngineService) countDecision(action schedquality.Action) {
+	switch action {
+	case schedquality.ActionEnter, schedquality.ActionRenew, schedquality.ActionTrialFail:
+		s.obs.Count("cooled", 1)
+	case schedquality.ActionRelease, schedquality.ActionTrialPass, schedquality.ActionTrialTimeout:
+		s.obs.Count("released", 1)
+	case schedquality.ActionTrial:
+		s.obs.Count("trial", 1)
+	case schedquality.ActionClear:
+		s.obs.Count("clear", 1)
 	}
 }

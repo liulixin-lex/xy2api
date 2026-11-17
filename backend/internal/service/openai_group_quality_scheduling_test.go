@@ -593,7 +593,9 @@ func TestOpenAIQualitySelection(t *testing.T) {
 		gid := int64(groupID)
 		ctx := svc.withOpenAISelectionContext(withResilienceLastResortGate(context.Background()), &gid)
 		acc := profitControlWSAccount(1, 0.8, time.Now())
-		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, threshold: 0.5})
+		acc.GroupIDs = []int64{gid}
+		svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{acc}}
+		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true, groupID: gid, threshold: 0.5})
 		_, veto, reason := svc.SelectionAdmissionVetoLatest(ctx, &acc)
 		require.True(t, veto)
 		require.Equal(t, openAIProfitFilterReasonThreshold, reason)

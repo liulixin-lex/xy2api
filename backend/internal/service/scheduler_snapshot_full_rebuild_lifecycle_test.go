@@ -20,8 +20,6 @@ type fullRebuildLifecycleCache struct {
 	captureAttempts []SchedulerBucket
 	captureErrors   map[string]error
 	lockBusyOnce    map[string]bool
-	watermark       int64
-	watermarkWrites []int64
 }
 
 func newFullRebuildLifecycleCache(buckets ...SchedulerBucket) *fullRebuildLifecycleCache {
@@ -72,30 +70,10 @@ func (c *fullRebuildLifecycleCache) TryLockBucket(ctx context.Context, bucket Sc
 	return c.groupLifecycleTestCache.TryLockBucket(ctx, bucket, ttl)
 }
 
-func (c *fullRebuildLifecycleCache) GetOutboxWatermark(context.Context) (int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.watermark, nil
-}
-
-func (c *fullRebuildLifecycleCache) SetOutboxWatermark(_ context.Context, id int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.watermark = id
-	c.watermarkWrites = append(c.watermarkWrites, id)
-	return nil
-}
-
 func (c *fullRebuildLifecycleCache) captureAttemptCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.captureAttempts)
-}
-
-func (c *fullRebuildLifecycleCache) currentWatermark() int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.watermark
 }
 
 func (c *fullRebuildLifecycleCache) totalSetAttempts() int {
@@ -282,10 +260,8 @@ func TestSchedulerFullRebuildActiveTombstoneDoesNotBlockFollowingGroupEvent(t *t
 
 	svc.pollOutbox()
 
-	require.Equal(t, int64(2), cache.currentWatermark())
-	cache.mu.Lock()
-	require.Equal(t, []int64{2}, cache.watermarkWrites)
-	cache.mu.Unlock()
+	require.Empty(t, outbox.events)
+	require.Equal(t, [][]int64{{1, 2}}, outbox.deleteCalls)
 	activeCalls, fallbackCalls, freshCalls := groups.stats()
 	require.Equal(t, 1, activeCalls)
 	require.Zero(t, fallbackCalls)
@@ -631,13 +607,15 @@ func TestSchedulerFullRebuildFreshReopenLockBusyRetriesWithoutBlockingOrdinaryTa
 	svc := newFullRebuildLifecycleService(cache, outbox, accounts, groups, config.RunModeStandard)
 
 	svc.pollOutbox()
-	require.Zero(t, cache.currentWatermark())
+	require.Len(t, outbox.events, 1)
+	require.Empty(t, outbox.deleteCalls)
 	_, groupZeroPublished := cache.counts(schedulerCanonicalBuckets(0)[0])
 	require.Equal(t, 1, groupZeroPublished, "ordinary tasks must still run when one strict Reopen task is busy")
 	require.Equal(t, 2*schedulerCanonicalAccountQueryCount(), accounts.callCount())
 
 	svc.pollOutbox()
-	require.Equal(t, int64(1), cache.currentWatermark())
+	require.Empty(t, outbox.events)
+	require.Equal(t, [][]int64{{1}}, outbox.deleteCalls)
 	require.Equal(t, 4*schedulerCanonicalAccountQueryCount(), accounts.callCount())
 	_, busyBucketPublished := cache.counts(canonical[0])
 	require.Equal(t, 1, busyBucketPublished)

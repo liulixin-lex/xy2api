@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,6 +145,7 @@ type Group struct {
 	// D 为请求用户当刻有效下游倍率（用户覆盖 ?? 分组默认，再乘高峰因子）。
 	// 只过滤候选账号，不改变既有排序/评分/粘性/熔断。
 	ProfitControlEnabled bool
+	MinUpstreamRate      *float64
 	ProfitMinMargin      float64 // 最低毛利率，小数存储（0.30=30%）
 	ProfitSafetyBuffer   float64 // 安全缓冲，小数，与 margin 相加后从 D 中扣除
 
@@ -490,4 +492,30 @@ func (g *Group) GetSearchPricePer1k() *float64 {
 		return nil
 	}
 	return g.SearchPricePer1k
+}
+
+// ValidateMinUpstreamRate accepts zero as the explicit clear operation.
+func ValidateMinUpstreamRate(platform string, rate *float64) error {
+	if rate == nil {
+		return nil
+	}
+	if platform != PlatformOpenAI {
+		return fmt.Errorf("min_upstream_rate only supports OpenAI groups")
+	}
+	v := *rate
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || (v > 0 && v < 0.0001) || v >= 1000000 {
+		return fmt.Errorf("min_upstream_rate must be finite, nonnegative, below 1000000 and have at most 4 decimal places")
+	}
+	decimal := strconv.FormatFloat(v, 'f', -1, 64)
+	if dot := strings.IndexByte(decimal, '.'); dot >= 0 && len(decimal)-dot-1 > 4 {
+		return fmt.Errorf("min_upstream_rate must have at most 4 decimal places")
+	}
+	return nil
+}
+
+func groupProfitFloor(group *Group) float64 {
+	if group != nil && group.Platform == PlatformOpenAI && group.MinUpstreamRate != nil {
+		return *group.MinUpstreamRate
+	}
+	return 0
 }

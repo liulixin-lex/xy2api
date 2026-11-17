@@ -72,10 +72,11 @@ func TestEngineInFlightAtReplayTime(t *testing.T) {
 	_, b := f.e.assessLine(d, row, q.EventRegular, at, nil)
 	require.Equal(t, 2, b.Error.Unknown)
 	_, b = f.e.assessLine(d, row, q.EventRegular, at.Add(2*time.Second), nil)
-	require.Zero(t, b.Error.Unknown)
+	require.Equal(t, 2, b.Error.Unknown, "completed retries stay unknown until their durable evidence is available")
 	require.Zero(t, b.Error.Clear, "finished but not inserted evidence is not yet usable")
 	_, b = f.e.assessLine(d, row, q.EventRegular, at.Add(20*time.Second), nil)
 	require.Equal(t, 1, b.Error.Clear)
+	require.Equal(t, 1, b.Error.Unknown, "the observer-only retry is still not durable")
 }
 func TestEngineErrorSourceGroupsFollowFinalHundredRequests(t *testing.T) {
 	f := newQualityFixture(t)
@@ -133,4 +134,95 @@ func TestEngineSnapshotKeepsTTFTSourceGroupsSeparate(t *testing.T) {
 	require.Equal(t, []int64{10, 30}, row.TTFTSourceGroups)
 	require.Equal(t, []int64{10, 20, 30}, row.Error.SourceGroups)
 	require.Equal(t, []int64{10, 20, 30}, row.SourceGroups)
+}
+
+func TestEngineSlowBoundaryMatchesRuleB(t *testing.T) {
+	at := time.Unix(1000, 0)
+	ms := 1001
+	a := q.AttemptSample{Stream: true, FinishedAt: at, Outcome: q.OutcomeOK, TTFOMs: &ms}
+	require.False(t, schedSlow(a, 1.001), "known first output equal to the limit is not slow")
+	ms = 1002
+	require.True(t, schedSlow(a, 1.001))
+	a.TTFOMs = nil
+	a.Outcome = q.OutcomeTimeout
+	a.CensoredMs = &ms
+	ms = 1001
+	require.True(t, schedSlow(a, 1.001), "censoring at the limit proves slow")
+	ms = 1000
+	require.False(t, schedSlow(a, 1.001))
+}
+
+func TestEngineRestartReplaysOverdueDeadlinesWithoutExtendingTrial(t *testing.T) {
+	f := newQualityFixture(t)
+	until := f.now.Add(-2 * time.Hour).Truncate(time.Minute)
+	entry := until.Add(-20 * time.Minute)
+	f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Admissions: 1, Entry: entry, LastRear: entry, Until: until, EvaluatedAt: entry}}
+	f.cycle()
+	require.False(t, f.view().TTFO.Trial)
+	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
+	require.Equal(t, until, f.line(q.DimensionTTFO).Epoch)
+	require.Len(t, f.store.Decisions, 2)
+	require.Equal(t, q.ActionTrial, f.store.Decisions[0].Action)
+	require.Equal(t, until, f.store.Decisions[0].At)
+	require.Equal(t, until.Add(q.TrialDuration), f.store.Decisions[0].Until)
+	require.Equal(t, q.ActionTrialTimeout, f.store.Decisions[1].Action)
+	require.Equal(t, until.Add(q.TrialDuration), f.store.Decisions[1].At)
+	require.True(t, f.store.Decisions[1].Until.IsZero())
+	f.e.processedAt = time.Time{}
+	f.cycle()
+	require.Len(t, f.store.Decisions, 2)
+}
+
+func TestEngineUninsertedRetryHidesEarlierFailure(t *testing.T) {
+	for _, observed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "durable-future-insertion", true: "observer-only"}[observed], func(t *testing.T) {
+			f := newQualityFixture(t)
+			at := f.now.Add(-10 * time.Second)
+			first := engineSamples(1, at.Add(-time.Minute), false)[0]
+			first.RequestID = "retry"
+			first.Outcome = q.OutcomeAccountFault
+			first.Class = q.ClassUpstream
+			retry := engineSamples(1, at.Add(-time.Second), false)[0]
+			retry.RequestID = "retry"
+			retry.InsertedAt = at.Add(time.Second)
+			f.e.window.merge([]q.AttemptSample{first}, f.now)
+			if observed {
+				retry.InsertedAt = time.Time{}
+				f.e.Observe(retry)
+				f.e.window.take(f.now)
+			} else {
+				f.e.window.merge([]q.AttemptSample{retry}, f.now)
+			}
+			d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
+			require.NoError(t, err)
+			_, basis := f.e.assessLine(d, q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: first.Model, Line: q.DimensionError}}, q.EventRegular, at, nil)
+			require.Zero(t, basis.Error.Failed)
+			require.Zero(t, basis.Error.Clear)
+			require.Equal(t, 1, basis.Error.Unknown)
+		})
+	}
+}
+func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
+	output := captureSchedObsLogs(t)
+	obs := NewSchedObservabilityService()
+	f := newQualityFixture(t)
+	f.e.obs = obs
+	next := q.LineState{Until: f.now.Add(20 * time.Minute), TrialUntil: f.now.Add(time.Hour)}
+	for _, tc := range []struct {
+		action q.Action
+		until  time.Time
+	}{
+		{q.ActionEnter, next.Until}, {q.ActionRenew, next.Until}, {q.ActionTrialFail, next.Until},
+		{q.ActionTrial, next.TrialUntil}, {q.ActionRelease, time.Time{}}, {q.ActionTrialPass, time.Time{}},
+		{q.ActionTrialTimeout, time.Time{}}, {q.ActionClear, time.Time{}}, {q.ActionRelax, time.Time{}}, {q.ActionReset, time.Time{}},
+	} {
+		require.Equal(t, tc.until, schedDecisionUntil(tc.action, next), tc.action)
+		f.e.countDecision(tc.action)
+	}
+	obs.summary(context.Background())
+	record := schedObsLogRecords(t, output)[0]
+	require.Equal(t, float64(3), record["cooled"])
+	require.Equal(t, float64(3), record["released"])
+	require.Equal(t, float64(1), record["trial"])
+	require.Equal(t, float64(1), record["clear"])
 }

@@ -21,7 +21,7 @@ func NewProfitPreviewService(accounts AccountRepository, groups GroupRepository)
 // ProfitControlPreview calculates the current group ceiling and member counts.
 // The request margin is used for this display-only calculation and the safety
 // buffer is deliberately zero; the stored group settings are not changed.
-func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID int64, margin *float64) (*ProfitControlPreview, error) {
+func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID int64, margin, floor *float64) (*ProfitControlPreview, error) {
 	if s == nil || s.groupRepo == nil || s.accountRepo == nil {
 		return nil, errors.New("group quality gate unavailable")
 	}
@@ -43,26 +43,54 @@ func (s *ProfitPreviewService) ProfitControlPreview(ctx context.Context, groupID
 		return nil, infraerrors.BadRequest("INVALID_PROFIT_CONTROL_CONFIG", err.Error())
 	}
 	previewGroup := *group
-	previewGroup.ProfitControlEnabled = true
+	// The default preview and an explicit margin simulate the ceiling. An
+	// explicit floor-only request respects the saved ceiling switch.
+	previewGroup.ProfitControlEnabled = group.ProfitControlEnabled || margin != nil || floor == nil
+	if floor != nil && *floor != 0 {
+		if err := ValidateMinUpstreamRate(group.Platform, floor); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_MIN_UPSTREAM_RATE", err.Error())
+		}
+	}
+	if floor != nil {
+		previewGroup.MinUpstreamRate = floor
+	}
 	previewGroup.ProfitMinMargin = effectiveMargin
 	previewGroup.ProfitSafetyBuffer = 0
 	now := time.Now()
-	ceiling, _ := groupProfitCeiling(&previewGroup, now)
+	ceiling, ceilingOn := groupProfitCeiling(&previewGroup, now)
+	var limit *float64
+	if ceilingOn {
+		limit = &ceiling
+	}
+	floorRate := groupProfitFloor(&previewGroup)
 	accounts, err := s.accountRepo.ListAllWithFilters(ctx, "", "", "", "", groupID, "")
 	if err != nil {
 		return nil, err
 	}
 	baseGroup := previewGroup
 	baseGroup.ProfitControlEnabled = false
-	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling}
+	baseGroup.MinUpstreamRate = nil
+	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling, Floor: floorRate, RangeEmpty: ceilingOn && !profitVerdictAdmitted(profitRangeVerdict(floorRate, true, &ceiling, floorRate, false)), PinnedLoss: []ProfitPinnedLoss{}}
 	for i := range accounts {
 		account := &accounts[i]
 		if !groupMemberServable(&baseGroup, account, now, nil) {
 			continue
 		}
 		out.Schedulable++
-		if cost, ok := openAIProfitGateCost(account, now); ok && !profitControlOverThreshold(cost, ceiling) {
+		pinned := group.Platform == PlatformOpenAI && account.PinnedIn(groupID)
+		cost, ok := openAIProfitGateCost(account, now)
+		verdict := profitRangeVerdict(cost, ok, limit, floorRate, pinned)
+		if !ceilingOn && floorRate <= 0 || profitVerdictAdmitted(verdict) {
 			out.Passing++
+		}
+		if verdict == openAIProfitFilterReasonFloor {
+			out.BelowFloor++
+		}
+		if pinned {
+			out.Pinned++
+			if ok && ceilingOn && profitControlOverThreshold(cost, ceiling) {
+				out.PinnedLoss = append(out.PinnedLoss, ProfitPinnedLoss{AccountID: account.ID, Name: account.Name, Rate: cost})
+			}
 		}
 	}
 	return out, nil

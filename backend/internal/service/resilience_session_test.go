@@ -347,7 +347,7 @@ func TestOpenAILastResortSingleAccount(t *testing.T) {
 	until := time.Now().Add(45 * time.Second)
 	accounts := []Account{{
 		ID: 71, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
-		RateLimitResetAt: &until,
+		RateLimitResetAt: &until, GroupIDs: []int64{9},
 	}}
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false

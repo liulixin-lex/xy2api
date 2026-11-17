@@ -46,6 +46,12 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		clearBinding("owner_unavailable")
 		return nil, false, nil
 	}
+	// A configured floor is a persistent owner exclusion, including while a
+	// temporary soft penalty or a previous attempt would otherwise keep affinity.
+	if openAIProfitFloorExcluded(ctx, account) {
+		clearBinding(openAIProfitFilterReasonFloor)
+		return nil, false, nil
+	}
 	if _, excluded := req.ExcludedIDs[accountID]; excluded {
 		noteBypass("owner_excluded")
 		return nil, false, nil
@@ -65,14 +71,18 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, nil
 	}
 	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
-		noteBypass(reason)
+		if reason == openAIProfitFilterReasonFloor {
+			clearBinding(reason)
+		} else {
+			noteBypass(reason)
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding("transport_incompatible")
 		return nil, false, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 	if account == nil {
 		clearBinding("owner_recheck_failed")
 		return nil, false, nil
@@ -82,7 +92,11 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, nil
 	}
 	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
-		clearBinding(reason)
+		if reason == openAIProfitFilterReasonThreshold || reason == openAIProfitFilterReasonInvalidAccountRate {
+			noteBypass(reason)
+		} else {
+			clearBinding(reason)
+		}
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
@@ -112,6 +126,7 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, acquireErr
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
+		s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
 		if !req.PreserveStickyBinding {
 			_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
 		}
@@ -195,7 +210,14 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		return nil, false, nil
 	}
 	if sessionHash != "" {
+		s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel}, account.ID).touch(ctx, account)
 		_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, account.ID)
+	} else {
+		trial := s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, RequestedModel: requestedModel}, 0)
+		// A response-id continuation has one protocol owner; full trial capacity
+		// cannot redirect it to another account.
+		trial.selected, _ = trial.reserve(ctx, account, true)
+		trial.finish(ctx, selection)
 	}
 	return selection, true, nil
 }

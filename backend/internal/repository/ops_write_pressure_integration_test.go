@@ -59,9 +59,14 @@ func TestEnqueueSchedulerOutbox_DeduplicatesIdempotentEvents(t *testing.T) {
 
 	var firstID int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM scheduler_outbox WHERE event_type = $1", service.SchedulerOutboxEventAccountChanged).Scan(&firstID))
-	events, err := NewSchedulerOutboxRepository(integrationDB).ListAfterAndReleaseDedup(ctx, 0, 100)
+	lease, acquired, err := NewSchedulerOutboxRepository(integrationDB).TryAcquireConsumerLock(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer lease.Release()
+	events, err := lease.ListPendingAndReleaseDedup(ctx, 100)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
+	require.NoError(t, lease.Commit())
 	require.Equal(t, firstID, events[0].ID)
 
 	require.NoError(t, enqueueSchedulerOutbox(ctx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
@@ -69,16 +74,21 @@ func TestEnqueueSchedulerOutbox_DeduplicatesIdempotentEvents(t *testing.T) {
 	require.Equal(t, 2, count)
 }
 
-func TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFlight(t *testing.T) {
+func TestSchedulerOutbox_ListPendingAndReleaseDedup_AllowsSameKeyAfterBatchCommit(t *testing.T) {
 	ctx := context.Background()
 	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox RESTART IDENTITY")
 
 	accountID := int64(17345)
 	require.NoError(t, enqueueSchedulerOutbox(ctx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
 
-	events, err := NewSchedulerOutboxRepository(integrationDB).ListAfterAndReleaseDedup(ctx, 0, 100)
+	lease, acquired, err := NewSchedulerOutboxRepository(integrationDB).TryAcquireConsumerLock(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer lease.Release()
+	events, err := lease.ListPendingAndReleaseDedup(ctx, 100)
 	require.NoError(t, err)
 	require.Len(t, events, 1)
+	require.NoError(t, lease.Commit())
 
 	require.NoError(t, enqueueSchedulerOutbox(ctx, integrationDB, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil))
 

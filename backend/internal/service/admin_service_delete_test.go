@@ -304,14 +304,6 @@ func (s *groupRepoStub) GetAccountCount(ctx context.Context, groupID int64) (int
 	panic("unexpected GetAccountCount call")
 }
 
-func (s *groupRepoStub) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	panic("unexpected DeleteAccountGroupsByGroupID call")
-}
-
-func (s *groupRepoStub) BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error {
-	panic("unexpected BindAccountsToGroup call")
-}
-
 func (s *groupRepoStub) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
 	panic("unexpected GetAccountIDsByGroupIDs call")
 }

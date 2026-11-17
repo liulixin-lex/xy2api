@@ -105,6 +105,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	ProfitBasis   json.RawMessage
 	PricingSource json.RawMessage `json:"pricing_source,omitempty"`
 
 	RequestScope       resilience.GatewayRequestScope

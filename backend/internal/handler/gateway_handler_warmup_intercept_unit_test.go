@@ -72,8 +72,6 @@ func (f *fakeSchedulerCache) UnlockBucket(_ context.Context, _ service.Scheduler
 func (f *fakeSchedulerCache) ListBuckets(_ context.Context) ([]service.SchedulerBucket, error) {
 	return nil, nil
 }
-func (f *fakeSchedulerCache) GetOutboxWatermark(_ context.Context) (int64, error) { return 0, nil }
-func (f *fakeSchedulerCache) SetOutboxWatermark(_ context.Context, _ int64) error { return nil }
 
 type fakeGroupRepo struct {
 	group *service.Group
@@ -103,13 +101,9 @@ func (f *fakeGroupRepo) ExistsByName(context.Context, string) (bool, error) { re
 func (f *fakeGroupRepo) GetAccountCount(context.Context, int64) (int64, int64, error) {
 	return 0, 0, nil
 }
-func (f *fakeGroupRepo) DeleteAccountGroupsByGroupID(context.Context, int64) (int64, error) {
-	return 0, nil
-}
 func (f *fakeGroupRepo) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	return nil, nil
 }
-func (f *fakeGroupRepo) BindAccountsToGroup(context.Context, int64, []int64) error { return nil }
 func (f *fakeGroupRepo) UpdateSortOrders(context.Context, []service.GroupSortOrderUpdate) error {
 	return nil
 }

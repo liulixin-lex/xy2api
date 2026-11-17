@@ -12,28 +12,49 @@ import (
 // stored multiplier is validated first: a fresh API-key probe may replace it,
 // while OAuth-like accounts use the scheduler's reference multiplier.
 func openAIProfitGateCost(acc *Account, at time.Time) (float64, bool) {
+	rate, _, ok := openAIProfitGateCostSource(acc, at)
+	return rate, ok
+}
+
+func openAIProfitGateCostSource(acc *Account, at time.Time) (float64, string, bool) {
 	if acc == nil || acc.RateMultiplier == nil {
-		return 0, false
+		return 0, "stored", false
 	}
 	raw := *acc.RateMultiplier
 	if raw < 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
-		return 0, false
+		return 0, "stored", false
 	}
-	var oauthRate *float64
 	if acc.IsOpenAIOAuthLike() {
-		oauthRate = cachedOpenAIOAuthSchedulingRateMultiplier()
-	} else if !acc.IsOpenAIApiKey() {
-		// The shared profit gate also covers the other token platforms, which
-		// have no OpenAI scheduling-rate signal; their validated multiplier is
-		// already the live cost source.
-		return raw, true
+		if rate := cachedOpenAIOAuthSchedulingRateMultiplier(); rate != nil && *rate >= 0 && !math.IsNaN(*rate) && !math.IsInf(*rate, 0) {
+			return *rate, "oauth_setting", true
+		}
+	} else if acc.IsOpenAIApiKey() {
+		if data, fresh := openAIFreshUpstreamBillingData(acc, at); fresh && data["billing_scope"] == "token" {
+			rate, valid := upstreamBillingRateAt(data, at)
+			return rate, "upstream_probe", valid && rate >= 0 && !math.IsNaN(rate) && !math.IsInf(rate, 0)
+		}
 	}
-	cost, ok := openAISchedulingRate(acc, at, oauthRate)
-	if !ok || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
-		return 0, false
-	}
-	return cost, true
+	return raw, "stored", true
 }
+
+// profitRangeVerdict is shared by live admission, fallback and both previews.
+func profitRangeVerdict(rate float64, ok bool, ceiling *float64, floor float64, pinned bool) string {
+	if pinned {
+		return "pinned"
+	}
+	if !ok || rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return openAIProfitFilterReasonInvalidAccountRate
+	}
+	if floor > 0 && floor-rate > profitControlRateEpsilon*math.Max(1, floor) {
+		return openAIProfitFilterReasonFloor
+	}
+	if ceiling != nil && profitControlOverThreshold(rate, *ceiling) {
+		return openAIProfitFilterReasonThreshold
+	}
+	return "pass"
+}
+
+func profitVerdictAdmitted(verdict string) bool { return verdict == "pass" || verdict == "pinned" }
 
 // groupProfitCeiling derives the default-account ceiling for one group.
 func groupProfitCeiling(group *Group, at time.Time) (float64, bool) {
@@ -68,12 +89,17 @@ func groupMemberUsable(group *Group, acc *Account, now time.Time) bool {
 	if tier == resilience.TierHard {
 		return false
 	}
-	if ceiling, on := groupProfitCeiling(group, now); on {
-		cost, ok := openAIProfitGateCost(acc, now)
-		if !ok || profitControlOverThreshold(cost, ceiling) {
-			return false
+	ceiling, ceilingOn := groupProfitCeiling(group, now)
+	floor := groupProfitFloor(group)
+	if ceilingOn || floor > 0 {
+		var limit *float64
+		if ceilingOn {
+			limit = &ceiling
 		}
+		cost, ok := openAIProfitGateCost(acc, now)
+		return profitVerdictAdmitted(profitRangeVerdict(cost, ok, limit, floor, group.Platform == PlatformOpenAI && acc.PinnedIn(group.ID)))
 	}
+
 	return true
 }
 

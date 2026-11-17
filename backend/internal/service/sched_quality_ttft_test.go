@@ -122,6 +122,15 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 				require.Equal(t, tc.Expected.Counts.D, got.Counts.D)
 				require.InDelta(t, tc.Expected.Prior, got.Prior, 1e-8)
 				require.InDelta(t, tc.Expected.PeerPrior, got.PeerPrior, 1e-8)
+				require.InDelta(t, tc.Expected.PeerCounts.N, got.PeerCounts.N, 1e-8)
+				require.InDelta(t, tc.Expected.PeerCounts.K, got.PeerCounts.K, 1e-8)
+				require.InDelta(t, tc.Expected.PeerCounts.X, got.PeerCounts.X, 1e-8)
+				if tc.Expected.U == nil {
+					require.Nil(t, got.U)
+				} else {
+					require.NotNil(t, got.U)
+					require.InDelta(t, *tc.Expected.U, *got.U, 1e-8)
+				}
 				require.Equal(t, tc.Expected.State, got.State)
 			})
 		}
@@ -132,35 +141,100 @@ func TestEnginePeerSnapshotPrecedesAllTransitions(t *testing.T) {
 	f := newQualityFixture(t)
 	f.badTTFT()
 	f.e.window.merge(f.ledger.Rows, f.now)
-	d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
-	require.NoError(t, err)
-	keys, rows := f.e.rowKeys(d, nil)
-	for _, k := range keys {
-		rows[k] = q.LineState{LineKey: k}
-	}
+	at := f.now.Add(-10 * time.Second)
 	run := func(reverse bool) map[q.LineKey]q.LineState {
-		current := make(map[q.LineKey]q.LineState)
-		for k, v := range rows {
-			current[k] = v
-		}
-		d.peers = freezePeers(f.now, current)
-		result := make(map[q.LineKey]q.LineState)
-		for i := range keys {
-			index := i
+		d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
+		require.NoError(t, err)
+		rows, _, _, decisions := f.e.replay(d, nil, nil, at.Add(-time.Second), at, func(keys []q.LineKey) {
 			if reverse {
-				index = len(keys) - 1 - i
+				for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
+					keys[i], keys[j] = keys[j], keys[i]
+				}
 			}
-			k := keys[index]
-			r := current[k]
-			v, b := f.e.assessLine(d, r, q.EventRegular, f.now, nil)
-			current[k], _ = q.Step(r, q.EventRegular, v, b, f.now)
-			result[k] = current[k]
+		})
+		result := make(map[q.LineKey]q.LineState)
+		for _, r := range rows {
+			result[r.LineKey] = r
 		}
+		slow := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+		fast := slow
+		fast.AccountID = 2
+		require.Equal(t, q.IdentityRear, result[slow].Identity)
+		require.Equal(t, q.IdentityPass, result[fast].Identity)
+		require.Equal(t, q.IdentityUnknown, d.peers.rows[slow].Identity, "snapshot predates slow peer's entry")
+		require.Len(t, decisions, 1)
+		require.Equal(t, q.ActionEnter, decisions[0].Action)
+		// This is a discriminating fixture: using the updated membership would
+		// remove the fast account's only peer and change its verdict to unknown.
+		d.peers = freezePeers(at, result)
+		wrong, _ := f.e.assessLine(d, q.LineState{LineKey: fast}, q.EventRegular, at, nil)
+		require.Equal(t, q.VerdictUnknown, wrong)
 		return result
 	}
 	require.Equal(t, run(false), run(true))
-	for _, peer := range d.peers.rows {
-		require.Equal(t, q.IdentityUnknown, peer.Identity)
+}
+
+func TestEnginePeerBucketsSurviveRewindFollowerAndOtherLineChanges(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	bucket := f.now.UTC().Truncate(q.RegularInterval)
+	frozen := f.e.peerBuckets[bucket]
+	slow := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+	require.Equal(t, q.IdentityUnknown, frozen.rows[slow].Identity)
+	late := engineSamples(1, bucket.Add(-10*time.Second), true)[0]
+	late.AttemptID = "late-for-previous-bucket"
+	late.InsertedAt = late.FinishedAt
+	f.ledger.Rows = append(f.ledger.Rows, late)
+	f.now = f.now.Add(20 * time.Second)
+	f.cycle()
+	require.Same(t, frozen, f.e.peerBuckets[bucket], "replaying the preceding bucket must not refreeze this one")
+	f.store.lock.Lock()
+	f.cycle()
+	f.store.lock.Unlock()
+	require.Same(t, frozen, f.e.peerBuckets[bucket], "losing the cycle lock must keep the frozen membership")
+	for _, line := range []q.Dimension{q.DimensionError, q.DimensionCache} {
+		p := f.store.Policies[10].Policy
+		if line == q.DimensionError {
+			p.MaxErrorRate += .1
+		} else {
+			p.MinCacheRatio -= .1
+		}
+		_, err := f.e.UpdatePolicy(context.Background(), 10, f.store.Version, p)
+		require.NoError(t, err)
+		require.Same(t, frozen, f.e.peerBuckets[bucket], "relaxing %s must not change TTFO membership", line)
+	}
+}
+
+func TestEngineTTFTRelaxOnlyOverridesAffectedBucketKeys(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.store.Members[20] = []int64{1, 2}
+	f.store.Policies[20] = SchedPolicyRecord{GroupID: 20, Policy: f.store.Policies[10].Policy}
+	f.cycle()
+	bucket := f.now.UTC().Truncate(q.RegularInterval)
+	original := f.e.peerBuckets[bucket]
+	// Recreate a preexisting bucket with both groups in rear to make a
+	// full refreeze distinguishable from replacing only this group's keys.
+	frozen := freezePeers(f.now, original.rows)
+	for k, r := range frozen.rows {
+		r.Identity = q.IdentityRear
+		r.Epoch = f.now
+		frozen.rows[k] = r
+	}
+	f.e.peerBuckets[bucket] = frozen
+	p := f.store.Policies[10].Policy
+	p.TTFTSeconds = 2
+	_, err := f.e.UpdatePolicy(context.Background(), 10, 0, p)
+	require.NoError(t, err)
+	for k, old := range frozen.rows {
+		next := f.e.peerBuckets[bucket].rows[k]
+		if k.GroupID == 10 {
+			require.Equal(t, q.IdentityUnknown, next.Identity)
+			require.True(t, next.Epoch.IsZero())
+		} else {
+			require.Equal(t, old, next)
+		}
 	}
 }
 
@@ -197,6 +271,58 @@ func TestEngineSyntheticCycleTiming(t *testing.T) {
 			replayed := time.Since(started) - prepared
 			f.e.publish(d, rows, nil, nil, f.now)
 			t.Logf("300 TTFO keys; 6 groups x 50 members; %d samples/account (%d total); prepare=%s replay=%s snapshot=%s total=%s", sampleCount, sampleCount*300, prepared, replayed, time.Since(started)-prepared-replayed, time.Since(started))
+		})
+	}
+}
+
+func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
+	f := newQualityFixture(t)
+	bucket := f.now.UTC().Truncate(q.RegularInterval)
+	f.now = bucket.Add(3 * time.Second)
+	f.badTTFT()
+	event := bucket.Add(-3 * time.Second)
+	for i := range f.ledger.Rows {
+		f.ledger.Rows[i].InsertedAt = event
+	}
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+	f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: bucket.Add(-time.Minute), EvaluatedAt: bucket.Add(-20 * time.Second), TrialUntil: bucket.Add(time.Hour), Admissions: 1}}
+	f.cycle()
+	require.Equal(t, bucket.Add(-7*time.Second), f.e.processedAt)
+	require.True(t, f.view().TTFO.Trial)
+	require.NotContains(t, f.e.peerBuckets, bucket, "display must not save membership before replay reaches the bucket")
+	require.NoError(t, f.e.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}))
+	require.NotContains(t, f.e.peerBuckets, bucket, "rebuild must not freeze a future bucket")
+	require.NoError(t, f.e.ClearOverride(context.Background(), 1, 10))
+	require.NotContains(t, f.e.peerBuckets, bucket)
+	f.now = bucket.Add(13 * time.Second)
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	require.Equal(t, event, f.line(q.DimensionTTFO).Entry)
+	require.Contains(t, f.e.peerBuckets, bucket)
+	require.Equal(t, q.IdentityRear, f.e.peerBuckets[bucket].rows[key].Identity, "official membership includes the pre-boundary trial failure")
+}
+
+func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
+	for _, line := range []q.Dimension{q.DimensionTTFO, q.DimensionError, q.DimensionCache} {
+		t.Run(string(line), func(t *testing.T) {
+			f := newQualityFixture(t)
+			bucket := f.now.UTC().Truncate(q.RegularInterval)
+			f.now = bucket.Add(3 * time.Second)
+			f.badTTFT()
+			f.cycle()
+			require.NotContains(t, f.e.peerBuckets, bucket)
+			policy := f.store.Policies[10].Policy
+			switch line {
+			case q.DimensionTTFO:
+				policy.TTFTSeconds = 2
+			case q.DimensionError:
+				policy.MaxErrorRate = .1
+			case q.DimensionCache:
+				policy.MinCacheRatio = .7
+			}
+			_, err := f.e.UpdatePolicy(context.Background(), 10, 0, policy)
+			require.NoError(t, err)
+			require.NotContains(t, f.e.peerBuckets, bucket, "immediate reevaluation uses disposable membership before replay reaches the bucket")
 		})
 	}
 }

@@ -100,7 +100,7 @@ func TestProfitControl_PricingAtFixesDownstreamPeakFactor(t *testing.T) {
 
 // pricingAt 早于探测接收时刻时不能使用未来探测，回到已校验的账号倍率。
 func TestProfitControl_UsesAccountRateInsteadOfProbeSnapshot(t *testing.T) {
-	gate := &openAIProfitControlGate{threshold: 0.5, pricingAt: time.Now().Add(-12 * time.Hour)}
+	gate := &openAIProfitControlGate{ceilingOn: true, threshold: 0.5, pricingAt: time.Now().Add(-12 * time.Hour)}
 	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, gate)
 	account := upstreamCostTestAccount(9, UpstreamBillingProbeStatusOK, 0.1, time.Now().Add(-3*time.Hour), 30*time.Minute)
 	profitControlTestAccountWithRate(account, 0.8)
@@ -181,7 +181,7 @@ func TestOpenAIProfitControlStickyBindingOccursOnlyAfterTerminalAdmission(t *tes
 		sessionBindings: map[string]int64{cacheKey: expensiveID},
 	}
 	svc := &OpenAIGatewayService{cache: cache}
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true,
 		groupID:   groupID,
 		platform:  PlatformOpenAI,
 		threshold: 0.5,

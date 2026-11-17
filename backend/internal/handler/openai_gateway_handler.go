@@ -854,7 +854,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, previousResponseID != "", selectNext, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
-			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
+			// 准入终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
 			// 否决次数达上限则直接终止，避免排队抢槽后才终检的延迟放大。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
@@ -1524,7 +1524,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, false, selectNext, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
-			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
+			// 准入终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
 			// 否决次数达上限则直接终止，避免排队抢槽后才终检的延迟放大。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
@@ -2340,7 +2340,7 @@ const (
 	openAISlotAcquireOK openAISlotAcquireResult = iota
 	// openAISlotAcquireFailed：错误响应已写出，调用方直接 return。
 	openAISlotAcquireFailed
-	// openAISlotAcquireProfitVetoed：槽位获取成功后利润终检否决。槽位已释放、
+	// openAISlotAcquireProfitVetoed：槽位获取成功后准入终检否决。槽位已释放、
 	// 未写任何响应；调用方应经 recordOpenAIProfitVeto 把该账号加入本请求排除集
 	// 后重新选号，全池耗尽由下一轮选号返回标准 no available accounts。
 	openAISlotAcquireProfitVetoed
@@ -2489,7 +2489,7 @@ func refreshOpenAIWSTurnBillingAPIKey(ctx context.Context, lookup openAIWSTurnAP
 	return &turnKey
 }
 
-// recordOpenAIProfitVeto 记录 OpenAI 侧选号循环的一次利润门终检否决：把账号
+// recordOpenAIProfitVeto 记录 OpenAI 侧选号循环的一次准入终检否决：把账号
 // 加入本请求排除集并递增否决计数。返回 false 表示否决次数已达
 // maxProfitVetoAttempts，调用方必须停止重选并按「无可用账号」终止。
 //
@@ -2503,7 +2503,7 @@ func recordOpenAIProfitVeto(failedAccountIDs map[int64]struct{}, accountID int64
 	return *vetoCount < maxProfitVetoAttempts
 }
 
-// handleOpenAIProfitVetoExhausted 在利润否决预算耗尽时写出错误响应。
+// handleOpenAIProfitVetoExhausted 在准入否决预算耗尽时写出错误响应。
 // 与 acquireResponsesAccountSlot 内部的 no-available-accounts 失败分支同形，
 // 保证同一调用方在两条路径上拿到一致的响应格式。
 func (h *OpenAIGatewayHandler) handleOpenAIProfitVetoExhausted(
@@ -2543,7 +2543,18 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	streamStarted *bool,
 	reqLog *zap.Logger,
 	writeError openAISlotErrorWriter,
-) (func(), openAISlotAcquireResult) {
+) (release func(), outcome openAISlotAcquireResult) {
+	defer func() {
+		if selection == nil || selection.Acquired {
+			return
+		}
+		cleanup := service.CombineSelectionRelease(selection, release)
+		if outcome == openAISlotAcquireOK {
+			release = wrapReleaseOnDone(c.Request.Context(), cleanup)
+		} else {
+			cleanup()
+		}
+	}()
 	if writeError == nil {
 		writeError = func(status int, errType, code, message string) {
 			h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, *streamStarted, false)
@@ -2565,12 +2576,12 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	ctx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 	account := selection.Account
 	if selection.Acquired {
-		latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
+		latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, false)
 		if vetoed {
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}
-			reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			return nil, openAISlotAcquireProfitVetoed
 		}
 		account = latest
@@ -2602,14 +2613,14 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		return nil, openAISlotAcquireFailed
 	}
 	if fastAcquired {
-		// 分组利润控制：快速抢槽成功后终检。选号与抢槽之间账号
-		// 倍率可能刷新，越线则释放槽位交由调用方排除重选，不绑定粘连。
-		latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
+		// 快速取槽复用刚读取的账号；若选号内部已等待则刷新权威状态。
+		// 拒绝时释放槽位并排除重选，不绑定粘连。
+		latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, false)
 		if vetoed {
 			if fastReleaseFunc != nil {
 				fastReleaseFunc()
 			}
-			reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			return nil, openAISlotAcquireProfitVetoed
 		}
 		account = latest
@@ -2619,7 +2630,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
+		return fastReleaseFunc, openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -2667,14 +2678,14 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
-	// 分组利润控制：WaitPlan 排队成功后终检。排队期间账号倍率
-	// 可能上调，越线则释放槽位交由调用方排除重选，不绑定粘连。
-	latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
+	// WaitPlan 排队成功后刷新账号及分组准入条件；不再符合条件时
+	// 释放槽位并交由调用方排除重选，不绑定粘连。
+	latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(ctx, selection, true)
 	if vetoed {
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
-		reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+		reqLog.Debug("openai.account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 		return nil, openAISlotAcquireProfitVetoed
 	}
 	account = latest
@@ -2684,7 +2695,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
+	return accountReleaseFunc, openAISlotAcquireOK
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
@@ -3135,13 +3146,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		admissionCtx := service.ContextWithSelectionProfitGate(ctx, selection)
 		accountReleaseFunc := selection.ReleaseFunc
 		if selection.Acquired {
-			// 调度器已抢槽路径同样终检：选号与抢槽之间账号倍率可能刷新。
-			latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(admissionCtx, account)
+			// 已取槽结果复用刚完成的准入；只有选号内部等待过才重新读库。
+			latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(admissionCtx, selection, false)
 			if vetoed {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
-				reqLog.Debug("openai.websocket_account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				reqLog.Debug("openai.websocket_account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 				if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
 					reqLog.Warn("openai.websocket_profit_veto_attempts_exhausted", zap.Int("profit_veto_count", profitVetoCount))
 					closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
@@ -3154,6 +3165,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		if !selection.Acquired {
 			if selection.WaitPlan == nil {
+				service.CombineSelectionRelease(selection, nil)()
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 				return
 			}
@@ -3163,22 +3175,25 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				selection.WaitPlan.MaxConcurrency,
 			)
 			if err != nil {
+				service.CombineSelectionRelease(selection, nil)()
 				reqLog.Warn("openai.websocket_account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire account concurrency slot")
 				return
 			}
 			if !fastAcquired {
+				service.CombineSelectionRelease(selection, nil)()
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 				return
 			}
-			// 分组利润控制：WS 快速抢槽成功后终检，越线则释放
+			fastReleaseFunc = service.CombineSelectionRelease(selection, fastReleaseFunc)
+			// WS 快速抢槽复查准入，若内部等待过则刷新账号；拒绝时释放
 			// 槽位、排除该账号重新选号，全池耗尽由下一轮选号关闭连接。
-			latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := h.gatewayService.SelectionAdmissionForResult(admissionCtx, selection, false)
 			if vetoed {
 				if fastReleaseFunc != nil {
 					fastReleaseFunc()
 				}
-				reqLog.Debug("openai.websocket_account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				reqLog.Debug("openai.websocket_account_slot_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 				if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
 					reqLog.Warn("openai.websocket_profit_veto_attempts_exhausted", zap.Int("profit_veto_count", profitVetoCount))
 					closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
@@ -3393,16 +3408,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					start = time.Now()
 				}
 				resilience.StateFrom(ctx).BeginGatewayTurn(start)
-				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
-					if userReleaseFunc != nil {
-						userReleaseFunc()
-					}
-					reqLog.Info("openai.websocket_turn_profit_vetoed",
-						zap.Int("turn", turn),
-						zap.Int64("account_id", account.ID),
-						zap.String("reason", reason))
-					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
-				}
+
 				// A full account gets the sticky short wait before the client
 				// is asked to reconnect; the user's own limit above does not.
 				var accountReleaseFunc func()
@@ -3422,6 +3428,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						userReleaseFunc()
 					}
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is busy, please retry later", nil)
+				}
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					turnAdmissionCtx = service.WithOpenAISelectionRequestModel(turnAdmissionCtx, snapshot.mapping.MappedModel)
+				}
+				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
+					}
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					reqLog.Info("openai.websocket_turn_admission_vetoed",
+						zap.Int("turn", turn),
+						zap.Int64("account_id", account.ID),
+						zap.String("reason", reason))
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)

@@ -299,12 +299,15 @@ func TestBrokenStreamUsageLiftsNoCooldown(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	st := resilience.NewRequestState()
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: transientCooldownStartedAt(repo.tempReason).Add(time.Second)})
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(resilience.WithRequestState(context.Background(), st))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: account.ID, Kind: "stream_error", Message: "upstream stream broke"})
 	r.NoteAccountSuccess(c.Request.Context(), account)
 	require.Zero(t, repo.clearCalls, "a broken stream keeps the cooldown")
 
-	r.NoteAccountSuccess(context.Background(), account)
+	success := resilience.NewRequestState()
+	success.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: transientCooldownStartedAt(repo.tempReason).Add(time.Second)})
+	r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), success), account)
 	require.Equal(t, 1, repo.clearCalls, "a real success of the last-resort account lifts it")
 }
 

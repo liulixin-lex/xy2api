@@ -31,4 +31,10 @@ func (s *OpenAIGatewayService) RefreshOpenAISelectionFlags(ctx context.Context, 
 		selection = &AccountSelectionResult{Account: account}
 	}
 	s.recordOpenAISelectionFlags(ctx, groupID, model, selection)
+	if account != nil {
+		group, session := resilience.StateFrom(ctx).SessionIdentity()
+		if group == derefGroupID(groupID) && session != "" {
+			s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, SessionHash: session, RequestedModel: model}, account.ID).touch(ctx, account)
+		}
+	}
 }

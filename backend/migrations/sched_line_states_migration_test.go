@@ -14,6 +14,7 @@ func TestSchedLineStatesMigration(t *testing.T) {
 	require.Contains(t, sql, "SET LOCAL lock_timeout = '5s';")
 	require.Contains(t, sql, "LOCK TABLE sched_decisions IN ACCESS EXCLUSIVE MODE;")
 	require.NotContains(t, sql, "NOWAIT")
+	require.Less(t, strings.Index(sql, "CREATE TABLE IF NOT EXISTS sched_line_states"), strings.Index(sql, "LOCK TABLE sched_decisions"))
 	require.Less(t, strings.Index(sql, "LOCK TABLE sched_decisions"), strings.Index(sql, "ALTER TABLE sched_decisions"))
 	require.Contains(t, sql, "PRIMARY KEY (account_id,model,group_id,line)")
 	require.Contains(t, sql, "identity IN (0,1,2)")

@@ -201,7 +201,10 @@ type SchedBoardRow struct {
 	AccountID   int64
 	Name        string
 	Rank        int
-	Layer       string // normal | below | stopped
+	Layer       string // front | trial | trial_full | rear | stopped
+	Lines       map[string]string
+	Pinned      bool
+	Excluded    string
 	Dims        []schedquality.Dimension
 	Until       *time.Time
 	Exempt      bool

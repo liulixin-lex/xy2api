@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -56,7 +57,12 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 	key = service.BillingAPIKey(c.Request.Context(), key)
 	requestType := int16(service.RequestTypeFromLegacy(stream, ws))
 	status := c.Writer.Status()
+	profitBasis, _ := json.Marshal(meta.ProfitBasis)
+	if meta.ProfitBasis == nil {
+		profitBasis = nil
+	}
 	row := &service.GatewayUnbilledRequest{
+		ProfitBasis:  profitBasis,
 		RequestScope: meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
 		RequestID: meta.RequestID, CreatedAt: meta.StartedAt, UserID: key.UserID, APIKeyID: key.ID, GroupID: key.GroupID,
 		Model: model, Stream: stream, RequestType: &requestType, Result: meta.Result, ErrorClass: meta.ErrorClass,

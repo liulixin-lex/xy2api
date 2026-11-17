@@ -144,7 +144,7 @@ func TestOpenAIProfitControlVetoReason(t *testing.T) {
 			if tc.oauth {
 				account.Type = AccountTypeOAuth
 			}
-			ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: tc.threshold, pricingAt: now})
+			ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{ceilingOn: true, threshold: tc.threshold, pricingAt: now})
 			vetoed, reason := openAIProfitControlVetoReason(ctx, account)
 			require.Equal(t, tc.want != "", vetoed)
 			require.Equal(t, tc.want, reason)

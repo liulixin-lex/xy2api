@@ -9,7 +9,8 @@ import (
 )
 
 type selectionKey struct {
-	Standing  int
+	Tier      int
+	Pinned    bool
 	Priority  int
 	RateKnown bool
 	Rate      float64
@@ -19,6 +20,10 @@ type selectionKey struct {
 }
 
 type selectionRequest struct {
+	Session             string
+	Owner               int64
+	Borrow              bool
+	Room                func(int64, string) bool
 	ManualOnly          bool
 	TokenBilled         bool
 	RequireCompact      bool
@@ -63,7 +68,8 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
-		Standing: int(selectionState(view, groupID, acc, model).Placement(!req.ManualOnly && selectionAuto(view, groupID, now), now)),
+		Tier:     selectionTier(view, groupID, model, acc, req, now),
+		Pinned:   acc.PinnedIn(groupID),
 		Priority: acc.Priority, RateKnown: !req.TokenBilled, ID: acc.ID,
 	}
 	if req.TokenBilled {
@@ -81,9 +87,29 @@ func buildSelectionKey(view schedquality.View, groupID int64, model string, acc 
 	return key
 }
 
+func selectionTier(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) int {
+	switch selectionState(view, groupID, acc, model).Placement(!req.ManualOnly && selectionAuto(view, groupID, now), now) {
+	case schedquality.PlaceRear:
+		return 2
+	case schedquality.PlaceTrial:
+		if req.Borrow && acc.ID != req.Owner {
+			return 3
+		}
+		if req.Session != "" && req.Owner == acc.ID || req.Room != nil && req.Room(acc.ID, OpenAIAttemptModel(acc, model)) {
+			return 0
+		}
+		return 1
+	default:
+		return 0
+	}
+}
+
 func selectionLess(a, b selectionKey) bool {
-	if a.Standing != b.Standing {
-		return a.Standing < b.Standing
+	if a.Tier != b.Tier {
+		return a.Tier < b.Tier
+	}
+	if a.Pinned != b.Pinned {
+		return a.Pinned
 	}
 	if a.Priority != b.Priority {
 		return a.Priority < b.Priority

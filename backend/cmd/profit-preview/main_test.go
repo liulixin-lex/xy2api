@@ -90,3 +90,13 @@ func TestModelsWithZeroRemainingWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestRatefloorPreviewInputCarriesFloorAndPin(t *testing.T) {
+	inputs, err := parsePreviewInputs([]byte(`{"groups":[{"group":{"id":7,"platform":"openai","rate_multiplier":1,"min_upstream_rate":0.4},"accounts":[{"id":1,"platform":"openai","type":"apikey","rate_multiplier":0.1,"pinned":true},{"id":2,"platform":"openai","type":"apikey","rate_multiplier":0.1}]}]}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *inputs[0].Group.MinUpstreamRate != 0.4 || !inputs[0].Accounts[0].PinnedIn(7) || inputs[0].Accounts[1].PinnedIn(7) {
+		t.Fatal("lost floor or group pinning")
+	}
+}

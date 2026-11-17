@@ -29,13 +29,29 @@ func markOpenAIStickySpillover(selection *AccountSelectionResult, spillover bool
 	return selection
 }
 
-func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) error {
+func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) (retErr error) {
 	if releasePendingOpenAIStickyOwner(ctx, groupID, sessionHash, owner) {
 		return nil
 	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) || s.cache == nil || owner <= 0 {
 		return nil
 	}
+	// Only clear a lease after the binding is confirmed absent or moved. An
+	// unavailable binding/model read leaves cleanup to the ten-minute expiry.
+	defer func() {
+		trial, _ := ctx.Value(selectionTrialContextKey{}).(*selectionTrial)
+		if retErr != nil || trial == nil && s.selectionTrialLeases() == nil {
+			return
+		}
+		if current, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); (err == nil || errors.Is(err, ErrStickySessionNotFound)) && current != owner {
+			// Legacy caches delete eagerly. Placement after a real deletion is a
+			// replacement, whereas an excluded or temporarily unavailable owner stays.
+			if trial != nil && trial.owner == owner {
+				trial.owner = current
+			}
+			s.releaseDeletedTrialOwner(ctx, groupID, sessionHash, owner)
+		}
+	}()
 	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, owner); handled {
 		return err
 	}
@@ -86,22 +102,22 @@ func (s *OpenAIGatewayService) openAIStickyBindingTTL(groupID *int64) time.Durat
 // recheckOpenAIStickyOwnerFromDB is recheckSelectedOpenAIAccountFromDB for a
 // sticky owner. transient reports a failed read of an existing account; the
 // owner is then skipped once and its binding kept.
-func (s *OpenAIGatewayService) recheckOpenAIStickyOwnerFromDB(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) (latest *Account, transient bool) {
+func (s *OpenAIGatewayService) recheckOpenAIStickyOwnerFromDB(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) (latest *Account, transient bool, profitReason string) {
 	if account == nil || s.schedulerSnapshot == nil || s.accountRepo == nil {
-		return s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability), false
+		latest = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	} else {
+		var err error
+		latest, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			return nil, err != nil && !errors.Is(err, ErrAccountNotFound), ""
+		}
+		latest = s.recheckLatestOpenAIAccount(ctx, latest, groupID, NormalizeOpenAICompatiblePlatform(platform), requestedModel, requireCompact, requiredCapability)
 	}
-	latest, err := s.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || latest == nil {
-		return nil, err != nil && !errors.Is(err, ErrAccountNotFound)
-	}
-	latest = s.recheckLatestOpenAIAccount(ctx, latest, groupID, NormalizeOpenAICompatiblePlatform(platform), requestedModel, requireCompact, requiredCapability)
 	if latest == nil {
-		return nil, false
+		return nil, false, ""
 	}
-	if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
-		return nil, false
-	}
-	return latest, false
+	_, profitReason = openAIProfitControlVetoReason(ctx, latest)
+	return latest, false, profitReason
 }
 
 type openAILegacyStickyCapacityKey struct{}
