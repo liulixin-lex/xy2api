@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -20,6 +21,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// SchedAttemptDetailOutputIncomplete identifies delivered output that did not
+// end normally; error attribution maps it to an interrupted output.
+const SchedAttemptDetailOutputIncomplete = "OUTPUT_INCOMPLETE"
+
 // SetSchedAttemptRecorder is called once during assembly, before serving requests.
 func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 	s.schedAttemptRecorder = r
@@ -33,6 +38,7 @@ type schedAttemptCapture struct {
 	accountID                                  int64
 	attempt                                    SchedAttempt
 	sendErr                                    error
+	networkErr                                 error
 	started                                    time.Time
 	first, done, client                        bool
 	expectTerminal, terminal, benignIncomplete bool
@@ -46,7 +52,7 @@ type schedAttemptCapture struct {
 	requestID                                  string
 	repairStep                                 bool
 	repairPrepared                             bool
-	unverifiedHTTP                             bool
+	projectedStatus                            int
 	terminalAt                                 time.Time
 	errorSource                                string
 	learnCapability                            func(int, []byte)
@@ -88,25 +94,27 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	if a.repairStep {
 		in.Class = schedquality.ClassRepairStep
 	}
-	failure := a.failure
-	if a.unverifiedHTTP && failure != nil {
-		copy := *failure
-		copy.StatusCode = 0
-		failure = &copy
+	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && !a.first && errors.Is(a.sendErr, bufio.ErrTooLong) {
+		in.Class = schedquality.ClassGateway
 	}
-	in = classifySchedAttempt(in, failure, a.first)
-	if a.unverifiedHTTP && a.failure != nil {
-		in.HTTPStatus, in.StatusOrigin = a.failure.StatusCode, schedquality.OriginNone
-	}
-	if in.HTTPStatus == 0 && a.httpStatus > 0 {
-		in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
+	in = classifySchedAttempt(in, a.failure, a.first)
+	if in.HTTPStatus == 0 {
+		if a.httpStatus > 0 {
+			in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
+		} else if a.projectedStatus > 0 {
+			in.HTTPStatus, in.StatusOrigin = a.projectedStatus, schedquality.OriginGateway
+		}
 	}
 	written := a.state.ClientOutputBytes() - a.outputStart
 	if written < 0 {
 		written = 0
 	}
 	in.OutputBytes = int(written)
-	logger.FromContext(a.ctx).Info("sched_quality.attempt_finished",
+	logFinish := logger.FromContext(a.ctx).Info
+	if in.Outcome == schedquality.OutcomeOK {
+		logFinish = logger.FromContext(a.ctx).Debug
+	}
+	logFinish("sched_quality.attempt_finished",
 		zap.String("component", "sched_quality"), zap.String("request_id", a.requestID),
 		zap.String("attempt_id", a.attemptID), zap.Int("outcome", int(in.Outcome)),
 		zap.String("class", in.Class.String()), zap.Int("status_origin", int(in.StatusOrigin)), zap.Int("http_status", in.HTTPStatus),
@@ -172,6 +180,41 @@ func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 		a.usage = usage
 	}
 }
+
+// classifySchedTerminal adapts only capture evidence. Forwarding keeps its SSE
+// envelope validation: bare JSON must not become an SSE terminal there.
+func classifySchedTerminal(data []byte) OpenAIResponsesTerminal {
+	terminal := ClassifyOpenAIResponsesTerminal("", data)
+	if !gjson.ValidBytes(data) {
+		return terminal
+	}
+	root := gjson.ParseBytes(data)
+	typ := root.Get("type").String()
+	if !root.IsObject() || root.Get("response").Exists() {
+		return terminal
+	}
+	var envelope []byte
+	if typ == "" || typ == "response" {
+		switch status := root.Get("status").String(); status {
+		case "completed", "incomplete", "failed", "cancelled", "canceled":
+			envelope = []byte(`{"type":"response.` + status + `","response":` + string(data) + `}`)
+		}
+	} else if isOpenAIWSTerminalEvent(typ) {
+		// WS readers accept terminal types without a response shell. HTTP
+		// readers can still reject them: their returned error wins in finish.
+		envelope = []byte(`{"type":"` + typ + `","response":{}}`)
+		if typ == "response.done" {
+			envelope = []byte(`{"type":"response.done","response":{"status":"completed"}}`)
+		}
+	}
+	if envelope != nil {
+		adapted := ClassifyOpenAIResponsesTerminal("", envelope)
+		adapted.ErrorPresent = adapted.ErrorPresent || terminal.ErrorPresent
+		return adapted
+	}
+	return terminal
+}
+
 func (a *schedAttemptCapture) observe(data []byte) {
 	if a == nil {
 		return
@@ -199,10 +242,18 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.markTerminal()
 		}
 	}
-	terminal := ClassifyOpenAIResponsesTerminal("", data)
+	terminalEvent := typ
+	if terminalEvent == "" {
+		terminalEvent = "response." + root.Get("status").String()
+	}
+	if isOpenAIWSTerminalEvent(terminalEvent) || terminalEvent == "error" {
+		a.mu.Lock()
+		a.terminalEvent = terminalEvent
+		a.mu.Unlock()
+	}
+	terminal := classifySchedTerminal(data)
 	if terminal.Seen {
 		a.mu.Lock()
-		a.terminalEvent = terminal.EventType
 		a.terminal = a.terminal || terminal.Valid
 		// Some Responses transports accept a typed provisional error followed
 		// by a completed response. Keep their final decision: explicit failed
@@ -211,6 +262,11 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.failure = nil
 		}
 		a.mu.Unlock()
+	}
+	// Readers retain response.done as a successful envelope regardless of its
+	// nested status. A forwarding error still takes precedence in finish.
+	if typ == "response.done" {
+		return
 	}
 	if terminal.BenignIncomplete() {
 		a.mu.Lock()
@@ -304,20 +360,21 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.done {
-		return
-	}
 	if result != nil {
 		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
 		if result.UpstreamTerminalEvent == "" {
 			result.UpstreamTerminalEvent = a.terminalEvent
 		}
 	}
+	if a.done {
+		return
+	}
 	if err == nil {
 		err = a.sendErr
 	}
 	var repairSignal *openAIRequestRepairSignal
-	if !a.repairStep && errors.As(err, &repairSignal) && repairSignal != nil && len(repairSignal.next) > 0 {
+	var searchSignal *openAIWebSearchReplaySignal
+	if !a.repairStep && (errors.As(err, &repairSignal) && repairSignal != nil && len(repairSignal.next) > 0 || errors.As(err, &searchSignal) && searchSignal != nil) {
 		// A prepared replay is not yet a resend. Keep this refusal pending
 		// through the forwarding defers until transport starts the next send.
 		return
@@ -330,6 +387,10 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
+	var httpErr *UpstreamFailoverError
+	if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
+		a.projectedStatus = httpErr.StatusCode
+	}
 	canceled := a.client || a.state.ClientCanceled()
 	// The reader can prove a complete JSON document despite an SSE header.
 	// Such responses do not require an SSE terminal (status may be omitted).
@@ -344,29 +405,25 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Class: schedquality.ClassClientCancel, Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
+	if httpErr != nil {
+		if httpErr.BudgetCutPlan != nil || httpErr.PreDispatchSelectionInvalidated {
+			a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassGateway, HTTPStatus: httpErr.StatusCode, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryTransient), Usage: a.usage})
+			return
+		}
+	}
 	failure := a.failure
-	if failure == nil && err != nil {
-		var httpErr *UpstreamFailoverError
-		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
-			// This error can carry a gateway projection; only captured HTTP
-			// headers establish a real upstream status.
-			a.unverifiedHTTP = a.httpStatus == 0
-			failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
-			if a.httpStatus > 0 {
-				failure.StatusCode = a.httpStatus
-				if a.httpStatus < 400 {
-					failure.Source = resilience.SourceStreamEvent
-				}
-			}
-			if httpErr.BudgetCutPlan != nil || httpErr.PreDispatchSelectionInvalidated {
-				a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassGateway, HTTPStatus: httpErr.StatusCode, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryTransient), Usage: a.usage})
-				return
-			}
-		} else {
-			var networkError net.Error
-			if a.sendErr != nil || errors.As(err, &networkError) {
-				failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: err}
-			}
+	if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+		a.networkErr = a.sendErr
+	}
+	if failure == nil && a.networkErr != nil {
+		failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: a.networkErr}
+	}
+	if failure == nil && err != nil && httpErr != nil {
+		// A projected status is not an upstream response head. Preserve any
+		// structured refusal while keeping that projection out of attribution.
+		failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: a.httpStatus, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
+		if a.httpStatus > 0 && a.httpStatus < 400 {
+			failure.Source = resilience.SourceStreamEvent
 		}
 	}
 	a.failure = failure
@@ -377,9 +434,14 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
-			terminal := ClassifyOpenAIResponsesTerminal("", failure.Body)
+			if httpErr != nil && a.httpStatus == 0 && a.networkErr == nil {
+				// Detail is the existing resilience diagnostic, independent of
+				// quality attribution and the provenance of the projected status.
+				detail = string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}).Category)
+			}
+			terminal := classifySchedTerminal(failure.Body)
 			if failure.Source == resilience.SourceStreamEvent && terminal.Valid && terminal.Status == "incomplete" && !terminal.BenignIncomplete() {
-				detail = "OUTPUT_INCOMPLETE"
+				detail = SchedAttemptDetailOutputIncomplete
 			}
 		}
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
@@ -410,6 +472,12 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
+		if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+			a.networkErr = a.sendErr
+		}
+		if a.failure == nil && a.networkErr != nil {
+			a.failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: a.networkErr}
+		}
 		noteOpenAIStickyAttemptOutcome(a, false)
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
@@ -495,7 +563,7 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		}
 	}
 	if err != nil {
-		(*owner).noteError(err)
+		(*owner).noteNetworkError(err)
 	}
 	return resp, err
 }
@@ -565,6 +633,10 @@ func (a *schedAttemptCapture) noteError(err error) {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.sendErr = err
+		var networkError net.Error
+		if a.networkErr == nil && (errors.As(err, &networkError) || errors.Is(err, io.ErrUnexpectedEOF)) {
+			a.networkErr = err
+		}
 		if a.errorSource == "" {
 			a.errorSource = "upstream_read_or_send"
 		}
@@ -572,7 +644,7 @@ func (a *schedAttemptCapture) noteError(err error) {
 }
 func noteSchedError(c *gin.Context, err error) {
 	if c != nil && c.Request != nil {
-		currentSchedAttempt(c.Request.Context()).noteError(err)
+		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
 	}
 }
 func noteSchedStall(c *gin.Context) {
@@ -596,7 +668,7 @@ func finishSchedRead(c *gin.Context, err error) {
 	// EOF may precede buffered delivery or a protocol conversion's final
 	// output. The forwarding function owns successful completion.
 	if !errors.Is(err, io.EOF) {
-		currentSchedAttempt(c.Request.Context()).noteError(err)
+		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
 	}
 }
 
@@ -678,4 +750,21 @@ func schedRelativeMillis(start, at time.Time) *int64 {
 	}
 	ms := at.Sub(start).Milliseconds()
 	return &ms
+}
+
+// Called at transport/consumer read boundaries, before a retry error replaces
+// the original cause. Later wrapping and cleanup cannot erase this evidence.
+func (a *schedAttemptCapture) noteNetworkError(err error) {
+	if a == nil || err == nil {
+		return
+	}
+	a.noteError(err)
+	if errors.Is(err, bufio.ErrTooLong) {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.done && a.networkErr == nil {
+		a.networkErr = err
+	}
 }

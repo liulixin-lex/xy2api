@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -23,15 +24,8 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		return in
 	}
 	in.Class = schedquality.ClassUnknown
-	if in.StatusOrigin == schedquality.OriginGateway {
-		in.Class = schedquality.ClassGateway
-		if in.HTTPStatus == http.StatusBadRequest || in.HTTPStatus == http.StatusNotFound {
-			in.Class = schedquality.ClassRequest
-		}
-		return in
-	}
 	if failure == nil {
-		if output || in.Detail == "OUTPUT_INCOMPLETE" {
+		if output || in.Detail == SchedAttemptDetailOutputIncomplete {
 			in.Class = schedquality.ClassInterrupted
 		}
 		return in
@@ -46,23 +40,25 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		code = fields.Get("code").String()
 	}
 	if message == "" {
-		message = fields.Get("message").String()
+		message = schedErrorMessage(o.Body)
 	}
-	capabilityStatus := o.StatusCode
-	if o.Source == resilience.SourceStreamEvent {
-		capabilityStatus = http.StatusBadRequest
+	isEvent := o.Source == resilience.SourceStreamEvent
+	if isEvent {
+		// HTTPStatus above remains the actual response head (usually 200).
+		// An explicit event status controls attribution only.
+		o.StatusCode = UpstreamErrorEventStatus(o.Body)
+	}
+	capability := IsUpstreamCapabilityFailure(o.StatusCode, o.Body)
+	if isEvent {
+		capability = IsUpstreamCapabilityEventFailure(o.Body)
 	}
 	result := classifyUpstreamOutcome(o)
 	switch {
-	case o.Source == resilience.SourceClientCancel:
-		in.Class = schedquality.ClassClientCancel
-	case o.Source == resilience.SourceFirstOutputTimeout:
-		in.Class, in.HTTPStatus, in.StatusOrigin = schedquality.ClassFirstOutputTimeout, http.StatusGatewayTimeout, schedquality.OriginGateway
-	case output || in.Detail == "OUTPUT_INCOMPLETE":
+	case output || in.Detail == SchedAttemptDetailOutputIncomplete:
 		in.Class = schedquality.ClassInterrupted
 	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
 		in.Class = schedquality.ClassMigration400
-	case IsUpstreamCapabilityFailure(capabilityStatus, o.Body):
+	case capability:
 		in.Class = schedquality.ClassCapability
 	case result.Category == resilience.CategoryBalance && strings.Contains(strings.ToLower(message), "upstream image account"):
 		in.Class = schedquality.ClassUpstream
@@ -70,11 +66,11 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassAccountAccess
 	case schedAccountCapacity(code, message):
 		in.Class = schedquality.ClassAccountCapacity
-	case schedRequestMessage(message) || resilience.IsContextWindowError(message, o.Body) || result.Category == resilience.CategoryUpstreamRequestRestriction || result.Category == resilience.CategoryClientError && !result.StatusOnly():
+	case result.Category == resilience.CategoryUpstreamRequestRestriction || o.StatusCode < 500 && (schedRequestMessage(message) || resilience.IsContextWindowError(message, o.Body) || result.Category == resilience.CategoryClientError && !result.StatusOnly()):
 		in.Class = schedquality.ClassRequest
 	case result.Category == resilience.CategoryCapacityShed:
 		in.Class = schedquality.ClassUpstream
-	case o.Source == resilience.SourceHTTP && o.StatusCode >= 500:
+	case (o.Source == resilience.SourceHTTP || isEvent) && o.StatusCode >= 500:
 		in.Class = schedquality.ClassUpstream
 	case o.Source == resilience.SourceNetwork && o.Err != nil && !errors.Is(o.Err, context.Canceled) && !errors.Is(o.Err, context.DeadlineExceeded):
 		in.Class = schedquality.ClassUpstream
@@ -84,7 +80,10 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 
 func schedMigrationMessage(message string) bool {
 	m := strings.ToLower(message)
-	for _, phrase := range []string{"no tool call found for function call output", "tool_use ids were found without tool_result", "tool_result blocks must have a corresponding tool_use", "previous_response_id is not supported", "previous response not found"} {
+	if strings.Contains(m, "function_call_output") && strings.Contains(m, "matching the") && strings.Contains(m, "tool call") {
+		return true
+	}
+	for _, phrase := range []string{"no tool call found for function call output", "tool_use ids were found without tool_result", "tool_result blocks must have a corresponding tool_use", "previous_response_id is not supported", "previous_response_id is only supported on responses websocket", "previous response not found"} {
 		if strings.Contains(m, phrase) {
 			return true
 		}
@@ -94,17 +93,20 @@ func schedMigrationMessage(message string) bool {
 
 func schedAccountCapacity(code, message string) bool {
 	switch strings.ToLower(code) {
-	case "account_limit_exceeded", "account_rate_limit_exceeded", "concurrency_limit_exceeded", "account_pool_exhausted", "credentials_exhausted":
+	case "account_limit_exceeded", "account_rate_limit_exceeded", "concurrency_limit_exceeded", "account_pool_exhausted", "credentials_exhausted", "model_cooldown":
 		return true
 	}
-	m := strings.ToLower(message)
+	m := strings.ToLower(strings.Join(strings.Fields(message), " "))
+	if schedAccountLimitTemplate.MatchString(m) || schedPoolTemplate.MatchString(m) {
+		return true
+	}
 	for _, phrase := range []string{"account limit reached", "account rate limit", "concurrency limit exceeded", "concurrency limit reached", "no available credentials", "no available accounts"} {
 		if strings.Contains(m, phrase) {
 			return true
 		}
 	}
 	if strings.Contains(m, "all credentials") || strings.Contains(m, "all accounts") {
-		for _, exhausted := range []string{"exhausted", "rate limited", "rate-limited", "unavailable", "cooldown"} {
+		for _, exhausted := range []string{"exhausted", "rate limited", "rate-limited", "unavailable", "cooldown", "cooling down"} {
 			if strings.Contains(m, exhausted) {
 				return true
 			}
@@ -126,7 +128,15 @@ func IsUpstreamCapabilityFailure(status int, body []byte) bool {
 	if !gjson.ValidBytes(body) {
 		return false
 	}
-	if resilience.IsModelUnsupportedResponse(status, body) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(body) {
+	modelBody := body
+	if !schedErrorFields(body).IsObject() {
+		if message := schedErrorMessage(body); message != "" {
+			// Apply the existing narrow model predicate to string envelopes too.
+			encoded, _ := json.Marshal(message)
+			modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
+		}
+	}
+	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
 		return true
 	}
 	fields := schedErrorFields(body)
@@ -144,7 +154,7 @@ func IsUpstreamCapabilityFailure(status int, body []byte) bool {
 		return false
 	}
 	message := strings.ToLower(strings.Join(strings.Fields(schedErrorMessage(body)), " "))
-	if schedUnsupportedModelMessage.MatchString(message) {
+	if schedUnsupportedModelMessage.MatchString(message) || schedProtocolTemplate.MatchString(message) {
 		return true
 	}
 	for _, phrase := range []string{
@@ -173,7 +183,7 @@ func schedErrorFields(body []byte) gjson.Result {
 
 func schedRequestMessage(message string) bool {
 	m := strings.ToLower(message)
-	for _, phrase := range []string{"invalid parameter", "invalid type", "request too large", "request body too large", "request entity too large", "payload too large"} {
+	for _, phrase := range []string{"invalid parameter", "invalid request parameter", "invalid type", "request too large", "request body too large", "request entity too large", "payload too large"} {
 		if strings.Contains(m, phrase) {
 			return true
 		}
@@ -196,4 +206,26 @@ func schedErrorMessage(body []byte) string {
 		}
 	}
 	return ""
+}
+
+var schedAccountLimitTemplate = regexp.MustCompile(`\baccount(?: \S+)? limit reached\b`)
+var schedPoolTemplate = regexp.MustCompile(`(?:^all available accounts are .+ please retry\b|^all credentials for model \S+ are .+)`)
+var schedProtocolTemplate = regexp.MustCompile(`(?:\bfrontend requests .+ are not supported on this .+|\bsupports text and https input_image content only\b)`)
+
+// UpstreamErrorEventStatus is shared by quality attribution and capability
+// learning. Only explicit integer 400..599 values in supported error envelopes
+// count; an event without one uses the established 400 fallback. This semantic
+// status never replaces the real HTTP response head in a captured sample.
+func UpstreamErrorEventStatus(payload []byte) int {
+	if status, ok := openAIModelAvailabilityExplicitStatus(payload); ok {
+		return status
+	}
+	return http.StatusBadRequest
+}
+
+// IsUpstreamCapabilityEventFailure excludes the HTTP 401 compatibility
+// exception: an in-band event has not established that account qualification.
+func IsUpstreamCapabilityEventFailure(payload []byte) bool {
+	status := UpstreamErrorEventStatus(payload)
+	return status != http.StatusUnauthorized && IsUpstreamCapabilityFailure(status, payload)
 }

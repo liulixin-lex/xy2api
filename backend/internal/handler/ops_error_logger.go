@@ -227,8 +227,8 @@ func enqueueOpsErrorLog(ops *service.OpsService, entry *service.OpsInsertErrorLo
 	if ops == nil || entry == nil {
 		return
 	}
-	if entry.UpstreamStatusCode == nil && (entry.ErrorOwner == "gateway" || entry.ErrorPhase == "routing" || entry.ErrorPhase == "auth") {
-		entry.StatusOrigin = 2
+	if entry.UpstreamStatusCode == nil {
+		entry.StatusOrigin = 0
 	}
 	applyBudgetCutErrorOwner(entry)
 	entry.UserAgent = normalizeOpsPersistentUserAgent(entry.UserAgent)
@@ -1270,7 +1270,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		ErrorType:         normalizedType,
 		Severity:          classifyOpsSeverity(normalizedType, status),
 		StatusCode:        status,
-		ClientStatus:      c.Writer.Status(),
+		ClientStatus:      opsClientStatus(c),
 		IsBusinessLimited: isBusinessLimited,
 		IsCountTokens:     isCountTokensRequest(c),
 
@@ -1321,7 +1321,7 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 		return
 	}
 
-	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus, ClientStatus: c.Writer.Status()}
+	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus, ClientStatus: opsClientStatus(c)}
 	applyOpsUpstreamFieldsFromContext(c, entry)
 	if len(entry.UpstreamErrors) > 0 {
 		visibleEvents := make([]*service.OpsUpstreamErrorEvent, 0, len(entry.UpstreamErrors))
@@ -1590,7 +1590,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		ErrorType:         normalizedType,
 		Severity:          classifyOpsSeverity(normalizedType, classifyStatus),
 		StatusCode:        recordedStatus,
-		ClientStatus:      wireStatus,
+		ClientStatus:      opsClientStatus(c),
 		IsBusinessLimited: isBusinessLimited,
 		IsCountTokens:     isCountTokensRequest(c),
 
@@ -2622,4 +2622,12 @@ func shouldSkipOpsClientClosed(c *gin.Context, ops *service.OpsService, status i
 // 统一落一条 status=403 的错误请求，故中间件跳过自身落库，避免双写。
 func shouldSkipOpsErrorLogForCyber(c *gin.Context) bool {
 	return service.GetOpsCyberPolicy(c) != nil
+}
+
+// Gin defaults to 200 even before a response has been committed.
+func opsClientStatus(c *gin.Context) int {
+	if c == nil || c.Writer == nil || !c.Writer.Written() {
+		return 0
+	}
+	return c.Writer.Status()
 }

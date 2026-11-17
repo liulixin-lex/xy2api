@@ -3186,6 +3186,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if sawFailedEvent {
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
+			schedCapture.noteNetworkError(err)
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err)
 			}

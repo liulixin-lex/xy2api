@@ -48,3 +48,23 @@ func TestClassifyOpenAIResponsesTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyOpenAIResponsesTerminalKeepsSSEEnvelopeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, event, data string
+		want              OpenAIResponsesTerminal
+	}{
+		{"named_completed_bare_response", "response.completed", `{"object":"response","status":"completed"}`, OpenAIResponsesTerminal{Seen: true, Failure: true, EventType: "response.completed", Reason: "missing_response"}},
+		{"named_failed_bare_response", "response.failed", `{"object":"response","status":"failed"}`, OpenAIResponsesTerminal{Seen: true, Failure: true, EventType: "response.failed", Reason: "missing_response"}},
+		{"data_only_completed", "", `{"object":"response","status":"completed"}`, OpenAIResponsesTerminal{}},
+		{"data_only_failed", "", `{"object":"response","status":"failed"}`, OpenAIResponsesTerminal{}},
+		{"data_only_incomplete", "", `{"status":"incomplete","incomplete_details":{"reason":"interrupted"}}`, OpenAIResponsesTerminal{}},
+		{"nonterminal_with_status", "", `{"type":"response.output_text.delta","status":"completed","delta":"hello"}`, OpenAIResponsesTerminal{EventType: "response.output_text.delta"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifyOpenAIResponsesTerminal(tc.event, []byte(tc.data)); got != tc.want {
+				t.Fatalf("got %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}

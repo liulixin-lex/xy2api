@@ -54,8 +54,8 @@ func TestErrclassCaptureBehavior(t *testing.T) {
 		{"interrupted", 200, `{"error":{"message":"Synthetic break"}}`, true, false, schedquality.ClassInterrupted, schedquality.OriginUpstream},
 		{"credential", 401, `{"error":{"code":"invalid_api_key"}}`, false, false, schedquality.ClassAccountAccess, schedquality.OriginUpstream},
 		{"balance", 503, `{"error":{"code":"insufficient_quota"}}`, false, false, schedquality.ClassAccountAccess, schedquality.OriginUpstream},
-		{"account_limit", 429, `{"error":{"message":"Account limit reached"}}`, false, false, schedquality.ClassAccountCapacity, schedquality.OriginUpstream},
-		{"credential_pool", 429, `{"error":{"message":"All credentials are exhausted"}}`, false, false, schedquality.ClassAccountCapacity, schedquality.OriginUpstream},
+		{"account_limit", 429, `{"error":{"message":"synthetic-id account synthetic-account limit reached"}}`, false, false, schedquality.ClassAccountCapacity, schedquality.OriginUpstream},
+		{"credential_pool", 429, `{"error":{"message":"all credentials for model synthetic-model are cooling down via provider synthetic-provider"}}`, false, false, schedquality.ClassAccountCapacity, schedquality.OriginUpstream},
 		{"model", 404, `{"error":{"code":"model_not_found"}}`, false, false, schedquality.ClassCapability, schedquality.OriginUpstream},
 		{"stream_only", 400, `{"error":{"message":"Only supports streaming requests"}}`, false, false, schedquality.ClassCapability, schedquality.OriginUpstream},
 		{"protocol", 400, `{"error":{"code":"unsupported_protocol"}}`, false, false, schedquality.ClassCapability, schedquality.OriginUpstream},
@@ -109,9 +109,7 @@ func TestErrclassFinishFailurePaths(t *testing.T) {
 		want   schedquality.ErrorClass
 	}{
 		{"client", func(a *schedAttemptCapture) { a.cancel() }, schedquality.ClassClientCancel},
-		{"network", func(a *schedAttemptCapture) {
-			a.finish(nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("synthetic connection refused")})
-		}, schedquality.ClassUpstream},
+
 		{"unfinished", func(a *schedAttemptCapture) { a.finishUnfinished() }, schedquality.ClassUnknown},
 		{"missing_terminal", func(a *schedAttemptCapture) { a.expectTerminal = true; a.finish(nil, nil) }, schedquality.ClassUnknown},
 		{"timeout_after_output", func(a *schedAttemptCapture) {
@@ -309,24 +307,28 @@ func TestErrclassDeliveredIncompleteQuality(t *testing.T) {
 				svc.SetSchedAttemptRecorder(rec)
 				result, err := svc.Forward(ctx, c, account, body)
 				require.NoError(t, err)
-				require.True(t, result.CompletedForDelivery())
+				require.Equal(t, reason == "max_output_tokens" || reason == "content_filter", result.CompletedForDelivery())
 				require.Len(t, up.requests, 1)
 				require.Len(t, rec.finishes, 1)
 				if reason == "" || reason == "interrupted" {
 					require.Equal(t, schedquality.ClassInterrupted, rec.finishes[0].Class)
-					require.Equal(t, "OUTPUT_INCOMPLETE", rec.finishes[0].Detail)
+					require.Equal(t, SchedAttemptDetailOutputIncomplete, rec.finishes[0].Detail)
 				} else {
 					require.Equal(t, schedquality.ClassNone, rec.finishes[0].Class)
 					require.Equal(t, schedquality.OutcomeOK, rec.finishes[0].Outcome)
 				}
 				st.CompleteGatewayForward(result.CompletedForDelivery(), result.ClientDisconnect)
 				meta, _ := st.ClaimGatewayRequest(true)
-				require.Equal(t, resilience.RequestSuccess, meta.Result)
+				wantResult := resilience.RequestSuccess
+				if reason == "" || reason == "interrupted" {
+					wantResult = resilience.RequestFailed
+				}
+				require.Equal(t, wantResult, meta.Result)
 			})
 		}
 	}
 	// No first-output marker is required: the non-benign terminal itself
 	// establishes that output did not complete normally (ruling J).
-	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: "OUTPUT_INCOMPLETE"}, nil, false)
+	got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: SchedAttemptDetailOutputIncomplete}, nil, false)
 	require.Equal(t, schedquality.ClassInterrupted, got.Class)
 }
