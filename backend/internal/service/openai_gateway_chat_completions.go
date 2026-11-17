@@ -838,6 +838,7 @@ func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
 		return err
 	}
 
+	noteSchedError(c, readErr.cause)
 	classifiedErr := newOpenAIUpstreamStreamReadError(readErr.cause)
 	code, message, ok := OpenAIUpstreamStreamReadErrorDetails(classifiedErr)
 	if !ok {
@@ -1516,6 +1517,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return missingTerminalErr()
 			}
 			if ev.err != nil {
+				noteSchedError(c, ev.err)
 				if cancelErr := canceledPrelude(); cancelErr != nil {
 					return nil, cancelErr
 				}

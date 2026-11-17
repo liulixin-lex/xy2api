@@ -578,6 +578,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	if !clientAborted && (terminal.IsTruncated(clientOutputStarted) || scanErr != nil && !terminal.Terminated()) {
 		partialFailure = true
 		cause := scanErr
+		if scanErr != nil {
+			noteSchedError(c, scanErr)
+		}
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
 		}

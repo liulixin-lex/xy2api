@@ -261,3 +261,81 @@ func TestM8GatewayMetadataFreeze(t *testing.T) {
 		require.Equal(t, first, second)
 	})
 }
+
+func TestGatewayRequestRescueRequiresEarlierFailedSend(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sends    int
+		failedAt int
+		want     int16
+	}{
+		{"single contradictory capture", 1, 1, RequestSuccess},
+		{"two successful sends", 2, 0, RequestSuccess},
+		{"only last capture failed", 2, 2, RequestSuccess},
+		{"earlier send failed", 2, 1, RequestRescued},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewRequestState()
+			st.EnableGatewayRequest(time.Now())
+			id := st.GatewayRequestID()
+			for i := 1; i <= tc.sends; i++ {
+				st.NoteGatewaySend(1)
+				st.NoteGatewayAttempt(i != tc.failedAt, "synthetic", nil, nil, nil)
+			}
+			st.CompleteGatewayForward(true, false)
+			meta, write := st.ClaimGatewayRequest(true)
+			require.False(t, write)
+			require.Equal(t, tc.want, meta.Result)
+			require.Equal(t, id, meta.RequestID)
+			require.NotEmpty(t, meta.RequestID)
+			st.NoteGatewayAttempt(false, "late cleanup", nil, nil, nil)
+			frozen, _ := st.ClaimGatewayRequest(false)
+			require.Equal(t, meta, frozen)
+		})
+	}
+}
+
+func TestGatewaySendClearsPreviousHTTPStatus(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		st := NewRequestState()
+		if enabled {
+			st.EnableGatewayRequest(time.Now())
+		}
+		st.NoteUpstreamHTTPStatus(1, 502)
+		require.Equal(t, 502, st.UpstreamHTTPStatus(1))
+		st.NoteGatewaySend(2)
+		require.Zero(t, st.UpstreamHTTPStatus(0))
+		st.NoteUpstreamHTTPStatus(2, 200)
+		require.Zero(t, st.UpstreamHTTPStatus(1))
+		require.Equal(t, 200, st.UpstreamHTTPStatus(2))
+		st.NoteGatewaySend(2)
+		require.Zero(t, st.UpstreamHTTPStatus(2))
+	}
+}
+
+func TestGatewayRequestDeliveredIncompleteIsNotRescued(t *testing.T) {
+	st := NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	st.NoteGatewaySend(1)
+	st.NoteGatewayAttempt(false, "synthetic_quality_failure", nil, nil, nil)
+	st.CompleteGatewayForward(true, false)
+	meta, _ := st.ClaimGatewayRequest(true)
+	require.Equal(t, RequestSuccess, meta.Result)
+	require.Equal(t, "synthetic_quality_failure", meta.ErrorClass)
+}
+
+func TestGatewayAttemptKeepsItsRequestIdentity(t *testing.T) {
+	st := NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	st.NoteGatewaySend(1)
+	previous := st.GatewayRequestID()
+	st.BeginGatewayTurn(time.Now())
+	st.NoteGatewaySend(1)
+	usage := 7
+	st.NoteGatewayAttemptForRequest(previous, false, "synthetic_quality_failure", &usage, nil, nil)
+	st.CompleteGatewayForward(true, false)
+	meta, _ := st.ClaimGatewayRequest(true)
+	require.Equal(t, RequestSuccess, meta.Result)
+	require.Empty(t, meta.ErrorClass)
+	require.Nil(t, meta.InputTokens)
+}

@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net"
@@ -13,8 +15,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // SchedAttemptDetailOutputIncomplete identifies delivered output that did not
@@ -34,12 +38,23 @@ type schedAttemptCapture struct {
 	accountID                                  int64
 	attempt                                    SchedAttempt
 	sendErr                                    error
+	networkErr                                 error
 	started                                    time.Time
 	first, done, client                        bool
 	expectTerminal, terminal, benignIncomplete bool
 	terminalEvent                              string
 	failure                                    *resilience.Outcome
 	usage                                      *SchedAttemptUsage
+	httpStatus                                 int
+	outputStart                                int64
+	bodyHash                                   [32]byte
+	attemptID                                  string
+	requestID                                  string
+	repairStep                                 bool
+	repairPrepared                             bool
+	projectedStatus                            int
+	terminalAt                                 time.Time
+	errorSource                                string
 }
 
 func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
@@ -53,7 +68,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}}
+	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
@@ -65,13 +80,48 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
-		Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
+		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
 	a.attempt = s.schedAttemptRecorder.Begin(in)
+	if handle, ok := a.attempt.(*schedAttemptHandle); ok {
+		a.attemptID = handle.row.AttemptID
+	}
 	st.SetCurrentAttempt(a)
 	return a
 }
 
 func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
+	if a.repairStep {
+		in.Class = schedquality.ClassRepairStep
+	}
+	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && !a.first && errors.Is(a.sendErr, bufio.ErrTooLong) {
+		in.Class = schedquality.ClassGateway
+	}
+	in = classifySchedAttempt(in, a.failure, a.first)
+	if in.HTTPStatus == 0 {
+		if a.httpStatus > 0 {
+			in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
+		} else if a.projectedStatus > 0 {
+			in.HTTPStatus, in.StatusOrigin = a.projectedStatus, schedquality.OriginGateway
+		}
+	}
+	written := a.state.ClientOutputBytes() - a.outputStart
+	if written < 0 {
+		written = 0
+	}
+	in.OutputBytes = int(written)
+	logFinish := logger.FromContext(a.ctx).Info
+	if in.Outcome == schedquality.OutcomeOK {
+		logFinish = logger.FromContext(a.ctx).Debug
+	}
+	logFinish("sched_quality.attempt_finished",
+		zap.String("component", "sched_quality"), zap.String("request_id", a.requestID),
+		zap.String("attempt_id", a.attemptID), zap.Int("outcome", int(in.Outcome)),
+		zap.String("class", in.Class.String()), zap.Int("status_origin", int(in.StatusOrigin)), zap.Int("http_status", in.HTTPStatus),
+		zap.Bool("client_disconnect", a.client || a.state.ClientCanceled()), zap.Bool("terminal_seen", a.terminal),
+		zap.String("terminal_event", a.terminalEvent), zap.String("error_source", a.errorSource), zap.Bool("terminal_failed", a.failure != nil),
+		zap.Int64p("terminal_ms", schedRelativeMillis(a.started, a.terminalAt)), zap.Bool("send_error", a.sendErr != nil),
+		zap.Bool("context_done", a.ctx.Err() != nil), zap.Int64("finished_ms", time.Since(a.started).Milliseconds()),
+		zap.Int64p("first_output_request_ms", a.state.EndToEndFirstOutputMs()), zap.Int("output_bytes", in.OutputBytes))
 	var input, read, creation *int
 	if in.Usage != nil {
 		input, creation = &in.Usage.InputTokens, &in.Usage.CacheCreationTokens
@@ -79,7 +129,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 			read = &in.Usage.CacheReadTokens
 		}
 	}
-	a.state.NoteGatewayAttempt(in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
+	a.state.NoteGatewayAttemptForRequest(a.requestID, in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
 	a.attempt.Finish(in)
 }
 func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {
@@ -236,13 +286,14 @@ func (a *schedAttemptCapture) observe(data []byte) {
 	if a.failure != nil && (a.failure.Source != resilience.SourceStreamEvent || !openAIResponsesTypedBareError(a.failure.Body)) {
 		return
 	}
-	o := resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: http.StatusOK, Body: append([]byte(nil), data...)}
+	o := resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: a.httpStatus, Body: append([]byte(nil), data...)}
 	errRoot := root.Get("response.error")
 	if !errRoot.IsObject() {
 		errRoot = root.Get("error")
 	}
 	o.Code, o.Type, o.Message = errRoot.Get("code").String(), errRoot.Get("type").String(), errRoot.Get("message").String()
 	a.failure = &o
+	a.errorSource = "upstream_event"
 }
 func (a *schedAttemptCapture) finishHTTP(resp *http.Response, body []byte) {
 	if a == nil {
@@ -250,10 +301,12 @@ func (a *schedAttemptCapture) finishHTTP(resp *http.Response, body []byte) {
 	}
 	a.mu.Lock()
 	if !a.done {
+		a.httpStatus = resp.StatusCode
+		a.errorSource = "upstream_http"
 		a.failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: resp.StatusCode, Headers: resp.Header, Body: append([]byte(nil), body...)}
 	}
 	a.mu.Unlock()
-	a.finish(nil, nil)
+	// Keep the refusal pending until forwarding returns or a repaired send starts.
 }
 func (a *schedAttemptCapture) cancel() {
 	if a == nil {
@@ -261,6 +314,7 @@ func (a *schedAttemptCapture) cancel() {
 	}
 	a.mu.Lock()
 	a.client = true
+	a.errorSource = "client_write"
 	a.mu.Unlock()
 	a.finish(nil, nil)
 }
@@ -274,17 +328,22 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		return
 	}
 	a.done = true
+	a.errorSource = "gateway_deadline"
 	noteOpenAIStickyAttemptOutcome(a, false)
 	if a.state.ClientCanceled() {
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Class: schedquality.ClassClientCancel, Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 	} else if plan.Applied() || a.first {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceNetwork, Err: context.DeadlineExceeded}).Category)
 		if a.first {
 			detail = string(resilience.CategoryStall)
 		}
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
+		class := schedquality.ClassGateway
+		if a.first && !plan.Applied() {
+			class = schedquality.ClassInterrupted
+		}
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: class, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: detail, Usage: a.usage})
 	} else {
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Class: schedquality.ClassFirstOutputTimeout, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
@@ -306,6 +365,13 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	if err == nil {
 		err = a.sendErr
 	}
+	var repairSignal *openAIRequestRepairSignal
+	var searchSignal *openAIWebSearchReplaySignal
+	if !a.repairStep && (errors.As(err, &repairSignal) && repairSignal != nil && len(repairSignal.next) > 0 || errors.As(err, &searchSignal) && searchSignal != nil) {
+		// A prepared replay is not yet a resend. Keep this refusal pending
+		// through the forwarding defers until transport starts the next send.
+		return
+	}
 	if result != nil {
 		if u := schedUsage(&result.Usage); u != nil {
 			a.usage = u
@@ -314,33 +380,58 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
+	var httpErr *UpstreamFailoverError
+	if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
+		a.projectedStatus = httpErr.StatusCode
+	}
 	canceled := a.client || a.state.ClientCanceled()
 	// The reader can prove a complete JSON document despite an SSE header.
 	// Such responses do not require an SSE terminal (status may be omitted).
 	jsonComplete := result != nil && result.ResponseFactsKnown && result.ResponseBodyKind == "json"
-	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
+	success := !a.repairStep && !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
 		(!a.expectTerminal || a.terminal || jsonComplete) &&
 		(result == nil || result.CompletedForDelivery())
 
 	noteOpenAIStickyAttemptOutcome(a, success)
 	// Client cancellation is an explicit delivery fact, never a generic deadline.
 	if canceled {
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Class: schedquality.ClassClientCancel, Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
-	failure := a.failure
-	if failure == nil && err != nil {
-		var httpErr *UpstreamFailoverError
-		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
-			failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
-		} else {
-			failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: err}
+	if httpErr != nil {
+		if httpErr.BudgetCutPlan != nil || httpErr.PreDispatchSelectionInvalidated {
+			a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassGateway, HTTPStatus: httpErr.StatusCode, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryTransient), Usage: a.usage})
+			return
 		}
+	}
+	failure := a.failure
+	if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+		a.networkErr = a.sendErr
+	}
+	if failure == nil && a.networkErr != nil {
+		failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: a.networkErr}
+	}
+	if failure == nil && err != nil && httpErr != nil {
+		// A projected status is not an upstream response head. Preserve any
+		// structured refusal while keeping that projection out of attribution.
+		failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: a.httpStatus, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
+		if a.httpStatus > 0 && a.httpStatus < 400 {
+			failure.Source = resilience.SourceStreamEvent
+		}
+	}
+	a.failure = failure
+	if !success && a.errorSource == "" {
+		a.errorSource = "forward_return"
 	}
 	if !success {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
+			if httpErr != nil && a.httpStatus == 0 && a.networkErr == nil {
+				// Detail is the existing resilience diagnostic, independent of
+				// quality attribution and the provenance of the projected status.
+				detail = string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}).Category)
+			}
 			terminal := classifySchedTerminal(failure.Body)
 			if failure.Source == resilience.SourceStreamEvent && terminal.Valid && terminal.Status == "incomplete" && !terminal.BenignIncomplete() {
 				detail = SchedAttemptDetailOutputIncomplete
@@ -374,6 +465,12 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
+		if a.networkErr == nil && a.httpStatus == 0 && !errors.Is(a.sendErr, bufio.ErrTooLong) {
+			a.networkErr = a.sendErr
+		}
+		if a.failure == nil && a.networkErr != nil {
+			a.failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: a.networkErr}
+		}
 		noteOpenAIStickyAttemptOutcome(a, false)
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
@@ -431,14 +528,30 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	if target := schedHTTPAttemptTarget(account, req); target != nil {
 		st.SetUpstreamAttemptTarget(target)
 	}
+	// A same-account 400 followed by a changed body is an actual repair
+	// resend. Freeze its refusal before the next attempt replaces the handle.
+	if previous := currentSchedAttempt(ctx); previous != nil {
+		previous.mu.Lock()
+		previous.repairStep = previous.accountID == account.ID && !previous.first && (previous.repairPrepared || previous.failure != nil && previous.failure.StatusCode == http.StatusBadRequest && previous.bodyHash != sha256.Sum256(body))
+		previous.mu.Unlock()
+		previous.finish(nil, nil)
+	}
 	// Builders may add group prompts or normalize cache fields after the caller's
 	// payload is prepared; ContentLength is the final wire length without a reread.
 	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
+	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	if resp != nil {
+		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)
+		if *owner != nil {
+			(*owner).mu.Lock()
+			(*owner).httpStatus = resp.StatusCode
+			(*owner).expectTerminal = isEventStreamResponse(resp.Header)
+			(*owner).mu.Unlock()
+		}
+	}
 	if err != nil {
-		(*owner).noteError(err)
-	} else if resp != nil && *owner != nil {
-		(*owner).expectTerminal = isEventStreamResponse(resp.Header)
+		(*owner).noteNetworkError(err)
 	}
 	return resp, err
 }
@@ -508,11 +621,18 @@ func (a *schedAttemptCapture) noteError(err error) {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.sendErr = err
+		var networkError net.Error
+		if a.networkErr == nil && (errors.As(err, &networkError) || errors.Is(err, io.ErrUnexpectedEOF)) {
+			a.networkErr = err
+		}
+		if a.errorSource == "" {
+			a.errorSource = "upstream_read_or_send"
+		}
 	}
 }
 func noteSchedError(c *gin.Context, err error) {
 	if c != nil && c.Request != nil {
-		currentSchedAttempt(c.Request.Context()).noteError(err)
+		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
 	}
 }
 func noteSchedStall(c *gin.Context) {
@@ -536,7 +656,7 @@ func finishSchedRead(c *gin.Context, err error) {
 	// EOF may precede buffered delivery or a protocol conversion's final
 	// output. The forwarding function owns successful completion.
 	if !errors.Is(err, io.EOF) {
-		currentSchedAttempt(c.Request.Context()).noteError(err)
+		currentSchedAttempt(c.Request.Context()).noteNetworkError(err)
 	}
 }
 
@@ -593,14 +713,43 @@ func (a *schedAttemptCapture) markTerminal() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.terminal = true
+	if a.terminalAt.IsZero() {
+		a.terminalAt = time.Now()
+	}
 }
 
 // noteGatewayWSOutput runs after a successful client write, unlike the attempt
 // clock which measures receipt from upstream.
 func noteGatewayWSOutput(ctx context.Context, payload []byte) {
+	resilience.StateFrom(ctx).NoteClientOutputBytes(len(payload))
 	root := gjson.ParseBytes(payload)
 	disposition := resilience.ResponsesEventOutputDisposition(strings.TrimSpace(root.Get("type").String()), payload)
 	if disposition.Visible || semanticJSONOutput(root) {
 		resilience.StateFrom(ctx).NoteSemanticOutput(time.Now())
+	}
+}
+
+func schedRelativeMillis(start, at time.Time) *int64 {
+	if at.IsZero() {
+		return nil
+	}
+	ms := at.Sub(start).Milliseconds()
+	return &ms
+}
+
+// Called at transport/consumer read boundaries, before a retry error replaces
+// the original cause. Later wrapping and cleanup cannot erase this evidence.
+func (a *schedAttemptCapture) noteNetworkError(err error) {
+	if a == nil || err == nil {
+		return
+	}
+	a.noteError(err)
+	if errors.Is(err, bufio.ErrTooLong) {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.done && a.networkErr == nil {
+		a.networkErr = err
 	}
 }

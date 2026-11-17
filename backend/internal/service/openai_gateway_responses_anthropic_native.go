@@ -222,6 +222,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai responses via native anthropic buffered: read error",
 				zap.Error(err),
@@ -463,6 +466,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	defer pump.stop()
 
 	logReadErr := func(err error) {
+		if !evidence.stopped && !errors.Is(err, io.EOF) {
+			noteSchedError(c, err)
+		}
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai responses via native anthropic stream: read error",
 				zap.Error(err),

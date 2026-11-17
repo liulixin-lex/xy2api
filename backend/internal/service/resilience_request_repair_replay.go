@@ -233,6 +233,11 @@ func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Contex
 	if r == nil || r.accountID != account.ID {
 		return nil, "", false
 	}
+	if capture := currentSchedAttempt(ctx); capture != nil {
+		capture.mu.Lock()
+		capture.repairPrepared = !capture.first
+		capture.mu.Unlock()
+	}
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}

@@ -39,6 +39,7 @@ func TestSchedCaptureHTTPClassificationMatchesFailover(t *testing.T) {
 					a.finish(nil, failover)
 				} else {
 					a.finishHTTP(&http.Response{StatusCode: tc.status}, body)
+					a.finish(nil, nil)
 				}
 				requireCaptureCategory(t, rec, tc.want)
 			}
@@ -68,6 +69,7 @@ func TestSchedCaptureClassificationUsesRuntimeSettings(t *testing.T) {
 				require.Equal(t, tc.want, classifyUpstreamHTTP(502, nil, body, "").Category)
 				a, rec := newClassificationCapture()
 				a.finishHTTP(&http.Response{StatusCode: 502}, body)
+				a.finish(nil, nil)
 				requireCaptureCategory(t, rec, tc.want)
 			}
 		})

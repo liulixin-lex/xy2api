@@ -19,6 +19,7 @@ import (
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
+	OpsUpstreamStatusOriginKey  = "ops_upstream_status_origin"
 	OpsUpstreamStatusCodeKey    = "ops_upstream_status_code"
 	OpsUpstreamErrorMessageKey  = "ops_upstream_error_message"
 	OpsUpstreamErrorDetailKey   = "ops_upstream_error_detail"
@@ -165,6 +166,7 @@ type OpsStreamError struct {
 	SkipMonitoring  bool
 	AccountID       int64
 	UpstreamModel   string
+	StatusOrigin    int16
 	UpstreamStatus  int
 	UpstreamMessage string
 	UpstreamDetail  string
@@ -189,6 +191,7 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	c.Set(OpsSkipPassthroughKey, false)
 	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
 	c.Set(OpsUpstreamStatusCodeKey, 0)
+	c.Set(OpsUpstreamStatusOriginKey, int16(0))
 	c.Set(OpsUpstreamErrorMessageKey, "")
 	c.Set(OpsUpstreamErrorDetailKey, "")
 	c.Set(OpsGatewayTerminalStatusKey, 0)
@@ -304,6 +307,9 @@ func snapshotOpsStreamErrorContext(c *gin.Context, streamErr *OpsStreamError) {
 	if streamErr.RequestScoped {
 		return
 	}
+	if origin, ok := c.Get(OpsUpstreamStatusOriginKey); ok {
+		streamErr.StatusOrigin, _ = origin.(int16)
+	}
 	if value, ok := c.Get(OpsUpstreamStatusCodeKey); ok {
 		switch status := value.(type) {
 		case int:
@@ -404,6 +410,17 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	}
 	if upstreamStatusCode > 0 {
 		c.Set(OpsUpstreamStatusCodeKey, upstreamStatusCode)
+		origin := int16(0)
+		if c.Request != nil {
+			if actual := resilience.StateFrom(c.Request.Context()).UpstreamHTTPStatus(0); actual > 0 {
+				if actual == upstreamStatusCode {
+					origin = 1
+				} else {
+					origin = 2
+				}
+			}
+		}
+		c.Set(OpsUpstreamStatusOriginKey, origin)
 	}
 	if msg := strings.TrimSpace(upstreamMessage); msg != "" {
 		c.Set(OpsUpstreamErrorMessageKey, msg)
@@ -449,6 +466,7 @@ type OpsUpstreamErrorEvent struct {
 	DroppedEarlierAttempts int `json:"dropped_earlier_attempts,omitempty"`
 
 	// Outcome
+	StatusOrigin       int16  `json:"status_origin,omitempty"`
 	UpstreamStatusCode int    `json:"upstream_status_code,omitempty"`
 	UpstreamRequestID  string `json:"upstream_request_id,omitempty"`
 
@@ -511,6 +529,23 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) *OpsUpstre
 	ev.Detail = strings.TrimSpace(ev.Detail)
 	ev.RejectedField = strings.TrimSpace(ev.RejectedField)
 	ev.Resent = false
+	if ev.StatusOrigin == 0 && ev.UpstreamStatusCode > 0 {
+		switch ev.Kind {
+		case "first_output_timeout", "stream_error", "stream_failed", "request_error", "ws_error":
+			ev.StatusOrigin = 2
+		case "http_error", "signature_error", "signature_retry_thinking", "signature_retry", "budget_constraint_error":
+			ev.StatusOrigin = 1
+		}
+		if c.Request != nil && ev.Kind != "first_output_timeout" {
+			if actual := resilience.StateFrom(c.Request.Context()).UpstreamHTTPStatus(ev.AccountID); actual > 0 {
+				if actual == ev.UpstreamStatusCode {
+					ev.StatusOrigin = 1
+				} else {
+					ev.StatusOrigin = 2
+				}
+			}
+		}
+	}
 	if ev.Message != "" {
 		ev.Message = sanitizeUpstreamErrorMessage(ev.Message)
 	}
