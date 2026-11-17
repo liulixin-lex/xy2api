@@ -28,7 +28,7 @@ type AccountSummary struct {
 // Request totals apply reset to the first request start, not to a retry's start;
 // attempt-based continuation and latency totals retain their attempt cutoffs.
 // The three latency medians use the same paired streaming samples; GapP50Ms is
-// the median of per-attempt differences, not a subtraction of the two medians.
+// the median of nonnegative per-attempt gaps, not a subtraction of the medians.
 func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.Time) AccountSummary {
 	out := AccountSummary{From: now.Add(-time.Hour), To: now}
 	if reset.After(out.From) {
@@ -46,7 +46,7 @@ func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.
 		if s.Stream && s.FirstEventMs != nil && s.TTFOMs != nil && *s.FirstEventMs >= 0 && *s.TTFOMs >= 0 {
 			events = append(events, *s.FirstEventMs)
 			outputs = append(outputs, *s.TTFOMs)
-			gaps = append(gaps, *s.TTFOMs-*s.FirstEventMs)
+			gaps = append(gaps, max(0, *s.TTFOMs-*s.FirstEventMs))
 		}
 		if s.Continuation && s.SessionKey != "" {
 			if read, input, ok := cacheTokens(s); ok {

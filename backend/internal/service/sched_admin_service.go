@@ -60,17 +60,23 @@ type schedAdminStatsEntry struct {
 	at    time.Time
 	value SchedAdminGroupLast60
 }
+type schedAdminStatsFlight struct {
+	done  chan struct{}
+	value SchedAdminGroupLast60
+	err   error
+}
 type SchedAdminService struct {
-	d       SchedAdminDependencies
-	statsMu sync.Mutex
-	stats   map[int64]schedAdminStatsEntry
+	d            SchedAdminDependencies
+	statsMu      sync.Mutex
+	stats        map[int64]schedAdminStatsEntry
+	statsFlights map[int64]*schedAdminStatsFlight
 }
 
 func NewSchedAdminService(d SchedAdminDependencies) *SchedAdminService {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &SchedAdminService{d: d, stats: map[int64]schedAdminStatsEntry{}}
+	return &SchedAdminService{d: d, stats: map[int64]schedAdminStatsEntry{}, statsFlights: map[int64]*schedAdminStatsFlight{}}
 }
 func (s *SchedAdminService) snapshot() *SchedQualitySnapshot {
 	if p := s.d.Engine.Snapshot(); p != nil {

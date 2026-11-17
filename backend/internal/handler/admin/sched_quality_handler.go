@@ -103,7 +103,7 @@ func (h *SchedQualityHandler) Reset(c *gin.Context) {
 		schedQualityReply(c, nil, e)
 		return
 	}
-	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "kept_count": len(v.Kept), "failed_count": len(v.Failed)})
+	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "preserved_count": len(v.Kept), "failed_count": len(v.Failed)})
 	schedQualityReply(c, v, nil)
 }
 func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
