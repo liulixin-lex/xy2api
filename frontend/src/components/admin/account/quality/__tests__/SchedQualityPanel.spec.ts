@@ -577,6 +577,29 @@ describe('SchedQualityPanel', () => {
     expect(w.find('[data-qp-decision="2"]').exists()).toBe(true)
   })
 
+  // A first-page refresh that fails drops the old list, so its retry asks for the first page (no before_id) again.
+  it('retries the first page after a refresh fails, never paging on from the records shown before', async () => {
+    const record = (id: number, action: string): BackendDecision =>
+      ({ id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action, level: 0, until: null })
+    api.accountDecisions
+      .mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => record(60 - i, 'enter')))
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValueOnce([record(61, 'reset'), record(60, 'enter')])
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    await w.get('[data-qp-decisions-toggle]').trigger('click')
+    await flushPromises()
+    await markSchedChanged()
+    await flushPromises()
+    expect(w.find('[data-qp-decision="60"]').exists()).toBe(false)
+    expect(w.find('[data-qp-decisions-more]').exists()).toBe(false)
+    await w.get('[data-qp-decisions-failed] button').trigger('click')
+    await flushPromises()
+    expect(api.accountDecisions.mock.calls.map((call) => call[1])).toEqual([
+      { limit: 50, beforeId: undefined }, { limit: 50, beforeId: undefined }, { limit: 50, beforeId: undefined }
+    ])
+    expect(w.find('[data-qp-decision="61"]').exists()).toBe(true)
+  })
+
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
     const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),

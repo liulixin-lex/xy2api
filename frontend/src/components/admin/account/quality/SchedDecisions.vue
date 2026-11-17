@@ -110,7 +110,14 @@ async function load(next: boolean) {
     more.value = page.length >= PAGE
     state.value = 'loaded'
   } catch {
-    if (request === seq) state.value = 'failed'
+    if (request !== seq) return
+    state.value = 'failed'
+    // The first page did not come: what was shown before is out of date, and its last id must not page on from there
+    // (records written since would be skipped). The retry then asks for the first page again.
+    if (!next) {
+      items.value = []
+      more.value = false
+    }
   }
 }
 
