@@ -168,13 +168,19 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			}
 		}
 	}
+	// Finished observations already have a result, even before the ledger write.
+	// In-flight attempts are not completed rounds and cannot block migration.
+	unpersisted := make(map[string]bool)
 	for _, r := range d.running {
-		sessions.add(schedQualityCloneSample(r))
+		if !r.FinishedAt.IsZero() && !r.FinishedAt.After(d.now) {
+			sessions.add(schedQualityCloneSample(r))
+			unpersisted[r.AttemptID] = true
+		}
 	}
 	sessions.sort()
 	view.sessions = make(map[schedSessionKey][]q.AttemptSample)
 	for k, rows := range sessions {
-		view.sessions[k] = schedSessionRounds(rows)
+		view.sessions[k] = schedSessionRounds(rows, unpersisted)
 	}
 	members := make(map[int64][]int64)
 	for group, ids := range s.members {
@@ -362,9 +368,10 @@ func schedStateUntil(v q.StateView) time.Time {
 	return until
 }
 
-// Retries share a logical request/turn. A switched first turn is a boundary,
-// so older history cannot be joined across a move away and back to an account.
-func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
+// Retries share a logical request/turn and the final finished attempt determines
+// its result. Preserve ledger-confirmed boundaries unless an unpersisted
+// predecessor supplements the ledger; observed rounds use merged history.
+func schedSessionRounds(attempts []q.AttemptSample, unpersisted map[string]bool) []q.AttemptSample {
 	type roundKey struct {
 		id      string
 		attempt bool
@@ -394,7 +401,16 @@ func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
 		return rows[i].StartedAt.Before(rows[j].StartedAt)
 	})
 	var tail []q.AttemptSample
-	for _, r := range rows {
+	for i, r := range rows {
+		if i > 0 && (unpersisted[r.AttemptID] || unpersisted[rows[i-1].AttemptID]) {
+			r.Switched = rows[i-1].AccountID != r.AccountID
+		} else if i == 0 && unpersisted[r.AttemptID] {
+			// Without a predecessor, this observation may be a cold first round.
+			// Exclude only this round; later completed rounds can still qualify.
+			r.Switched = true
+		}
+		// Otherwise preserve the durable round's confirmed marker: its true
+		// predecessor may have expired before an older, overlapping request.
 		if r.Switched {
 			tail = nil
 			continue

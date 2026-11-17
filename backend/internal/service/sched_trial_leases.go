@@ -27,6 +27,9 @@ type SchedTrialLeases interface {
 	Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error)
 	// Promote atomically replaces this request reservation with its committed
 	// session member. An existing session is renewed without consuming another slot.
+	// A missing/expired request still creates the session, even when capacity is
+	// full: committed bindings must be counted; this quota is not a hard limit.
+	// Binding CAS and Promote are separate operations, not one atomic transaction.
 	Promote(ctx context.Context, accountID int64, model string, groupID int64, request, session string, now time.Time) error
 	// Touch renews only an existing, unexpired member. Missing members are a
 	// successful no-op; storage failures are returned as errors.
