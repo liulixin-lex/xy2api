@@ -38,7 +38,7 @@ const ConfirmStub = defineComponent({
     : null
 })
 
-type Field = { save: () => Promise<boolean>; valid: boolean }
+type Field = { save: () => Promise<boolean>; valid: boolean; unsaved: boolean }
 async function mountField() {
   const w = mount(SchedTTFTRuleField, { global: { stubs: { ConfirmDialog: ConfirmStub } } })
   await flushPromises()
@@ -143,6 +143,41 @@ describe('SchedTTFTRuleField', () => {
       expect(w.find('[data-test="confirm"]').exists()).toBe(false)
     })
   }
+
+  it('marks the values a declined relaxation left unsaved, until they are put back or saved', async () => {
+    const w = await mountField()
+    const decline = async () => {
+      const saving = vm(w).save()
+      await flushPromises()
+      await w.get('[data-test="no"]').trigger('click')
+      expect(await saving).toBe(false)
+      await flushPromises()
+    }
+    await input(w, 'confidence').setValue('90')
+    await decline()
+    expect(vm(w).unsaved).toBe(true)
+    expect(w.get('[data-sq-ttft-unsaved]').text()).toBe('admin.schedQuality.ttftRule.unsaved')
+    expect(input(w, 'confidence').attributes('data-sq-ttft-unsaved-input')).toBeDefined()
+    expect(input(w, 'confidence').classes()).toContain('border-amber-500')
+    expect(input(w, 'tolerance').attributes('data-sq-ttft-unsaved-input')).toBeUndefined()
+
+    // Put back to the saved value: nothing left unsaved.
+    await input(w, 'confidence').setValue('80')
+    expect(vm(w).unsaved).toBe(false)
+    expect(w.find('[data-sq-ttft-unsaved]').exists()).toBe(false)
+
+    // Declined again, then confirmed: saved, the mark goes.
+    await input(w, 'confidence').setValue('90')
+    await decline()
+    expect(w.find('[data-sq-ttft-unsaved]').exists()).toBe(true)
+    const confirmed = vm(w).save()
+    await flushPromises()
+    await w.get('[data-test="ok"]').trigger('click')
+    expect(await confirmed).toBe(true)
+    await flushPromises()
+    expect(w.find('[data-sq-ttft-unsaved]').exists()).toBe(false)
+    expect(input(w, 'confidence').attributes('data-sq-ttft-unsaved-input')).toBeUndefined()
+  })
 
   it('keeps the loaded defaults and replayed ranges when the save answer leaves them out, and says what a relaxation cleared', async () => {
     const w = await mountField()

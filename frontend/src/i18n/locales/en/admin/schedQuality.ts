@@ -313,6 +313,8 @@ export default {
       savedRelaxed: 'First-output line: {n} states cleared and judged again with the new values',
       invalidOnSave: 'The first-output judging values are not valid; nothing was saved',
       notSaved: 'First-output judging was not saved; the other settings were',
+      declined: 'The other settings were saved; first-output judging was not',
+      unsaved: 'Not saved: the marked values relax first-output judging and take effect only when you choose “Save and judge again” on saving; put them back to drop this note.',
       confirmTitle: 'Relax first-output judging',
       confirmMessage: 'Raising any value makes accounts less likely to go to the rear. Saving clears every first-output rear and trial and judges them again with the new values at once; accounts still below standard go to the rear from the first step.',
       confirmSave: 'Save and judge again',

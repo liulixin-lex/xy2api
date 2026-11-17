@@ -9,6 +9,10 @@
       <span v-if="saveMessage" class="text-sm text-gray-700 dark:text-gray-300">{{ saveMessage }}</span>
       <button v-if="conflict" type="button" class="btn btn-secondary btn-sm" data-sq-ttft-reload @click="reload">{{ t('admin.schedQuality.action.reload') }}</button>
     </div>
+    <!-- A relaxation the confirm dialog declined: the values stay as typed and are marked until saved or put back. -->
+    <div v-if="unsaved" class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300" role="status" data-sq-ttft-unsaved>
+      {{ t('admin.schedQuality.ttftRule.unsaved') }}
+    </div>
     <div v-if="loadFailed" class="flex items-center gap-3">
       <span class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
       <button type="button" class="btn btn-secondary btn-sm" @click="reload">{{ t('admin.schedQuality.action.retry') }}</button>
@@ -32,8 +36,9 @@
             :aria-invalid="!valid[field]"
             :aria-describedby="!valid[field] || outside[field] ? `${ids[field]}-note` : undefined"
             :placeholder="record.defaults ? display(record.defaults[field]) : undefined"
-            :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid[field] }]"
+            :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid[field], 'border-amber-500 dark:border-amber-500': valid[field] && unsaved && changed(field) }]"
             :data-sq-ttft-input="field"
+            :data-sq-ttft-unsaved-input="valid[field] && unsaved && changed(field) ? '' : undefined"
             @input="edited[field] = true"
           />
           <span class="w-16 text-sm sq-text-3">{{ t(`admin.schedQuality.ttftRule.unit.${UNITS[field]}`) }}</span>
@@ -71,7 +76,8 @@
  * legal ranges (50 < confidence < 100, 0 < tolerance < 100, 0 ≤ margin < 100) frame the input red and are not
  * saved; values outside the replayed range are allowed with a note that no data supports them. Raising any value
  * makes accounts less likely to go to the rear (relaxing): a pure or mixed relaxation asks first, since saving it
- * clears every first-output rear and trial and judges them again.
+ * clears every first-output rear and trial and judges them again. Declining keeps the typed values, marked as not
+ * saved, like a failed save keeps them.
  */
 import { computed, reactive, ref, shallowRef, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -96,6 +102,8 @@ const ids = { confidence: `sq-ttft-c-${useId()}`, tolerance: `sq-ttft-p-${useId(
 
 const record = shallowRef<BackendTTFTRule | null>(null)
 const loadFailed = ref(false)
+// The last save stopped at the confirm dialog's cancel.
+const declined = ref(false)
 const conflict = ref(false)
 const saveFailed = ref(false)
 const saveMessage = ref('')
@@ -118,6 +126,7 @@ async function reload() {
     conflict.value = false
     saveFailed.value = false
     saveMessage.value = ''
+    declined.value = false
     fill(value)
   } catch {
     loadFailed.value = true
@@ -134,6 +143,10 @@ const current = computed<SchedTTFTRuleValues>(() => {
   const value = (field: SchedTTFTRuleField) => (saved && !edited[field] ? saved[field] : Number((Number(form[field]) / 100).toFixed(6)))
   return { confidence: value('confidence'), tolerance: value('tolerance'), peer_margin: value('peer_margin') }
 })
+
+/** Declined, and the values still differ from the saved ones: the note and the marked inputs show. */
+const unsaved = computed(() => declined.value && !!record.value && ttftRuleChange(record.value, current.value) !== 'none')
+const changed = (field: SchedTTFTRuleField) => !!record.value && current.value[field] !== record.value[field]
 
 const outside = computed(() =>
   Object.fromEntries(FIELDS.map((field) => [field, outsideReplayed(record.value?.replayed?.[field], current.value[field])])) as Record<SchedTTFTRuleField, boolean>
@@ -166,7 +179,11 @@ async function save(): Promise<boolean> {
   // Untouched settings send nothing, so they never hold up the page's save.
   if (change === 'none') return true
   if (!isValid.value) return false
-  if ((change === 'relax' || change === 'mixed') && !(await confirmRelax())) return false
+  if ((change === 'relax' || change === 'mixed') && !(await confirmRelax())) {
+    declined.value = true
+    return false
+  }
+  declined.value = false
   saveFailed.value = false
   saveMessage.value = ''
   try {
@@ -199,5 +216,5 @@ function focusInvalid() {
 /** The last save was refused (conflict or another failure), as opposed to declined or not needed. */
 const failed = computed(() => conflict.value || saveFailed.value)
 
-defineExpose({ save, valid: isValid, failed, focusInvalid })
+defineExpose({ save, valid: isValid, failed, unsaved, focusInvalid })
 </script>
