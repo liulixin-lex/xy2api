@@ -3164,8 +3164,8 @@ func (c *Config) Validate() error {
 		c.Billing.InflightReservation.MaxReservationUSD < 0 {
 		return fmt.Errorf("billing.inflight_reservation values must be non-negative")
 	}
-	if c.Database.MaxOpenConns <= 0 {
-		return fmt.Errorf("database.max_open_conns must be positive")
+	if c.Database.MaxOpenConns < 2 {
+		return fmt.Errorf("database.max_open_conns must be at least 2: scheduler outbox consumption reserves one connection for its lease")
 	}
 	if c.Database.MaxIdleConns < 0 {
 		return fmt.Errorf("database.max_idle_conns must be non-negative")
