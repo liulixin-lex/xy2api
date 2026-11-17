@@ -860,18 +860,6 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 	return
 }
 
-func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
-	}
-	return affected, nil
-}
-
 func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
 	return r.deleteCascade(ctx, id, false)
 }
@@ -1094,51 +1082,6 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 	}
 
 	return accountIDs, nil
-}
-
-// BindAccountsToGroup 将多个账号绑定到指定分组（批量插入，忽略已存在的绑定）
-func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error {
-	if len(accountIDs) == 0 {
-		return nil
-	}
-
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-	exec := sqlExecutor(r.client)
-	if tx != nil {
-		defer func() { _ = tx.Rollback() }()
-		exec = tx.Client()
-	}
-	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
-		return err
-	}
-
-	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
-	_, err = exec.ExecContext(
-		ctx,
-		`INSERT INTO account_groups (account_id, group_id, created_at)
-		 SELECT unnest($1::bigint[]), $2, NOW()
-		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		pq.Array(accountIDs),
-		groupID,
-	)
-	if err != nil {
-		return err
-	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	// 发送调度器事件
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
-	}
-
-	return nil
 }
 
 // UpdateSortOrders 批量更新分组排序

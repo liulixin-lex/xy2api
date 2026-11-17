@@ -250,6 +250,7 @@ type simpleModeGroupReference struct {
 }
 
 type simpleModeAccountGroupReference struct {
+	Pinned    bool                      `json:"pinned"`
 	AccountID int64                     `json:"account_id"`
 	GroupID   int64                     `json:"group_id"`
 	CreatedAt time.Time                 `json:"created_at"`
@@ -333,7 +334,7 @@ func (a AccountWithConcurrency) MarshalJSON() ([]byte, error) {
 			continue
 		}
 		accountGroups = append(accountGroups, simpleModeAccountGroupReference{
-			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID,
+			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID, Pinned: accountGroup.Pinned,
 			CreatedAt: accountGroup.CreatedAt, Group: simpleModeGroupReferenceFromDTO(accountGroup.Group),
 		})
 	}

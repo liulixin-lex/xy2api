@@ -1051,12 +1051,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 
-	if gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); gate != nil && gate.floor > 0 {
-		if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
-			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
-			return nil
-		}
+	if openAIProfitFloorExcluded(ctx, account) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(openAIProfitFilterReasonFloor)
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+		return nil
 	}
 	if _, excluded := excludedIDs[accountID]; excluded {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
@@ -1080,10 +1078,6 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	// Verify account is usable for current request
 	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
-		if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
-			resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-			_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
-		}
 		return nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
@@ -1265,12 +1259,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_unavailable")
 			}
 			if err == nil && account != nil {
-				if gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); gate != nil && gate.floor > 0 {
-					if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
-						resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
-						account = nil
-					}
+				if openAIProfitFloorExcluded(ctx, account) {
+					resilience.StateFrom(ctx).NoteStickyBypassReason(openAIProfitFilterReasonFloor)
+					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+					account = nil
 				}
 			}
 			if err == nil && account != nil && isExcluded(accountID) {
@@ -1291,10 +1283,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				eligible := !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability, s)
 				if !clearSticky && !eligible {
 					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
-					if _, reason := openAIProfitControlVetoReason(ctx, account); reason == openAIProfitFilterReasonFloor {
-						resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
-					}
 				}
 				if eligible {
 					var transient bool

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -101,44 +102,47 @@ func TestRatefloorPreviewParity(t *testing.T) {
 }
 
 func TestRatefloorStickyReleaseAndCeilingPreserve(t *testing.T) {
-	for _, floor := range []bool{true, false} {
-		for _, stale := range []bool{true, false} {
-			t.Run(map[bool]string{true: "floor", false: "ceiling"}[floor]+map[bool]string{true: " DB change", false: " snapshot"}[stale], func(t *testing.T) {
+	for _, path := range []string{"load-aware", "sticky-hit"} {
+		for _, floor := range []bool{true, false} {
+			t.Run(path+map[bool]string{true: "/floor", false: "/ceiling"}[floor], func(t *testing.T) {
 				gid := int64(7)
-				now := time.Now()
-				rate := 0.1
+				owner := selectionFixtureAccount(1, 1)
+				owner.RateMultiplier = floatPtr(0.1)
 				if !floor {
-					rate = 0.9
+					owner.RateMultiplier = floatPtr(0.9)
 				}
-				account := profitControlWSAccount(1, rate, now)
-				account.Extra = nil
-				account.GroupIDs = []int64{gid}
-				account.AccountGroups = []AccountGroup{{GroupID: gid, AccountID: 1}}
-				cached := account
-				if stale {
-					cached.RateMultiplier = floatPtr(0.5)
-				}
-				repo := schedulerTestOpenAIAccountRepo{accounts: []Account{account}}
+				cached := owner
+				cached.RateMultiplier = floatPtr(0.5)
+				replacement := selectionFixtureAccount(2, 2)
+				replacement.RateMultiplier = floatPtr(0.6)
+				repo := schedulerTestOpenAIAccountRepo{accounts: []Account{owner, replacement}}
 				cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:range-sticky": 1}}
-				svc := &OpenAIGatewayService{accountRepo: repo, cache: cache, rateLimitService: newOpenAISelectionRateLimitService()}
-				// A scheduler snapshot makes the initial owner stale, while the repository
-				// remains authoritative for the subsequent membership/profit recheck.
-				if stale {
-					svc.schedulerSnapshot = NewSchedulerSnapshotService(&openAISnapshotCacheStub{accountsByID: map[int64]*Account{1: &cached}}, nil, repo, nil, nil)
-				}
-				gate := &openAIProfitControlGate{groupID: gid, platform: PlatformOpenAI, ceilingOn: true, threshold: 0.8, floor: 0.4, pricingAt: now}
-				ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, gate)
-				_, _, err := svc.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "range-sticky", RequestedModel: "gpt-test"})
-				require.NoError(t, err)
-				if floor {
-					require.Zero(t, cache.sessionBindings["openai:range-sticky"])
-					require.NoError(t, svc.bindOpenAIStickySessionDuringSelection(ctx, &gid, "range-sticky", 2))
-					require.Zero(t, cache.sessionBindings["openai:range-sticky"])
-					require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ctx, &gid, "range-sticky", 2))
-					require.Equal(t, int64(2), cache.sessionBindings["openai:range-sticky"])
+				group := profitControlTestGroup(gid, 0.2, 0)
+				group.MinUpstreamRate = floatPtr(0.4)
+				snapshot := NewSchedulerSnapshotService(&openAISnapshotCacheStub{snapshotAccounts: []*Account{&cached, &replacement}, accountsByID: map[int64]*Account{1: &cached, 2: &replacement}}, nil, repo, &fallbackGroupRepo{groups: map[int64]*Group{gid: group}}, nil)
+				svc := &OpenAIGatewayService{accountRepo: repo, cache: cache, schedulerSnapshot: snapshot, rateLimitService: newOpenAISelectionRateLimitService(), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(profitControlTestCtx(group), st)
+				ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &gid)
+				if path == "load-aware" {
+					selected, err := svc.SelectAccountWithLoadAwareness(ctx, &gid, "range-sticky", "m", nil)
+					require.NoError(t, err)
+					require.NotNil(t, selected)
+					require.EqualValues(t, 2, selected.Account.ID)
+					if selected.ReleaseFunc != nil {
+						selected.ReleaseFunc()
+					}
 				} else {
-					require.Equal(t, int64(1), cache.sessionBindings["openai:range-sticky"])
+					require.Nil(t, svc.tryStickySessionHit(ctx, &gid, PlatformOpenAI, "range-sticky", "m", nil, false, 1, ""))
 				}
+				want := int64(1)
+				reason := openAIProfitFilterReasonThreshold
+				if floor {
+					want = 0
+					reason = openAIProfitFilterReasonFloor
+				}
+				require.Equal(t, want, cache.sessionBindings["openai:range-sticky"])
+				require.Equal(t, reason, st.StickyBypassReason(), "must reach the database profit recheck, not owner_group_mismatch")
 			})
 		}
 	}
@@ -297,4 +301,70 @@ func TestRatefloorSoftOwnerCanCommitReplacement(t *testing.T) {
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:floor-soft"])
 	CompleteOpenAIStickyChange(ctx, 2, true, false)
 	require.EqualValues(t, 2, f.cache.sessionBindings["openai:floor-soft"])
+}
+
+func TestRatefloorReviewPreviewZeroAndBoundary(t *testing.T) {
+	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity} {
+		t.Run(platform, func(t *testing.T) {
+			group := &Group{ID: 10, Platform: platform, RateMultiplier: 1, ProfitControlEnabled: true, ProfitMinMargin: 0.2}
+			account := healthyAccount(1)
+			account.Platform = platform
+			account.Type = AccountTypeAPIKey
+			account.RateMultiplier = floatPtr(0.5)
+			svc := NewProfitPreviewService(&groupAccountsRepo{byGroup: map[int64][]Account{10: {account}}}, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
+			preview, err := svc.ProfitControlPreview(context.Background(), 10, floatPtr(0.2), floatPtr(0))
+			require.NoError(t, err)
+			require.Equal(t, 0.0, preview.Floor)
+			require.InDelta(t, 0.8, preview.Ceiling, 1e-12)
+			require.Equal(t, 1, preview.Passing)
+			_, err = svc.ProfitControlPreview(context.Background(), 10, nil, floatPtr(0.4))
+			require.Error(t, err)
+		})
+	}
+	group := profitControlTestGroup(10, 0.2, 0)
+	group.RateMultiplier = 0.7
+	svc := NewProfitPreviewService(&groupAccountsRepo{byGroup: map[int64][]Account{}}, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
+	for _, tc := range []struct {
+		floor float64
+		empty bool
+	}{{0.56, false}, {0.5601, true}} {
+		preview, err := svc.ProfitControlPreview(context.Background(), 10, nil, &tc.floor)
+		require.NoError(t, err)
+		require.Equal(t, tc.empty, preview.RangeEmpty)
+	}
+}
+
+func TestRatefloorReviewInvalidFreshProbe(t *testing.T) {
+	at := time.Now()
+	for _, value := range []any{-1.0, "NaN", "+Inf"} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			account := profitPreviewProbeAccount(1, UpstreamBillingProbeStatusOK, 0.5, at.Add(-time.Minute), time.Minute)
+			account.RateMultiplier = floatPtr(0.5)
+			account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)["data"].(map[string]any)["resolved_rate_multiplier"] = value
+			rate, source, valid := openAIProfitGateCostSource(account, at)
+			require.False(t, valid, "invalid fresh probe must not fall back to stored multiplier")
+			require.Equal(t, "upstream_probe", source)
+			require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, profitRangeVerdict(rate, valid, nil, 0.4, false))
+			rate, source, valid = openAIProfitGateCostSource(account, at.Add(time.Hour))
+			require.True(t, valid)
+			require.Equal(t, "stored", source)
+			require.Equal(t, 0.5, rate)
+		})
+	}
+}
+
+func TestRatefloorPrecheckDoesNotDuplicateVeto(t *testing.T) {
+	gid := int64(7)
+	account := selectionFixtureAccount(1, 1)
+	account.RateMultiplier = floatPtr(0.9)
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:range-count": 1}}
+	svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}, cache: cache}
+	st := resilience.NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	ctx := resilience.WithRequestState(context.Background(), st)
+	ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, platform: PlatformOpenAI, ceilingOn: true, threshold: 0.8, floor: 0.4})
+	require.Nil(t, svc.tryStickySessionHit(ctx, &gid, PlatformOpenAI, "range-count", "m", nil, false, 1, ""))
+	meta, _ := st.ClaimGatewayRequest(false)
+	require.Len(t, meta.ProfitBasis.Vetoes, 1)
+	require.Equal(t, openAIProfitFilterReasonThreshold, meta.ProfitBasis.Vetoes[0].Verdict)
 }

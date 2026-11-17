@@ -55,14 +55,80 @@ func TestRatefloorMemberHandler(t *testing.T) {
 	}
 }
 
+type ratefloorUpdateGroupRepo struct {
+	service.AdminGroupRepository
+	group  service.Group
+	writes int
+}
+
+func (r *ratefloorUpdateGroupRepo) GetByID(context.Context, int64) (*service.Group, error) {
+	g := r.group
+	return &g, nil
+}
+func (r *ratefloorUpdateGroupRepo) Update(_ context.Context, g *service.Group) error {
+	r.group = *g
+	r.writes++
+	return nil
+}
+
 func TestRatefloorRequestNullAndZero(t *testing.T) {
-	for _, body := range []string{`{}`, `{"min_upstream_rate":null}`} {
-		var req UpdateGroupRequest
-		require.NoError(t, json.Unmarshal([]byte(body), &req))
-		require.Nil(t, req.MinUpstreamRate)
+	floor := 0.4
+	repo := &ratefloorUpdateGroupRepo{group: service.Group{ID: 7, Platform: service.PlatformOpenAI, RateMultiplier: 1, MinUpstreamRate: &floor}}
+	svc := service.NewAdminService(nil, nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := &GroupHandler{adminService: svc}
+	router := gin.New()
+	router.PUT("/groups/:id", h.Update)
+	for _, tc := range []struct {
+		body    string
+		cleared bool
+	}{{`{}`, false}, {`{"min_upstream_rate":null}`, false}, {`{"min_upstream_rate":0}`, true}} {
+		request := httptest.NewRequest(http.MethodPut, "/groups/7", bytes.NewBufferString(tc.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Equal(t, 200, response.Code, response.Body.String())
+		var payload struct {
+			Data struct {
+				MinUpstreamRate *float64 `json:"min_upstream_rate"`
+			}
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+		if tc.cleared {
+			require.Nil(t, repo.group.MinUpstreamRate)
+			require.Nil(t, payload.Data.MinUpstreamRate)
+		} else {
+			require.NotNil(t, repo.group.MinUpstreamRate)
+			require.Equal(t, 0.4, *repo.group.MinUpstreamRate)
+			require.NotNil(t, payload.Data.MinUpstreamRate)
+			require.Equal(t, 0.4, *payload.Data.MinUpstreamRate)
+		}
 	}
-	var req UpdateGroupRequest
-	require.NoError(t, json.Unmarshal([]byte(`{"min_upstream_rate":0}`), &req))
-	require.NotNil(t, req.MinUpstreamRate)
-	require.Zero(t, *req.MinUpstreamRate)
+	require.Equal(t, 3, repo.writes)
+}
+
+type ratefloorPreviewGroups struct {
+	service.GroupRepository
+	platform string
+}
+
+func (r ratefloorPreviewGroups) GetByIDLite(context.Context, int64) (*service.Group, error) {
+	return &service.Group{ID: 10, Platform: r.platform, RateMultiplier: 2, ProfitControlEnabled: true}, nil
+}
+func TestRatefloorPreviewZeroOnOtherPlatforms(t *testing.T) {
+	for _, platform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformGrok, service.PlatformAntigravity} {
+		t.Run(platform, func(t *testing.T) {
+			h := NewProfitPreviewHandler(service.NewProfitPreviewService(ratefloorPreviewAccounts{}, ratefloorPreviewGroups{platform: platform}))
+			router := gin.New()
+			router.GET("/groups/:id/profit-control-preview", h.ProfitControlPreview)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/groups/10/profit-control-preview?margin=0.2&floor=0", nil))
+			require.Equal(t, 200, response.Code, response.Body.String())
+		})
+	}
+}
+
+type ratefloorPreviewAccounts struct{ service.AccountRepository }
+
+func (ratefloorPreviewAccounts) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]service.Account, error) {
+	return []service.Account{}, nil
 }
