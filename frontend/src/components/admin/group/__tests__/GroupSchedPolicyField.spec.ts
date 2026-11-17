@@ -201,7 +201,7 @@ describe('GroupSchedPolicyField', () => {
     await ttft(w).setValue('8')
     await settle()
     const spans = w.findAll('[data-sq-trial-names] > span')
-    expect(spans.map((el) => el.text())).toEqual(['acc-01 · gpt-a, gpt-b', 'acc-02'])
+    expect(spans.map((el) => el.text())).toEqual(['acc-01 · gpt-aadmin.schedQuality.evidence.joinergpt-b', 'acc-02'])
     expect((spans[0].element as HTMLElement & { __tipText?: string }).__tipText).toBe([
       'gpt-a · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.pass → admin.schedQuality.verdict.fail',
       'gpt-b · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.unknown → admin.schedQuality.verdict.fail',
