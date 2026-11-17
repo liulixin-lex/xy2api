@@ -268,6 +268,10 @@ func (r *selectionTrialReservation) promote(ctx context.Context) {
 	defer cancel()
 	if err := r.leases.Promote(stateCtx, r.account, r.model, r.group, r.member, r.session, now); err != nil {
 		slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+		// The CAS is already committed. Release only our request member: if Redis
+		// executed Promote but lost its reply, the session member remains intact.
+		r.release(ctx)
+		return
 	}
 	r.retained.Store(true)
 }

@@ -145,13 +145,14 @@ func TestEnginePeerSnapshotPrecedesAllTransitions(t *testing.T) {
 	run := func(reverse bool) map[q.LineKey]q.LineState {
 		d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
 		require.NoError(t, err)
-		rows, _, _, decisions := f.e.replay(d, nil, nil, at.Add(-time.Second), at, func(keys []q.LineKey) {
+		rows, _, _, decisions, err := f.e.replay(context.Background(), d, nil, nil, at.Add(-time.Second), at, func(keys []q.LineKey) {
 			if reverse {
 				for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
 					keys[i], keys[j] = keys[j], keys[i]
 				}
 			}
 		})
+		require.NoError(t, err)
 		result := make(map[q.LineKey]q.LineState)
 		for _, r := range rows {
 			result[r.LineKey] = r
@@ -266,7 +267,8 @@ func TestEngineSyntheticCycleTiming(t *testing.T) {
 			d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
 			require.NoError(t, err)
 			prepared := time.Since(started)
-			rows, _, _, _ := f.e.replay(d, nil, nil, at.Add(-q.RegularInterval), at)
+			rows, _, _, _, err := f.e.replay(context.Background(), d, nil, nil, at.Add(-q.RegularInterval), at)
+			require.NoError(t, err)
 			require.Len(t, rows, 900)
 			replayed := time.Since(started) - prepared
 			f.e.publish(d, rows, nil, nil, f.now)
@@ -280,7 +282,8 @@ func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
 	bucket := f.now.UTC().Truncate(q.RegularInterval)
 	f.now = bucket.Add(3 * time.Second)
 	f.badTTFT()
-	event := bucket.Add(-3 * time.Second)
+	// Arrival after the old horizon rounds to a grid still before the bucket.
+	event := bucket.Add(-6 * time.Second)
 	for i := range f.ledger.Rows {
 		f.ledger.Rows[i].InsertedAt = event
 	}
@@ -297,7 +300,7 @@ func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
 	f.now = bucket.Add(13 * time.Second)
 	f.cycle()
 	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
-	require.Equal(t, event, f.line(q.DimensionTTFO).Entry)
+	require.Equal(t, bucket.Add(-5*time.Second), f.line(q.DimensionTTFO).Entry)
 	require.Contains(t, f.e.peerBuckets, bucket)
 	require.Equal(t, q.IdentityRear, f.e.peerBuckets[bucket].rows[key].Identity, "official membership includes the pre-boundary trial failure")
 }

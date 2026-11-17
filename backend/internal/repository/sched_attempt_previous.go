@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
 func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
@@ -19,6 +21,17 @@ func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
 
 func (r *schedAttemptRepository) LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
 	return r.read(ctx, `WHERE finished_at >= $1 ORDER BY finished_at, attempt_id`, since)
+}
+
+func (r *schedAttemptRepository) LoadFinishedPage(ctx context.Context, since, through time.Time, after service.SchedAttemptCursor, limit int) ([]schedquality.AttemptSample, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("finished evidence page limit must be positive")
+	}
+	if after.At.IsZero() {
+		after.At = since.Add(-time.Microsecond)
+		after.AttemptID = "00000000-0000-0000-0000-000000000000"
+	}
+	return r.read(ctx, `WHERE finished_at >= $1 AND finished_at <= $2 AND (finished_at,attempt_id) > ($3,$4::uuid) ORDER BY finished_at,attempt_id LIMIT $5`, since, through, after.At, after.AttemptID, limit)
 }
 
 type schedAttemptLookup struct {
