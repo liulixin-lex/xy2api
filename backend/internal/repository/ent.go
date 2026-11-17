@@ -28,8 +28,9 @@ const (
 )
 
 // initializeDatabaseWithRetry retries only errors that indicate PostgreSQL is
-// temporarily unavailable during startup. Permanent configuration, migration,
-// and data errors are returned immediately so they remain visible to operators.
+// temporarily unavailable or migration locks are busy during startup. Permanent
+// configuration, migration, and data errors are returned immediately so they
+// remain visible to operators.
 func initializeDatabaseWithRetry(ctx context.Context, initialize func(context.Context) error) error {
 	return initializeDatabaseWithRetryWithWait(ctx, initialize, waitForDatabaseInitializationRetry)
 }
@@ -81,7 +82,7 @@ func isTransientDatabaseInitializationError(err error) bool {
 		return false
 	}
 	code := string(pqErr.Code)
-	return code == "57P03" || strings.HasPrefix(code, "08")
+	return code == "57P03" || code == "55P03" || strings.HasPrefix(code, "08")
 }
 
 // InitEnt 初始化 Ent ORM 客户端并返回客户端实例和底层的 *sql.DB。

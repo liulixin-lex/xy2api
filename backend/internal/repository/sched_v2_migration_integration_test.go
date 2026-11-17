@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,30 @@ func TestSchedV2DecisionStateTransactionAndReset(t *testing.T) {
 	rows, _, _, err := r.LoadRows(ctx)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Equal(t, row, rows[0])
+	want, got := row, rows[0]
+	expectedBasis := basis
+	expectedBasis.AttemptIDs = nil
+	want.Basis = &expectedBasis
+	for _, field := range []struct {
+		name      string
+		want, got *time.Time
+	}{
+		{"pending_at", &want.PendingAt, &got.PendingAt}, {"epoch", &want.Epoch, &got.Epoch}, {"entry", &want.Entry, &got.Entry},
+		{"until", &want.Until, &got.Until}, {"trial_until", &want.TrialUntil, &got.TrialUntil}, {"good_since", &want.GoodSince, &got.GoodSince},
+		{"last_rear", &want.LastRear, &got.LastRear}, {"evaluated_at", &want.EvaluatedAt, &got.EvaluatedAt},
+	} {
+		if field.want.IsZero() {
+			require.True(t, field.got.IsZero(), field.name)
+		} else {
+			require.WithinDuration(t, *field.want, *field.got, time.Microsecond, field.name)
+		}
+		*field.want = time.Time{}
+		*field.got = time.Time{}
+	}
+	require.Equal(t, want, got)
+	var recorded pq.StringArray
+	require.NoError(t, integrationDB.QueryRow("SELECT attempt_ids FROM sched_decisions WHERE account_id=$1 AND action='enter'", a).Scan(&recorded))
+	require.Equal(t, basis.AttemptIDs, []string(recorded))
 	require.Equal(t, basis.SourceGroups, rows[0].Basis.SourceGroups)
 	require.WithinDuration(t, row.Epoch, rows[0].Epoch, time.Microsecond)
 	reset, err := r.RunReset(ctx, a)

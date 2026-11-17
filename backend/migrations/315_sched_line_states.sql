@@ -1,3 +1,6 @@
+-- Wait briefly for the existing ledger, without repeatedly losing to vacuum.
+SET LOCAL lock_timeout = '5s';
+
 -- Preserve the legacy tables so a previous binary can still be rolled back.
 CREATE TABLE IF NOT EXISTS sched_line_states (
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -20,6 +23,7 @@ CREATE TABLE IF NOT EXISTS sched_line_states (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (account_id,model,group_id,line)
 );
+LOCK TABLE sched_decisions IN ACCESS EXCLUSIVE MODE;
 ALTER TABLE sched_decisions ADD COLUMN IF NOT EXISTS line TEXT NOT NULL DEFAULT '';
 -- Preserve all four actions from migration 300 while the old ledger ages out.
 ALTER TABLE sched_decisions DROP CONSTRAINT IF EXISTS sched_decisions_action_check;

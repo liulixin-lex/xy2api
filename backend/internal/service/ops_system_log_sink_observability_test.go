@@ -36,6 +36,8 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 	obs := NewSchedObservabilityService()
 	obs.Count("cooled", 2)
 	obs.Count("released", 4)
+	obs.Count("trial", 3)
+	obs.Count("clear", 5)
 	obs.Cycle(123*time.Millisecond, true)
 	obs.summary(context.Background())
 	state := resilience.NewRequestState()
@@ -56,7 +58,7 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 	require.Len(t, saved, 2)
 	expected := []map[string]any{
 		{"cycles": float64(1), "cycles_failed": float64(1), "cycle_ms_max": float64(123),
-			"cooled": float64(2), "released": float64(4)},
+			"cooled": float64(2), "released": float64(4), "trial": float64(3), "clear": float64(5)},
 		{"kind": "takeover", "gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
 			"model": "m", "from": float64(10), "to": float64(1), "reason": "priority_takeover", "committed": true},
 	}
