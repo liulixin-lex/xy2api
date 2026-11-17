@@ -360,6 +360,42 @@ func (_u *UsageLogUpdate) ClearPricingSource() *UsageLogUpdate {
 	return _u
 }
 
+// SetProfitBasis sets the "profit_basis" field.
+func (_u *UsageLogUpdate) SetProfitBasis(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetProfitBasis(v)
+	return _u
+}
+
+// AppendProfitBasis appends value to the "profit_basis" field.
+func (_u *UsageLogUpdate) AppendProfitBasis(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendProfitBasis(v)
+	return _u
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (_u *UsageLogUpdate) ClearProfitBasis() *UsageLogUpdate {
+	_u.mutation.ClearProfitBasis()
+	return _u
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (_u *UsageLogUpdate) SetDispatchPhases(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetDispatchPhases(v)
+	return _u
+}
+
+// AppendDispatchPhases appends value to the "dispatch_phases" field.
+func (_u *UsageLogUpdate) AppendDispatchPhases(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendDispatchPhases(v)
+	return _u
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (_u *UsageLogUpdate) ClearDispatchPhases() *UsageLogUpdate {
+	_u.mutation.ClearDispatchPhases()
+	return _u
+}
+
 // SetModel sets the "model" field.
 func (_u *UsageLogUpdate) SetModel(v string) *UsageLogUpdate {
 	_u.mutation.SetModel(v)
@@ -2047,6 +2083,28 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.ProfitBasis(); ok {
+		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProfitBasis(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProfitBasis, value)
+		})
+	}
+	if _u.mutation.ProfitBasisCleared() {
+		_spec.ClearField(usagelog.FieldProfitBasis, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.DispatchPhases(); ok {
+		_spec.SetField(usagelog.FieldDispatchPhases, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDispatchPhases(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDispatchPhases, value)
+		})
+	}
+	if _u.mutation.DispatchPhasesCleared() {
+		_spec.ClearField(usagelog.FieldDispatchPhases, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
@@ -2952,6 +3010,42 @@ func (_u *UsageLogUpdateOne) AppendPricingSource(v jsontext.Value) *UsageLogUpda
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (_u *UsageLogUpdateOne) ClearPricingSource() *UsageLogUpdateOne {
 	_u.mutation.ClearPricingSource()
+	return _u
+}
+
+// SetProfitBasis sets the "profit_basis" field.
+func (_u *UsageLogUpdateOne) SetProfitBasis(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetProfitBasis(v)
+	return _u
+}
+
+// AppendProfitBasis appends value to the "profit_basis" field.
+func (_u *UsageLogUpdateOne) AppendProfitBasis(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendProfitBasis(v)
+	return _u
+}
+
+// ClearProfitBasis clears the value of the "profit_basis" field.
+func (_u *UsageLogUpdateOne) ClearProfitBasis() *UsageLogUpdateOne {
+	_u.mutation.ClearProfitBasis()
+	return _u
+}
+
+// SetDispatchPhases sets the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) SetDispatchPhases(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetDispatchPhases(v)
+	return _u
+}
+
+// AppendDispatchPhases appends value to the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) AppendDispatchPhases(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendDispatchPhases(v)
+	return _u
+}
+
+// ClearDispatchPhases clears the value of the "dispatch_phases" field.
+func (_u *UsageLogUpdateOne) ClearDispatchPhases() *UsageLogUpdateOne {
+	_u.mutation.ClearDispatchPhases()
 	return _u
 }
 
@@ -4671,6 +4765,28 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ProfitBasis(); ok {
+		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedProfitBasis(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldProfitBasis, value)
+		})
+	}
+	if _u.mutation.ProfitBasisCleared() {
+		_spec.ClearField(usagelog.FieldProfitBasis, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.DispatchPhases(); ok {
+		_spec.SetField(usagelog.FieldDispatchPhases, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedDispatchPhases(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldDispatchPhases, value)
+		})
+	}
+	if _u.mutation.DispatchPhasesCleared() {
+		_spec.ClearField(usagelog.FieldDispatchPhases, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)

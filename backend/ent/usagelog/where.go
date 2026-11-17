@@ -1095,6 +1095,26 @@ func PricingSourceNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSource))
 }
 
+// ProfitBasisIsNil applies the IsNil predicate on the "profit_basis" field.
+func ProfitBasisIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldProfitBasis))
+}
+
+// ProfitBasisNotNil applies the NotNil predicate on the "profit_basis" field.
+func ProfitBasisNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldProfitBasis))
+}
+
+// DispatchPhasesIsNil applies the IsNil predicate on the "dispatch_phases" field.
+func DispatchPhasesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldDispatchPhases))
+}
+
+// DispatchPhasesNotNil applies the NotNil predicate on the "dispatch_phases" field.
+func DispatchPhasesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldDispatchPhases))
+}
+
 // ModelEQ applies the EQ predicate on the "model" field.
 func ModelEQ(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))

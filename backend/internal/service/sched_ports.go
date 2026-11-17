@@ -42,18 +42,35 @@ type SchedAttemptUsage struct {
 	CacheReadTokensPresent bool
 }
 type SchedAttemptFinish struct {
-	Outcome schedquality.Outcome
-	Detail  string
-	Waited  time.Duration
-	Usage   *SchedAttemptUsage
+	Outcome      schedquality.Outcome
+	Class        schedquality.ErrorClass
+	HTTPStatus   int // Zero means no status was observed.
+	StatusOrigin schedquality.StatusOrigin
+	Detail       string
+	Waited       time.Duration
+	OutputBytes  int
+	Usage        *SchedAttemptUsage
 }
+
+type SchedOutputKind uint8
+
+const (
+	OutputFirstEvent SchedOutputKind = iota
+	OutputValid
+	OutputAnswer
+)
+
 type SchedAttempt interface {
-	MarkFirstOutput(at time.Time)
+	MarkOutput(kind SchedOutputKind, at time.Time)
 	Finish(SchedAttemptFinish)
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
-	SetObserver(fn func(schedquality.AttemptSample)) // wired once by WP0 to the engine's Observe
+	// Report Begin (FinishedAt zero) and Finish once each. Engine integration
+	// must adopt F7: use observations only for in-flight tracking and admit
+	// completed evidence through LoadInsertedAfter. The legacy engine on this
+	// branch still adds Finish observations directly to its window.
+	SetObserver(fn func(schedquality.AttemptSample))
 	Flush(ctx context.Context) error
 }
 type SchedAttemptStore interface {

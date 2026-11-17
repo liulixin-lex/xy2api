@@ -37,7 +37,7 @@ func (r *captureServiceRecorder) Begin(in SchedAttemptStart) SchedAttempt {
 }
 func (*captureServiceRecorder) SetObserver(func(schedquality.AttemptSample)) {}
 func (*captureServiceRecorder) Flush(context.Context) error                  { return nil }
-func (*captureServiceAttempt) MarkFirstOutput(time.Time)                     {}
+func (*captureServiceAttempt) MarkOutput(SchedOutputKind, time.Time)         {}
 func (a *captureServiceAttempt) finish(outcome schedquality.Outcome, detail string) {
 	if a.done {
 		panic("duplicate finish")
