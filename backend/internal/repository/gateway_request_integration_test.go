@@ -53,11 +53,12 @@ func TestGatewayRequestsExperienceUnionAndIdempotence(t *testing.T) {
 		require.NoError(t, repo.CreateUnbilledRequest(ctx, &service.GatewayUnbilledRequest{
 			RequestID: uuid.NewString(), CreatedAt: when, GroupID: &g.ID, Result: 3}))
 	}
-	for _, scope := range []resilience.GatewayRequestScope{resilience.GatewayRequestScopeImage, resilience.GatewayRequestScopeEmbedding} {
+	for _, scope := range []resilience.GatewayRequestScope{resilience.GatewayRequestScopeImage, resilience.GatewayRequestScopeEmbedding, resilience.GatewayRequestScopeSearch} {
 		copy := *usage
 		copy.ID = 0
 		copy.RequestID = uuid.NewString()
 		copy.RequestScope = scope
+		copy.EndToEndFirstOutputMs = new(int64(9000)) // Non-text output must not enter overview latency either.
 		_, err := repo.Create(ctx, &copy)
 		require.NoError(t, err)
 		require.NoError(t, repo.CreateUnbilledRequest(ctx, &service.GatewayUnbilledRequest{RequestID: uuid.NewString(), CreatedAt: at, GroupID: &g.ID, Result: 3, RequestScope: scope}))
@@ -72,6 +73,12 @@ func TestGatewayRequestsExperienceUnionAndIdempotence(t *testing.T) {
 	require.Nil(t, got[-1].CacheRatio)
 	require.Nil(t, got[-1].FailedRate)
 	require.Nil(t, got[-1].TTFOP50Ms)
+	accountRepo := newAccountRepositoryWithSQL(client, tx, nil)
+	overview, err := accountRepo.SchedAdminGroupLast60(ctx, []int64{g.ID}, at)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, *overview[g.ID].Requests, "only the legacy text bill has measured output; image/embedding/search also have times but are excluded")
+	require.Equal(t, 100.0, *overview[g.ID].E2EFirstOutputP50Ms)
+	require.Equal(t, 100.0, *overview[g.ID].E2EFirstOutputP90Ms)
 }
 
 func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {

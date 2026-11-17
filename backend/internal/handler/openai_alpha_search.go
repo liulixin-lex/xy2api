@@ -12,6 +12,7 @@ import (
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
@@ -120,6 +121,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 	defer inflightDone()
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, requestedModel, false, h.gatewayService, resilience.GatewayRequestScopeSearch)()
 
 	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
@@ -197,6 +199,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
 		}()
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
+		// Non-2xx passthrough returns (nil, nil); only a delivered search result
+		// completes this request. Billing and its financial idempotency stay unchanged.
+		recordForwardRecovery(c, err, false, result != nil)
 
 		if err == nil {
 			if result != nil {
