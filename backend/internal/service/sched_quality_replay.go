@@ -10,6 +10,10 @@ import (
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
+type schedReplayStats struct {
+	batches, assessments int
+}
+
 type schedReplayEvent struct {
 	at    time.Time
 	keys  map[q.LineKey]bool
@@ -37,6 +41,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 	if err = ctx.Err(); err != nil {
 		return
 	}
+	d.replayStats = schedReplayStats{}
 	keys, initial := s.rowKeys(d, states)
 	if len(order) > 0 {
 		order[0](keys)
@@ -55,8 +60,8 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		r.LineKey = k
 		rows[k] = r
 		start := newAfter
-		if exists && !r.EvaluatedAt.IsZero() {
-			start = r.EvaluatedAt
+		if exists {
+			start = schedQualitySince(r.EvaluatedAt, horizon.Add(-schedEvidenceRetention))
 		}
 		lower[k] = schedQualitySince(start, resets[k.AccountID])
 		rank[k] = len(enabled)
@@ -91,12 +96,21 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 						return e
 					}
 				}
-				at := schedAvailableAt(a)
+				at := schedArrivalGrid(schedAvailableAt(a))
 				if !at.After(horizon) {
 					times = append(times, at)
 				}
 			}
 			sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
+			// Adjacent arrivals in one five-second cell cause one assessment.
+			n := 0
+			for _, at := range times {
+				if n == 0 || !at.Equal(times[n-1]) {
+					times[n] = at
+					n++
+				}
+			}
+			times = times[:n]
 			arrivalTimes[pair] = times
 		}
 		i := sort.Search(len(times), func(i int) bool { return times[i].After(start) })
@@ -116,6 +130,11 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 	schedule := func(r q.LineState, start time.Time) error {
 		start = schedQualitySince(start, lower[r.LineKey])
 		add := func(at time.Time) {
+			if !at.IsZero() && !at.After(start) {
+				// Expired timers outside the retained window fire at the first
+				// grid strictly after its start, never at their historical time.
+				at = start.UTC().Truncate(schedTrialArrivalInterval).Add(schedTrialArrivalInterval)
+			}
 			if at.After(start) {
 				if e := eventAt(at); e != nil {
 					e.keys[r.LineKey] = true
@@ -163,6 +182,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		if len(e.keys) == 0 {
 			continue
 		}
+		d.replayStats.batches++
 		d.usePeerBucket(e.at, rows)
 		eventKeys := make([]q.LineKey, 0, len(e.keys))
 		for k := range e.keys {
@@ -183,6 +203,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			if !due {
 				continue
 			}
+			d.replayStats.assessments++
 			v, basis := s.assessLine(d, prev, kind, e.at, resets)
 			next, action := q.Step(prev, kind, v, basis, e.at)
 			rows[k] = next
@@ -225,4 +246,14 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 	}
 	sort.Slice(deleted, func(i, j int) bool { return schedLineLess(deleted[i], deleted[j]) })
 	return
+}
+
+const schedTrialArrivalInterval = 5 * time.Second
+
+func schedArrivalGrid(at time.Time) time.Time {
+	grid := at.UTC().Truncate(schedTrialArrivalInterval)
+	if at.After(grid) {
+		grid = grid.Add(schedTrialArrivalInterval)
+	}
+	return grid
 }

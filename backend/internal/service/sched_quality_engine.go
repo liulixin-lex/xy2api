@@ -194,7 +194,7 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		if latest.After(s.insertedAt) {
 			s.insertedAt = latest
 		}
-		if len(rows) < schedQualityLedgerPageSize {
+		if len(rows) < schedQualityLedgerPageSize || boot && !latest.Before(s.loadThrough) {
 			break
 		}
 		if !latest.After(after) {
@@ -244,93 +244,29 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	if err != nil {
 		return err
 	}
-	var states, previous []schedquality.LineState
-	var overrides []SchedOverride
-	var resets map[int64]time.Time
-	var decisions []schedquality.Decision
-	horizon := now.Add(-10 * time.Second)
-	after := s.processedAt
-	if after.IsZero() {
-		after = now.Add(-5 * time.Minute)
-	} else if late := s.window.newFinishedAt; !late.IsZero() && !late.After(after) {
-		after = late.Add(-time.Microsecond)
-		if floor := now.Add(-5 * time.Minute); after.Before(floor) {
-			after = floor
-		}
-	}
+	oldPolicies, oldRule := s.policies, s.rule
+	var batch *schedReplayBatch
 	locked, err := s.store.RunCycle(ctx, func(tx SchedQualityTx) error {
-		// Configuration must match the states protected by this transaction, even
-		// when another instance changed it since our last cached membership refresh.
-		policies, err := tx.Policies()
-		if err != nil {
-			return err
-		}
-		rule, err := tx.TTFTRule()
-		if err != nil {
-			return err
-		}
-		s.policies, s.rule = policies, rule
-		states, err = tx.States()
-		if err != nil {
-			return err
-		}
-		previous = append([]schedquality.LineState(nil), states...)
-		overrides, err = tx.Overrides()
-		if err != nil {
-			return err
-		}
-		resets, err = tx.ResetTimes()
-		if err != nil {
-			return err
-		}
-		var changed []schedquality.LineState
-		var deleted []schedquality.LineKey
-		states, changed, deleted, decisions, err = s.replay(ctx, d, states, resets, after, horizon)
-		if err != nil {
-			return err
-		}
-		if err := tx.Upsert(changed); err != nil {
-			return err
-		}
-		if err := tx.Delete(deleted); err != nil {
-			return err
-		}
-		if err := tx.InsertDecisions(decisions); err != nil {
-			return err
-		}
-		var expired, active []SchedOverride
-		for _, o := range overrides {
-			if (o.ExpiresAt != nil && !o.ExpiresAt.After(now)) || o.GroupID != 0 && !s.isMember(o.GroupID, o.AccountID) {
-				expired = append(expired, o)
-			} else {
-				active = append(active, o)
-			}
-		}
-		if err := tx.DeleteOverrides(expired); err != nil {
-			return err
-		}
-		overrides = active
-		return nil
+		var err error
+		batch, err = s.replayTx(ctx, tx, d)
+		return err
 	})
 	if err != nil {
+		s.policies, s.rule = oldPolicies, oldRule
 		return err
 	}
 	if !locked {
 		s.processedAt = time.Time{}
-		states, overrides, resets, err = s.store.LoadRows(ctx)
+		batch = &schedReplayBatch{}
+		batch.states, batch.overrides, batch.resets, err = s.store.LoadRows(ctx)
 		if err != nil {
 			return err
 		}
 	} else {
-		s.processedAt = horizon
-		s.releaseEndedTrials(ctx, previous, states)
-		for _, decision := range decisions {
-			LogSchedQualityDecision(ctx, decision)
-			s.countDecision(decision.Action)
-		}
+		s.commitReplay(ctx, batch, batch.states)
 	}
 	s.window.newFinishedAt = time.Time{}
-	notifications = s.publish(d, states, overrides, resets, now)
+	notifications = s.publish(d, batch.states, batch.overrides, batch.resets, now)
 	return nil
 }
 

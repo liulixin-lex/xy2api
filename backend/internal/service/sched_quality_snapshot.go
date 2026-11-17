@@ -15,6 +15,7 @@ type schedQualityKey struct {
 	group   int64
 }
 type schedQualityData struct {
+	replayStats   schedReplayStats
 	now           time.Time
 	samples       map[SchedAccountModel][]q.AttemptSample
 	globalEnabled bool

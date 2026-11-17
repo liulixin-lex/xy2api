@@ -80,22 +80,16 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 	}
 	oldPolicies := cloneSchedPolicies(s.policies)
 	oldRule := s.rule
-	var states, previous []schedquality.LineState
-	var overrides []SchedOverride
-	var resets map[int64]time.Time
+	var batch *schedReplayBatch
+	var states []schedquality.LineState
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
-		// Read after acquiring the lock: another instance may have saved since refreshConfig.
-		policies, e := tx.Policies()
+		var e error
+		batch, e = s.replayTx(ctx, tx, d)
 		if e != nil {
 			return e
 		}
-		s.policies = policies
-		rule, e := tx.TTFTRule()
-		if e != nil {
-			return e
-		}
-		s.rule = rule
-		result.RelaxedLines = relaxedPolicyLines(policies[groupID].Policy, p)
+		states = batch.states
+		result.RelaxedLines = relaxedPolicyLines(s.policies[groupID].Policy, p)
 		result.SchedPolicyRecord, e = tx.SavePolicy(groupID, expectedVersion, p)
 		if e != nil {
 			return e
@@ -105,20 +99,7 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 			s.policies[group] = record
 		}
 		s.policies[groupID] = result.SchedPolicyRecord
-		states, e = tx.States()
-		if e != nil {
-			return e
-		}
-		previous = append([]schedquality.LineState(nil), states...)
-		overrides, e = tx.Overrides()
-		if e != nil {
-			return e
-		}
-		resets, e = tx.ResetTimes()
-		if e != nil {
-			return e
-		}
-		states, result.Cleared, e = s.rejudge(tx, d, states, resets, func(k schedquality.LineKey) bool {
+		states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
 			return k.GroupID == groupID && slices.Contains(result.RelaxedLines, k.Line)
 		}, func(k schedquality.LineKey) bool { return k.GroupID == groupID && !p.Enabled })
 		return e
@@ -129,8 +110,8 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 		return
 	}
 	s.configAt = time.Time{}
-	s.releaseEndedTrials(ctx, previous, states)
-	notifications = s.publish(d, states, overrides, resets, now)
+	s.commitReplay(ctx, batch, states)
+	notifications = s.publish(d, states, batch.overrides, batch.resets, now)
 	return
 }
 
@@ -159,20 +140,16 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 	}
 	oldRule := s.rule
 	oldPolicies := cloneSchedPolicies(s.policies)
-	var states, previous []schedquality.LineState
-	var overrides []SchedOverride
-	var resets map[int64]time.Time
+	var batch *schedReplayBatch
+	var states []schedquality.LineState
 	err = s.store.RunExclusive(ctx, func(tx SchedQualityTx) error {
-		policies, e := tx.Policies()
+		var e error
+		batch, e = s.replayTx(ctx, tx, d)
 		if e != nil {
 			return e
 		}
-		s.policies = policies
-		old, e := tx.TTFTRule()
-		if e != nil {
-			return e
-		}
-		result.Change, e = schedquality.CompareRuleBParams(old.Params, p)
+		states = batch.states
+		result.Change, e = schedquality.CompareRuleBParams(s.rule.Params, p)
 		if e != nil {
 			return e
 		}
@@ -181,21 +158,8 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 			return e
 		}
 		s.rule = result.SchedTTFTRuleRecord
-		states, e = tx.States()
-		if e != nil {
-			return e
-		}
-		previous = append([]schedquality.LineState(nil), states...)
-		overrides, e = tx.Overrides()
-		if e != nil {
-			return e
-		}
-		resets, e = tx.ResetTimes()
-		if e != nil {
-			return e
-		}
 		if result.Change == schedquality.RuleBRelaxed || result.Change == schedquality.RuleBMixed {
-			states, result.Cleared, e = s.rejudge(tx, d, states, resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+			states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
 		}
 		return e
 	})
@@ -205,8 +169,8 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		return
 	}
 	s.configAt = time.Time{}
-	s.releaseEndedTrials(ctx, previous, states)
-	notifications = s.publish(d, states, overrides, resets, now)
+	s.commitReplay(ctx, batch, states)
+	notifications = s.publish(d, states, batch.overrides, batch.resets, now)
 	return
 }
 
