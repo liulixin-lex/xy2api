@@ -99,6 +99,9 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 		in.Class = schedquality.ClassGateway
 	}
 	in = classifySchedAttempt(in, a.failure, a.first, a.allowModel401)
+	if in.Class == schedquality.ClassCapability && a.failure != nil && a.failure.Source == resilience.SourceStreamEvent {
+		observeCapabilityFailure(a.learnCapability, a.failure.Body)
+	}
 	if in.HTTPStatus == 0 {
 		if a.httpStatus > 0 {
 			in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
@@ -277,9 +280,6 @@ func (a *schedAttemptCapture) observe(data []byte) {
 	}
 	if !terminal.QualityFailure() {
 		return
-	}
-	if a.learnCapability != nil {
-		observeCapabilityFailure(a.learnCapability, data)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

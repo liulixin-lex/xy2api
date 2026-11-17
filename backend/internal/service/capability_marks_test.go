@@ -51,6 +51,7 @@ func TestCapabilityMarksExpiryRenewalAndRestart(t *testing.T) {
 	old := *mark
 	old.ExpiresAt = start.Add(-time.Hour)
 	fresh.Extra[capabilityMarkExtraKey(old.Model, old.Protocol, old.Shape)] = old
+	account.Extra[capabilityMarkExtraKey(old.Model, old.Protocol, old.Shape)] = old
 	require.Nil(t, fresh.CapabilityMarked(old.Model, old.Protocol, old.Shape, start))
 	require.NoError(t, svc.LearnCapabilityMark(ctx, fresh, old))
 	renewed, err := repo.GetByID(ctx, 1)
@@ -143,7 +144,7 @@ func TestCapabilityMarksLearnOnlyExplicitUpstreamRefusals(t *testing.T) {
 		reason string
 	}{
 		{"model", 404, `{"error":{"code":"MODEL_UNSUPPORTED"}}`, "model_unsupported"},
-		{"request", 400, `{"error":{"message":"this site does not support this request"}}`, "request_unsupported"},
+		{"request feature", 400, `{"error":{"message":"this site does not support this request"}}`, ""},
 		{"protocol", 503, `{"error":{"code":"unsupported_protocol"}}`, "request_unsupported"},
 		{"temporary missing channel", 503, `{"error":{"code":"model_not_found","message":"synthetic channel temporarily unavailable"}}`, ""},
 		{"429 missing channel", 429, `{"error":{"code":"model_not_found"}}`, ""},
@@ -165,7 +166,7 @@ func TestCapabilityMarksLearnOnlyExplicitUpstreamRefusals(t *testing.T) {
 			mark := account.CapabilityMarked("synthetic-model", "responses", "stream", time.Now())
 			if tc.reason == "" {
 				if tc.name == "input modality" || tc.name == "frontend" || tc.name == "detail frontend" {
-					classified := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: tc.status, Body: []byte(tc.body)}, false)
+					classified := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: tc.status, Body: []byte(tc.body)}, false, false)
 					require.Equal(t, schedquality.ClassCapability, classified.Class)
 				}
 				require.Nil(t, mark)
@@ -346,10 +347,9 @@ func TestCapabilityMarksLimitRenewalExpiryAndIdentity(t *testing.T) {
 	mark := syntheticCapabilityMark()
 	mark.Model = "overflow-fixture"
 	require.NoError(t, svc.LearnCapabilityMark(ctx, account, mark))
-	require.Nil(t, account.CapabilityMarked(mark.Model, mark.Protocol, mark.Shape, time.Now()))
-	// Both callers hold the same stale 31-record snapshot. The repository's
-	// lock must serialize the final capacity check against the actual row.
-	delete(account.Extra, capabilityMarkExtraKey("fixture-31", mark.Protocol, mark.Shape))
+	require.NotNil(t, account.CapabilityMarked(mark.Model, mark.Protocol, mark.Shape, time.Now()))
+	// Both callers hold a stale snapshot; each new key must evict under the
+	// same row lock as its merge so concurrent arrivals stay bounded.
 	snapshot, err := repo.GetByID(ctx, 1)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
@@ -372,9 +372,12 @@ func TestCapabilityMarksLimitRenewalExpiryAndIdentity(t *testing.T) {
 		}
 	}
 	require.Equal(t, CapabilityMarkLimit, count)
-	mark.Model = "fixture-0"
+	mark.Model = "overflow-fixture"
 	old := account.CapabilityMarked(mark.Model, mark.Protocol, mark.Shape, time.Now())
 	require.NotNil(t, old)
+	aged := *old
+	aged.ExpiresAt = time.Now().Add(CapabilityMarkTTL - 2*time.Hour)
+	account.Extra[capabilityMarkExtraKey(mark.Model, mark.Protocol, mark.Shape)] = aged
 	require.NoError(t, svc.LearnCapabilityMark(ctx, account, mark))
 	require.True(t, account.CapabilityMarked(mark.Model, mark.Protocol, mark.Shape, time.Now()).ExpiresAt.After(old.ExpiresAt))
 	expired := *old
