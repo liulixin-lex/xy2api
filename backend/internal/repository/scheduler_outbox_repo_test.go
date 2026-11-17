@@ -60,23 +60,24 @@ func TestSchedulerOutboxRepositoryOldestPendingCreatedAtReturnsNotFound(t *testi
 
 func expectOutboxTransaction(mock sqlmock.Sqlmock, acquired bool) {
 	mock.ExpectBegin()
-	mock.ExpectExec("SET LOCAL idle_in_transaction_session_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_xact_lock(hashtext('scheduler_outbox_cleanup'))")).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(acquired))
 }
-func TestSchedulerOutboxRepositoryTransactionAcknowledgesExactIDs(t *testing.T) {
+func TestSchedulerOutboxRepositoryAcknowledgesExactIDsOutsideLease(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	expectOutboxTransaction(mock, true)
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM scheduler_outbox WHERE id = ANY($1::bigint[])")).WithArgs("{2,9}").WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectCommit()
-	lease, acquired, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"alive"}).AddRow(1))
+	mock.ExpectRollback()
+	repo := &schedulerOutboxRepository{db: db}
+	lease, acquired, err := repo.TryAcquireConsumerLock(context.Background())
 	require.NoError(t, err)
 	require.True(t, acquired)
-	require.NoError(t, lease.DeleteProcessed(context.Background(), []int64{2, 9}))
-	require.NoError(t, lease.Commit())
-	lease.Release() // harmless after commit; no pooled session lock remains
+	require.NoError(t, repo.DeleteProcessed(context.Background(), []int64{2, 9}))
+	require.NoError(t, lease.KeepAlive(context.Background()))
+	lease.Release() // only the advisory lock lives in this transaction
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 func TestSchedulerOutboxRepositoryTransactionRollsBack(t *testing.T) {

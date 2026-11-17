@@ -87,7 +87,9 @@ type outboxCleanupRepo struct {
 	deleteErr       error
 	pendingReads    int
 	healthUnderLock bool
-	commitErr       error
+	leaseErr        error
+	heartbeats      int
+	batchDeadline   bool
 }
 
 type outboxCleanupAccountRepo struct {
@@ -174,7 +176,8 @@ func (r *outboxCleanupRepo) DeleteProcessed(_ context.Context, ids []int64) erro
 	r.events = events
 	return nil
 }
-func (r *outboxCleanupRepo) TryAcquireConsumerLock(context.Context) (SchedulerOutboxConsumerLease, bool, error) {
+func (r *outboxCleanupRepo) TryAcquireConsumerLock(ctx context.Context) (SchedulerOutboxConsumerLease, bool, error) {
+	_, r.batchDeadline = ctx.Deadline()
 	r.lockAttempts++
 	if r.lockUnavailable {
 		return nil, false, nil
@@ -185,28 +188,12 @@ func (r *outboxCleanupRepo) TryAcquireConsumerLock(context.Context) (SchedulerOu
 
 type outboxCleanupLease struct {
 	repo     *outboxCleanupRepo
-	ids      []int64
 	released bool
 }
 
-func (l *outboxCleanupLease) ListPendingAndReleaseDedup(ctx context.Context, limit int) ([]SchedulerOutboxEvent, error) {
-	return l.repo.ListPendingAndReleaseDedup(ctx, limit)
-}
-func (l *outboxCleanupLease) DeleteProcessed(_ context.Context, ids []int64) error {
-	if l.repo.deleteErr != nil {
-		return l.repo.deleteErr
-	}
-	l.ids = append([]int64(nil), ids...)
-	return nil
-}
-func (l *outboxCleanupLease) Commit() error {
-	if l.repo.commitErr != nil {
-		l.Release()
-		return l.repo.commitErr
-	}
-	err := l.repo.DeleteProcessed(context.Background(), l.ids)
-	l.Release()
-	return err
+func (l *outboxCleanupLease) KeepAlive(context.Context) error {
+	l.repo.heartbeats++
+	return l.repo.leaseErr
 }
 func (l *outboxCleanupLease) Release() {
 	if !l.released {
@@ -808,12 +795,23 @@ func TestSchedulerOutboxReleasesTransactionBeforeLagCheck(t *testing.T) {
 	require.False(t, repo.healthUnderLock)
 	require.Equal(t, 1, repo.releaseCount)
 }
-func TestSchedulerOutboxCommitFailureReplaysBatch(t *testing.T) {
-	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}, commitErr: errors.New("transaction terminated")}
+func TestSchedulerOutboxLostLeaseStillAcknowledgesBatch(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1, EventType: SchedulerOutboxEventAccountLastUsed}}, rows: []int64{1}, leaseErr: errors.New("idle transaction terminated")}
+	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, &config.Config{})
+	svc.pollOutbox()
+	require.Empty(t, repo.events, "successful projections must not replay forever when the lease expires")
+	require.Equal(t, [][]int64{{1}}, repo.deleteCalls)
+	require.Equal(t, 2, repo.heartbeats, "renew after the event and check again before acknowledgement")
+	require.False(t, repo.batchDeadline, "each event has a budget, not the whole batch")
+	require.Equal(t, 1, repo.pendingReads, "lag inspection must still follow a successful acknowledgement")
+	require.False(t, repo.healthUnderLock)
+}
+
+func TestSchedulerOutboxRenewsLeaseAfterEveryEvent(t *testing.T) {
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{ID: 1}, {ID: 2}, {ID: 3}}, rows: []int64{1, 2, 3}}
 	svc := NewSchedulerSnapshotService(&outboxCleanupCache{}, repo, nil, nil, nil)
 	svc.pollOutbox()
-	require.Len(t, repo.events, 1)
-	repo.commitErr = nil
-	svc.pollOutbox()
+	require.Equal(t, 4, repo.heartbeats)
+	require.False(t, repo.batchDeadline)
 	require.Empty(t, repo.events)
 }
