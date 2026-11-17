@@ -37,7 +37,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	agentTaskRecoveryTried *bool,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -214,6 +217,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
 	defer acquireCancel()
+	acquireCtx, schedDial := withSchedWSDialObservation(acquireCtx, ctx, s, account, reqStream)
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
 		Account: account,
@@ -369,7 +373,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
 		body := payloadAsJSONBytes(wirePayload)
-		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
+		schedCapture = schedDial.beginSend(body, reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		schedCapture.noteWSNetworkError(err)

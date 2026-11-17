@@ -211,7 +211,10 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	var reasoningEffort *string
 	var schedCapture *schedAttemptCapture
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity, &reasoningEffort, &schedCapture)
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	if err != nil {
 		return nil, err
 	}

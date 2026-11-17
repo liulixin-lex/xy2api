@@ -102,10 +102,18 @@ func (s *SchedAttemptRecorderService) SetObserver(fn func(schedquality.AttemptSa
 }
 
 func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
+	return s.beginAt(in, time.Time{})
+}
+
+// beginAt preserves a request-owned physical dial start without publishing a
+// provisional attempt for a dial that is later canceled locally.
+func (s *SchedAttemptRecorderService) beginAt(in SchedAttemptStart, at time.Time) SchedAttempt {
 	if s == nil || s.stopped.Load() || s.store == nil {
 		return schedAttemptNoop{}
 	}
-	at := s.now()
+	if at.IsZero() {
+		at = s.now()
+	}
 	row := schedquality.AttemptSample{
 		AttemptID: uuid.Must(uuid.NewV7()).String(), StartedAt: at,
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,

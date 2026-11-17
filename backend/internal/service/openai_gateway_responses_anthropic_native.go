@@ -45,7 +45,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
-	defer func() { schedCapture.finish(schedResult, schedErr) }()
+	defer func() {
+		rethrowSchedAttemptPanic(schedCapture, recover())
+		schedCapture.finish(schedResult, schedErr)
+	}()
 	startTime := time.Now()
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
@@ -151,9 +154,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func(a *schedAttemptCapture) {
+		defer resp.Body.Close()
+		rethrowSchedAttemptPanic(a, recover())
 		// Completion belongs to the consumer, before transport cleanup.
 		a.finish(schedResult, schedErr)
-		_ = resp.Body.Close()
 	}(schedCapture)
 
 	if resp.StatusCode >= 400 {
