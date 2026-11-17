@@ -30,6 +30,22 @@ const VALUES: Record<string, string[]> = {
 const lookup = (messages: unknown, path: string): unknown =>
   path.split('.').reduce<unknown>((node, key) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined), messages)
 
+// The board's two rate-range exclusions read as the floor and the ceiling ("不用 · 低于下限 / 高于上限").
+it('names the rate-range exclusions as below the floor and above the ceiling', () => {
+  const words = (messages: unknown) => ['profit_floor', 'profit_threshold'].map((key) => lookup(messages, `admin.schedQuality.reject.${key}`))
+  expect([words(zh), words(en)]).toEqual([['低于下限', '高于上限'], ['Below the rate floor', 'Above the rate ceiling']])
+})
+
+// With the switch off the engine still judges and only selection ignores the layers; a group with its gate off is not
+// judged at all. The words say exactly that.
+it('says what each gate-off really stops', () => {
+  const words = (messages: unknown) => ['gateOffGlobal', 'gateOffGroup'].map((key) => String(lookup(messages, `admin.schedQuality.identity.${key}`)))
+  const [zhGlobal, zhGroup] = words(zh)
+  const [enGlobal, enGroup] = words(en)
+  expect([zhGlobal.includes('判定照常进行'), zhGlobal.includes('不做判定'), zhGroup.includes('不做判定')]).toEqual([true, false, true])
+  expect([enGlobal.includes('judging goes on'), enGlobal.includes('nothing is judged'), enGroup.includes('judged')]).toEqual([true, false, true])
+})
+
 describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_locale, messages) => {
   it('names every identity, place, layer, action, unknown cause and evidence field the backend sends', () => {
     const missing = Object.entries(VALUES).flatMap(([prefix, values]) =>

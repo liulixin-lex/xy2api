@@ -233,7 +233,7 @@ const changedAccounts = computed(() => {
 const shownChanged = computed(() =>
   changedAccounts.value.slice(0, PREVIEW_NAMES).map((entry) => ({
     account_id: entry.account_id,
-    text: entry.models.length > 1 ? `${entry.name} · ${entry.models.join(', ')}` : entry.name,
+    text: entry.models.length > 1 ? `${entry.name} · ${entry.models.join(t('admin.schedQuality.evidence.joiner'))}` : entry.name,
     tip: entry.changes.join('\n')
   }))
 )

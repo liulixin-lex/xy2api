@@ -15,6 +15,7 @@ import {
   profitMarginPercentFromGroup,
   profitPercentToDecimal,
   profitPreviewLevel,
+  profitSaveCheck,
   validateMinUpstreamRate,
   validateProfitControlFormState,
   type ProfitControlFormState,
@@ -216,20 +217,51 @@ describe("validateMinUpstreamRate", () => {
   });
 
   it("accepts finite positive values with at most four decimals", () => {
-    for (const value of [0.0001, 0.1234, 0.5, 1, 2.75, "0.3"]) {
+    for (const value of [0.0001, 0.1234, 0.5, 1, 2.75, "0.3", 999999.9999]) {
       expect(validateMinUpstreamRate(value)).toBeNull();
     }
   });
 
-  it("rejects zero, negatives and non-numbers", () => {
-    for (const value of [0, -0.1, "abc", Number.POSITIVE_INFINITY, Number.NaN]) {
+  it("rejects zero, negatives, non-numbers and the backend's bound of 1000000 or more", () => {
+    for (const value of [0, -0.1, "abc", Number.POSITIVE_INFINITY, Number.NaN, 1e6, "1e6", 1234567]) {
       expect(validateMinUpstreamRate(value)).toBe("floorRangeError");
     }
   });
 
-  it("rejects a fifth decimal instead of rounding it", () => {
-    expect(validateMinUpstreamRate(0.12345)).toBe("floorPrecisionError");
-    expect(validateMinUpstreamRate(0.00001)).toBe("floorPrecisionError");
+  it("rejects a fifth decimal instead of rounding it, as the backend counts the decimals of the value sent", () => {
+    for (const value of [0.12345, 0.00001, "1e-10", "1000.00001", 123456.12345]) {
+      expect(validateMinUpstreamRate(value)).toBe("floorPrecisionError");
+    }
+    expect(validateMinUpstreamRate("1e-4")).toBeNull();
+  });
+});
+
+// What a save checks for "no usable account", from the payload it submits and the saved group.
+describe("profitSaveCheck", () => {
+  const saved = { profit_control_enabled: true, profit_min_margin: 0.15, profit_safety_buffer: 0.05, min_upstream_rate: 0.3, rate_multiplier: 1 };
+  // What the edit form submits for the saved group when nothing is changed (the buffer is folded into the margin).
+  const same = { profit_control_enabled: true, profit_min_margin: 0.2, min_upstream_rate: 0.3, rate_multiplier: 1 };
+
+  it("checks nothing when the switch, margin, floor and multiplier are as saved, or when nothing can block after saving", () => {
+    expect(profitSaveCheck(same, saved)).toBeNull();
+    // Off and no floor after saving: profit control cannot leave the group without accounts.
+    expect(profitSaveCheck({ ...same, profit_control_enabled: false, min_upstream_rate: 0 }, saved)).toBeNull();
+    // Margin and multiplier only count while profit control is on.
+    const off = { ...saved, profit_control_enabled: false };
+    expect(profitSaveCheck({ ...same, profit_control_enabled: false, profit_min_margin: 0.4, rate_multiplier: 2 }, off)).toBeNull();
+  });
+
+  it("checks the submitted values when one of them changed", () => {
+    expect(profitSaveCheck({ ...same, min_upstream_rate: 2 }, saved)).toEqual({ profitEnabled: true, margin: 0.2, floor: 2, rateChanged: false });
+    expect(profitSaveCheck({ ...same, profit_min_margin: 0.3 }, saved)).toEqual({ profitEnabled: true, margin: 0.3, floor: 0.3, rateChanged: false });
+    // Clearing the floor on edit submits 0; a floor not sent stays as saved.
+    expect(profitSaveCheck({ ...same, profit_min_margin: 0.3, min_upstream_rate: undefined }, saved)).toMatchObject({ floor: 0.3 });
+    expect(profitSaveCheck({ ...same, min_upstream_rate: 0 }, saved)).toMatchObject({ floor: 0 });
+    expect(profitSaveCheck({ ...same, profit_control_enabled: false }, saved)).toEqual({ profitEnabled: false, margin: 0, floor: 0.3, rateChanged: false });
+  });
+
+  it("marks a changed multiplier while profit control is on: the preview uses the saved one", () => {
+    expect(profitSaveCheck({ ...same, rate_multiplier: 0.5 }, saved)).toMatchObject({ rateChanged: true });
   });
 });
 

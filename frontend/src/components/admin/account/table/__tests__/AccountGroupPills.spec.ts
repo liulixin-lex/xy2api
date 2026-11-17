@@ -188,7 +188,7 @@ describe('AccountGroupPills', () => {
     })
   })
 
-  it('shows a trial\'s models and end, an exemption\'s end and reason, the TTFT samples while unknown, and a stop\'s reason, source and end', () => {
+  it('shows a trial\'s models and end, an exemption\'s end and reason, the TTFT samples while unknown, and a stop\'s reason, source and end', async () => {
     const trialEnd = inMinutes(40)
     const trial = mountPills(1, baseQuality({
       group_status: statuses({ 1: 'trial' }),
@@ -211,6 +211,11 @@ describe('AccountGroupPills', () => {
     const unknown = mountPills(1, baseQuality({ group_status: statuses({ 1: 'unknown' }), ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
     expect(cardOf(unknown.get('[data-test="group-pill-dot"]'))).toMatchObject({
       chip: { text: 'admin.accounts.table.dotStates.unknown', tone: 'observe' }, rows: [['admin.accounts.table.tip.reason', 'admin.accounts.table.tip.unknownWhy']]
+    })
+    // Quality scheduling switched off: nothing is judged, as the panel says, not "not enough evidence".
+    await unknown.setProps({ gateOff: true })
+    expect(cardOf(unknown.get('[data-test="group-pill-dot"]'))).toMatchObject({
+      rows: [['admin.accounts.table.tip.reason', 'admin.schedQuality.identity.gateOffGlobal']]
     })
     const until = inMinutes(90)
     const stopped = mountPills(1, baseQuality({ stop: { source: 'manual', reason: 'manual_off', until } }))

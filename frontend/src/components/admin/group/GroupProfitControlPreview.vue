@@ -71,6 +71,9 @@
     <p v-else class="text-gray-500 dark:text-gray-400">
       {{ t('admin.groups.profitControl.previewLoading') }}
     </p>
+    <p v-if="rateUnsaved && profitEnabled" class="mt-1 text-gray-500 dark:text-gray-400" data-testid="profit-control-preview-saved-rate">
+      {{ t('admin.groups.profitControl.previewSavedRate') }}
+    </p>
   </div>
 </template>
 
@@ -87,18 +90,17 @@ import {
   floorOnlyPreviewLevel,
   formatProfitCeiling,
   minUpstreamRateValue,
-  profitBlockReason,
   profitPercentToDecimal,
   profitPreviewLevel,
   validateMinUpstreamRate,
   type MinUpstreamRateInput,
-  type ProfitBlockReason,
   type ProfitPreviewLevel
 } from '@/views/admin/groupsProfitControl'
 
 // 编辑现有分组时的利润门预览：毛利率换算出的上游倍率上限、可调度成员中能通过的数量，以及最低上游倍率
 // （倍率区间的下限）排除的号数、固定号数和高于上限的固定号。利润开关关闭、只设了下限时只显示与下限有关的几行。
-// 改毛利率或下限时防抖重新预览；保存前由父组件调用 blockingReason() 取与当前输入一致的结果。
+// 改毛利率或下限时防抖重新预览。预览接口按已保存的分组倍率计算，表单里倍率改了时写明这一点。保存前的确认
+// 不读这里的结果：父页面按这次提交的参数另取一次（groupsProfitControl.profitSaveCheck）。
 const PREVIEW_DEBOUNCE_MS = 400
 
 const LEVEL_CLASSES: Record<ProfitPreviewLevel, string> = {
@@ -117,6 +119,8 @@ const props = defineProps<{
   floor: MinUpstreamRateInput
   /** 输入框里是读不出数的内容（value 为空但不是留空）：按无效处理，不预览。 */
   floorUnreadable?: boolean
+  /** 表单里的分组倍率与已保存的不同：预览仍按已保存的倍率算，加一行说明。 */
+  rateUnsaved?: boolean
 }>()
 
 const { t } = useI18n()
@@ -128,7 +132,6 @@ const playMotion = useStateMotion(root)
 const preview = shallowRef<GroupProfitControlPreview | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
-let previewKey: string | null = null
 let controller: AbortController | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
@@ -150,7 +153,6 @@ const floorValue = computed(() =>
 const query = computed(() =>
   marginDecimal.value === null || floorValue.value === null ? null : { margin: marginDecimal.value, floor: floorValue.value }
 )
-const keyOf = (q: { margin: number; floor: number }) => `${q.margin}:${q.floor}`
 
 const level = computed<ProfitPreviewLevel>(() => {
   if (!preview.value) return 'normal'
@@ -167,12 +169,10 @@ async function fetchPreview(q: { margin: number; floor: number }) {
     const result = await adminAPI.groups.getProfitControlPreview(props.groupId, q.margin, q.floor, { signal: current.signal })
     if (request !== seq) return
     preview.value = result
-    previewKey = keyOf(q)
     errorMessage.value = ''
   } catch (error) {
     if (request !== seq) return
     preview.value = null
-    previewKey = null
     errorMessage.value = extractApiErrorMessage(error, t('common.unknownError'))
   } finally {
     if (request === seq) loading.value = false
@@ -205,18 +205,4 @@ onUnmounted(() => {
   clearTimeout(timer)
   controller?.abort()
 })
-
-/**
- * 保存前调用：取与当前输入一致的预览，返回需要确认的原因（区间为空，或有可调度成员却没有一个能用），
- * 不需要确认时为 null。预览失败不拦截保存。
- */
-async function blockingReason(): Promise<ProfitBlockReason | null> {
-  const q = query.value
-  if (q === null) return null
-  if (previewKey !== keyOf(q) || loading.value) await fetchPreview(q)
-  if (previewKey !== keyOf(q) || !preview.value) return null
-  return profitBlockReason(preview.value, props.profitEnabled)
-}
-
-defineExpose({ blockingReason })
 </script>

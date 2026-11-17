@@ -40,6 +40,7 @@ vi.mock('@/api/admin', () => ({
       getCapacitySummary,
       getLiveCapability,
       getAll: vi.fn(),
+      getProfitControlPreview: vi.fn(),
       create: vi.fn(),
       update: updateGroup,
       delete: vi.fn(),
@@ -461,6 +462,158 @@ describe('GroupsView duplicate action', () => {
     }
     expect(updateGroup).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  // B1: what is saved and the preview that decides whether to confirm must be the same values, so the profit block
+  // cannot change while a save is on its way.
+  it('freezes the profit switch, margin and rate floor while the group is being saved', async () => {
+    let finish!: (value: unknown) => void
+    updateGroup.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    // A preview with usable accounts: the save goes on to the PUT without asking.
+    vi.mocked(adminAPI.groups.getProfitControlPreview).mockResolvedValue({
+      members: 2, schedulable: 2, passing: 2, ceiling: 0.8, floor: 2, below_floor: 0, pinned: 0, range_empty: false, pinned_loss: []
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const floor = wrapper.get('[data-testid="edit-min-upstream-rate"]')
+    const profitSwitch = floor.element.closest('.border-t')!.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    await wrapper.findAll('input[type="checkbox"]').find((input) => input.element === profitSwitch)!.setValue(true)
+    await flushPromises()
+    await floor.setValue('2')
+    const disabled = (selector: string) => (wrapper.get(selector).element as HTMLInputElement).disabled
+    expect([profitSwitch.disabled, disabled('#edit-profit-min-margin'), disabled('[data-testid="edit-min-upstream-rate"]')]).toEqual([false, false, false])
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(updateGroup).toHaveBeenCalledTimes(1)
+    expect([profitSwitch.disabled, disabled('#edit-profit-min-margin'), disabled('[data-testid="edit-min-upstream-rate"]')]).toEqual([true, true, true])
+    finish(sourceGroup)
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  // The "no usable account" confirmation judges exactly what is submitted (requestData), whatever the preview area or
+  // the child component holds; a preview it cannot get for those values is never taken as "no confirmation needed".
+  describe('confirming a save that may leave the group without usable accounts', () => {
+    const preview = (patch: Record<string, unknown> = {}) =>
+      ({ members: 2, schedulable: 2, passing: 2, ceiling: 0.8, floor: 0, below_floor: 0, pinned: 0, range_empty: false, pinned_loss: [], ...patch })
+    const previewApi = () => vi.mocked(adminAPI.groups.getProfitControlPreview)
+    const shownConfirm = (w: ReturnType<typeof mountView>) =>
+      w.findAllComponents({ name: 'ConfirmDialog' }).find((dialog) => dialog.props('show') === true)
+    async function openEdit(group: AdminGroup = sourceGroup) {
+      listGroups.mockResolvedValue({ items: [group], total: 1, page: 1, page_size: 20, pages: 1 })
+      const w = mountView()
+      await flushPromises()
+      await w.findAll('button').find((button) => button.text() === 'common.edit')!.trigger('click')
+      await flushPromises()
+      return w
+    }
+    beforeEach(() => {
+      previewApi().mockReset().mockResolvedValue(preview())
+      updateGroup.mockResolvedValue(sourceGroup)
+    })
+
+    it('judges the value submitted in the same turn as the change, and asks before saving it', async () => {
+      previewApi().mockImplementation(async (_id: number, _margin: number, floor: number) =>
+        preview(floor >= 2 ? { floor, below_floor: 2 } : { floor }))
+      const w = await openEdit()
+      const floor = w.get('[data-testid="edit-min-upstream-rate"]').element as HTMLInputElement
+      floor.value = '0.1'
+      floor.dispatchEvent(new Event('input'))
+      await flushPromises()
+      // Typed and submitted before anything re-renders: the payload and the check both read 2.
+      floor.value = '2'
+      floor.dispatchEvent(new Event('input'))
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(previewApi()).toHaveBeenLastCalledWith(42, 0, 2, expect.anything())
+      expect(shownConfirm(w)!.props('title')).toBe('admin.groups.profitControl.floorNoneUsableConfirmTitle')
+      expect(updateGroup).not.toHaveBeenCalled()
+      shownConfirm(w)!.vm.$emit('confirm')
+      await flushPromises()
+      expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({ min_upstream_rate: 2 }))
+      w.unmount()
+    })
+
+    it.each([
+      ['failed', new Error('Network Error')],
+      ['timed out', Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })],
+      ['cancelled', Object.assign(new Error('canceled'), { name: 'CanceledError', code: 'ERR_CANCELED' })]
+    ])('asks with the general confirmation when the preview for the submitted values %s', async (_case, error) => {
+      const w = await openEdit()
+      previewApi().mockRejectedValue(error)
+      await w.get('[data-testid="edit-min-upstream-rate"]').setValue('2')
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(shownConfirm(w)!.props('title')).toBe('admin.groups.profitControl.unverifiedConfirmTitle')
+      shownConfirm(w)!.vm.$emit('cancel')
+      await flushPromises()
+      expect(updateGroup).not.toHaveBeenCalled()
+
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      shownConfirm(w)!.vm.$emit('confirm')
+      await flushPromises()
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      w.unmount()
+    })
+
+    it('asks with the multiplier note, without a preview, when the multiplier changes too', async () => {
+      const w = await openEdit({ ...sourceGroup, profit_control_enabled: true, profit_min_margin: 0.2, profit_safety_buffer: 0 } as AdminGroup)
+      await flushPromises()
+      const shown = previewApi().mock.calls.length
+      Object.assign((w.vm as unknown as { editForm: Record<string, unknown> }).editForm, { rate_multiplier: 0.5, min_upstream_rate: 0.6 })
+      await flushPromises()
+      expect(w.get('[data-testid="profit-control-preview-saved-rate"]').text()).toBe('admin.groups.profitControl.previewSavedRate')
+      const asked = previewApi().mock.calls.length
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(shownConfirm(w)!.props('title')).toBe('admin.groups.profitControl.rateChangedConfirmTitle')
+      expect(previewApi().mock.calls.length).toBe(asked)
+      expect(asked).toBeGreaterThanOrEqual(shown)
+      shownConfirm(w)!.vm.$emit('cancel')
+      await flushPromises()
+      expect(updateGroup).not.toHaveBeenCalled()
+      w.unmount()
+    })
+
+    it('neither asks nor previews again when the switch, margin, floor and multiplier are unchanged', async () => {
+      previewApi().mockResolvedValue(preview({ passing: 0 }))
+      const w = await openEdit({ ...sourceGroup, profit_control_enabled: true, profit_min_margin: 0.2, profit_safety_buffer: 0 } as AdminGroup)
+      await flushPromises()
+      const shown = previewApi().mock.calls.length
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(shownConfirm(w)).toBeUndefined()
+      expect(previewApi().mock.calls.length).toBe(shown)
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      w.unmount()
+    })
+
+    it('freezes the profit switch, margin and floor while a new group is being created', async () => {
+      let finish!: (value: unknown) => void
+      vi.mocked(adminAPI.groups.create).mockReturnValueOnce(new Promise((resolve) => { finish = resolve }) as never)
+      const w = mountView()
+      await flushPromises()
+      const vm = w.vm as unknown as { showCreateModal: boolean; createForm: Record<string, unknown> }
+      vm.showCreateModal = true
+      Object.assign(vm.createForm, { name: 'new-group', platform: 'openai', profit_control_enabled: true, profit_min_margin_percent: 20, min_upstream_rate: 2 })
+      await flushPromises()
+      const inputs = () => [
+        w.get('#create-profit-min-margin').element.closest('.border-t')!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled,
+        (w.get('#create-profit-min-margin').element as HTMLInputElement).disabled,
+        (w.get('#create-min-upstream-rate').element as HTMLInputElement).disabled
+      ]
+      expect(inputs()).toEqual([false, false, false])
+      await w.get('#create-group-form').trigger('submit')
+      await flushPromises()
+      expect(adminAPI.groups.create).toHaveBeenCalledTimes(1)
+      expect(inputs()).toEqual([true, true, true])
+      finish({ ...sourceGroup, id: 99 })
+      await flushPromises()
+      w.unmount()
+    })
   })
 
   it('updates manifest controls immediately and submits the displayed selection', async () => {

@@ -110,7 +110,14 @@ async function load(next: boolean) {
     more.value = page.length >= PAGE
     state.value = 'loaded'
   } catch {
-    if (request === seq) state.value = 'failed'
+    if (request !== seq) return
+    state.value = 'failed'
+    // The first page did not come: what was shown before is out of date, and its last id must not page on from there
+    // (records written since would be skipped). The retry then asks for the first page again.
+    if (!next) {
+      items.value = []
+      more.value = false
+    }
   }
 }
 
@@ -128,9 +135,16 @@ watch(() => props.accountId, () => {
   if (open.value) void load(false)
 })
 
-// A recovery or an exemption writes records: an open list starts over from the newest.
+// A recovery or an exemption writes records: an open list starts over from the newest; a collapsed one is out of date,
+// so its next opening does (an answer still on its way is dropped).
 watch(changed, () => {
-  if (open.value && state.value !== 'idle') trackSchedReload(load(false))
+  if (state.value === 'idle') return
+  if (open.value) {
+    trackSchedReload(load(false))
+    return
+  }
+  seq++
+  state.value = 'idle'
 })
 
 function toggleEvidence(id: number) {

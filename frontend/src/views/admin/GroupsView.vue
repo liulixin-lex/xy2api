@@ -1217,7 +1217,9 @@
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(createForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <!-- 新建没有可预览的对象，不做“无号可用”的确认；提交期间同样冻结利润块 -->
             <input
+              :disabled="submitting"
               v-model="createForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -1240,6 +1242,7 @@
               <label for="create-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 id="create-profit-min-margin"
+                :disabled="submitting"
                 v-model.number="createForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -1260,6 +1263,7 @@
               <label for="create-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
               <input
                 id="create-min-upstream-rate"
+                :disabled="submitting"
                 v-model.number="createForm.min_upstream_rate"
                 type="number"
                 step="any"
@@ -2927,8 +2931,9 @@
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <!-- 保存进行中冻结利润块：提交的值与用来判断是否要确认的预览是同一份 -->
             <input
-              :disabled="!canAdjustBalance"
+              :disabled="!canAdjustBalance || submitting"
               v-model="editForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2951,7 +2956,7 @@
               <label for="edit-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 id="edit-profit-min-margin"
-                :disabled="!canAdjustBalance"
+                :disabled="!canAdjustBalance || submitting"
                 v-model.number="editForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -2972,7 +2977,7 @@
               <label for="edit-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
               <input
                 id="edit-min-upstream-rate"
-                :disabled="!canAdjustBalance"
+                :disabled="!canAdjustBalance || submitting"
                 v-model.number="editForm.min_upstream_rate"
                 type="number"
                 step="any"
@@ -2989,13 +2994,13 @@
                以及下限排除的号、固定号；利润开关关闭但设了下限时只预览下限 -->
           <GroupProfitControlPreview
             v-if="editingGroup && (editForm.profit_control_enabled || editFloorSet)"
-            ref="editProfitPreviewRef"
             class="mb-3"
             :group-id="editingGroup.id"
             :margin-percent="editForm.profit_min_margin_percent"
             :profit-enabled="editForm.profit_control_enabled"
             :floor="isMinUpstreamRatePlatform(editForm.platform) ? editForm.min_upstream_rate : ''"
             :floor-unreadable="isMinUpstreamRatePlatform(editForm.platform) && editFloorUnreadable"
+            :rate-unsaved="Number(editForm.rate_multiplier) !== Number(editingGroup.rate_multiplier)"
           />
         </div>
 
@@ -4534,8 +4539,11 @@ import {
   validateMinUpstreamRate,
   isUnreadableNumberInput,
   validateProfitControlFormState,
-  type ProfitBlockReason,
+  profitBlockReason,
+  profitSaveCheck,
   type ProfitControlFormState,
+  type ProfitSaveCheck,
+  type ProfitSaveRisk,
 } from "./groupsProfitControl";
 import {
   normalizeReasoningEffortForPlatform,
@@ -5279,7 +5287,6 @@ type CodexManifestAccountsFieldExpose = {
   resetValidation: () => void;
 };
 const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
-const editProfitPreviewRef = ref<InstanceType<typeof GroupProfitControlPreview> | null>(null);
 const editSchedPolicyRef = ref<InstanceType<typeof GroupSchedPolicyField> | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
@@ -6178,16 +6185,21 @@ const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
 // 利润门预览显示没有成员能通过时，保存前要求确认。
 // 下限把区间压空、或设了下限后没有成员能用时，换用说明下限的文案。
 const showZeroPassProfitConfirm = ref(false);
-const zeroPassProfitCopy = ref<"zeroPass" | "floorRangeEmpty" | "floorNoneUsable">("zeroPass");
+// 拿不到能代表这次提交的预览（失败、超时、取消，或倍率也改了）时用通用文案，同样要确认才保存。
+const zeroPassProfitCopy = ref<"zeroPass" | "floorRangeEmpty" | "floorNoneUsable" | "unverified" | "rateChanged">("zeroPass");
 let zeroPassProfitResolve: ((confirmed: boolean) => void) | null = null;
-const confirmZeroPassProfit = (reason: ProfitBlockReason) =>
+const confirmZeroPassProfit = (risk: ProfitSaveRisk, check: ProfitSaveCheck) =>
   new Promise<boolean>((resolve) => {
     zeroPassProfitCopy.value =
-      reason === "range_empty"
-        ? "floorRangeEmpty"
-        : editForm.profit_control_enabled && !editFloorSet.value
-          ? "zeroPass"
-          : "floorNoneUsable";
+      risk === "unverified"
+        ? "unverified"
+        : risk === "rate_changed"
+          ? "rateChanged"
+          : risk === "range_empty"
+            ? "floorRangeEmpty"
+            : check.profitEnabled && check.floor === 0
+              ? "zeroPass"
+              : "floorNoneUsable";
     zeroPassProfitResolve = resolve;
     showZeroPassProfitConfirm.value = true;
   });
@@ -6195,6 +6207,24 @@ const settleZeroPassProfitConfirm = (confirmed: boolean) => {
   showZeroPassProfitConfirm.value = false;
   zeroPassProfitResolve?.(confirmed);
   zeroPassProfitResolve = null;
+};
+
+// 这次提交会不会让分组没有号可用：按提交的参数单独取一次预览（不看预览区当时显示的结果，后来的预览也取消不了它）。
+// 倍率也改了时预览不能代表提交后的结果（接口按已保存的倍率算）；请求失败、超时或被取消（页面卸载）时同样不能
+// 当作没问题。卸载后不再保存。
+let profitCheckController: AbortController | null = null;
+let viewUnmounted = false;
+const profitSaveRisk = async (groupId: number, check: ProfitSaveCheck): Promise<ProfitSaveRisk | null> => {
+  if (check.rateChanged) return "rate_changed";
+  const controller = (profitCheckController = new AbortController());
+  try {
+    const preview = await adminAPI.groups.getProfitControlPreview(groupId, check.margin, check.floor, { signal: controller.signal });
+    return profitBlockReason(preview, check.profitEnabled);
+  } catch {
+    return "unverified";
+  } finally {
+    if (profitCheckController === controller) profitCheckController = null;
+  }
 };
 
 const validateProfitControlForm = (
@@ -6786,14 +6816,16 @@ const handleUpdateGroup = async () => {
     // 门槛保存失败时对话框保留，再次保存时分组没改就不重复提交（也不再做利润门确认）。
     const groupRequestKey = JSON.stringify(requestData);
     if (groupRequestKey !== savedEditGroupRequestKey) {
-      // 利润门在保存后会挡住全部成员时先确认；简洁模式与无权改价格的管理员提交时不带利润字段，不用确认。
-      if (
-        !authStore.isSimpleMode &&
-        canAdjustBalance.value &&
-        editProfitPreviewRef.value
-      ) {
-        const reason = await editProfitPreviewRef.value.blockingReason();
-        if (reason && !(await confirmZeroPassProfit(reason))) return;
+      // 保存后可能没有号可用时先确认，按这次提交的参数（requestData 本身）判断；简洁模式与无权改价格的管理员
+      // 提交时不带利润字段，不用确认。利润开关、毛利率、下限、倍率都没动时不检查。
+      if (!authStore.isSimpleMode && canAdjustBalance.value) {
+        // 非简洁模式下 requestData 就是 payload。
+        const check = profitSaveCheck(payload, editingGroup.value);
+        if (check) {
+          const risk = await profitSaveRisk(groupId, check);
+          if (viewUnmounted) return;
+          if (risk && !(await confirmZeroPassProfit(risk, check))) return;
+        }
       }
       await adminAPI.groups.update(groupId, requestData);
       savedEditGroupRequestKey = groupRequestKey;
@@ -7324,6 +7356,8 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  viewUnmounted = true;
+  profitCheckController?.abort();
   document.removeEventListener("click", handleClickOutside);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();
