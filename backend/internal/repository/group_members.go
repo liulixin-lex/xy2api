@@ -34,6 +34,9 @@ func (r *groupRepository) SetMemberPinned(ctx context.Context, groupID, accountI
 	if n == 0 {
 		return infraerrors.BadRequest("INVALID_GROUP_MEMBER", "account must be a member of an OpenAI group")
 	}
+	if err := bumpAccountMembershipRevision(ctx, exec, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload([]int64{groupID})); err != nil {
 		return err
 	}
@@ -43,12 +46,13 @@ func (r *groupRepository) SetMemberPinned(ctx context.Context, groupID, accountI
 	return nil
 }
 
-// CopyAccountMembers preserves retained target pins. Newly added members start
-// unpinned because the target group can have different pricing from the source.
-func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64, sources, accounts []int64, replace bool) error {
+// CopyAccountMembers materializes one filtered source set in a single statement.
+// Both replacement and insertion consume that same snapshot, even if a source
+// membership changes while the target rows are locked by another transaction.
+func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64, sources []int64, oauthOnly, replace bool) (int64, error) {
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
+		return 0, err
 	}
 	exec := sqlExecutor(r.client)
 	if tx != nil {
@@ -56,29 +60,46 @@ func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64,
 		exec = tx.Client()
 	}
 	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
-		return err
+		return 0, err
 	}
-	accounts = uniquePositiveInt64s(accounts)
-	if replace {
-		if _, err := exec.ExecContext(ctx, `DELETE FROM account_groups WHERE group_id=$1 AND NOT (account_id = ANY($2::bigint[]))`, groupID, pq.Array(accounts)); err != nil {
-			return err
-		}
-	}
-	if len(accounts) > 0 {
-		_, err := exec.ExecContext(ctx, `INSERT INTO account_groups (account_id,group_id,pinned,created_at)
-   SELECT DISTINCT ag.account_id,$1::bigint,FALSE,NOW()
-   FROM account_groups ag
-   WHERE ag.group_id=ANY($2::bigint[]) AND ag.account_id=ANY($3::bigint[])
-   ON CONFLICT (account_id,group_id) DO NOTHING`, groupID, pq.Array(sources), pq.Array(accounts))
-		if err != nil {
-			return err
-		}
+	var count int64
+	err = scanSingleRow(ctx, exec, `/* ratefloor_copy_members */
+ WITH desired AS MATERIALIZED (
+  SELECT DISTINCT ag.account_id FROM account_groups ag
+  JOIN accounts a ON a.id=ag.account_id
+  WHERE ag.group_id=ANY($2::bigint[]) AND a.deleted_at IS NULL AND (NOT $3 OR a.type<>$4)
+ ), removed AS (
+  DELETE FROM account_groups ag WHERE ag.group_id=$1 AND $5
+  AND NOT EXISTS (SELECT 1 FROM desired d WHERE d.account_id=ag.account_id)
+  RETURNING ag.account_id
+ ), added AS (
+  INSERT INTO account_groups(account_id,group_id,pinned,created_at)
+  SELECT account_id,$1::bigint,FALSE,NOW() FROM desired
+  ON CONFLICT(account_id,group_id) DO NOTHING RETURNING account_id
+ ), revised AS (
+  UPDATE accounts SET updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
+  WHERE id IN (SELECT account_id FROM removed UNION SELECT account_id FROM added) RETURNING id
+ ) SELECT COUNT(*) FROM desired`, []any{groupID, pq.Array(uniquePositiveInt64s(sources)), oauthOnly, service.AccountTypeAPIKey, replace}, &count)
+	if err != nil {
+		return 0, err
 	}
 	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		return err
+		return 0, err
 	}
 	if tx != nil {
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
 	}
-	return nil
+	return count, nil
+}
+
+// Membership projections share the accounts.updated_at revision used by the
+// scheduler's monotonic cache writer. Advance it in the membership transaction.
+func bumpAccountMembershipRevision(ctx context.Context, exec sqlExecutor, accountIDs []int64) error {
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	_, err := exec.ExecContext(ctx, `UPDATE accounts SET updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=ANY($1::bigint[])`, pq.Array(uniquePositiveInt64s(accountIDs)))
+	return err
 }

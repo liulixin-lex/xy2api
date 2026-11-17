@@ -25,3 +25,7 @@ func TestRatefloorMemberPersistenceIntegration(t *testing.T) {
 	}
 	runRatefloorMemberPersistence(t, tx.Client(), tx)
 }
+
+func TestRatefloorCopyConcurrentSourceChangeIntegration(t *testing.T) {
+	runRatefloorCopyConcurrentSourceChange(t, integrationEntClient, integrationDB)
+}

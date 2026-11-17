@@ -336,15 +336,26 @@ func TestRatefloorReviewPreviewZeroAndBoundary(t *testing.T) {
 
 func TestRatefloorReviewInvalidFreshProbe(t *testing.T) {
 	at := time.Now()
-	for _, value := range []any{-1.0, "NaN", "+Inf"} {
+	for _, value := range []any{-1.0, "NaN", "+Inf", "invalid-timezone"} {
 		t.Run(fmt.Sprint(value), func(t *testing.T) {
 			account := profitPreviewProbeAccount(1, UpstreamBillingProbeStatusOK, 0.5, at.Add(-time.Minute), time.Minute)
 			account.RateMultiplier = floatPtr(0.5)
-			account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)["data"].(map[string]any)["resolved_rate_multiplier"] = value
+			data := account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)["data"].(map[string]any)
+			if value == "invalid-timezone" {
+				data["peak_rate_enabled"] = true
+				data["peak_start"] = "00:00"
+				data["peak_end"] = "23:59"
+				data["peak_rate_multiplier"] = 2.0
+				data["timezone"] = "Invalid/FixtureZone"
+			} else {
+				data["resolved_rate_multiplier"] = value
+			}
 			rate, source, valid := openAIProfitGateCostSource(account, at)
-			require.False(t, valid, "invalid fresh probe must not fall back to stored multiplier")
-			require.Equal(t, "upstream_probe", source)
-			require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, profitRangeVerdict(rate, valid, nil, 0.4, false))
+			require.True(t, valid, "unusable probe falls back to stored rate")
+			require.Equal(t, "stored", source)
+			require.Equal(t, 0.5, rate)
+			require.Equal(t, "pass", profitRangeVerdict(rate, valid, nil, 0.4, false))
+			require.Equal(t, openAIProfitFilterReasonFloor, profitRangeVerdict(rate, valid, nil, 0.6, false))
 			rate, source, valid = openAIProfitGateCostSource(account, at.Add(time.Hour))
 			require.True(t, valid)
 			require.Equal(t, "stored", source)
@@ -367,4 +378,80 @@ func TestRatefloorPrecheckDoesNotDuplicateVeto(t *testing.T) {
 	meta, _ := st.ClaimGatewayRequest(false)
 	require.Len(t, meta.ProfitBasis.Vetoes, 1)
 	require.Equal(t, openAIProfitFilterReasonThreshold, meta.ProfitBasis.Vetoes[0].Verdict)
+}
+
+func TestRatefloorAdmittedBasisFreezesAtSend(t *testing.T) {
+	for _, sentAgain := range []bool{false, true} {
+		t.Run(fmt.Sprint(sentAgain), func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.EnableGatewayRequest(time.Now())
+			ctx := resilience.WithRequestState(context.Background(), st)
+			ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: 7, platform: PlatformOpenAI, floor: 0.4, sell: 1, pricingAt: time.Now()})
+			a := selectionFixtureAccount(1, 1)
+			a.RateMultiplier = floatPtr(0.5)
+			veto, _ := openAIProfitControlVetoReason(ctx, &a)
+			require.False(t, veto)
+			st.NoteGatewaySend(a.ID)
+			a.RateMultiplier = floatPtr(0.6)
+			veto, _ = openAIProfitControlVetoReason(ctx, &a)
+			require.False(t, veto)
+			if sentAgain {
+				st.NoteGatewaySend(a.ID)
+			}
+			st.CompleteGatewayForward(false, true)
+			meta, _ := st.ClaimGatewayRequest(false)
+			require.NotNil(t, meta.ProfitBasis)
+			require.NotNil(t, meta.ProfitBasis.Admitted)
+			want := 0.5
+			if sentAgain {
+				want = 0.6
+			}
+			require.Equal(t, want, *meta.ProfitBasis.Admitted.Upstream, "an unsent same-account candidate must not replace the actual send basis")
+		})
+	}
+}
+
+func TestRatefloorEarlyReleaseRecordsBasis(t *testing.T) {
+	for _, excluded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "soft", true: "excluded"}[excluded], func(t *testing.T) {
+			owner := selectionFixtureAccount(1, 1)
+			owner.RateMultiplier = floatPtr(0.1)
+			until := time.Now().Add(time.Minute)
+			var exclude map[int64]struct{}
+			if excluded {
+				exclude = map[int64]struct{}{1: {}}
+			} else {
+				owner.TempUnschedulableUntil = &until
+				owner.TempUnschedulableReason = "transient:synthetic"
+			}
+			replacement := selectionFixtureAccount(2, 2)
+			replacement.RateMultiplier = floatPtr(0.6)
+			f := newSelectionRuntimeFixture(t, owner, replacement)
+			f.cache.sessionBindings["openai:floor-evidence"] = 1
+			gid := int64(7)
+			st := resilience.NewRequestState()
+			st.EnableGatewayRequest(time.Now())
+			ctx := resilience.WithRequestState(context.Background(), st)
+			ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, platform: PlatformOpenAI, floor: 0.4, ceilingOn: true, threshold: 0.8, sell: 1, pricingAt: time.Now()})
+			selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, &gid, "", "floor-evidence", "m", exclude, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+			require.NoError(t, err)
+			require.EqualValues(t, 2, selected.Account.ID)
+			defer selected.ReleaseFunc()
+			require.True(t, pendingOpenAIStickyChange(ctx).ownerReleased)
+			st.NoteGatewaySend(selected.Account.ID)
+			CompleteOpenAIStickyChange(ctx, 2, true, false)
+			st.CompleteGatewayForward(true, false)
+			meta, _ := st.ClaimGatewayRequest(false)
+			require.Len(t, meta.ProfitBasis.Vetoes, 1)
+			decision := meta.ProfitBasis.Vetoes[0]
+			require.EqualValues(t, 1, decision.AccountID)
+			require.Equal(t, openAIProfitFilterReasonFloor, decision.Verdict)
+			require.Equal(t, "stored", decision.Source)
+			require.Equal(t, 1.0, decision.Sell)
+			require.Equal(t, 0.1, *decision.Upstream)
+			require.Equal(t, 0.4, *decision.Floor)
+			require.Equal(t, 0.8, *decision.Ceiling)
+			require.EqualValues(t, 2, f.cache.sessionBindings["openai:floor-evidence"])
+		})
+	}
 }
