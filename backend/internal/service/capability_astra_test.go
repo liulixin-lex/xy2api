@@ -68,9 +68,9 @@ func TestCapabilityProvisionalWebSocketRefusalWaitsForOutcome(t *testing.T) {
 			require.Zero(t, repo.writes)
 			if success {
 				pending.observe([]byte(`{"type":"response.completed","response":{"status":"completed"}}`))
-				pending.finish(&OpenAIForwardResult{UpstreamTerminalEvent: "response.completed"}, nil)
+				pending.finish(capabilityStreamFinish{})
 			} else {
-				pending.finish(nil, errors.New("synthetic stream failure"))
+				pending.finish(capabilityStreamFinish{UpstreamFailure: true})
 			}
 			require.Equal(t, !success, account.CapabilityMarked("fixture", "responses", "stream", time.Now()) != nil)
 		})

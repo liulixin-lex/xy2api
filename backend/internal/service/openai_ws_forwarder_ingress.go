@@ -998,7 +998,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
 		learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wirePayload)}
-		defer func() { learnCapability.finish(schedResult, schedErr) }()
+		learningFinal := capabilityStreamFinish{}
+		defer func() {
+			if panicValue := recover(); panicValue != nil {
+				panic(panicValue) // no learning while the attempt unwinds
+			}
+			learningFinal.ContextDone = ctx.Err() != nil
+			learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
+			learnCapability.finish(learningFinal)
+		}()
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			schedCapture.noteWSNetworkError(err)
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -1050,6 +1058,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
+				learningFinal.UpstreamFailure = true
+				learningFinal.GatewayDeadline = errors.Is(readErr, context.DeadlineExceeded)
 				schedCapture.noteWSNetworkError(readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
@@ -1229,8 +1239,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				markSchedWSOutput(schedCapture, clientMessage)
 				if err := writeClientMessage(clientMessage); err != nil {
+					learningFinal.LocalFailure = true
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
+						learningFinal.ClientDisconnected = true
 						schedCapture.cancel()
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 						logOpenAIWSModeInfo(
@@ -1254,6 +1266,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			if isTerminalEvent {
+				learningFinal.UpstreamFailure = ClassifyOpenAIResponsesTerminal("", upstreamMessage).QualityFailure()
 				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {

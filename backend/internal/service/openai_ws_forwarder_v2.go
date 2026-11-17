@@ -365,7 +365,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
 	learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
-	defer func() { learnCapability.finish(schedResult, schedErr) }()
+	learningFinal := capabilityStreamFinish{}
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			panic(panicValue) // no learning while the attempt unwinds
+		}
+		learningFinal.ContextDone = ctx.Err() != nil
+		learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
+		learnCapability.finish(learningFinal)
+	}()
 	// This boundary belongs to every real application send, even when quality
 	// recording is disabled. A failed first send must precede the next send.
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
@@ -429,6 +437,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return
 		}
 		clientDisconnected = true
+		learningFinal.ClientDisconnected = true
 		schedCapture.cancel()
 		clientDisconnectDrainStartedAt = time.Now()
 		if !upstreamReadDetached {
@@ -520,6 +529,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			flushStreamWriter(forceFlush)
 			return
 		}
+		learningFinal.LocalFailure = true
 		markClientDisconnected("downstream_write_error")
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected, continue draining upstream: account=%d", account.ID)
 	}
@@ -608,6 +618,8 @@ readLoop:
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
 		}
 		if readErr != nil {
+			learningFinal.UpstreamFailure = true
+			learningFinal.GatewayDeadline = errors.Is(readErr, context.DeadlineExceeded)
 			schedCapture.noteWSNetworkError(readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
@@ -708,6 +720,7 @@ readLoop:
 		}
 
 		if eventType == "error" {
+			learningFinal.UpstreamFailure = true
 			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
@@ -766,12 +779,14 @@ readLoop:
 				emitStreamMessage(message, true)
 			}
 			if !reqStream {
+				priorErrors := len(c.Errors)
 				c.JSON(statusCode, gin.H{
 					"error": gin.H{
 						"type":    "upstream_error",
 						"message": errMsg,
 					},
 				})
+				learningFinal.LocalFailure = learningFinal.LocalFailure || len(c.Errors) > priorErrors
 			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
@@ -807,6 +822,7 @@ readLoop:
 		}
 
 		if isTerminalEvent {
+			learningFinal.UpstreamFailure = ClassifyOpenAIResponsesTerminal("", message).QualityFailure()
 			if !clientDisconnected {
 				markOpenAIWSClientVisibleFailure(c, eventType, message)
 			}
@@ -851,7 +867,9 @@ readLoop:
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
 
+		priorErrors := len(c.Errors)
 		c.Data(http.StatusOK, "application/json", finalResponse)
+		learningFinal.LocalFailure = learningFinal.LocalFailure || len(c.Errors) > priorErrors
 	} else {
 		flushStreamWriter(true)
 	}

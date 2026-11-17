@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -100,9 +101,6 @@ func (s *OpenAIGatewayService) LearnCapabilityMark(ctx context.Context, account 
 	}
 	now := time.Now().UTC()
 	key := capabilityMarkExtraKey(mark.Model, mark.Protocol, mark.Shape)
-	if capabilityMarkRecentlyWritten(account.Extra[key], mark, now) {
-		return nil
-	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	// A fresh read catches repeated evidence even when selection supplied an
@@ -252,6 +250,10 @@ func (p *capabilityStreamFailure) observe(payload []byte) {
 		return
 	}
 	terminal := ClassifyOpenAIResponsesTerminal("", payload)
+	if terminal.Success {
+		p.pending = nil
+		return
+	}
 	if !terminal.QualityFailure() {
 		return
 	}
@@ -261,16 +263,33 @@ func (p *capabilityStreamFailure) observe(payload []byte) {
 	}
 }
 
-func (p *capabilityStreamFailure) finish(result *OpenAIForwardResult, err error) {
-	if len(p.pending) == 0 {
-		return
-	}
+// Forwarding exits supply facts from their read/write boundary. Return-value
+// projections and incomplete result values are not refusal evidence.
+type capabilityStreamFinish struct {
+	UpstreamFailure    bool
+	ClientDisconnected bool
+	ContextDone        bool
+	GatewayDeadline    bool
+	LocalFailure       bool
+	EffectiveOutput    bool
+}
+
+func (p *capabilityStreamFailure) finish(final capabilityStreamFinish) {
 	payload := p.pending
 	p.pending = nil
-	if errors.Is(err, context.Canceled) || result != nil && (result.ClientDisconnect || err == nil && result.CompletedForDelivery()) || result == nil && err == nil {
+	if len(payload) == 0 || !final.UpstreamFailure || final.ClientDisconnected || final.ContextDone || final.GatewayDeadline || final.LocalFailure {
 		return
 	}
-	observeCapabilityFailure(p.learn, payload)
+	failure := &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: UpstreamErrorEventStatus(payload), Body: payload}
+	finish := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, failure, final.EffectiveOutput, false)
+	learnFinalCapabilityFailure(p.learn, finish, failure)
+}
+
+// Sampled attempts and independent WS consumers share the final attribution gate.
+func learnFinalCapabilityFailure(learn func(int, []byte), final SchedAttemptFinish, failure *resilience.Outcome) {
+	if final.Outcome != schedquality.OutcomeOK && final.Class == schedquality.ClassCapability && failure != nil && failure.Source == resilience.SourceStreamEvent {
+		observeCapabilityFailure(learn, failure.Body)
+	}
 }
 
 func capabilityExtraKey(protocol string) string {
