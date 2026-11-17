@@ -263,6 +263,21 @@ describe("profitSaveCheck", () => {
   it("marks a changed multiplier while profit control is on: the preview uses the saved one", () => {
     expect(profitSaveCheck({ ...same, rate_multiplier: 0.5 }, saved)).toMatchObject({ rateChanged: true });
   });
+
+  // The ceiling is base × the peak multiplier then × (1 − margin): a peak setting that takes effect moves it too.
+  it("marks a change of the peak setting that takes effect, and nothing that leaves the multiplier as it is", () => {
+    const peaked = { ...saved, subscription_type: "subscription", peak_rate_enabled: true, peak_start: "09:00", peak_end: "18:00", peak_rate_multiplier: 1 };
+    const unchanged = { ...same, subscription_type: "subscription", peak_rate_enabled: true, peak_start: "09:00", peak_end: "18:00", peak_rate_multiplier: 1 };
+    expect(profitSaveCheck(unchanged, peaked)).toBeNull();
+    for (const patch of [{ peak_rate_multiplier: 0.5 }, { peak_end: "20:00" }, { peak_rate_enabled: false }, { subscription_type: "standard" }]) {
+      expect(profitSaveCheck({ ...unchanged, ...patch }, peaked)).toMatchObject({ rateChanged: true });
+    }
+    // Peak settings of a group they do not apply to (standard type, or peak off) leave the multiplier alone.
+    const standard = { ...peaked, subscription_type: "standard" };
+    expect(profitSaveCheck({ ...unchanged, subscription_type: "standard", peak_rate_multiplier: 0.5 }, standard)).toBeNull();
+    const peakOff = { ...peaked, peak_rate_enabled: false };
+    expect(profitSaveCheck({ ...unchanged, peak_rate_enabled: false, peak_start: "10:00" }, peakOff)).toBeNull();
+  });
 });
 
 describe("min upstream rate submit values", () => {

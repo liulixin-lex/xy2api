@@ -3000,7 +3000,7 @@
             :profit-enabled="editForm.profit_control_enabled"
             :floor="isMinUpstreamRatePlatform(editForm.platform) ? editForm.min_upstream_rate : ''"
             :floor-unreadable="isMinUpstreamRatePlatform(editForm.platform) && editFloorUnreadable"
-            :rate-unsaved="Number(editForm.rate_multiplier) !== Number(editingGroup.rate_multiplier)"
+            :rate-unsaved="groupRateSignature(editForm) !== groupRateSignature(editingGroup)"
           />
         </div>
 
@@ -4539,6 +4539,7 @@ import {
   validateMinUpstreamRate,
   isUnreadableNumberInput,
   validateProfitControlFormState,
+  groupRateSignature,
   profitBlockReason,
   profitSaveCheck,
   type ProfitControlFormState,
@@ -6619,6 +6620,8 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
+  // 一次保存（含它的确认）还在进行时再触发直接忽略：两次并行会抢同一个确认框。
+  if (submitting.value) return;
   if (editSystemPromptRef.value && !editSystemPromptRef.value.validate()) return;
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
@@ -6825,6 +6828,8 @@ const handleUpdateGroup = async () => {
           const risk = await profitSaveRisk(groupId, check);
           if (viewUnmounted) return;
           if (risk && !(await confirmZeroPassProfit(risk, check))) return;
+          // 确认之后、发出之前页面可能已经离开。
+          if (viewUnmounted) return;
         }
       }
       await adminAPI.groups.update(groupId, requestData);
@@ -7358,6 +7363,8 @@ onMounted(() => {
 onUnmounted(() => {
   viewUnmounted = true;
   profitCheckController?.abort();
+  // 还挂着的确认按取消结束，不保存。
+  if (zeroPassProfitResolve) settleZeroPassProfitConfirm(false);
   document.removeEventListener("click", handleClickOutside);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();

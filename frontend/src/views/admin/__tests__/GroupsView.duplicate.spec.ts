@@ -469,9 +469,9 @@ describe('GroupsView duplicate action', () => {
   it('freezes the profit switch, margin and rate floor while the group is being saved', async () => {
     let finish!: (value: unknown) => void
     updateGroup.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
-    // A preview with usable accounts: the save goes on to the PUT without asking.
+    // Floor 0.5 under the 0.8 ceiling (base 1, margin 20%) with both members inside: the save goes on to the PUT.
     vi.mocked(adminAPI.groups.getProfitControlPreview).mockResolvedValue({
-      members: 2, schedulable: 2, passing: 2, ceiling: 0.8, floor: 2, below_floor: 0, pinned: 0, range_empty: false, pinned_loss: []
+      members: 2, schedulable: 2, passing: 2, ceiling: 0.8, floor: 0.5, below_floor: 0, pinned: 0, range_empty: false, pinned_loss: []
     })
     const wrapper = mountView()
     await flushPromises()
@@ -481,7 +481,7 @@ describe('GroupsView duplicate action', () => {
     const profitSwitch = floor.element.closest('.border-t')!.querySelector<HTMLInputElement>('input[type="checkbox"]')!
     await wrapper.findAll('input[type="checkbox"]').find((input) => input.element === profitSwitch)!.setValue(true)
     await flushPromises()
-    await floor.setValue('2')
+    await floor.setValue('0.5')
     const disabled = (selector: string) => (wrapper.get(selector).element as HTMLInputElement).disabled
     expect([profitSwitch.disabled, disabled('#edit-profit-min-margin'), disabled('[data-testid="edit-min-upstream-rate"]')]).toEqual([false, false, false])
     await wrapper.get('#edit-group-form').trigger('submit')
@@ -589,6 +589,93 @@ describe('GroupsView duplicate action', () => {
       expect(previewApi().mock.calls.length).toBe(shown)
       expect(updateGroup).toHaveBeenCalledTimes(1)
       w.unmount()
+    })
+
+    // A subscription group in its peak hours: what it charges is base × peak multiplier, and the preview uses the saved one.
+    const peaked = {
+      ...sourceGroup, subscription_type: 'subscription', peak_rate_enabled: true, peak_start: '00:00', peak_end: '23:59', peak_rate_multiplier: 1,
+      profit_control_enabled: true, profit_min_margin: 0.2, profit_safety_buffer: 0, min_upstream_rate: 0.6
+    } as AdminGroup
+    const editForm = (w: ReturnType<typeof mountView>) => (w.vm as unknown as { editForm: Record<string, unknown> }).editForm
+
+    it.each([
+      ['the peak multiplier', { peak_rate_multiplier: 0.5 }],
+      ['the peak hours', { peak_end: '12:00' }],
+      ['the peak switch', { peak_rate_enabled: false }],
+      ['the subscription type', { subscription_type: 'standard' }]
+    ])('asks with the multiplier confirmation when only %s changes; cancel saves nothing, confirm saves once', async (_case, patch) => {
+      const w = await openEdit(peaked)
+      const shown = previewApi().mock.calls.length
+      Object.assign(editForm(w), patch)
+      await flushPromises()
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(shownConfirm(w)!.props('title')).toBe('admin.groups.profitControl.rateChangedConfirmTitle')
+      shownConfirm(w)!.vm.$emit('cancel')
+      await flushPromises()
+      expect(updateGroup).not.toHaveBeenCalled()
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      shownConfirm(w)!.vm.$emit('confirm')
+      await flushPromises()
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining(patch))
+      // No preview is asked to judge the save: it could only answer with the saved multiplier.
+      expect(previewApi().mock.calls.length).toBe(shown)
+      w.unmount()
+    })
+
+    it('neither asks nor previews for a change that does not touch the multiplier range', async () => {
+      const w = await openEdit(peaked)
+      const shown = previewApi().mock.calls.length
+      Object.assign(editForm(w), { description: 'only the words change', rpm_limit: 30 })
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      expect(shownConfirm(w)).toBeUndefined()
+      expect(previewApi().mock.calls.length).toBe(shown)
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      w.unmount()
+    })
+
+    it('ignores a second save while the first one is still on its way, so it saves once', async () => {
+      let finish!: (value: unknown) => void
+      updateGroup.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+      const w = await openEdit()
+      await w.get('[data-testid="edit-min-upstream-rate"]').setValue('0.5')
+      const save = (w.vm as unknown as { handleUpdateGroup: () => Promise<void> }).handleUpdateGroup
+      void save()
+      await flushPromises()
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      // Still saving (the PUT has not answered): a second save would check and PUT again in parallel.
+      void save()
+      await flushPromises()
+      expect(updateGroup).toHaveBeenCalledTimes(1)
+      finish(sourceGroup)
+      await flushPromises()
+      w.unmount()
+    })
+
+    it('does not save when the page is left right after the confirmation, nor while it is open', async () => {
+      const w = await openEdit()
+      previewApi().mockRejectedValue(new Error('Network Error'))
+      await w.get('[data-testid="edit-min-upstream-rate"]').setValue('2')
+      await w.get('#edit-group-form').trigger('submit')
+      await flushPromises()
+      shownConfirm(w)!.vm.$emit('confirm')
+      w.unmount()
+      await flushPromises()
+      expect(updateGroup).not.toHaveBeenCalled()
+
+      // Left while the confirmation is open: it ends as a cancel and the save finishes without a PUT.
+      const open = await openEdit()
+      await open.get('[data-testid="edit-min-upstream-rate"]').setValue('2')
+      const saving = (open.vm as unknown as { handleUpdateGroup: () => Promise<void> }).handleUpdateGroup()
+      await flushPromises()
+      expect(shownConfirm(open)).toBeDefined()
+      open.unmount()
+      const ended = await Promise.race([saving.then(() => 'ended'), new Promise((resolve) => setTimeout(() => resolve('still waiting'), 50))])
+      expect(ended).toBe('ended')
+      expect(updateGroup).not.toHaveBeenCalled()
     })
 
     it('freezes the profit switch, margin and floor while a new group is being created', async () => {
