@@ -532,6 +532,26 @@ describe('SchedQualityPanel', () => {
     expect(judged.querySelector('[data-qp-evidence-why]')).not.toBeNull()
   })
 
+  // Both switches off on a fresh view: the group is still not judged, so its words and evidence say that, not "judging
+  // goes on".
+  it('reads a group whose gate is off as not judged even with quality scheduling switched off too', async () => {
+    const value = { ...detail(), global_enabled: false }
+    value.groups[1].policy = { ...policy, enabled: false }
+    value.groups[1].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ causes: ['mass_insufficient'] }) })
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    expect(groupRow(54).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')).toBe(
+      'admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGroup'
+    )
+    expect(groupRow(53).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')).toBe(
+      'admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGlobal'
+    )
+    document.querySelector<HTMLElement>('[data-qp-expand="54"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-qp-group-detail="54"] [data-qp-line="ttfo"] [data-qp-evidence-why]')).toBeNull()
+  })
+
   // Before the engine's first cycle the backend answers stale with global_enabled false: that is not the switch.
   it('says the data is stale, not that quality scheduling is off, while the view is stale', async () => {
     const value = detail()

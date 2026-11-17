@@ -190,8 +190,30 @@ export type ProfitBlockReason = "range_empty" | "none_usable";
  */
 export type ProfitSaveRisk = ProfitBlockReason | "unverified" | "rate_changed";
 
-/** 这次提交要按哪组参数检查“会不会无号可用”：利润开关、毛利率（小数）、下限（0 = 不设）、倍率是否也改了。 */
+/** 这次提交要按哪组参数检查“会不会无号可用”：利润开关、毛利率（小数）、下限（0 = 不设）、实际倍率是否也改了。 */
 export type ProfitSaveCheck = { profitEnabled: boolean; margin: number; floor: number; rateChanged: boolean };
+
+type GroupRateFields = {
+  rate_multiplier?: number | string;
+  subscription_type?: string;
+  peak_rate_enabled?: boolean;
+  peak_start?: string;
+  peak_end?: string;
+  peak_rate_multiplier?: number | string;
+};
+
+/**
+ * 决定分组实际倍率的配置（后端上限 = 基础倍率 × 当时的高峰倍率 × (1 − 毛利率 − 缓冲)）：基础倍率，以及高峰——
+ * 只对订阅类型且开着高峰的分组生效（Group.PeakMultiplierAt），这时看起止时间和高峰倍率。下限只与账号的上游倍率
+ * 比较，不受分组字段影响。两份配置的签名相同，实际倍率就相同。
+ */
+export const groupRateSignature = (group: GroupRateFields): string => {
+  const peak =
+    group.subscription_type === "subscription" && group.peak_rate_enabled === true
+      ? `${group.peak_start ?? ""}-${group.peak_end ?? ""}x${Number(group.peak_rate_multiplier)}`
+      : "none";
+  return `${Number(group.rate_multiplier)}|${peak}`;
+};
 
 /**
  * 从这次提交的参数（与 PUT 的是同一份）和已保存的分组算出要检查什么；利润开关、毛利率、下限、倍率都没动，
@@ -199,14 +221,13 @@ export type ProfitSaveCheck = { profitEnabled: boolean; margin: number; floor: n
  * 毛利率只在开着利润控制时有意义，倍率只影响上限，同样只在开着时算改动。
  */
 export const profitSaveCheck = (
-  payload: { profit_control_enabled?: boolean; profit_min_margin?: number; min_upstream_rate?: number; rate_multiplier?: number },
+  payload: { profit_control_enabled?: boolean; profit_min_margin?: number; min_upstream_rate?: number } & GroupRateFields,
   saved: {
     profit_control_enabled?: boolean;
     profit_min_margin?: number | null;
     profit_safety_buffer?: number | null;
     min_upstream_rate?: number | null;
-    rate_multiplier?: number;
-  },
+  } & GroupRateFields,
 ): ProfitSaveCheck | null => {
   const profitEnabled = payload.profit_control_enabled === true;
   const margin = profitEnabled ? (payload.profit_min_margin ?? 0) : 0;
@@ -215,7 +236,8 @@ export const profitSaveCheck = (
   const floor = payload.min_upstream_rate === undefined ? savedFloor : payload.min_upstream_rate;
   // 回显时缓冲并入毛利率，没改时提交的就是这个数。
   const savedMargin = profitPercentToDecimal(profitMarginPercentFromGroup(saved.profit_min_margin, saved.profit_safety_buffer));
-  const rateChanged = payload.rate_multiplier !== undefined && Number(payload.rate_multiplier) !== Number(saved.rate_multiplier);
+  // 基础倍率或生效的高峰配置变了：预览接口按已保存的算，不能代表提交后的上限。没提交的字段按已保存的算。
+  const rateChanged = groupRateSignature({ ...saved, ...payload }) !== groupRateSignature(saved);
   const changed =
     profitEnabled !== (saved.profit_control_enabled === true) ||
     floor !== savedFloor ||
