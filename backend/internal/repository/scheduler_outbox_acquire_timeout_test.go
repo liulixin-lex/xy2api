@@ -22,7 +22,7 @@ func TestSchedulerOutboxAcquireTimesOutWhenPoolIsExhausted(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		lease, acquired, acquireErr := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(ctx)
+		lease, acquired, acquireErr := (&schedulerOutboxRepository{db: db, acquireTimeout: 10 * time.Millisecond}).TryAcquireConsumerLock(ctx)
 		if acquired {
 			lease.Release()
 		}
@@ -89,7 +89,7 @@ func TestSchedulerOutboxAcquireInitializationHasDeadline(t *testing.T) {
 					WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
 			}
 			mock.ExpectExec("ROLLBACK").WillReturnResult(sqlmock.NewResult(0, 0))
-			lease, acquired, err := (&schedulerOutboxRepository{db: db}).TryAcquireConsumerLock(context.Background())
+			lease, acquired, err := (&schedulerOutboxRepository{db: db, acquireTimeout: 10 * time.Millisecond}).TryAcquireConsumerLock(context.Background())
 			require.ErrorIs(t, err, sqlmock.ErrCancelled, "SQL setup must observe the acquisition deadline")
 			require.False(t, acquired)
 			require.Nil(t, lease)

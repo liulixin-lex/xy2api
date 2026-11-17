@@ -18,7 +18,8 @@ import (
 )
 
 type schedulerOutboxRepository struct {
-	db *sql.DB
+	db             *sql.DB
+	acquireTimeout time.Duration // Non-positive values use the production default.
 }
 
 const schedulerOutboxAcquireTimeout = 5 * time.Second
@@ -133,7 +134,11 @@ func (r *schedulerOutboxRepository) DeleteProcessed(ctx context.Context, ids []i
 }
 
 func (r *schedulerOutboxRepository) TryAcquireConsumerLock(ctx context.Context) (service.SchedulerOutboxConsumerLease, bool, error) {
-	acquireCtx, acquireCancel := context.WithTimeout(ctx, schedulerOutboxAcquireTimeout)
+	timeout := r.acquireTimeout
+	if timeout <= 0 {
+		timeout = schedulerOutboxAcquireTimeout
+	}
+	acquireCtx, acquireCancel := context.WithTimeout(ctx, timeout)
 	defer acquireCancel()
 	conn, err := r.db.Conn(acquireCtx)
 	if err != nil {
@@ -142,8 +147,10 @@ func (r *schedulerOutboxRepository) TryAcquireConsumerLock(ctx context.Context) 
 	lease := &schedulerOutboxConsumerLease{conn: conn}
 	// lib/pq starts watching a BeginTx context only after BEGIN returns. Use
 	// its cancellable ExecContext path on this reserved connection instead.
-	// The short setup context bounds all network I/O without limiting the
-	// lifetime of the transaction once acquired (including with PgBouncer).
+	// The setup deadline bounds pool waits and asks a responsive server to
+	// cancel slow queries, without limiting an acquired transaction's lifetime.
+	// A half-open socket can still await TCP keepalive failure (about 2.5
+	// minutes with the default dialer); cancellation alone cannot unblock it.
 	if _, err := conn.ExecContext(acquireCtx, "BEGIN; SET LOCAL idle_in_transaction_session_timeout = '60s'; SET LOCAL statement_timeout = '60s'"); err != nil {
 		lease.Release()
 		return nil, false, err
