@@ -103,7 +103,7 @@ func TestErrclassReviewTemplates(t *testing.T) {
 		{400, `{"error":{"message":"function_call_output requires a synthetic-id matching the synthetic tool call; provide the complete synthetic-history"}}`, schedquality.ClassMigration400},
 	} {
 		t.Run(fmt.Sprint(tc.status, tc.body), func(t *testing.T) {
-			got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: tc.status, Body: []byte(tc.body)}, false)
+			got := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: tc.status, Body: []byte(tc.body)}, false, false)
 			require.Equal(t, tc.want, got.Class)
 		})
 	}
@@ -318,7 +318,7 @@ func TestErrclassEventStatusControlsAttribution(t *testing.T) {
 				payload := []byte(fmt.Sprintf(`{"type":"response.failed","response":{"error":{"code":"model_not_found",%q:%d}}}`, field, tc.status))
 				require.Equal(t, tc.status, UpstreamErrorEventStatus(payload))
 				require.Equal(t, tc.capability, IsUpstreamCapabilityEventFailure(payload))
-				in := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: 200, Body: payload}, false)
+				in := classifySchedAttempt(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault}, &resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: 200, Body: payload}, false, false)
 				require.Equal(t, tc.want, in.Class)
 				require.Equal(t, 200, in.HTTPStatus)
 				require.Equal(t, schedquality.OriginUpstream, in.StatusOrigin)

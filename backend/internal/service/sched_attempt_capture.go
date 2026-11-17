@@ -36,6 +36,7 @@ type schedAttemptCapture struct {
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
 	accountID                                  int64
+	allowModel401                              bool
 	attempt                                    SchedAttempt
 	sendErr                                    error
 	networkErr                                 error
@@ -69,7 +70,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
+	a := &schedAttemptCapture{allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
@@ -97,7 +98,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 	if in.Outcome != schedquality.OutcomeOK && in.Class == schedquality.ClassNone && !a.first && errors.Is(a.sendErr, bufio.ErrTooLong) {
 		in.Class = schedquality.ClassGateway
 	}
-	in = classifySchedAttempt(in, a.failure, a.first)
+	in = classifySchedAttempt(in, a.failure, a.first, a.allowModel401)
 	if in.HTTPStatus == 0 {
 		if a.httpStatus > 0 {
 			in.HTTPStatus, in.StatusOrigin = a.httpStatus, schedquality.OriginUpstream
@@ -291,11 +292,7 @@ func (a *schedAttemptCapture) observe(data []byte) {
 		return
 	}
 	o := resilience.Outcome{Source: resilience.SourceStreamEvent, StatusCode: a.httpStatus, Body: append([]byte(nil), data...)}
-	errRoot := root.Get("response.error")
-	if !errRoot.IsObject() {
-		errRoot = root.Get("error")
-	}
-	o.Code, o.Type, o.Message = errRoot.Get("code").String(), errRoot.Get("type").String(), errRoot.Get("message").String()
+	o.Code, o.Type, o.Message = openAIStreamErrorField(data, "code").String(), openAIStreamErrorField(data, "type").String(), schedErrorMessage(data)
 	a.failure = &o
 	a.errorSource = "upstream_event"
 }

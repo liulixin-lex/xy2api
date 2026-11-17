@@ -15,7 +15,7 @@ import (
 
 // classifySchedAttempt keeps quality attribution separate from resilience's
 // immediate retry/credential policy. An unexplained 4xx is not proof of fault.
-func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, output bool) SchedAttemptFinish {
+func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, output bool, allowModel401 bool) SchedAttemptFinish {
 	if in.Outcome == schedquality.OutcomeOK {
 		in.Class = schedquality.ClassNone
 		return in
@@ -34,10 +34,9 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 	if o.StatusCode > 0 && (o.Source == resilience.SourceHTTP || o.Source == resilience.SourceStreamEvent) {
 		in.HTTPStatus, in.StatusOrigin = o.StatusCode, schedquality.OriginUpstream
 	}
-	fields := schedErrorFields(o.Body)
 	code, message := o.Code, o.Message
 	if code == "" {
-		code = fields.Get("code").String()
+		code = openAIStreamErrorField(o.Body, "code").String()
 	}
 	if message == "" {
 		message = schedErrorMessage(o.Body)
@@ -48,9 +47,18 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		// An explicit event status controls attribution only.
 		o.StatusCode = UpstreamErrorEventStatus(o.Body)
 	}
-	capability := IsUpstreamCapabilityFailure(o.StatusCode, o.Body)
+	capability := classifyUpstreamCapabilityFailure(o.StatusCode, o.Body, allowModel401)
 	if isEvent {
-		capability = IsUpstreamCapabilityEventFailure(o.Body)
+		capability = ClassifyUpstreamCapabilityEventFailure(o.Body)
+	}
+	if o.Code == "" {
+		o.Code = code
+	}
+	if o.Message == "" {
+		o.Message = message
+	}
+	if o.Type == "" {
+		o.Type = openAIStreamErrorField(o.Body, "type").String()
 	}
 	result := classifyUpstreamOutcome(o)
 	switch {
@@ -58,10 +66,12 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassInterrupted
 	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
 		in.Class = schedquality.ClassMigration400
-	case capability:
+	case capability != UpstreamCapabilityNone:
 		in.Class = schedquality.ClassCapability
 	case result.Category == resilience.CategoryBalance && strings.Contains(strings.ToLower(message), "upstream image account"):
 		in.Class = schedquality.ClassUpstream
+	case !isEvent && o.StatusCode == http.StatusUnauthorized && !allowModel401:
+		in.Class = schedquality.ClassAccountAccess
 	case result.Category == resilience.CategoryAuth && (!result.StatusOnly() || o.StatusCode == http.StatusUnauthorized) || result.Category == resilience.CategoryBalance:
 		in.Class = schedquality.ClassAccountAccess
 	case schedAccountCapacity(code, message):
@@ -115,70 +125,118 @@ func schedAccountCapacity(code, message string) bool {
 	return false
 }
 
-// IsUpstreamCapabilityFailure recognizes an explicit upstream model/protocol
-// rejection. Callers must supply the upstream response, not a gateway status or
-// request body. Ordinary parameter errors and ambiguous 404s are not evidence.
-func IsUpstreamCapabilityFailure(status int, body []byte) bool {
+// UpstreamCapabilityScope describes what the refusal rules out. Request
+// features (including ambiguous wording) never justify a model/protocol mark.
+type UpstreamCapabilityScope uint8
+
+const (
+	UpstreamCapabilityNone UpstreamCapabilityScope = iota
+	UpstreamCapabilityModel
+	UpstreamCapabilityProtocol
+	UpstreamCapabilityRequestFeature
+)
+
+func (s UpstreamCapabilityScope) Markable() bool {
+	return s == UpstreamCapabilityModel || s == UpstreamCapabilityProtocol
+}
+
+// ClassifyUpstreamCapabilityFailure reads a real HTTP refusal. The 401 model
+// exception requires the same account qualification as the rate-limit layer.
+func ClassifyUpstreamCapabilityFailure(account *Account, status int, body []byte) UpstreamCapabilityScope {
+	return classifyUpstreamCapabilityFailure(status, body, account != nil && account.Type == AccountTypeAPIKey && account.IsOpenAICompatible())
+}
+
+func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bool) UpstreamCapabilityScope {
 	if status < 400 || status > 599 || len(body) > 1<<20 {
-		return false
+		return UpstreamCapabilityNone
 	}
-	if resilience.IsStreamOnlyFailure(status, body) {
-		return true
+	if status == http.StatusUnauthorized && !allowModel401 {
+		return UpstreamCapabilityNone
 	}
 	if !gjson.ValidBytes(body) {
-		return false
-	}
-	modelBody := body
-	if !schedErrorFields(body).IsObject() {
-		if message := schedErrorMessage(body); message != "" {
-			// Apply the existing narrow model predicate to string envelopes too.
-			encoded, _ := json.Marshal(message)
-			modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
+		if resilience.IsStreamOnlyFailure(status, body) {
+			return UpstreamCapabilityProtocol
 		}
-	}
-	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
-		return true
+		return UpstreamCapabilityNone
 	}
 	fields := schedErrorFields(body)
-	for _, key := range []string{"code", "type"} {
-		switch strings.ToLower(strings.TrimSpace(fields.Get(key).String())) {
-		case "model_not_found", "model_not_supported", "unsupported_model", "protocol_not_supported", "request_type_not_supported":
-			if status == http.StatusBadRequest || status == http.StatusNotFound {
-				return true
-			}
-		case "model_unsupported", "unsupported_protocol", "unsupported_request_type", "unsupported_frontend", "unsupported_input_capability":
-			return true
+	modelBody := body
+	if fields.IsObject() {
+		// The flat event's type names the envelope, not its error category.
+		if fields.Get("type").String() == "error" {
+			encoded, _ := json.Marshal(map[string]any{"error": map[string]any{
+				"code": openAIStreamErrorField(body, "code").Value(), "message": schedErrorMessage(body), "param": openAIStreamErrorField(body, "param").Value(),
+			}})
+			modelBody = encoded
 		}
-	}
-	if status != http.StatusBadRequest && status != http.StatusNotFound {
-		return false
+	} else if message := schedErrorMessage(body); message != "" {
+		encoded, _ := json.Marshal(message)
+		modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
 	}
 	message := strings.ToLower(strings.Join(strings.Fields(schedErrorMessage(body)), " "))
-	if schedUnsupportedModelMessage.MatchString(message) || schedProtocolTemplate.MatchString(message) {
-		return true
+	// These templates describe dimensions absent from capability routing keys.
+	if status == 400 || status == 404 {
+		if schedProtocolTemplate.MatchString(message) || strings.Contains(message, "unsupported frontend") || strings.Contains(message, "unsupported input capability") {
+			return UpstreamCapabilityRequestFeature
+		}
+	}
+	for _, key := range []string{"code", "type"} {
+		switch strings.ToLower(strings.TrimSpace(openAIStreamErrorField(body, key).String())) {
+		case "unsupported_frontend", "unsupported_input_capability", "unsupported_request_type":
+			return UpstreamCapabilityRequestFeature
+		case "request_type_not_supported":
+			if status == 400 || status == 404 {
+				return UpstreamCapabilityRequestFeature
+			}
+		case "model_unsupported":
+			return UpstreamCapabilityModel
+		case "unsupported_protocol":
+			return UpstreamCapabilityProtocol
+		case "protocol_not_supported":
+			if status == 400 || status == 404 {
+				return UpstreamCapabilityProtocol
+			}
+		case "model_not_found", "model_not_supported", "unsupported_model":
+			if status == 400 || status == 404 {
+				return UpstreamCapabilityModel
+			}
+		}
+	}
+	if resilience.IsStreamOnlyFailure(status, modelBody) {
+		return UpstreamCapabilityProtocol
+	}
+	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
+		return UpstreamCapabilityModel
+	}
+	if status != http.StatusBadRequest && status != http.StatusNotFound {
+		return UpstreamCapabilityNone
+	}
+	if schedUnsupportedModelMessage.MatchString(message) {
+		return UpstreamCapabilityModel
 	}
 	for _, phrase := range []string{
 		"this site does not support this request", "this upstream does not support this request",
-		"this endpoint does not support this request", "unsupported frontend", "unsupported input capability",
-		"站点不支持这种请求", "上游不支持这种请求",
+		"this endpoint does not support this request", "站点不支持这种请求", "上游不支持这种请求",
 	} {
 		if strings.Contains(message, phrase) {
-			return true
+			return UpstreamCapabilityRequestFeature
 		}
 	}
-	return false
+	return UpstreamCapabilityNone
 }
 
-// Only explicit error objects are eligible; do not scan echoed input or output.
+// IsUpstreamCapabilityFailure is a conservative boolean view for callers
+// without account qualification. Learning must consume the scoped API instead.
+func IsUpstreamCapabilityFailure(status int, body []byte) bool {
+	return ClassifyUpstreamCapabilityFailure(nil, status, body) != UpstreamCapabilityNone
+}
+
+// Envelope fields win; root fields are eligible only for an explicit error event.
 func schedErrorFields(body []byte) gjson.Result {
-	root := gjson.ParseBytes(body)
-	if fields := root.Get("error"); fields.IsObject() {
-		return fields
+	if object := openAIStreamErrorObject(body); object.IsObject() {
+		return object
 	}
-	if fields := root.Get("response.error"); fields.IsObject() {
-		return fields
-	}
-	return gjson.Result{}
+	return openAITopLevelStreamError(body)
 }
 
 func schedRequestMessage(message string) bool {
@@ -226,6 +284,11 @@ func UpstreamErrorEventStatus(payload []byte) int {
 // IsUpstreamCapabilityEventFailure excludes the HTTP 401 compatibility
 // exception: an in-band event has not established that account qualification.
 func IsUpstreamCapabilityEventFailure(payload []byte) bool {
-	status := UpstreamErrorEventStatus(payload)
-	return status != http.StatusUnauthorized && IsUpstreamCapabilityFailure(status, payload)
+	return ClassifyUpstreamCapabilityEventFailure(payload) != UpstreamCapabilityNone
+}
+
+// ClassifyUpstreamCapabilityEventFailure shares scope and event-status evidence
+// with quality attribution; the HTTP account-qualified 401 exception is absent.
+func ClassifyUpstreamCapabilityEventFailure(payload []byte) UpstreamCapabilityScope {
+	return classifyUpstreamCapabilityFailure(UpstreamErrorEventStatus(payload), payload, false)
 }
