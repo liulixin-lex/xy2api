@@ -41,6 +41,15 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(missing).toEqual([])
   })
 
+  // One word for the rear wherever it shows: the list's filter and dot, the panel and the board.
+  it('names the rear the same in the filter, the dot, the panel and the board', () => {
+    const words = [
+      'admin.accounts.table.quality.rear', 'admin.accounts.table.dotStates.back',
+      'admin.schedQuality.identity.rear', 'admin.schedQuality.placement.rear', 'admin.schedQuality.layer.rear'
+    ].map((key) => lookup(messages, key))
+    expect(new Set(words).size).toBe(1)
+  })
+
   it('puts the value into every evidence template', () => {
     const templates = ['ttfo', 'error', 'cache'].flatMap((line) =>
       VALUES[`admin.schedQuality.evidence.${line}`].map((key) => [key, String(lookup(messages, `admin.schedQuality.evidence.${line}.${key}`))])

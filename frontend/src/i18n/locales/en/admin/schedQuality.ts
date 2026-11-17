@@ -44,7 +44,7 @@ export default {
       exemptUntil: 'until {time}',
       exemptForever: 'no end',
       allExempt: 'All exempt',
-      tabBack: 'a group is at the back of the queue for this model',
+      tabBack: 'this model is at the rear in a group',
       evidenceToggle: 'Evidence for {name}',
       noData: 'No data for this model in the group yet: all three lines are unknown ({why}).',
       recentLines: {
