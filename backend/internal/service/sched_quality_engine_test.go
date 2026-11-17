@@ -198,7 +198,24 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 					f.store.Rows[i] = old
 				}
 			}
+			// A rear peer whose epoch excludes its samples must be cleared before
+			// membership and evidence are frozen for the relaxed reevaluation.
+			for i, r := range f.store.Rows {
+				if r.AccountID == 2 && r.Line == q.DimensionTTFO {
+					r.Identity = q.IdentityRear
+					r.Epoch = f.now
+					r.Until = f.now.Add(time.Hour)
+					f.store.Rows[i] = r
+				}
+			}
 			before := append([]q.LineState(nil), f.store.Rows...)
+			peers := make(map[q.LineKey]q.LineState)
+			for _, r := range before {
+				peers[r.LineKey] = r
+			}
+			frozen := freezePeers(f.now, peers)
+			f.e.peerBuckets = map[time.Time]*peerBucket{frozen.at: frozen}
+			decisionCount := len(f.store.Decisions)
 			p := q.DefaultRuleBParams()
 			switch change {
 			case "tighten":
@@ -223,6 +240,20 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				require.Equal(t, 1, r.Admissions)
 				require.True(t, r.Epoch.IsZero())
 				require.Equal(t, f.now, r.Entry)
+				require.NotNil(t, r.Basis.TTFT.PRel, "the cleared rear peer must supply usable evidence")
+				var actions []q.Action
+				for _, d := range f.store.Decisions[decisionCount:] {
+					if d.Key == r.LineKey {
+						actions = append(actions, d.Action)
+						if d.Action == q.ActionRelax {
+							require.True(t, d.Until.IsZero())
+						} else {
+							require.Equal(t, r.Until, d.Until)
+						}
+					}
+				}
+				require.Equal(t, []q.Action{q.ActionRelax, q.ActionEnter}, actions)
+				require.Equal(t, q.IdentityPass, f.e.Snapshot().View.StateOf(10, 2, "synthetic-model").TTFO.Identity)
 			}
 			rows := append([]q.LineState(nil), f.store.Rows...)
 			_, err = f.e.UpdateTTFTRule(context.Background(), 0, p)

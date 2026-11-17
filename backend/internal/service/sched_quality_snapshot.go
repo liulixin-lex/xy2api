@@ -22,6 +22,7 @@ type schedQualityData struct {
 	ruleSamples   map[SchedAccountModel][]q.RuleBSample
 	ruleGroups    map[schedGroupModel][]q.RuleBSample
 	peers         *peerBucket
+	peerBuckets   map[time.Time]*peerBucket
 }
 
 type schedQualityView struct {
@@ -93,9 +94,13 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 	keys, previous := s.rowKeys(d, states)
 	groupRows := make(map[int64][]SchedGroupRow)
 	// Display uses the same bucket membership as replay, without changing it.
-	if d.peers == nil {
-		d.peers = freezePeers(d.now, previous)
+	for _, k := range keys {
+		r := previous[k]
+		r.LineKey = k
+		previous[k] = r
 	}
+	d.usePeerBucket(d.now, previous)
+	s.peerBuckets = d.peerBuckets
 	grouped := make(map[schedQualityKey]*SchedGroupRow)
 	for _, key := range keys {
 		r := previous[key]

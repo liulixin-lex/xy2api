@@ -129,7 +129,6 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 		return
 	}
 	s.configAt = time.Time{}
-	s.peers = d.peers
 	s.releaseEndedTrials(ctx, previous, states)
 	notifications = s.publish(d, states, overrides, resets, now)
 	return
@@ -206,7 +205,6 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		return
 	}
 	s.configAt = time.Time{}
-	s.peers = d.peers
 	s.releaseEndedTrials(ctx, previous, states)
 	notifications = s.publish(d, states, overrides, resets, now)
 	return
@@ -240,11 +238,31 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 	}
 	peerRows := make(map[schedquality.LineKey]schedquality.LineState)
 	for _, k := range keys {
-		if r, ok := rows[k]; ok && s.policies[k.GroupID].Policy.Enabled {
+		if !remove(k) && s.policies[k.GroupID].Policy.Enabled {
+			r := rows[k]
+			r.LineKey = k
 			peerRows[k] = r
 		}
 	}
-	d.peers = freezePeers(d.now, peerRows)
+	d.usePeerBucket(d.now, peerRows)
+	// Only relaxed TTFO keys may replace identities within an existing bucket;
+	// error/cache changes keep all first-output peers frozen as they were.
+	var clearedPeers map[schedquality.LineKey]schedquality.LineState
+	for k, r := range peerRows {
+		if k.Line == schedquality.DimensionTTFO && relax(k) {
+			if clearedPeers == nil {
+				clearedPeers = make(map[schedquality.LineKey]schedquality.LineState, len(d.peers.rows))
+				for pk, pr := range d.peers.rows {
+					clearedPeers[pk] = pr
+				}
+			}
+			clearedPeers[k] = schedquality.LineState{LineKey: k, Identity: r.Identity, Epoch: r.Epoch}
+		}
+	}
+	if clearedPeers != nil {
+		d.peers = &peerBucket{at: d.peers.at, rows: clearedPeers}
+		d.peerBuckets[d.peers.at] = d.peers
+	}
 	var changed []schedquality.LineState
 	var decisions []schedquality.Decision
 	for _, k := range keys {
@@ -259,10 +277,10 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		rows[k] = next
 		changed = append(changed, next)
 		if old[k].Identity == schedquality.IdentityRear || old[k].Trial {
-			action = schedquality.ActionRelax
+			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: schedquality.ActionRelax, Basis: basis})
 		}
 		if action != "" {
-			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: action, Level: next.Level, Until: next.Until, Basis: basis})
+			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
 		}
 	}
 	if err := tx.Delete(deleted); err != nil {
@@ -321,7 +339,7 @@ func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int
 		return nil, err
 	}
 	keys, rows := s.rowKeys(d, states)
-	d.peers = freezePeers(now, rows)
+	d.usePeerBucket(now, rows)
 	old := s.policies[group]
 	s.policies[group] = SchedPolicyRecord{GroupID: group, Policy: p}
 	defer func() { s.policies[group] = old }()

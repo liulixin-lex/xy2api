@@ -26,6 +26,28 @@ func freezePeers(at time.Time, rows map[q.LineKey]q.LineState) *peerBucket {
 	return b
 }
 
+// Bucket values are immutable. A cycle copies the index so a failed commit
+// cannot publish newly frozen membership or a parameter-change override.
+func clonePeerBuckets(src map[time.Time]*peerBucket, now time.Time) map[time.Time]*peerBucket {
+	out := make(map[time.Time]*peerBucket)
+	for at, b := range src {
+		if !at.Before(now.Add(-schedEvidenceRetention)) {
+			out[at] = b
+		}
+	}
+	return out
+}
+func (d *schedQualityData) usePeerBucket(at time.Time, rows map[q.LineKey]q.LineState) {
+	if d.peerBuckets == nil {
+		d.peerBuckets = make(map[time.Time]*peerBucket)
+	}
+	bucket := at.UTC().Truncate(q.RegularInterval)
+	if d.peerBuckets[bucket] == nil {
+		d.peerBuckets[bucket] = freezePeers(at, rows)
+	}
+	d.peers = d.peerBuckets[bucket]
+}
+
 func ruleBTime(at time.Time) float64 {
 	if at.IsZero() {
 		return math.Inf(-1)
@@ -101,12 +123,16 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 	for _, a := range d.samples[pair] {
 		if !schedAvailableAt(a).After(at) {
 			samples = append(samples, a)
-		} else if !a.StartedAt.After(at) && a.FinishedAt.After(at) {
+		} else if !a.StartedAt.After(at) {
+			// A completed but not yet available retry must still hide the earlier
+			// attempt. Its eventual outcome cannot become evidence before insertion.
+			a.FinishedAt = time.Time{}
 			running = append(running, a)
 		}
 	}
 	for _, a := range d.running {
-		if a.AccountID == r.AccountID && a.Model == r.Model && !a.StartedAt.After(at) && (a.FinishedAt.IsZero() || a.FinishedAt.After(at)) {
+		if a.AccountID == r.AccountID && a.Model == r.Model && !a.StartedAt.After(at) {
+			a.FinishedAt = time.Time{}
 			running = append(running, a)
 		}
 	}
