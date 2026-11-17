@@ -2020,6 +2020,7 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	admissionPanicExpected string
 	configureAdmission     func(*openAIWSUsageHandlerAccountRepoStub, *concurrencyCacheMock)
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
@@ -3327,14 +3328,22 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	router := gin.New()
 	handlerDone := make(chan struct{})
+	admissionPanic := make(chan any, 1)
 	router.Use(func(c *gin.Context) {
+		defer close(handlerDone)
+		if tc.admissionPanicExpected != "" {
+			defer func() {
+				if p := recover(); p != nil {
+					admissionPanic <- p
+				}
+			}()
+		}
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
 		if tc.apiKeyService != nil && apiKey.Group != nil {
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
 		}
 		c.Next()
-		close(handlerDone)
 	})
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
@@ -3414,6 +3423,21 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.secondPayload))
 		cancelWrite()
 		require.NoError(t, err)
+		if tc.admissionPanicExpected != "" {
+			select {
+			case <-handlerDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("admission panic did not unwind handler")
+			}
+			select {
+			case p := <-admissionPanic:
+				require.Equal(t, tc.admissionPanicExpected, p)
+			default:
+				t.Fatal("expected admission dependency panic")
+			}
+			require.Len(t, upstreamPayloadCh, 1)
+			return openAIResponsesWSUsageLogResult{upstreamPayloads: [][]byte{<-upstreamPayloadCh}}
+		}
 		if tc.secondTurnCloseExpected {
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 			_, _, readErr := clientConn.Read(readCtx)
