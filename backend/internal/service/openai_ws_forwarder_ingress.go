@@ -998,6 +998,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
+			schedCapture.noteWSNetworkError(err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
@@ -1047,6 +1048,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
+				schedCapture.noteWSNetworkError(readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",

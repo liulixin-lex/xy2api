@@ -78,6 +78,8 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassAccountCapacity
 	case result.Category == resilience.CategoryUpstreamRequestRestriction || o.StatusCode < 500 && (schedRequestMessage(message) || resilience.IsContextWindowError(message, o.Body) || result.Category == resilience.CategoryClientError && !result.StatusOnly()):
 		in.Class = schedquality.ClassRequest
+	case isOpenAITransientProcessingError(o.StatusCode, message, o.Body):
+		in.Class = schedquality.ClassUpstream
 	case result.Category == resilience.CategoryCapacityShed:
 		in.Class = schedquality.ClassUpstream
 	case (o.Source == resilience.SourceHTTP || isEvent) && o.StatusCode >= 500:
