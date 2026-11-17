@@ -124,7 +124,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
 	}
 	guardFirstOutput := firstOutputTimeout > 0
-	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI && (!resilience.Current().Enabled || resilience.Current().Stream.PreludeStaging)
+	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
 	var attemptResponseHeaders http.Header
 	if stageFirstOutput {
 		if s.responseHeaderFilter != nil {

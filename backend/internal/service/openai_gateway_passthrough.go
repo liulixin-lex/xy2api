@@ -2490,7 +2490,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// writes the pre-output heartbeats itself, so a failed heartbeat is seen
 	// as a departed client (PM7).
 	guarded := resilience.Current().StrictTerminalOn()
-	stagePrelude := !resilience.Current().Enabled || resilience.Current().Stream.PreludeStaging
 	firstOutputTimeout := time.Duration(0)
 	var firstOutputPlan resilience.TimeoutPlan
 	if guarded && account != nil && account.Platform == PlatformOpenAI {
@@ -2957,7 +2956,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
 			}
-			lineStartsClientOutput = !stagePrelude || forceFlushFailedEvent || commitsOutput
+			lineStartsClientOutput = forceFlushFailedEvent || commitsOutput
 			// Content stops the first-output deadline even after a failed
 			// heartbeat, so it cannot cut the drain of the usage (PM7).
 			firstOutputSeen = firstOutputSeen || lineStartsClientOutput && !suppressCurrentEvent
@@ -3003,7 +3002,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if responsesEOF && line == "" {
 				wireLine = ""
 			}
-			if stagePrelude && !clientOutputStarted && !lineStartsClientOutput {
+			if !clientOutputStarted && !lineStartsClientOutput {
 				if _, err := pendingStage.WriteString(wireLine); err != nil {
 					message := "OpenAI first-output staging failed"
 					if errors.Is(err, errOpenAIFirstOutputStageLimit) {

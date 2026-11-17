@@ -1410,6 +1410,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser m7CompatSSEFrameParser
 		for scanner.Scan() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
 			line := scanner.Text()
 			frame, ok := parser.AddLine(line)
 			if !ok {
@@ -1532,6 +1535,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
 				}
 				return resultWithUsage(), newOpenAIUpstreamStreamReadError(ev.err)
+			}
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := ev.line
 			frame, ok := parser.AddLine(line)

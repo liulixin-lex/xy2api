@@ -1563,6 +1563,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser m7CompatSSEFrameParser
 		for scanner.Scan() {
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
+			}
 			line := scanner.Text()
 			if isOpenAICompatDoneSentinelLine(line) {
 				return missingTerminalErr()
@@ -1680,6 +1683,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				}
 				handleScanErr(ev.err)
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", ev.err)
+			}
+			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
+				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
 			line := ev.line
 			if isOpenAICompatDoneSentinelLine(line) {

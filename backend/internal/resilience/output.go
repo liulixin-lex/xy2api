@@ -28,7 +28,7 @@ func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
 		return OutputClass{}
 	}
 	root := gjson.ParseBytes(payload)
-	if !root.IsObject() {
+	if !root.IsObject() || !outputHasUniqueFields(root, 0) {
 		return OutputClass{}
 	}
 	typ := root.Get("type").String()
@@ -93,6 +93,20 @@ func ClassifyOutput(protocol, event string, payload []byte) OutputClass {
 		}
 	}
 	return OutputClass{}
+}
+
+// Duplicate keys are ambiguous to clients and gjson. Reuse the transport's
+// object check at every level and leave ambiguous events to its legacy policy.
+func outputHasUniqueFields(value gjson.Result, depth int) bool {
+	if !value.IsObject() && !value.IsArray() {
+		return true
+	}
+	if depth > responsesEmptyFieldMaxDepth || value.IsObject() && !responsesObjectHasUniqueFields(value) {
+		return false
+	}
+	unique := true
+	value.ForEach(func(_, child gjson.Result) bool { unique = outputHasUniqueFields(child, depth+1); return unique })
+	return unique
 }
 
 func classifyResponsesOutput(typ string, root gjson.Result) OutputClass {
@@ -206,7 +220,7 @@ func outputItem(item gjson.Result) OutputClass {
 		out := outputTool(item)
 		out.Valid = out.Valid || nonemptyOutputString(item.Get("input"))
 		return out
-	case "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_list_tools", "mcp_approval_request":
+	case "web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_approval_request":
 		return OutputClass{Known: true, Valid: true}
 	case "compaction":
 		return outputText(item.Get("encrypted_content"), false)

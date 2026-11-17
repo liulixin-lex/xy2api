@@ -111,7 +111,7 @@ func TestFirstoutRequestClockAndDispatchPhases(t *testing.T) {
 }
 
 func TestFirstoutManagedToolsAndEventIdentity(t *testing.T) {
-	for _, kind := range []string{"web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_list_tools", "mcp_approval_request"} {
+	for _, kind := range []string{"web_search_call", "file_search_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "computer_call", "mcp_call", "mcp_approval_request"} {
 		for _, phase := range []string{"added", "done"} {
 			raw := []byte(fmt.Sprintf(`{"type":"response.output_item.%s","item":{"type":%q}}`, phase, kind))
 			require.Equal(t, OutputClass{Known: true, Valid: true}, ClassifyOutput("responses", "", raw))
@@ -161,4 +161,19 @@ func TestFirstoutUndispatchedTimingDoesNotIncludeGeneration(t *testing.T) {
 	sent.NoteGatewaySend(123)
 	sent.FinishRejectedDispatch(start.Add(time.Minute))
 	require.Empty(t, sent.Timing().DispatchPhases, "uninstrumented provider sends must not publish generation as dispatch time")
+}
+
+func TestFirstoutMCPListAndDuplicateKeysAreUnknown(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"response.output_item.added","item":{"type":"mcp_list_tools","tools":[{"name":"fixture"}]}}`,
+		`{"type":"response.output_item.done","item":{"type":"mcp_list_tools","tools":[]}}`,
+		`{"type":"response.output_text.delta","delta":" ","delta":"answer"}`,
+		`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":" ","text":"answer"}]}}`,
+		`{"choices":[{"delta":{"content":" ","content":"answer"}}]}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":" ","text":"answer"}}`,
+	} {
+		require.Equal(t, OutputClass{}, ClassifyOutput("", "", []byte(payload)), payload)
+	}
+	// Repeated names in distinct objects are not duplicate keys.
+	require.Equal(t, OutputClass{Known: true, Valid: true, Answer: true}, ClassifyOutput("", "", []byte(`{"choices":[{"delta":{"content":"a"}},{"delta":{"content":"b"}}]}`)))
 }

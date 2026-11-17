@@ -17,9 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type firstoutPipeUpstream struct{ body *io.PipeReader }
+type firstoutPipeUpstream struct {
+	body    *io.PipeReader
+	request *http.Request
+}
 
 func (u *firstoutPipeUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.request = req
 	context.AfterFunc(req.Context(), func() { _ = u.body.CloseWithError(req.Context().Err()) })
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: u.body, Request: req}, nil
 }
@@ -190,6 +194,14 @@ func TestFirstoutFallbackSettingsDisarmAtCommit(t *testing.T) {
 						_, err := io.WriteString(writer, firstoutWire("response.created", `,"response":{"id":"fixture","status":"in_progress"}`)+firstoutWire("response.metadata", `,"metadata":{}`))
 						require.NoError(t, err)
 						synctest.Wait()
+						if mode == "staging_off" && (route == "native" || route == "passthrough") {
+							require.Empty(t, wire.Body.String(), "compatibility staging does not control native or passthrough")
+							time.Sleep(2 * time.Second)
+							synctest.Wait()
+							requireFirstOutputFailover(t, <-done)
+							require.Empty(t, wire.Body.String())
+							return
+						}
 						require.NotEmpty(t, wire.Body.String(), "disabled staging commits its first event")
 						require.Nil(t, state.EndToEndFirstOutputMs(), "protocol commitment is not valid output")
 						time.Sleep(2 * time.Second)
@@ -252,5 +264,118 @@ func TestFirstoutUnknownCommitsWithoutQualitySample(t *testing.T) {
 				require.NoError(t, <-done)
 			})
 		})
+	}
+}
+
+func TestFirstoutCompatContentAndUnknownFrames(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"chat", "messages"} {
+		for _, tc := range []struct {
+			name, payload string
+			valid         bool
+		}{
+			{"unknown", `{"type":"response.vendor","message":"opaque"}`, false},
+			{"web_search", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"web_search_call"}}`, true},
+			{"image_generation", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"image_generation_call"}}`, true},
+			{"mcp_list_tools", `{"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"mcp_list_tools","tools":[{"name":"fixture"}]}}`, false},
+			{"duplicate", `{"type":"response.output_text.delta","delta":" ","delta":"duplicate-value"}`, false},
+		} {
+			t.Run(route+"/"+tc.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					body := `{"model":"fixture","stream":true,"messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
+					c, _ := compatStreamContext("/v1/"+route, body)
+					state := resilience.NewRequestState()
+					account := rawChatCompletionsTestAccount()
+					state.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "fixture"})
+					c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+					reader, writer := io.Pipe()
+					defer reader.Close()
+					defer writer.Close()
+					up := &firstoutPipeUpstream{body: reader}
+					svc := compatStreamService(up, 1, 0, 0)
+					svc.schedAttemptRecorder = NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
+					done := make(chan error, 1)
+					go func() { _, err := captureForward(svc, c, account, []byte(body), route); done <- err }()
+					synctest.Wait()
+					capture := currentSchedAttempt(c.Request.Context())
+					require.NotNil(t, capture)
+					handle := capture.attempt.(*schedAttemptHandle)
+					guard := up.request.Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+					_, err := io.WriteString(writer, firstoutWire("response.created", `,"response":{"id":"fixture","status":"in_progress"}`))
+					require.NoError(t, err)
+					synctest.Wait()
+					require.False(t, guard.disarmed.Load())
+					time.Sleep(100 * time.Millisecond)
+					_, err = io.WriteString(writer, "data: "+tc.payload+"\n\n")
+					require.NoError(t, err)
+					synctest.Wait()
+					require.True(t, guard.disarmed.Load(), "legacy unknowns and model tools release the guard at receipt")
+					if tc.valid {
+						require.Equal(t, 100, *handle.row.TTFOMs)
+					} else {
+						require.Nil(t, handle.row.TTFOMs)
+					}
+					require.Nil(t, handle.row.FirstAnswerMs)
+					time.Sleep(2 * time.Second)
+					synctest.Wait()
+					select {
+					case err := <-done:
+						t.Fatalf("guard interrupted released event: %v", err)
+					default:
+					}
+					_, err = io.WriteString(writer, firstoutWire("response.output_text.delta", `,"delta":"answer"`)+firstoutWire("response.completed", `,"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+					require.NoError(t, err)
+					require.NoError(t, writer.Close())
+					require.NoError(t, <-done)
+					require.NotNil(t, handle.row.FirstAnswerMs)
+				})
+			})
+		}
+	}
+}
+
+func TestFirstoutCompatStagingDisabledDisarmsOnAnyLine(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Stream.PreludeStaging = false })
+	for _, route := range []string{"chat", "messages"} {
+		for _, async := range []bool{false, true} {
+			for _, line := range []string{": heartbeat\n", "data: {not-json\n"} {
+				t.Run(fmt.Sprintf("%s/async=%v/%q", route, async, line), func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						body := `{"model":"fixture","stream":true,"messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
+						c, _ := compatStreamContext("/v1/"+route, body)
+						reader, writer := io.Pipe()
+						defer reader.Close()
+						defer writer.Close()
+						up := &firstoutPipeUpstream{body: reader}
+						svc := compatStreamService(up, 1, 0, 0)
+						if async {
+							svc.cfg.Gateway.StreamKeepaliveInterval = 10
+						}
+						done := make(chan error, 1)
+						go func() {
+							_, err := captureForward(svc, c, rawChatCompletionsTestAccount(), []byte(body), route)
+							done <- err
+						}()
+						synctest.Wait()
+						guard := up.request.Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+						_, err := io.WriteString(writer, line)
+						require.NoError(t, err)
+						synctest.Wait()
+						require.True(t, guard.disarmed.Load())
+						time.Sleep(2 * time.Second)
+						synctest.Wait()
+						select {
+						case err := <-done:
+							t.Fatalf("guard fired after scanner line: %v", err)
+						default:
+						}
+						_, err = io.WriteString(writer, "\n"+firstoutWire("response.created", `,"response":{"id":"fixture","status":"in_progress"}`)+firstoutWire("response.output_text.delta", `,"delta":"answer"`)+firstoutWire("response.completed", `,"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+						require.NoError(t, err)
+						require.NoError(t, writer.Close())
+						require.NoError(t, <-done)
+					})
+				})
+			}
+		}
 	}
 }
