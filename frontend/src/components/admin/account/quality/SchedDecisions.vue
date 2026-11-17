@@ -128,9 +128,16 @@ watch(() => props.accountId, () => {
   if (open.value) void load(false)
 })
 
-// A recovery or an exemption writes records: an open list starts over from the newest.
+// A recovery or an exemption writes records: an open list starts over from the newest; a collapsed one is out of date,
+// so its next opening does (an answer still on its way is dropped).
 watch(changed, () => {
-  if (open.value && state.value !== 'idle') trackSchedReload(load(false))
+  if (state.value === 'idle') return
+  if (open.value) {
+    trackSchedReload(load(false))
+    return
+  }
+  seq++
+  state.value = 'idle'
 })
 
 function toggleEvidence(id: number) {

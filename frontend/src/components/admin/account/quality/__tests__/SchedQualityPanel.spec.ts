@@ -4,6 +4,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
+import SchedDecisions from '../SchedDecisions.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
@@ -555,6 +556,25 @@ describe('SchedQualityPanel', () => {
     expect(opened.querySelector('[data-qp-line="cache"] [data-qp-evidence-why]')).toBeNull()
     // Another group stays closed.
     expect(document.querySelector('[data-qp-group-detail="53"]')).toBeNull()
+  })
+
+  // M1: a recovery while the list is collapsed: opening it again shows the new record, not the history loaded before.
+  it('reloads a collapsed decision list on its next opening after a recovery or an exemption', async () => {
+    const record = (id: number, action: string): BackendDecision =>
+      ({ id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action, level: 0, until: null })
+    api.accountDecisions.mockResolvedValueOnce([record(1, 'enter')]).mockResolvedValueOnce([record(2, 'reset'), record(1, 'enter')])
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    const toggle = w.get('[data-qp-decisions-toggle]')
+    await toggle.trigger('click')
+    await flushPromises()
+    await toggle.trigger('click')
+    await markSchedChanged()
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenCalledTimes(1)
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.accountDecisions).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-qp-decision="2"]').exists()).toBe(true)
   })
 
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
