@@ -90,7 +90,9 @@ describe('AccountRecentCell', () => {
     const file = '../AccountRecentCell.vue'
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
     expect(source).toMatch(/\.recent \{[^}]*width: 72px;[^}]*\}/)
-    expect(source).toMatch(/\.recent \{[^}]*column-gap: 8px;/)
+    // Label ≤ 25 + gap 6 + value ≤ 36.3 (system fonts) in 72px; a wider label gives way with an ellipsis, never the value.
+    expect(source).toMatch(/\.recent \{[^}]*grid-template-columns: minmax\(0, auto\) auto;[^}]*column-gap: 6px;/)
+    expect(source).toMatch(/\.recent__k \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/)
     vi.useFakeTimers()
     const cell = mountCell(quality({ ttfo: { first_event_p50_ms: 50, first_output_p50_ms: 100, gap_p50_ms: 50, n: 30 } }))
     expect(cell.get('[data-dim="ttfo"]').text()).toBe('0.10s')
@@ -104,6 +106,16 @@ describe('AccountRecentCell', () => {
     ])
     const ttfo = (ms: number) => cells(quality({ ttfo: { first_event_p50_ms: null, first_output_p50_ms: ms, gap_p50_ms: null, n: 30 } }))[0].text
     expect([50, 994, 996, 1000, 59_940, 99_960, 123_400].map(ttfo)).toEqual(['0.05s', '0.99s', '1.0s', '1.0s', '59.9s', '100s', '123s'])
+  })
+
+  // English "Errors"/"Cache" (34/36px) leave no room in 72px: the table cell has short labels, the card and tip the full ones.
+  it('labels the table cell with the short names and the card and its tip with the full ones', () => {
+    const labels = (card: boolean) =>
+      mount(AccountRecentCell, { attachTo: document.body, props: { quality: quality(), card } }).findAll('.recent__k').map((el) => el.text())
+    expect(labels(false)).toEqual(['admin.accounts.table.dimsShort.ttfo', 'admin.accounts.table.dimsShort.error', 'admin.accounts.table.dimsShort.cache'])
+    expect(labels(true)).toEqual(['admin.accounts.table.dims.ttfo', 'admin.accounts.table.dims.error', 'admin.accounts.table.dims.cache'])
+    const tip = (mountCell(quality()).element as HTMLElement & { __tipText?: () => { rows: unknown[][] } }).__tipText!()
+    expect(tip.rows.map((row) => row[0])).toContain('admin.accounts.table.dims.error')
   })
 
   it('takes its column\'s size, never the viewport\'s: 72px, 84px only when the table has the roomy widths (7q-5)', () => {

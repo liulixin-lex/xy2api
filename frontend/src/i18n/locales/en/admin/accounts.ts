@@ -25,6 +25,7 @@ export default {
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },
+        dimsShort: { ttfo: 'First', error: 'Err', cache: 'Hit' },
         dimReasons: { ttfo: 'slow first token', error: 'error rate too high', cache: 'cache too low' },
         recent: {
           firstOutput: 'First useful output P50',

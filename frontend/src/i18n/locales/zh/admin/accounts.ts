@@ -25,6 +25,7 @@ export default {
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '错误', cache: '缓存' },
+        dimsShort: { ttfo: '首字', error: '错误', cache: '缓存' },
         dimReasons: { ttfo: '首字超限', error: '错误率超限', cache: '缓存偏低' },
         recent: {
           firstOutput: '首个有效输出 P50',
