@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -61,7 +62,7 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassInterrupted
 	case resilience.ClassifyStateRejection(code, message).RequestScoped() || schedMigrationMessage(message):
 		in.Class = schedquality.ClassMigration400
-	case IsUpstreamCapabilityFailure(capabilityStatus, o.Body) || result.Category == resilience.CategoryModelUnsupported && result.Reason != "status_404_model":
+	case IsUpstreamCapabilityFailure(capabilityStatus, o.Body):
 		in.Class = schedquality.ClassCapability
 	case result.Category == resilience.CategoryBalance && strings.Contains(strings.ToLower(message), "upstream image account"):
 		in.Class = schedquality.ClassUpstream
@@ -125,22 +126,27 @@ func IsUpstreamCapabilityFailure(status int, body []byte) bool {
 	if !gjson.ValidBytes(body) {
 		return false
 	}
-	if resilience.IsModelUnsupportedResponse(status, body) {
+	if resilience.IsModelUnsupportedResponse(status, body) || status == http.StatusUnauthorized && resilience.IsOpenAICompatibleModelNotFound401(body) {
 		return true
 	}
 	fields := schedErrorFields(body)
 	for _, key := range []string{"code", "type"} {
 		switch strings.ToLower(strings.TrimSpace(fields.Get(key).String())) {
-		case "model_unsupported", "model_not_found", "model_not_supported", "unsupported_model",
-			"unsupported_protocol", "protocol_not_supported", "unsupported_request_type", "request_type_not_supported",
-			"unsupported_frontend", "unsupported_input_capability":
+		case "model_not_found", "model_not_supported", "unsupported_model", "protocol_not_supported", "request_type_not_supported":
+			if status == http.StatusBadRequest || status == http.StatusNotFound {
+				return true
+			}
+		case "model_unsupported", "unsupported_protocol", "unsupported_request_type", "unsupported_frontend", "unsupported_input_capability":
 			return true
 		}
 	}
 	if status != http.StatusBadRequest && status != http.StatusNotFound {
 		return false
 	}
-	message := strings.ToLower(strings.Join(strings.Fields(fields.Get("message").String()), " "))
+	message := strings.ToLower(strings.Join(strings.Fields(schedErrorMessage(body)), " "))
+	if schedUnsupportedModelMessage.MatchString(message) {
+		return true
+	}
 	for _, phrase := range []string{
 		"this site does not support this request", "this upstream does not support this request",
 		"this endpoint does not support this request", "unsupported frontend", "unsupported input capability",
@@ -173,4 +179,21 @@ func schedRequestMessage(message string) bool {
 		}
 	}
 	return false
+}
+
+// Fixed template words identify a refusal; provider/model placeholders are
+// deliberately opaque and never interpreted as status or account evidence.
+var schedUnsupportedModelMessage = regexp.MustCompile(`^model .+ is (?:not supported by any .+ account in this .+|not available for this .+)[.!]?$`)
+
+func schedErrorMessage(body []byte) string {
+	if message := schedErrorFields(body).Get("message"); message.Type == gjson.String {
+		return message.String()
+	}
+	root := gjson.ParseBytes(body)
+	for _, path := range []string{"error", "response.error", "detail"} {
+		if message := root.Get(path); message.Type == gjson.String {
+			return message.String()
+		}
+	}
+	return ""
 }
