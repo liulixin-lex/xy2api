@@ -103,7 +103,7 @@ async function load(next: boolean) {
   const request = ++seq
   state.value = 'loading'
   try {
-    const before = next ? items.value.at(-1)?.id : undefined
+    const before = next ? items.value[items.value.length - 1]?.id : undefined
     const page = await schedQualityAPI.accountDecisions(accountId, { limit: PAGE, beforeId: before })
     if (request !== seq) return
     items.value = next ? [...items.value, ...page] : page
