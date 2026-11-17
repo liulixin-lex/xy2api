@@ -16,6 +16,31 @@
 
 SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额、用户并发、本地模型配置与上游内容安全拒绝标为业务限制，不计入 SLA。
 
+## 运维错误记录的状态码
+
+迁移 316 为 `ops_error_logs` 增加两个可空列，与质量尝试表或采样日志里的同名字段分开看：
+
+| 列 | 含义与取值 |
+|---|---|
+| `status_origin` | `upstream_status_code` 的来源：`1` 为上游返回，`2` 为网关合成；历史记录、来源未确认或没有上游状态时为 `NULL`。不能把空值当作真实上游来源 |
+| `client_status` | 已实际提交给客户端的 HTTP 状态码；尚未写出响应时为 `NULL`，不把框架缺省的 200 当成已发送 |
+
+原有 `status_code` 保留请求记录与内部归类口径；`upstream_status_code` 保留上游状态或网关投影码，来源由 `status_origin` 区分。流式失败时，客户端已提交的状态码不再覆盖上游码，而是分别记录。例如响应头已发出 200、之后流内失败，`client_status` 仍可能是 200，内部与上游错误状态另存。
+
+**当前查看入口**：这两列只落库，运维面板和错误接口都不返回。运维监控的错误列表与错误详情仍显示原有的“状态码 / 上游状态码”；接口的 `status_code` 优先取 `upstream_status_code`，缺失时取原记录的 `status_code`，不能把面板状态当成新的 `client_status`。
+
+需要区分时，用只读数据库连接查询，不改记录：
+
+```sql
+BEGIN READ ONLY;
+SELECT created_at, status_code, upstream_status_code,
+       status_origin, client_status
+FROM ops_error_logs
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+COMMIT;
+```
+
 ## 管理接口
 
 | 方法与路径 | 用途 |
