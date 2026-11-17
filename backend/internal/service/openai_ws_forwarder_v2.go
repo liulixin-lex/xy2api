@@ -366,7 +366,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
 	defer func() { learnCapability.finish(schedResult, schedErr) }()
-	if s.schedAttemptRecorder != nil {
 	// This boundary belongs to every real application send, even when quality
 	// recording is disabled. A failed first send must precede the next send.
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
