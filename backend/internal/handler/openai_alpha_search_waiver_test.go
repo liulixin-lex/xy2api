@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -153,6 +154,75 @@ func TestN12AlphaWaiverOwnership(t *testing.T) {
 			require.False(t, write)
 		})
 	}
+}
+
+func TestN12AlphaLateWaiverResult(t *testing.T) {
+	withHandlerResilience(t, nil)
+	resilience.SetUndeliveredAbuseCheck(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := resilience.NewRequestState()
+	writer := &n12ZeroWriter{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"model":"gpt-5.1","query":"fixture"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(string(body))).WithContext(resilience.WithRequestState(ctx, st))
+	c.Request.Header.Set("Content-Type", "application/json")
+	service.InstallDeliveryTracking(c, time.Now())
+	group := &service.Group{ID: 4201, Platform: service.PlatformOpenAI, Hydrated: true, RateMultiplier: 1.5, WebSearchPricePerCall: new(0.02)}
+	key := &service.APIKey{ID: 1801, UserID: 1701, GroupID: &group.ID, Group: group, User: &service.User{ID: 1701, Balance: 100}}
+	account := service.Account{ID: 1, GroupIDs: []int64{group.ID}, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, RateMultiplier: new(0.7), Credentials: map[string]any{"api_key": "test", "base_url": "https://capture.example"}}
+	c.Set(string(middleware.ContextKeyAPIKey), key)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.UserID, Concurrency: 2})
+	st.SetAPIKey(key.ID)
+	setOpsSelectedAccount(c, account.ID, account.Platform)
+	up := &captureUpstream{reply: func(int, *http.Request, []byte) (*http.Response, error) {
+		resp := captureResponse(200, `{"results":[{"title":"fixture"}]}`, false)
+		resp.Header.Set("X-Request-Id", "n12-late-financial-request")
+		return resp, nil
+	}}
+	usage, billing := &requestRecordRepo{}, &n12BillingRepo{}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Default.RateMultiplier = 1
+	gw := service.NewOpenAIGatewayService(&openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}, usage, billing, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, nil, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	h := &OpenAIGatewayHandler{gatewayService: gw, apiKeyService: &service.APIKeyService{}}
+	finish := beginGatewayRequestWithScope(c, func() *service.APIKey { return key }, "gpt-5.1", false, gw, resilience.GatewayRequestScopeSearch)
+	// Drive the same forwarding, billing and tail calls explicitly so cancellation
+	// is deterministically between the first billing Claim and context resolution.
+	result, err := gw.ForwardAlphaSearch(c.Request.Context(), c, &account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, up.calls)
+	require.Positive(t, writer.calls)
+	require.Zero(t, writer.Body.Len())
+	require.NoError(t, ctx.Err())
+	recordForwardRecovery(c, err, false, result != nil)
+	claimed := gatewayBillingContext(c.Request.Context())
+	before := resilience.GatewayRequestMetadataFromContext(claimed)
+	require.NotNil(t, before)
+	require.EqualValues(t, resilience.RequestFailed, before.Result)
+	cancel()
+	c.Request = c.Request.WithContext(claimed)
+	h.recordAlphaSearchUsage(c, key, &account, nil, service.ChannelMappingResult{}, "gpt-5.1", body, result, key.UserID)
+	noted, _, billed := st.UndeliveredUsage()
+	require.NotEmpty(t, noted)
+	require.False(t, billed)
+	finish()
+	require.Empty(t, billing.commands)
+	require.Empty(t, usage.bills)
+	require.Len(t, usage.unbilled, 1)
+	row := usage.unbilled[0]
+	require.Equal(t, resilience.GatewayRequestScopeSearch, row.RequestScope)
+	require.EqualValues(t, resilience.RequestCanceled, row.Result)
+	require.Equal(t, before.RequestID, row.RequestID)
+	after, write := st.ClaimGatewayRequest(false)
+	require.False(t, write)
+	expected := *before
+	expected.Result = resilience.RequestCanceled
+	require.Equal(t, &expected, after, "identity, timing, account and other frozen facts are preserved")
+	require.EqualValues(t, resilience.RequestFailed, before.Result)
+	finish()
+	require.Len(t, usage.unbilled, 1)
+	t.Log("N12_LATE_WAIVER first_claim=Failed tail=Canceled usage=0 unbilled=1 apply=0")
 }
 
 // This is a recorded legacy gap, intentionally outside the Search-only rollout.
