@@ -26,15 +26,14 @@ type schedQualityData struct {
 }
 
 type schedQualityView struct {
-	version            int64
-	at                 time.Time
-	globalEnabled      bool
-	states             map[schedQualityKey]q.StateView
-	policies           map[int64]SchedPolicyRecord
-	overrides          map[int64][]SchedOverride
-	resets             map[int64]time.Time
-	sessions           map[schedSessionKey][]q.AttemptSample
-	incompleteSessions map[schedSessionKey]bool
+	version       int64
+	at            time.Time
+	globalEnabled bool
+	states        map[schedQualityKey]q.StateView
+	policies      map[int64]SchedPolicyRecord
+	overrides     map[int64][]SchedOverride
+	resets        map[int64]time.Time
+	sessions      map[schedSessionKey][]q.AttemptSample
 }
 
 func (v *schedQualityView) Version() int64            { return v.version }
@@ -60,11 +59,7 @@ func (v *schedQualityView) TakeoverIdle(g int64) (time.Duration, bool) {
 }
 
 func (v *schedQualityView) SessionSlowTwice(g, a int64, m, session string) bool {
-	key := schedSessionKey{g, m, session}
-	if v.incompleteSessions[key] {
-		return false
-	}
-	rows := v.sessions[key]
+	rows := v.sessions[schedSessionKey{g, m, session}]
 	if len(rows) < 2 {
 		return false
 	}
@@ -169,19 +164,19 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			}
 		}
 	}
-	// Only durable samples have confirmed predecessor/switch boundaries.
-	// Even a finished observer sample is incomplete history until read from the
-	// ledger. Do not substitute older durable rounds across this gap.
-	view.incompleteSessions = make(map[schedSessionKey]bool)
+	// Finished observations already have a result, even before the ledger write.
+	// In-flight attempts are not completed rounds and cannot block migration.
+	unpersisted := make(map[string]bool)
 	for _, r := range d.running {
-		if r.SessionKey != "" && !r.StartedAt.After(d.now) {
-			view.incompleteSessions[schedSessionOf(r)] = true
+		if !r.FinishedAt.IsZero() && !r.FinishedAt.After(d.now) {
+			sessions.add(schedQualityCloneSample(r))
+			unpersisted[r.AttemptID] = true
 		}
 	}
 	sessions.sort()
 	view.sessions = make(map[schedSessionKey][]q.AttemptSample)
 	for k, rows := range sessions {
-		view.sessions[k] = schedSessionRounds(rows)
+		view.sessions[k] = schedSessionRounds(rows, unpersisted)
 	}
 	members := make(map[int64][]int64)
 	for group, ids := range s.members {
@@ -369,9 +364,10 @@ func schedStateUntil(v q.StateView) time.Time {
 	return until
 }
 
-// Retries share a logical request/turn. A switched first turn is a boundary,
-// so older history cannot be joined across a move away and back to an account.
-func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
+// Retries share a logical request/turn and the final finished attempt determines
+// its result. Resolve switch boundaries between these merged rounds, since the
+// ledger may not yet contain a closer predecessor seen by the observer.
+func schedSessionRounds(attempts []q.AttemptSample, unpersisted map[string]bool) []q.AttemptSample {
 	type roundKey struct {
 		id      string
 		attempt bool
@@ -401,7 +397,16 @@ func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
 		return rows[i].StartedAt.Before(rows[j].StartedAt)
 	})
 	var tail []q.AttemptSample
-	for _, r := range rows {
+	for i, r := range rows {
+		if i > 0 {
+			r.Switched = rows[i-1].AccountID != r.AccountID
+		} else if unpersisted[r.AttemptID] {
+			// Without a predecessor, this observation may be a cold first round.
+			// Exclude only this round; later completed rounds can still qualify.
+			r.Switched = true
+		}
+		// The first durable round retains its confirmed ledger switch marker,
+		// including a predecessor outside the retained history.
 		if r.Switched {
 			tail = nil
 			continue

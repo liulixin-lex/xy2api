@@ -185,9 +185,84 @@ func TestSelectionActiveAliasedTurnsRenewBeyondIdleLimit(t *testing.T) {
 	require.Len(t, leases.calls, 12)
 }
 
-func TestSelectionUnpersistedFinishedRoundsBlockMigration(t *testing.T) {
-	for _, mode := range []string{"switch_not_persisted", "gap_before_later_rounds"} {
-		t.Run(mode, func(t *testing.T) {
+// Exercise the real published view and the owner-selection path together.
+func selectionRequireSnapshotMigration(t *testing.T, f *qualityFixture, want bool) {
+	t.Helper()
+	view := f.e.Snapshot().View
+	require.Equal(t, want, view.SessionSlowTwice(10, 1, "synthetic-model", "session"))
+	require.Equal(t, q.PlaceRear, view.StateOf(10, 1, "synthetic-model").Placement(true, f.now))
+	session := selectionNewSessionFixture()
+	session.owner = selectionTestAccount(1, 5)
+	session.candidates = []*Account{selectionTestAccount(3, 1)}
+	session.candidates[0].GroupIDs = []int64{10}
+	session.binding.owner = 1
+	session.session.now = func() time.Time { return f.now }
+	session.session.view = func() q.View { return view }
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	result := session.session.selectOwner(ctx, 10, "session", "synthetic-model", session.owner, session.candidates, selectionRequest{})
+	require.Equal(t, want, result != nil)
+	if result == nil {
+		require.Empty(t, session.slots.attempts)
+		return
+	}
+	CompleteOpenAIStickyChange(ctx, 3, true, false)
+	result.ReleaseFunc()
+	require.EqualValues(t, 3, session.binding.owner)
+}
+
+func TestSelectionContinuousFinishedRoundsAllowMigration(t *testing.T) {
+	f := newQualityFixture(t)
+	rows := engineSamples(7, f.now, true)
+	for i := range rows {
+		rows[i].SessionKey = "session"
+		rows[i].StartedAt = rows[i].StartedAt.Add(time.Duration(i) * 4 * time.Second)
+		rows[i].FinishedAt = rows[i].StartedAt.Add(3 * time.Second)
+	}
+	rows[0].AccountID = 2
+	f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
+	for i := 1; i < len(rows)-1; i++ {
+		// Rn finishes, only Rn-1 reaches the ledger, and Rn+1 is already running.
+		f.now = rows[i].FinishedAt.Add(time.Second)
+		persisted := rows[i-1]
+		persisted.InsertedAt = f.now
+		f.ledger.Rows = append(f.ledger.Rows, persisted)
+		begin := rows[i]
+		begin.FinishedAt = time.Time{}
+		f.e.Observe(begin)
+		f.e.Observe(rows[i])
+		next := rows[i+1]
+		next.FinishedAt = time.Time{}
+		f.e.Observe(next)
+		f.cycle()
+		require.Len(t, f.e.window.running, 2, "each cycle has a finished pending write and a live attempt")
+		require.True(t, f.e.window.running[next.AttemptID].FinishedAt.IsZero())
+		selectionRequireSnapshotMigration(t, f, i >= 3)
+		if i >= 3 {
+			tail := f.e.Snapshot().View.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+			require.Equal(t, []string{rows[i-1].AttemptID, rows[i].AttemptID}, []string{tail[0].AttemptID, tail[1].AttemptID})
+		}
+	}
+}
+
+func TestSelectionMergedFinishedRoundsBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		durable, observed     []int
+		tail                  []int
+		firstOnOther, fastEnd bool
+		retry, inFlight       bool
+		want                  bool
+	}{
+		{name: "switch_two_unpersisted", durable: []int{0}, observed: []int{1, 2}, firstOnOther: true, tail: []int{2}},
+		{name: "unknown_predecessor_two", observed: []int{1, 2}, tail: []int{2}},
+		{name: "unknown_predecessor_then_two", observed: []int{1, 2, 3}, tail: []int{2, 3}, want: true},
+		{name: "earlier_unknown_then_durable", durable: []int{2, 3}, observed: []int{1}, tail: []int{2, 3}, want: true},
+		{name: "latest_unpersisted_fast", durable: []int{0, 1}, observed: []int{2}, fastEnd: true, tail: []int{1, 2}},
+		{name: "merged_predecessor_overrides_ledger_switch", durable: []int{0, 2}, observed: []int{1, 3}, firstOnOther: true, tail: []int{2, 3}, want: true},
+		{name: "unpersisted_final_retry_fast", durable: []int{0, 1}, observed: []int{2, 3}, fastEnd: true, retry: true, tail: []int{1, 3}},
+		{name: "inflight_other_account_ignored", durable: []int{0, 1}, inFlight: true, tail: []int{0, 1}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newQualityFixture(t)
 			rows := engineSamples(4, f.now.Add(-time.Minute), true)
 			for i := range rows {
@@ -195,45 +270,46 @@ func TestSelectionUnpersistedFinishedRoundsBlockMigration(t *testing.T) {
 				rows[i].StartedAt = rows[i].StartedAt.Add(time.Duration(i) * 4 * time.Second)
 				rows[i].FinishedAt = rows[i].StartedAt.Add(3 * time.Second)
 			}
-			pending := rows[1:3]
-			f.ledger.Rows = rows[:1]
-			if mode == "switch_not_persisted" {
+			if tc.firstOnOther {
 				rows[0].AccountID = 2
-			} else {
-				// Two later durable slow rounds cannot hide an earlier incomplete round.
-				f.ledger.Rows = rows[2:]
-				pending = rows[:1]
 			}
-			for _, finished := range pending {
-				begin := finished
+			if tc.retry {
+				rows[3].RequestID = rows[2].RequestID
+			}
+			if tc.fastEnd {
+				ms := 100
+				rows[tc.observed[len(tc.observed)-1]].TTFOMs = &ms
+			}
+			for _, i := range tc.durable {
+				f.ledger.Rows = append(f.ledger.Rows, rows[i])
+			}
+			for _, i := range tc.observed {
+				begin := rows[i]
 				begin.FinishedAt = time.Time{}
 				f.e.Observe(begin)
-				f.e.Observe(finished) // Finish observed, asynchronous ledger write still pending.
+				f.e.Observe(rows[i])
+			}
+			if tc.inFlight {
+				live := rows[2]
+				live.AccountID = 2
+				live.FinishedAt = time.Time{}
+				f.e.Observe(live)
 			}
 			f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Identity: q.IdentityRear, Until: f.now.Add(time.Hour), EvaluatedAt: f.now}}
 			f.cycle()
-			view := f.e.Snapshot().View
-			require.Len(t, f.e.window.running, len(pending))
-			require.False(t, view.SessionSlowTwice(10, 1, "synthetic-model", "session"), "unconfirmed switch boundaries must block this migration")
-			session := selectionNewSessionFixture()
-			session.owner = selectionTestAccount(1, 5)
-			session.candidates = []*Account{selectionTestAccount(3, 1)}
-			session.candidates[0].GroupIDs = []int64{10}
-			session.binding.owner = 1
-			session.session.now = func() time.Time { return f.now }
-			session.session.view = func() q.View { return view }
-			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
-			require.Nil(t, session.session.selectOwner(ctx, 10, "session", "synthetic-model", session.owner, session.candidates, selectionRequest{}))
-			require.Empty(t, session.slots.attempts)
-			// A later successful ledger read clears the barrier and confirms boundaries.
-			f.now = f.now.Add(time.Second)
-			for i := range rows {
-				rows[i].InsertedAt = f.now
+			tail := f.e.Snapshot().View.(*schedQualityView).sessions[schedSessionKey{10, "synthetic-model", "session"}]
+			var got, want []string
+			for _, r := range tail {
+				got = append(got, r.AttemptID)
 			}
-			f.ledger.Rows = rows
-			f.cycle()
-			require.Empty(t, f.e.window.running)
-			require.True(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "session"), "two confirmed slow rounds after the switched first round now allow migration")
+			for _, i := range tc.tail {
+				want = append(want, rows[i].AttemptID)
+			}
+			require.Equal(t, want, got)
+			selectionRequireSnapshotMigration(t, f, tc.want)
+			if tc.name == "merged_predecessor_overrides_ledger_switch" {
+				require.True(t, f.e.window.samples[SchedAccountModel{1, "synthetic-model"}][0].Switched, "migration projection must not change the RuleB ledger sample")
+			}
 		})
 	}
 }
