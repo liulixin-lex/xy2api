@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,13 +79,28 @@ func errclassWSFixture(t *testing.T, mode string) (*OpenAIGatewayService, *Accou
 			}
 			return
 		case "client_disconnect":
-			if conn.Write(ctx, coderws.MessageText, []byte(errclassWSCreated)) != nil {
+			// HTTP buffers response.created, so use effective output to reach
+			// the real downstream write before the client disconnects.
+			if conn.Write(ctx, coderws.MessageText, []byte(errclassWSDelta)) != nil {
 				return
 			}
 			select {
 			case <-release:
 			case <-ctx.Done():
 				return
+			}
+			// ctx_pool drains the upstream after a failed client write. Exercise
+			// subsequent writes after the peer closes, then supply the terminal
+			// so the existing drain policy can finish normally.
+			for i := 0; i < 8; i++ {
+				if conn.Write(ctx, coderws.MessageText, []byte(errclassWSDelta)) != nil {
+					return
+				}
+				select {
+				case <-time.After(5 * time.Millisecond):
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 		_ = conn.Write(ctx, coderws.MessageText, []byte(errclassWSCompleted))
@@ -246,6 +262,11 @@ func TestErrclassRealWSIngressFailures(t *testing.T) {
 					want = schedquality.ClassClientCancel
 				case "deadline":
 					want = schedquality.ClassUnknown
+					if route == OpenAIWSIngressModePassthrough {
+						// Passthrough uses the idle timeout as its first-output
+						// fallback even when the configured first-output limit is 0.
+						want = schedquality.ClassFirstOutputTimeout
+					}
 				}
 				for _, sample := range rec.finishes {
 					require.Equal(t, want, sample.Class)
@@ -268,4 +289,56 @@ func TestErrclassTransientProcessingFailure(t *testing.T) {
 		require.Equal(t, schedquality.ClassUpstream, got.Class)
 		require.True(t, got.Class.Counted())
 	}
+}
+
+// Control frames bypass the relay's normal write_upstream stage. An upstream
+// write error must still be attributed to the active attempt, not the client.
+type errclassControlWriteFailureConn struct {
+	*stagedPassthroughConn
+}
+
+func (c *errclassControlWriteFailureConn) WriteFrame(ctx context.Context, typ coderws.MessageType, payload []byte) error {
+	if strings.Contains(string(payload), "session.update") {
+		return io.ErrUnexpectedEOF
+	}
+	return c.stagedPassthroughConn.WriteFrame(ctx, typ, payload)
+}
+
+func TestErrclassPassthroughControlFrameUpstreamWriteFailure(t *testing.T) {
+	withResilienceSettings(t, nil)
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	svc.openaiWSPassthroughDialer = &stagedPassthroughDialer{conn: &errclassControlWriteFailureConn{upstream}}
+	rec := &errclassRecorder{}
+	svc.SetSchedAttemptRecorder(rec)
+	account := passthroughLifecycleAccount()
+	st := resilience.NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "synthetic-model"})
+	ctx, cancel := context.WithTimeout(resilience.WithRequestState(context.Background(), st), 5*time.Second)
+	defer cancel()
+	st.InitDelivery(ctx, time.Now(), nil)
+	server, done := startPassthroughLifecycleServer(t, ctx, svc, account)
+	defer server.Close()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer client.CloseNow()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"synthetic-model","input":"synthetic"}`)))
+	select {
+	case <-upstream.writes:
+	case <-ctx.Done():
+		t.Fatal("initial request was not sent")
+	}
+	upstream.Send(errclassWSCreated)
+	_, _, err = client.Read(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"session.update","session":{}}`)))
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("proxy did not finish after upstream write failure")
+	}
+	require.Len(t, rec.finishes, 1)
+	require.Equal(t, schedquality.ClassUpstream, rec.finishes[0].Class)
+	require.True(t, rec.finishes[0].Class.Counted())
 }

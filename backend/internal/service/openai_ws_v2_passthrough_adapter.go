@@ -1246,6 +1246,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
+				// This write runs inside ReadClientFrame, whose relay exit stage
+				// is read_client. Preserve and finish the upstream failure here
+				// before relay cleanup could mistake it for a client disconnect.
+				schedTurns.noteNetworkError(writeErr)
+				schedTurns.finish(nil, writeErr)
 				return msgType, payload, writeErr
 			}
 		}
