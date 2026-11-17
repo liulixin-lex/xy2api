@@ -216,20 +216,22 @@ describe("validateMinUpstreamRate", () => {
   });
 
   it("accepts finite positive values with at most four decimals", () => {
-    for (const value of [0.0001, 0.1234, 0.5, 1, 2.75, "0.3"]) {
+    for (const value of [0.0001, 0.1234, 0.5, 1, 2.75, "0.3", 999999.9999]) {
       expect(validateMinUpstreamRate(value)).toBeNull();
     }
   });
 
-  it("rejects zero, negatives and non-numbers", () => {
-    for (const value of [0, -0.1, "abc", Number.POSITIVE_INFINITY, Number.NaN]) {
+  it("rejects zero, negatives, non-numbers and the backend's bound of 1000000 or more", () => {
+    for (const value of [0, -0.1, "abc", Number.POSITIVE_INFINITY, Number.NaN, 1e6, "1e6", 1234567]) {
       expect(validateMinUpstreamRate(value)).toBe("floorRangeError");
     }
   });
 
-  it("rejects a fifth decimal instead of rounding it", () => {
-    expect(validateMinUpstreamRate(0.12345)).toBe("floorPrecisionError");
-    expect(validateMinUpstreamRate(0.00001)).toBe("floorPrecisionError");
+  it("rejects a fifth decimal instead of rounding it, as the backend counts the decimals of the value sent", () => {
+    for (const value of [0.12345, 0.00001, "1e-10", "1000.00001", 123456.12345]) {
+      expect(validateMinUpstreamRate(value)).toBe("floorPrecisionError");
+    }
+    expect(validateMinUpstreamRate("1e-4")).toBeNull();
   });
 });
 

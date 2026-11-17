@@ -87,11 +87,14 @@ export const validateProfitControlFormState = (
 };
 
 // 最低上游倍率（倍率区间的下限）：只用于 OpenAI 分组，与利润开关无关，填了就生效；留空表示不设。
-// 后端按 decimal 存，最多 4 位小数，必须 > 0。
+// 后端按 decimal 存，最多 4 位小数，必须 > 0 且 < 1000000。
 export const isMinUpstreamRatePlatform = (platform: string): boolean =>
   platform === "openai";
 
 export type MinUpstreamRateInput = number | string | null | undefined;
+
+/** The backend's bound: a floor must stay below it. */
+export const MIN_UPSTREAM_RATE_LIMIT = 1_000_000;
 
 const isBlankRate = (value: MinUpstreamRateInput): boolean =>
   value === null || value === undefined || String(value).trim() === "";
@@ -101,7 +104,8 @@ const isBlankRate = (value: MinUpstreamRateInput): boolean =>
 export const isUnreadableNumberInput = (event: Event): boolean =>
   (event.target as HTMLInputElement | null)?.validity?.badInput === true;
 
-// 提交前校验：留空通过；读不出数不通过；否则必须是有限数、> 0、最多 4 位小数。
+// 提交前校验：留空通过；读不出数不通过；否则与后端 ValidateMinUpstreamRate 等价：有限数、> 0、< 1000000、
+// 不小于 0.0001，且实际发送的数按十进制写出最多 4 位小数（0 只由编辑时清空产生，见 minUpstreamRateForUpdate）。
 // 返回 null 表示通过，否则返回错误信息的 i18n key（相对 admin.groups.profitControl 前缀）。
 export const validateMinUpstreamRate = (
   value: MinUpstreamRateInput,
@@ -110,11 +114,13 @@ export const validateMinUpstreamRate = (
   if (unreadable) return "floorUnreadable";
   if (isBlankRate(value)) return null;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "floorRangeError";
-  if (Math.abs(Math.round(parsed * 1e4) / 1e4 - parsed) > 1e-9 * Math.max(1, parsed)) {
-    return "floorPrecisionError";
-  }
-  return null;
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= MIN_UPSTREAM_RATE_LIMIT) return "floorRangeError";
+  if (parsed < 0.0001) return "floorPrecisionError";
+  // In [0.0001, 1000000) String() writes the shortest round-trip digits without an exponent, as the backend's
+  // FormatFloat(v, 'f', -1, 64) does: count the decimals of what is sent.
+  const written = String(parsed);
+  const dot = written.indexOf(".");
+  return dot >= 0 && written.length - dot - 1 > 4 ? "floorPrecisionError" : null;
 };
 
 // 表单值 → 下限数值；留空或无效为 null（不设）。
