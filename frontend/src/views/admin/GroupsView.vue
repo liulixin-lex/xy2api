@@ -1251,7 +1251,7 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
-          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效 -->
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效。step=any、不设 min：范围和小数位由页面校验并提示，不让浏览器原生气泡先拦 -->
           <div
             v-if="isMinUpstreamRatePlatform(createForm.platform)"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -1262,8 +1262,7 @@
                 id="create-min-upstream-rate"
                 v-model.number="createForm.min_upstream_rate"
                 type="number"
-                step="0.0001"
-                min="0"
+                step="any"
                 :class="['input', { 'input-error': validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable) }]"
                 :aria-invalid="!!validateMinUpstreamRate(createForm.min_upstream_rate, createFloorUnreadable)"
                 @input="createFloorUnreadable = isUnreadableNumberInput($event)"
@@ -2964,7 +2963,7 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
-          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效 -->
+          <!-- 最低上游倍率：倍率区间的下限，仅 OpenAI 分组；与利润开关无关，填了就生效。step=any、不设 min：范围和小数位由页面校验并提示，不让浏览器原生气泡先拦 -->
           <div
             v-if="isMinUpstreamRatePlatform(editForm.platform)"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -2976,8 +2975,7 @@
                 :disabled="!canAdjustBalance"
                 v-model.number="editForm.min_upstream_rate"
                 type="number"
-                step="0.0001"
-                min="0"
+                step="any"
                 :class="['input', { 'input-error': validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable) }]"
                 :aria-invalid="!!validateMinUpstreamRate(editForm.min_upstream_rate, editFloorUnreadable)"
                 @input="editFloorUnreadable = isUnreadableNumberInput($event)"
