@@ -319,6 +319,7 @@ type openAIWSPassthroughTurnLifecycle struct {
 	mu           sync.Mutex
 	inFlight     bool
 	exitErr      error
+	exitDone     chan struct{}
 	terminalDone chan struct{}
 }
 
@@ -370,11 +371,16 @@ func (l *openAIWSPassthroughTurnLifecycle) lockAfterTerminal() {
 // no later writer can create a terminal barrier, even before exit settles.
 func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() error {
 	l.lockAfterTerminal()
-	defer l.mu.Unlock()
 	if l.exitErr != nil {
-		return l.exitErr
+		err, exited := l.exitErr, l.exitDone
+		l.mu.Unlock()
+		// Do not let the rejected write's turn callback settle the attempt
+		// ahead of the exit that owns its original failure/cancellation.
+		<-exited
+		return err
 	}
 	l.terminalDone = make(chan struct{})
+	l.mu.Unlock()
 	return nil
 }
 
@@ -394,8 +400,10 @@ func (l *openAIWSPassthroughTurnLifecycle) finishTerminalWrite(succeeded bool, o
 func (l *openAIWSPassthroughTurnLifecycle) finishExit(writeErr error, settle func()) {
 	l.mu.Lock()
 	l.exitErr = writeErr
-	done := l.terminalDone
+	l.exitDone = make(chan struct{})
+	exited, done := l.exitDone, l.terminalDone
 	l.mu.Unlock()
+	defer close(exited)
 	if done != nil {
 		<-done
 	}

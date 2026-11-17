@@ -40,7 +40,7 @@ func (s *errclassTerminalSink) WriteFrame(ctx context.Context, _ coderws.Message
 }
 
 func TestErrclassTerminalExitOwnership(t *testing.T) {
-	for _, order := range []string{"exit_first", "terminal_first", "slow_client_timeout"} {
+	for _, order := range []string{"exit_first", "exit_first_no_output", "terminal_first", "slow_client_timeout"} {
 		t.Run(order, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				st := resilience.NewRequestState()
@@ -52,8 +52,10 @@ func TestErrclassTerminalExitOwnership(t *testing.T) {
 				svc := &OpenAIGatewayService{schedAttemptRecorder: rec}
 				turn := &schedWSTurnCapture{}
 				turn.begin(svc, ctx, account, nil)
-				turn.observe([]byte(errclassWSDelta))
-				noteGatewayWSOutput(ctx, []byte(errclassWSDelta))
+				if order != "exit_first_no_output" {
+					turn.observe([]byte(errclassWSDelta))
+					noteGatewayWSOutput(ctx, []byte(errclassWSDelta))
+				}
 				life := newOpenAIWSPassthroughTurnLifecycle(true)
 				sink := &errclassTerminalSink{stagedPassthroughConn: newStagedPassthroughConn(), entered: make(chan struct{})}
 				client := &openAIWSTerminalClientConn{FrameConn: sink, lifecycle: life, observe: turn.observe}
@@ -80,19 +82,35 @@ func TestErrclassTerminalExitOwnership(t *testing.T) {
 					client.finishTerminalWrite(err == nil, nil)
 					close(callbackDone)
 				}
-				if order == "exit_first" {
+				if order == "exit_first" || order == "exit_first_no_output" {
 					go exit()
 					<-exitSettling // exit has decided, but has not settled the attempt
 					go write()
-					err := <-written
-					assert.ErrorIs(t, err, errOpenAIWSTerminalAfterExit)
+					synctest.Wait()
+					earlyCallback := false
+					select {
+					case <-written:
+						t.Error("rejected terminal returned before exit finished attribution")
+						earlyCallback = true
+						close(settleCallback)
+						<-callbackDone
+					default:
+					}
 					assert.Zero(t, sink.writes, "a terminal arriving after exit admission must not reach the client")
 					close(settleExit)
 					<-exitDone
-					close(settleCallback)
-					<-callbackDone
+					if !earlyCallback {
+						err := <-written
+						assert.ErrorIs(t, err, errOpenAIWSTerminalAfterExit)
+						close(settleCallback)
+						<-callbackDone
+					}
 					require.Len(t, rec.finishes, 1)
-					require.Equal(t, q.ClassInterrupted, rec.finishes[0].Class)
+					want := q.ClassInterrupted
+					if order == "exit_first_no_output" {
+						want = q.ClassUpstream
+					}
+					require.Equal(t, want, rec.finishes[0].Class)
 					return
 				}
 				sink.release = make(chan struct{})
