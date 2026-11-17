@@ -78,6 +78,8 @@ func classifySchedAttempt(in SchedAttemptFinish, failure *resilience.Outcome, ou
 		in.Class = schedquality.ClassAccountCapacity
 	case result.Category == resilience.CategoryUpstreamRequestRestriction || o.StatusCode < 500 && (schedRequestMessage(message) || resilience.IsContextWindowError(message, o.Body) || result.Category == resilience.CategoryClientError && !result.StatusOnly()):
 		in.Class = schedquality.ClassRequest
+	case isOpenAITransientProcessingError(o.StatusCode, message, o.Body):
+		in.Class = schedquality.ClassUpstream
 	case result.Category == resilience.CategoryCapacityShed:
 		in.Class = schedquality.ClassUpstream
 	case (o.Source == resilience.SourceHTTP || isEvent) && o.StatusCode >= 500:
@@ -172,6 +174,16 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 	} else if message := schedErrorMessage(body); message != "" {
 		encoded, _ := json.Marshal(message)
 		modelBody = []byte(`{"error":{"message":` + string(encoded) + `}}`)
+	} else {
+		// Shared legacy helpers also accept root fields. Do not let that
+		// broaden the qualified error-envelope boundary established above.
+		return UpstreamCapabilityNone
+	}
+	if status == http.StatusUnauthorized {
+		if allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
+			return UpstreamCapabilityModel
+		}
+		return UpstreamCapabilityNone
 	}
 	message := strings.ToLower(strings.Join(strings.Fields(schedErrorMessage(body)), " "))
 	// These templates describe dimensions absent from capability routing keys.
@@ -205,7 +217,7 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 	if resilience.IsStreamOnlyFailure(status, modelBody) {
 		return UpstreamCapabilityProtocol
 	}
-	if resilience.IsModelUnsupportedResponse(status, modelBody) || status == http.StatusUnauthorized && allowModel401 && resilience.IsOpenAICompatibleModelNotFound401(modelBody) {
+	if resilience.IsModelUnsupportedResponse(status, modelBody) {
 		return UpstreamCapabilityModel
 	}
 	if status != http.StatusBadRequest && status != http.StatusNotFound {

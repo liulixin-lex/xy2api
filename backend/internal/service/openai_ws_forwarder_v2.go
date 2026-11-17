@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 )
@@ -366,10 +367,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
 	defer func() { learnCapability.finish(schedResult, schedErr) }()
 	if s.schedAttemptRecorder != nil {
+	// This boundary belongs to every real application send, even when quality
+	// recording is disabled. A failed first send must precede the next send.
+	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
+	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
 		body := payloadAsJSONBytes(wirePayload)
 		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
+		schedCapture.noteWSNetworkError(err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -603,6 +609,7 @@ readLoop:
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
 		}
 		if readErr != nil {
+			schedCapture.noteWSNetworkError(readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
 			logOpenAIWSModeInfo(

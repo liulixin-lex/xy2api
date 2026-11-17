@@ -1227,6 +1227,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstWriteErr := upstreamRelayConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
+		schedTurns.noteNetworkError(firstWriteErr)
 		return wrapOpenAIWSIngressTurnError(
 			"write_upstream",
 			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
@@ -1245,6 +1246,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
+				// This write runs inside ReadClientFrame, whose relay exit stage
+				// is read_client. Preserve and finish the upstream failure here
+				// before relay cleanup could mistake it for a client disconnect.
+				schedTurns.noteNetworkError(writeErr)
+				schedTurns.finish(nil, writeErr)
 				return msgType, payload, writeErr
 			}
 		}
@@ -1396,6 +1402,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				} else if resilience.StateFrom(ctx).ClientCanceled() || (exit.Stage == "read_client" || exit.Stage == "write_client") && gatewayWSClientCanceled(ctx, exit.Err) {
 					schedTurns.cancel()
 				} else {
+					if exit.Stage == "read_upstream" || exit.Stage == "write_upstream" {
+						schedTurns.noteNetworkError(exit.Err)
+					}
 					schedTurns.finish(nil, exit.Err)
 				}
 				var reroute *OpenAIQualityRerouteError

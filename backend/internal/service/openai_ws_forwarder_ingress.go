@@ -1000,6 +1000,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		learnCapability := &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wirePayload)}
 		defer func() { learnCapability.finish(schedResult, schedErr) }()
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
+			schedCapture.noteWSNetworkError(err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
@@ -1049,6 +1050,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
+				schedCapture.noteWSNetworkError(readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",

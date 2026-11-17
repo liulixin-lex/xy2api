@@ -765,3 +765,31 @@ func (a *schedAttemptCapture) noteNetworkError(err error) {
 		a.networkErr = err
 	}
 }
+
+// WS consumers call this before wrapping transport failures. Read/write budget
+// deadlines and the normal close after a terminal are not upstream evidence.
+func (a *schedAttemptCapture) noteWSNetworkError(err error) {
+	if a == nil || err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, errOpenAIWSPassthroughFirstOutputTimeout) || errors.Is(err, errOpenAIWSPassthroughActiveTurnTimeout) {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.done || a.terminal || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() {
+		return
+	}
+	a.sendErr = err
+	if errors.Is(err, bufio.ErrTooLong) {
+		return
+	}
+	if a.networkErr == nil {
+		a.networkErr = err
+	}
+	a.errorSource = "upstream_ws_read_or_write"
+}
+
+func (t *schedWSTurnCapture) noteNetworkError(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active.noteWSNetworkError(err)
+}
