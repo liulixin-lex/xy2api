@@ -2927,8 +2927,9 @@
         <!-- 分组利润控制（五个平台 token 请求） -->
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <!-- 保存进行中冻结利润块：提交的值与用来判断是否要确认的预览是同一份 -->
             <input
-              :disabled="!canAdjustBalance"
+              :disabled="!canAdjustBalance || submitting"
               v-model="editForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2951,7 +2952,7 @@
               <label for="edit-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 id="edit-profit-min-margin"
-                :disabled="!canAdjustBalance"
+                :disabled="!canAdjustBalance || submitting"
                 v-model.number="editForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -2972,7 +2973,7 @@
               <label for="edit-min-upstream-rate" class="input-label">{{ t("admin.groups.profitControl.floor") }}</label>
               <input
                 id="edit-min-upstream-rate"
-                :disabled="!canAdjustBalance"
+                :disabled="!canAdjustBalance || submitting"
                 v-model.number="editForm.min_upstream_rate"
                 type="number"
                 step="any"

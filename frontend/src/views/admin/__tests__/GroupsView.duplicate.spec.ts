@@ -463,6 +463,31 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  // B1: what is saved and the preview that decides whether to confirm must be the same values, so the profit block
+  // cannot change while a save is on its way.
+  it('freezes the profit switch, margin and rate floor while the group is being saved', async () => {
+    let finish!: (value: unknown) => void
+    updateGroup.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const floor = wrapper.get('[data-testid="edit-min-upstream-rate"]')
+    const profitSwitch = floor.element.closest('.border-t')!.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    await wrapper.findAll('input[type="checkbox"]').find((input) => input.element === profitSwitch)!.setValue(true)
+    await flushPromises()
+    await floor.setValue('2')
+    const disabled = (selector: string) => (wrapper.get(selector).element as HTMLInputElement).disabled
+    expect([profitSwitch.disabled, disabled('#edit-profit-min-margin'), disabled('[data-testid="edit-min-upstream-rate"]')]).toEqual([false, false, false])
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(updateGroup).toHaveBeenCalledTimes(1)
+    expect([profitSwitch.disabled, disabled('#edit-profit-min-margin'), disabled('[data-testid="edit-min-upstream-rate"]')]).toEqual([true, true, true])
+    finish(sourceGroup)
+    await flushPromises()
+    wrapper.unmount()
+  })
+
   it('updates manifest controls immediately and submits the displayed selection', async () => {
     vi.useFakeTimers()
     vi.mocked(adminAPI.accounts.list).mockResolvedValue({

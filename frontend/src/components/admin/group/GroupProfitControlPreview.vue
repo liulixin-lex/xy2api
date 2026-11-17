@@ -207,15 +207,23 @@ onUnmounted(() => {
 })
 
 /**
- * 保存前调用：取与当前输入一致的预览，返回需要确认的原因（区间为空，或有可调度成员却没有一个能用），
- * 不需要确认时为 null。预览失败不拦截保存。
+ * 保存前调用：按调用这一刻的输入（就是要提交的值）判断，返回需要确认的原因（区间为空，或有可调度成员却没有一个能用），
+ * 不需要确认时为 null。手上已有这组值的预览就用它，否则为这组值单独请求一次：输入框随后触发的新预览不能取消它，
+ * 别的值的预览也不会被当成它的结果。预览请求失败不拦截保存（与原来一致）。
  */
 async function blockingReason(): Promise<ProfitBlockReason | null> {
   const q = query.value
   if (q === null) return null
-  if (previewKey !== keyOf(q) || loading.value) await fetchPreview(q)
-  if (previewKey !== keyOf(q) || !preview.value) return null
-  return profitBlockReason(preview.value, props.profitEnabled)
+  const profitEnabled = props.profitEnabled
+  let result = !loading.value && previewKey === keyOf(q) ? preview.value : null
+  if (!result) {
+    try {
+      result = await adminAPI.groups.getProfitControlPreview(props.groupId, q.margin, q.floor)
+    } catch {
+      return null
+    }
+  }
+  return profitBlockReason(result, profitEnabled)
 }
 
 defineExpose({ blockingReason })

@@ -72,6 +72,27 @@ describe('GroupProfitControlPreview', () => {
     expect(await blockingReason(w)).toBe('range_empty')
   })
 
+  // B1: the save asks about floor 2; while that answer is on its way the box changes to 0.2 and its own preview lands
+  // first. The answer for 2 still decides (range empty → confirm), never "no confirmation needed".
+  it('judges the values being saved even when the input changes while that preview is on its way', async () => {
+    vi.useFakeTimers()
+    const forTwo: { resolve?: (value: Preview) => void } = {}
+    api.getProfitControlPreview.mockImplementation((_id: number, _margin: number, floor: number) =>
+      floor === 2
+        ? new Promise<Preview>((resolve) => { forTwo.resolve = resolve })
+        : Promise.resolve(preview({ floor, ceiling: 1, below_floor: 0 })))
+    const w = mountPreview({ floor: 0.1 })
+    await flushPromises()
+    await w.setProps({ floor: 2 })
+    const saving = blockingReason(w)
+    await w.setProps({ floor: 0.2 })
+    await vi.advanceTimersByTimeAsync(400)
+    await flushPromises()
+    expect(api.getProfitControlPreview).toHaveBeenLastCalledWith(53, 0.2, 0.2, expect.anything())
+    forTwo.resolve!(preview({ floor: 2, ceiling: 1, below_floor: 6, passing: 0, range_empty: true }))
+    expect(await saving).toBe('range_empty')
+  })
+
   it('shows below-floor and pinned counts, and names pinned accounts above the ceiling', async () => {
     api.getProfitControlPreview.mockResolvedValue(preview({
       floor: 0.3,
