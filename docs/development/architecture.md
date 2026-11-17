@@ -44,7 +44,7 @@
 | `internal/handler/` | HTTP 处理器：网关、用户端、`admin/` 管理端、`dto/` 传输对象 |
 | `internal/service/` | 业务逻辑：网关转发、账号调度、计费与定价、运维监控、支付、插件宿主等 |
 | `internal/repository/` | 数据访问：Ent 与原生 SQL 查询、Redis 缓存、上游 HTTP 客户端、迁移执行器 |
-| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与常量（证据级联、三条线、快速通道、阶梯、续轮） |
+| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与常量（三线身份、同伴比较、到期复核、试用、阶梯与续接轮） |
 | `internal/pkg/` | 通用工具包，以及各上游协议的适配代码（`claude`、`openai`、`gemini`、`antigravity`、`xai`、`apicompat`、`tlsfingerprint` 等） |
 | `internal/resilience/` | 网关韧性规则：上游失败分类、请求预算、惩罚与余额暂停、首包前保活。纯函数，不做 I/O |
 | `internal/payment/` | 支付渠道抽象、注册与负载均衡 |
@@ -105,10 +105,20 @@
    - API Key 鉴权（`internal/server/middleware/api_key_auth.go`）依次从 `Authorization: Bearer`、`x-api-key`、`x-goog-api-key` 读取 Key，查询参数里的 Key 会被拒绝。它分两层：鉴权（Key 有效、用户状态、IP 限制）总是执行；计费执行（过期、配额、订阅、余额）在 `/v1/usage` 等只读端点上跳过。鉴权结果有两级缓存：进程内缓存和 Redis。
 4. **按分组平台分派。** 路由处理函数根据 Key 所属分组的平台选择处理器：OpenAI、Grok 与多协议 API Key 平台走 `OpenAIGatewayHandler`（`openai_gateway_handler.go`），其余平台（Claude、Gemini、Antigravity 等）走 `GatewayHandler`（`gateway_handler.go`、`gemini_v1beta_handler.go`），再由它们调用对应平台的 service。
 5. **准入与预占。** 处理器先占用户并发槽位（等待有上限），再调用 `BillingCacheService.CheckBillingEligibility` 检查余额、订阅和配额，然后按估算预占在途额度。
-6. **选号。** 进入失败切换循环（`internal/handler/failover_loop.go`）。每一轮调用 service 选号（Claude 系为 `gateway_scheduling.go` 的 `SelectAccountWithLoadAwareness`，OpenAI 系为 `openai_gateway_scheduling.go` 与 `openai_selection_*.go`），综合粘性会话、分组与模型、账号可调度状态、负载和优先级。可调度账号列表来自 Redis 中的调度快照，快照由 `scheduler_snapshot_service.go` 根据数据库的 scheduler outbox 事件重建。选中账号后占账号并发槽位，槽位满时进入等待队列。调度规则见 [账号调度](../guides/scheduling.md)。
+6. **选号。** 进入失败切换循环（`internal/handler/failover_loop.go`）。每一轮调用 service 选号（Claude 系为 `gateway_scheduling.go` 的 `SelectAccountWithLoadAwareness`，OpenAI 系为 `openai_gateway_scheduling.go` 与 `openai_selection_*.go`），综合粘性会话、分组与模型、账号可调度状态、负载和优先级。可调度账号列表来自 Redis 中的调度快照，快照由 `scheduler_snapshot_service.go` 根据数据库的 scheduler outbox 事件重建。OpenAI 候选按质量层 → 固定 → 优先级 → 倍率 → 负载等排序。选中后占账号槽位，满时等待；排队取得槽位后用最新账号状态复查准入，失败释放槽位与请求试用名额。调度规则见 [账号调度](../guides/scheduling.md)。
 7. **转发。** service 按平台改写请求，经 repository 的上游 HTTP 客户端发出，按账号的代理与 TLS 指纹配置出站。命中插件绑定的 OpenAI OAuth 账号改由插件进程发出上游请求，见 [插件开发](plugins.md)。
 8. **失败处理。** 上游失败经 `internal/resilience` 分类后，决定同账号重试、切换账号、临时停调度或直接返回。一旦已经向客户端写出响应内容，就不再切换账号。见 [网关韧性](../guides/gateway-resilience.md)。
 9. **计费。** 转发成功后，处理器调用 `GatewayService.RecordUsage`（`gateway_usage_billing.go`）：按定价计算费用，写 `usage_logs`，扣减余额或累计订阅、配额用量。计费任务在请求处理器返回前同步执行，不受客户端断开影响（`internal/handler/durable_usage_task.go`）。每次计费是一条至多应用一次的命令（`usage_billing.go`），失败由恢复流程补偿。用量口径见 [用量指标与导出](../guides/usage.md)。
+
+### OpenAI 质量采样与身份
+
+真实发送由 `sched_attempt_capture.go`、`sched_attempt_recorder.go` 记录到 `account_attempt_samples`，样本按账号 × 模型汇集，身份在 `sched_line_states` 按账号 × 模型 × 分组 × 线持久化。`capture_version` 隔离升级前后的证据。流式尝试分别记录首个事件、首个有效输出、首个答案正文；共用输出分类判据，不用用量或 HTTP 成功状态猜输出。
+
+`sched_quality_*.go` 加载窗口证据、恢复评估时刻，并发布只读质量视图。三线独立推进达标、未知、试用与后排；首字做时间折扣和同伴比较，报错按请求最终结果归并，缓存按真实续接轮和 Token 加权。放宽门槛清零对应线后重判；关闭分组门槛删除对应身份；全局关闭只停止调度应用，仍保留判定与展示。
+
+试用名额由 `sched_trial_leases.go` 定义、`repository/sched_trial_lease_cache.go` 实现，按账号 × 模型在 Redis 跨分组共享。新候选先占请求名额，绑定成功后转换成会话名额；绑定提交与名额转换不是同一个事务，失败、借号、换号和空闲过期分别释放。期限与已知局限见 [分组质量门槛](../guides/group-quality-gate.md)。
+
+调度 outbox 的事件消费保留晚提交事务的可见性，并在消费锁故障时限时恢复；账号状态更新不等待同键慢消费完成。成功请求只解除在它开始之前生效的软冷却，避免旧成功覆盖新限制。质量动作与会话绑定事务分别写 `sched_quality.state`、`sched_quality.session_switch`，字段见 [观测与排障](../guides/gateway-resilience-observability.md#质量状态)。
 
 ### 运维错误日志与上游尝试
 
@@ -195,6 +205,7 @@ Redis 存放缓存、跨实例协调状态和插件的持久键值。主要用�
 | 用户、Key、账号并发槽位 | `concurrency:user:`、`concurrency:api_key:`、`concurrency:account:` | `repository/concurrency_cache.go` |
 | 粘性会话 | `sticky_session:` | `repository/gateway_cache.go` |
 | 调度快照 | `sched:` | `repository/scheduler_cache.go` |
+| 试用名额 | `sched:trial:` | `repository/sched_trial_lease_cache.go` |
 | RPM、会话数与窗口成本限制 | `rpm:`、`session_limit:account:`、`window_cost:account:` | `repository/rpm_cache.go`、`session_limit_cache.go` |
 | 单实例后台任务选主 | `leader:lock:` | `repository/leader_lock_cache.go` |
 | 插件键值存储 | `plugin:kv:v1:` | `repository/plugin_kv_store.go` |
