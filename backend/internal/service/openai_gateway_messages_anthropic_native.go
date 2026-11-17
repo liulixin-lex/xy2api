@@ -275,6 +275,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	forwardUsage := claudeUsageToOpenAIUsage(usage)
+	// A failed client write finishes capture immediately, before the result is returned.
+	currentSchedAttempt(ctx).noteUsage(&forwardUsage)
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
@@ -298,7 +301,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	return &OpenAIForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
 		UpstreamHeaders:  resp.Header,
-		Usage:            claudeUsageToOpenAIUsage(usage),
+		Usage:            forwardUsage,
 		Model:            originalModel,
 		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
