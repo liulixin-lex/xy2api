@@ -103,7 +103,13 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 
 ### 质量状态
 
-OpenAI 质量判定、换号与尝试收尾使用以下事件。主要运行事件带组件 `sched_quality`；部分存储告警只有事件名，检索时也应按事件名找。事件字段不记录请求或响应正文、凭据与完整会话值。Info 级的组件日志也可在运维监控的系统日志里筛选；成功尝试的 Debug 记录需启用对应日志级别。
+OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不记录请求或响应正文、凭据与完整会话值。查询入口分三类：
+
+- 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选。
+- Warn 及以上会落库，但以下日志不带 `component`，须按事件名找：`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error。
+- 不带 `component` 的 Info 只在应用标准输出里，包括 `sched_quality.capability_mark_limit` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录；不能在系统日志中查到。
+
+成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
 
 | 事件 | 级别 | 何时写 / 关键字段 |
 |---|---|---|
@@ -112,8 +118,8 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。主要运行事�
 | `sched_quality.session_switch` | Info | 会话绑定事务结束，成功、失败、取消、冲突均可写；见下表 |
 | `sched_quality.attempt_finished` | 成功 Debug，其余 Info | 尝试收尾；请求、尝试 ID、分类、状态来源、终态及实际输出字节，见下文 |
 | `sched_quality.policy_changed` | Info | 保存分组门槛或全局首字规则；`operator_id`、`old`、`new`、`affected_lines`、`cleared`，分组门槛另有 `group_id` |
-| `sched_quality.cleanup` | Info；失败 Error | 清理真正执行时；`kind=ledger` 为超过 7 天的尝试，`kind=decisions` 为超过 30 天的判定；含 `rows`，尝试清理另有 `duration_ms`，失败有 `error` |
-| `sched_quality.cycle` | Warn / Error | 评估超过 5 秒时 Warn，含 `duration_ms`，每 5 分钟最多一次；评估失败为 Error，含 `error` |
+| `sched_quality.cleanup` | Info；失败 Error | 清理真正执行时；`kind=ledger` 为超过 7 天的尝试，`kind=decisions` 为超过 30 天的判定；含 `rows`，尝试清理另有 `duration_ms`，失败有 `error`；`ledger` 可按组件筛，`decisions` 成功仅标准输出，失败按事件名找 |
+| `sched_quality.cycle` | Warn / Error | 引擎周期超过 5 秒时 Warn，含 `duration_ms`，每 5 分钟最多一次；周期失败为 Error，含 `error`，不带组件，按事件名找 |
 | `sched_quality.view_stale` | Warn | 质量视图超过 60 秒未更新，暂停自动分层；含 `view_at`、`view_version`，最多每分钟一次 |
 | `sched_quality.ttft_assessment` | Warn | 首字评估计算失败，保持未知；`account_id`、`model`、`group_id`、`error` |
 | `sched_quality.delivery_capture_mismatch` | Warn | 请求已交付，但单次发送的质量采样为失败；`request_id`、`sends`、`sample_error_class`，不把这次交付误标为救回 |
@@ -185,9 +191,9 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **非流式请求总是 503 并提示改用 stream**：账号被学为仅流式。在账号列表清除学习记录，或让客户端改发流式请求。
 
-**OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：在运维监控的系统日志里按组件 `sched_quality` 筛选（字段见 [质量状态](#质量状态)）。
+**OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
-1. 先看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 次评估；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明评估变慢或失败，多半是数据库慢。
+1. 先看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
 2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及到期复核结果。
 3. 会话搬动看 `sched_quality.session_switch`，先确认 `committed`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发绑定事务的请求；再用 `sched_quality.attempt_finished` 的 `request_id` / `attempt_id` 区分首输出截止、真实上游失败、取消和修复重发（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
