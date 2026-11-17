@@ -12,7 +12,7 @@ import { groupModel } from '@/__tests__/fixtures/schedQuality/lines'
 /** The quality panel's detail of an account with one model at the rear, so 恢复 is enabled. */
 const panelDetail = (id: number) => ({
   account: { id, name: `acc-${id}`, priority: 1, rate: 1, concurrency: 5, in_flight: 0 },
-  at: '', stale: false, global_enabled: true, status: 'normal', stop: null, reset_at: null,
+  at: '', stale: false, global_enabled: true, stop: null, reset_at: null,
   groups: [{
     group_id: 53, name: '晨星组', exemption: null,
     policy: { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0, takeover_idle_seconds: 0 },

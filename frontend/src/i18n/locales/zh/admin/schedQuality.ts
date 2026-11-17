@@ -122,6 +122,7 @@ export default {
       post_output: '输出失败',
       proxy_circuit: '代理隔离',
       capability_learned: '仅流式',
+      capability_marked: '能力不兼容',
       manual_off: '手动停用',
       expired: '已过期',
       quota: '额度耗尽',

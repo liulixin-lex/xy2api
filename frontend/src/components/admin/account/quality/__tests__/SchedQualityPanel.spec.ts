@@ -44,7 +44,6 @@ function detail(id = 7): BackendAccountDetail {
     at: '2026-11-14T10:00:00Z',
     stale: false,
     global_enabled: true,
-    status: 'normal',
     stop: null,
     reset_at: null,
     groups: [
@@ -423,7 +422,7 @@ describe('SchedQualityPanel', () => {
     alone.unmount()
     backendSummary.mockClear()
     const quality = {
-      account_id: 7, status: 'normal', reset_at: null, stop: null, rear: [], exemptions: [],
+      account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [],
       ttfo: { first_event_p50_ms: 1100, first_output_p50_ms: 12_300, gap_p50_ms: 11_200, n: 40 },
       error: { n: 40, short: false, red: false, rate: 0.01 },
       cache: { ratio: 0.4, turns: 2, all_ratio: 0.7, all_requests: 90 }
@@ -505,7 +504,7 @@ describe('SchedQualityPanel', () => {
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
     const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),
-      basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', cut: null, threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
+      basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
       ...patch
     })
     const page = [record(60), record(59, { action: 'trial', until: inMinutes(50) }), record(58, { line: '', action: 'renew', basis: null })]
