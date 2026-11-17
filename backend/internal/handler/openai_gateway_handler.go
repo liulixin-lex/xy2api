@@ -2715,6 +2715,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	setOpenAIClientTransportWS(c)
+	c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolResponses, true))
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -3084,6 +3085,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 使用 IsExplicitImageGenerationIntent 排除被动 namespace 声明（#4476）。
 	requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
 	if service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage) && requestPlatform == service.PlatformOpenAI {
+		ctx = resilience.WithCapabilityRequest(ctx, "", true)
+		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), "", true))
 		requiredCapability = service.OpenAIEndpointCapabilityResponses
 	}
 

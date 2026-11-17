@@ -15,7 +15,20 @@ const (
 	CapabilityProtocolChat      = "chat"
 	CapabilityModeStreamOnly    = "stream_only"
 	ReasonCapabilityStreamOnly  = "capability_stream_only"
+	CapabilityMarksExtraKey     = "capability_marks"
+	CapabilityMarkTTL           = 24 * time.Hour
+	ReasonCapabilityMarked      = "capability_marked"
 )
+
+// CapabilityMark describes one explicitly rejected upstream request tuple.
+type CapabilityMark struct {
+	Model       string    `json:"model"`
+	Protocol    string    `json:"protocol"`
+	Shape       string    `json:"shape"`
+	Reason      string    `json:"reason"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Fingerprint string    `json:"fingerprint"`
+}
 
 // LearnedCapability is an administrator-visible, expiring observation. Manual
 // capability settings are separate and are not implemented by this feature.
@@ -35,7 +48,8 @@ type capabilityRequest struct {
 }
 
 // WithCapabilityRequest records an explicitly parsed client mode. Callers
-// omit it for images, compact, WebSocket and unsupported protocols.
+// omit it for images, compact and unsupported protocols. Responses WebSocket
+// requests use the streaming Responses tuple.
 func WithCapabilityRequest(ctx context.Context, protocol string, stream bool) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

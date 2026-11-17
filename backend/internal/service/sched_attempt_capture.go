@@ -57,6 +57,7 @@ type schedAttemptCapture struct {
 	projectedStatus                            int
 	terminalAt                                 time.Time
 	errorSource                                string
+	learnCapability                            func(int, []byte)
 }
 
 func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
@@ -281,6 +282,9 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	if !terminal.QualityFailure() {
 		return
 	}
+	if a.learnCapability != nil {
+		observeCapabilityFailure(a.learnCapability, data)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.done {
@@ -303,6 +307,9 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 func (a *schedAttemptCapture) finishHTTP(resp *http.Response, body []byte) {
 	if a == nil {
 		return
+	}
+	if a.learnCapability != nil {
+		a.learnCapability(resp.StatusCode, body)
 	}
 	a.mu.Lock()
 	if !a.done {
@@ -536,6 +543,11 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	// Builders may add group prompts or normalize cache fields after the caller's
 	// payload is prepared; ContentLength is the final wire length without a reread.
 	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
+	if *owner != nil {
+		if target := schedHTTPAttemptTarget(account, req); target != nil && !strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/responses/compact") {
+			(*owner).learnCapability = s.capabilityFailureLearner(ctx, account, body, target.Protocol)
+		}
+	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	if resp != nil {
@@ -675,6 +687,9 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 	t.active.finishUnfinished()
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
+	if t.active != nil {
+		t.active.learnCapability = s.capabilityWSFailureLearner(ctx, account, payload)
+	}
 }
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()

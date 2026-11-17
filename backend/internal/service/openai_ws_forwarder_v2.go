@@ -363,6 +363,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
+	learnCapability := s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))
 	if s.schedAttemptRecorder != nil {
 		body := payloadAsJSONBytes(wirePayload)
 		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
@@ -640,6 +641,7 @@ readLoop:
 		if eventType == "" {
 			continue
 		}
+		observeCapabilityFailure(learnCapability, message)
 		schedCapture.observe(message)
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++

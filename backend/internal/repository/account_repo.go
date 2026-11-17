@@ -3012,8 +3012,12 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
 		}
 	}
+	hasCapabilityMarks := false
+	for key := range updates {
+		hasCapabilityMarks = hasCapabilityMarks || strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_")
+	}
 	ensureCompatSeed := service.ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0 || ensureCompatSeed
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0 || ensureCompatSeed || hasCapabilityMarks
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -3029,6 +3033,25 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
 		}
+	}
+	for key := range updates {
+		if !strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_") {
+			continue
+		}
+		// Serialize the bound check with the merge; two simultaneous 32nd
+		// marks must never both be admitted from an old scheduler snapshot.
+		updates, err = limitCapabilityMarkUpdates(ctx, client, id, updates)
+		if err != nil {
+			return err
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		payload, err = json.Marshal(updates)
+		if err != nil {
+			return err
+		}
+		break
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if _, hasLimits := updates["model_rate_limits"]; hasLimits {
@@ -3051,6 +3074,16 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 		extraArgs = append(extraArgs, pq.Array(rotationIDs))
 		extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "$3")
+	}
+	// Prune only this managed namespace, after the atomic top-level merge. A
+	// cleanup based on a scheduler snapshot could erase a concurrently renewed
+	// mark. Numeric expiries are written by LearnCapabilityMark; malformed or
+	// explicitly cleared marks are removed without timestamp casts.
+	for key := range updates {
+		if strings.HasPrefix(key, service.CapabilityMarksExtraKey+"_") {
+			extraExpression = "COALESCE((SELECT jsonb_object_agg(mark.key, mark.value) FROM jsonb_each(" + extraExpression + ") AS mark WHERE left(mark.key, 17) <> 'capability_marks_' OR CASE WHEN jsonb_typeof(mark.value->'expires_at_unix') = 'number' THEN (mark.value->>'expires_at_unix')::numeric > EXTRACT(EPOCH FROM clock_timestamp()) ELSE false END), '{}'::jsonb)"
+			break
+		}
 	}
 	identityChanged := false
 	if len(iqConditions) > 0 {

@@ -39,6 +39,25 @@ func (r openAIImagesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*
 	return nil, service.ErrNoAvailableAccounts
 }
 
+// Capability learning now persists explicit refusals during text failover too.
+// Keep the fixture's shared account rows current instead of falling through to
+// the embedded, unimplemented repository method.
+func (r openAIImagesFailoverAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID != id {
+			continue
+		}
+		if r.accounts[i].Extra == nil {
+			r.accounts[i].Extra = map[string]any{}
+		}
+		for key, value := range updates {
+			r.accounts[i].Extra[key] = value
+		}
+		return nil
+	}
+	return service.ErrAccountNotFound
+}
+
 func (r openAIImagesFailoverAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, _ int64, platform string) ([]service.Account, error) {
 	return r.accountsForPlatform(platform), nil
 }
