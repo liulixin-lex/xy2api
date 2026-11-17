@@ -274,6 +274,23 @@ type capabilityStreamFinish struct {
 	EffectiveOutput    bool
 }
 
+// Only errors from the upstream socket can confirm an upstream failure.
+// Local reader limits use the same sentinel boundary as quality capture;
+// a remote close with code 1009 remains an upstream error.
+func (f *capabilityStreamFinish) noteIOError(err error, upstream bool) {
+	if err == nil {
+		return
+	}
+	local := !upstream || schedLocalReadLimit(err)
+	canceled := errors.Is(err, context.Canceled)
+	deadline := errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, errOpenAIWSPassthroughFirstOutputTimeout) || errors.Is(err, errOpenAIWSPassthroughActiveTurnTimeout)
+	f.LocalFailure = f.LocalFailure || local
+	f.ContextDone = f.ContextDone || canceled
+	f.GatewayDeadline = f.GatewayDeadline || deadline
+	f.UpstreamFailure = upstream && !local && !canceled && !deadline
+}
+
 func (p *capabilityStreamFailure) finish(final capabilityStreamFinish) {
 	payload := p.pending
 	p.pending = nil

@@ -991,7 +991,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		defer func() {
 			rethrowSchedAttemptPanic(schedCapture, recover())
 			if learnCapability != nil {
-				learningFinal.ContextDone = ctx.Err() != nil
+				learningFinal.ContextDone = learningFinal.ContextDone || ctx.Err() != nil
 				learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
 				learnCapability.finish(learningFinal)
 			}
@@ -1014,6 +1014,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wirePayload)}
 
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
+			learningFinal.noteIOError(err, true)
 			schedCapture.noteWSNetworkError(err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1064,8 +1065,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
-				learningFinal.UpstreamFailure = true
-				learningFinal.GatewayDeadline = errors.Is(readErr, context.DeadlineExceeded)
+				learningFinal.noteIOError(readErr, true)
 				schedCapture.noteWSNetworkError(readErr)
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
@@ -1245,7 +1245,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				markSchedWSOutput(schedCapture, clientMessage)
 				if err := writeClientMessage(clientMessage); err != nil {
-					learningFinal.LocalFailure = true
+					learningFinal.noteIOError(err, false)
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
 						learningFinal.ClientDisconnected = true

@@ -42,7 +42,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
 		if learnCapability != nil {
-			learningFinal.ContextDone = ctx.Err() != nil
+			learningFinal.ContextDone = learningFinal.ContextDone || ctx.Err() != nil
 			learningFinal.EffectiveOutput = !resilience.StateFrom(ctx).SemanticOutputAt().IsZero()
 			learnCapability.finish(learningFinal)
 		}
@@ -386,6 +386,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		schedCapture = schedDial.beginSend(body, reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
+		learningFinal.noteIOError(err, true)
 		schedCapture.noteWSNetworkError(err)
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -533,7 +534,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			flushStreamWriter(forceFlush)
 			return
 		}
-		learningFinal.LocalFailure = true
+		learningFinal.noteIOError(wErr, false)
 		markClientDisconnected("downstream_write_error")
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected, continue draining upstream: account=%d", account.ID)
 	}
@@ -622,8 +623,7 @@ readLoop:
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
 		}
 		if readErr != nil {
-			learningFinal.UpstreamFailure = true
-			learningFinal.GatewayDeadline = errors.Is(readErr, context.DeadlineExceeded)
+			learningFinal.noteIOError(readErr, true)
 			schedCapture.noteWSNetworkError(readErr)
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
@@ -790,7 +790,9 @@ readLoop:
 						"message": errMsg,
 					},
 				})
-				learningFinal.LocalFailure = learningFinal.LocalFailure || len(c.Errors) > priorErrors
+				for _, writeErr := range c.Errors[priorErrors:] {
+					learningFinal.noteIOError(writeErr.Err, false)
+				}
 			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
@@ -873,7 +875,9 @@ readLoop:
 
 		priorErrors := len(c.Errors)
 		c.Data(http.StatusOK, "application/json", finalResponse)
-		learningFinal.LocalFailure = learningFinal.LocalFailure || len(c.Errors) > priorErrors
+		for _, writeErr := range c.Errors[priorErrors:] {
+			learningFinal.noteIOError(writeErr.Err, false)
+		}
 	} else {
 		flushStreamWriter(true)
 	}
