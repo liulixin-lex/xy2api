@@ -213,7 +213,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	committed := false
 	defer func() {
 		if committed && change.trial != nil {
-			change.trial.retained.Store(true)
+			change.trial.promote(ctx)
 		}
 		if !committed {
 			change.releaseTrial(ctx)
@@ -290,16 +290,6 @@ func (c *openAIStickyChange) trialSessionKey() string {
 	return c.session
 }
 
-// Concurrent first requests can reserve the same session member. A losing or
-// failed request must not release the lease of another request's committed owner.
-func (c *openAIStickyChange) releaseTrial(ctx context.Context) {
-	if c.trial == nil || c.trial.retained.Load() {
-		return
-	}
-	stateCtx, cancel := resilienceStateContext(ctx)
-	defer cancel()
-	if binding, err := c.cache.GetSessionBinding(stateCtx, c.groupID, c.key); err == nil && binding.AccountID == c.target {
-		c.trial.retained.Store(true)
-	}
-	c.trial.release(ctx)
-}
+// A failed candidate owns only its request member, never a concurrent
+// request's reservation or a committed session member.
+func (c *openAIStickyChange) releaseTrial(ctx context.Context) { c.trial.release(ctx) }

@@ -2046,6 +2046,8 @@ type openAIResponsesWSUsageLogCase struct {
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
 	qualityView           schedquality.View
+	trialLeases           service.SchedTrialLeases
+	sessionID             string
 	gatewayCache          service.GatewayCache
 	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
 	acquireAccountSlot func() bool
@@ -3282,7 +3284,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil, // userPlatformQuotaRepo
 	)
 	if tc.qualityView != nil {
-		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView })
+		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView }, tc.trialLeases)
 	}
 
 	cache := &concurrencyCacheMock{
@@ -3339,6 +3341,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	defer handlerServer.Close()
 
 	headers := http.Header{}
+	if tc.sessionID != "" {
+		headers.Set("session-id", tc.sessionID)
+	}
 	if tc.userAgent != nil {
 		headers.Set("User-Agent", *tc.userAgent)
 	}

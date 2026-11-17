@@ -50,6 +50,11 @@ elseif operation == 'acquire' then
     end
     redis.call('ZADD', key, now, member)
     return finish(1)
+elseif operation == 'promote' then
+    local target = ARGV[7]
+    local score = redis.call('ZSCORE', key, target)
+    redis.call('ZREM', key, member)
+    redis.call('ZADD', key, math.max(now, tonumber(score) or now), target)
 elseif operation == 'touch' then
     local score = redis.call('ZSCORE', key, member)
     if score then
@@ -85,10 +90,12 @@ func schedTrialLeaseGroupPrefix(groupID int64) string {
 	return strconv.FormatInt(groupID, 10) + ":"
 }
 
-func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session, now string) (bool, error) {
-	result, err := schedTrialLeaseScript.Run(ctx, c.rdb, []string{schedTrialLeaseKey(accountID, model)},
-		operation, now, service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit,
-		int64(schedTrialLeaseTTL/time.Second), schedTrialLeaseGroupPrefix(groupID)+session).Int()
+func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session, now string, promoted ...string) (bool, error) {
+	args := []any{operation, now, service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit, int64(schedTrialLeaseTTL / time.Second), schedTrialLeaseGroupPrefix(groupID) + session}
+	if len(promoted) > 0 {
+		args = append(args, schedTrialLeaseGroupPrefix(groupID)+promoted[0])
+	}
+	result, err := schedTrialLeaseScript.Run(ctx, c.rdb, []string{schedTrialLeaseKey(accountID, model)}, args...).Int()
 	if err != nil {
 		return false, err
 	}
@@ -115,5 +122,10 @@ func (c *schedTrialLeaseCache) Release(ctx context.Context, accountID int64, mod
 
 func (c *schedTrialLeaseCache) ReleaseGroup(ctx context.Context, accountID int64, model string, groupID int64) error {
 	_, err := c.run(ctx, "release_group", accountID, model, groupID, "", "")
+	return err
+}
+
+func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g int64, request, session string, now time.Time) error {
+	_, err := c.run(ctx, "promote", a, m, g, request, strconv.FormatInt(now.UnixMilli(), 10), session)
 	return err
 }

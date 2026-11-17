@@ -147,7 +147,7 @@ func TestOpenAISelectionTrialSessionLifecycle(t *testing.T) {
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 			result := selectTrialRuntime(t, f, ctx, "raw-session")
 			require.Equal(t, int64(1), result.Account.ID)
-			require.True(t, leases.held[trialTestKey(1, "m", 7, "s:raw-session")])
+			require.True(t, leases.held[trialTestKey(1, "m", 7, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()))])
 			require.True(t, leases.held[trialTestKey(10, "m", 7, "s:raw-session")])
 			CompleteOpenAIStickyChange(ctx, 1, success, false)
 			result.ReleaseFunc()
@@ -351,4 +351,11 @@ func TestOpenAISelectionTrialConcurrentSessionFailureKeepsCommittedLease(t *test
 	second.ReleaseFunc()
 	require.Equal(t, int64(1), f.cache.sessionBindings["openai:session"])
 	require.True(t, leases.held[trialTestKey(1, "m", 7, "s:session")])
+}
+
+func (f *selectionTrialLeaseFake) Promote(_ context.Context, a int64, m string, g int64, request, session string, _ time.Time) error {
+	f.calls = append(f.calls, "promote:"+trialTestKey(a, m, g, request)+"->"+session)
+	delete(f.held, trialTestKey(a, m, g, request))
+	f.held[trialTestKey(a, m, g, session)] = true
+	return nil
 }

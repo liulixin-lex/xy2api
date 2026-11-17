@@ -1396,7 +1396,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if err != nil {
 				return nil, true, err
 			}
-			if sessionHash != "" && !trial.borrowing(ctx) && !gatewayProfitControlGateActive(ctx) {
+			if sessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
 				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
 			}
 			return selected, true, nil

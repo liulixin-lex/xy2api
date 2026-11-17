@@ -225,27 +225,22 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	if err := createGroupRecord(ctx, txClient, groupIn); err != nil {
 		return err
 	}
-	result, err := txClient.ExecContext(
-		ctx,
-		`INSERT INTO account_groups (account_id, group_id, pinned, created_at)
-		 SELECT ag.account_id, $2, ag.pinned, NOW()
-		 FROM account_groups ag
-		 JOIN accounts a ON a.id = ag.account_id
-		 WHERE ag.group_id = $1
-		   AND a.deleted_at IS NULL
-		   AND (NOT $3 OR a.type <> $4)
-		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		sourceGroupID,
-		groupIn.ID,
-		groupIn.RequireOAuthOnly,
-		service.AccountTypeAPIKey,
-	)
+	var count int64
+	err = scanSingleRow(ctx, txClient, `WITH added AS (
+ INSERT INTO account_groups(account_id,group_id,pinned,created_at)
+ SELECT ag.account_id,$2,ag.pinned,NOW() FROM account_groups ag
+ JOIN accounts a ON a.id=ag.account_id
+ WHERE ag.group_id=$1 AND a.deleted_at IS NULL AND (NOT $3 OR a.type<>$4)
+ ON CONFLICT(account_id,group_id) DO NOTHING RETURNING account_id
+ ), revised AS (
+ UPDATE accounts SET updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
+ WHERE id IN (SELECT account_id FROM added) RETURNING id
+ ) SELECT COUNT(*) FROM added`, []any{sourceGroupID, groupIn.ID, groupIn.RequireOAuthOnly, service.AccountTypeAPIKey}, &count)
 	if err != nil {
 		return err
 	}
-	if count, countErr := result.RowsAffected(); countErr == nil {
-		groupIn.AccountCount = count
-	}
+	groupIn.AccountCount = count
+
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		return err
 	}

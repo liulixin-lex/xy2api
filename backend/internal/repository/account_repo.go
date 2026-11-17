@@ -2203,6 +2203,9 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 			return err
 		}
 	}
+	if err := bumpAccountMembershipRevision(ctx, txClient, []int64{accountID}); err != nil {
+		return err
+	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
 	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		return err

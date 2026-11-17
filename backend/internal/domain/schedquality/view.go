@@ -55,8 +55,8 @@ type View interface {
 	ResetAt(accountID int64) time.Time
 	StateOf(groupID, accountID int64, model string) StateView
 	TakeoverIdle(groupID int64) (idle time.Duration, enabled bool)
-	// N6：该会话（组×模型×会话）最近两次尝试都在这个号上，并且按本组 L 都超限
-	// （TTFOMs>L，或没有首字且 CensoredMs≥L；换号首轮也算一轮）。
+	// N6：该会话（组×模型×会话）最近两个逻辑请求轮都在这个号上，并且按本组 L 都超限
+	// （重试取最终尝试，换号首轮不计；TTFOMs>L，或没有首字且 CensoredMs≥L）。
 	SessionSlowTwice(groupID, accountID int64, model, sessionKey string) bool
 }
 

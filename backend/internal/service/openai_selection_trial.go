@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -30,6 +31,8 @@ type selectionTrialReservation struct {
 	leases         SchedTrialLeases
 	account, group int64
 	model, member  string
+	session        string
+	now            func() time.Time
 	request        bool
 	retained       atomic.Bool
 	once           sync.Once
@@ -101,7 +104,10 @@ func (t *selectionTrial) isTrial(account *Account) bool {
 // Borrowing keeps the old binding. Trial targets are a last choice and use a
 // request member, so finishing this request cannot create a trial session.
 func (t *selectionTrial) borrowing(ctx context.Context) bool {
-	if t.owner == 0 || t.request.SessionHash == "" {
+	if t.manual || t.owner == 0 || t.request.SessionHash == "" {
+		return false
+	}
+	if resilience.StateFrom(ctx).Avoided(t.owner) && !preserveOpenAIRejectionBinding(ctx, t.request.SessionHash) && !preserveOpenAIGuardianParentBinding(ctx, t.request.SessionHash) {
 		return false
 	}
 	change := pendingOpenAIStickyChange(ctx)
@@ -112,7 +118,7 @@ func (t *selectionTrial) borrowing(ctx context.Context) bool {
 }
 
 func (t *selectionTrial) memberFor(ctx context.Context, account int64) string {
-	if account != t.owner && t.borrowing(ctx) {
+	if account != t.owner {
 		return t.requestMember
 	}
 	return t.member
@@ -142,7 +148,7 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 	if t.leases != nil {
 		acquired, err := t.leases.Acquire(ctx, account.ID, model, gid, member, t.service.selectionNow())
 		if err == nil && acquired {
-			return &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: member == t.requestMember}, true
+			return &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}, true
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
@@ -158,7 +164,7 @@ func (t *selectionTrial) finish(ctx context.Context, result *AccountSelectionRes
 		reservation.release(ctx)
 		return
 	}
-	if result.Account.ID != t.owner && t.borrowing(ctx) {
+	if result.Account.ID != t.owner && t.isTrial(result.Account) && t.borrowing(ctx) {
 		result.StickyCapacitySpillover = true
 	}
 	if result.Account.ID == t.owner {
@@ -173,7 +179,7 @@ func (t *selectionTrial) finish(ctx context.Context, result *AccountSelectionRes
 		change.leases = t.leases
 	} else if !reservation.request && t.request.SessionHash != "" {
 		if owner, err := t.service.getStickySessionAccountID(ctx, t.request.GroupID, t.request.SessionHash); err == nil && owner == result.Account.ID {
-			reservation.retained.Store(true)
+			reservation.promote(ctx)
 		}
 	}
 	result.ReleaseFunc = releaseSelectionTrialWithSlot(ctx, change, reservation, result.ReleaseFunc)
@@ -248,4 +254,20 @@ func (s *OpenAIGatewayService) releaseDeletedTrialOwner(ctx context.Context, gro
 	if account := s.selectionTrialOwner(stateCtx, owner); account != nil {
 		releaseSelectionTrial(stateCtx, s.selectionTrialLeases(), owner, OpenAIAttemptModel(account, req.RequestedModel), derefGroupID(groupID), TrialLeaseSessionMember(session))
 	}
+}
+
+func (r *selectionTrialReservation) promote(ctx context.Context) {
+	if r == nil || r.request || r.retained.Load() {
+		return
+	}
+	now := time.Now()
+	if r.now != nil {
+		now = r.now()
+	}
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	if err := r.leases.Promote(stateCtx, r.account, r.model, r.group, r.member, r.session, now); err != nil {
+		slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+	}
+	r.retained.Store(true)
 }

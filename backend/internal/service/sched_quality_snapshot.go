@@ -65,7 +65,7 @@ func (v *schedQualityView) SessionSlowTwice(g, a int64, m, session string) bool 
 	}
 	limit := v.policies[g].Policy.TTFTSeconds
 	for _, r := range rows[len(rows)-2:] {
-		if r.AccountID != a || !r.StartedAt.After(v.resets[a]) || !schedSlow(r, limit) {
+		if r.Switched || r.AccountID != a || !r.StartedAt.After(v.resets[a]) || !schedSlow(r, limit) {
 			return false
 		}
 	}
@@ -170,10 +170,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 	sessions.sort()
 	view.sessions = make(map[schedSessionKey][]q.AttemptSample)
 	for k, rows := range sessions {
-		if len(rows) > 2 {
-			rows = rows[len(rows)-2:]
-		}
-		view.sessions[k] = append([]q.AttemptSample(nil), rows...)
+		view.sessions[k] = schedSessionRounds(rows)
 	}
 	members := make(map[int64][]int64)
 	for group, ids := range s.members {
@@ -359,4 +356,49 @@ func schedStateUntil(v q.StateView) time.Time {
 		}
 	}
 	return until
+}
+
+// Retries share a logical request/turn. A switched first turn is a boundary,
+// so older history cannot be joined across a move away and back to an account.
+func schedSessionRounds(attempts []q.AttemptSample) []q.AttemptSample {
+	type roundKey struct {
+		id      string
+		attempt bool
+	}
+	rounds := make(map[roundKey]q.AttemptSample)
+	for _, r := range attempts {
+		key := roundKey{id: r.RequestID}
+		if key.id == "" {
+			key = roundKey{id: r.AttemptID, attempt: true}
+		}
+		previous, ok := rounds[key]
+		switched := r.Switched || previous.Switched
+		if !ok || r.StartedAt.After(previous.StartedAt) || r.StartedAt.Equal(previous.StartedAt) && (r.FinishedAt.After(previous.FinishedAt) || r.FinishedAt.Equal(previous.FinishedAt) && r.AttemptID > previous.AttemptID) {
+			previous = r
+		}
+		previous.Switched = switched
+		rounds[key] = previous
+	}
+	rows := make([]q.AttemptSample, 0, len(rounds))
+	for _, r := range rounds {
+		rows = append(rows, r)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].StartedAt.Equal(rows[j].StartedAt) {
+			return rows[i].AttemptID < rows[j].AttemptID
+		}
+		return rows[i].StartedAt.Before(rows[j].StartedAt)
+	})
+	var tail []q.AttemptSample
+	for _, r := range rows {
+		if r.Switched {
+			tail = nil
+			continue
+		}
+		tail = append(tail, r)
+		if len(tail) > 2 {
+			tail = tail[len(tail)-2:]
+		}
+	}
+	return tail
 }

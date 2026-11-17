@@ -27,13 +27,15 @@ func TestOpenAISelectionTrialHTTPReleaseBeforeCommit(t *testing.T) {
 				}
 				ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 				result := selectTrialRuntime(t, f, ctx, "session")
-				key := trialTestKey(1, "m", 7, "s:session")
+				key := trialTestKey(1, "m", 7, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()))
 				require.True(t, leases.held[key])
 				// Production HTTP handlers release their slot before reporting Forward's outcome.
 				result.ReleaseFunc()
 				heldAfterSlotRelease := leases.held[key]
 				require.Equal(t, []int64{1}, f.releases)
 				CompleteOpenAIStickyChange(ctx, 1, success, false)
+				require.False(t, leases.held[key])
+				key = trialTestKey(1, "m", 7, "s:session")
 				t.Logf("after_slot_release=%t after_complete=%t binding=%d", heldAfterSlotRelease, leases.held[key], f.cache.sessionBindings["openai:session"])
 				require.True(t, heldAfterSlotRelease, "slot release cannot decide an unfinished binding transaction")
 				require.Equal(t, success, leases.held[key])
@@ -78,7 +80,9 @@ func TestOpenAISelectionTrialBorrowUsesRequestLease(t *testing.T) {
 				want = 2
 			}
 			require.Equal(t, want, result.Account.ID)
-			require.True(t, result.StickyCapacitySpillover)
+			if want == 1 {
+				require.True(t, result.StickyCapacitySpillover)
+			}
 			if mode == "wait" {
 				require.NotNil(t, result.WaitPlan)
 			}

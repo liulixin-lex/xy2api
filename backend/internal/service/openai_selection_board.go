@@ -21,8 +21,11 @@ type OpenAISelectionBoard struct {
 
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
 
-func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View) *OpenAISelectionBoard {
+func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View, leases ...SchedTrialLeases) *OpenAISelectionBoard {
 	board := &OpenAISelectionBoard{service: service, view: view, now: time.Now}
+	if len(leases) > 0 {
+		board.leases = leases[0]
+	}
 	if service != nil {
 		service.selectionBoard = board
 		if service.resilience != nil {

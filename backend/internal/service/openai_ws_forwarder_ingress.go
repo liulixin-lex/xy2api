@@ -979,6 +979,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
+	stickyTurnSent := false
+	defer func() {
+		// A retry can end while reacquiring its upstream connection, before the
+		// relay is entered again. It is still a final outcome of the sent turn.
+		if stickyTurnSent {
+			FinishOpenAIStickyForward(ctx, account.ID, nil, returnErr)
+		}
+	}()
 	turnHasEncryptedContent := false
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (schedResult *OpenAIForwardResult, schedErr error) {
 		var schedCapture *schedAttemptCapture
@@ -996,6 +1004,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
 		resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
+		stickyTurnSent = true
 		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -1863,6 +1872,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
+				FinishOpenAIStickyForward(ctx, account.ID, result, errOpenAIWSSessionPreempted)
+				stickyTurnSent = false
 				sessionLease.MarkBroken()
 				return errOpenAIWSSessionPreempted
 			}
@@ -1883,6 +1894,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil {
 				finalErr = unwrapped
 			}
+			// Repair retries above belong to this turn; only its final outcome may
+			// decide the binding and lease, before AfterTurn releases slots.
+			FinishOpenAIStickyForward(ctx, account.ID, result, finalErr)
+			stickyTurnSent = false
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, nil, finalErr)
 			}
@@ -1893,6 +1908,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		turnPrevRecoveryTried = false
 		lastTurnFinishedAt = time.Now()
 		lastTurnClean = true
+		FinishOpenAIStickyForward(ctx, account.ID, result, nil)
+		stickyTurnSent = false
 		if hooks != nil && hooks.AfterTurn != nil {
 			hooks.AfterTurn(turn, result, nil)
 		}
