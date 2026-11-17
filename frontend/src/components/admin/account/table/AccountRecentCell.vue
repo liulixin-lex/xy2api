@@ -21,7 +21,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
 import { vTip, type TipCard } from '@/utils/tip'
-import { RECENT_DIMS, recentExtras, recentValue } from './accountRecent'
+import { RECENT_DIMS, formatRecentSecondsCompact, recentExtras, recentValue } from './accountRecent'
 import { formatShortTime } from './accountTime'
 
 const props = defineProps<{ quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache' | 'reset_at'> | null; card?: boolean }>()
@@ -34,8 +34,11 @@ const lines = computed(() => {
   return RECENT_DIMS.map((dim: BackendDim) => {
     const label = t(`admin.accounts.table.dims.${dim}`)
     const value = q ? recentValue(q, dim) : null
-    if (!value || value.text === null) return { dim, label, value, text: '—', muted: true }
-    return { dim, label, value, text: value.text, muted: value.short }
+    if (!value || value.text === null) return { dim, label, value, text: '—', full: '—', muted: true }
+    // The cell is 72px: first token is written compactly there (0.10s), the tip card keeps the full text (100ms).
+    const ms = dim === 'ttfo' ? q?.ttfo.first_output_p50_ms : null
+    const text = ms == null ? value.text : formatRecentSecondsCompact(ms)
+    return { dim, label, value, text, full: value.text, muted: value.short }
   })
 })
 
@@ -54,7 +57,7 @@ function tipCard(): TipCard | '' {
   const valueRow = (line: (typeof lines.value)[number], label: string) => {
     const n = line.value?.n ?? 0
     const key = `admin.accounts.table.tip.${COUNT_KEYS[line.dim]}${line.muted ? 'Short' : ''}`
-    return [label, line.muted ? { text: line.text, tone: 'muted' as const } : line.text, t(key, { n }, n)]
+    return [label, line.muted ? { text: line.full, tone: 'muted' as const } : line.full, t(key, { n }, n)]
   }
   const [ttfo, error, cache] = lines.value
   return {
@@ -80,7 +83,8 @@ function tipCard(): TipCard | '' {
   display: grid;
   grid-template-columns: auto auto;
   justify-content: space-between;
-  column-gap: 12px;
+  /* 72px = label 24 (two 12px characters) + gap 8 + value up to 40; the widest value, "100%", is about 35px. */
+  column-gap: 8px;
   row-gap: 2px;
   width: 72px;
 }
