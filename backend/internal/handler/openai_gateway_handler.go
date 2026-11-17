@@ -3445,9 +3445,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						zap.String("reason", reason))
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
 				}
+				// MapRequestModel has already resolved the channel and account aliases
+				// for sampling. Use that exact model for flags and this turn's trial lease.
+				if selected, ok := resilience.StateFrom(ctx).SchedSelection(); ok {
+					accountReleaseFunc = h.gatewayService.PrepareOpenAISelectionTurn(ctx, apiKey.GroupID, account, selected.Model, selection.StickyCapacitySpillover, accountReleaseFunc)
+				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				h.gatewayService.RefreshOpenAISelectionFlags(ctx, apiKey.GroupID, account, gatewayTurnModel)
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {

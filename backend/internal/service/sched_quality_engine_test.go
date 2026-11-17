@@ -316,7 +316,7 @@ func TestEngineSessionSlowTwice(t *testing.T) {
 	rows[0].AccountID = 2
 	f.ledger.Rows = rows
 	f.cycle()
-	require.True(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "session"))
+	require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "session"), "the switched first turn leaves only one eligible round")
 	require.True(t, f.e.window.samples[SchedAccountModel{1, "synthetic-model"}][0].Switched)
 	require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 2, "synthetic-model", "session"))
 	require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "missing"))

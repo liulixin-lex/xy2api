@@ -15,7 +15,7 @@ const (
 // TrialLeaseRequestMember; use the same identity for every operation on a lease.
 // Each operation first removes members idle for at least TrialLeaseIdle.
 // On Room/Acquire errors, callers treat capacity as full and rank the account in
-// the second tier without blocking selection. Touch/Release/ReleaseGroup errors
+// the second tier without blocking selection. Touch/Promote/Release/ReleaseGroup errors
 // are logged only. Implementations return errors unchanged. A transport error
 // may leave a mutation's outcome unknown; callers must not assume rollback.
 type SchedTrialLeases interface {
@@ -25,6 +25,9 @@ type SchedTrialLeases interface {
 	// Acquire atomically reserves a slot, or renews an existing member even when
 	// full. It returns false, nil when full, and false plus the error on failure.
 	Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error)
+	// Promote atomically replaces this request reservation with its committed
+	// session member. An existing session is renewed without consuming another slot.
+	Promote(ctx context.Context, accountID int64, model string, groupID int64, request, session string, now time.Time) error
 	// Touch renews only an existing, unexpired member. Missing members are a
 	// successful no-op; storage failures are returned as errors.
 	Touch(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) error
@@ -41,7 +44,8 @@ type SchedTrialLeases interface {
 // real session keys too, so "r:request-id" cannot alias a request member.
 func TrialLeaseSessionMember(session string) string { return "s:" + session }
 
-// TrialLeaseRequestMember namespaces the unique ID of a sessionless request.
+// TrialLeaseRequestMember namespaces a request, including a candidate session
+// awaiting binding commit; Promote converts only successful candidates.
 // Release it in each selection's release callback (including switches), rather
 // than waiting for the whole request to finish. Idle expiry reclaims leaked slots.
 func TrialLeaseRequestMember(requestID string) string { return "r:" + requestID }
