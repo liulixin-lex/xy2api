@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -315,9 +316,10 @@ func (e *openAIWSControlWriteError) Error() string { return e.err.Error() }
 func (e *openAIWSControlWriteError) Unwrap() error { return e.err }
 
 type openAIWSPassthroughTurnLifecycle struct {
-	mu                sync.Mutex
-	inFlight          bool
-	terminalWriteDone atomic.Pointer[chan struct{}]
+	mu           sync.Mutex
+	inFlight     bool
+	exitErr      error
+	terminalDone chan struct{}
 }
 
 func newOpenAIWSPassthroughTurnLifecycle(inFlight bool) *openAIWSPassthroughTurnLifecycle {
@@ -328,9 +330,9 @@ func (l *openAIWSPassthroughTurnLifecycle) beginResponseCreate(onAccepted func()
 	if l == nil {
 		return false
 	}
-	l.mu.Lock()
+	l.lockAfterTerminal()
 	defer l.mu.Unlock()
-	if l.inFlight {
+	if l.inFlight || l.exitErr != nil {
 		return false
 	}
 	l.inFlight = true
@@ -344,40 +346,87 @@ func (l *openAIWSPassthroughTurnLifecycle) cancelResponseCreate() {
 	if l == nil {
 		return
 	}
-	l.mu.Lock()
+	l.lockAfterTerminal()
 	l.inFlight = false
 	l.mu.Unlock()
 }
 
-func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() {
-	if l != nil {
+var errOpenAIWSTerminalAfterExit = errors.New("websocket relay exited before terminal write")
+
+// lockAfterTerminal returns with mu held. Waiting never holds mu across IO.
+func (l *openAIWSPassthroughTurnLifecycle) lockAfterTerminal() {
+	for {
 		l.mu.Lock()
-		done := make(chan struct{})
-		l.terminalWriteDone.Store(&done)
+		if l.terminalDone == nil {
+			return
+		}
+		done := l.terminalDone
+		l.mu.Unlock()
+		<-done
 	}
 }
 
-func (l *openAIWSPassthroughTurnLifecycle) finishTerminalWrite(succeeded bool, onSucceeded func()) {
-	if l == nil {
-		return
+// Admission and exit are decided under the same mutex. Once exitErr is set,
+// no later writer can create a terminal barrier, even before exit settles.
+func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() error {
+	l.lockAfterTerminal()
+	defer l.mu.Unlock()
+	if l.exitErr != nil {
+		return l.exitErr
 	}
+	l.terminalDone = make(chan struct{})
+	return nil
+}
+
+func (l *openAIWSPassthroughTurnLifecycle) finishTerminalWrite(succeeded bool, onSucceeded func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if succeeded {
 		if onSucceeded != nil {
 			onSucceeded()
 		}
 		l.inFlight = false
 	}
-	close(*l.terminalWriteDone.Load())
-	l.terminalWriteDone.Store(nil)
-	l.mu.Unlock()
+	close(l.terminalDone)
+	l.terminalDone = nil
 }
 
-// A close may arrive after the client receives the terminal but before its
-// turn callback settles the attempt and claims usage. Let that write and its
-// callback finish before connection cleanup can cancel the attempt.
-func (l *openAIWSPassthroughTurnLifecycle) waitTerminalWrite() {
-	if done := l.terminalWriteDone.Load(); done != nil {
-		<-*done
+func (l *openAIWSPassthroughTurnLifecycle) finishExit(writeErr error, settle func()) {
+	l.mu.Lock()
+	l.exitErr = writeErr
+	done := l.terminalDone
+	l.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+	settle()
+}
+
+// Admission is checked at the actual write boundary. Rejected terminals never
+// reach the client; accepted terminals retain ownership through OnTurnComplete.
+// The relay's existing write context still bounds a slow client's write.
+type openAIWSTerminalClientConn struct {
+	openaiwsv2.FrameConn
+	lifecycle    *openAIWSPassthroughTurnLifecycle
+	observe      func([]byte)
+	ownsTerminal bool // only the upstream relay writer and its callbacks access this
+}
+
+func (c *openAIWSTerminalClientConn) WriteFrame(ctx context.Context, typ coderws.MessageType, payload []byte) error {
+	if openAIWSPassthroughIsTerminalOutput(payload) {
+		if err := c.lifecycle.beginTerminalWrite(); err != nil {
+			return err
+		}
+		c.ownsTerminal = true
+		c.observe(payload)
+	}
+	return c.FrameConn.WriteFrame(ctx, typ, payload)
+}
+
+func (c *openAIWSTerminalClientConn) finishTerminalWrite(succeeded bool, onSucceeded func()) {
+	if c.ownsTerminal {
+		c.ownsTerminal = false
+		c.lifecycle.finishTerminalWrite(succeeded, onSucceeded)
 	}
 }
 
@@ -1042,8 +1091,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return restoreCodexToolNamesFromContext(c, payload)
 		},
 	}
+	terminalClientConn := &openAIWSTerminalClientConn{
+		FrameConn: clientFrameConn, lifecycle: turnLifecycle, observe: schedTurns.observe,
+	}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
-		inner: clientFrameConn,
+		inner: terminalClientConn,
 		// 注意线程安全：filter 仅在 runClientToUpstream 这一条
 		// goroutine 中被调用（passthrough_relay.go: ReadFrame loop），
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
@@ -1375,13 +1427,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					hooks.AfterTurn(turnNo, turnResult, nil)
 				}
 			},
-			BeforeClientWrite: func(msgType coderws.MessageType, payload []byte) {
-				if openAIWSPassthroughIsTerminalOutput(payload) {
-					turnLifecycle.beginTerminalWrite()
-					// Publish the terminal only after its write barrier exists.
-					schedTurns.observe(payload)
-				}
-			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
 				if msgType == coderws.MessageBinary {
 					eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
@@ -1402,24 +1447,32 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					markOpenAIWSClientVisibleFailure(c, eventType, payload)
 				}
 				if openAIWSPassthroughIsTerminalOutput(payload) {
-					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+					terminalClientConn.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
-				turnLifecycle.waitTerminalWrite()
 				var controlWriteErr *openAIWSControlWriteError
 				upstreamWrite := errors.As(exit.Err, &controlWriteErr)
-				var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
-				if errors.As(exit.Err, &timeoutErr) {
-					_ = recordFirstOutputTimeout(timeoutErr)
-				} else if resilience.StateFrom(ctx).ClientCanceled() || !upstreamWrite && (exit.Stage == "read_client" || exit.Stage == "write_client") && gatewayWSClientCanceled(ctx, exit.Err) {
-					schedTurns.cancel()
-				} else {
-					if upstreamWrite || exit.Stage == "read_upstream" || exit.Stage == "write_upstream" {
-						schedTurns.noteNetworkError(exit.Err)
-					}
-					schedTurns.finish(nil, exit.Err)
+				clientCanceled := resilience.StateFrom(ctx).ClientCanceled() || !upstreamWrite &&
+					(exit.Stage == "read_client" || exit.Stage == "write_client") && gatewayWSClientCanceled(ctx, exit.Err)
+				lateWriteErr := errOpenAIWSTerminalAfterExit
+				if clientCanceled {
+					// Preserve the existing canceled-drain result for a late terminal.
+					lateWriteErr = io.ErrClosedPipe
 				}
+				turnLifecycle.finishExit(lateWriteErr, func() {
+					var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
+					if errors.As(exit.Err, &timeoutErr) {
+						_ = recordFirstOutputTimeout(timeoutErr)
+					} else if clientCanceled {
+						schedTurns.cancel()
+					} else {
+						if upstreamWrite || exit.Stage == "read_upstream" || exit.Stage == "write_upstream" {
+							schedTurns.noteNetworkError(exit.Err)
+						}
+						schedTurns.finish(nil, exit.Err)
+					}
+				})
 				var reroute *OpenAIQualityRerouteError
 				if errors.As(exit.Err, &reroute) {
 					return
