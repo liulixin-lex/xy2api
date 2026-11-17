@@ -53,6 +53,7 @@ type SchedAttemptRecorderService struct {
 	droppedWriteFailed atomic.Uint64
 	lastQueueWarning   atomic.Int64
 	lastWriteWarning   atomic.Int64
+	lastStoppedWarning atomic.Int64
 }
 
 var _ SchedAttemptRecorder = (*SchedAttemptRecorderService)(nil)
@@ -199,6 +200,13 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 
 func (s *SchedAttemptRecorderService) enqueue(row schedquality.AttemptSample) {
 	s.queueMu.Lock()
+	// Check under the queue lock so an accepted row precedes the shutdown drain.
+	if s.stopped.Load() {
+		s.queueMu.Unlock()
+		s.droppedWriteFailed.Add(1)
+		s.warnDrop("stopped", &s.lastStoppedWarning, nil)
+		return
+	}
 	dropped := s.count == len(s.queue)
 	if dropped {
 		s.head = (s.head + 1) % len(s.queue)
