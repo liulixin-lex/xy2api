@@ -48,6 +48,16 @@ func (d *schedQualityData) usePeerBucket(at time.Time, rows map[q.LineKey]q.Line
 	d.peers = d.peerBuckets[bucket]
 }
 
+// Display and immediate reevaluation may precede replay's watermark. They may
+// reuse an established bucket, but must not reserve a future bucket's membership.
+func (d *schedQualityData) displayPeers(at time.Time, rows map[q.LineKey]q.LineState) {
+	bucket := at.UTC().Truncate(q.RegularInterval)
+	d.peers = d.peerBuckets[bucket]
+	if d.peers == nil {
+		d.peers = freezePeers(at, rows)
+	}
+}
+
 func ruleBTime(at time.Time) float64 {
 	if at.IsZero() {
 		return math.Inf(-1)

@@ -274,3 +274,55 @@ func TestEngineSyntheticCycleTiming(t *testing.T) {
 		})
 	}
 }
+
+func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
+	f := newQualityFixture(t)
+	bucket := f.now.UTC().Truncate(q.RegularInterval)
+	f.now = bucket.Add(3 * time.Second)
+	f.badTTFT()
+	event := bucket.Add(-3 * time.Second)
+	for i := range f.ledger.Rows {
+		f.ledger.Rows[i].InsertedAt = event
+	}
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+	f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: bucket.Add(-time.Minute), EvaluatedAt: bucket.Add(-20 * time.Second), TrialUntil: bucket.Add(time.Hour), Admissions: 1}}
+	f.cycle()
+	require.Equal(t, bucket.Add(-7*time.Second), f.e.processedAt)
+	require.True(t, f.view().TTFO.Trial)
+	require.NotContains(t, f.e.peerBuckets, bucket, "display must not save membership before replay reaches the bucket")
+	require.NoError(t, f.e.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}))
+	require.NotContains(t, f.e.peerBuckets, bucket, "rebuild must not freeze a future bucket")
+	require.NoError(t, f.e.ClearOverride(context.Background(), 1, 10))
+	require.NotContains(t, f.e.peerBuckets, bucket)
+	f.now = bucket.Add(13 * time.Second)
+	f.cycle()
+	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
+	require.Equal(t, event, f.line(q.DimensionTTFO).Entry)
+	require.Contains(t, f.e.peerBuckets, bucket)
+	require.Equal(t, q.IdentityRear, f.e.peerBuckets[bucket].rows[key].Identity, "official membership includes the pre-boundary trial failure")
+}
+
+func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
+	for _, line := range []q.Dimension{q.DimensionTTFO, q.DimensionError, q.DimensionCache} {
+		t.Run(string(line), func(t *testing.T) {
+			f := newQualityFixture(t)
+			bucket := f.now.UTC().Truncate(q.RegularInterval)
+			f.now = bucket.Add(3 * time.Second)
+			f.badTTFT()
+			f.cycle()
+			require.NotContains(t, f.e.peerBuckets, bucket)
+			policy := f.store.Policies[10].Policy
+			switch line {
+			case q.DimensionTTFO:
+				policy.TTFTSeconds = 2
+			case q.DimensionError:
+				policy.MaxErrorRate = .1
+			case q.DimensionCache:
+				policy.MinCacheRatio = .7
+			}
+			_, err := f.e.UpdatePolicy(context.Background(), 10, 0, policy)
+			require.NoError(t, err)
+			require.NotContains(t, f.e.peerBuckets, bucket, "immediate reevaluation uses disposable membership before replay reaches the bucket")
+		})
+	}
+}

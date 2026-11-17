@@ -99,7 +99,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		r.LineKey = k
 		previous[k] = r
 	}
-	d.usePeerBucket(d.now, previous)
+	d.displayPeers(d.now, previous)
 	s.peerBuckets = d.peerBuckets
 	grouped := make(map[schedQualityKey]*SchedGroupRow)
 	for _, key := range keys {
