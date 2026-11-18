@@ -38,23 +38,28 @@ type openAIStickyChange struct {
 	attemptSucceeded bool
 	attemptCanceled  bool
 	activeAttempt    *schedAttemptCapture
-	groupID          int64
-	session          string
-	key              string
-	model            string
-	kind             string
-	reason           string
-	fromModel        string
-	ownerLookup      func(context.Context, int64) *Account
-	trialSession     string
-	leases           SchedTrialLeases
-	trial            *selectionTrialReservation
-	expected         StickySessionBinding
-	target           int64
-	ttl              time.Duration
-	cache            OpenAIStickyVersionedCache
-	dualWriteLegacy  bool
-	skipCommit       bool // The snapshot read failed; keep all selection writes suppressed.
+
+	canTransfer                   bool // Final selection's protocol authorization for expected.
+	targetUpstreamFirstValidDelay time.Duration
+	targetUpstreamFirstValidKnown bool
+
+	groupID         int64
+	session         string
+	key             string
+	model           string
+	kind            string
+	reason          string
+	fromModel       string
+	ownerLookup     func(context.Context, int64) *Account
+	trialSession    string
+	leases          SchedTrialLeases
+	trial           *selectionTrialReservation
+	expected        StickySessionBinding
+	target          int64
+	ttl             time.Duration
+	cache           OpenAIStickyVersionedCache
+	dualWriteLegacy bool
+	skipCommit      bool // The snapshot read failed; keep all selection writes suppressed.
 	// ownerReleased: selection hit a branch that deletes the owner's binding
 	// (hard unavailable, failure streak). Only then may an ordinary placement
 	// replace an existing owner (§5.2); other bypasses serve the request elsewhere.
@@ -70,6 +75,10 @@ func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) 
 	change.mu.Lock()
 	if change.activeAttempt == attempt {
 		change.attemptSucceeded = success
+		if !attempt.upstreamFirstValidAt.IsZero() {
+			change.targetUpstreamFirstValidDelay = attempt.upstreamFirstValidAt.Sub(attempt.started)
+			change.targetUpstreamFirstValidKnown = true
+		}
 		change.attemptCanceled = attempt.client || attempt.state.ClientCanceled()
 	}
 	change.mu.Unlock()
@@ -166,6 +175,23 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		resetAt:         s.resilience.sessionAccountResetAt,
 		leases:          s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})
+}
+
+// Runs after planOpenAIStickyReplacement (deferred later by the scheduler).
+// Quality ownership and child-thread protection are only final after selection.
+func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Context, groupID *int64, session string, selection *AccountSelectionResult, ordinary bool) {
+	change := pendingOpenAIStickyChange(ctx)
+	if change == nil {
+		return
+	}
+	eligible := ordinary && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
+		change.expected.AccountID == selection.Account.ID && change.expected.Generation != "" && !change.skipCommit &&
+		change.groupID == derefGroupID(groupID) && session != "" && change.session == session && change.key != "" &&
+		!openAINoStickyMigration(ctx) && !preserveOpenAIGuardianParentBinding(ctx, session) &&
+		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session) && !s.qualityOwnsSticky(ctx, groupID, session)
+	change.mu.Lock()
+	change.canTransfer = eligible
+	change.mu.Unlock()
 }
 
 func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, model string, selection *AccountSelectionResult) {

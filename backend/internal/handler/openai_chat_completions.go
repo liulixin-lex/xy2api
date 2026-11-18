@@ -276,7 +276,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
-			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
+			st.SetSchedSelection(resilience.SchedSelection{
+				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel),
+				HTTPStreamText: reqStream,
+				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+			})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, forwardModel),

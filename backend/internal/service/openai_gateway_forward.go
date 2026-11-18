@@ -1217,7 +1217,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			headerGuard.close()
 			return nil, s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				context.WithValue(ctx, schedHTTPAttemptKey{}, headerGuard.capture.Load()), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				attemptStart, originalModel, reasoningEffortValue,
 				firstOutputTimeout, "response_headers", nil, headerGuard.plan,
 			)
