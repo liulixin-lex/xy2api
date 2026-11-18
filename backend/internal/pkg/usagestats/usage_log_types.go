@@ -396,9 +396,10 @@ type AccountUsageStatsResponse struct {
 // AdminRequestStats adds request outcomes only to the administrative view.
 type AdminRequestStats struct {
 	UsageStats
-	Success    int64    `json:"success"`
-	Rescued    int64    `json:"rescued"`
-	Failed     int64    `json:"failed"`
-	TTFOP50Ms  *float64 `json:"ttfo_p50_ms"`
-	CacheRatio *float64 `json:"cache_ratio"`
+	Success               int64    `json:"success"`
+	Rescued               int64    `json:"rescued"`
+	Failed                int64    `json:"failed"`
+	E2EFirstOutputP50Ms   *float64 `json:"e2e_first_output_p50_ms"`
+	E2EFirstOutputSamples int64    `json:"e2e_first_output_samples"`
+	CacheRatio            *float64 `json:"cache_ratio"`
 }

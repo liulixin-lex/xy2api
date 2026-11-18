@@ -162,7 +162,8 @@ func TestAdminRequestListStatsAttemptsShareFacts(t *testing.T) {
 	require.EqualValues(t, 4, stats.TotalRequests)
 	require.EqualValues(t, 1, stats.Success)
 	require.EqualValues(t, 1, stats.Failed)
-	require.Equal(t, 300.0, *stats.TTFOP50Ms) // nearest rank of original row values: 50, 300, 999
+	require.Equal(t, 100.0, *stats.E2EFirstOutputP50Ms) // nearest rank of measured E2E values: 100, 300
+	require.EqualValues(t, 2, stats.E2EFirstOutputSamples)
 	require.InDelta(t, 0.45, *stats.CacheRatio, 1e-9)
 	require.Equal(t, 2.0, stats.TotalCost)
 	filters.AccountID = b.ID
