@@ -47,12 +47,14 @@ const pageSize = ref(10)
 
 const close = () => emit('update:modelValue', false)
 
-const showTTFT = computed(() => props.preset.sort === 'ttft_desc')
-const latencyLabel = computed(() => t(showTTFT.value ? 'admin.ops.ttftLabel' : 'admin.ops.requestDetails.table.duration'))
+// The latency column follows the sort: the user's wait (end-to-end first output) when sorted by it, else the duration.
+const showE2E = computed(() => props.preset.sort === 'e2e_first_output_desc')
+const latencyLabel = computed(() => t(showE2E.value ? 'admin.ops.e2eFirstOutput.detailsTitle' : 'admin.ops.requestDetails.table.duration'))
 
 function formatLatency(row: OpsRequestDetail): string {
-  const value = showTTFT.value ? row.first_token_ms : row.duration_ms
-  return typeof value === 'number' ? `${value} ms` : '-'
+  const value = showE2E.value ? row.end_to_end_first_output_ms : row.duration_ms
+  if (typeof value === 'number') return `${value} ms`
+  return showE2E.value ? t('admin.ops.e2eFirstOutput.unknown') : '-'
 }
 
 const rangeLabel = computed(() => {

@@ -23,7 +23,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 
-async function openDetails(sort: 'duration_desc' | 'ttft_desc') {
+async function openDetails(sort: 'duration_desc' | 'e2e_first_output_desc') {
   const wrapper = mount(OpsRequestDetailsModal, {
     props: { modelValue: false, timeRange: '1h', preset: { title: 'Details', sort } },
     global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Pagination: true } },
@@ -39,43 +39,39 @@ describe('Ops request latency details', () => {
     viewport.desktop = true
     listRequestDetails.mockResolvedValue({
       items: [
-        { kind: 'success', created_at: '2026-09-10T00:00:00Z', duration_ms: 12000, first_token_ms: 800 },
-        { kind: 'success', created_at: '2026-09-10T00:00:01Z', duration_ms: 9000, first_token_ms: 0 },
-        { kind: 'success', created_at: '2026-09-10T00:00:02Z', duration_ms: 5000, first_token_ms: null },
+        { kind: 'success', created_at: '2026-09-10T00:00:00Z', duration_ms: 12000, first_token_ms: 800, end_to_end_first_output_ms: 51000 },
+        { kind: 'success', created_at: '2026-09-10T00:00:01Z', duration_ms: 9000, first_token_ms: 300, end_to_end_first_output_ms: 0 },
+        { kind: 'success', created_at: '2026-09-10T00:00:02Z', duration_ms: 5000, first_token_ms: 200, end_to_end_first_output_ms: null },
       ],
       total: 3,
     })
   })
 
-  it('opens the TTFT card with first-token sorting and successful requests', async () => {
+  it('opens the user-wait card with end-to-end sorting and successful requests', async () => {
     const wrapper = shallowMount(OpsDashboardHeader, {
       props: { overview: {} as OpsDashboardOverview, platform: '', groupId: null, timeRange: '1h', queryMode: 'auto', loading: false, lastUpdated: null },
     })
     await flushPromises()
-    const button = wrapper.findAll('button').find((item) =>
-      item.text() === 'admin.ops.requestDetails.details' &&
-      item.element.parentElement?.textContent?.includes('TTFT'),
-    )
+    const button = wrapper.get('[data-testid="ops-e2e-card"]').findAll('button').find((item) => item.text() === 'admin.ops.requestDetails.details')
     expect(button).toBeDefined()
     await button!.trigger('click')
     expect(wrapper.emitted('openRequestDetails')).toEqual([[
-      { title: 'admin.ops.ttftLabel', kind: 'success', sort: 'ttft_desc' },
+      { title: 'admin.ops.e2eFirstOutput.detailsTitle', kind: 'success', sort: 'e2e_first_output_desc' },
     ]])
     wrapper.unmount()
   })
 
-  it.each([true, false])('shows TTFT rather than total duration (desktop: %s)', async (desktop) => {
+  it.each([true, false])('shows the end-to-end first output rather than the last attempt or total duration (desktop: %s)', async (desktop) => {
     viewport.desktop = desktop
-    const wrapper = await openDetails('ttft_desc')
-    expect(listRequestDetails).toHaveBeenCalledWith(expect.objectContaining({ sort: 'ttft_desc' }))
-    expect(wrapper.text()).toContain('admin.ops.ttftLabel')
-    expect(wrapper.text()).toContain('800 ms')
+    const wrapper = await openDetails('e2e_first_output_desc')
+    expect(listRequestDetails).toHaveBeenCalledWith(expect.objectContaining({ sort: 'e2e_first_output_desc' }))
+    expect(wrapper.text()).toContain('admin.ops.e2eFirstOutput.detailsTitle')
+    expect(wrapper.text()).toContain('51000 ms')
     expect(wrapper.text()).toContain('0 ms')
-    expect(wrapper.text()).not.toContain('12000 ms')
-    expect(wrapper.text()).not.toContain('9000 ms')
-    expect(wrapper.text()).not.toContain('5000 ms')
-    if (desktop) expect(wrapper.findAll('tbody tr')[2].findAll('td')[4].text()).toBe('-')
-    else expect(wrapper.text()).toContain('admin.ops.ttftLabel: -')
+    for (const other of ['800 ms', '300 ms', '200 ms', '12000 ms', '9000 ms', '5000 ms']) expect(wrapper.text()).not.toContain(other)
+    // No end-to-end record: unknown, not the last attempt's first token.
+    if (desktop) expect(wrapper.findAll('tbody tr')[2].findAll('td')[4].text()).toBe('admin.ops.e2eFirstOutput.unknown')
+    else expect(wrapper.text()).toContain('admin.ops.e2eFirstOutput.detailsTitle: admin.ops.e2eFirstOutput.unknown')
     wrapper.unmount()
   })
 

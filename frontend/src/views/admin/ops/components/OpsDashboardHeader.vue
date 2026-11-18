@@ -414,12 +414,30 @@ const durationP50Ms = computed(() => overview.value?.duration?.p50_ms ?? null)
 const durationAvgMs = computed(() => overview.value?.duration?.avg_ms ?? null)
 const durationMaxMs = computed(() => overview.value?.duration?.max_ms ?? null)
 
+// The last attempt's first token: the health score and the threshold colour use it.
 const ttftP99Ms = computed(() => overview.value?.ttft?.p99_ms ?? null)
-const ttftP95Ms = computed(() => overview.value?.ttft?.p95_ms ?? null)
-const ttftP90Ms = computed(() => overview.value?.ttft?.p90_ms ?? null)
 const ttftP50Ms = computed(() => overview.value?.ttft?.p50_ms ?? null)
-const ttftAvgMs = computed(() => overview.value?.ttft?.avg_ms ?? null)
-const ttftMaxMs = computed(() => overview.value?.ttft?.max_ms ?? null)
+
+// The user's wait (end-to-end first output). Without samples (a range before the upgrade, say) it is unknown; the
+// count does not say which periods lack records.
+const e2eSampleCount = computed(() => overview.value?.e2e_first_output_sample_count ?? 0)
+const e2eP99Ms = computed(() => overview.value?.e2e_first_output?.p99_ms ?? null)
+const e2eStats = computed(() => {
+  const e2e = overview.value?.e2e_first_output
+  return [
+    { label: 'P95', value: e2e?.p95_ms ?? null },
+    { label: 'P90', value: e2e?.p90_ms ?? null },
+    { label: 'P50', value: e2e?.p50_ms ?? null },
+    { label: 'Avg', value: e2e?.avg_ms ?? null },
+    { label: 'Max', value: e2e?.max_ms ?? null }
+  ]
+})
+const e2eTooltip = computed(() => {
+  const note = e2eSampleCount.value > 0
+    ? t('admin.ops.e2eFirstOutput.samples', { n: e2eSampleCount.value.toLocaleString() })
+    : t('admin.ops.e2eFirstOutput.none')
+  return `${t('admin.ops.tooltips.e2eFirstOutput')} ${note}`
+})
 
 // --- Health Score & Diagnosis (primary) ---
 
@@ -1326,54 +1344,53 @@ function handleToolbarRefresh() {
           </div>
         </div>
 
-        <!-- Card 5: TTFT -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;">
+        <!-- Card 5: user wait (end-to-end first output); the last attempt's first token keeps the threshold colour -->
+        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;" data-testid="ops-e2e-card">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1">
-              <span class="text-[10px] font-bold uppercase text-gray-400">TTFT</span>
-              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.ttft')" />
+              <span class="text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.e2eFirstOutput.title') }}</span>
+              <HelpTooltip v-if="!props.fullscreen" :content="e2eTooltip" />
             </div>
             <button
               v-if="!props.fullscreen"
               class="text-[10px] font-bold text-blue-500 hover:underline"
               type="button"
-              @click="openDetails({ title: t('admin.ops.ttftLabel'), kind: 'success', sort: 'ttft_desc' })"
+              @click="openDetails({ title: t('admin.ops.e2eFirstOutput.detailsTitle'), kind: 'success', sort: 'e2e_first_output_desc' })"
             >
               {{ t('admin.ops.requestDetails.details') }}
             </button>
           </div>
-          <div class="mt-2 flex items-baseline gap-2">
-            <div class="text-3xl font-black" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP99Ms))">
-              {{ ttftP99Ms ?? '-' }}
+          <template v-if="e2eSampleCount > 0">
+            <div class="mt-2 flex items-baseline gap-2">
+              <div class="text-3xl font-black text-gray-900 dark:text-white" data-testid="ops-e2e-p99">
+                {{ e2eP99Ms ?? '-' }}
+              </div>
+              <span class="text-xs font-bold text-gray-400">ms (P99)</span>
             </div>
-            <span class="text-xs font-bold text-gray-400">ms (P99)</span>
-          </div>
-          <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P95:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP95Ms))">{{ ttftP95Ms ?? '-' }}</span>
+            <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
+              <div v-for="item in e2eStats" :key="item.label" class="flex items-baseline gap-1 whitespace-nowrap">
+                <span class="text-gray-500">{{ item.label }}:</span>
+                <span class="font-bold text-gray-900 dark:text-white">{{ item.value ?? '-' }}</span>
+                <span class="text-gray-400">ms</span>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <div class="mt-2 text-3xl font-black text-gray-400 dark:text-gray-500" data-testid="ops-e2e-p99">{{ t('admin.ops.e2eFirstOutput.unknown') }}</div>
+            <p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-testid="ops-e2e-none">{{ t('admin.ops.e2eFirstOutput.none') }}</p>
+          </template>
+          <div class="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700" data-testid="ops-e2e-last-attempt">
+            <span class="text-gray-500">{{ t('admin.ops.e2eFirstOutput.lastAttempt') }}</span>
+            <span class="whitespace-nowrap">
+              <span class="text-gray-500">P99:</span>
+              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP99Ms))">{{ ttftP99Ms ?? '-' }}</span>
               <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P90:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP90Ms))">{{ ttftP90Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
+            </span>
+            <span class="whitespace-nowrap">
               <span class="text-gray-500">P50:</span>
               <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP50Ms))">{{ ttftP50Ms ?? '-' }}</span>
               <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Avg:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftAvgMs))">{{ ttftAvgMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Max:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftMaxMs))">{{ ttftMaxMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
+            </span>
           </div>
         </div>
 

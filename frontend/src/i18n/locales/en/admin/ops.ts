@@ -110,7 +110,14 @@ export default {
       errorRate: 'error_rate:',
       upstreamRate: 'upstream_rate:',
       latencyDuration: 'Request Duration',
-      ttftLabel: 'First token (usage metric, ms)',
+      e2eFirstOutput: {
+        title: 'User wait',
+        detailsTitle: 'User wait (end-to-end first output, ms)',
+        unknown: 'Unknown',
+        none: 'No end-to-end records in this period (periods before the upgrade have none)',
+        samples: 'Over {n} requests; periods before the upgrade have no records and are not counted.',
+        lastAttempt: 'Last attempt'
+      },
       p50: 'p50:',
       p90: 'p90:',
       p95: 'p95:',
@@ -825,7 +832,7 @@ export default {
         errors: 'Error statistics, including total errors, error rate, and upstream error rate.',
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
-        ttft: 'First token, measured as the first-token metric in system settings says (by default the first event, keep-alive frames included): how fast streaming responses start. It differs from the "first useful output" quality judging uses, which counts only real output such as text, reasoning or tool calls.',
+        e2eFirstOutput: 'User wait: the end-to-end first output, from the request entering the gateway to the user receiving the first useful output, queueing and earlier failed attempts included. It is how long the user actually waited. "Last attempt" below counts from the start of the last attempt only (as the first-token metric in system settings says); the health score and the over-threshold red still use it.',
         health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
       },
       charts: {
