@@ -7,9 +7,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFirstOutputFollowSimpleModeFullPool(t *testing.T) {
+	withResilienceSettings(t, nil)
+	y := selectionFixtureAccount(11, 2)
+	y.GroupIDs = []int64{99}
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), y)
+	f.svc.cfg.RunMode = config.RunModeSimple
+	const key = "openai:session"
+	f.cache.sessionBindings[key] = 10
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	x := selectTrialRuntime(t, f, ctx, "session")
+	require.EqualValues(t, 10, x.Account.ID)
+	x.ReleaseFunc()
+	change := pendingOpenAIStickyChange(ctx)
+	fact := resilience.OwnerFirstOutputCutoff{GroupID: 7, Session: "session", BindingKey: change.key, AccountID: x.Account.ID,
+		Generation: change.expected.Generation, AttemptSeq: st.MarkOpsUpstreamSendBoundary(x.Account.ID), FiredAt: time.Now(), Effective: time.Second, CanTransfer: change.canTransfer}
+	require.True(t, st.RecordOwnerCutoff(fact))
+	recordFirstOutputAvoid(ctx, fact)
+	sel, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", map[int64]struct{}{x.Account.ID: {}},
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+	require.NoError(t, err)
+	require.NotNil(t, sel)
+	defer sel.ReleaseFunc()
+	require.Equal(t, y.ID, sel.Account.ID)
+	require.Equal(t, stickyFollow, pendingOpenAIStickyChange(ctx).kind)
+	followDelivery(f.svc, ctx, sel.Account, time.Millisecond, &OpenAIForwardResult{})
+	require.Equal(t, y.ID, f.cache.sessionBindings[key])
+	require.Equal(t, []string{key}, f.cache.casKeys)
+}
 
 func TestFirstOutputFollowOwnerReleasePrecedesBorrow(t *testing.T) {
 	withResilienceSettings(t, nil)

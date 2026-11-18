@@ -397,7 +397,7 @@ func (s *OpenAIGatewayService) followTargetRejection(ctx context.Context, req Op
 	ctx = context.WithValue(s.withOpenAIQuotaAutoPauseContext(ctx), openAIGroupPrivacyRequirementContextKey{},
 		openAIGroupPrivacyRequirement{groupID: groupID, required: req.RequirePrivacySet})
 	fresh := s.recheckSelectionAccount(ctx, req, account)
-	if fresh == nil || fresh.ID != account.ID || !openAIStickyAccountMatchesGroup(fresh, req.GroupID) {
+	if fresh == nil || fresh.ID != account.ID || !s.openAIAccountMatchesSchedulingGroup(fresh, req.GroupID) {
 		return "target_ineligible"
 	}
 	view, now := s.selectionView(), s.selectionNow()
