@@ -113,7 +113,7 @@ func TestOwnerCutoffAtWinningGuards(t *testing.T) {
 
 func TestOwnerCutoffRejectsUnrelatedAttempts(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, scenario := range []string{"same_account_replay", "late_callback", "capacity_borrow", "ws_http_bridge", "client_cancel", "valid_output", "constructor", "short_budget", "missing_snapshot"} {
+	for _, scenario := range []string{"same_account_replay", "late_callback", "capacity_borrow", "client_cancel", "valid_output", "constructor", "short_budget", "missing_snapshot"} {
 		t.Run(scenario, func(t *testing.T) {
 			client, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -122,9 +122,6 @@ func TestOwnerCutoffRejectsUnrelatedAttempts(t *testing.T) {
 			sel, _ := st.SchedSelection()
 			if scenario == "capacity_borrow" {
 				sel.StickyWarm = OpenAIAttemptWarm(OpenAIAccountScheduleDecision{Layer: openAIAccountScheduleLayerSessionSticky, StickySessionHit: true}, &AccountSelectionResult{Account: account, StickyCapacitySpillover: true}, false)
-			}
-			if scenario == "ws_http_bridge" {
-				sel.HTTPStreamText = false
 			}
 			st.SetSchedSelection(sel)
 			if scenario == "missing_snapshot" {
@@ -169,7 +166,7 @@ func TestOwnerCutoffRejectsUnrelatedAttempts(t *testing.T) {
 			fact, ok := st.OwnerCutoff()
 			require.Equal(t, scenario == "missing_snapshot", ok)
 			require.False(t, fact.CanTransfer)
-			require.Equal(t, scenario != "same_account_replay" && scenario != "capacity_borrow" && scenario != "ws_http_bridge", a.ownerHit)
+			require.Equal(t, scenario != "same_account_replay" && scenario != "capacity_borrow" && scenario != a.ownerHit)
 			require.Equal(t, scenario == "capacity_borrow" || scenario == "same_account_replay" || scenario == "missing_snapshot", a.fullTierFirstOutputTimeout)
 		})
 	}
@@ -496,4 +493,122 @@ func TestOwnerCutoffGuardlessRawChatBypass(t *testing.T) {
 	require.False(t, guard)
 	require.False(t, st.GatewayRequestEnabled())
 	require.Nil(t, a, "guardless stream cannot produce a cutoff for follow")
+}
+
+func TestOwnerCutoffUnqualifiedGuardAllocations(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, mode := range []string{"cold", "wrong_account", "sent"} {
+		t.Run(mode, func(t *testing.T) {
+			account := rawChatCompletionsTestAccount()
+			st, ctx := ownerFactsState(context.Background(), account)
+			sel, _ := st.SchedSelection()
+			switch mode {
+			case "cold":
+				sel.StickyWarm = false
+			case "wrong_account":
+				sel.AccountID++
+			case "sent":
+				st.MarkOpsUpstreamSendBoundary(account.ID)
+			}
+			st.SetSchedSelection(sel)
+			guard := &openAIFirstOutputHeaderGuard{}
+			svc := &OpenAIGatewayService{}
+			var got *schedAttemptCapture
+			allocs := testing.AllocsPerRun(100, func() { got = svc.newSchedAttemptCapture(ctx, account, nil, true, time.Time{}, guard) })
+			require.Nil(t, got)
+			require.Zero(t, allocs)
+		})
+	}
+}
+
+func TestOwnerCutoffFiredBeforeDispatch(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		account := rawChatCompletionsTestAccount()
+		st, ctx := ownerFactsState(context.Background(), account)
+		plan := st.PlanAttemptTimeout(time.Second, false, time.Now())
+		svc := &OpenAIGatewayService{schedAttemptRecorder: &captureServiceRecorder{}}
+		a := svc.beginSchedAttempt(ctx, account, nil, 0, true)
+		time.Sleep(plan.Effective())
+		firedAt := time.Now()
+		time.Sleep(time.Nanosecond)
+		a.markHTTPDispatch(st.MarkOpsUpstreamSendBoundary(account.ID))
+		require.True(t, a.ownerHit)
+		_, published := claimOpenAIFirstOutputCutoff(a, plan, firedAt, nil)
+		require.False(t, published)
+		require.False(t, a.fullTierFirstOutputTimeout)
+	})
+}
+
+func TestOwnerCutoffCompatReaderExclusions(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"messages", "chat"} {
+		for _, mode := range []string{"held_prelude", "disconnected"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					account := rawChatCompletionsTestAccount()
+					c, _ := compatStreamContext("/v1/"+route, compatMessagesStreamBody)
+					st, ctx := ownerFactsState(c.Request.Context(), account)
+					c.Request = c.Request.WithContext(ctx)
+					keepalive := 0
+					before := keepaliveStallCreated
+					var writer *openAICompatFailingWriter
+					if mode == "disconnected" {
+						keepalive = 1
+						before = ""
+						writer = &openAICompatFailingWriter{ResponseWriter: c.Writer}
+						c.Writer = writer
+					}
+					up := &silentUpstream{headers: true, before: before}
+					var a *schedAttemptCapture
+					svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+						a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+						RecordOpsUpstreamSendBoundary(req.Context(), id)
+						return up.Do(req, "", id, 1)
+					}}, 1, 30, keepalive)
+					_, err := captureForward(svc, c, account, []byte(compatMessagesStreamBody), route)
+					if writer != nil {
+						require.Equal(t, 1, writer.failedWrites)
+						require.Error(t, err)
+						require.NoError(t, ctx.Err())
+					} else {
+						requireFirstOutputFailover(t, err)
+						require.True(t, a.holdingCompatPrelude)
+					}
+					require.True(t, a.ownerHit)
+					require.False(t, a.fullTierFirstOutputTimeout)
+					_, ok := st.OwnerCutoff()
+					require.False(t, ok)
+				})
+			})
+		}
+	}
+}
+
+func TestOwnerCutoffRequiresMatchingActiveTimer(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, mode := range []string{"current", "different_handle", "different_account", "no_text_budget"} {
+		t.Run(mode, func(t *testing.T) {
+			account := rawChatCompletionsTestAccount()
+			st, ctx := ownerFactsState(context.Background(), account)
+			a := (&OpenAIGatewayService{schedAttemptRecorder: &captureServiceRecorder{}}).beginSchedAttempt(ctx, account, nil, 0, true)
+			a.markHTTPDispatch(st.MarkOpsUpstreamSendBoundary(account.ID))
+			require.True(t, a.ownerHit)
+			if mode == "different_account" {
+				profile := st.AttemptProfile()
+				profile.AccountID++
+				st.SetAttemptProfile(profile)
+			}
+			plan := st.PlanAttemptTimeout(time.Second, false, time.Now())
+			if mode == "different_handle" {
+				st.SetCurrentAttempt(&schedAttemptCapture{accountID: account.ID})
+			}
+			if mode == "no_text_budget" {
+				st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindImage, time.Now()))
+			}
+			_, ok := claimOpenAIFirstOutputCutoff(a, plan, plan.Start().Add(plan.Effective()), nil)
+			require.Equal(t, mode == "current", ok)
+			require.Equal(t, ok, a.fullTierFirstOutputTimeout)
+		})
+	}
 }

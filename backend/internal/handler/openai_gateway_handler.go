@@ -1374,6 +1374,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(c, apiKey, reqModel)
 	reqStream := gjson.GetBytes(body, "stream").Bool()
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/messages", reqModel, body)
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
@@ -1559,7 +1560,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
 			st.SetSchedSelection(resilience.SchedSelection{
 				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, currentRoutingModel),
-				HTTPStreamText: reqStream,
+				HTTPStreamText: reqStream && !imageIntent,
 				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
 			})
 			st.SetAttemptProfile(resilience.AttemptProfile{

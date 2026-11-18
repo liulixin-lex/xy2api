@@ -68,3 +68,15 @@ func TestOwnerCutoffClearedOnNextGatewayTurn(t *testing.T) {
 	require.False(t, ok)
 	require.True(t, st.ConfirmOwnerAvoid(next, fact.Generation))
 }
+
+func TestOwnerCutoffAvoidReceiptIsIndependentOfTransfer(t *testing.T) {
+	st := NewRequestState()
+	seq := st.MarkOpsUpstreamSendBoundary(4)
+	fact := OwnerFirstOutputCutoff{GroupID: 7, AccountID: 4, AttemptSeq: seq, Generation: "v2", CanTransfer: false}
+	require.True(t, st.RecordOwnerCutoff(fact))
+	require.False(t, st.ConfirmOwnerAvoid(seq, "stale"))
+	require.True(t, st.ConfirmOwnerAvoid(seq, "v2"))
+	got, ok := st.ConfirmedOwnerCutoff()
+	require.True(t, ok)
+	require.Equal(t, fact, got)
+}

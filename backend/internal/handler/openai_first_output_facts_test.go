@@ -4,16 +4,17 @@ package handler
 
 import (
 	"context"
-	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/repository"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
-
-	"github.com/gin-gonic/gin"
 	"testing"
 	"time"
 
+	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/repository"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -180,4 +181,121 @@ func TestOwnerCutoffAfterHTTPRedirect(t *testing.T) {
 	t.Logf("status=%d wire_hops=%d published=%t fact_seq=%d", response.Code, hops.Load(), ok, fact.AttemptSeq)
 	require.EqualValues(t, 2, hops.Load())
 	require.False(t, ok)
+}
+
+func TestOwnerCutoffHTTPSource(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, route := range []string{"responses", "chat/completions", "messages"} {
+		for _, mode := range []string{"buffered", "stream", "image"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				var sel resilience.SchedSelection
+				up := &captureUpstream{reply: func(_ int, req *http.Request, _ []byte) (*http.Response, error) {
+					sel, _ = resilience.StateFrom(req.Context()).SchedSelection()
+					resp := captureResponse(200, captureTerminalSSE(), true)
+					resp.Request = req
+					return resp, nil
+				}}
+				_, _, router := captureFixture(t, service.Account{Extra: map[string]any{"openai_responses_mode": "force_responses"}}, up)
+				fields := `"max_tokens":100,"messages":[{"role":"user","content":"hello"}]`
+				if route == "responses" || route == "chat/completions" && mode == "image" {
+					fields = `"input":"hello"`
+				}
+				switch mode {
+				case "image":
+					fields += `,"stream":true,"tools":[{"type":"image_generation","name":"draw","input_schema":{"type":"object"}}]`
+				case "stream":
+					fields += `,"stream":true`
+				}
+				response := captureRequest(router, "/v1/"+route, `{"model":"gpt-5.1",`+fields+"}")
+				require.Equal(t, 1, up.calls, response.Body.String())
+				require.Equal(t, mode == "stream", sel.HTTPStreamText)
+			})
+		}
+	}
+}
+
+type factsReselectionSlots struct {
+	queueReselectionCache
+	binding *capturePinnedCache
+}
+
+func (s *factsReselectionSlots) IncrementAccountWaitCount(ctx context.Context, id int64, limit int) (bool, error) {
+	ok, err := s.queueReselectionCache.IncrementAccountWaitCount(ctx, id, limit)
+	// A concurrent request moves the binding while the first choice is queued.
+	// The next selection hits that binding but cannot become original-owner evidence.
+	s.binding.owner = 2
+	s.freeB = true
+	return ok, err
+}
+
+func TestOwnerCutoffQueueReselection(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, route := range []string{"responses", "chat/completions", "messages"} {
+		t.Run(route, func(t *testing.T) {
+			a := service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{4201}, Credentials: map[string]any{"api_key": "test", "base_url": "https://capture.example"}, Extra: map[string]any{"openai_responses_mode": "force_responses"}}
+			b := a
+			b.ID = 2
+			repo := &openAIImagesFailoverAccountRepo{accounts: []service.Account{a, b}}
+			binding := &capturePinnedCache{owner: 1}
+			slots := &factsReselectionSlots{queueReselectionCache: queueReselectionCache{attempts: map[int64]int{}, queueFull: true}, binding: binding}
+			concurrency := service.NewConcurrencyService(slots)
+			var selected resilience.SchedSelection
+			var profileWarm bool
+			up := &captureUpstream{reply: func(_ int, req *http.Request, _ []byte) (*http.Response, error) {
+				st := resilience.StateFrom(req.Context())
+				selected, _ = st.SchedSelection()
+				profileWarm = st.AttemptProfile().Warm
+				resp := captureResponse(200, captureTerminalSSE(), true)
+				resp.Request = req
+				return resp, nil
+			}}
+			h, _, router := captureFixture(t, a, up, captureOptions{repo: repo, cache: binding, slots: concurrency})
+			h.concurrencyHelper = NewConcurrencyHelper(concurrency, SSEPingFormatNone, 0)
+			body := `{"model":"gpt-5.1","stream":true,"input":"hi","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"prompt_cache_key":"fixture"}`
+			response := captureRequest(router, "/v1/"+route, body)
+			require.Equal(t, 1, slots.waitAdds, response.Body.String())
+			require.Equal(t, 1, up.calls)
+			require.EqualValues(t, 2, selected.AccountID)
+			require.True(t, profileWarm, "new selection really was sticky")
+			require.False(t, selected.StickyWarm)
+		})
+	}
+}
+
+func TestOwnerCutoffWebSocketHTTPBridgeSource(t *testing.T) {
+	withHandlerResilience(t, nil)
+	selections := make(chan resilience.SchedSelection, 2)
+	up := &captureUpstream{reply: func(_ int, req *http.Request, _ []byte) (*http.Response, error) {
+		sel, _ := resilience.StateFrom(req.Context()).SchedSelection()
+		selections <- sel
+		return captureResponse(200, captureTerminalSSE(), true), nil
+	}}
+	_, rec, router := captureFixture(t, service.Account{Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true, "openai_apikey_responses_websockets_v2_mode": service.OpenAIWSIngressModeCtxPool}}, up, captureOptions{configure: func(cfg *config.Config) {
+		cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+		cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	}})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	for range 2 {
+		require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hi"}`)))
+		_, _, err = conn.Read(ctx)
+		require.NoError(t, err)
+		select {
+		case sel := <-selections:
+			require.NotZero(t, sel.AccountID)
+			require.False(t, sel.HTTPStreamText)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		select {
+		case <-rec.finished:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
 }

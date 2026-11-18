@@ -86,6 +86,20 @@ func (fe *openAICompatFirstEvent) expired() bool {
 	return true
 }
 
+// Content or a terminal disarms this guard. Until then the reader may hold
+// metadata for conversion; its timer can still fail over without publishing
+// first-output evidence while that prelude is pending.
+func (fe *openAICompatFirstEvent) noteHeldPrelude() {
+	if fe == nil {
+		return
+	}
+	if a := fe.guard.capture.Load(); a != nil {
+		a.mu.Lock()
+		a.holdingCompatPrelude = true
+		a.mu.Unlock()
+	}
+}
+
 // ownsStall reports a guard still waiting for effective output: the
 // stall check leaves the attempt to it, as resilienceFirstOutputGuardOwnsStall
 // does for the Responses stream (review P1-C).

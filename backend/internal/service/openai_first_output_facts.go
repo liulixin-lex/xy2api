@@ -62,6 +62,8 @@ func (a *schedAttemptCapture) cancelFirstOutputUpstream() {
 // Only a winning guard calls this. The recorder reads the two booleans under
 // the capture lock; the final request outcome cannot create either fact.
 func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.TimeoutPlan, firedAt time.Time, onClaim context.CancelFunc) (resilience.OwnerFirstOutputCutoff, bool) {
+	// The caller owns the specific timer; a replaced account profile or a
+	// request whose text budget has gone away cannot authorize its publication.
 	if a == nil || !plan.FullFirstOutputTier() || a.accountID != plan.AccountID() || resilienceTextBudget(a.ctx) == nil {
 		return resilience.OwnerFirstOutputCutoff{}, false
 	}
@@ -71,7 +73,7 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 		a.mu.Unlock()
 		return fact, false
 	}
-	if a.repeatedHTTPSend || a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
+	if a.holdingCompatPrelude || a.repeatedHTTPSend || a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
 		a.first || a.terminal || a.httpStatus >= 400 || a.done || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() || !a.state.IsCurrentHTTPDispatch(a, a.dispatch.AttemptSeq) {
 		a.mu.Unlock()
 		return resilience.OwnerFirstOutputCutoff{}, false
