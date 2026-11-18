@@ -27,7 +27,14 @@ type CacheAssessment struct {
 // 只取续接轮、本轮成功、token 都已知、FinishedAt∈[now-30m,now]、StartedAt>cut 的样本。
 // Pass：Turns≥20 且 Ratio≥MinRatio。Fail：Turns≥20、Ratio<MinRatio 且 LowSessions≥2。其余 Unknown。没有 3 个百分点的容差。
 func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) CacheAssessment {
+	assessment, _ := AssessCacheForGroup(samples, minRatio, cut, now, 0)
+	return assessment
+}
+
+// AssessCacheForGroup counts only continuation turns with usable token evidence.
+func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now time.Time, groupID int64) (CacheAssessment, int) {
 	out := CacheAssessment{MinRatio: minRatio}
+	local := 0
 	type session struct {
 		group int64
 		key   string
@@ -46,6 +53,9 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 		}
 		groups[s.GroupID] = struct{}{}
 		out.Turns++
+		if s.GroupID == groupID {
+			local++
+		}
 		out.ReadTokens += read
 		out.InputTokens += input
 		k := session{s.GroupID, s.SessionKey}
@@ -78,7 +88,7 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 	for _, s := range bad[:min(50, len(bad))] {
 		out.AttemptIDs = append(out.AttemptIDs, s.AttemptID)
 	}
-	return out
+	return out, local
 }
 
 // IsContinuation requires the immediately preceding group/model/session attempt.

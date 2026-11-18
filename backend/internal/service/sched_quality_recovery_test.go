@@ -65,6 +65,9 @@ func TestEngineErrorRecoveryByEvent(t *testing.T) {
 				var stored q.Basis
 				require.NoError(t, json.Unmarshal(raw, &stored))
 				require.NotNil(t, stored.Error)
+				ui := SchedAdminDecisionBasis(stored)
+				require.Equal(t, sample.want == q.VerdictUnknown, ui.Error.RecoveryOverLimit)
+				require.Equal(t, q.NewSampleCounts(52, 52), ui.SampleCounts)
 				require.Equal(t, verdict, stored.Error.Verdict)
 				if sample.want == q.VerdictUnknown {
 					require.True(t, stored.Error.RecoveryOverLimit)

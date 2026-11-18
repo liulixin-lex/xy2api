@@ -208,6 +208,11 @@ func TestEngineSnapshotKeepsTTFTSourceGroupsSeparate(t *testing.T) {
 	f.ledger.Rows = rows
 	f.cycle()
 	row := f.e.Snapshot().RowsForAccount(1)[0]
+	lines := SchedAdminGroupModel(row, false).Lines
+	require.Equal(t, q.NewSampleCounts(1, 3), lines.TTFO.SampleCounts)
+	require.InDelta(t, lines.TTFO.Evidence.N/3, *lines.TTFO.Evidence.NLocal, 1e-12)
+	require.Equal(t, q.NewSampleCounts(1, 4), lines.Error.SampleCounts)
+	require.Equal(t, q.NewSampleCounts(0, 0), lines.Cache.SampleCounts)
 	require.Equal(t, []int64{10, 30}, row.TTFTSourceGroups)
 	require.Equal(t, []int64{10, 20, 30}, row.Error.SourceGroups)
 	require.Equal(t, []int64{10, 20, 30}, row.SourceGroups)
@@ -309,4 +314,80 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 // the first cooldown no longer outlasts both view staleness and lease idleness.
 func TestSchedTrialResetResidualWindowFitsFirstCooldown(t *testing.T) {
 	require.Greater(t, q.CooldownLadder[0], TrialLeaseIdle+q.ViewMaxAge)
+}
+
+type timeoutSeatProbe struct {
+	engineLeaseProbe
+	stall   bool
+	at      time.Time
+	err     error
+	reads   []schedQualityKey
+	bounded bool
+}
+
+func (p *timeoutSeatProbe) LastFull(ctx context.Context, a int64, m string, g int64) (time.Time, error) {
+	_, p.bounded = ctx.Deadline()
+	p.reads = append(p.reads, schedQualityKey{a, m, g})
+	if p.stall && p.bounded {
+		<-ctx.Done()
+		return time.Time{}, ctx.Err()
+	}
+	return p.at, p.err
+}
+
+func TestObserveTimeoutSeatEvidenceAtTrialDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		offset     time.Duration
+		missing    bool
+		err        error
+	}{
+		{"start", "full", 0, false, nil},
+		{"end", "full", q.TrialDuration, false, nil},
+		{"absent", "not_observed", 0, true, nil},
+		{"earlier", "not_observed", -time.Millisecond, false, nil},
+		{"overwritten", "unknown", q.TrialDuration + time.Millisecond, false, nil},
+		{"storage error", "unknown", 0, true, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newQualityFixture(t)
+			end := f.now.Add(-10 * time.Second)
+			start := end.Add(-q.TrialDuration)
+			probe := &timeoutSeatProbe{err: tc.err}
+			if !tc.missing {
+				probe.at = start.Add(tc.offset)
+			}
+			f.e.SetTrialLeases(probe)
+			key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}
+			f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: start, TrialUntil: end, EvaluatedAt: end.Add(-time.Minute)}}
+			f.cycle()
+			require.Len(t, f.store.Decisions, 1)
+			decision := f.store.Decisions[0]
+			require.Equal(t, q.ActionTrialTimeout, decision.Action)
+			require.Equal(t, new(tc.want), decision.Basis.TrialSeats)
+			require.Equal(t, q.NewSampleCounts(0, 0), decision.Basis.SampleCounts)
+			require.Equal(t, &decision.Basis, f.line(q.DimensionError).Basis)
+			require.True(t, probe.bounded)
+			require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.reads)
+		})
+	}
+}
+
+func TestObserveTimeoutSeatReadBudgetSharedByReplay(t *testing.T) {
+	f := newQualityFixture(t)
+	end := f.now.Add(-10 * time.Second)
+	for _, dim := range []q.Dimension{q.DimensionTTFO, q.DimensionError, q.DimensionCache} {
+		f.store.Rows = append(f.store.Rows, q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: dim},
+			Trial: true, Epoch: end.Add(-q.TrialDuration), TrialUntil: end, EvaluatedAt: end.Add(-time.Minute)})
+	}
+	probe := &timeoutSeatProbe{stall: true}
+	f.e.SetTrialLeases(probe)
+	f.cycle()
+	require.True(t, probe.bounded)
+	require.Len(t, probe.reads, 1, "an unavailable Redis must not cost one timeout per trial")
+	require.Len(t, f.store.Decisions, 3)
+	for _, decision := range f.store.Decisions {
+		require.Equal(t, q.ActionTrialTimeout, decision.Action)
+		require.Equal(t, new("unknown"), decision.Basis.TrialSeats)
+	}
 }

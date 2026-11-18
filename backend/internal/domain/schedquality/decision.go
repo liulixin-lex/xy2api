@@ -7,6 +7,7 @@ const RuleVersion = "3.0"
 // TTFTEvidence is the stable, flat representation stored in decision/state JSON
 // and returned by the API. RuleBResult remains the in-memory assessment.
 type TTFTEvidence struct {
+	NLocal       *float64             `json:"n_local"`
 	LimitSeconds float64              `json:"limit_s"`
 	N            float64              `json:"n"`
 	K            float64              `json:"k"`
@@ -27,6 +28,7 @@ type TTFTEvidence struct {
 func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 	e := &TTFTEvidence{
 		LimitSeconds: limitSeconds,
+		NLocal:       new(result.NLocal),
 		N:            result.Counts.N, K: result.Counts.K, X: result.Counts.X,
 		S: result.Counts.S, D: result.Counts.D,
 		PriorMu: result.Prior, PeerNu: result.PeerPrior, PAbs: result.AbsoluteProbability,
@@ -45,7 +47,19 @@ func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 	return e
 }
 
+// SampleCounts preserves missing historical counts separately from a measured zero.
+type SampleCounts struct {
+	SamplesLocal *int `json:"samples_local"`
+	SamplesTotal *int `json:"samples_total"`
+}
+
+func NewSampleCounts(local, total int) SampleCounts {
+	return SampleCounts{SamplesLocal: &local, SamplesTotal: &total}
+}
+
 type Basis struct {
+	SampleCounts
+	TrialSeats   *string          `json:"trial_seats"`
 	RuleVersion  string           `json:"rule_version"`
 	Line         Dimension        `json:"line"`
 	Kind         string           `json:"kind"` // regular | trial | review | relax

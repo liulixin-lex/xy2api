@@ -13,7 +13,10 @@
       "line": "ttfo",
       "kind": "trial",
       "threshold": 10,
-      "source_groups": [],
+      "source_groups": [
+        1,
+        2
+      ],
       "ttft": {
         "limit_s": 10,
         "n": 25,
@@ -29,8 +32,12 @@
         "z": null,
         "causes": [
           "no_peers"
-        ]
-      }
+        ],
+        "n_local": 10
+      },
+      "samples_local": 12,
+      "samples_total": 30,
+      "trial_seats": null
     }
   },
   {
@@ -47,7 +54,10 @@
       "line": "ttfo",
       "kind": "review",
       "threshold": 10,
-      "source_groups": [],
+      "source_groups": [
+        1,
+        2
+      ],
       "ttft": {
         "limit_s": 10,
         "n": 25,
@@ -63,8 +73,12 @@
         "z": null,
         "causes": [
           "no_peers"
-        ]
-      }
+        ],
+        "n_local": 10
+      },
+      "samples_local": 12,
+      "samples_total": 30,
+      "trial_seats": null
     }
   },
   {

@@ -36,6 +36,9 @@ func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedqual
 func (r *schedAdminAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error) {
 	return []SchedAdminDecision{}, nil
 }
+func (r *schedAdminAccounts) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error) {
+	return nil, nil
+}
 func (r *schedAdminAccounts) SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error) {
 	return map[int64]SchedAdminGroupLast60{}, nil
 }
@@ -65,7 +68,7 @@ func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
 	require.Equal(t, "fail", ttfo["verdict"])
 	require.EqualValues(t, 2, ttfo["level"])
 	evidence := ttfo["evidence"].(map[string]any)
-	require.ElementsMatch(t, []string{"limit_s", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
+	require.ElementsMatch(t, []string{"limit_s", "n_local", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
 	for _, key := range []string{"p_rel", "u", "z"} {
 		require.Nil(t, evidence[key])
 	}
@@ -143,10 +146,14 @@ func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
 
 type schedAdminStatsAccounts struct {
 	*schedAdminAccounts
-	calls int
-	err   error
+	rearErr error
+	calls   int
+	err     error
 }
 
+func (r *schedAdminStatsAccounts) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error) {
+	return map[int64]SchedAdminRearEntries{}, r.rearErr
+}
 func (r *schedAdminStatsAccounts) SchedAdminGroupLast60(_ context.Context, ids []int64, _ time.Time) (map[int64]SchedAdminGroupLast60, error) {
 	r.calls++
 	return map[int64]SchedAdminGroupLast60{}, r.err
@@ -163,8 +170,10 @@ func TestSchedAdminV2GroupsJSONAndCache(t *testing.T) {
 	out, err := s.GroupsSummary(context.Background(), []int64{1})
 	require.NoError(t, err)
 	group := schedAdminJSON(t, out.Groups[0])
-	require.ElementsMatch(t, []string{"group_id", "accounts", "last60"}, schedAdminJSONKeys(group))
+	require.ElementsMatch(t, []string{"group_id", "accounts", "last60", "rear_entries_24h"}, schedAdminJSONKeys(group))
 	require.Equal(t, map[string]any{"pass": float64(1), "unknown": float64(1), "trial": float64(1), "rear": float64(1)}, group["accounts"])
+	require.Equal(t, &SchedAdminRearEntries{}, out.Groups[0].RearEntries24h)
+	repo.rearErr = fmt.Errorf("unavailable")
 	last := group["last60"].(map[string]any)
 	require.Len(t, last, 6)
 	for _, v := range last {
@@ -182,6 +191,7 @@ func TestSchedAdminV2GroupsJSONAndCache(t *testing.T) {
 	e.snapshot.Policies[1] = policy
 	out, err = s.GroupsSummary(context.Background(), []int64{1})
 	require.NoError(t, err)
+	require.Nil(t, out.Groups[0].RearEntries24h)
 	require.Equal(t, SchedAdminCounts{Pass: 1, Unknown: 3}, out.Groups[0].Accounts)
 }
 func TestSchedAdminV2PreviewJSONAndConflict(t *testing.T) {
@@ -323,7 +333,7 @@ func TestSchedAdminV2PolicySavedJSONAndChangeLog(t *testing.T) {
 	out, err := s.UpdatePolicy(context.Background(), 1, 7, policy, 42)
 	require.NoError(t, err)
 	raw := schedAdminJSON(t, out)
-	require.ElementsMatch(t, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}, schedAdminJSONKeys(raw))
+	require.ElementsMatch(t, []string{"group_id", "version", "policy", "effective_max_error_rate", "error_trip_examples", "relaxed_lines", "cleared"}, schedAdminJSONKeys(raw))
 	require.Equal(t, []any{"ttfo"}, raw["relaxed_lines"])
 	require.EqualValues(t, 8, raw["version"])
 	var event map[string]any

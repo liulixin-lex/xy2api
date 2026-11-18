@@ -157,6 +157,7 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		}
 		if err == nil {
 			basis.TTFT = q.NewTTFTEvidence(result, p.TTFTSeconds)
+			basis.SampleCounts = q.NewSampleCounts(result.SamplesLocal, result.SamplesTotal)
 			switch result.State {
 			case q.RuleBGood:
 				verdict = q.VerdictPass
@@ -165,7 +166,8 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 			}
 		}
 	case q.DimensionError:
-		result := q.AssessError(samples, running, p.MaxErrorRate, cut, at)
+		result, local := q.AssessErrorForGroup(samples, running, p.MaxErrorRate, cut, at, r.GroupID)
+		basis.SampleCounts = q.NewSampleCounts(local, result.Clear)
 		if kind == q.EventReview || kind == q.EventTrial {
 			result = result.ForRecovery()
 		}
@@ -175,7 +177,8 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		basis.AttemptIDs = result.AttemptIDs
 		verdict = result.Verdict
 	case q.DimensionCache:
-		result := q.AssessCache(samples, p.MinCacheRatio, cut, at)
+		result, local := q.AssessCacheForGroup(samples, p.MinCacheRatio, cut, at, r.GroupID)
+		basis.SampleCounts = q.NewSampleCounts(local, result.Turns)
 		basis.Threshold = p.MinCacheRatio
 		basis.Cache = &result
 		basis.SourceGroups = append([]int64(nil), result.SourceGroups...)

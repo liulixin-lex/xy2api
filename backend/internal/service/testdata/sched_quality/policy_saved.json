@@ -11,5 +11,16 @@
   "relaxed_lines": [
     "ttfo"
   ],
-  "cleared": 3
+  "cleared": 3,
+  "effective_max_error_rate": 0.05,
+  "error_trip_examples": [
+    {
+      "known": 50,
+      "failed": 6
+    },
+    {
+      "known": 100,
+      "failed": 10
+    }
+  ]
 }

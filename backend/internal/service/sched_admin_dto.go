@@ -93,13 +93,14 @@ type SchedAdminAccountDetailGroups struct {
 
 // Evidence DTOs deliberately omit assessment internals (verdict and token totals).
 type SchedAdminErrorEvidence struct {
-	Limit     float64 `json:"limit"`
-	Clear     int     `json:"clear"`
-	Failed    int     `json:"failed"`
-	Unknown   int     `json:"unknown"`
-	Padded    int     `json:"padded"`
-	LowerFail float64 `json:"lower_fail"`
-	LowerPass float64 `json:"lower_pass"`
+	RecoveryOverLimit bool    `json:"recovery_over_limit,omitempty"`
+	Limit             float64 `json:"limit"`
+	Clear             int     `json:"clear"`
+	Failed            int     `json:"failed"`
+	Unknown           int     `json:"unknown"`
+	Padded            int     `json:"padded"`
+	LowerFail         float64 `json:"lower_fail"`
+	LowerPass         float64 `json:"lower_pass"`
 }
 type SchedAdminCacheEvidence struct {
 	MinRatio    float64 `json:"min_ratio"`
@@ -109,6 +110,7 @@ type SchedAdminCacheEvidence struct {
 	LowSessions int     `json:"low_sessions"`
 }
 type SchedAdminLine[E any] struct {
+	schedquality.SampleCounts
 	Identity     string  `json:"identity"`
 	Level        int     `json:"level"`
 	Until        *string `json:"until"`
@@ -162,10 +164,17 @@ type SchedAdminAttention struct {
 	Unknown []int64 `json:"unknown"`
 	Exempt  []int64 `json:"exempt"`
 }
+type SchedAdminErrorTripExample struct {
+	Known  int `json:"known"`
+	Failed int `json:"failed"`
+}
+
 type SchedAdminPolicy struct {
-	GroupID int64                  `json:"group_id"`
-	Version int64                  `json:"version"`
-	Policy  SchedAdminPolicyPolicy `json:"policy"`
+	EffectiveMaxErrorRate float64                      `json:"effective_max_error_rate"`
+	ErrorTripExamples     []SchedAdminErrorTripExample `json:"error_trip_examples"`
+	GroupID               int64                        `json:"group_id"`
+	Version               int64                        `json:"version"`
+	Policy                SchedAdminPolicyPolicy       `json:"policy"`
 }
 type SchedAdminPolicyPolicy struct {
 	Enabled             bool    `json:"enabled"`
@@ -222,10 +231,16 @@ type SchedAdminGroupLast60 struct {
 	Requests             *int64   `json:"requests"`
 	Migration400         *int64   `json:"migration_400"`
 }
+type SchedAdminRearEntries struct {
+	Decisions     int64 `json:"decisions"`
+	AccountModels int64 `json:"account_models"`
+}
+
 type SchedAdminGroupSummary struct {
-	GroupID  int64                 `json:"group_id"`
-	Accounts SchedAdminCounts      `json:"accounts"`
-	Last60   SchedAdminGroupLast60 `json:"last60"`
+	RearEntries24h *SchedAdminRearEntries `json:"rear_entries_24h"`
+	GroupID        int64                  `json:"group_id"`
+	Accounts       SchedAdminCounts       `json:"accounts"`
+	Last60         SchedAdminGroupLast60  `json:"last60"`
 }
 type SchedAdminGroupsSummary struct {
 	At     string                   `json:"at"`
@@ -282,6 +297,8 @@ type SchedAdminDecision struct {
 	Basis   *SchedAdminBasis       `json:"basis,omitempty"`
 }
 type SchedAdminBasis struct {
+	schedquality.SampleCounts
+	TrialSeats   *string                    `json:"trial_seats"`
 	RuleVersion  string                     `json:"rule_version"`
 	Line         schedquality.Dimension     `json:"line"`
 	Kind         string                     `json:"kind"`

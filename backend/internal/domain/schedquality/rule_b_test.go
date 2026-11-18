@@ -644,3 +644,23 @@ func TestRuleBBetaNonConvergence(t *testing.T) {
 		})
 	}
 }
+
+func TestObserveRuleBLocalDiscountedWeight(t *testing.T) {
+	local := RuleBSample{AccountID: 2, GroupID: 7, Model: "fixture", Stream: true, Outcome: OutcomeOK, TTFOMs: 100,
+		StartedAt: machineNow.Add(-RuleBHalfLife), AvailableAt: machineNow.Add(-RuleBHalfLife)}
+	borrowed := local
+	borrowed.GroupID, borrowed.StartedAt, borrowed.AvailableAt = 9, machineNow, machineNow
+	censored := local
+	censored.Outcome, censored.TTFOMs = OutcomeTimeout, 0
+	censored.StartedAt, censored.AvailableAt = machineNow.Add(-2*RuleBHalfLife), machineNow.Add(-2*RuleBHalfLife)
+	excluded := local
+	excluded.SwitchedAccount = true
+	result, err := EvaluateRuleB(RuleBInput{Scope: RuleBScope{AccountID: 2, GroupID: 7, Model: "fixture"}, Now: machineNow, LimitSeconds: 1,
+		Samples: []RuleBSample{local, borrowed, censored, excluded}}, DefaultRuleBParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SamplesLocal != 2 || result.SamplesTotal != 3 || result.NLocal != .75 || result.Counts.N != 1.75 || result.Counts.X != .25 {
+		t.Fatalf("local/total %d/%d, n_local/n/x %v/%v/%v", result.SamplesLocal, result.SamplesTotal, result.NLocal, result.Counts.N, result.Counts.X)
+	}
+}
