@@ -4,9 +4,9 @@
 
 ## [Unreleased]
 
-### 模型目录
+### 修复
 
-- gpt-6.2-sol、gpt-6.2-astra 的 Codex 模型目录改用 openai/codex 官方元数据（推理档位 low–ultra、默认 low、上下文窗口与图片输入等），与 GPT-6.1 Sol/Terra 的处理一致，Codex 客户端不再默认发送上游会拒绝的 none 档位；请求转发、推理档位校验与计费不变。
+- Codex 客户端中的 gpt-6.2-sol、gpt-6.2-astra 可选 low–ultra 推理档位并默认使用 low，不再默认发送上游会拒绝的 none；两者的 Codex 模型目录改用 openai/codex 官方元数据（上下文窗口、图片输入、Fast 档与 GPT-6.1 Sol/Terra 处理方式一致），请求转发、推理档位校验与计费不变，详见 [OpenAI 平台说明](docs/platforms/openai.md#模型支持gpt-62-sol-与-gpt-62-astra)。
 
 ## [0.6.9] - 2026-11-17
 
