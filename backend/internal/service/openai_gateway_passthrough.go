@@ -3281,17 +3281,19 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if resilience.BudgetTraceEnabledForTest {
 				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")
 			}
+			// Attribute the timer at firing. Delivery still resolves disconnects and
+			// bare errors after Close has allowed any in-flight read to finish.
+			if !clientDisconnected && reqCtx.Err() == nil && !(codexFailureTerminal && sawBareError && !sawResponseFailed) {
+				claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, schedCapture.cancelFirstOutputUpstream)
+			}
+			_ = resp.Body.Close()
 			if clientDisconnected || reqCtx.Err() != nil {
-				_ = resp.Body.Close()
 				MarkResponseCommitted(c)
 				return resultWithUsage(), errors.New("stream usage incomplete: client disconnected before output")
 			}
 			if codexFailureTerminal && sawBareError && !sawResponseFailed {
-				_ = resp.Body.Close()
 				return finish(nil)
 			}
-			claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, schedCapture.cancelFirstOutputUpstream)
-			_ = resp.Body.Close()
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, schedCapture), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan)

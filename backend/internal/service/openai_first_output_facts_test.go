@@ -403,3 +403,37 @@ func TestOwnerCutoffCancelsBeforeBlockingClose(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerCutoffPassthroughDisconnectDuringClose(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+		account := rawChatCompletionsTestAccount()
+		c, _ := compatStreamContext("/v1/responses", string(body))
+		client, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+		st, ctx := ownerFactsState(client, account)
+		c.Request = c.Request.WithContext(ctx)
+		r, w := io.Pipe()
+		defer w.Close()
+		b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
+		up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+			RecordOpsUpstreamSendBoundary(req.Context(), id)
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: b, Request: req}, nil
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := compatStreamService(up, 1, 0, 0).forwardOpenAIPassthrough(ctx, c, account, body, body, "wire-model", false, nil, true, time.Now())
+			done <- err
+		}()
+		<-b.enter
+		before, ok := st.OwnerCutoff()
+		cancel()
+		close(b.leave)
+		require.EqualError(t, <-done, "stream usage incomplete: client disconnected before output")
+		require.True(t, IsResponseCommitted(c))
+		after, preserved := st.OwnerCutoff()
+		require.True(t, ok && preserved)
+		require.Equal(t, before, after)
+	})
+}
