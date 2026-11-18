@@ -135,6 +135,38 @@ describe('Ops request latency details', () => {
     wrapper.unmount()
   })
 
+  // Third review item 3: the previous window's query ending first does not end the current query's loading.
+  it.each(['answer', 'failure'] as const)('keeps loading while the current query is out after the previous window\'s query ends first with an %s', async (early) => {
+    const deferred = () => {
+      let resolve!: (value: unknown) => void
+      let reject!: (error: unknown) => void
+      const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+      return { promise, resolve, reject }
+    }
+    const week = deferred()
+    const month = deferred()
+    listRequestDetails.mockReset().mockReturnValueOnce(week.promise).mockReturnValueOnce(month.promise)
+    const wrapper = mount(OpsRequestDetailsModal, {
+      props: { modelValue: false, timeRange: 'custom', customStartTime: '2026-11-04T00:00:00.000Z', customEndTime: '2026-11-11T00:00:00.000Z', preset: { title: 'Details', kind: 'success', sort: 'e2e_first_output_desc' } },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Pagination: { props: ['total'], template: '<i data-total>{{ total }}</i>' } } },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await wrapper.setProps({ modelValue: false })
+    await wrapper.setProps({ customStartTime: '2026-10-02T00:00:00.000Z', customEndTime: '2026-11-01T00:00:00.000Z' })
+    await wrapper.setProps({ modelValue: true })
+    if (early === 'answer') week.resolve({ items: [], total: 0 })
+    else week.reject(new Error('late'))
+    await flushPromises()
+    // The 30-day query is still out: loading, not the empty list.
+    expect(wrapper.text()).toContain('common.loading')
+    expect(wrapper.text()).not.toContain('admin.ops.requestDetails.empty')
+    month.resolve({ items: [{ kind: 'success', created_at: '2026-10-20T00:00:00Z', request_id: 'MONTH-ROW', end_to_end_first_output_ms: 3000 }], total: 1 })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('common.loading')
+    expect(wrapper.text()).toContain('MONTH-ROW')
+    wrapper.unmount()
+  })
+
   it('keeps total duration for duration details', async () => {
     const wrapper = await openDetails('duration_desc')
     expect(listRequestDetails).toHaveBeenCalledWith(expect.objectContaining({ sort: 'duration_desc' }))
