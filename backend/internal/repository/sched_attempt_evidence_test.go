@@ -195,6 +195,16 @@ func assertSchedAttemptOwnerTimeoutEvidence(t *testing.T, db *sql.DB) {
 			SessionKey: tc.name, StartedAt: now.Add(time.Second)})
 	}
 	require.NoError(t, repo.InsertBatch(ctx, batch))
+	t.Run("physical-columns", func(t *testing.T) {
+		for _, tc := range cases {
+			var warm, full bool
+			err := db.QueryRowContext(ctx, `SELECT warm, full_tier_first_output_timeout
+    FROM account_attempt_samples WHERE attempt_id=$1`, ids[tc.name]).Scan(&warm, &full)
+			require.NoError(t, err)
+			require.Equal(t, tc.warm, warm, tc.name)
+			require.Equal(t, tc.full, full, tc.name)
+		}
+	})
 	_, err := db.ExecContext(ctx, "UPDATE account_attempt_samples SET inserted_at=finished_at WHERE model=$1", model)
 	require.NoError(t, err)
 	boot, err := repo.LoadFinishedPage(ctx, now, now, service.SchedAttemptCursor{}, len(cases))
@@ -274,4 +284,17 @@ func assertSchedAttemptOwnerTimeoutEvidence(t *testing.T, db *sql.DB) {
 			require.Equal(t, prior, row.TTFT.PriorMu)
 		})
 	}
+	t.Run("v2-only-incremental-tail", func(t *testing.T) {
+		id := ids["old-continuation"]
+		inserted := now.Add(time.Microsecond)
+		_, err := db.ExecContext(ctx, "UPDATE account_attempt_samples SET inserted_at=$1 WHERE attempt_id=$2", inserted, id)
+		require.NoError(t, err)
+		tail, next, err := repo.LoadInsertedAfter(ctx, cursor, 1)
+		require.NoError(t, err)
+		require.Len(t, tail, 1)
+		require.Equal(t, id, tail[0].AttemptID)
+		require.Equal(t, 2, tail[0].CaptureVersion)
+		require.True(t, inserted.Equal(next), "last v2 row must advance cursor to %v, got %v", inserted, next)
+	})
+
 }
