@@ -115,10 +115,11 @@ const props = withDefaults(defineProps<{
   showAccountCost?: boolean
   strikeStandardCost?: boolean
   /**
-   * Admin page only: whether `stats` answer the current filter (loaded), are still on their way, or failed to load.
+   * Admin page only: whether `stats` answer the current filter (loaded), are still on their way, failed to load, or
+   * were not read because the list failed.
    * Without it there is no user-wait card (the user page's stats have no end-to-end fields).
    */
-  e2eState?: 'loading' | 'failed' | 'loaded'
+  e2eState?: 'loading' | 'failed' | 'loaded' | 'blocked'
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
@@ -147,11 +148,14 @@ const e2e = computed(() => {
   const unknown = t('usage.latencyUnknown')
   if (props.e2eState === 'loading') return { value: '…', note: t('usage.e2eFirstOutputLoading') }
   if (props.e2eState === 'failed') return { value: unknown, note: t('usage.e2eFirstOutputFailed') }
+  if (props.e2eState === 'blocked') return { value: unknown, note: t('usage.e2eFirstOutputBlocked') }
   const stats = props.stats as (AdminUsageStatsResponse | null)
   const samples = stats?.e2e_first_output_samples
   if (typeof samples !== 'number') return { value: unknown, note: t('usage.e2eFirstOutputMissing') }
   const p50 = stats?.e2e_first_output_p50_ms
-  if (samples <= 0 || p50 == null) return { value: unknown, note: t('usage.e2eFirstOutputNone') }
+  if (samples <= 0) return { value: unknown, note: t('usage.e2eFirstOutputNone') }
+  // Samples counted, but no median in the answer: the count stands, the median is unknown.
+  if (p50 == null) return { value: unknown, note: t('usage.e2eFirstOutputP50Missing', { n: samples.toLocaleString() }) }
   return { value: formatDuration(p50), note: t('usage.e2eFirstOutputSamples', { n: samples.toLocaleString() }) }
 })
 const showAccountCost = computed(() => props.showAccountCost)

@@ -439,9 +439,23 @@ type DetailTab = 'usage' | 'errors' | 'ranking'
 const activeTab = ref<DetailTab>('usage')
 const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
 const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
+/** The filter the stats and the list are asked with, and the one whose list load failed last. */
+const statsFilterKey = computed(() => JSON.stringify(filters.value))
+const listFailedKey = ref<string | null>(null)
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
-  fetchPage: (signal) => adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal }),
+  fetchPage: async (signal) => {
+    // The stats only run after a list load succeeds: while the current filter's list fails, its stats are not read.
+    const key = statsFilterKey.value
+    try {
+      const page = await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
+      if (listFailedKey.value === key) listFailedKey.value = null
+      return page
+    } catch (error) {
+      if (!signal.aborted) listFailedKey.value = key
+      throw error
+    }
+  },
   membershipIntervalMs: 5000,
   membershipActive: () => activeTab.value === 'usage',
   tail: {
@@ -469,16 +483,24 @@ const askEndpointStats = (noCache = false) => {
   if (noCache) statsNoCache = true
 }
 // The stats answer the filter they were asked with. The user-wait card says whether its numbers are the current
-// filter's, still on their way, or failed to load: never another filter's (review item 2). The other cards keep the
-// last answer until a new one arrives, as before.
-const statsFilterKey = computed(() => JSON.stringify(filters.value))
+// filter's, still on their way (a request out for it), failed to load, or not read because the list failed (review
+// items 2): never another filter's. A filter shown with its stats keeps them while the 30 s refresh runs. The other
+// cards keep the last answer until a new one arrives, as before.
 const usageStatsKey = ref<string | null>(null)
 const usageStatsFailedKey = ref<string | null>(null)
-const usageStatsState = computed<'loading' | 'failed' | 'loaded'>(() =>
-  usageStatsFailedKey.value === statsFilterKey.value ? 'failed' : usageStatsKey.value === statsFilterKey.value ? 'loaded' : 'loading'
-)
+const usageStatsPendingKey = ref<string | null>(null)
+let statsRun = 0
+const usageStatsState = computed<'loading' | 'failed' | 'loaded' | 'blocked'>(() => {
+  const key = statsFilterKey.value
+  if (usageStatsKey.value === key && usageStatsFailedKey.value !== key) return 'loaded'
+  if (usageStatsPendingKey.value === key) return 'loading'
+  if (usageStatsFailedKey.value === key) return 'failed'
+  return listFailedKey.value === key ? 'blocked' : 'loading'
+})
 const runStatsTask = async (signal: AbortSignal) => {
   const key = statsFilterKey.value
+  const run = ++statsRun
+  usageStatsPendingKey.value = key
   const withEndpoints = endpointStatsDue
   const noCache = statsNoCache
   const requestType = filters.value.request_type
@@ -506,6 +528,8 @@ const runStatsTask = async (signal: AbortSignal) => {
     console.error('Failed to load usage stats:', error)
     if (withEndpoints) endpointStatsLoading.value = false
     throw error // the engine retries it on the back-off beat
+  } finally {
+    if (run === statsRun) usageStatsPendingKey.value = null
   }
 }
 
@@ -602,6 +626,7 @@ const loadChartData = async () => {
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
 const applyFilters = () => {
+  usageStatsFailedKey.value = null // a new attempt for the filter: loading until it answers
   pagination.page = 1
   invalidateModelStatsCache()
   usageTableRef.value?.scrollToTop?.()
@@ -617,6 +642,7 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
+  usageStatsFailedKey.value = null
   void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
   askEndpointStats(true)

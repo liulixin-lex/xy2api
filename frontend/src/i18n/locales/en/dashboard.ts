@@ -450,6 +450,8 @@ export default {
     e2eFirstOutputLoading: 'Loading',
     e2eFirstOutputFailed: 'The stats failed to load; no figures for this filter',
     e2eFirstOutputMissing: 'The stats returned carry no end-to-end figures',
+    e2eFirstOutputBlocked: 'The list failed to load; the stats for this filter have not been read',
+    e2eFirstOutputP50Missing: 'Over {n} requests, but the answer has no median',
     e2eFirstOutputHint: 'Median end-to-end first output: from the request entering the gateway to the user receiving the first useful output, queueing and earlier failed attempts included. Only requests with this record count.',
     outputTps: 'Avg TPS',
     outputTpsHint: 'Average TPS = output tokens ÷ total request duration, including first-token wait, in t/s (output tokens per second). Output may already include reasoning tokens; do not add them again. — means no valid output or duration.',

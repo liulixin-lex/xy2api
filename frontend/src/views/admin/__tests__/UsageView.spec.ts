@@ -357,6 +357,73 @@ describe('admin UsageView native compaction filter', () => {
     wrapper.unmount()
   })
 
+  // Second review item 2: the list keeps failing for a new filter, so its stats are never read: the card says so.
+  it('says the stats were not read while the current filter\'s list fails, and loads them once the list does', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    list.mockRejectedValue(new Error('down'))
+    getStats.mockClear().mockResolvedValue({ total_requests: 56, e2e_first_output_p50_ms: 4_000, e2e_first_output_samples: 56 })
+    ;(wrapper.vm as any).filters.group_id = 56
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(cards().props('e2eState')).toBe('blocked')
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 56 }))
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 56 })
+    wrapper.unmount()
+  })
+
+  // Second review item 2: going back to a filter whose stats failed, the new request reads as loading, not failed.
+  it('shows loading, not the earlier failure, while a filter\'s stats are asked again', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    const setGroup = async (id: number) => {
+      ;(wrapper.vm as any).filters.group_id = id
+      ;(wrapper.vm as any).applyFilters()
+      await flushPromises()
+    }
+    getStats.mockRejectedValueOnce(new Error('down'))
+    await setGroup(54)
+    expect(cards().props('e2eState')).toBe('failed')
+    // The engine's own retry of the failed stats is a new request too: loading while it is out.
+    let retried!: (value: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { retried = reject }))
+    const asked = getStats.mock.calls.length
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(getStats.mock.calls.length).toBe(asked + 1)
+    expect(cards().props('e2eState')).toBe('loading')
+    retried(new Error('down again'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+    getStats.mockResolvedValueOnce({ total_requests: 55, e2e_first_output_p50_ms: 5_000, e2e_first_output_samples: 55 })
+    await setGroup(55)
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    let answer!: (value: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    await setGroup(54)
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('loading')
+    answer({ total_requests: 54, e2e_first_output_p50_ms: 6_000, e2e_first_output_samples: 54 })
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 54 })
+    wrapper.unmount()
+  })
+
   it('propagates the filter to list/stats/model/snapshot requests and clears it on reset', async () => {
     const wrapper = mountRouteFilteredUsageView()
     vi.advanceTimersByTime(120)

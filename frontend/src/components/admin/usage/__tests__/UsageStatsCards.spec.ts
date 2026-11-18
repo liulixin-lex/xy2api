@@ -110,6 +110,8 @@ describe('UsageStatsCards user wait (admin)', () => {
     ['failed for the current filter', 'failed', { e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputFailed' }],
     ['loaded without the figures', 'loaded', {}, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputMissing' }],
     ['loaded with no samples', 'loaded', { e2e_first_output_p50_ms: null, e2e_first_output_samples: 0 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputNone' }],
+    ['not read while the list fails', 'blocked', { e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputBlocked' }],
+    ['loaded with samples but no median', 'loaded', { e2e_first_output_samples: 12 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputP50Missing:{"n":"12"}' }],
   ] as const)('never shows another filter\'s median: %s', (_, state, value, expected) => {
     expect(card(mountCards(value, state))).toEqual(expected)
   })

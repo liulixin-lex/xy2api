@@ -455,6 +455,8 @@ export default {
     e2eFirstOutputLoading: '读取中',
     e2eFirstOutputFailed: '统计读取失败，没有这个筛选范围的数',
     e2eFirstOutputMissing: '返回的统计里没有端到端数据',
+    e2eFirstOutputBlocked: '列表读取失败，这个筛选范围的统计还没有读',
+    e2eFirstOutputP50Missing: '基于 {n} 个请求，但返回里没有中位数',
     e2eFirstOutputHint: '端到端首输出的中位数：从请求进入网关到用户收到首个有效输出，含排队和之前失败的尝试。只算有这项记录的请求。',
     outputTps: '平均TPS',
     outputTpsHint: '平均 TPS = 输出 Token ÷ 请求总耗时（含首 Token 等待），单位 t/s（每秒输出 Token 数）。输出可能已包含推理 Token，不重复相加；无有效输出或耗时时显示 —。',
