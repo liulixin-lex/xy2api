@@ -126,6 +126,7 @@ type openAIStickyChange struct {
 	attemptCanceled  bool
 	activeAttempt    *schedAttemptCapture
 
+	recheckFollow                 func(context.Context) string
 	ownerFirstOutputLimit         time.Duration // Frozen on the original send, only for first_output_follow.
 	canTransfer                   bool          // Final selection's protocol authorization for expected.
 	targetUpstreamFirstValidDelay time.Duration
@@ -377,7 +378,50 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	}
 	next := change.replacement(stickyFollow, model, target, "faster_delivery")
 	next.ownerFirstOutputLimit = fact.Effective
+	req, _ := ContextWithSelectionProfitGate(ctx, selection).Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	req.GroupID, req.SessionHash, req.RequestedModel, req.Platform = group, session, model, PlatformOpenAI
+	req.ExcludedIDs = nil // Request exclusions governed selection; the target already delivered.
+	account := selection.Account
+	next.recheckFollow = func(checkCtx context.Context) string {
+		checkCtx = ContextWithSelectionProfitGate(CopyOpenAIQualityRoutingContext(checkCtx, ctx), selection)
+		return s.followTargetRejection(checkCtx, req, account)
+	}
 	state.SetStickyChange(next)
+}
+
+// Only a fast, complete delivery reaches this gate. Reuse the scheduler's
+// current account and hard-admission checks without acquiring another slot.
+func (s *OpenAIGatewayService) followTargetRejection(ctx context.Context, req OpenAIAccountScheduleRequest, account *Account) string {
+	groupID := derefGroupID(req.GroupID)
+	req.RequirePrivacySet = s.loadOpenAIGroupRequiresPrivacySet(ctx, req.GroupID)
+	ctx = context.WithValue(s.withOpenAIQuotaAutoPauseContext(ctx), openAIGroupPrivacyRequirementContextKey{},
+		openAIGroupPrivacyRequirement{groupID: groupID, required: req.RequirePrivacySet})
+	fresh := s.recheckSelectionAccount(ctx, req, account)
+	if fresh == nil || fresh.ID != account.ID || !openAIStickyAccountMatchesGroup(fresh, req.GroupID) {
+		return "target_ineligible"
+	}
+	view, now := s.selectionView(), s.selectionNow()
+	if selectionState(view, groupID, fresh, req.RequestedModel).Placement(selectionAuto(view, groupID, now), now) != schedquality.PlaceFront {
+		return "not_front"
+	}
+	if s.qualityOwnsSticky(ctx, req.GroupID, req.SessionHash) {
+		return "quality_owned"
+	}
+	// The original quality snapshot may predate an update by another instance.
+	q := qualityRequest(ctx)
+	if remote, ok := s.cache.(OpenAIQualityRoutingStore); ok && q != nil && q.group == groupID && q.session == req.SessionHash && s.qualityConfig().EffectiveMode() == "enforce" {
+		q.mu.Lock()
+		scope := q.scope
+		q.mu.Unlock()
+		current, _, err := remote.ReadOpenAIQualityRouting(ctx, scope, groupID, nil)
+		if err != nil {
+			return "quality_unavailable"
+		}
+		if current != nil && current.Generation > 0 && current.Expires > time.Now().UnixMilli() {
+			return "quality_owned"
+		}
+	}
+	return ""
 }
 
 // CompleteOpenAIStickyChange must be called by the actual attempt terminal path,
@@ -408,7 +452,7 @@ func (change *openAIStickyChange) completeLocked(ctx context.Context, success, c
 	}
 	change.followDelivered = success
 	final := change.replacement(change.kind, change.model, change.target, change.reason)
-	final.ownerFirstOutputLimit = change.ownerFirstOutputLimit
+	final.ownerFirstOutputLimit, final.recheckFollow = change.ownerFirstOutputLimit, change.recheckFollow
 	final.activeAttempt, final.attemptSucceeded, final.attemptCanceled = change.activeAttempt, change.attemptSucceeded, change.attemptCanceled
 	final.targetUpstreamFirstValidKnown, final.targetUpstreamFirstValidDelay = change.targetUpstreamFirstValidKnown, change.targetUpstreamFirstValidDelay
 	change.mu.Unlock()
@@ -489,6 +533,16 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 			change.reason = "borrowed"
 		}
 		return
+	}
+	if change.kind == stickyFollow {
+		if reason := change.recheckFollow(stateCtx); reason != "" {
+			change.reason = reason
+			return
+		}
+		if ctx.Err() != nil || resilience.StateFrom(ctx).ClientCanceled() {
+			change.reason = "canceled"
+			return
+		}
 	}
 	commitAttempted = true
 	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))

@@ -826,3 +826,75 @@ func TestFirstOutputFollowTerminalUnlocksBeforeWrite(t *testing.T) {
 		})
 	}
 }
+
+type followQualityStore struct {
+	GatewayCache
+	OpenAIQualityRoutingStore
+	state *OpenAIQualityState
+	err   error
+}
+
+func (s *followQualityStore) ReadOpenAIQualityRouting(context.Context, string, int64, []string) (*OpenAIQualityState, []int64, error) {
+	return s.state, nil, s.err
+}
+
+func TestFirstOutputFollowRechecksTargetBeforeCAS(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct{ name, reason string }{
+		{"front", "faster_delivery"}, {"rear", "not_front"}, {"trial", "not_front"}, {"disabled", "target_ineligible"}, {"moved_group", "target_ineligible"},
+		{"quality", "quality_owned"}, {"other_instance", "quality_owned"}, {"quality_read_failed", "quality_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			rt := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(1, 2))
+			rt.svc.cfg.Gateway.OpenAIQualityRouting.Mode = "enforce"
+			store := &followQualityStore{GatewayCache: rt.svc.cache}
+			rt.svc.cache = store
+			ctx := context.WithValue(withOpenAIQualityRouting(followState(t, f, true)), openAIQualityContextKey{},
+				&openAIQualityRequest{group: 7, session: "session", scope: "synthetic", loaded: true})
+			target := rt.repo.accounts[1]
+			followSelect(rt.svc, ctx, &target)
+			require.Equal(t, stickyFollow, pendingOpenAIStickyChange(ctx).kind)
+			switch tc.name {
+			case "rear":
+				rt.view.States[fakeSchedViewKey{7, target.ID, "m"}] = schedquality.StateView{Cache: schedquality.LineView{Identity: schedquality.IdentityRear}}
+			case "trial":
+				rt.view.States[fakeSchedViewKey{7, target.ID, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}
+			case "disabled":
+				rt.repo.accounts[1].Schedulable = false
+			case "moved_group":
+				rt.repo.accounts[1].GroupIDs = []int64{8}
+			case "quality":
+				q := qualityRequest(ctx)
+				q.mu.Lock()
+				q.state.Generation = 1
+				q.mu.Unlock()
+			case "other_instance":
+				store.state = &OpenAIQualityState{Generation: 1, Expires: time.Now().Add(time.Hour).UnixMilli()}
+			case "quality_read_failed":
+				store.err = errors.New("store unavailable")
+			}
+			logs := captureOpenAIObservationLogs(t)
+			followDelivery(rt.svc, ctx, &target, time.Millisecond, &OpenAIForwardResult{})
+			var events []map[string]any
+			for _, row := range schedObsLogRecords(t, logs) {
+				if row["msg"] == "sched_quality.session_switch" {
+					events = append(events, row)
+				}
+			}
+			require.Len(t, events, 1)
+			require.Equal(t, tc.reason, events[0]["reason"])
+			require.Equal(t, true, events[0]["faster_complete"])
+			require.Equal(t, tc.name == "front", events[0]["commit_attempted"])
+			if tc.name == "front" {
+				require.Equal(t, target.ID, f.binding.owner)
+			} else {
+				require.Equal(t, f.owner.ID, f.binding.owner)
+				require.Empty(t, f.binding.casKeys)
+			}
+			strict, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
+			require.NoError(t, err)
+			require.Empty(t, strict)
+		})
+	}
+}
