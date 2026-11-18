@@ -424,6 +424,75 @@ describe('admin UsageView native compaction filter', () => {
     wrapper.unmount()
   })
 
+  // Third review item 1: on the same filter, a retry from a failure reads loading, never the answer shown before it.
+  it('never shows a filter\'s earlier answer again after its refresh failed, until a new answer comes', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    const refresh = async () => { (wrapper.vm as any).refreshData(); await flushPromises() }
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    getStats.mockRejectedValueOnce(new Error('down'))
+    await refresh()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    let fail!: (error: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    await refresh()
+    expect(cards().props('e2eState')).toBe('loading')
+    fail(new Error('down again'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    list.mockRejectedValue(new Error('list down'))
+    await refresh()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(cards().props('e2eState')).toBe('blocked')
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockResolvedValue({ total_requests: 20, e2e_first_output_p50_ms: 8_000, e2e_first_output_samples: 20 })
+    await refresh()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 20 })
+    wrapper.unmount()
+  })
+
+  // Third review item 2: a cancelled list request of the same filter, ending late, changes nothing.
+  it.each([
+    ['a late success after a newer failure', 'resolve', false, 'blocked'],
+    ['a late failure after a newer success', 'reject', true, 'loaded']
+  ] as const)('keeps the state of the newer list request on %s', async (_, late, newerSucceeds, expected) => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    getStats.mockRejectedValueOnce(new Error('down'))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    let settleOld!: { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+    list.mockReturnValueOnce(new Promise((resolve, reject) => { settleOld = { resolve, reject } }))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    if (newerSucceeds) list.mockResolvedValueOnce({ items: [], total: 0, pages: 0 })
+    else list.mockRejectedValueOnce(new Error('list down'))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe(expected)
+    const statsCalls = getStats.mock.calls.length
+
+    if (late === 'resolve') settleOld.resolve({ items: [], total: 0, pages: 0 })
+    else settleOld.reject(new Error('old list down'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe(expected)
+    expect(getStats.mock.calls.length).toBe(statsCalls)
+    wrapper.unmount()
+  })
+
   it('propagates the filter to list/stats/model/snapshot requests and clears it on reset', async () => {
     const wrapper = mountRouteFilteredUsageView()
     vi.advanceTimersByTime(120)

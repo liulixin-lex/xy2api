@@ -214,6 +214,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import { useUsageStatsState } from './usageStatsState'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
@@ -439,20 +440,19 @@ type DetailTab = 'usage' | 'errors' | 'ranking'
 const activeTab = ref<DetailTab>('usage')
 const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
 const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
-/** The filter the stats and the list are asked with, and the one whose list load failed last. */
-const statsFilterKey = computed(() => JSON.stringify(filters.value))
-const listFailedKey = ref<string | null>(null)
+// The user-wait card's state for the current filter (see usageStatsState.ts): the list and the stats requests report
+// to it, each with its generation. The other cards keep the last stats answer until a new one arrives, as before.
+const statsCard = useUsageStatsState(() => JSON.stringify(filters.value))
+const usageStatsState = statsCard.phase
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: async (signal) => {
-    // The stats only run after a list load succeeds: while the current filter's list fails, its stats are not read.
-    const key = statsFilterKey.value
+    // The stats run only after a list load succeeds: while the current filter's list fails, they are not asked.
+    const list = statsCard.listStarted()
     try {
-      const page = await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
-      if (listFailedKey.value === key) listFailedKey.value = null
-      return page
+      return await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
     } catch (error) {
-      if (!signal.aborted) listFailedKey.value = key
+      if (!signal.aborted) list.failed()
       throw error
     }
   },
@@ -482,25 +482,8 @@ const askEndpointStats = (noCache = false) => {
   endpointStatsLoading.value = true
   if (noCache) statsNoCache = true
 }
-// The stats answer the filter they were asked with. The user-wait card says whether its numbers are the current
-// filter's, still on their way (a request out for it), failed to load, or not read because the list failed (review
-// items 2): never another filter's. A filter shown with its stats keeps them while the 30 s refresh runs. The other
-// cards keep the last answer until a new one arrives, as before.
-const usageStatsKey = ref<string | null>(null)
-const usageStatsFailedKey = ref<string | null>(null)
-const usageStatsPendingKey = ref<string | null>(null)
-let statsRun = 0
-const usageStatsState = computed<'loading' | 'failed' | 'loaded' | 'blocked'>(() => {
-  const key = statsFilterKey.value
-  if (usageStatsKey.value === key && usageStatsFailedKey.value !== key) return 'loaded'
-  if (usageStatsPendingKey.value === key) return 'loading'
-  if (usageStatsFailedKey.value === key) return 'failed'
-  return listFailedKey.value === key ? 'blocked' : 'loading'
-})
 const runStatsTask = async (signal: AbortSignal) => {
-  const key = statsFilterKey.value
-  const run = ++statsRun
-  usageStatsPendingKey.value = key
+  const run = statsCard.statsStarted()
   const withEndpoints = endpointStatsDue
   const noCache = statsNoCache
   const requestType = filters.value.request_type
@@ -511,11 +494,10 @@ const runStatsTask = async (signal: AbortSignal) => {
       stream: legacyStream === null ? undefined : legacyStream,
       ...(noCache ? { nocache: 1 } : {}),
     })
-    if (signal.aborted) return // a load started: the filter may have changed
+    if (signal.aborted || !run.latest()) return // a load started: the filter may have changed
     if (noCache) statsNoCache = false
     usageStats.value = s
-    usageStatsKey.value = key
-    if (usageStatsFailedKey.value === key) usageStatsFailedKey.value = null
+    run.loaded()
     if (!withEndpoints) return
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
@@ -523,13 +505,11 @@ const runStatsTask = async (signal: AbortSignal) => {
     endpointStatsDue = false
     endpointStatsLoading.value = false
   } catch (error) {
-    if (signal.aborted) return
-    usageStatsFailedKey.value = key
+    if (signal.aborted || !run.latest()) return
+    run.failed()
     console.error('Failed to load usage stats:', error)
     if (withEndpoints) endpointStatsLoading.value = false
     throw error // the engine retries it on the back-off beat
-  } finally {
-    if (run === statsRun) usageStatsPendingKey.value = null
   }
 }
 
@@ -626,7 +606,7 @@ const loadChartData = async () => {
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
 const applyFilters = () => {
-  usageStatsFailedKey.value = null // a new attempt for the filter: loading until it answers
+  statsCard.retry()
   pagination.page = 1
   invalidateModelStatsCache()
   usageTableRef.value?.scrollToTop?.()
@@ -642,7 +622,7 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
-  usageStatsFailedKey.value = null
+  statsCard.retry()
   void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
   askEndpointStats(true)
