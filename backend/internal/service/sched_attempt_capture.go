@@ -162,6 +162,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 		written = 0
 	}
 	in.OutputBytes = int(written)
+	in.Warm, in.FullTierFirstOutputTimeout = a.ownerHit, a.fullTierFirstOutputTimeout
 	logFinish := logger.FromContext(a.ctx).Info
 	if in.Outcome == schedquality.OutcomeOK {
 		logFinish = logger.FromContext(a.ctx).Debug
