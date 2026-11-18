@@ -75,6 +75,23 @@ describe('Ops request latency details', () => {
     wrapper.unmount()
   })
 
+  it('queries the dashboard\'s custom window, not the last hour, and follows a switch to another past window', async () => {
+    const week = { start: '2026-11-04T00:00:00.000Z', end: '2026-11-11T00:00:00.000Z' }
+    const month = { start: '2026-10-12T00:00:00.000Z', end: '2026-11-11T00:00:00.000Z' }
+    const wrapper = mount(OpsRequestDetailsModal, {
+      props: { modelValue: false, timeRange: 'custom', customStartTime: week.start, customEndTime: week.end, preset: { title: 'Details', kind: 'success', sort: 'e2e_first_output_desc' } },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Pagination: true } },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    expect(listRequestDetails).toHaveBeenLastCalledWith(expect.objectContaining({ start_time: week.start, end_time: week.end, sort: 'e2e_first_output_desc' }))
+    expect(wrapper.text()).not.toContain('admin.ops.requestDetails.rangeHours')
+    await wrapper.setProps({ customStartTime: month.start })
+    await flushPromises()
+    expect(listRequestDetails).toHaveBeenLastCalledWith(expect.objectContaining({ start_time: month.start, end_time: month.end }))
+    wrapper.unmount()
+  })
+
   it('keeps total duration for duration details', async () => {
     const wrapper = await openDetails('duration_desc')
     expect(listRequestDetails).toHaveBeenCalledWith(expect.objectContaining({ sort: 'duration_desc' }))

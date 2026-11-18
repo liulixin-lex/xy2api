@@ -12,7 +12,8 @@ import { parseTimeRangeMinutes, formatDateTime } from '../utils/opsFormatters'
 export interface OpsRequestDetailsPreset {
   title: string
   kind?: OpsRequestDetailsParams['kind']
-  sort?: OpsRequestDetailsParams['sort']
+  /** The sorts the modal has a column for; the API also takes ttft_desc, which nothing here opens. */
+  sort?: Exclude<OpsRequestDetailsParams['sort'], 'ttft_desc'>
   min_duration_ms?: number
   max_duration_ms?: number
 }
@@ -20,6 +21,9 @@ export interface OpsRequestDetailsPreset {
 interface Props {
   modelValue: boolean
   timeRange: string
+  /** The dashboard's own window when timeRange is custom (7 or 30 days, a past period): the details query the same. */
+  customStartTime?: string | null
+  customEndTime?: string | null
   preset: OpsRequestDetailsPreset
   platform?: string
   groupId?: number | null
@@ -57,13 +61,21 @@ function formatLatency(row: OpsRequestDetail): string {
   return showE2E.value ? t('admin.ops.e2eFirstOutput.unknown') : '-'
 }
 
+const customRange = computed(() =>
+  props.timeRange === 'custom' && props.customStartTime && props.customEndTime
+    ? { start: props.customStartTime, end: props.customEndTime }
+    : null
+)
+
 const rangeLabel = computed(() => {
+  if (customRange.value) return `${formatDateTime(customRange.value.start)} – ${formatDateTime(customRange.value.end)}`
   const minutes = parseTimeRangeMinutes(props.timeRange)
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (customRange.value) return { start_time: customRange.value.start, end_time: customRange.value.end }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -120,6 +132,8 @@ watch(
 watch(
   () => [
     props.timeRange,
+    props.customStartTime,
+    props.customEndTime,
     props.platform,
     props.groupId,
     props.preset.kind,
