@@ -141,9 +141,12 @@ const errorTrip = computed(() => {
       .join(t('admin.schedQuality.policy.errorTripJoiner'))
   })
 })
-/** A cache floor above 85 %: accounts go in and out around the line more (an observed relation). */
+/**
+ * A saved cache floor above 85 %: accounts go in and out around the line more (an observed relation). By the saved
+ * policy like the error examples (review item 8): it follows a successful save or a reload, not the typing.
+ */
 const CACHE_HIGH = 0.85
-const cacheHigh = computed(() => valid.value.cache && current.value.min_cache_ratio > CACHE_HIGH)
+const cacheHigh = computed(() => (record.value?.policy.min_cache_ratio ?? 0) > CACHE_HIGH)
 
 const takeoverOptions = computed(() => TAKEOVER_VALUES.map((value) => ({
   value,

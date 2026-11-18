@@ -378,7 +378,7 @@ export default {
       errorTrip: 'With the saved limit of {limit}: {examples} judge the line bad once; going to the rear also takes two bad assessments in a row; to recover, the failure share must not be above the limit.',
       errorTripItem: 'at least {failed} failures among {known} clear outcomes',
       errorTripJoiner: ', or ',
-      cacheHigh: 'Cache floor above 85%: accounts going in and out around the line happens more (an observed relation).',
+      cacheHigh: 'Saved cache floor above 85%: accounts going in and out around the line happens more (an observed relation).',
       trialStable: 'Passing a trial does not mean stable: it only means the trial found no evidence that the account is bad; assessments go on as usual.',
     },
     settings: {

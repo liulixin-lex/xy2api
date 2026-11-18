@@ -276,14 +276,26 @@ describe('GroupSchedPolicyField', () => {
     expect(note()).toBe(tripText('8%', [{ known: 50, failed: 8 }, { known: 100, failed: 13 }]))
   })
 
-  it('warns about a cache floor above 85 % as typed, and always says a passed trial is not stability', async () => {
+  // Review item 8: by the saved floor, like the error examples; it follows a successful save, not the typing.
+  it('warns about a saved cache floor above 85 %, unchanged by typing until a save, and always says a passed trial is not stability', async () => {
     const w = await mountField()
-    // The fixture's floor is 90 %.
-    expect(w.find('[data-sq-policy-notes="cache"]').text()).toBe('admin.schedQuality.policy.cacheHigh')
+    const warned = () => w.find('[data-sq-policy-notes="cache"]').exists()
+    // The fixture's saved floor is 90 %.
+    expect(w.get('[data-sq-policy-notes="cache"]').text()).toBe('admin.schedQuality.policy.cacheHigh')
     await cache(w).setValue('85')
-    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(false)
-    await cache(w).setValue('86')
-    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(true)
+    expect(warned()).toBe(true)
+    api.updateGroupPolicy.mockResolvedValue({ ...policy(), version: 64, policy: { ...policy().policy, min_cache_ratio: 0.85 }, relaxed_lines: [], cleared: 0 })
+    expect(await save(w)).toBe(true)
+    await flushPromises()
+    expect(warned()).toBe(false)
+    await cache(w).setValue('95')
+    expect(warned()).toBe(false)
     expect(w.get('[data-sq-policy-notes="trial"]').text()).toBe('admin.schedQuality.policy.trialStable')
+  })
+
+  it.each([[0.85, false], [0.86, true]])('warns at a saved floor of %s: %s', async (floor, expected) => {
+    api.getGroupPolicy.mockResolvedValue({ ...policy(), policy: { ...policy().policy, min_cache_ratio: floor } })
+    const w = await mountField()
+    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(expected)
   })
 })
