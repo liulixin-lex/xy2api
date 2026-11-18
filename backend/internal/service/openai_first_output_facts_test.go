@@ -166,7 +166,7 @@ func TestOwnerCutoffRejectsUnrelatedAttempts(t *testing.T) {
 			fact, ok := st.OwnerCutoff()
 			require.Equal(t, scenario == "missing_snapshot", ok)
 			require.False(t, fact.CanTransfer)
-			require.Equal(t, scenario != "same_account_replay" && scenario != "capacity_borrow" && scenario != a.ownerHit)
+			require.Equal(t, scenario != "same_account_replay" && scenario != "capacity_borrow", a.ownerHit)
 			require.Equal(t, scenario == "capacity_borrow" || scenario == "same_account_replay" || scenario == "missing_snapshot", a.fullTierFirstOutputTimeout)
 		})
 	}
