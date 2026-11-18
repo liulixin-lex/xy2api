@@ -295,3 +295,56 @@ func TestOwnerCutoffRepeatedSendBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerCutoffBeforeCompatReaderReturns(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"chat", "messages"} {
+		for _, mode := range []string{"delayed_read", "cancel_after_fire"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					account := rawChatCompletionsTestAccount()
+					c, _ := compatStreamContext("/v1/"+route, compatMessagesStreamBody)
+					client, cancel := context.WithCancel(c.Request.Context())
+					defer cancel()
+					st, ctx := ownerFactsState(client, account)
+					c.Request = c.Request.WithContext(ctx)
+					release := make(chan struct{})
+					guardCanceled := make(chan struct{})
+					up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+						RecordOpsUpstreamSendBoundary(req.Context(), id)
+						reader, writer := io.Pipe()
+						go func() {
+							<-req.Context().Done()
+							close(guardCanceled)
+							<-release
+							_ = writer.CloseWithError(req.Context().Err())
+						}()
+						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader, Request: req}, nil
+					}}
+					svc := compatStreamService(up, 1, 0, 0)
+					done := make(chan error, 1)
+					go func() {
+						_, err := captureForward(svc, c, account, []byte(compatMessagesStreamBody), route)
+						done <- err
+					}()
+					<-guardCanceled
+					synctest.Wait()
+					_, atFire := st.OwnerCutoff()
+					if mode == "cancel_after_fire" {
+						cancel()
+					}
+					close(release)
+					err := <-done
+					_, atReturn := st.OwnerCutoff()
+					require.True(t, atFire, "timer must publish before the reader releases")
+					require.True(t, atReturn)
+					if mode == "delayed_read" {
+						requireFirstOutputFailover(t, err)
+					} else {
+						require.Error(t, err)
+					}
+				})
+			})
+		}
+	}
+}

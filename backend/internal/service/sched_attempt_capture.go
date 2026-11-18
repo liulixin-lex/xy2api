@@ -265,6 +265,13 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	}
 	a.observeOutput(data, time.Now(), typHint)
 	if a.factsOnly {
+		event := typHint
+		if event == "" {
+			event = gjson.GetBytes(data, "type").String()
+		}
+		if isOpenAIWSTerminalEvent(event) || event == "error" || strings.TrimSpace(string(data)) == "[DONE]" {
+			a.markTerminal()
+		}
 		return
 	}
 	if typHint != "" {
@@ -609,11 +616,6 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
-	// Converted streams keep their timer past headers. Their reader decides
-	// whether it won after accounting for disconnects and terminal events.
-	if fe, _ := req.Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent); fe != nil && resp != nil {
-		fe.guard.compatHeadersReceived.Store(true)
-	}
 	if resp != nil {
 		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)
 		if *owner != nil {
