@@ -134,7 +134,7 @@
             </span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
             <span
-              v-if="showFallbackOrigin && row.origin_group_id"
+              v-if="crossGroup(row)"
               data-testid="usage-fallback-marker"
               class="text-xs text-amber-700 dark:text-amber-300"
               :title="t('admin.resilience.usage.fallbackTitle')"
@@ -700,6 +700,12 @@ const scrollToTop = () => tableRef.value?.scrollToTop()
 defineExpose({ isAtTop, scrollToTop })
 
 const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
+/**
+ * Served by another group than the request's: judged only by the original and the serving group ids, both known and
+ * different (the bill's fallback flag means a rear account took the request, not another group).
+ */
+const crossGroup = (row: AdminUsageLog) =>
+  props.showFallbackOrigin && row.origin_group_id != null && row.group_id != null && row.origin_group_id !== row.group_id
 /** The wait the colour bar's top follows: the end-to-end first output on the admin page, the first token otherwise. */
 const leadLatency = (row: AdminUsageLog) => (props.showEndToEnd ? row.end_to_end_first_output_ms : row.first_token_ms) ?? null
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`

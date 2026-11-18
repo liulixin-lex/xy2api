@@ -1013,14 +1013,29 @@ describe('admin usage latency: the user wait first', () => {
     expect(wrapper.find('span[aria-hidden="true"]').classes()).toContain('from-orange-500')
   })
 
-  it('shows a missing end-to-end or last-attempt value as unknown with why, never the other value', () => {
-    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, end_to_end_first_output_ms: null, first_token_ms: null }])
+  // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other.
+  it.each([
+    ['no end-to-end value', { end_to_end_first_output_ms: null, first_token_ms: 800 }, { e2e: null, last: '800ms' }],
+    ['no last-attempt value', { end_to_end_first_output_ms: 51_000, first_token_ms: null }, { e2e: '51.00s', last: null }],
+    ['neither', { end_to_end_first_output_ms: null, first_token_ms: null }, { e2e: null, last: null }]
+  ])('shows each value or unknown with why on its own: %s', (_, patch, expected) => {
+    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, ...patch }])
     const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
-    expect(e2e.text()).toBe('usage.latencyUnknown')
-    expect(e2e.attributes('title')).toBe('usage.latencyEndToEndUnknownHint')
     const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
-    expect(last.text()).toBe('usage.latencyUnknown')
-    expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
+    if (expected.e2e) {
+      expect(e2e.text()).toBe(expected.e2e)
+      expect(e2e.attributes('title')).toBeUndefined()
+    } else {
+      expect(e2e.text()).toBe('usage.latencyUnknown')
+      expect(e2e.attributes('title')).toBe('usage.latencyEndToEndUnknownHint')
+    }
+    if (expected.last) {
+      expect(last.text()).toBe(expected.last)
+      expect(last.attributes('title')).toBeUndefined()
+    } else {
+      expect(last.text()).toBe('usage.latencyUnknown')
+      expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
+    }
     expect(wrapper.text()).toContain('usage.latencyDuration1m 10s')
   })
 
