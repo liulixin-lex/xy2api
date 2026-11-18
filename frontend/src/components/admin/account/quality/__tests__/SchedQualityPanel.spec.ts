@@ -725,6 +725,16 @@ describe('SchedQualityPanel', () => {
     expect(e.find('[data-qp-evidence-weight]').exists()).toBe(false)
   })
 
+  // Second review item 5: one side missing never hides the other; a recorded 0 is 0, not unknown.
+  it.each([
+    ['this group 0, all missing', { samples_local: 0, samples_total: null }, { local: '0', total: U }],
+    ['this group missing, all 12', { samples_local: null, samples_total: 12 }, { local: U, total: '12' }]
+  ])('shows each side of the counts on its own: %s', (_, samples, expected) => {
+    const w = mount(SchedEvidence, { props: { dim: 'error', evidence: errorEvidence(), samples } })
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.error:${JSON.stringify(expected)}`)
+    expect(w.get('[data-qp-evidence-samples-why]').text()).toBe('admin.schedQuality.evidence.samples.unknownWhy')
+  })
+
   it('shows a basis\'s own counts when its nested evidence is missing', () => {
     const w = mount(SchedEvidence, { props: { dim: 'ttfo', evidence: undefined, samples: { samples_local: 4, samples_total: 12 } } })
     expect(w.get('[data-qp-evidence-samples]').text()).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"4","total":"12"}')
