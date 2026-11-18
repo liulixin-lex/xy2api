@@ -87,6 +87,7 @@
               v-if="item.row"
               :dim="mark.dim"
               :evidence="item.row.lines[mark.dim].evidence"
+              :samples="item.row.lines[mark.dim]"
               :source-groups="item.row.lines[mark.dim].source_groups"
               :group-name="groupName"
               :gate-off="item.gateOff === 'group'"

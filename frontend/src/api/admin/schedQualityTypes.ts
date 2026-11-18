@@ -11,7 +11,7 @@
  * - DELETE /admin/sched-quality/accounts/:id/auto-states/:key: BackendClearAutoState
  * - GET | PUT /admin/sched-quality/groups/:id/policy (+ POST …/preview): BackendGroupPolicy, SchedGroupPolicyUpdate,
  *   BackendPolicyPreview
- * - GET /admin/sched-quality/groups/:id/order: BackendOrder (the group board)
+ * - GET /admin/sched-quality/groups/:id/order?model=: BackendOrder (the group board; any model name, listed or not)
  * - GET | PUT /admin/sched-quality/ttft-rule: BackendTTFTRule, SchedTTFTRuleUpdate
  */
 
@@ -107,6 +107,8 @@ export interface BackendTTFOEvidence {
   n: number
   k: number
   x: number
+  /** The discounted weight of this group's samples (n is every group's); absent or null on records before it was kept. */
+  n_local?: number | null
   /** Sessions the samples come from (counted up to 3), and sessions with a request over the limit (up to 2). */
   s: number
   d: number
@@ -136,6 +138,11 @@ export interface BackendErrorEvidence {
   /** Conservative lower bound of the failure rate, and the same with every unknown counted as a failure. */
   lower_fail: number
   lower_pass: number
+  /**
+   * A review or a trial would have passed, but the failure share is above the limit, so the verdict is unknown (the
+   * account does not recover yet). Omitted when false and on records before it was kept.
+   */
+  recovery_over_limit?: boolean
 }
 
 export interface BackendCacheEvidence {
@@ -153,8 +160,17 @@ export interface BackendEvidenceOf {
   cache: BackendCacheEvidence
 }
 
+/**
+ * The units a line's rule really counted (first output: samples, errors: clear outcomes, cache: turns): those from this
+ * group, and all of them, borrowed ones included. Absent or null on records from before they were kept (unknown).
+ */
+export interface BackendSampleCounts {
+  samples_local?: number | null
+  samples_total?: number | null
+}
+
 /** One line of one group × model. */
-export interface BackendLine<D extends BackendDim = BackendDim> {
+export interface BackendLine<D extends BackendDim = BackendDim> extends BackendSampleCounts {
   identity: BackendIdentity
   /** Rear stay step, 0..4 (20, 40, 60, 90, 120 minutes). */
   level: number
@@ -229,8 +245,14 @@ export interface BackendAccountDetail {
 
 // ---- GET /accounts/:id/decisions ----
 
+/**
+ * Whether a trial that ended without a verdict met full trial seats while picking accounts: full (it did),
+ * not_observed (not seen), unknown (could not be read, or a later record overwrote it).
+ */
+export type BackendTrialSeats = 'full' | 'not_observed' | 'unknown'
+
 /** The evidence a decision was taken on (one of ttft, error, cache, by its line). */
-export interface BackendBasis {
+export interface BackendBasis extends BackendSampleCounts {
   rule_version: string
   line: BackendDim
   /** regular | trial | review | relax | clock (the 24-hour clear) */
@@ -243,6 +265,8 @@ export interface BackendBasis {
   ttft?: BackendTTFOEvidence
   error?: BackendErrorEvidence
   cache?: BackendCacheEvidence
+  /** Only on trial_timeout; null or absent on other decisions and on records before it was kept. */
+  trial_seats?: BackendTrialSeats | null
 }
 
 /** A change of a line's identity. Records of the previous rules have an empty line and no basis. */
@@ -291,6 +315,10 @@ export interface BackendGroupPolicy {
   group_id: number
   version: number
   policy: BackendPolicy
+  /** The error limit in force: the group's or 5 %, whichever is larger. */
+  effective_max_error_rate: number
+  /** With the limit in force: the fewest failures among `known` clear outcomes (50, 100) that judge the line bad once. */
+  error_trip_examples: { known: number; failed: number }[]
 }
 
 /** The answer to a save: the lines a relaxed threshold cleared and re-judged, and how many line states that was. */
@@ -341,6 +369,8 @@ export interface BackendGroupSummary {
     /** Attempts counted as 400s caused by migrating a session. */
     migration_400: number | null
   }
+  /** Rear-type decisions (enter, renew, trial_fail) of the last 24 hours and the distinct account × model keys they hit; null when not read. */
+  rear_entries_24h: { decisions: number; account_models: number } | null
 }
 
 export interface BackendGroupsSummary {
@@ -388,6 +418,20 @@ export interface BackendOrder {
   global_enabled: boolean
   /** In the current selection order; render as given. */
   rows: BackendOrderRow[]
+  /** The model's supply in the group at `at`; null when it could not be read. */
+  supply: BackendSupply | null
+}
+
+/**
+ * Member accounts for the model: declaring it (disabled and unschedulable ones included), of those enabled and
+ * schedulable, and of those eligible for it right now on the board's default entry (streaming Responses / HTTP SSE:
+ * eligibility, rate limits, cooldowns; free slots are not looked at, and plain text requests may use another entry).
+ */
+export interface BackendSupply {
+  declared: number
+  enabled: number
+  available: number
+  at: string
 }
 
 // ---- GET | PUT /ttft-rule (the first-output line's three settings, global) ----

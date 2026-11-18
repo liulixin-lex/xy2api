@@ -98,7 +98,8 @@ export async function groupsSummary(groupIds: number[], options?: RequestOptions
 
 /**
  * The group board: the group's accounts in the backend's selection order for one request model (the group's busiest
- * without one).
+ * without one), with the model's supply. Any model name may be asked for, also one missing from `models` (declared
+ * only by accounts that are off and so without recent traffic).
  */
 export async function groupBoard(groupId: number, model?: string, options?: RequestOptions): Promise<BackendOrder> {
   const { data } = await apiClient.get<BackendOrder>(`${base}/groups/${groupId}/order`, {

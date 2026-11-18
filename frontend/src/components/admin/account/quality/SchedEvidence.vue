@@ -3,6 +3,13 @@
     <p v-if="!evidence" class="ev__none">{{ t('admin.schedQuality.evidence.none') }}</p>
     <template v-else>
       <ul class="ev__list">
+        <!-- This group's and all the counted units (the rule's own set); a record from before they were kept: unknown. -->
+        <li class="ev__i" data-qp-evidence-samples>
+          {{ samples.count ? t(`admin.schedQuality.evidence.samples.${dim}`, { ...samples.count }) : t('admin.schedQuality.evidence.samples.unknown') }}
+        </li>
+        <li v-if="dim === 'ttfo' && samples.count" class="ev__i" data-qp-evidence-weight>
+          {{ samples.weight ? t('admin.schedQuality.evidence.samples.weight', { ...samples.weight }) : t('admin.schedQuality.evidence.samples.weightUnknown') }}
+        </li>
         <li v-for="item in items" :key="item.key" class="ev__i" :data-qp-evidence-item="item.key">
           {{ t(`admin.schedQuality.evidence.${dim}.${item.key}`, { v: item.value }) }}
         </li>
@@ -10,6 +17,7 @@
       <p v-if="causes.length && !gateOff" class="ev__why" data-qp-evidence-why>
         {{ t('admin.schedQuality.evidence.why', { reasons: causes.join(t('admin.schedQuality.evidence.reasonJoiner')) }) }}
       </p>
+      <p v-if="overLimit && !gateOff" class="ev__why" data-qp-evidence-over-limit>{{ t('admin.schedQuality.evidence.recoveryOverLimit') }}</p>
     </template>
     <p v-if="sources" class="ev__src">{{ t('admin.schedQuality.evidence.sources', { names: sources }) }}</p>
   </div>
@@ -18,17 +26,20 @@
 <script setup lang="ts">
 /**
  * The evidence of one line, as the backend computed it (the panel's expanded group row and a decision record):
- * each field as a short sentence with its unit, why an unknown first-output verdict is unknown, and the groups the
- * requests came from. Nothing is judged here.
+ * this group's and all the units the rule counted, each field as a short sentence with its unit, why an unknown
+ * first-output verdict is unknown, why an error line did not recover, and the groups the requests came from. Nothing is
+ * judged here.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { BackendDim, BackendEvidenceOf } from '@/api/admin/schedQualityTypes'
-import { evidenceCauses, lineEvidence } from './qualityPanel'
+import type { BackendDim, BackendEvidenceOf, BackendSampleCounts } from '@/api/admin/schedQualityTypes'
+import { evidenceCauses, lineEvidence, lineSamples } from './qualityPanel'
 
 const props = defineProps<{
   dim: BackendDim
   evidence: BackendEvidenceOf[BackendDim] | null | undefined
+  /** The line or the basis: this group's and all the units the rule counted. */
+  samples?: BackendSampleCounts | null
   sourceGroups?: number[]
   /** A group's name by id; the id when unknown. */
   groupName?: (id: number) => string | undefined
@@ -38,6 +49,9 @@ const props = defineProps<{
 const { t, te } = useI18n()
 
 const items = computed(() => (props.evidence ? lineEvidence(props.dim, props.evidence) : []))
+const samples = computed(() => lineSamples(props.dim, props.samples, props.evidence))
+/** A review or a trial would have passed, but the failure share is above the limit: not recovered yet. */
+const overLimit = computed(() => props.dim === 'error' && (props.evidence as BackendEvidenceOf['error'] | null | undefined)?.recovery_over_limit === true)
 const causes = computed(() =>
   evidenceCauses(props.dim, props.evidence ?? undefined).map((cause) => {
     const key = `admin.schedQuality.evidence.causes.${cause}`

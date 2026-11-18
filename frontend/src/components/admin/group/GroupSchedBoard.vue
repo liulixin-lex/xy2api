@@ -13,14 +13,18 @@
       <SchedPauseMark v-if="data" :global-enabled="data.global_enabled" :stale="data.stale" />
     </template>
     <template #header-actions>
+      <!-- The models with samples, or any model name typed in (one declared only by accounts that are off has no traffic). -->
       <Select
-        v-if="modelOptions.length"
-        :model-value="data?.model ?? null"
+        :model-value="data?.model ?? board.model ?? null"
         :options="modelOptions"
-        :searchable="false"
+        searchable
+        creatable
+        :creatable-prefix="t('admin.schedQuality.board.modelInput')"
+        :search-placeholder="t('admin.schedQuality.board.modelSearch')"
         :aria-label="t('admin.schedQuality.aria.model')"
-        class="sq-select-sm w-[150px]"
-        @update:model-value="(value) => setSchedBoardModel(String(value))"
+        class="sq-select-sm w-[180px]"
+        data-sq-board-model
+        @update:model-value="pickModel"
       />
     </template>
 
@@ -36,6 +40,18 @@
         <dd class="sq-num sq-text" data-sq-summary="body">{{ summaryText.body }}</dd>
         <dd class="sq-num sq-text" data-sq-summary="migration">{{ summaryText.migration }}</dd>
       </div>
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <dt v-tip="t('admin.schedQuality.board.rearEntriesTip')" class="sq-text-3" tabindex="0">{{ t('admin.schedQuality.board.rearEntriesTitle') }}</dt>
+        <dd class="sq-num sq-text" data-sq-summary="rear-entries">{{ summaryText.rearEntries }}</dd>
+      </div>
+    </dl>
+    <!-- The picked model's supply in the group: declared, enabled, eligible now on the default entry (free slots not
+         included); unknown when not read. -->
+    <dl v-if="data" class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px]" data-sq-board-supply>
+      <dt v-tip="t('admin.schedQuality.board.supplyTip')" class="sq-text-3" tabindex="0">{{ t('admin.schedQuality.board.supplyTitle', { model: data.model }) }}</dt>
+      <dd class="sq-num sq-text" data-sq-supply="counts">{{ supplyText.counts }}</dd>
+      <dd v-if="supplyText.at" class="sq-num sq-text-3" data-sq-supply="at">{{ supplyText.at }}</dd>
+      <dd v-else class="sq-text-3" data-sq-supply="failed">{{ t('admin.schedQuality.board.supplyFailed') }}</dd>
     </dl>
     <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
@@ -146,6 +162,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { DASH, fmtCountdown, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatRecentSeconds } from '@/components/admin/account/table/accountRecent'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
@@ -173,7 +190,27 @@ let restoreFocus: (() => void) | null = null
 watch(() => boardData.data, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
 watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
-const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
+// The models of the group's last answer: kept while another model loads or fails, so a name typed in can be changed.
+const lastModels = ref<{ groupId: number; models: string[] } | null>(null)
+watch(data, (value) => { if (value) lastModels.value = { groupId: value.group_id, models: value.models } })
+const modelOptions = computed(() => {
+  const models = lastModels.value?.groupId === board.groupId ? lastModels.value.models : []
+  return models.map((m) => ({ value: m, label: m }))
+})
+function pickModel(value: unknown) {
+  const model = String(value ?? '').trim()
+  if (model) setSchedBoardModel(model)
+}
+
+// The picked model's supply; every count unknown when it was not read.
+const supplyText = computed(() => {
+  const supply = data.value?.supply ?? null
+  const count = (value: number | undefined) => (value == null ? t('admin.schedQuality.board.supplyUnknown') : String(value))
+  return {
+    counts: t('admin.schedQuality.board.supplyCounts', { declared: count(supply?.declared), enabled: count(supply?.enabled), available: count(supply?.available) }),
+    at: supply ? t('admin.schedQuality.board.supplyAt', { time: formatShortTime(supply.at) }) : ''
+  }
+})
 
 // The summary line: a missing summary or field reads "—".
 const summaryText = computed(() => {
@@ -194,7 +231,10 @@ const summaryText = computed(() => {
     // No count, no unit: "—" alone.
     migration: last60?.migration_400 == null
       ? t('admin.schedQuality.board.summaryMigrationNone')
-      : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 })
+      : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 }),
+    rearEntries: summary?.rear_entries_24h
+      ? t('admin.schedQuality.board.rearEntries', { decisions: summary.rear_entries_24h.decisions, account_models: summary.rear_entries_24h.account_models })
+      : t('admin.schedQuality.board.rearEntriesNone')
   }
 })
 

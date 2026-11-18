@@ -256,4 +256,34 @@ describe('GroupSchedPolicyField', () => {
     expect(await save(w)).toBe(true)
     expect(toast.showInfo).toHaveBeenCalledTimes(1)
   })
+
+  // Round 3 (plan item 9): what the saved error limit takes to judge a line bad, by the backend's numbers.
+  it('explains the saved error limit with the backend\'s examples, not the typed value, until a save answers with new ones', async () => {
+    const w = await mountField()
+    const tripText = (limit: string, examples: { known: number; failed: number }[]) => `admin.schedQuality.policy.errorTrip:${JSON.stringify({
+      limit,
+      examples: examples.map((item) => `admin.schedQuality.policy.errorTripItem:${JSON.stringify(item)}`).join('admin.schedQuality.policy.errorTripJoiner')
+    })}`
+    const note = () => w.get('[data-sq-policy-notes="error"]').text()
+    expect(note()).toBe(tripText('5%', [{ known: 50, failed: 6 }, { known: 100, failed: 10 }]))
+    await error(w).setValue('8')
+    expect(note()).toBe(tripText('5%', [{ known: 50, failed: 6 }, { known: 100, failed: 10 }]))
+    const saved = { ...policy(), version: 64, policy: { ...policy().policy, max_error_rate: 0.08 }, effective_max_error_rate: 0.08,
+      error_trip_examples: [{ known: 50, failed: 8 }, { known: 100, failed: 13 }], relaxed_lines: [], cleared: 0 }
+    api.updateGroupPolicy.mockResolvedValue(saved)
+    expect(await save(w)).toBe(true)
+    await flushPromises()
+    expect(note()).toBe(tripText('8%', [{ known: 50, failed: 8 }, { known: 100, failed: 13 }]))
+  })
+
+  it('warns about a cache floor above 85 % as typed, and always says a passed trial is not stability', async () => {
+    const w = await mountField()
+    // The fixture's floor is 90 %.
+    expect(w.find('[data-sq-policy-notes="cache"]').text()).toBe('admin.schedQuality.policy.cacheHigh')
+    await cache(w).setValue('85')
+    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(false)
+    await cache(w).setValue('86')
+    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(true)
+    expect(w.get('[data-sq-policy-notes="trial"]').text()).toBe('admin.schedQuality.policy.trialStable')
+  })
 })
