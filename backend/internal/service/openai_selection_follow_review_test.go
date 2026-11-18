@@ -4,13 +4,73 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
+
+type followAccountReadBarrier struct {
+	AccountRepository
+	hold func()
+}
+
+func (r followAccountReadBarrier) GetByID(ctx context.Context, id int64) (*Account, error) {
+	account, err := r.AccountRepository.GetByID(ctx, id)
+	r.hold()
+	return account, err
+}
+
+func TestFirstOutputFollowSwitchDuringRecheck(t *testing.T) {
+	for _, mode := range []string{"enabled", "disabled_during_read"} {
+		t.Run(mode, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			synctest.Test(t, func(t *testing.T) {
+				f := selectionNewSessionFixture()
+				rt := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(1, 2))
+				ctx := followState(t, f, true)
+				y := &rt.repo.accounts[1]
+				followSelect(rt.svc, ctx, y)
+				entered, resume := make(chan struct{}), make(chan struct{})
+				rt.svc.accountRepo = followAccountReadBarrier{rt.repo, sync.OnceFunc(func() {
+					close(entered)
+					<-resume
+				})}
+				logs := captureOpenAIObservationLogs(t)
+				done := make(chan struct{})
+				go func() {
+					followDelivery(rt.svc, ctx, y, time.Millisecond, &OpenAIForwardResult{})
+					close(done)
+				}()
+				<-entered
+				if mode == "disabled_during_read" {
+					settings := *resilience.Current()
+					settings.Session.Enabled = false
+					resilience.Publish(settings)
+				}
+				close(resume)
+				<-done
+				FinishOpenAIStickyForward(ctx, y.ID, &OpenAIForwardResult{}, nil)
+				events := schedObsLogRecords(t, logs)
+				require.Len(t, events, 1)
+				require.Equal(t, true, events[0]["faster_complete"])
+				require.Equal(t, mode == "enabled", events[0]["commit_attempted"])
+				if mode == "enabled" {
+					require.Len(t, f.binding.casKeys, 1)
+					require.Equal(t, y.ID, f.binding.owner)
+				} else {
+					require.Empty(t, f.binding.casKeys)
+					require.Equal(t, f.owner.ID, f.binding.owner)
+					require.Equal(t, "session_disabled", events[0]["reason"])
+				}
+			})
+		})
+	}
+}
 
 func TestFirstOutputFollowSimpleModeFullPool(t *testing.T) {
 	withResilienceSettings(t, nil)

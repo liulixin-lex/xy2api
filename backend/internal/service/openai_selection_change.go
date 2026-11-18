@@ -554,6 +554,10 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 			change.reason = "canceled"
 			return
 		}
+		if !resilience.Current().SessionOn() {
+			change.reason = "session_disabled"
+			return
+		}
 	}
 	commitAttempted = true
 	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
