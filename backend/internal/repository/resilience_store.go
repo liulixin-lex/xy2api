@@ -32,7 +32,7 @@ const (
 // (review R06): a failure of another account must not keep an old count
 // alive. The window of an account restarts once it ended and is extended by
 // each of its failures; the key lives as long as the newest window.
-// KEYS[1] session hash, ARGV[1] account, ARGV[2] window ms, ARGV[3] now ms, ARGV[4] writer instance.
+// KEYS[1] session hash, ARGV[1] account, ARGV[2] window ms, ARGV[3] now ms, ARGV[4] writer instance, ARGV[5] process monotonic ms (-1 if unavailable).
 var resilienceSessionFailureScript = redis.NewScript(`
 	local now = tonumber(ARGV[3])
 	local win = tonumber(ARGV[2])
@@ -46,15 +46,22 @@ var resilienceSessionFailureScript = redis.NewScript(`
 	else
 		v = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
 	end
-	-- A delayed increment must not move the failure watermark backwards.
-	local last = tonumber(redis.call('HGET', KEYS[1], fk))
-	local wk = 'w:' .. ARGV[1]
-	if not last or now > last then
-		last = now
-		redis.call('HSET', KEYS[1], wk, ARGV[4])
+	local last = math.max(now, tonumber(redis.call('HGET', KEYS[1], fk)) or now)
+	local wk, mk = 'w:' .. ARGV[1], 'm:' .. ARGV[1]
+	local mono = tonumber(ARGV[5])
+	if v == 1 then
+		-- Clearing or expiry starts a new account window.
+		redis.call('HSET', KEYS[1], wk, ARGV[4], mk, mono)
 	elseif redis.call('HGET', KEYS[1], wk) ~= ARGV[4] then
-		-- This writer may have a slower clock: neither instance owns the ordering.
-		redis.call('HDEL', KEYS[1], wk)
+		-- No owner on an existing count means mixed/unknown until the count resets.
+		redis.call('HDEL', KEYS[1], wk, mk)
+	else
+		local prev = tonumber(redis.call('HGET', KEYS[1], mk)) or -1
+		if prev >= 0 then
+			-- A single untimed failure makes the whole window wall-clock only.
+			if mono >= 0 then mono = math.max(prev, mono) end
+			redis.call('HSET', KEYS[1], mk, mono)
+		end
 	end
 	redis.call('HSET', KEYS[1], ek, last + win, fk, last)
 	redis.call('PEXPIRE', KEYS[1], win)
@@ -65,13 +72,16 @@ var resilienceSessionFailureScript = redis.NewScript(`
 var resilienceClearPriorFailuresScript = redis.NewScript(`
 	local id = ARGV[1]
 	local last = tonumber(redis.call('HGET', KEYS[1], 'f:' .. id))
-	local wk = 'w:' .. id
-	local cutoff = tonumber(ARGV[2])
-	if ARGV[3] == '' or redis.call('HGET', KEYS[1], wk) ~= ARGV[3] then
-		cutoff = cutoff - tonumber(ARGV[4])
+	if not last or last <= 0 then return 0 end
+	local wk, mk = 'w:' .. id, 'm:' .. id
+	local cutoff = tonumber(ARGV[2]) - tonumber(ARGV[4])
+	local sendMono = tonumber(ARGV[5])
+	if sendMono >= 0 and ARGV[3] ~= '' and redis.call('HGET', KEYS[1], wk) == ARGV[3] then
+		local mono = tonumber(redis.call('HGET', KEYS[1], mk))
+		if mono and mono >= 0 then last, cutoff = mono, sendMono end
 	end
-	if last and last > 0 and last < cutoff then
-		return redis.call('HDEL', KEYS[1], id, 'e:' .. id, 'f:' .. id, wk)
+	if last < cutoff then
+		return redis.call('HDEL', KEYS[1], id, 'e:' .. id, 'f:' .. id, wk, mk)
 	end
 	return 0
 `)
@@ -116,10 +126,22 @@ var resilienceMarkStableScript = redis.NewScript(`
 	return ARGV[1]
 `)
 
+var sessionFailureProcessStart = time.Now()
+
+func sessionMonotonicMillis(at time.Time) int64 {
+	// Round(0) strips only the monotonic reading. Sub would silently use the
+	// wall clock for a decoded timestamp, so mark that reading unavailable.
+	if at == at.Round(0) || at.Before(sessionFailureProcessStart) {
+		return -1
+	}
+	return at.Sub(sessionFailureProcessStart).Milliseconds()
+}
+
 type resilienceStore struct {
-	rdb        *redis.Client
-	now        func() time.Time
-	instanceID string
+	rdb             *redis.Client
+	now             func() time.Time
+	instanceID      string
+	monotonicMillis func(time.Time) int64
 }
 
 // NewResilienceStore creates the Redis store of the resilience layer.
@@ -127,7 +149,7 @@ func NewResilienceStore(rdb *redis.Client) service.ResilienceStore {
 	if rdb == nil {
 		return nil
 	}
-	return &resilienceStore{rdb: rdb, now: time.Now, instanceID: uuid.NewString()}
+	return &resilienceStore{rdb: rdb, now: time.Now, instanceID: uuid.NewString(), monotonicMillis: sessionMonotonicMillis}
 }
 
 func sessionKey(prefix string, groupID int64, sessionHash string) string {
@@ -136,8 +158,9 @@ func sessionKey(prefix string, groupID int64, sessionHash string) string {
 
 func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error) {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
+	at := s.now()
 	v, err := resilienceSessionFailureScript.Run(ctx, s.rdb, []string{key}, strconv.FormatInt(accountID, 10),
-		window.Milliseconds(), s.now().UnixMilli(), s.instanceID).Int64()
+		window.Milliseconds(), at.UnixMilli(), s.instanceID, s.monotonicMillis(at)).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("incr session failure: %w", err)
 	}
@@ -147,7 +170,7 @@ func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64,
 func (s *resilienceStore) ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
 	id := strconv.FormatInt(accountID, 10)
-	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id, "f:"+id, "w:"+id).Err()
+	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id, "f:"+id, "w:"+id, "m:"+id).Err()
 }
 
 func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error {
@@ -155,7 +178,7 @@ func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupI
 		return nil
 	}
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
-	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.UnixMilli(), s.instanceID, service.SessionFailureClockSkewAllowance.Milliseconds()).Err()
+	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.UnixMilli(), s.instanceID, service.SessionFailureClockSkewAllowance.Milliseconds(), s.monotonicMillis(start)).Err()
 }
 
 // SessionFailures returns the counts whose window has not ended; a count

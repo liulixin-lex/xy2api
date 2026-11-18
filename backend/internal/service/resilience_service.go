@@ -32,7 +32,8 @@ type ResilienceStore interface {
 	IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error)
 	// ClearSessionFailure resets the count of an account within a session.
 	ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error
-	// ClearSessionFailuresBefore uses the skew allowance for foreign or unknown writers.
+	// ClearSessionFailuresBefore uses monotonic order for a fully timed, local-only
+	// window and a wall-clock skew allowance otherwise.
 	ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error
 	// SessionFailures returns all counts of a session (Explain).
 	SessionFailures(ctx context.Context, groupID int64, sessionHash string) (map[int64]int64, error)

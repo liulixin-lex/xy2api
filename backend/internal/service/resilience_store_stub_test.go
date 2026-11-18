@@ -15,6 +15,7 @@ import (
 type memFailureWatermark struct {
 	at     int64
 	writer string
+	mono   int64
 }
 
 // memResilienceStore is an in-memory ResilienceStore for tests.
@@ -23,6 +24,7 @@ type memResilienceStore struct {
 	sf           map[string]map[int64]int64
 	lastFailure  map[string]map[int64]memFailureWatermark
 	instanceID   string
+	clockStart   time.Time
 	now          func() time.Time
 	avoid        map[string]map[int64]time.Time
 	avoidWritten map[string]map[int64]time.Time
@@ -33,7 +35,7 @@ type memResilienceStore struct {
 }
 
 func newMemResilienceStore() *memResilienceStore {
-	return &memResilienceStore{now: time.Now, instanceID: "local", lastFailure: map[string]map[int64]memFailureWatermark{}, sf: map[string]map[int64]int64{}, avoid: map[string]map[int64]time.Time{},
+	return &memResilienceStore{now: time.Now, clockStart: time.Now(), instanceID: "local", lastFailure: map[string]map[int64]memFailureWatermark{}, sf: map[string]map[int64]int64{}, avoid: map[string]map[int64]time.Time{},
 		stable: map[int64]time.Time{}, undeliv: map[string]int64{}, ratios: map[string]float64{}, fbKeys: map[string]time.Time{}}
 }
 
@@ -47,16 +49,30 @@ func (m *memResilienceStore) IncrSessionFailure(_ context.Context, g int64, h st
 		m.sf[k] = map[int64]int64{}
 		m.lastFailure[k] = map[int64]memFailureWatermark{}
 	}
+	at := m.now()
+	mono := m.monotonicMillis(at)
 	last := m.lastFailure[k][a]
-	if at := m.now().UnixMilli(); at > last.at {
-		last = memFailureWatermark{at: at, writer: m.instanceID}
+	if m.sf[k][a] == 0 {
+		last.writer, last.mono = m.instanceID, mono
 	} else if last.writer != m.instanceID {
-		last.writer = ""
+		last.writer, last.mono = "", -1
+	} else if last.mono >= 0 && (mono < 0 || mono > last.mono) {
+		last.mono = mono
+	}
+	if at.UnixMilli() > last.at {
+		last.at = at.UnixMilli()
 	}
 	m.lastFailure[k][a] = last
 	m.sf[k][a]++
 	return m.sf[k][a], nil
 }
+func (m *memResilienceStore) monotonicMillis(at time.Time) int64 {
+	if at == at.Round(0) || at.Before(m.clockStart) {
+		return -1
+	}
+	return at.Sub(m.clockStart).Milliseconds()
+}
+
 func (m *memResilienceStore) ClearSessionFailure(_ context.Context, g int64, h string, a int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -70,10 +86,11 @@ func (m *memResilienceStore) ClearSessionFailuresBefore(_ context.Context, g int
 	defer m.mu.Unlock()
 	k := memSessionKey(g, h)
 	last := m.lastFailure[k][a]
-	if last.writer == "" || last.writer != m.instanceID {
-		start = start.Add(-SessionFailureClockSkewAllowance)
+	prior := last.at < start.Add(-SessionFailureClockSkewAllowance).UnixMilli()
+	if mono := m.monotonicMillis(start); mono >= 0 && last.mono >= 0 && last.writer == m.instanceID {
+		prior = last.mono < mono
 	}
-	if last.at > 0 && last.at < start.UnixMilli() {
+	if last.at > 0 && prior {
 		delete(m.sf[k], a)
 		delete(m.lastFailure[k], a)
 	}
