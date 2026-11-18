@@ -542,3 +542,32 @@ func TestFirstOutputFollowReceiptBeforeBlockingClose(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstOutputFollowReceiptWithoutTransferAuthority(t *testing.T) {
+	f := selectionNewSessionFixture()
+	state := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), state)
+	state.SetStickyChange(&openAIStickyChange{groupID: 7, session: "session", key: f.binding.key, cache: f.binding,
+		expected: StickySessionBinding{AccountID: f.owner.ID, Generation: f.binding.generation}, ttl: time.Hour})
+	fact := resilience.OwnerFirstOutputCutoff{GroupID: 7, Session: "session", BindingKey: f.binding.key,
+		AccountID: f.owner.ID, Generation: f.binding.generation, AttemptSeq: state.MarkOpsUpstreamSendBoundary(f.owner.ID),
+		FiredAt: time.Now(), Effective: time.Second, CanTransfer: false}
+	require.True(t, state.RecordOwnerCutoff(fact))
+	recordFirstOutputAvoid(ctx, fact)
+	avoid, err := f.session.store.SessionAvoid(ctx, 7, firstOutputAvoidSession("session"))
+	require.NoError(t, err)
+	require.Empty(t, avoid, "an ineligible cutoff must not write even though the binding matches")
+	_, confirmed := state.ConfirmedOwnerCutoff()
+	require.False(t, confirmed)
+	require.True(t, state.ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation))
+	frozen, confirmed := state.ConfirmedOwnerCutoff()
+	require.True(t, confirmed)
+	require.False(t, frozen.CanTransfer)
+	svc := &OpenAIGatewayService{}
+	target := f.candidates[0]
+	followSelect(svc, ctx, target)
+	require.Zero(t, pendingOpenAIStickyChange(ctx).target)
+	followDelivery(svc, ctx, target, 0, &OpenAIForwardResult{})
+	require.Equal(t, f.owner.ID, f.binding.owner)
+	require.Empty(t, f.binding.casKeys)
+}
