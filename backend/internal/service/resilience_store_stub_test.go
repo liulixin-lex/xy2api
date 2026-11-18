@@ -12,11 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type memFailureWatermark struct {
+	at     int64
+	writer string
+}
+
 // memResilienceStore is an in-memory ResilienceStore for tests.
 type memResilienceStore struct {
 	mu           sync.Mutex
 	sf           map[string]map[int64]int64
-	lastFailure  map[string]map[int64]int64
+	lastFailure  map[string]map[int64]memFailureWatermark
+	instanceID   string
 	now          func() time.Time
 	avoid        map[string]map[int64]time.Time
 	avoidWritten map[string]map[int64]time.Time
@@ -27,7 +33,7 @@ type memResilienceStore struct {
 }
 
 func newMemResilienceStore() *memResilienceStore {
-	return &memResilienceStore{now: time.Now, lastFailure: map[string]map[int64]int64{}, sf: map[string]map[int64]int64{}, avoid: map[string]map[int64]time.Time{},
+	return &memResilienceStore{now: time.Now, instanceID: "local", lastFailure: map[string]map[int64]memFailureWatermark{}, sf: map[string]map[int64]int64{}, avoid: map[string]map[int64]time.Time{},
 		stable: map[int64]time.Time{}, undeliv: map[string]int64{}, ratios: map[string]float64{}, fbKeys: map[string]time.Time{}}
 }
 
@@ -39,11 +45,15 @@ func (m *memResilienceStore) IncrSessionFailure(_ context.Context, g int64, h st
 	k := memSessionKey(g, h)
 	if m.sf[k] == nil {
 		m.sf[k] = map[int64]int64{}
-		m.lastFailure[k] = map[int64]int64{}
+		m.lastFailure[k] = map[int64]memFailureWatermark{}
 	}
-	if at := m.now().UnixMilli(); at > m.lastFailure[k][a] {
-		m.lastFailure[k][a] = at
+	last := m.lastFailure[k][a]
+	if at := m.now().UnixMilli(); at > last.at {
+		last = memFailureWatermark{at: at, writer: m.instanceID}
+	} else if last.writer != m.instanceID {
+		last.writer = ""
 	}
+	m.lastFailure[k][a] = last
 	m.sf[k][a]++
 	return m.sf[k][a], nil
 }
@@ -59,7 +69,11 @@ func (m *memResilienceStore) ClearSessionFailuresBefore(_ context.Context, g int
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := memSessionKey(g, h)
-	if last := m.lastFailure[k][a]; last > 0 && last < start.Add(-SessionFailureClockSkewAllowance).UnixMilli() {
+	last := m.lastFailure[k][a]
+	if last.writer == "" || last.writer != m.instanceID {
+		start = start.Add(-SessionFailureClockSkewAllowance)
+	}
+	if last.at > 0 && last.at < start.UnixMilli() {
 		delete(m.sf[k], a)
 		delete(m.lastFailure[k], a)
 	}

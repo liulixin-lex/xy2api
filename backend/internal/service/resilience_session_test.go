@@ -316,6 +316,7 @@ func TestSessionFailureStreakRebindsAndAvoids(t *testing.T) {
 	other := &GatewayService{cache: cache, resilience: NewResilienceService(nil, store)}
 	st.SetSession(7, "s3", other.gatewaySessionRecorder())
 	st.MarkOpsUpstreamSendBoundary(53)
+	store.instanceID = "second-instance"
 	st.SessionSuccess(resilience.WithRequestState(ctx, st), 53)
 	store.now = time.Now
 	rec.Failure(ctx, 7, "s3", 53, resilience.CategoryRateLimit)
@@ -447,6 +448,9 @@ func TestSessionSuccessCannotClearAnotherSend(t *testing.T) {
 				st.NoteGatewaySend(51)
 			}
 			st.SessionFailure(ctx, 51, resilience.CategoryTransient)
+			if tc == "fast_sending_instance" {
+				store.instanceID = "fast-instance"
+			}
 			st.SessionSuccess(ctx, 51)
 			counts, err := store.SessionFailures(ctx, 7, "sess")
 			require.NoError(t, err)

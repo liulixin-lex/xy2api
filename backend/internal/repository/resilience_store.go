@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,7 +32,7 @@ const (
 // (review R06): a failure of another account must not keep an old count
 // alive. The window of an account restarts once it ended and is extended by
 // each of its failures; the key lives as long as the newest window.
-// KEYS[1] session hash, ARGV[1] account, ARGV[2] window ms, ARGV[3] now ms.
+// KEYS[1] session hash, ARGV[1] account, ARGV[2] window ms, ARGV[3] now ms, ARGV[4] writer instance.
 var resilienceSessionFailureScript = redis.NewScript(`
 	local now = tonumber(ARGV[3])
 	local win = tonumber(ARGV[2])
@@ -46,7 +47,15 @@ var resilienceSessionFailureScript = redis.NewScript(`
 		v = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
 	end
 	-- A delayed increment must not move the failure watermark backwards.
-	local last = math.max(now, tonumber(redis.call('HGET', KEYS[1], fk)) or now)
+	local last = tonumber(redis.call('HGET', KEYS[1], fk))
+	local wk = 'w:' .. ARGV[1]
+	if not last or now > last then
+		last = now
+		redis.call('HSET', KEYS[1], wk, ARGV[4])
+	elseif redis.call('HGET', KEYS[1], wk) ~= ARGV[4] then
+		-- This writer may have a slower clock: neither instance owns the ordering.
+		redis.call('HDEL', KEYS[1], wk)
+	end
 	redis.call('HSET', KEYS[1], ek, last + win, fk, last)
 	redis.call('PEXPIRE', KEYS[1], win)
 	return v
@@ -56,8 +65,13 @@ var resilienceSessionFailureScript = redis.NewScript(`
 var resilienceClearPriorFailuresScript = redis.NewScript(`
 	local id = ARGV[1]
 	local last = tonumber(redis.call('HGET', KEYS[1], 'f:' .. id))
-	if last and last > 0 and last < tonumber(ARGV[2]) then
-		return redis.call('HDEL', KEYS[1], id, 'e:' .. id, 'f:' .. id)
+	local wk = 'w:' .. id
+	local cutoff = tonumber(ARGV[2])
+	if ARGV[3] == '' or redis.call('HGET', KEYS[1], wk) ~= ARGV[3] then
+		cutoff = cutoff - tonumber(ARGV[4])
+	end
+	if last and last > 0 and last < cutoff then
+		return redis.call('HDEL', KEYS[1], id, 'e:' .. id, 'f:' .. id, wk)
 	end
 	return 0
 `)
@@ -103,8 +117,9 @@ var resilienceMarkStableScript = redis.NewScript(`
 `)
 
 type resilienceStore struct {
-	rdb *redis.Client
-	now func() time.Time
+	rdb        *redis.Client
+	now        func() time.Time
+	instanceID string
 }
 
 // NewResilienceStore creates the Redis store of the resilience layer.
@@ -112,7 +127,7 @@ func NewResilienceStore(rdb *redis.Client) service.ResilienceStore {
 	if rdb == nil {
 		return nil
 	}
-	return &resilienceStore{rdb: rdb, now: time.Now}
+	return &resilienceStore{rdb: rdb, now: time.Now, instanceID: uuid.NewString()}
 }
 
 func sessionKey(prefix string, groupID int64, sessionHash string) string {
@@ -122,7 +137,7 @@ func sessionKey(prefix string, groupID int64, sessionHash string) string {
 func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error) {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
 	v, err := resilienceSessionFailureScript.Run(ctx, s.rdb, []string{key}, strconv.FormatInt(accountID, 10),
-		window.Milliseconds(), s.now().UnixMilli()).Int64()
+		window.Milliseconds(), s.now().UnixMilli(), s.instanceID).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("incr session failure: %w", err)
 	}
@@ -132,7 +147,7 @@ func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64,
 func (s *resilienceStore) ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
 	id := strconv.FormatInt(accountID, 10)
-	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id, "f:"+id).Err()
+	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id, "f:"+id, "w:"+id).Err()
 }
 
 func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error {
@@ -140,7 +155,7 @@ func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupI
 		return nil
 	}
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
-	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.Add(-service.SessionFailureClockSkewAllowance).UnixMilli()).Err()
+	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.UnixMilli(), s.instanceID, service.SessionFailureClockSkewAllowance.Milliseconds()).Err()
 }
 
 // SessionFailures returns the counts whose window has not ended; a count
