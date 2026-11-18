@@ -221,9 +221,7 @@ func (s *GatewayService) GatewayAccountAfterSlot(ctx context.Context, sel *Accou
 		}
 		if err != nil {
 			slog.Warn("gateway.wait_group_refresh_failed", "group_id", *w.groupID, "account_id", fresh.ID, "platform", w.platform, "error_class", "storage_read")
-			return s.GatewayProfitControlVetoLatest(ctx, sel.Account)
-		}
-		if group.RequirePrivacySet {
+		} else if group.RequirePrivacySet {
 			return nil, false, "privacy_required"
 		}
 	}

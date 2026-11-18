@@ -63,7 +63,7 @@ func TestGatewayWaitRechecksCurrentPrivacyRule(t *testing.T) {
 	require.NotNil(t, acc)
 	svc.groupRepo = waitGroupReadError{repo}
 	acc, _, _ = svc.GatewayAccountAfterSlot(ctx, pick)
-	require.Same(t, pick.Account, acc)
+	require.Same(t, svc.accountRepo.(groupListingRepo).accountsByID[41], acc)
 	// A group-read error cannot make a confirmed account disable disappear.
 	svc.accountRepo.(groupListingRepo).accountsByID[41].Status = StatusDisabled
 	acc, _, _ = svc.GatewayAccountAfterSlot(ctx, pick)
@@ -99,4 +99,33 @@ func TestGatewayWaitLastResortRechecksLiveRequestLimits(t *testing.T) {
 	got, _, reason = svc.GatewayAccountAfterSlot(ctx, pick)
 	require.Nil(t, got)
 	require.Equal(t, "window_cost", reason)
+}
+
+func TestGatewayWaitGroupReadErrorStillVetoesFreshPrice(t *testing.T) {
+	groupID := int64(7)
+	oldRate, newRate := 0.2, 0.8
+	a := Account{ID: 41, Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, RateMultiplier: &oldRate,
+		Extra: map[string]any{"mixed_scheduling": true}, AccountGroups: []AccountGroup{{GroupID: groupID}}}
+	svc, _ := newLastResortGatewayFixture(t, []Account{a})
+	svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{41: false}})
+	group := svc.groupRepo.(*mockGroupRepoForGateway).groups[groupID]
+	group.ProfitControlEnabled = true
+	group.RateMultiplier = 0.5
+	ctx, _ := WithGatewayTokenRequestPricing(context.Background())
+	pick, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, pick.WaitPlan)
+	require.True(t, pick.ProfitGateActive())
+	svc.accountRepo.(groupListingRepo).accountsByID[41].RateMultiplier = &newRate
+	admissionCtx := ContextWithSelectionProfitGate(ctx, pick)
+	for _, readFails := range []bool{false, true} {
+		if readFails {
+			svc.groupRepo = waitGroupReadError{svc.groupRepo}
+		}
+		got, veto, reason := svc.GatewayAccountAfterSlot(admissionCtx, pick)
+		require.NotNil(t, got)
+		require.Equal(t, newRate, *got.RateMultiplier)
+		require.True(t, veto)
+		require.Equal(t, "profit_threshold", reason)
+	}
 }
