@@ -286,20 +286,12 @@ func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.T
 	s.mu.Lock()
 	var notifications map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(notifications) }()
-	rows, _, _, err := s.store.LoadRows(ctx)
+	at, groups, err := s.store.RunReset(ctx, id)
 	if err != nil {
 		return time.Time{}, err
 	}
-	groups := make(map[schedQualityKey]bool)
-	for _, r := range rows {
-		if r.AccountID == id {
-			groups[schedQualityKey{r.AccountID, r.Model, r.GroupID}] = true
-		}
-	}
-	s.releaseGroups(ctx, groups)
-	at, err := s.store.RunReset(ctx, id)
-	if err != nil {
-		return time.Time{}, err
+	for _, group := range groups {
+		s.releaseGroup(ctx, schedQualityKey{id, group.Model, group.GroupID})
 	}
 	notifications, err = s.rebuild(ctx)
 	return at, err
@@ -379,16 +371,16 @@ func (s *SchedQualityEngineService) releaseEndedTrials(ctx context.Context, befo
 			groups[k] = true
 		}
 	}
-	s.releaseGroups(ctx, groups)
+	for k := range groups {
+		s.releaseGroup(ctx, k)
+	}
 }
-func (s *SchedQualityEngineService) releaseGroups(ctx context.Context, groups map[schedQualityKey]bool) {
+func (s *SchedQualityEngineService) releaseGroup(ctx context.Context, k schedQualityKey) {
 	if s.leases == nil {
 		return
 	}
-	for k := range groups {
-		if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
-			slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
-		}
+	if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
+		slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
 	}
 }
 

@@ -22,11 +22,11 @@ type selectionTurnLeases struct {
 func (l *selectionTurnLeases) Room(context.Context, int64, string, int64, string, time.Time) (bool, error) {
 	return true, nil
 }
-func (l *selectionTurnLeases) Acquire(_ context.Context, _ int64, m string, _ int64, s string, _ time.Time) (bool, error) {
+func (l *selectionTurnLeases) Acquire(_ context.Context, _ int64, m string, _ int64, s string, _ time.Time) (bool, string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.acquired = append(l.acquired, m+"/"+s)
-	return true, nil
+	return true, "test-generation", nil
 }
 func (l *selectionTurnLeases) Touch(_ context.Context, _ int64, m string, _ int64, s string, _ time.Time) error {
 	l.mu.Lock()
@@ -40,7 +40,7 @@ func (l *selectionTurnLeases) Release(_ context.Context, _ int64, m string, _ in
 	l.released = append(l.released, m+"/"+s)
 	return nil
 }
-func (l *selectionTurnLeases) Promote(context.Context, int64, string, int64, string, string, time.Time) error {
+func (l *selectionTurnLeases) Promote(context.Context, int64, string, int64, string, string, string, time.Time) error {
 	return nil
 }
 func (l *selectionTurnLeases) ReleaseGroup(context.Context, int64, string, int64) error { return nil }

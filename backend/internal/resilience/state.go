@@ -46,9 +46,10 @@ type RequestState struct {
 	prelude preludeTrace
 
 	// requestID is generated locally, independent of client correlation IDs.
-	requestID     string
-	gatewayRecord *gatewayRequestTrace
-	firstOutput   time.Time
+	requestID             string
+	gatewayRecord         *gatewayRequestTrace
+	gatewayAdmissionScope GatewayRequestScope
+	firstOutput           time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile
@@ -109,9 +110,14 @@ type RequestState struct {
 	groupNoAccount bool
 
 	// session identifies the request's sticky session for failure streaks.
-	sessionGroupID int64
-	sessionHash    string
-	sessionRec     SessionRecorder
+	sessionGroupID  int64
+	sessionHash     string
+	sessionRec      SessionRecorder
+	sessionDispatch struct {
+		requestID string
+		accountID int64
+		at        time.Time
+	}
 	stickyChange   any // Service-owned pending binding change; completed by the send lifecycle.
 	selectionFlags schedSelectionFlags
 
@@ -503,6 +509,24 @@ func IsPostOutputSessionFailure(ctx context.Context) bool {
 	}
 	postOutput, _ := ctx.Value(postOutputSessionFailureKey{}).(bool)
 	return postOutput
+}
+
+// SessionDispatchStart returns the physical send observed for this turn and
+// account. A delayed bill for an earlier WebSocket turn cannot use a later send.
+func (s *RequestState) SessionDispatchStart(ctx context.Context, accountID int64) time.Time {
+	if s == nil || accountID <= 0 {
+		return time.Time{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.sessionDispatch
+	if d.requestID != s.requestID || d.accountID != accountID {
+		return time.Time{}
+	}
+	if meta, _ := ctx.Value(gatewayRequestMetadataKey{}).(*GatewayRequestMetadata); meta != nil && meta.RequestID != d.requestID {
+		return time.Time{}
+	}
+	return d.at
 }
 
 // SessionSuccess reports a successful request of the session on an account.

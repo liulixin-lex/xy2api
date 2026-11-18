@@ -94,11 +94,12 @@ func TestSchedQualityResetUsesDatabaseTimeAfterLock(t *testing.T) {
 	var begin time.Time
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&begin))
 	type result struct {
-		at  time.Time
-		err error
+		at     time.Time
+		groups []service.SchedTrialGroup
+		err    error
 	}
 	done := make(chan result, 1)
-	go func() { at, err := r.RunReset(ctx, a); done <- result{at, err} }()
+	go func() { at, groups, err := r.RunReset(ctx, a); done <- result{at, groups, err} }()
 	// Observe PostgreSQL's actual wait rather than scheduling by sleeping.
 	deadline := time.Now().Add(2 * time.Second)
 	waiting := false
@@ -111,6 +112,7 @@ func TestSchedQualityResetUsesDatabaseTimeAfterLock(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	got := <-done
 	require.NoError(t, got.err)
+	require.Equal(t, []service.SchedTrialGroup{{GroupID: g, Model: "m"}}, got.groups)
 	require.True(t, got.at.After(begin))
 	require.False(t, got.at.Before(releaseAt))
 	var resetText string
@@ -302,7 +304,7 @@ func TestSchedQualityInvalidResetTimeDoesNotBlockReads(t *testing.T) {
 	at := time.Date(2026, 11, 11, 12, 0, 0, 123456789, time.UTC)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{group_quality_reset_at}',to_jsonb($2::text)) WHERE id=$1`, valid, at.Format(time.RFC3339Nano))
 	require.NoError(t, err)
-	databaseAt, err := r.RunReset(ctx, fromDatabase)
+	databaseAt, _, err := r.RunReset(ctx, fromDatabase)
 	require.NoError(t, err)
 	var logs bytes.Buffer
 	logger, limiter := slog.Default(), schedQualityResetWarnings

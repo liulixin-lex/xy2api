@@ -33,7 +33,7 @@ func TestSelectionCtxPoolCompletesTrialTransaction(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, *account)
 			leases := newSelectionTrialLeaseFake()
 			f.svc.selectionBoard.leases = leases
-			f.view.States[fakeSchedViewKey{7, account.ID, "gpt-5.1"}] = q.StateView{TTFO: q.LineView{Trial: true}}
+			f.view.States[fakeSchedViewKey{7, account.ID, "gpt-5.1"}] = q.StateView{TTFO: q.LineView{Trial: true, TrialUntil: f.view.At().Add(q.TrialDuration)}}
 			cfg := passthroughLifecycleConfig()
 			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
