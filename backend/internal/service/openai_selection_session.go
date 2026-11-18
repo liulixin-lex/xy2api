@@ -169,9 +169,10 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		var reservation *selectionTrialReservation
 		if selectionState(view, groupID, latest, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceTrial {
 			acquired := false
+			var generation string
 			if s.leases != nil {
 				var err error
-				acquired, err = s.leases.Acquire(ctx, latest.ID, OpenAIAttemptModel(latest, model), groupID, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), now)
+				acquired, generation, err = s.leases.Acquire(ctx, latest.ID, OpenAIAttemptModel(latest, model), groupID, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), now)
 				if err != nil {
 					slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", latest.ID, "error", err)
 					acquired = false
@@ -182,6 +183,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 				continue
 			}
 			reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), session: TrialLeaseSessionMember(sessionHash), now: s.now}
+			reservation.rememberRound(view, generation)
 		}
 		kind, reason := "takeover", "priority_takeover"
 		if migrate {

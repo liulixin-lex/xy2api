@@ -77,7 +77,7 @@ func TestSchedV2DecisionStateTransactionAndReset(t *testing.T) {
 	require.Equal(t, basis.AttemptIDs, []string(recorded))
 	require.Equal(t, basis.SourceGroups, rows[0].Basis.SourceGroups)
 	require.WithinDuration(t, row.Epoch, rows[0].Epoch, time.Microsecond)
-	reset, err := r.RunReset(ctx, a)
+	reset, _, err := r.RunReset(ctx, a)
 	require.NoError(t, err)
 	require.False(t, reset.Before(at))
 	rows, _, _, err = r.LoadRows(ctx)

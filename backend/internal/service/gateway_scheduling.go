@@ -77,6 +77,13 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
 
+	// The legacy selector may have resolved a fallback group and rewritten the
+	// composite model. Keep that decision before adding per-account prefetches.
+	if wait, ok := ctx.Value(legacyWaitEligibilityKey{}).(*gatewayWaitEligibility); ok {
+		*wait = s.gatewayWaitCriteria(ctx, groupID, platform, requestedModel,
+			(platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform)
+	}
+
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
 	// 注意：强制平台模式不走混合调度
 	if (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform {
@@ -197,7 +204,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		for {
-			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
+			var wait gatewayWaitEligibility
+			pickCtx := context.WithValue(ctx, legacyWaitEligibilityKey{}, &wait)
+			account, err := s.SelectAccountForModelWithExclusions(pickCtx, groupID, sessionHash, requestedModel, localExcluded)
 			if err != nil {
 				return nil, err
 			}
@@ -225,18 +234,20 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
 				if waitingCount < cfg.StickySessionMaxWaiting {
 					return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-						AccountID:      account.ID,
-						MaxConcurrency: account.Concurrency,
-						Timeout:        cfg.StickySessionWaitTimeout,
-						MaxWaiting:     cfg.StickySessionMaxWaiting,
+						gatewayEligibility: wait,
+						AccountID:          account.ID,
+						MaxConcurrency:     account.Concurrency,
+						Timeout:            cfg.StickySessionWaitTimeout,
+						MaxWaiting:         cfg.StickySessionMaxWaiting,
 					})
 				}
 			}
 			return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-				AccountID:      account.ID,
-				MaxConcurrency: account.Concurrency,
-				Timeout:        cfg.FallbackWaitTimeout,
-				MaxWaiting:     cfg.FallbackMaxWaiting,
+				gatewayEligibility: wait,
+				AccountID:          account.ID,
+				MaxConcurrency:     account.Concurrency,
+				Timeout:            cfg.FallbackWaitTimeout,
+				MaxWaiting:         cfg.FallbackMaxWaiting,
 			})
 		}
 	}
@@ -257,6 +268,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(accounts) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
+	wait := s.gatewayWaitCriteria(ctx, groupID, platform, requestedModel, useMixed)
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
 
@@ -489,10 +501,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 										// 调度快照中的账号是精简版（OAuth token 等被剥离），
 										// 直接返回会导致后续转发缺少凭证而鉴权失败。
 										selection, selectionErr := s.newSelectionResult(ctx, stickyAccount, false, nil, &AccountWaitPlan{
-											AccountID:      stickyAccountID,
-											MaxConcurrency: stickyAccount.Concurrency,
-											Timeout:        cfg.StickySessionWaitTimeout,
-											MaxWaiting:     cfg.StickySessionMaxWaiting,
+											gatewayEligibility: wait.forSticky(),
+											AccountID:          stickyAccountID,
+											MaxConcurrency:     stickyAccount.Concurrency,
+											Timeout:            cfg.StickySessionWaitTimeout,
+											MaxWaiting:         cfg.StickySessionMaxWaiting,
 										})
 										markAnthropicStickyHit(selection, platform)
 										return selection, selectionErr
@@ -605,10 +618,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed wait: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
 					}
 					return s.newSelectionResult(ctx, item.account, false, nil, &AccountWaitPlan{
-						AccountID:      item.account.ID,
-						MaxConcurrency: item.account.Concurrency,
-						Timeout:        cfg.StickySessionWaitTimeout,
-						MaxWaiting:     cfg.StickySessionMaxWaiting,
+						gatewayEligibility: wait,
+						AccountID:          item.account.ID,
+						MaxConcurrency:     item.account.Concurrency,
+						Timeout:            cfg.StickySessionWaitTimeout,
+						MaxWaiting:         cfg.StickySessionMaxWaiting,
 					})
 				}
 				// 所有路由账号会话限制都已满，继续到 Layer 2 回退
@@ -717,10 +731,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"result", "wait_plan",
 							)
 							selection, selectionErr := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-								AccountID:      accountID,
-								MaxConcurrency: account.Concurrency,
-								Timeout:        cfg.StickySessionWaitTimeout,
-								MaxWaiting:     cfg.StickySessionMaxWaiting,
+								gatewayEligibility: wait.forSticky(),
+								AccountID:          accountID,
+								MaxConcurrency:     account.Concurrency,
+								Timeout:            cfg.StickySessionWaitTimeout,
+								MaxWaiting:         cfg.StickySessionMaxWaiting,
 							})
 							markAnthropicStickyHit(selection, platform)
 							return selection, selectionErr
@@ -888,10 +903,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			continue // 会话限制已满，尝试下一个账号
 		}
 		return s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
-			AccountID:      acc.ID,
-			MaxConcurrency: acc.Concurrency,
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
+			gatewayEligibility: wait,
+			AccountID:          acc.ID,
+			MaxConcurrency:     acc.Concurrency,
+			Timeout:            cfg.FallbackWaitTimeout,
+			MaxWaiting:         cfg.FallbackMaxWaiting,
 		})
 	}
 	return nil, ErrNoAvailableAccounts
@@ -2055,6 +2071,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 							if s.debugModelRoutingEnabled() {
 								logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 							}
+							noteLegacyWaitChoice(ctx, true, false)
 							return account, nil
 						}
 					}
@@ -2156,6 +2173,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
 			}
+			noteLegacyWaitChoice(ctx, false, true)
 			return selected, nil
 		}
 		logger.LegacyPrintf("service.gateway", "[ModelRouting] No routed accounts available for model=%s, falling back to normal selection", requestedModel)
@@ -2175,6 +2193,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
 					if !clearSticky && s.isGatewayAccountProfitEligible(ctx, account) && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+						noteLegacyWaitChoice(ctx, true, true)
 						return account, nil
 					}
 				}
@@ -2280,6 +2299,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 	}
 
+	noteLegacyWaitChoice(ctx, false, false)
 	return selected, nil
 }
 
@@ -2322,6 +2342,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 								}
+								noteLegacyWaitChoice(ctx, true, true)
 								return account, nil
 							}
 						}
@@ -2424,6 +2445,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
 			}
+			noteLegacyWaitChoice(ctx, false, true)
 			return selected, nil
 		}
 		logger.LegacyPrintf("service.gateway", "[ModelRouting] No routed accounts available for model=%s, falling back to normal selection", requestedModel)
@@ -2444,6 +2466,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					}
 					if !clearSticky && s.isGatewayAccountProfitEligible(ctx, account) && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
+							noteLegacyWaitChoice(ctx, true, false)
 							return account, nil
 						}
 					}
@@ -2549,6 +2572,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 	}
 
+	noteLegacyWaitChoice(ctx, false, false)
 	return selected, nil
 }
 

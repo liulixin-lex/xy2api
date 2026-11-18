@@ -73,7 +73,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		if b.leases == nil {
 			return false
 		}
-		room, err := b.leases.PeekRoom(ctx, id, attemptModel, now)
+		room, err := b.leases.PeekRoom(ctx, id, attemptModel)
 		return err == nil && room
 	}
 	selectionReq.TokenBilled, selectionReq.OAuthRateMultiplier = true, multiplier

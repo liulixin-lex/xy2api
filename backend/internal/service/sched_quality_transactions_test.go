@@ -26,20 +26,97 @@ func (p *engineLeaseProbe) ReleaseGroup(_ context.Context, a int64, m string, g 
 	p.released = append(p.released, schedQualityKey{a, m, g})
 	return p.err
 }
-func TestEngineResetReleasesAllModelsBeforeDeletingStates(t *testing.T) {
-	f := newQualityFixture(t)
-	f.badTTFT()
-	f.cycle()
-	probe := &engineLeaseProbe{err: errors.New("synthetic Redis outage")}
-	probe.beforeRelease = func() { require.NotEmpty(t, f.store.Rows, "release precedes deletion") }
-	f.e.SetTrialLeases(probe)
-	_, err := f.e.Reset(context.Background(), 1)
-	require.NoError(t, err)
-	require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.released)
-	for _, r := range f.store.Rows {
-		require.NotEqual(t, int64(1), r.AccountID)
+
+type resetFailureStore struct {
+	SchedQualityStore
+	err error
+}
+
+func (s resetFailureStore) RunReset(context.Context, int64) (time.Time, []SchedTrialGroup, error) {
+	return time.Time{}, nil, s.err
+}
+
+type resetRebuildFailureStore struct {
+	SchedQualityStore
+	committed bool
+}
+
+func (s *resetRebuildFailureStore) RunReset(ctx context.Context, id int64) (time.Time, []SchedTrialGroup, error) {
+	at, deleted, err := s.SchedQualityStore.RunReset(ctx, id)
+	s.committed = err == nil
+	return at, deleted, err
+}
+func (s *resetRebuildFailureStore) LoadRows(ctx context.Context) ([]q.LineState, []SchedOverride, map[int64]time.Time, error) {
+	if s.committed {
+		return nil, nil, nil, errors.New("rebuild read failed")
+	}
+	return s.SchedQualityStore.LoadRows(ctx)
+}
+
+func TestEngineResetReleasesOnlyAfterCommit(t *testing.T) {
+	for _, mode := range []string{"success", "db_failure", "release_failure", "rebuild_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newQualityFixture(t)
+			f.badTTFT()
+			f.cycle()
+			probe := &engineLeaseProbe{}
+			probe.beforeRelease = func() {
+				require.NotZero(t, f.store.Resets[1])
+				for _, row := range f.store.Rows {
+					require.NotEqual(t, int64(1), row.AccountID)
+				}
+			}
+			f.e.SetTrialLeases(probe)
+			switch mode {
+			case "db_failure":
+				f.e.store = resetFailureStore{f.store, errors.New("db reset failed")}
+			case "release_failure":
+				probe.err = errors.New("Redis unavailable")
+			case "rebuild_failure":
+				f.e.store = &resetRebuildFailureStore{SchedQualityStore: f.store}
+			}
+			_, err := f.e.Reset(context.Background(), 1)
+			if mode == "db_failure" {
+				require.ErrorContains(t, err, "db reset failed")
+				require.Empty(t, probe.released)
+				require.Empty(t, f.store.Resets)
+				return
+			}
+			if mode == "rebuild_failure" {
+				require.ErrorContains(t, err, "rebuild read failed")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.released)
+		})
 	}
 }
+
+type insertBeforeResetStore struct {
+	SchedQualityStore
+	insert func()
+}
+
+func (s insertBeforeResetStore) RunReset(ctx context.Context, id int64) (time.Time, []SchedTrialGroup, error) {
+	s.insert()
+	return s.SchedQualityStore.RunReset(ctx, id)
+}
+
+func TestEngineResetFencesGroupsInsertedBeforeTransaction(t *testing.T) {
+	f := newQualityFixture(t)
+	leases := &engineLeaseProbe{}
+	f.e.SetTrialLeases(leases)
+	f.e.store = insertBeforeResetStore{f.store, func() {
+		for _, line := range []q.Dimension{q.DimensionTTFO, q.DimensionError} {
+			f.store.Rows = append(f.store.Rows, q.LineState{LineKey: q.LineKey{GroupID: 7, Model: "m", AccountID: 1, Line: line}, Trial: true})
+		}
+	}}
+	_, err := f.e.Reset(context.Background(), 1)
+	require.NoError(t, err)
+	require.Empty(t, f.store.Rows)
+	require.Equal(t, []schedQualityKey{{1, "m", 7}}, leases.released)
+}
+
 func TestEngineReleaseWaitsForLastTrialLine(t *testing.T) {
 	f := newQualityFixture(t)
 	probe := &engineLeaseProbe{}
@@ -225,4 +302,11 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 	require.Equal(t, float64(3), record["released"])
 	require.Equal(t, float64(1), record["trial"])
 	require.Equal(t, float64(1), record["clear"])
+}
+
+// Even with generation fencing, an unsuccessful Redis cleanup can leave seats
+// touched through a still-fresh old view. Reassess that residual window if
+// the first cooldown no longer outlasts both view staleness and lease idleness.
+func TestSchedTrialResetResidualWindowFitsFirstCooldown(t *testing.T) {
+	require.Greater(t, q.CooldownLadder[0], TrialLeaseIdle+q.ViewMaxAge)
 }

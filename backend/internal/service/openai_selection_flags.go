@@ -61,7 +61,7 @@ func (s *OpenAIGatewayService) PrepareOpenAISelectionTurn(ctx context.Context, g
 		return slotRelease
 	}
 	member := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
-	acquired, err := leases.Acquire(ctx, account.ID, model, derefGroupID(groupID), member, now)
+	acquired, _, err := leases.Acquire(ctx, account.ID, model, derefGroupID(groupID), member, now)
 	if err != nil {
 		slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "error", err)
 	}

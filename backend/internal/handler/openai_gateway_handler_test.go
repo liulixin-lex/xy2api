@@ -3119,6 +3119,15 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 	require.NotContains(t, accountRepo.rateLimitedIDs, int64(9913), "healthy failover account must not be penalized")
 }
 
+func TestWebSocketExplicitImageFirstFrameSetsImageBillingScope(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload: `{"type":"response.create","model":"gpt-5.1","input":"fixture","tools":[{"type":"image_generation"}],"tool_choice":{"type":"image_generation"}}`,
+		ingressMode:  service.OpenAIWSIngressModeCtxPool,
+	})
+	require.NotNil(t, got.log)
+	require.Equal(t, resilience.GatewayRequestScopeImage, got.log.RequestScope)
+}
+
 func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSUsageLogCase) openAIResponsesWSUsageLogResult {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

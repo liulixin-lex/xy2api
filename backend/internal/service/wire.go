@@ -895,7 +895,14 @@ func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAtt
 }
 
 func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQualityEngineService) *OpenAISelectionBoard {
-	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View }, engine.leases)
+	reader, ok := engine.store.(SchedTrialRoundReader)
+	return NewOpenAISelectionBoard(openai, func() schedquality.View {
+		view := engine.Snapshot().View
+		if !ok {
+			return view
+		}
+		return trialCheckingView{View: view, SchedTrialRoundReader: reader}
+	}, engine.leases)
 }
 
 func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTransientAdmin {

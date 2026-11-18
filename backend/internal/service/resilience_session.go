@@ -358,6 +358,9 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		slog.Warn("resilience.last_resort_list_failed", "group_id", *groupID, "error", err)
 		return nil
 	}
+	wait := s.gatewayWaitCriteria(ctx, groupID, platform, requestedModel, useMixed)
+	wait.lastResort = true
+	wait.checkGroup = true
 	// The candidates pass the same gates as in normal selection (window
 	// cost and RPM included); only soft penalties are relaxed.
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
@@ -434,11 +437,13 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
+		wait.sticky = acc.ID == owner
 		sel, err := s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
-			AccountID:      acc.ID,
-			MaxConcurrency: acc.Concurrency,
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
+			gatewayEligibility: wait,
+			AccountID:          acc.ID,
+			MaxConcurrency:     acc.Concurrency,
+			Timeout:            cfg.FallbackWaitTimeout,
+			MaxWaiting:         cfg.FallbackMaxWaiting,
 		})
 		if err != nil {
 			return nil
@@ -652,7 +657,6 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	if err != nil {
 		return
 	}
-	rec.r.markSessionFailures(groupID, sessionHash, window)
 	if !postOutput && n < int64(cfg.Session.StreakThreshold) {
 		return
 	}
@@ -680,29 +684,23 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	)...)
 }
 
-// Success resets the session's failure count of the account. Only sessions
-// this instance saw failing touch Redis, so the common path costs nothing.
+// Success only clears failures predating the successful send on this account.
 func (rec *sessionFailureRecorder) Success(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
 	if rec != nil && rec.r != nil {
 		rec.r.terminalRejections.reset(groupID, openAITerminalRejectionSession(ctx, sessionHash), accountID)
 	}
-	if rec == nil || rec.r == nil || rec.r.store == nil || !rec.r.sessionHadFailures(groupID, sessionHash) {
+	if rec == nil || rec.r == nil || rec.r.store == nil || sessionHash == "" || accountID <= 0 || !resilience.Current().SessionOn() {
+		return
+	}
+	start := resilience.StateFrom(ctx).SessionDispatchStart(ctx, accountID)
+	if start.IsZero() {
 		return
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
-}
-
-func sessionMarkKey(groupID int64, sessionHash string) string {
-	return sessionHash + "\x00" + strconv.FormatInt(groupID, 10)
-}
-
-func (r *ResilienceService) markSessionFailures(groupID int64, sessionHash string, window time.Duration) {
-	if r == nil {
-		return
+	if err := rec.r.store.ClearSessionFailuresBefore(stateCtx, groupID, sessionHash, accountID, start); err != nil {
+		slog.Warn("resilience.session_failure_clear_failed", "group_id", groupID, "account_id", accountID, "error", err)
 	}
-	r.failingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(window))
 }
 
 func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
@@ -719,37 +717,10 @@ func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
 	}
 }
 
-// sweepSessionMarks drops expired failure and avoid marks; without it every
-// session that failed once and never returned would stay in memory. The
-// per-account counts of failures after output and the expired last-resort
-// group snapshots go on the same tick.
+// sweepSessionMarks drops expired post-output failures and last-resort snapshots.
 func (r *ResilienceService) sweepSessionMarks(now time.Time) {
 	r.postOutput.sweep(now)
 	r.lastResortGroups.sweep(now)
-	for _, m := range []*sync.Map{&r.failingSessions} {
-		m.Range(func(k, v any) bool {
-			if until, ok := v.(time.Time); !ok || now.After(until) {
-				m.Delete(k)
-			}
-			return true
-		})
-	}
-}
-
-func (r *ResilienceService) sessionHadFailures(groupID int64, sessionHash string) bool {
-	if r == nil {
-		return false
-	}
-	key := sessionMarkKey(groupID, sessionHash)
-	v, ok := r.failingSessions.Load(key)
-	if !ok {
-		return false
-	}
-	if until, _ := v.(time.Time); time.Now().After(until) {
-		r.failingSessions.Delete(key)
-		return false
-	}
-	return true
 }
 
 // gatewaySessionRecorder returns the recorder of the gateway scheduler.

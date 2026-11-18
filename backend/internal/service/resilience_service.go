@@ -13,10 +13,13 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
+// SessionFailureClockSkewAllowance covers small relative clock offsets between
+// gateway instances without a Redis read on every physical send.
+const SessionFailureClockSkewAllowance = 2 * time.Second
+
 const (
 	resilienceSettingsRefreshInterval = 10 * time.Second
-	// resilienceSessionMarkSweep removes expired session marks of sessions
-	// that never came back (lookups only drop the marks they touch).
+	// Expire post-output failure windows and cached last-resort groups.
 	resilienceSessionMarkSweep = time.Minute
 	resilienceLoadTimeout      = 5 * time.Second
 )
@@ -29,6 +32,9 @@ type ResilienceStore interface {
 	IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error)
 	// ClearSessionFailure resets the count of an account within a session.
 	ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error
+	// ClearSessionFailuresBefore uses monotonic order for a fully timed, local-only
+	// window and a wall-clock skew allowance otherwise.
+	ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error
 	// SessionFailures returns all counts of a session (Explain).
 	SessionFailures(ctx context.Context, groupID int64, sessionHash string) (map[int64]int64, error)
 	// AddSessionAvoid puts an account into the session avoid set for ttl.
@@ -91,9 +97,6 @@ type ResilienceService struct {
 	// lastResortUsed records accounts recently served as last resort
 	// (id -> time) so a success lifts their transient cooldown early.
 	lastResortUsed sync.Map
-	// failingSessions marks sessions with failure counts on this instance
-	// (key -> expiry) so successes only reset counts when needed.
-	failingSessions sync.Map
 	// Installed at startup by the selection board; it reads the current view.
 	sessionResetAt func(int64) time.Time
 	// terminalRejections holds bounded, instance-local refusal evidence.
