@@ -226,7 +226,7 @@ type SchedBoardRow struct {
 }
 type SchedSelectionBoard interface {
 	// Board orders the group's accounts for one assumed request: streaming text, token-billed, no session, HTTP.
-	Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, error)
+	Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, *SchedAdminSupply, error)
 }
 type SchedLocalPenalty struct {
 	Key, Kind, Scope, Model string

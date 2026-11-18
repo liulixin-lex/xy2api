@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -99,6 +100,9 @@ func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accoun
 	if err != nil {
 		return false, err
 	}
+	if result == 0 && (operation == "acquire" || operation == "room") {
+		c.recordFull(ctx, accountID, model, groupID, now)
+	}
 	return result == 1, nil
 }
 
@@ -128,4 +132,53 @@ func (c *schedTrialLeaseCache) ReleaseGroup(ctx context.Context, accountID int64
 func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g int64, request, session string, now time.Time) error {
 	_, err := c.run(ctx, "promote", a, m, g, request, strconv.FormatInt(now.UnixMilli(), 10), session)
 	return err
+}
+
+// Retain observations beyond a one-hour trial and its next evaluation.
+const schedTrialFullTTL = 24 * time.Hour
+
+var schedTrialPeekRoomScript = redis.NewScript(`
+local holders = redis.call('ZCOUNT', KEYS[1], '(' .. ARGV[1], '+inf')
+return holders < tonumber(ARGV[2]) and 1 or 0
+`)
+
+var schedTrialRecordFullScript = redis.NewScript(`
+local previous = redis.call('HGET', KEYS[1], ARGV[1])
+if not previous or tonumber(previous) < tonumber(ARGV[2]) then
+    redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+    redis.call('EXPIRE', KEYS[1], ARGV[3])
+end
+return 1
+`)
+
+func schedTrialFullKey(accountID int64, model string) string {
+	return "sched:trial_full:" + strconv.FormatInt(accountID, 10) + ":" + model
+}
+
+func (c *schedTrialLeaseCache) recordFull(ctx context.Context, accountID int64, model string, groupID int64, nowMs string) {
+	// Observability is best effort and must not turn a full seat into a dispatch error.
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	err := schedTrialRecordFullScript.Run(ctx, c.rdb, []string{schedTrialFullKey(accountID, model)},
+		groupID, nowMs, int64(schedTrialFullTTL/time.Second)).Err()
+	if err != nil {
+		slog.WarnContext(ctx, "sched_quality.trial_full_record_failed", "account_id", accountID, "group_id", groupID, "error", err)
+	}
+}
+
+func (c *schedTrialLeaseCache) PeekRoom(ctx context.Context, accountID int64, model string, now time.Time) (bool, error) {
+	result, err := schedTrialPeekRoomScript.Run(ctx, c.rdb, []string{schedTrialLeaseKey(accountID, model)},
+		now.UnixMilli()-service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit).Int()
+	return result == 1, err
+}
+
+func (c *schedTrialLeaseCache) LastFull(ctx context.Context, accountID int64, model string, groupID int64) (time.Time, error) {
+	ms, err := c.rdb.HGet(ctx, schedTrialFullKey(accountID, model), strconv.FormatInt(groupID, 10)).Int64()
+	if err == redis.Nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(ms).UTC(), nil
 }

@@ -166,13 +166,15 @@ func (g schedAdminGroups) GetByID(_ context.Context, id int64) (*Group, error) {
 }
 
 type schedAdminBoard struct {
-	rows  []SchedBoardRow
-	model string
+	supply *SchedAdminSupply
+	err    error
+	rows   []SchedBoardRow
+	model  string
 }
 
-func (b *schedAdminBoard) Board(_ context.Context, _ int64, m string) ([]SchedBoardRow, error) {
+func (b *schedAdminBoard) Board(_ context.Context, _ int64, m string) ([]SchedBoardRow, *SchedAdminSupply, error) {
 	b.model = m
-	return b.rows, nil
+	return b.rows, b.supply, b.err
 }
 
 type schedAdminTransient struct{ entries map[string]bool }

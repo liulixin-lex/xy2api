@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -279,10 +280,15 @@ func (s *SchedAdminService) Order(ctx context.Context, g int64, model string) (S
 	if out.Model == "" {
 		return out, nil
 	}
-	rows, err := s.d.Board.Board(ctx, g, out.Model)
+	rows, supply, err := s.d.Board.Board(ctx, g, out.Model)
 	if err != nil {
-		return out, err
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		slog.WarnContext(ctx, "sched_quality.board_read_failed", "group_id", g, "error", err)
+		return out, nil
 	}
+	out.Supply = supply
 	for _, r := range rows {
 		x := SchedAdminOrderRow{Rank: r.Rank, AccountID: r.AccountID, Name: r.Name, Layer: r.Layer, Lines: r.Lines, Pinned: r.Pinned, Exempt: r.Exempt, Priority: r.Priority, Rate: r.Rate, LoadRate: r.LoadRate, InFlight: r.InFlight, Concurrency: r.Concurrency}
 		if r.Excluded != "" {

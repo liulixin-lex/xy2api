@@ -64,7 +64,7 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	for k, v := range s.selectionFullMarks.at {
 		before[k] = v
 	}
-	rows, err := board.Board(context.Background(), 7, "m")
+	rows, _, err := board.Board(context.Background(), 7, "m")
 	require.NoError(t, err)
 	require.Len(t, rows, 5)
 	var ids []int64
@@ -140,7 +140,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 			}
 			s.accountRepo = &selectionBoardRepo{accounts: []Account{*a}}
 			b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
-			rows, err := b.Board(context.Background(), 7, "m")
+			rows, _, err := b.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Equal(t, "stopped", rows[0].Layer)
 			if kind == "iq" {
@@ -154,7 +154,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 	t.Run("group_profit_applies", func(t *testing.T) {
 		s := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}}
 		b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
-		rows, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
+		rows, _, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
 		require.NoError(t, err)
 		require.Equal(t, "stopped", rows[0].Layer)
 	})
@@ -182,7 +182,7 @@ func TestSchedBoardSchedulingThresholdReadOnly(t *testing.T) {
 			s.accountRepo = repo
 			board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 			board.now = func() time.Time { return now }
-			rows, err := board.Board(context.Background(), 7, "m")
+			rows, _, err := board.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			require.Equal(t, tt.paused, rows[0].Layer == "stopped")
@@ -215,7 +215,7 @@ func TestSchedBoardUpstreamChannelRestriction(t *testing.T) {
 	require.True(t, s.needsUpstreamChannelRestrictionCheck(ctx, ptrInt64Selection(7)))
 	require.False(t, s.checkChannelPricingRestriction(ctx, ptrInt64Selection(7), "m"), "the group-level check cannot resolve account mapping")
 	board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(time.Now()) })
-	rows, err := board.Board(ctx, 7, "m")
+	rows, _, err := board.Board(ctx, 7, "m")
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, allowed.ID, rows[0].AccountID)

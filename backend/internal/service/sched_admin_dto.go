@@ -174,7 +174,15 @@ type SchedAdminPolicyPolicy struct {
 	MinCacheRatio       float64 `json:"min_cache_ratio"`
 	TakeoverIdleSeconds int     `json:"takeover_idle_seconds"`
 }
+type SchedAdminSupply struct {
+	Declared  int    `json:"declared"`
+	Enabled   int    `json:"enabled"`
+	Available int    `json:"available"`
+	At        string `json:"at"`
+}
+
 type SchedAdminOrder struct {
+	Supply        *SchedAdminSupply    `json:"supply"`
 	GroupID       int64                `json:"group_id"`
 	Model         string               `json:"model"`
 	Models        []string             `json:"models"`

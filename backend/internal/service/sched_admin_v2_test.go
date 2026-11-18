@@ -425,8 +425,42 @@ func TestSchedAdminBoardSharesEngineTrialLeases(t *testing.T) {
 	out, err = admin.Order(context.Background(), 7, "m")
 	require.NoError(t, err)
 	require.Equal(t, "trial", out.Rows[0].Layer)
-	for _, call := range leases.calls {
-		require.Contains(t, call, "room:", "board must only inspect capacity")
-	}
+	require.Equal(t, []string{"peek_room", "peek_room"}, leases.calls, "board must only inspect capacity")
 	require.Empty(t, leases.held)
+}
+
+func TestObserveGroupSupplyOutsideRecentModels(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	members := make([]Account, 5)
+	for i := range members {
+		members[i] = *selectionTestAccount(int64(i+1), i)
+		members[i].Credentials = map[string]any{"model_mapping": map[string]any{"other-model": "target"}}
+	}
+	members[0].Status = StatusDisabled
+	members[1].Schedulable = false
+	members[2].RateLimitResetAt = &future
+	members[4].Credentials = map[string]any{"model_mapping": map[string]any{"unrelated": "target"}}
+	repo := &selectionBoardRepo{accounts: members}
+	s, engine, _ := schedAdminFixture()
+	engine.snapshot.GroupModels = map[int64][]SchedModelCount{7: {{Model: "recent"}}}
+	s.d.Groups = schedAdminGroups{7: {ID: 7, Platform: PlatformOpenAI}}
+	board := NewOpenAISelectionBoard(&OpenAIGatewayService{accountRepo: repo}, nil)
+	board.now = func() time.Time { return now }
+	s.d.Board = board
+	out, err := s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, []string{"recent"}, out.Models)
+	require.Equal(t, "other-model", out.Model)
+	require.Equal(t, &SchedAdminSupply{Declared: 4, Enabled: 2, Available: 1, At: schedAdminStamp(now)}, out.Supply)
+
+	repo.accounts = members[:2]
+	out, err = s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, &SchedAdminSupply{Declared: 2, At: schedAdminStamp(now)}, out.Supply)
+	s.d.Board = &schedAdminBoard{err: fmt.Errorf("member read failed")}
+	out, err = s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Nil(t, out.Supply)
 }

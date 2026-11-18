@@ -22,6 +22,12 @@ type selectionTurnLeases struct {
 func (l *selectionTurnLeases) Room(context.Context, int64, string, int64, string, time.Time) (bool, error) {
 	return true, nil
 }
+func (l *selectionTurnLeases) PeekRoom(context.Context, int64, string, time.Time) (bool, error) {
+	return true, nil
+}
+func (l *selectionTurnLeases) LastFull(context.Context, int64, string, int64) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (l *selectionTurnLeases) Acquire(_ context.Context, _ int64, m string, _ int64, s string, _ time.Time) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

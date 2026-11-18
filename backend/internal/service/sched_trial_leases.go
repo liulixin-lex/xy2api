@@ -40,6 +40,12 @@ type SchedTrialLeases interface {
 	// ReleaseGroup removes all session and request members for this group, using
 	// storage time for idle cleanup. Missing groups succeed; failures return errors.
 	ReleaseGroup(ctx context.Context, accountID int64, model string, groupID int64) error
+	// PeekRoom reports capacity for a new session without refreshing TTLs or
+	// recording an observation. It is used only for the admin preview.
+	PeekRoom(ctx context.Context, accountID int64, model string, now time.Time) (bool, error)
+	// LastFull returns the latest dispatch-time observation for this group.
+	// A zero time means there is no observation; storage failures return an error.
+	LastFull(ctx context.Context, accountID int64, model string, groupID int64) (time.Time, error)
 }
 
 // TrialLeaseSessionMember namespaces the sessionHash shared by sampling and

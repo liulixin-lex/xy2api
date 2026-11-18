@@ -82,8 +82,8 @@ func (schedAdminHandlerGroups) GetByID(_ context.Context, id int64) (*service.Gr
 
 type schedAdminHandlerBoard struct{}
 
-func (schedAdminHandlerBoard) Board(context.Context, int64, string) ([]service.SchedBoardRow, error) {
-	return []service.SchedBoardRow{{AccountID: 1, Rank: 1, Name: "one", Layer: "normal"}}, nil
+func (schedAdminHandlerBoard) Board(context.Context, int64, string) ([]service.SchedBoardRow, *service.SchedAdminSupply, error) {
+	return []service.SchedBoardRow{{AccountID: 1, Rank: 1, Name: "one", Layer: "normal"}}, nil, nil
 }
 
 type schedAdminHandlerAudit struct {
@@ -147,7 +147,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		keys               []string
-	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"rear", "trial", "unknown", "exempt"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"relaxed_lines", "lines", "changed"}}}
+	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"rear", "trial", "unknown", "exempt"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows", "supply"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"relaxed_lines", "lines", "changed"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h, _, repo := schedAdminHandlerFixture()
