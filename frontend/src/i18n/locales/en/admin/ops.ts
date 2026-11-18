@@ -115,6 +115,7 @@ export default {
         detailsTitle: 'User wait (end-to-end first output, ms)',
         unknown: 'Unknown',
         none: 'No end-to-end records in this period (periods before the upgrade have none)',
+        notProvided: 'The data returned carries no end-to-end figures',
         samples: 'Over {n} requests; periods before the upgrade have no records and are not counted.',
         lastAttempt: 'Last attempt'
       },

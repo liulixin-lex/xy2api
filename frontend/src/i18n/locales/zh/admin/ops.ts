@@ -115,6 +115,7 @@ export default {
         detailsTitle: '用户等待（端到端首输出，毫秒）',
         unknown: '未知',
         none: '这段时间没有端到端记录（升级之前的时段没有记录）',
+        notProvided: '这次返回的数据里没有端到端统计',
         samples: '基于 {n} 个请求；升级之前的时段没有记录，不计入。',
         lastAttempt: '末次首字'
       },

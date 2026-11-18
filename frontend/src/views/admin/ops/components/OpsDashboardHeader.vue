@@ -418,9 +418,12 @@ const durationMaxMs = computed(() => overview.value?.duration?.max_ms ?? null)
 const ttftP99Ms = computed(() => overview.value?.ttft?.p99_ms ?? null)
 const ttftP50Ms = computed(() => overview.value?.ttft?.p50_ms ?? null)
 
-// The user's wait (end-to-end first output). Without samples (a range before the upgrade, say) it is unknown; the
-// count does not say which periods lack records.
+// The user's wait (end-to-end first output). Unknown without samples, for one of two reasons kept apart (review item 7):
+// the answer counted none (a range before the upgrade, say; the count does not say which periods lack records), or
+// the answer carries no count at all.
+const e2eCounted = computed(() => typeof overview.value?.e2e_first_output_sample_count === 'number')
 const e2eSampleCount = computed(() => overview.value?.e2e_first_output_sample_count ?? 0)
+const e2eUnknownWhy = computed(() => t(e2eCounted.value ? 'admin.ops.e2eFirstOutput.none' : 'admin.ops.e2eFirstOutput.notProvided'))
 const e2eP99Ms = computed(() => overview.value?.e2e_first_output?.p99_ms ?? null)
 const e2eStats = computed(() => {
   const e2e = overview.value?.e2e_first_output
@@ -435,7 +438,7 @@ const e2eStats = computed(() => {
 const e2eTooltip = computed(() => {
   const note = e2eSampleCount.value > 0
     ? t('admin.ops.e2eFirstOutput.samples', { n: e2eSampleCount.value.toLocaleString() })
-    : t('admin.ops.e2eFirstOutput.none')
+    : e2eUnknownWhy.value
   return `${t('admin.ops.tooltips.e2eFirstOutput')} ${note}`
 })
 
@@ -1377,7 +1380,7 @@ function handleToolbarRefresh() {
           </template>
           <template v-else>
             <div class="mt-2 text-3xl font-black text-gray-400 dark:text-gray-500" data-testid="ops-e2e-p99">{{ t('admin.ops.e2eFirstOutput.unknown') }}</div>
-            <p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-testid="ops-e2e-none">{{ t('admin.ops.e2eFirstOutput.none') }}</p>
+            <p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-testid="ops-e2e-none">{{ e2eUnknownWhy }}</p>
           </template>
           <div class="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700" data-testid="ops-e2e-last-attempt">
             <span class="text-gray-500">{{ t('admin.ops.e2eFirstOutput.lastAttempt') }}</span>

@@ -48,16 +48,17 @@ describe('OpsDashboardHeader user wait', () => {
     wrapper.unmount()
   })
 
+  // Review item 7: an answer that counted no samples and one without the count say different things.
   it.each([
-    ['no samples', { e2e_first_output: { p50_ms: null, p90_ms: null, p95_ms: null, p99_ms: null, avg_ms: null, max_ms: null }, e2e_first_output_sample_count: 0 }],
-    ['an answer without the fields', {}]
-  ])('shows the user wait as unknown with why for %s, the last attempt still shown', async (_, value) => {
+    ['no samples counted', { e2e_first_output: { p50_ms: null, p90_ms: null, p95_ms: null, p99_ms: null, avg_ms: null, max_ms: null }, e2e_first_output_sample_count: 0 }, 'admin.ops.e2eFirstOutput.none'],
+    ['an answer without the count', {}, 'admin.ops.e2eFirstOutput.notProvided']
+  ])('shows the user wait as unknown with why for %s, the last attempt still shown', async (_, value, why) => {
     const wrapper = mountWait(value)
     await flushPromises()
     const card = wrapper.get('[data-testid="ops-e2e-card"]')
     expect(card.get('[data-testid="ops-e2e-p99"]').text()).toBe('admin.ops.e2eFirstOutput.unknown')
-    expect(card.get('[data-testid="ops-e2e-none"]').text()).toBe('admin.ops.e2eFirstOutput.none')
-    expect(card.get('[data-testid="help"]').attributes('data-content')).toBe('admin.ops.tooltips.e2eFirstOutput admin.ops.e2eFirstOutput.none')
+    expect(card.get('[data-testid="ops-e2e-none"]').text()).toBe(why)
+    expect(card.get('[data-testid="help"]').attributes('data-content')).toBe(`admin.ops.tooltips.e2eFirstOutput ${why}`)
     expect(card.get('[data-testid="ops-e2e-last-attempt"]').text()).toContain('1200')
     wrapper.unmount()
   })
