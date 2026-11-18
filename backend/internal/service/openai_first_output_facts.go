@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -10,10 +11,35 @@ import (
 // Only sendSchedHTTP attaches this handle to the built request.
 type schedHTTPAttemptKey struct{}
 
+// A redirect or a transport retry can use another connection (including a
+// reused one) within the same Do. The installed timer spans both wire sends.
+func (a *schedAttemptCapture) withHTTPDispatchTrace(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, schedHTTPAttemptKey{}, a)
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.gotHTTPConn {
+			a.invalidateRepeatedSendLocked()
+		}
+		a.gotHTTPConn = true
+	}})
+}
+
+func (a *schedAttemptCapture) invalidateRepeatedSendLocked() {
+	a.repeatedHTTPSend = true
+	a.ownerHit, a.fullTierFirstOutputTimeout = false, false
+}
+
 func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.httpSelection.HTTPStreamText || a.done || seq == 0 || a.dispatch.AttemptSeq != 0 || a.state.CurrentAttempt() != a {
+	if !a.httpSelection.HTTPStreamText || a.done || seq == 0 || a.state.CurrentAttempt() != a {
+		return
+	}
+	if a.dispatch.AttemptSeq != 0 {
+		if seq != a.dispatch.AttemptSeq {
+			a.invalidateRepeatedSendLocked()
+		}
 		return
 	}
 	group, session := a.state.SessionIdentity()
@@ -37,8 +63,8 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 		a.mu.Unlock()
 		return fact, false
 	}
-	if a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
-		a.first || a.done || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() || a.state.CurrentAttempt() != a {
+	if a.repeatedHTTPSend || a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
+		a.first || a.done || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() || !a.state.IsCurrentHTTPDispatch(a, a.dispatch.AttemptSeq) {
 		a.mu.Unlock()
 		return resilience.OwnerFirstOutputCutoff{}, false
 	}

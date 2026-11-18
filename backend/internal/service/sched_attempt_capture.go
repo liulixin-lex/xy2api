@@ -35,6 +35,7 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
 	factsOnly                                  bool
+	gotHTTPConn, repeatedHTTPSend              bool
 	mu                                         sync.Mutex
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
@@ -600,7 +601,7 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		if model := gjson.GetBytes(body, "model").String(); model != "" {
 			a.dispatch.Model = model
 		}
-		req = req.WithContext(context.WithValue(req.Context(), schedHTTPAttemptKey{}, a))
+		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
 	}
 	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
 	if guard != nil {

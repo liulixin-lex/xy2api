@@ -25,6 +25,17 @@ func (s *RequestState) OwnerHTTPDispatchPending(accountID int64) bool {
 		s.schedSelection.AccountID == accountID && s.schedSelection.StickyWarm
 }
 
+// IsCurrentHTTPDispatch checks both the handle and the physical send. A
+// transport can make a second send without replacing the forwarding handle.
+func (s *RequestState) IsCurrentHTTPDispatch(handle any, seq uint64) bool {
+	if s == nil || seq == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentAttempt == handle && s.httpSendSeq == seq
+}
+
 func (s *RequestState) RecordOwnerCutoff(v OwnerFirstOutputCutoff) bool {
 	if s == nil || v.AttemptSeq == 0 {
 		return false

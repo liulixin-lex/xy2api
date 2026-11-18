@@ -4,7 +4,11 @@ package handler
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/repository"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"testing"
@@ -128,4 +132,52 @@ func TestOwnerCutoffFromHTTPIngress(t *testing.T) {
 			require.Equal(t, account.ID, fact.AccountID)
 		})
 	}
+}
+
+type factsRedirectTransport struct {
+	service.HTTPUpstream
+	state *resilience.RequestState
+}
+
+func (u *factsRedirectTransport) Do(req *http.Request, proxy string, id int64, c int) (*http.Response, error) {
+	u.state = resilience.StateFrom(req.Context())
+	return u.HTTPUpstream.Do(req, proxy, id, c)
+}
+func TestOwnerCutoffAfterHTTPRedirect(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) {
+		s.Budget.FirstOutputTimeoutSeconds.Default = 1
+		s.Budget.ModelOverrides = nil
+		s.Budget.PreOutputBudgetSeconds = 12
+	})
+	var hops atomic.Int32
+	testUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hops.Add(1)
+		if r.URL.Path != "/next" {
+			http.Redirect(w, r, "/next", http.StatusTemporaryRedirect)
+			return
+		}
+		select {
+		case <-r.Context().Done():
+		case <-time.After(4 * time.Second):
+		}
+	}))
+	defer testUpstream.Close()
+	account := service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{4201}, Credentials: map[string]any{"api_key": "test", "base_url": testUpstream.URL}, Extra: map[string]any{"openai_responses_mode": "force_responses"}}
+	repo := &openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}
+	up := &factsRedirectTransport{HTTPUpstream: repository.NewHTTPUpstream(&config.Config{})}
+	h, _, router := captureFixture(t, account, up, captureOptions{cache: &capturePinnedCache{owner: account.ID}, repo: repo})
+	probe := gin.New()
+	probe.Use(router.Handlers...)
+	probe.Use(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		resilience.StateFrom(ctx).SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
+		c.Next()
+	})
+	probe.POST("/v1/responses", h.Responses)
+	response := captureRequest(probe, "/v1/responses", `{"model":"gpt-5.1","input":"hi","stream":true,"prompt_cache_key":"review"}`)
+	require.NotNil(t, up.state)
+	fact, ok := up.state.OwnerCutoff()
+	t.Logf("status=%d wire_hops=%d published=%t fact_seq=%d", response.Code, hops.Load(), ok, fact.AttemptSeq)
+	require.EqualValues(t, 2, hops.Load())
+	require.False(t, ok)
 }
