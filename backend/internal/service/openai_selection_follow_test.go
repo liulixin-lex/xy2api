@@ -650,6 +650,60 @@ func TestFirstOutputFollowBorrowKeepsTrialLast(t *testing.T) {
 	}
 }
 
+func TestFirstOutputFollowAvoidWriteLog(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name, reason string
+		hasError     bool
+	}{
+		{"written", "confirmed", false}, {"disabled", "session_disabled", false},
+		{"snapshot", "binding_changed", false}, {"rejected", "rejected", false},
+		{"expired", "expired", false}, {"store_error", "error", true}, {"timeout", "timeout", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			ctx := followState(t, f, false)
+			state := resilience.StateFrom(ctx)
+			fact, _ := state.OwnerCutoff()
+			const privateText = "synthetic private store detail"
+			switch tc.name {
+			case "disabled":
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
+			case "snapshot":
+				fact.Generation = "another-version"
+			case "rejected":
+				f.binding.avoidRejected = true
+			case "expired":
+				fact.FiredAt = time.Now().Add(-time.Hour)
+			case "store_error":
+				f.binding.avoidErr = errors.New(privateText)
+			case "timeout":
+				f.binding.avoidErr = fmt.Errorf("%s: %w", privateText, context.DeadlineExceeded)
+			}
+			logs := captureOpenAIObservationLogs(t)
+			recordFirstOutputAvoid(ctx, fact)
+			rows := schedObsLogRecords(t, logs)
+			require.Len(t, rows, 1)
+			require.Equal(t, "sched_quality.first_output_avoid", rows[0]["msg"])
+			require.Equal(t, tc.reason, rows[0]["reason"])
+			wantWritten := tc.name == "written"
+			require.Equal(t, wantWritten, rows[0]["confirmed"])
+			class, hasClass := rows[0]["error_class"]
+			require.Equal(t, tc.hasError, hasClass)
+			if hasClass {
+				require.NotEmpty(t, class)
+			}
+			require.NotContains(t, logs.String(), privateText)
+			_, confirmed := state.ConfirmedOwnerCutoff()
+			require.Equal(t, wantWritten, confirmed)
+			stored, err := f.session.store.SessionAvoid(ctx, 7, firstOutputAvoidSession("session"))
+			require.NoError(t, err)
+			_, written := stored[f.owner.ID]
+			require.Equal(t, wantWritten, written)
+		})
+	}
+}
+
 func TestFirstOutputFollowSwitchDisabledAfterReceipt(t *testing.T) {
 	for _, planned := range []bool{false, true} {
 		t.Run(fmt.Sprintf("planned=%t", planned), func(t *testing.T) {

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -65,27 +67,26 @@ func (c *openAIStickyChange) matchesCutoff(f resilience.OwnerFirstOutputCutoff) 
 }
 
 func recordFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) {
-	state := resilience.StateFrom(ctx)
-	confirmed := false
-	reason := "protocol_ineligible"
-	if !resilience.Current().SessionOn() {
-		reason = "session_disabled"
-	} else if fact.CanTransfer {
-		if change := pendingOpenAIStickyChange(ctx); change.matchesCutoff(fact) && change.writeFirstOutputAvoid(ctx, fact) {
-			confirmed = state.ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation)
-		}
-		reason = "unconfirmed"
-		if confirmed {
-			reason = "confirmed"
-		}
+	reason, errorClass := pendingOpenAIStickyChange(ctx).writeFirstOutputAvoid(ctx, fact)
+	fields := []any{"component", "sched_quality", "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
+		"group_id", fact.GroupID, "model", fact.Model, "account_id", fact.AccountID, "reason", reason, "confirmed", reason == "confirmed"}
+	if errorClass != "" {
+		fields = append(fields, "error_class", errorClass)
 	}
-	slog.InfoContext(ctx, "sched_quality.first_output_avoid", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
-		"group_id", fact.GroupID, "model", fact.Model, "account_id", fact.AccountID, "reason", reason, "confirmed", confirmed)
+	slog.InfoContext(ctx, "sched_quality.first_output_avoid", fields...)
 }
 
-func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) bool {
-	if c.cache == nil {
-		return false
+func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) (reason, errorClass string) {
+	cfg := resilience.Current()
+	switch {
+	case !cfg.SessionOn():
+		return "session_disabled", ""
+	case !fact.CanTransfer:
+		return "protocol_ineligible", ""
+	case !c.matchesCutoff(fact):
+		return "binding_changed", ""
+	case c.cache == nil:
+		return "error", "cache_unavailable"
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
@@ -93,12 +94,27 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 	if c.resetAt != nil {
 		reset = c.resetAt(fact.AccountID)
 	}
-	ttl := time.Until(fact.FiredAt.Add(time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second))
+	ttl := time.Until(fact.FiredAt.Add(time.Duration(cfg.Session.AvoidSeconds) * time.Second))
 	if ttl <= 0 {
-		return false
+		return "expired", ""
 	}
 	written, err := c.cache.RecordSessionBindingFailure(stateCtx, fact.GroupID, fact.BindingKey, firstOutputAvoidSession(fact.Session), c.expected, fact.AccountID, ttl, reset)
-	return written && err == nil && stateCtx.Err() == nil
+	if ctxErr := stateCtx.Err(); ctxErr != nil {
+		err = ctxErr // A late acknowledgement cannot authorize handoff.
+	}
+	if err != nil {
+		if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
+			return "timeout", fmt.Sprintf("%T", netErr)
+		}
+		return "error", fmt.Sprintf("%T", err)
+	}
+	if !written {
+		return "rejected", ""
+	}
+	if !resilience.StateFrom(ctx).ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation) {
+		return "receipt_stale", ""
+	}
+	return "confirmed", ""
 }
 
 // A selection only plans a change. Admission and billing must never commit it.
