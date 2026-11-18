@@ -268,11 +268,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, selectionSessionHash, accountReleaseFunc, nil)
+		if latest == nil {
+			reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			continue
+		}
 		if vetoed {
-			if accountReleaseFunc != nil {
-				accountReleaseFunc()
-			}
 			reqLog.Debug("gateway.cc.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 				reqLog.Warn("gateway.cc.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))

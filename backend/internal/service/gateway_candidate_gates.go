@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"errors"
+	"log/slog"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 type gatewayCandidateReason string
@@ -12,12 +16,13 @@ type gatewayCandidateReason string
 // gateway selection. Share candidates and last-resort selection both run
 // accounts through them, so neither can miss a gate the other applies.
 type gatewayCandidateGates struct {
-	s            *GatewayService
-	groupID      *int64
-	platform     string
-	useMixed     bool
-	model        string
-	channelCheck bool
+	s                *GatewayService
+	groupID          *int64
+	platform         string
+	useMixed         bool
+	model            string
+	channelCheck     bool
+	profitAtDispatch bool
 }
 
 func (s *GatewayService) newGatewayCandidateGates(ctx context.Context, groupID *int64, platform string, useMixed bool, model string) gatewayCandidateGates {
@@ -36,7 +41,7 @@ func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account
 	case !s.isAccountSchedulableForSelection(acc):
 		reason, end := shareAccountStateReason(acc, now)
 		return reason, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, end)
-	case !s.isGatewayAccountProfitEligible(ctx, acc):
+	case !g.profitAtDispatch && !s.isGatewayAccountProfitEligible(ctx, acc):
 		return "profit_gate", time.Time{}
 	case !s.isAccountAllowedForPlatform(acc, g.platform, g.useMixed):
 		return "platform_mismatch", time.Time{}
@@ -129,4 +134,89 @@ func shareAccountStateReason(a *Account, now time.Time) (gatewayCandidateReason,
 		return "quota_exceeded", time.Time{}
 	}
 	return "not_schedulable", time.Time{}
+}
+
+// gatewayWaitEligibility freezes the policy of the branch that selected this
+// account. ctx is the request's selection context before cost/RPM prefetch.
+type gatewayWaitEligibility struct {
+	ctx                                     context.Context
+	groupID                                 *int64
+	platform, model                         string
+	useMixed, sticky, lastResort            bool
+	checkGroup, skipChannel, requirePrivacy bool
+}
+
+type legacyWaitEligibilityKey struct{}
+
+func (s *GatewayService) gatewayWaitCriteria(ctx context.Context, groupID *int64, platform, model string, mixed bool) gatewayWaitEligibility {
+	// In simple mode the snapshot lists every account of the platform. The
+	// repository-only mixed list still scopes a non-nil group.
+	checkGroup := s.cfg == nil || s.cfg.RunMode != config.RunModeSimple || (mixed && groupID != nil)
+	if s.schedulerSnapshot != nil {
+		checkGroup = !s.schedulerSnapshot.isRunModeSimple()
+	}
+	return gatewayWaitEligibility{ctx: ctx, groupID: groupID, platform: platform, model: model, useMixed: mixed, checkGroup: checkGroup}
+}
+
+func (w gatewayWaitEligibility) forSticky() gatewayWaitEligibility {
+	w.sticky = true
+	return w
+}
+
+func noteLegacyWaitChoice(ctx context.Context, sticky, skipChannel bool, group *Group) {
+	if w, ok := ctx.Value(legacyWaitEligibilityKey{}).(*gatewayWaitEligibility); ok {
+		w.sticky = sticky
+		w.skipChannel = skipChannel
+		w.requirePrivacy = !sticky && group != nil && group.RequirePrivacySet
+		w.checkGroup = w.checkGroup || sticky
+	}
+}
+
+// GatewayAccountAfterSlot returns nil for a pre-dispatch eligibility loss.
+// A profit veto retains the account and its distinct veto reason.
+func (s *GatewayService) GatewayAccountAfterSlot(ctx context.Context, sel *AccountSelectionResult) (*Account, bool, string) {
+	if sel.Acquired {
+		return s.GatewayProfitControlVetoLatest(ctx, sel.Account)
+	}
+	w := sel.WaitPlan.gatewayEligibility
+	fresh, err := s.accountRepo.GetByID(ctx, sel.Account.ID)
+	if errors.Is(err, ErrAccountNotFound) {
+		return nil, false, "account_deleted"
+	}
+	if err != nil {
+		slog.Warn("gateway.wait_account_refresh_failed", "group_id", derefGroupID(w.groupID), "account_id", sel.Account.ID,
+			"platform", w.platform, "error_class", "storage_read")
+		return s.GatewayProfitControlVetoLatest(ctx, sel.Account)
+	}
+	if fresh == nil || (w.checkGroup && !s.isAccountInGroup(fresh, w.groupID)) {
+		return nil, false, "account_missing_or_moved"
+	}
+	gateCtx := w.ctx
+	now := time.Now()
+	if w.lastResort {
+		tier, _, _ := resiliencePenaltyOf(fresh, w.model, now)
+		if tier == resilience.TierHard || iqGateBlocksRequest(fresh, w.model, false) {
+			return nil, false, "hard_penalty"
+		}
+		fresh = withoutSoftPenalties(*fresh, now)
+		gateCtx = withResilienceLastResortGate(gateCtx)
+	} else {
+		if s.isAccountBlockedBySchedulingThreshold(gateCtx, fresh) || (fresh.IsGrok() && len(s.filterGrokFreeQuotaAccountsForGateway(gateCtx, []Account{*fresh})) == 0) {
+			return nil, false, "scheduling_threshold"
+		}
+		if w.requirePrivacy && !fresh.IsPrivacySet() {
+			return nil, false, "privacy_required"
+		}
+	}
+	if s.checkChannelPricingRestriction(gateCtx, w.groupID, w.model) {
+		return nil, false, "channel_restricted"
+	}
+	gates := s.newGatewayCandidateGates(gateCtx, w.groupID, w.platform, w.useMixed, w.model)
+	gates.channelCheck = gates.channelCheck && !w.skipChannel
+	gates.profitAtDispatch = true
+	if reason, _ := gates.candidateReason(gateCtx, fresh, w.sticky, now); reason != "" {
+		return nil, false, string(reason)
+	}
+	// The authoritative row already includes current prices and membership.
+	return profitControlVetoLatest(ctx, fresh, nil)
 }

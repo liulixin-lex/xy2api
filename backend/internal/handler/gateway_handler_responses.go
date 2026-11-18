@@ -270,11 +270,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		// ctx 上（composite/fallback 还可能解析出与入口分组不同的门），直接用
 		// requestCtx 会退化为空操作。
 		admissionCtx := service.ContextWithSelectionProfitGate(requestCtx, selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, sessionHash, accountReleaseFunc, nil)
+		if latest == nil {
+			reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			continue
+		}
 		if vetoed {
-			if accountReleaseFunc != nil {
-				accountReleaseFunc()
-			}
 			reqLog.Debug("gateway.responses.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 				reqLog.Warn("gateway.responses.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))

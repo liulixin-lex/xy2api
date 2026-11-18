@@ -358,6 +358,9 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		slog.Warn("resilience.last_resort_list_failed", "group_id", *groupID, "error", err)
 		return nil
 	}
+	wait := s.gatewayWaitCriteria(ctx, groupID, platform, requestedModel, useMixed)
+	wait.lastResort = true
+	wait.checkGroup = true
 	// The candidates pass the same gates as in normal selection (window
 	// cost and RPM included); only soft penalties are relaxed.
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
@@ -434,11 +437,13 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			continue
 		}
 		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
+		wait.sticky = acc.ID == owner
 		sel, err := s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
-			AccountID:      acc.ID,
-			MaxConcurrency: acc.Concurrency,
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
+			gatewayEligibility: wait,
+			AccountID:          acc.ID,
+			MaxConcurrency:     acc.Concurrency,
+			Timeout:            cfg.FallbackWaitTimeout,
+			MaxWaiting:         cfg.FallbackMaxWaiting,
 		})
 		if err != nil {
 			return nil

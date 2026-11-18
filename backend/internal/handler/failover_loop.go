@@ -139,6 +139,7 @@ type FailoverState struct {
 	// 请求开始冻结），被清空的账号会被立即重选并再次否决，形成没有任何上游请求、
 	// SwitchCount 也不前进的活锁。清空后必须把它们放回排除集。
 	profitVetoedAccountIDs map[int64]struct{}
+	invalidAfterWait       map[int64]struct{}
 	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
 	profitVetoCount int
 }
@@ -152,6 +153,33 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
 		hasBoundSession:        hasBoundSession,
 		profitVetoedAccountIDs: make(map[int64]struct{}),
 	}
+}
+
+// admitGatewaySlot consumes the slot and session registration on rejection.
+// Only waiting plans can lose eligibility. Keep their exclusions through 503
+// backoff without treating them as upstream attempts or profit vetoes.
+func (s *FailoverState) admitGatewaySlot(ctx context.Context, gateway *service.GatewayService, selection *service.AccountSelectionResult,
+	session string, releaseSlot func(), deferredSessions map[int64]*service.Account) (*service.Account, bool, string) {
+	account, profitVeto, reason := gateway.GatewayAccountAfterSlot(ctx, selection)
+	if account != nil && !profitVeto {
+		return account, false, ""
+	}
+	if releaseSlot != nil {
+		releaseSlot()
+	}
+	id := selection.Account.ID
+	if !selection.Acquired {
+		gateway.ReleaseAccountSession(context.WithoutCancel(ctx), selection.Account, session)
+		delete(deferredSessions, id)
+	}
+	if account == nil {
+		if s.invalidAfterWait == nil {
+			s.invalidAfterWait = make(map[int64]struct{})
+		}
+		s.invalidAfterWait[id] = struct{}{}
+		s.FailedAccountIDs[id] = struct{}{}
+	}
+	return account, profitVeto, reason
 }
 
 // RecordProfitVeto 记录一次分组利润门终检否决：把账号加入排除列表（同时登记到
@@ -338,6 +366,9 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 				if _, vetoed := s.profitVetoedAccountIDs[id]; vetoed {
 					continue
 				}
+				if _, invalid := s.invalidAfterWait[id]; invalid {
+					continue
+				}
 				hint, ok := resilience.StateFrom(ctx).AccountRetryNotBefore(id)
 				if !ok || !hint.NotBefore.After(now) {
 					hasImmediate = true
@@ -389,6 +420,9 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 		s.FailedAccountIDs = stillWaiting
 		// 利润门否决的账号不参与退避重试的解除：判定依据（冻结的下游倍率）在
 		// 同一请求内不变，放它们回池只会被再次否决。
+		for id := range s.invalidAfterWait {
+			s.FailedAccountIDs[id] = struct{}{}
+		}
 		for id := range s.profitVetoedAccountIDs {
 			s.FailedAccountIDs[id] = struct{}{}
 		}
