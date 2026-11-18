@@ -461,7 +461,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				_ = resp.Body.Close()
 			}
 			headerGuard.close()
-			return nil, s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+			return nil, s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, headerGuard.capture.Load()), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				attemptStart, reqModel, reasoningEffortValue, firstOutputTimeout, "response_headers", nil, headerGuard.plan)
 		}
 		if err != nil && headerGuard != nil {
@@ -3277,8 +3277,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
 		contentSeen: func() bool { return firstOutputSeen || clientOutputStarted },
 		onDeadline: func() (*openaiStreamingResultPassthrough, error) {
+			firedAt := time.Now()
 			if resilience.BudgetTraceEnabledForTest {
 				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")
+			}
+			// Attribute the timer at firing. Delivery still resolves disconnects and
+			// bare errors after Close has allowed any in-flight read to finish.
+			if !clientDisconnected && reqCtx.Err() == nil && !(codexFailureTerminal && sawBareError && !sawResponseFailed) {
+				claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, schedCapture.cancelFirstOutputUpstream)
 			}
 			_ = resp.Body.Close()
 			if clientDisconnected || reqCtx.Err() != nil {
@@ -3289,7 +3295,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				return finish(nil)
 			}
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
-			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, schedCapture), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan)
 		},
 		onStall: func(lastRead time.Time, deadlineArmed bool) (*openaiStreamingResultPassthrough, error, bool) {

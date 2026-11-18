@@ -57,6 +57,10 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
+	httpSendSeq          uint64 // never reused by another turn on this connection
+	turnStartHTTPSeq     uint64
+	ownerCutoff          OwnerFirstOutputCutoff
+	ownerAvoidConfirmed  bool
 	currentAttempt       any
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
@@ -364,9 +368,9 @@ func (s *RequestState) RecordOpsUpstreamEvent() uint64 {
 
 // MarkOpsUpstreamSendBoundary snapshots the current upstream event sequence
 // immediately before an HTTP send for accountID.
-func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
+func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) uint64 {
 	if s == nil || accountID <= 0 {
-		return
+		return 0
 	}
 	s.mu.Lock()
 	if s.opsUpstreamSendBoundaries == nil {
@@ -375,7 +379,10 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
+	s.httpSendSeq++
+	seq := s.httpSendSeq
 	s.mu.Unlock()
+	return seq
 }
 
 // OpsUpstreamSendBoundary returns the latest send boundary for accountID.
@@ -510,9 +517,10 @@ func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 type stateKey struct{}
 
 type SchedSelection struct {
-	AccountID  int64
-	Model      string
-	StickyWarm bool
+	AccountID      int64
+	Model          string
+	StickyWarm     bool
+	HTTPStreamText bool
 }
 
 func (s *RequestState) SetSchedSelection(v SchedSelection) {

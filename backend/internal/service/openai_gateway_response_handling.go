@@ -1382,6 +1382,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				_ = resp.Body.Close()
 				return finalizeStream()
 			}
+			if !clientDisconnected {
+				claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, time.Now(), schedCapture.cancelFirstOutputUpstream)
+			}
 			if resilience.BudgetTraceEnabledForTest {
 				firstOutputPlan.ObserveFiredForTest("openai_semantic_output")
 			}
@@ -1391,7 +1394,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				context.WithValue(ctx, schedHTTPAttemptKey{}, schedCapture), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort,
 				firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan,
 			)

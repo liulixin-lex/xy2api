@@ -226,8 +226,12 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
-	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
-	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
+	defer func() {
+		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
+		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)
+	}()
+	if ordinary {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
 	}
