@@ -330,6 +330,33 @@ describe('admin UsageView native compaction filter', () => {
     vi.useRealTimers()
   })
 
+  // Review item 2: the user-wait card follows the current filter's stats, never the previous filter's.
+  it('marks the stats as the current filter\'s only after they load for it, and as failed when they do not', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 12 })
+
+    getStats.mockRejectedValueOnce(new Error('down'))
+    ;(wrapper.vm as any).filters.group_id = 54
+    await wrapper.vm.$nextTick()
+    expect(cards().props('e2eState')).toBe('loading')
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('failed')
+
+    getStats.mockResolvedValueOnce({ total_requests: 3, e2e_first_output_p50_ms: 9_000, e2e_first_output_samples: 3 })
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 3 })
+    wrapper.unmount()
+  })
+
   it('propagates the filter to list/stats/model/snapshot requests and clears it on reset', async () => {
     const wrapper = mountRouteFilteredUsageView()
     vi.advanceTimersByTime(120)

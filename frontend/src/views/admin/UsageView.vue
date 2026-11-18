@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :stats="usageStats" :e2e-state="usageStatsState" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -468,7 +468,17 @@ const askEndpointStats = (noCache = false) => {
   endpointStatsLoading.value = true
   if (noCache) statsNoCache = true
 }
+// The stats answer the filter they were asked with. The user-wait card says whether its numbers are the current
+// filter's, still on their way, or failed to load: never another filter's (review item 2). The other cards keep the
+// last answer until a new one arrives, as before.
+const statsFilterKey = computed(() => JSON.stringify(filters.value))
+const usageStatsKey = ref<string | null>(null)
+const usageStatsFailedKey = ref<string | null>(null)
+const usageStatsState = computed<'loading' | 'failed' | 'loaded'>(() =>
+  usageStatsFailedKey.value === statsFilterKey.value ? 'failed' : usageStatsKey.value === statsFilterKey.value ? 'loaded' : 'loading'
+)
 const runStatsTask = async (signal: AbortSignal) => {
+  const key = statsFilterKey.value
   const withEndpoints = endpointStatsDue
   const noCache = statsNoCache
   const requestType = filters.value.request_type
@@ -482,6 +492,8 @@ const runStatsTask = async (signal: AbortSignal) => {
     if (signal.aborted) return // a load started: the filter may have changed
     if (noCache) statsNoCache = false
     usageStats.value = s
+    usageStatsKey.value = key
+    if (usageStatsFailedKey.value === key) usageStatsFailedKey.value = null
     if (!withEndpoints) return
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
@@ -490,6 +502,7 @@ const runStatsTask = async (signal: AbortSignal) => {
     endpointStatsLoading.value = false
   } catch (error) {
     if (signal.aborted) return
+    usageStatsFailedKey.value = key
     console.error('Failed to load usage stats:', error)
     if (withEndpoints) endpointStatsLoading.value = false
     throw error // the engine retries it on the back-off beat

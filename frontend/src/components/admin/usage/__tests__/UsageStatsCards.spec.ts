@@ -24,7 +24,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, unknown>) => (params ? `${messages[key] ?? key}:${JSON.stringify(params)}` : messages[key] ?? key),
     }),
   }
 })
@@ -89,24 +89,32 @@ describe('UsageStatsCards', () => {
 })
 
 describe('UsageStatsCards user wait (admin)', () => {
-  const mountCards = (value: Record<string, unknown>) => mount(UsageStatsCards, {
-    props: { stats: { ...stats, ...value } as never },
+  const mountCards = (value: Record<string, unknown>, e2eState?: 'loading' | 'failed' | 'loaded') => mount(UsageStatsCards, {
+    props: { stats: { ...stats, ...value } as never, e2eState },
     global: { stubs: { Icon: true } },
   })
-
-  it('shows the median end-to-end first output with the requests it is over', () => {
-    const wrapper = mountCards({ e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 1234 })
-    expect(wrapper.get('[data-testid="usage-e2e-p50"]').text()).toBe('51.00s')
-    expect(wrapper.get('[data-testid="usage-e2e-samples"]').text()).toBe('usage.e2eFirstOutputSamples')
+  const card = (wrapper: ReturnType<typeof mountCards>) => ({
+    value: wrapper.get('[data-testid="usage-e2e-p50"]').text(),
+    note: wrapper.get('[data-testid="usage-e2e-samples"]').text(),
   })
 
-  it('reads unknown without samples', () => {
-    const wrapper = mountCards({ e2e_first_output_p50_ms: null, e2e_first_output_samples: 0 })
-    expect(wrapper.get('[data-testid="usage-e2e-p50"]').text()).toBe('usage.latencyUnknown')
-    expect(wrapper.get('[data-testid="usage-e2e-samples"]').text()).toBe('usage.e2eFirstOutputNone')
+  it('shows the median end-to-end first output with the number of requests it is over', () => {
+    expect(card(mountCards({ e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 1234 }, 'loaded'))).toEqual({
+      value: '51.00s', note: `usage.e2eFirstOutputSamples:${JSON.stringify({ n: (1234).toLocaleString() })}`,
+    })
+    expect(card(mountCards({ e2e_first_output_p50_ms: 800, e2e_first_output_samples: 1 }, 'loaded')).note).toBe('usage.e2eFirstOutputSamples:{"n":"1"}')
   })
 
-  it('has no card on the user page, whose stats carry no end-to-end fields', () => {
-    expect(mountCards({}).find('[data-testid="usage-e2e-card"]').exists()).toBe(false)
+  it.each([
+    ['still loading for the current filter', 'loading', { e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }, { value: '…', note: 'usage.e2eFirstOutputLoading' }],
+    ['failed for the current filter', 'failed', { e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputFailed' }],
+    ['loaded without the figures', 'loaded', {}, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputMissing' }],
+    ['loaded with no samples', 'loaded', { e2e_first_output_p50_ms: null, e2e_first_output_samples: 0 }, { value: 'usage.latencyUnknown', note: 'usage.e2eFirstOutputNone' }],
+  ] as const)('never shows another filter\'s median: %s', (_, state, value, expected) => {
+    expect(card(mountCards(value, state))).toEqual(expected)
+  })
+
+  it('has no card on the user page, which passes no state', () => {
+    expect(mountCards({ e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }).find('[data-testid="usage-e2e-card"]').exists()).toBe(false)
   })
 })
