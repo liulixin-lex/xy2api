@@ -129,13 +129,16 @@ async function reload() {
 watch(() => props.groupId, reload, { immediate: true })
 
 // The saved limit in force and what it takes to judge the error line bad once (50 and 100 clear outcomes): the
-// backend's numbers, never worked out here.
+// backend's numbers, never worked out here. The backend lists only the examples that can trip; with a high limit there
+// may be one or none, and none says the line is not judged bad within 100. Older answers without the fields show nothing.
 const errorTrip = computed(() => {
   const saved = record.value
-  const examples = saved?.error_trip_examples ?? []
-  if (!saved || typeof saved.effective_max_error_rate !== 'number' || !examples.length) return ''
+  const examples = saved?.error_trip_examples
+  if (!saved || typeof saved.effective_max_error_rate !== 'number' || !Array.isArray(examples)) return ''
+  const limit = `${pct(saved.effective_max_error_rate)}%`
+  if (!examples.length) return t('admin.schedQuality.policy.errorTripNone', { limit })
   return t('admin.schedQuality.policy.errorTrip', {
-    limit: `${pct(saved.effective_max_error_rate)}%`,
+    limit,
     examples: examples
       .map((item) => t('admin.schedQuality.policy.errorTripItem', { known: item.known, failed: item.failed }))
       .join(t('admin.schedQuality.policy.errorTripJoiner'))

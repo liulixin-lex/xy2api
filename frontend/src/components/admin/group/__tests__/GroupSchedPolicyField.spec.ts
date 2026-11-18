@@ -277,6 +277,21 @@ describe('GroupSchedPolicyField', () => {
   })
 
   // Review item 8: by the saved floor, like the error examples; it follows a successful save, not the typing.
+  // With a high limit the backend lists only the examples that can trip: one, or none (not judged bad within 100).
+  it.each([
+    ['one example', { effective_max_error_rate: 0.3, error_trip_examples: [{ known: 100, failed: 39 }] },
+      `admin.schedQuality.policy.errorTrip:${JSON.stringify({ limit: '30%', examples: 'admin.schedQuality.policy.errorTripItem:{"known":100,"failed":39}' })}`],
+    ['no example', { effective_max_error_rate: 0.9, error_trip_examples: [] }, 'admin.schedQuality.policy.errorTripNone:{"limit":"90%"}'],
+    ['an older answer without the fields', { effective_max_error_rate: undefined, error_trip_examples: undefined }, null],
+    ['an older answer without the examples', { error_trip_examples: undefined }, null]
+  ])('explains the saved error limit with %s', async (_, patch, expected) => {
+    api.getGroupPolicy.mockResolvedValue({ ...policy(), ...patch })
+    const w = await mountField()
+    const note = w.find('[data-sq-policy-notes="error"]')
+    if (expected === null) expect(note.exists()).toBe(false)
+    else expect(note.text()).toBe(expected)
+  })
+
   it('warns about a saved cache floor above 85 %, unchanged by typing until a save, and always says a passed trial is not stability', async () => {
     const w = await mountField()
     const warned = () => w.find('[data-sq-policy-notes="cache"]').exists()
