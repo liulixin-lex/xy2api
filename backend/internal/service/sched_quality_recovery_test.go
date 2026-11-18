@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -12,6 +13,139 @@ import (
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/stretchr/testify/require"
 )
+
+func errorRecoverySamples(clear, failed int, at time.Time) []q.AttemptSample {
+	rows := engineSamples(clear, at, false)
+	for i := range rows {
+		rows[i].RequestID = rows[i].AttemptID
+		rows[i].InsertedAt = at
+		if i < failed {
+			rows[i].Outcome = q.OutcomeAccountFault
+			rows[i].Class = q.ClassUpstream
+		}
+	}
+	return rows
+}
+
+func TestEngineErrorRecoveryByEvent(t *testing.T) {
+	for _, event := range []struct {
+		name string
+		kind q.EventKind
+		want q.Verdict
+	}{
+		{"regular", q.EventRegular, q.VerdictPass},
+		{"review", q.EventReview, q.VerdictUnknown},
+		{"trial", q.EventTrial, q.VerdictUnknown},
+	} {
+		t.Run(event.name, func(t *testing.T) {
+			f := newQualityFixture(t)
+			f.e.policies = f.store.Policies
+			key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}
+			pair := SchedAccountModel{key.AccountID, key.Model}
+			row := q.LineState{LineKey: key}
+			for _, sample := range []struct {
+				failed int
+				want   q.Verdict
+			}{
+				{5, event.want},
+				{6, q.VerdictFail},
+			} {
+				d := &schedQualityData{samples: map[SchedAccountModel][]q.AttemptSample{
+					pair: errorRecoverySamples(52, sample.failed, f.now.Add(-time.Second)),
+				}}
+				verdict, basis := f.e.assessLine(d, row, event.kind, f.now, nil)
+				require.Equal(t, sample.want, verdict)
+				require.NotNil(t, basis.Error)
+				require.Equal(t, verdict, basis.Error.Verdict)
+				require.Equal(t, 52, basis.Error.Clear)
+				require.Equal(t, sample.failed, basis.Error.Failed)
+
+				raw, err := json.Marshal(basis)
+				require.NoError(t, err)
+				var stored q.Basis
+				require.NoError(t, json.Unmarshal(raw, &stored))
+				require.NotNil(t, stored.Error)
+				require.Equal(t, verdict, stored.Error.Verdict)
+				if sample.want == q.VerdictUnknown {
+					require.True(t, stored.Error.RecoveryOverLimit)
+					require.Contains(t, string(raw), `"recovery_over_limit":true`)
+				} else {
+					require.False(t, stored.Error.RecoveryOverLimit)
+					require.NotContains(t, string(raw), "recovery_over_limit")
+				}
+			}
+		})
+	}
+}
+
+func TestEngineErrorRecoveryKeepsTrialAcrossRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		action   q.Action
+		identity q.Identity
+		verdict  q.Verdict
+	}{
+		{"later-failure", q.ActionTrialFail, q.IdentityRear, q.VerdictFail},
+		{"still-over-limit-at-deadline", q.ActionTrialTimeout, q.IdentityUnknown, q.VerdictUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newQualityFixture(t)
+			reviewAt := f.now.Add(-10 * time.Second)
+			entry := reviewAt.Add(-q.CooldownLadder[0])
+			f.store.Rows = []q.LineState{{
+				LineKey:  q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError},
+				Identity: q.IdentityRear, Entry: entry, LastRear: entry, Until: reviewAt, EvaluatedAt: entry, Admissions: 1,
+			}}
+			f.ledger.Rows = errorRecoverySamples(52, 5, reviewAt.Add(-30*time.Second))
+			f.cycle()
+			require.Equal(t, q.PlaceTrial, f.view().Placement(true, f.now))
+			require.Len(t, f.store.Decisions, 1)
+			review := f.store.Decisions[0]
+			require.Equal(t, q.ActionTrial, review.Action)
+			require.Equal(t, "review", review.Basis.Kind)
+			require.NotNil(t, review.Basis.Error)
+			require.Equal(t, q.VerdictUnknown, review.Basis.Error.Verdict)
+			require.True(t, review.Basis.Error.RecoveryOverLimit)
+			require.Equal(t, &review.Basis, f.line(q.DimensionError).Basis)
+
+			trialAt := reviewAt.Add(time.Minute)
+			f.now = trialAt.Add(10 * time.Second)
+			f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(52, 5, trialAt)...)
+			f.cycle()
+			trial := f.line(q.DimensionError)
+			require.Equal(t, trialAt, trial.EvaluatedAt)
+			require.Equal(t, reviewAt.Add(q.TrialDuration), trial.TrialUntil)
+			require.Equal(t, q.PlaceTrial, f.view().Placement(true, f.now))
+			require.Len(t, f.store.Decisions, 1)
+
+			f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
+			f.cycle()
+			require.Equal(t, trial, f.line(q.DimensionError))
+			require.Equal(t, q.PlaceTrial, f.view().Placement(true, f.now))
+			require.Len(t, f.store.Decisions, 1)
+
+			endAt := trial.TrialUntil
+			if tc.action == q.ActionTrialFail {
+				endAt = trialAt.Add(time.Minute)
+				f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(1, 1, endAt)...)
+			}
+			f.now = endAt.Add(10 * time.Second)
+			f.cycle()
+			state := f.line(q.DimensionError)
+			require.False(t, state.Trial)
+			require.Equal(t, tc.identity, state.Identity)
+			require.Len(t, f.store.Decisions, 2)
+			decision := f.store.Decisions[1]
+			require.Equal(t, endAt, decision.At)
+			require.Equal(t, tc.action, decision.Action)
+			require.Equal(t, "trial", decision.Basis.Kind)
+			require.NotNil(t, decision.Basis.Error)
+			require.Equal(t, tc.verdict, decision.Basis.Error.Verdict)
+			require.Equal(t, tc.verdict == q.VerdictUnknown, decision.Basis.Error.RecoveryOverLimit)
+			require.Equal(t, &decision.Basis, state.Basis)
+		})
+	}
+}
 
 func TestEngineRestartRecoversTrialArrivalsAndMinutes(t *testing.T) {
 	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
