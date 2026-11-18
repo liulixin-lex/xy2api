@@ -151,7 +151,23 @@ func TestFirstOutputFollowRequiresReceiptAndFront(t *testing.T) {
 			recordFirstOutputAvoid(ctx, fact)
 			_, confirmed := st.ConfirmedOwnerCutoff()
 			require.Equal(t, scenario != "rejected" && scenario != "error" && scenario != "expired", confirmed)
+			logs := captureOpenAIObservationLogs(t)
 			svc.planOpenAIFollow(ctx, ptrInt64Selection(7), "session", "m", sel, true)
+			events := schedObsLogRecords(t, logs)
+			require.Len(t, events, 1)
+			require.Equal(t, "sched_quality.session_switch", events[0]["msg"])
+			require.Equal(t, st.GatewayRequestID(), events[0]["gateway_request_id"])
+			require.Equal(t, false, events[0]["committed"])
+			switch scenario {
+			case "trial", "rear":
+				require.Equal(t, "not_front", events[0]["reason"])
+			case "rejected", "error", "expired":
+				require.Equal(t, "avoid_unconfirmed", events[0]["reason"])
+			case "protocol":
+				require.Equal(t, "protocol_ineligible", events[0]["reason"])
+			default:
+				require.Equal(t, "borrowed", events[0]["reason"])
+			}
 			require.Zero(t, pendingOpenAIStickyChange(ctx).target)
 			followDelivery(svc, ctx, acc, 0, &OpenAIForwardResult{})
 			require.Empty(t, f.binding.casKeys)

@@ -362,7 +362,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	case !change.matchesCutoff(fact) || fact.GroupID != derefGroupID(group) || fact.Session != session:
 		reason = "binding_changed"
 	case change.ownerReleased || change.target != 0:
-		return // An independently planned create, release or takeover owns this outcome.
+		reason = "existing_change" // Another binding plan owns this outcome.
 	case selection.StickyCapacitySpillover || openAIStickyBindingKept(ctx, session, target) || keptOwner != 0 && keptOwner != target:
 		reason = "borrowed"
 	default:
