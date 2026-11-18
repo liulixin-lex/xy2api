@@ -2,7 +2,6 @@ package service
 
 import (
 	"log/slog"
-	"math"
 	"sort"
 	"time"
 
@@ -58,17 +57,10 @@ func (d *schedQualityData) displayPeers(at time.Time, rows map[q.LineKey]q.LineS
 	}
 }
 
-func ruleBTime(at time.Time) float64 {
-	if at.IsZero() {
-		return math.Inf(-1)
-	}
-	return float64(at.Unix()) + float64(at.Nanosecond())/1e9
-}
-
 func ruleBSample(r q.AttemptSample) q.RuleBSample {
 	s := q.RuleBSample{
 		AccountID: r.AccountID, GroupID: r.GroupID, Model: r.Model, SessionKey: r.SessionKey,
-		StartedAt: ruleBTime(r.StartedAt), AvailableAt: ruleBTime(schedAvailableAt(r)),
+		StartedAt: r.StartedAt, AvailableAt: schedAvailableAt(r),
 		Stream: r.Stream, Outcome: r.Outcome, SwitchedAccount: r.Switched,
 		CaptureVersion: r.CaptureVersion, Warm: r.Warm, FullTierFirstOutputTimeout: r.FullTierFirstOutputTimeout,
 	}
@@ -92,11 +84,11 @@ func ruleBSamples(rows []q.AttemptSample) []q.RuleBSample {
 	// Stable accumulation order makes replay independent of map/SQL row order.
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		if a.AvailableAt != b.AvailableAt {
-			return a.AvailableAt < b.AvailableAt
+		if cmp := a.AvailableAt.Compare(b.AvailableAt); cmp != 0 {
+			return cmp < 0
 		}
-		if a.StartedAt != b.StartedAt {
-			return a.StartedAt < b.StartedAt
+		if cmp := a.StartedAt.Compare(b.StartedAt); cmp != 0 {
+			return cmp < 0
 		}
 		if a.AccountID != b.AccountID {
 			return a.AccountID < b.AccountID
@@ -116,7 +108,7 @@ func ruleBSamples(rows []q.AttemptSample) []q.RuleBSample {
 }
 
 func ttftInput(d *schedQualityData, k q.LineKey, cut, at time.Time, limit float64, resets map[int64]time.Time) q.RuleBInput {
-	in := q.RuleBInput{Scope: q.RuleBScope{AccountID: k.AccountID, GroupID: k.GroupID, Model: k.Model}, Now: ruleBTime(at), Cut: ruleBTime(cut), LimitSeconds: limit, Samples: d.ruleSamples[SchedAccountModel{k.AccountID, k.Model}], GroupSamples: d.ruleGroups[schedGroupModel{k.GroupID, k.Model}]}
+	in := q.RuleBInput{Scope: q.RuleBScope{AccountID: k.AccountID, GroupID: k.GroupID, Model: k.Model}, Now: at, Cut: cut, LimitSeconds: limit, Samples: d.ruleSamples[SchedAccountModel{k.AccountID, k.Model}], GroupSamples: d.ruleGroups[schedGroupModel{k.GroupID, k.Model}]}
 	if d.peers != nil {
 		for key, r := range d.peers.rows {
 			if key.GroupID != k.GroupID || key.Model != k.Model || key.AccountID == k.AccountID {
@@ -126,7 +118,7 @@ func ttftInput(d *schedQualityData, k q.LineKey, cut, at time.Time, limit float6
 			if r.Identity == q.IdentityRear {
 				identity = 1
 			} // Rule B uses a different persisted identity encoding.
-			in.Peers = append(in.Peers, q.RuleBPeer{Scope: q.RuleBScope{AccountID: key.AccountID, GroupID: key.GroupID, Model: key.Model}, Identity: identity, Epoch: ruleBTime(schedQualitySince(r.Epoch, resets[key.AccountID])), Samples: d.ruleSamples[SchedAccountModel{key.AccountID, key.Model}]})
+			in.Peers = append(in.Peers, q.RuleBPeer{Scope: q.RuleBScope{AccountID: key.AccountID, GroupID: key.GroupID, Model: key.Model}, Identity: identity, Epoch: schedQualitySince(r.Epoch, resets[key.AccountID]), Samples: d.ruleSamples[SchedAccountModel{key.AccountID, key.Model}]})
 		}
 	}
 	sort.Slice(in.Peers, func(i, j int) bool { return in.Peers[i].Scope.AccountID < in.Peers[j].Scope.AccountID })
@@ -190,9 +182,8 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 	sources := make(map[int64]bool)
 	switch r.Line {
 	case q.DimensionTTFO:
-		now, cutoff := ruleBTime(at), ruleBTime(cut)
 		for _, a := range samples {
-			if !ruleBSample(a).Eligible(now, cutoff) {
+			if !ruleBSample(a).Eligible(at, cut) {
 				continue
 			}
 			sources[a.GroupID] = true

@@ -3,11 +3,12 @@ package schedquality
 import (
 	"fmt"
 	"math"
+	"time"
 )
 
 const (
-	RuleBHalfLifeSeconds = 1800.0
-	RuleBPriorStrength   = 5.0
+	RuleBHalfLife      = 30 * time.Minute
+	RuleBPriorStrength = 5.0
 )
 
 // RuleBParams uses proportions, not percentages. Half-life and prior strength
@@ -71,14 +72,14 @@ func CompareRuleBParams(old, next RuleBParams) (RuleBParamChange, error) {
 	}
 }
 
-// RuleBSample is a completed attempt. Times are seconds on one caller-selected
-// timeline; AvailableAt must be max(finished_at, inserted_at). TTFOMs > 0 means
+// RuleBSample is a completed attempt. AvailableAt is the later of its
+// finish and insertion timestamps. TTFOMs > 0 means
 // known first output; otherwise only OutcomeTimeout supplies censored evidence.
 // SwitchedAccount marks only the first turn after an account switch (cold=2).
 type RuleBSample struct {
 	AccountID, GroupID               int64
 	Model, SessionKey                string
-	StartedAt, AvailableAt           float64
+	StartedAt, AvailableAt           time.Time
 	TTFOMs, CensoredMs               float64
 	Stream                           bool
 	Outcome                          Outcome
@@ -88,11 +89,12 @@ type RuleBSample struct {
 }
 
 // Eligible reports whether this attempt belongs in the Rule B evidence window.
-func (s RuleBSample) Eligible(now, cut float64) bool {
+func (s RuleBSample) Eligible(now, cut time.Time) bool {
 	ownerTimeout := s.CaptureVersion >= FullTierTimeoutCaptureVersion && s.Warm && s.FullTierFirstOutputTimeout && s.Outcome == OutcomeTimeout
 	return s.Stream && (!s.SwitchedAccount || ownerTimeout) &&
 		(s.TTFOMs > 0 || s.Outcome == OutcomeTimeout) &&
-		s.StartedAt >= cut && s.AvailableAt >= math.Max(now-8*RuleBHalfLifeSeconds, cut) && s.AvailableAt <= now
+		!s.StartedAt.Before(cut) && !s.AvailableAt.Before(cut) &&
+		!s.AvailableAt.Before(now.Add(-8*RuleBHalfLife)) && !s.AvailableAt.After(now)
 }
 
 // RuleBScope identifies an account/model and its target group. Evidence for the
@@ -110,16 +112,17 @@ type RuleBScope struct {
 type RuleBPeer struct {
 	Scope    RuleBScope
 	Identity int
-	Epoch    float64
+	Epoch    time.Time
 	Samples  []RuleBSample
 }
 
 type RuleBInput struct {
 	Scope RuleBScope
-	// Cut is epoch, or rear-entry time for an expiry review. Use -Inf for no
+	// Cut is epoch, or rear-entry time for an expiry review. Use the zero time for no
 	// cutoff. LimitSeconds is the target group's current limit for every sample.
-	Now, Cut, LimitSeconds float64
-	Samples                []RuleBSample
+	Now, Cut     time.Time
+	LimitSeconds float64
+	Samples      []RuleBSample
 	// GroupSamples supplies all accounts in the target group/model, regardless
 	// of identity or epoch. It must include this account's local samples too.
 	GroupSamples []RuleBSample
@@ -174,15 +177,14 @@ type RuleBResult struct {
 }
 
 // CountRuleBEvidence counts an account/model across source groups. Both available
-// window endpoints and the started-at cutoff are inclusive. Samples and all
-// supplied times/measurements must be finite, except Cut may be negative infinity.
-func CountRuleBEvidence(samples []RuleBSample, scope RuleBScope, now, cut, limitSeconds float64) RuleBCounts {
+// window endpoints and the started-at cutoff are inclusive.
+func CountRuleBEvidence(samples []RuleBSample, scope RuleBScope, now, cut time.Time, limitSeconds float64) RuleBCounts {
 	return countRuleB(samples, now, cut, limitSeconds, func(s RuleBSample) bool {
 		return s.AccountID == scope.AccountID && s.Model == scope.Model
 	})
 }
 
-func countRuleB(samples []RuleBSample, now, cut, limitSeconds float64, include func(RuleBSample) bool) RuleBCounts {
+func countRuleB(samples []RuleBSample, now, cut time.Time, limitSeconds float64, include func(RuleBSample) bool) RuleBCounts {
 	var out RuleBCounts
 	type session struct {
 		group int64
@@ -193,7 +195,7 @@ func countRuleB(samples []RuleBSample, now, cut, limitSeconds float64, include f
 		if !include(s) || !s.Eligible(now, cut) {
 			continue
 		}
-		weight := math.Exp2(-(now - s.AvailableAt) / RuleBHalfLifeSeconds)
+		weight := math.Exp2(-float64(now.Sub(s.AvailableAt)) / float64(RuleBHalfLife))
 		out.N += weight
 		slow := s.TTFOMs > 0 && s.TTFOMs/1000 > limitSeconds
 		if s.TTFOMs <= 0 {
@@ -235,10 +237,10 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 		return r, fmt.Errorf("rule B limit_seconds: must be finite and positive")
 	}
 	r.Counts = CountRuleBEvidence(in.Samples, in.Scope, in.Now, in.Cut, in.LimitSeconds)
-	r.PriorGroupCounts = countRuleB(in.GroupSamples, in.Now, math.Inf(-1), in.LimitSeconds, func(s RuleBSample) bool {
+	r.PriorGroupCounts = countRuleB(in.GroupSamples, in.Now, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
 		return s.GroupID == in.Scope.GroupID && s.Model == in.Scope.Model
 	})
-	r.PriorLocalCounts = countRuleB(in.GroupSamples, in.Now, math.Inf(-1), in.LimitSeconds, func(s RuleBSample) bool {
+	r.PriorLocalCounts = countRuleB(in.GroupSamples, in.Now, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
 		return s.GroupID == in.Scope.GroupID && s.Model == in.Scope.Model && s.AccountID == in.Scope.AccountID
 	})
 	g, local, own := r.PriorGroupCounts, r.PriorLocalCounts, r.Counts

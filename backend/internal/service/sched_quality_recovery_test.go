@@ -222,7 +222,7 @@ func TestEngineKnownClockBackstepAndMovedRoundRetry(t *testing.T) {
 		own := f.e.window.samples[SchedAccountModel{1, "synthetic-model"}]
 		require.True(t, own[0].Switched)
 		require.False(t, own[1].Switched)
-		count := q.CountRuleBEvidence(ruleBSamples(own), q.RuleBScope{AccountID: 1, GroupID: 10, Model: "synthetic-model"}, ruleBTime(f.now), ruleBTime(time.Time{}), 1)
+		count := q.CountRuleBEvidence(ruleBSamples(own), q.RuleBScope{AccountID: 1, GroupID: 10, Model: "synthetic-model"}, f.now, time.Time{}, 1)
 		require.Greater(t, count.N, 0.0)
 		require.False(t, f.e.Snapshot().View.SessionSlowTwice(10, 1, "synthetic-model", "moved"))
 	})

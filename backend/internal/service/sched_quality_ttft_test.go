@@ -364,3 +364,71 @@ func TestTTFTBasisIncludesOnlyProvenSwitchedTimeout(t *testing.T) {
 		require.Equal(t, 1.0, basis.TTFT.K)
 	}
 }
+
+func TestTTFTEvidenceWindowNanosecondBoundaries(t *testing.T) {
+	f := newQualityFixture(t)
+	ctx := context.Background()
+	owner := engineSamples(1, f.now, true)[0]
+	owner.AttemptID, owner.SessionKey = "owner", "returning-session"
+	owner.CaptureVersion, owner.Warm, owner.FullTierFirstOutputTimeout = 3, true, true
+	owner.Outcome, owner.CensoredMs, owner.TTFOMs = q.OutcomeTimeout, owner.TTFOMs, nil
+	owner.InsertedAt = f.now
+	owner.FinishedAt = f.now.Add(-time.Second)
+
+	peer := engineSamples(1, f.now, true)[0]
+	peer.AttemptID, peer.SessionKey, peer.AccountID, peer.CaptureVersion = "peer", "peer-session", 2, 2
+	peer.FinishedAt, peer.InsertedAt = owner.FinishedAt, owner.InsertedAt
+	pred := engineSamples(1, f.now.Add(-time.Minute), false)[0]
+	pred.AttemptID, pred.SessionKey, pred.AccountID = "pred", owner.SessionKey, peer.AccountID
+	f.ledger.Rows = []q.AttemptSample{pred, owner, peer}
+	require.NoError(t, f.e.loadEvidence(ctx, f.now))
+	d, err := f.e.inputs(ctx, f.now, f.e.window.samples)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name            string
+		at, cut         time.Time
+		mass, priorMass float64
+	}{
+		{"before-insert", f.now.Add(-time.Nanosecond), time.Time{}, 0, 0},
+		{"at-insert-and-cut", f.now, owner.StartedAt, 1, 1},
+		{"start-before-cut", f.now, owner.StartedAt.Add(time.Nanosecond), 0, 1},
+		{"at-window-start", f.now.Add(4 * time.Hour), time.Time{}, 1.0 / 256, 1.0 / 256},
+		{"before-window-start", f.now.Add(4*time.Hour + time.Nanosecond), time.Time{}, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := make(map[q.LineKey]q.LineState)
+			for _, a := range []q.AttemptSample{owner, peer} {
+				key := q.LineKey{GroupID: a.GroupID, AccountID: a.AccountID, Model: a.Model, Line: q.DimensionTTFO}
+				states[key] = q.LineState{LineKey: key, Epoch: tc.cut}
+			}
+			d.peers = freezePeers(tc.at, states)
+			for key, state := range states {
+				in := ttftInput(d, key, tc.cut, tc.at, 1, nil)
+				result, err := q.EvaluateRuleB(in, q.DefaultRuleBParams())
+				require.NoError(t, err)
+				for _, counts := range []q.RuleBCounts{result.Counts, result.PeerCounts} {
+					require.Equal(t, tc.mass, counts.N)
+					require.Equal(t, tc.mass, counts.K)
+				}
+				require.Equal(t, 2*tc.priorMass, result.PriorGroupCounts.N)
+				require.Equal(t, 2*tc.priorMass, result.PriorGroupCounts.K)
+				require.Equal(t, tc.priorMass, result.PriorLocalCounts.N)
+				require.Equal(t, tc.priorMass, result.PriorLocalCounts.K)
+				_, basis := f.e.assessLine(d, state, q.EventRegular, tc.at, nil)
+				require.Equal(t, tc.mass, basis.TTFT.N)
+				require.Equal(t, tc.mass, basis.TTFT.K)
+				if tc.mass == 0 {
+					require.Empty(t, basis.AttemptIDs)
+					require.Empty(t, basis.SourceGroups)
+				} else {
+					wantID := owner.AttemptID
+					if key.AccountID == peer.AccountID {
+						wantID = peer.AttemptID
+					}
+					require.Equal(t, []string{wantID}, basis.AttemptIDs)
+					require.Equal(t, []int64{owner.GroupID}, basis.SourceGroups)
+				}
+			}
+		})
+	}
+}

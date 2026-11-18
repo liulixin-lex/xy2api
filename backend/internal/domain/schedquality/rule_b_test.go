@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Columns keep the selected reference inputs small without rounding timestamps.
@@ -32,12 +33,19 @@ func (s ruleBVectorSamples) expand() []RuleBSample {
 		availableNS += s.AvailableDeltaNS[i]
 		rows[i] = RuleBSample{
 			AccountID: s.AccountID[i], GroupID: s.GroupID[i], Model: s.Model[i], SessionKey: s.SessionKey[i],
-			AvailableAt: float64(availableNS) / 1e9, StartedAt: float64(availableNS-s.StartedBeforeAvailableNS[i]) / 1e9,
+			AvailableAt: time.Unix(0, availableNS), StartedAt: time.Unix(0, availableNS-s.StartedBeforeAvailableNS[i]),
 			TTFOMs: s.TTFOMs[i], CensoredMs: s.CensoredMs[i], Stream: s.Stream[i],
 			Outcome: s.Outcome[i], SwitchedAccount: s.SwitchedAccount[i],
 		}
 	}
 	return rows
+}
+
+func ruleBFixtureTime(seconds float64) time.Time {
+	if seconds == -1e20 { // Reference vectors use this cutoff for all history.
+		return time.Time{}
+	}
+	return time.Unix(0, int64(math.Round(seconds*1e9)))
 }
 
 func TestRuleBVectors(t *testing.T) {
@@ -104,10 +112,10 @@ func TestRuleBVectors(t *testing.T) {
 	coverage := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			in := RuleBInput{Scope: tc.Scope, Now: tc.Now, Cut: tc.Cut, LimitSeconds: tc.LimitSeconds,
+			in := RuleBInput{Scope: tc.Scope, Now: ruleBFixtureTime(tc.Now), Cut: ruleBFixtureTime(tc.Cut), LimitSeconds: tc.LimitSeconds,
 				Samples: resolve(tc.Samples), GroupSamples: resolve(tc.GroupSamples)}
 			for _, p := range tc.Peers {
-				in.Peers = append(in.Peers, RuleBPeer{Scope: p.Scope, Identity: p.Identity, Epoch: p.Epoch, Samples: resolve(p.Samples)})
+				in.Peers = append(in.Peers, RuleBPeer{Scope: p.Scope, Identity: p.Identity, Epoch: ruleBFixtureTime(p.Epoch), Samples: resolve(p.Samples)})
 			}
 			got, err := EvaluateRuleB(in, tc.Params)
 			if err != nil {
@@ -298,40 +306,43 @@ func TestRuleBParams(t *testing.T) {
 }
 
 func TestRuleBEvidenceBoundaries(t *testing.T) {
+	now := time.Unix(20000, 0)
+	epoch := time.Unix(19000, 0)
+	noCut := time.Time{}
 	base := RuleBSample{AccountID: 1, GroupID: 1, Model: "model", SessionKey: "session",
-		StartedAt: 19000, AvailableAt: 20000, TTFOMs: 1000, Stream: true, Outcome: OutcomeOK}
+		StartedAt: epoch, AvailableAt: now, TTFOMs: 1000, Stream: true, Outcome: OutcomeOK}
 	for _, tc := range []struct {
 		name   string
-		cut    float64
+		cut    time.Time
 		mutate func(*RuleBSample)
 		want   RuleBCounts
 	}{
-		{"now-inclusive", 0, func(*RuleBSample) {}, RuleBCounts{N: 1, S: 1}},
-		{"not-yet-available", 0, func(s *RuleBSample) { s.AvailableAt = math.Nextafter(20000, math.Inf(1)) }, RuleBCounts{}},
-		{"window-inclusive-long-request", math.Inf(-1), func(s *RuleBSample) { s.AvailableAt, s.StartedAt = 5600, -100 }, RuleBCounts{N: 1.0 / 256, S: 1}},
-		{"outside-window", 0, func(s *RuleBSample) { s.AvailableAt = math.Nextafter(5600, 0) }, RuleBCounts{}},
-		{"half-life-from-availability", 0, func(s *RuleBSample) { s.AvailableAt, s.StartedAt = 18200, 100 }, RuleBCounts{N: .5, S: 1}},
-		{"cut-inclusive", 20000, func(s *RuleBSample) { s.StartedAt = 20000 }, RuleBCounts{N: 1, S: 1}},
-		{"started-before-cut", 19000, func(s *RuleBSample) { s.StartedAt = math.Nextafter(19000, 0) }, RuleBCounts{}},
-		{"available-before-cut", 19000, func(s *RuleBSample) { s.AvailableAt = math.Nextafter(19000, 0) }, RuleBCounts{}},
-		{"equal-limit-is-good", 0, func(s *RuleBSample) { s.TTFOMs = 10000 }, RuleBCounts{N: 1, S: 1}},
-		{"above-limit-is-slow", 0, func(s *RuleBSample) { s.TTFOMs = 10000.001 }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
-		{"censor-equal-is-slow", 0, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 10000, OutcomeTimeout }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
-		{"censor-below-is-unknown", 0, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 9999.999, OutcomeTimeout }, RuleBCounts{N: 1, X: 1, S: 1}},
-		{"censor-above-is-slow", 0, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 10000.001, OutcomeTimeout }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
-		{"known-first-output-wins", 0, func(s *RuleBSample) { s.CensoredMs, s.Outcome = 20000, OutcomeTimeout }, RuleBCounts{N: 1, S: 1}},
-		{"missing-session", 0, func(s *RuleBSample) { s.SessionKey, s.TTFOMs = "", 20000 }, RuleBCounts{N: 1, K: 1}},
-		{"switch-first-turn", 0, func(s *RuleBSample) { s.SwitchedAccount = true }, RuleBCounts{}},
-		{"non-stream", 0, func(s *RuleBSample) { s.Stream = false }, RuleBCounts{}},
-		{"no-output-no-timeout", 0, func(s *RuleBSample) { s.TTFOMs = 0 }, RuleBCounts{}},
-		{"other-account", 0, func(s *RuleBSample) { s.AccountID = 2 }, RuleBCounts{}},
-		{"other-model", 0, func(s *RuleBSample) { s.Model = "other" }, RuleBCounts{}},
-		{"other-source-group", 0, func(s *RuleBSample) { s.GroupID = 2 }, RuleBCounts{N: 1, S: 1}},
+		{"now-inclusive", noCut, func(*RuleBSample) {}, RuleBCounts{N: 1, S: 1}},
+		{"not-yet-available", noCut, func(s *RuleBSample) { s.AvailableAt = now.Add(time.Nanosecond) }, RuleBCounts{}},
+		{"window-inclusive-long-request", noCut, func(s *RuleBSample) { s.AvailableAt, s.StartedAt = time.Unix(5600, 0), time.Unix(-100, 0) }, RuleBCounts{N: 1.0 / 256, S: 1}},
+		{"outside-window", noCut, func(s *RuleBSample) { s.AvailableAt = time.Unix(5600, -1) }, RuleBCounts{}},
+		{"half-life-from-availability", noCut, func(s *RuleBSample) { s.AvailableAt, s.StartedAt = time.Unix(18200, 0), time.Unix(100, 0) }, RuleBCounts{N: .5, S: 1}},
+		{"cut-inclusive", now, func(s *RuleBSample) { s.StartedAt = now }, RuleBCounts{N: 1, S: 1}},
+		{"started-before-cut", epoch, func(s *RuleBSample) { s.StartedAt = epoch.Add(-time.Nanosecond) }, RuleBCounts{}},
+		{"available-before-cut", epoch, func(s *RuleBSample) { s.AvailableAt = epoch.Add(-time.Nanosecond) }, RuleBCounts{}},
+		{"equal-limit-is-good", noCut, func(s *RuleBSample) { s.TTFOMs = 10000 }, RuleBCounts{N: 1, S: 1}},
+		{"above-limit-is-slow", noCut, func(s *RuleBSample) { s.TTFOMs = 10000.001 }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
+		{"censor-equal-is-slow", noCut, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 10000, OutcomeTimeout }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
+		{"censor-below-is-unknown", noCut, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 9999.999, OutcomeTimeout }, RuleBCounts{N: 1, X: 1, S: 1}},
+		{"censor-above-is-slow", noCut, func(s *RuleBSample) { s.TTFOMs, s.CensoredMs, s.Outcome = 0, 10000.001, OutcomeTimeout }, RuleBCounts{N: 1, K: 1, S: 1, D: 1}},
+		{"known-first-output-wins", noCut, func(s *RuleBSample) { s.CensoredMs, s.Outcome = 20000, OutcomeTimeout }, RuleBCounts{N: 1, S: 1}},
+		{"missing-session", noCut, func(s *RuleBSample) { s.SessionKey, s.TTFOMs = "", 20000 }, RuleBCounts{N: 1, K: 1}},
+		{"switch-first-turn", noCut, func(s *RuleBSample) { s.SwitchedAccount = true }, RuleBCounts{}},
+		{"non-stream", noCut, func(s *RuleBSample) { s.Stream = false }, RuleBCounts{}},
+		{"no-output-no-timeout", noCut, func(s *RuleBSample) { s.TTFOMs = 0 }, RuleBCounts{}},
+		{"other-account", noCut, func(s *RuleBSample) { s.AccountID = 2 }, RuleBCounts{}},
+		{"other-model", noCut, func(s *RuleBSample) { s.Model = "other" }, RuleBCounts{}},
+		{"other-source-group", noCut, func(s *RuleBSample) { s.GroupID = 2 }, RuleBCounts{N: 1, S: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sample := base
 			tc.mutate(&sample)
-			got := CountRuleBEvidence([]RuleBSample{sample}, RuleBScope{AccountID: 1, Model: "model"}, 20000, tc.cut, 10)
+			got := CountRuleBEvidence([]RuleBSample{sample}, RuleBScope{AccountID: 1, Model: "model"}, now, tc.cut, 10)
 			if got != tc.want {
 				t.Fatalf("counts = %+v, want %+v", got, tc.want)
 			}
@@ -339,12 +350,12 @@ func TestRuleBEvidenceBoundaries(t *testing.T) {
 	}
 	base.TTFOMs = 20000
 	rows := []RuleBSample{base, base}
-	got := CountRuleBEvidence(rows, RuleBScope{AccountID: 1, Model: "model"}, 20000, 0, 10)
+	got := CountRuleBEvidence(rows, RuleBScope{AccountID: 1, Model: "model"}, now, noCut, 10)
 	if got != (RuleBCounts{N: 2, K: 2, S: 1, D: 1}) {
 		t.Fatal(got)
 	}
 	rows[1].GroupID = 2
-	got = CountRuleBEvidence(rows, RuleBScope{AccountID: 1, Model: "model"}, 20000, 0, 10)
+	got = CountRuleBEvidence(rows, RuleBScope{AccountID: 1, Model: "model"}, now, noCut, 10)
 	if got.S != 2 || got.D != 2 {
 		t.Fatalf("source group must be part of session key: %+v", got)
 	}
@@ -397,16 +408,16 @@ func ruleBTestInput(ownCount, peerCount int, slow bool) RuleBInput {
 		out := make([]RuleBSample, n)
 		for i := range out {
 			out[i] = RuleBSample{AccountID: account, GroupID: 1, Model: "model", SessionKey: fmt.Sprintf("session-%d", i%3),
-				StartedAt: 20000, AvailableAt: 20000, TTFOMs: 1000, Stream: true, Outcome: OutcomeOK}
+				StartedAt: time.Unix(20000, 0), AvailableAt: time.Unix(20000, 0), TTFOMs: 1000, Stream: true, Outcome: OutcomeOK}
 			if isSlow {
 				out[i].TTFOMs = 11000
 			}
 		}
 		return out
 	}
-	in := RuleBInput{Scope: RuleBScope{AccountID: 1, GroupID: 1, Model: "model"}, Now: 20000, Cut: math.Inf(-1), LimitSeconds: 10,
+	in := RuleBInput{Scope: RuleBScope{AccountID: 1, GroupID: 1, Model: "model"}, Now: time.Unix(20000, 0), LimitSeconds: 10,
 		Samples: rows(1, ownCount, slow),
-		Peers:   []RuleBPeer{{Scope: RuleBScope{AccountID: 2, GroupID: 1, Model: "model"}, Identity: -1, Epoch: math.Inf(-1), Samples: rows(2, peerCount, false)}},
+		Peers:   []RuleBPeer{{Scope: RuleBScope{AccountID: 2, GroupID: 1, Model: "model"}, Identity: -1, Samples: rows(2, peerCount, false)}},
 	}
 	in.GroupSamples = append(slices.Clone(in.Samples), in.Peers[0].Samples...)
 	return in
@@ -431,7 +442,7 @@ func TestRuleBPeerAndUnknownBoundaries(t *testing.T) {
 	}{
 		{"peer-known-20", func(*RuleBInput) {}, RuleBGood, "", false},
 		{"peer-known-19.99", func(in *RuleBInput) {
-			in.Peers[0].Samples[0].AvailableAt = in.Now + RuleBHalfLifeSeconds*math.Log2(.99)
+			in.Peers[0].Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(.99)))
 		}, RuleBUnknown, RuleBPeerKnownInsufficient, true},
 		{"no-members", func(in *RuleBInput) { in.Peers = nil }, RuleBUnknown, RuleBNoPeers, true},
 		{"all-rear", func(in *RuleBInput) { in.Peers[0].Identity = 1 }, RuleBUnknown, RuleBAllPeersRear, true},
@@ -439,11 +450,11 @@ func TestRuleBPeerAndUnknownBoundaries(t *testing.T) {
 		{"other-group-is-not-peer", func(in *RuleBInput) { in.Peers[0].Scope.GroupID = 2 }, RuleBUnknown, RuleBNoPeers, true},
 		{"other-model-is-not-peer", func(in *RuleBInput) { in.Peers[0].Scope.Model = "other" }, RuleBUnknown, RuleBNoPeers, true},
 		{"pending-confirmation-is-front", func(in *RuleBInput) { in.Peers[0].Identity = 2 }, RuleBGood, "", false},
-		{"peer-epoch-cuts-start", func(in *RuleBInput) { in.Peers[0].Epoch = 20001 }, RuleBUnknown, RuleBPeerKnownInsufficient, true},
+		{"peer-epoch-cuts-start", func(in *RuleBInput) { in.Peers[0].Epoch = in.Now.Add(time.Second) }, RuleBUnknown, RuleBPeerKnownInsufficient, true},
 		{"empty-own", func(in *RuleBInput) { in.Samples = nil }, RuleBUnknown, RuleBNoSamples, false},
 		{"own-mass-19", func(in *RuleBInput) { in.Samples = in.Samples[:19] }, RuleBUnknown, RuleBMassInsufficient, false},
 		{"own-good-N-tolerance", func(in *RuleBInput) {
-			in.Samples[0].AvailableAt = in.Now + RuleBHalfLifeSeconds*math.Log2(1-5e-9)
+			in.Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(1-5e-9)))
 		}, RuleBGood, "", false},
 		{"one-session", func(in *RuleBInput) {
 			for i := range in.Samples {
@@ -494,7 +505,7 @@ func TestRuleBPriorsPosteriorsAndPurity(t *testing.T) {
 		t.Fatalf("one slow session must veto bad: %+v", r)
 	}
 	in = ruleBTestInput(20, 20, false)
-	in.Cut = 20001
+	in.Cut = in.Now.Add(time.Second)
 	r = evaluateRuleBTest(t, in, DefaultRuleBParams())
 	if r.Counts.N != 0 || r.PriorGroupCounts.N != 40 || r.PriorLocalCounts.N != 20 || r.PeerCounts.N != 20 {
 		t.Fatalf("own cutoff must not truncate priors or peers: %+v", r)
