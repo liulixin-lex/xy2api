@@ -1452,7 +1452,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, openAIResponsesRequestScope(imageIntent))()
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0

@@ -193,7 +193,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
-	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, openAIResponsesRequestScope(imageIntent))()
 
 	for {
 		if failoverClientGone(c) {
