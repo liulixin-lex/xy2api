@@ -85,8 +85,14 @@ function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_ti
   }
 }
 
+// Each query has a generation: an answer, a failure or the end of loading counts only for the latest query, and closing
+// the modal ends the generation, so a late answer for an earlier window never replaces the current one.
+let fetchSeq = 0
+let cutOff = false
+
 const fetchData = async () => {
   if (!props.modelValue) return
+  const seq = ++fetchSeq
   loading.value = true
   try {
     const params: OpsRequestDetailsParams = {
@@ -105,27 +111,39 @@ const fetchData = async () => {
     if (typeof props.preset.max_duration_ms === 'number') params.max_duration_ms = props.preset.max_duration_ms
 
     const res = await opsAPI.listRequestDetails(params)
+    if (seq !== fetchSeq) return
     items.value = res.items || []
     total.value = res.total || 0
   } catch (e: any) {
+    if (seq !== fetchSeq) return
     console.error('[OpsRequestDetailsModal] Failed to fetch request details', e)
     appStore.showError(e?.message || t('admin.ops.requestDetails.failedToLoad'))
     items.value = []
     total.value = 0
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) {
-      if (props.resumeState) return
-      page.value = 1
-      pageSize.value = 10
-      fetchData()
+    if (!open) {
+      // A query still running when the modal closes is dropped; coming back to the same list asks it again.
+      cutOff = loading.value
+      fetchSeq++
+      loading.value = false
+      return
     }
+    if (props.resumeState) {
+      if (cutOff) fetchData()
+      cutOff = false
+      return
+    }
+    cutOff = false
+    page.value = 1
+    pageSize.value = 10
+    fetchData()
   }
 )
 
