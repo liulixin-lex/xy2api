@@ -584,3 +584,31 @@ func TestOwnerCutoffCompatReaderExclusions(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerCutoffRequiresMatchingActiveTimer(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, mode := range []string{"current", "different_handle", "different_account", "no_text_budget"} {
+		t.Run(mode, func(t *testing.T) {
+			account := rawChatCompletionsTestAccount()
+			st, ctx := ownerFactsState(context.Background(), account)
+			a := (&OpenAIGatewayService{schedAttemptRecorder: &captureServiceRecorder{}}).beginSchedAttempt(ctx, account, nil, 0, true)
+			a.markHTTPDispatch(st.MarkOpsUpstreamSendBoundary(account.ID))
+			require.True(t, a.ownerHit)
+			if mode == "different_account" {
+				profile := st.AttemptProfile()
+				profile.AccountID++
+				st.SetAttemptProfile(profile)
+			}
+			plan := st.PlanAttemptTimeout(time.Second, false, time.Now())
+			if mode == "different_handle" {
+				st.SetCurrentAttempt(&schedAttemptCapture{accountID: account.ID})
+			}
+			if mode == "no_text_budget" {
+				st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindImage, time.Now()))
+			}
+			_, ok := claimOpenAIFirstOutputCutoff(a, plan, plan.Start().Add(plan.Effective()), nil)
+			require.Equal(t, mode == "current", ok)
+			require.Equal(t, ok, a.fullTierFirstOutputTimeout)
+		})
+	}
+}
