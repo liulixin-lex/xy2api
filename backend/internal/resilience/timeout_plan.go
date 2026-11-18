@@ -19,7 +19,8 @@ type TimeoutPlan struct {
 
 // FullFirstOutputTier reports whether this frozen timer granted its whole tier.
 func (p TimeoutPlan) FullFirstOutputTier() bool {
-	return p.tier > 0 && p.effective >= p.tier && !p.applied
+	// An applied budget cut necessarily grants less than the tier.
+	return p.tier > 0 && p.effective >= p.tier
 }
 
 func (p TimeoutPlan) Effective() time.Duration { return p.effective }

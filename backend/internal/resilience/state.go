@@ -57,7 +57,8 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	httpSendSeq          uint64
+	httpSendSeq          uint64 // never reused by another turn on this connection
+	turnStartHTTPSeq     uint64
 	ownerCutoff          OwnerFirstOutputCutoff
 	ownerAvoidConfirmed  bool
 	currentAttempt       any

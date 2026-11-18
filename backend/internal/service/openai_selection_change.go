@@ -177,6 +177,14 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	})
 }
 
+type openAITransferProtectedKey struct{}
+
+// WithOpenAITransferProtected carries an ingress protocol constraint solely
+// for the first-output transfer decision at the end of account selection.
+func WithOpenAITransferProtected(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAITransferProtectedKey{}, true)
+}
+
 // Runs after planOpenAIStickyReplacement (deferred later by the scheduler).
 // Quality ownership and child-thread protection are only final after selection.
 func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Context, groupID *int64, session string, selection *AccountSelectionResult, ordinary bool) {
@@ -184,7 +192,8 @@ func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Conte
 	if change == nil {
 		return
 	}
-	eligible := ordinary && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
+	protected, _ := ctx.Value(openAITransferProtectedKey{}).(bool)
+	eligible := ordinary && !protected && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
 		change.expected.AccountID == selection.Account.ID && change.expected.Generation != "" && !change.skipCommit &&
 		change.groupID == derefGroupID(groupID) && session != "" && change.session == session && change.key != "" &&
 		!openAINoStickyMigration(ctx) && !preserveOpenAIGuardianParentBinding(ctx, session) &&

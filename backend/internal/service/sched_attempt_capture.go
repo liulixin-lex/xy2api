@@ -34,19 +34,24 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
-	factsOnly                                  bool
-	mu                                         sync.Mutex
-	state                                      *resilience.RequestState
-	ctx                                        context.Context
-	accountID                                  int64
-	allowModel401                              bool
-	attempt                                    SchedAttempt
-	sendErr                                    error
-	networkErr                                 error
-	started                                    time.Time
-	upstreamFirstValidAt                       time.Time
-	httpSelection                              resilience.SchedSelection
-	dispatch                                   resilience.OwnerFirstOutputCutoff
+	firstOutputCancel             context.CancelFunc // nonblocking cancellation of this guarded HTTP request
+	factsOnly                     bool
+	gotHTTPConn, repeatedHTTPSend bool
+	holdingCompatPrelude          bool
+	mu                            sync.Mutex
+	state                         *resilience.RequestState
+	ctx                           context.Context
+	accountID                     int64
+	allowModel401                 bool
+	attempt                       SchedAttempt
+	sendErr                       error
+	networkErr                    error
+	started                       time.Time
+	upstreamFirstValidAt          time.Time
+	httpSelection                 resilience.SchedSelection
+	dispatch                      resilience.OwnerFirstOutputCutoff
+	// Begin precedes dispatch. Only the conjunction on the final timeout row
+	// proves the original owner received a full tier for this send.
 	ownerHit, fullTierFirstOutputTimeout       bool
 	first, done, client                        bool
 	stream                                     bool
@@ -72,6 +77,10 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 }
 
 func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool, started time.Time) *schedAttemptCapture {
+	return s.newSchedAttemptCapture(ctx, account, body, stream, started, nil)
+}
+
+func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, account *Account, body []byte, stream bool, started time.Time, guard *openAIFirstOutputHeaderGuard) *schedAttemptCapture {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -80,10 +89,13 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
 	change := pendingOpenAIStickyChange(ctx)
 	factsOnly := !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled()
-	if factsOnly && (!stream || !st.OwnerHTTPDispatchPending(account.ID) || resilienceTextBudget(ctx) == nil) {
+	if factsOnly && (guard == nil || !stream || !st.OwnerHTTPDispatchPending(account.ID) || resilienceTextBudget(ctx) == nil) {
 		return nil
 	}
 	a := &schedAttemptCapture{factsOnly: factsOnly, allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), requestID: st.GatewayRequestID()}
+	if guard != nil {
+		a.firstOutputCancel = guard.cancel
+	}
 	if !factsOnly {
 		a.bodyHash = sha256.Sum256(body)
 	}
@@ -265,6 +277,13 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 	}
 	a.observeOutput(data, time.Now(), typHint)
 	if a.factsOnly {
+		event := typHint
+		if event == "" {
+			event = gjson.GetBytes(data, "type").String()
+		}
+		if isOpenAIWSTerminalEvent(event) || event == "error" || strings.TrimSpace(string(data)) == "[DONE]" {
+			a.markTerminal()
+		}
 		return
 	}
 	if typHint != "" {
@@ -589,9 +608,8 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		previous.mu.Unlock()
 		previous.finish(nil, nil)
 	}
-	// Builders may add group prompts or normalize cache fields after the caller's
-	// payload is prepared; ContentLength is the final wire length without a reread.
-	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
+	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
+	*owner = s.newSchedAttemptCapture(ctx, account, body, stream, time.Time{}, guard)
 	if *owner != nil && !(*owner).factsOnly {
 		if target := schedHTTPAttemptTarget(account, req); target != nil && !strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/responses/compact") {
 			(*owner).learnCapability = s.capabilityFailureLearner(ctx, account, body, target.Protocol)
@@ -601,19 +619,13 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		if model := gjson.GetBytes(body, "model").String(); model != "" {
 			a.dispatch.Model = model
 		}
-		req = req.WithContext(context.WithValue(req.Context(), schedHTTPAttemptKey{}, a))
+		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
 	}
-	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
-	if guard != nil {
+	if guard != nil && *owner != nil {
 		guard.capture.Store(*owner)
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
-	// Converted streams keep their timer past headers. Their reader decides
-	// whether it won after accounting for disconnects and terminal events.
-	if fe, _ := req.Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent); fe != nil && resp != nil {
-		fe.guard.compatHeadersReceived.Store(true)
-	}
 	if resp != nil {
 		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)
 		if *owner != nil {
