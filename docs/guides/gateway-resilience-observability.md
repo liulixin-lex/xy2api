@@ -4,6 +4,7 @@
 
 ## 管理后台
 
+- **运维看板**。全局或按平台查看时，自动或预聚合模式使用的整点小时汇总不含无分组 Key 请求的末次首字和端到端首输出。只有开启 `allow_ungrouped_key_scheduling` 才会有这类请求，原始查询会计入符合筛选条件的这类请求。
 - **运维监控 → 网关韧性**：当前实例最近 5 分钟至 1 小时的计数（按指标、分组、账号与细分标签），以及未送达请求列表。计数在进程内存中，多实例部署时只反映所在实例。
 - **选号解释**：在同一面板底部选择任一分组（含原版调度分组），可选填模型、会话哈希与请求类型，只读查看每个账号的档位（健康、软罚、硬罚）、原因、恢复时间、会话失败次数与是否被暂避，以及末位兜底账号与兜底分组的决策。
   - 填了模型时，若该模型不在分组白名单或渠道定价不含它（所有请求在选号前即失败），在账号表上方提示。
@@ -142,7 +143,7 @@ COMMIT;
 OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不记录请求或响应正文、凭据与完整会话值。查询入口分三类：
 
 - 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选。
-- Warn 及以上会落库，但以下日志不带 `component`，须按事件名找：`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error。
+- Warn 及以上会落库。`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.rear_entries_read_failed`、`sched_quality.trial_full_record_failed`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error 均按事件名查找。这些事件不带 `component`。
 - 不带 `component` 的 Info 只在应用标准输出里，包括 `sched_quality.capability_mark_evicted` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录；不能在系统日志中查到。
 
 成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
@@ -168,8 +169,10 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 | `sched_quality.binding_alias_failed` | Warn | 保存绑定别名失败；`account_id`、`error` |
 | `sched_quality.takeover_avoid_failed` | Warn | 换号失败后写会话避让失败；`account_id`、`error` |
 | `sched_quality.takeover_commit_failed` | Warn | 会话绑定提交存储失败；`account_id`、`error` |
+| `sched_quality.rear_entries_read_failed` | Warn | 分组摘要的近 24 小时进后排统计读取失败，`rear_entries_24h` 为 `null`。含 `error` |
 | `sched_quality.trial_room_failed` | Warn | 试用名额查询失败，按满额降层；`account_id`、`error` |
 | `sched_quality.trial_acquire_failed` | Warn | 试用名额获取失败，按满额继续选号；`error`，部分调用另带 `account_id` |
+| `sched_quality.trial_full_record_failed` | Warn | 满位时刻写入失败，本轮试用超时时，名额状态可能记为 `not_observed`（未观察到名额已满）。含 `error`、`account_id`、`group_id` |
 | `sched_quality.trial_touch_failed` | Warn | 试用名额续期失败；`error`，部分调用另带 `account_id` |
 | `sched_quality.trial_promote_failed` | Warn | 已提交绑定后，请求名额转会话名额失败；`account_id`、`error`，随后尽力释放请求名额 |
 | `sched_quality.trial_release_failed` | Warn | 单个名额释放失败；`account_id`、`group_id`、`error` |

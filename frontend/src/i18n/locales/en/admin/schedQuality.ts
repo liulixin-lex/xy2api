@@ -299,7 +299,7 @@ export default {
         seats: {
           full: 'trial seats were full at some point during the trial',
           not_observed: 'full trial seats were not seen during the trial',
-          unknown: 'trial seats unknown (not readable, or overwritten by a later record)',
+          unknown: 'trial seat status unknown (the record could not be read, a full-seat timestamp was within 2 seconds of the trial start or end, or a later record overwrote it)',
         },
       },
       action: {
