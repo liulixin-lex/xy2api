@@ -80,6 +80,7 @@ func TestOwnerCutoffFromHTTPIngress(t *testing.T) {
 		{"responses", "/v1/responses", `"input":"hello"`, true},
 		{"messages", "/v1/messages", `"max_tokens":32,"messages":[{"role":"user","content":"hello"}]`, true},
 		{"chat", "/v1/chat/completions", `"messages":[{"role":"user","content":"hello"}]`, true},
+		{"chat_image", "/v1/chat/completions", `"input":"hello","tools":[{"type":"image_generation"}]`, false},
 		{"chat_continuation", "/v1/chat/completions", `"input":"hello","previous_response_id":"resp_continuation"`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,8 +88,10 @@ func TestOwnerCutoffFromHTTPIngress(t *testing.T) {
 			repo := &openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}
 			var state *resilience.RequestState
 			var wirePrevious string
+			var wireImage bool
 			up := &captureUpstream{reply: func(_ int, req *http.Request, body []byte) (*http.Response, error) {
 				state = resilience.StateFrom(req.Context())
+				wireImage = service.IsExplicitImageGenerationIntent(tc.path, "gpt-5.1", body)
 				wirePrevious = gjson.GetBytes(body, "previous_response_id").String()
 				<-req.Context().Done()
 				return nil, req.Context().Err()
@@ -113,6 +116,13 @@ func TestOwnerCutoffFromHTTPIngress(t *testing.T) {
 				require.Equal(t, "resp_continuation", wirePrevious)
 			}
 			fact, ok := state.OwnerCutoff()
+			if tc.name == "chat_image" {
+				require.True(t, wireImage)
+				selected, _ := state.SchedSelection()
+				require.False(t, selected.HTTPStreamText)
+				require.False(t, ok)
+				return
+			}
 			require.True(t, ok)
 			require.Equal(t, tc.transfer, fact.CanTransfer)
 			require.Equal(t, account.ID, fact.AccountID)

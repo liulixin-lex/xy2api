@@ -102,14 +102,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body)
 	// Responses-shaped Chat requests can forward the original continuation ID.
-	if strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()) != "" &&
+	if imageIntent || strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()) != "" &&
 		!gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
 		c.Request = c.Request.WithContext(service.WithOpenAITransferProtected(c.Request.Context()))
 	}
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
-	if !service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body) {
+	if !imageIntent {
 		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolChat, reqStream))
 	}
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -283,7 +284,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
 			st.SetSchedSelection(resilience.SchedSelection{
 				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel),
-				HTTPStreamText: reqStream,
+				HTTPStreamText: reqStream && !imageIntent,
 				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
 			})
 			st.SetAttemptProfile(resilience.AttemptProfile{
