@@ -598,3 +598,44 @@ func testTrialLeaseClockOffsets(t *testing.T, rdb *redis.Client) {
 		}
 	}
 }
+
+func TestObserveLeaseReadsRedisClockAndRecordsOnlyConfirmedFull(t *testing.T) {
+	ctx := context.Background()
+	db := newLocalRedisClient(t)
+	leases := NewSchedTrialLeaseCache(db)
+	key := schedTrialLeaseKey(33, "clock-model")
+	// Five seconds of gateway skew would prune these three holders too early.
+	serverNow, err := db.Time(ctx).Result()
+	require.NoError(t, err)
+	for i := 0; i < service.TrialLeaseLimit; i++ {
+		err = db.ZAdd(ctx, key, redis.Z{Score: float64(serverNow.Add(-service.TrialLeaseIdle + 5*time.Second).UnixMilli()), Member: fmt.Sprint(i)}).Err()
+		require.NoError(t, err)
+	}
+	room, err := leases.PeekRoom(ctx, 33, "clock-model")
+	require.NoError(t, err)
+	require.False(t, room)
+	at, err := leases.LastFull(ctx, 33, "clock-model", 7)
+	require.NoError(t, err)
+	require.True(t, at.IsZero())
+
+	room, err = leases.Room(ctx, 33, "clock-model", 7, "r:request", serverNow.Add(time.Hour))
+	require.NoError(t, err)
+	require.False(t, room)
+	at, err = leases.LastFull(ctx, 33, "clock-model", 7)
+	require.NoError(t, err)
+	after, err := db.Time(ctx).Result()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, at.UnixMilli(), serverNow.UnixMilli())
+	require.LessOrEqual(t, at.UnixMilli(), after.UnixMilli())
+	require.NoError(t, db.Set(ctx, schedTrialLeaseKey(34, "clock-model"), "wrong-type", time.Minute).Err())
+	room, err = leases.Room(ctx, 34, "clock-model", 7, "r:request", time.Now())
+	require.Error(t, err)
+	require.False(t, room)
+	acquired, token, err := leases.Acquire(ctx, 34, "clock-model", 7, "r:request", time.Now())
+	require.Error(t, err)
+	require.False(t, acquired)
+	require.Empty(t, token)
+	at, err = leases.LastFull(ctx, 34, "clock-model", 7)
+	require.NoError(t, err)
+	require.True(t, at.IsZero())
+}
