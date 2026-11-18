@@ -1,19 +1,17 @@
 <template>
   <div class="ev" :data-qp-evidence="dim">
+    <ul class="ev__list">
+      <!-- This group's and all the counted units (the rule's own set), each as recorded or unknown; kept apart from the
+           evidence, so a record without one still shows the other. -->
+      <li class="ev__i" data-qp-evidence-samples>{{ t(`admin.schedQuality.evidence.samples.${dim}`, split(samples.count)) }}</li>
+      <li v-if="samples.weight" class="ev__i" data-qp-evidence-weight>{{ t('admin.schedQuality.evidence.samples.weight', split(samples.weight)) }}</li>
+      <li v-for="item in items" :key="item.key" class="ev__i" :data-qp-evidence-item="item.key">
+        {{ t(`admin.schedQuality.evidence.${dim}.${item.key}`, { v: item.value }) }}
+      </li>
+    </ul>
+    <p v-if="samplesUnknown" class="ev__none" data-qp-evidence-samples-why>{{ t('admin.schedQuality.evidence.samples.unknownWhy') }}</p>
     <p v-if="!evidence" class="ev__none">{{ t('admin.schedQuality.evidence.none') }}</p>
     <template v-else>
-      <ul class="ev__list">
-        <!-- This group's and all the counted units (the rule's own set); a record from before they were kept: unknown. -->
-        <li class="ev__i" data-qp-evidence-samples>
-          {{ samples.count ? t(`admin.schedQuality.evidence.samples.${dim}`, { ...samples.count }) : t('admin.schedQuality.evidence.samples.unknown') }}
-        </li>
-        <li v-if="dim === 'ttfo' && samples.count" class="ev__i" data-qp-evidence-weight>
-          {{ samples.weight ? t('admin.schedQuality.evidence.samples.weight', { ...samples.weight }) : t('admin.schedQuality.evidence.samples.weightUnknown') }}
-        </li>
-        <li v-for="item in items" :key="item.key" class="ev__i" :data-qp-evidence-item="item.key">
-          {{ t(`admin.schedQuality.evidence.${dim}.${item.key}`, { v: item.value }) }}
-        </li>
-      </ul>
       <p v-if="causes.length && !gateOff" class="ev__why" data-qp-evidence-why>
         {{ t('admin.schedQuality.evidence.why', { reasons: causes.join(t('admin.schedQuality.evidence.reasonJoiner')) }) }}
       </p>
@@ -33,7 +31,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { BackendDim, BackendEvidenceOf, BackendSampleCounts } from '@/api/admin/schedQualityTypes'
-import { evidenceCauses, lineEvidence, lineSamples } from './qualityPanel'
+import { evidenceCauses, lineEvidence, lineSamples, type SampleSplit } from './qualityPanel'
 
 const props = defineProps<{
   dim: BackendDim
@@ -50,6 +48,13 @@ const { t, te } = useI18n()
 
 const items = computed(() => (props.evidence ? lineEvidence(props.dim, props.evidence) : []))
 const samples = computed(() => lineSamples(props.dim, props.samples, props.evidence))
+const split = (value: SampleSplit) => ({
+  local: value.local ?? t('admin.schedQuality.evidence.samples.unknownValue'),
+  total: value.total ?? t('admin.schedQuality.evidence.samples.unknownValue')
+})
+const samplesUnknown = computed(() =>
+  [samples.value.count, samples.value.weight].some((value) => value && (value.local === null || value.total === null))
+)
 /** A review or a trial would have passed, but the failure share is above the limit: not recovered yet. */
 const overLimit = computed(() => props.dim === 'error' && (props.evidence as BackendEvidenceOf['error'] | null | undefined)?.recovery_over_limit === true)
 const causes = computed(() =>

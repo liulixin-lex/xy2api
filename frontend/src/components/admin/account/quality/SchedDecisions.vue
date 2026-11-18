@@ -187,14 +187,19 @@ const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basi
 /**
  * Why a trial ended without a verdict, from the basis as it is (the backend gives no reason code): no traffic of this
  * group during the trial, or not enough evidence (the first-output line adds rule B's reasons); then, on its own, what
- * was seen of the trial seats. A record from before these were kept says so, nothing is worked out.
+ * was seen of the trial seats. Each part is read on its own: one the record does not have says so without hiding the
+ * other, and a record with neither is an older decision. Nothing is worked out.
  */
 function timeoutReason(item: BackendDecision): string {
   const basis = item.basis
   const local = basis?.samples_local
-  if (!basis || local == null) return t('admin.schedQuality.decisions.timeout.line', { reasons: t('admin.schedQuality.decisions.timeout.legacy') })
+  const seats = basis?.trial_seats
+  if (!basis || (local == null && seats == null)) {
+    return t('admin.schedQuality.decisions.timeout.line', { reasons: t('admin.schedQuality.decisions.timeout.legacy') })
+  }
   const parts: string[] = []
-  if (local === 0) parts.push(t('admin.schedQuality.decisions.timeout.noTraffic'))
+  if (local == null) parts.push(t('admin.schedQuality.decisions.timeout.trafficLegacy'))
+  else if (local === 0) parts.push(t('admin.schedQuality.decisions.timeout.noTraffic'))
   else {
     const causes = evidenceCauses(basis.line, basis.ttft).map((cause) => {
       const key = `admin.schedQuality.evidence.causes.${cause}`
@@ -204,7 +209,7 @@ function timeoutReason(item: BackendDecision): string {
       ? t('admin.schedQuality.decisions.timeout.evidenceWhy', { reasons: causes.join(t('admin.schedQuality.evidence.joiner')) })
       : t('admin.schedQuality.decisions.timeout.evidence'))
   }
-  parts.push(t(`admin.schedQuality.decisions.timeout.seats.${basis.trial_seats ?? 'unknown'}`))
+  parts.push(seats == null ? t('admin.schedQuality.decisions.timeout.seatsLegacy') : t(`admin.schedQuality.decisions.timeout.seats.${seats}`))
   return t('admin.schedQuality.decisions.timeout.line', { reasons: parts.join(t('admin.schedQuality.decisions.timeout.joiner')) })
 }
 </script>
