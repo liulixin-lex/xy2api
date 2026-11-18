@@ -165,6 +165,9 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		}
 	case q.DimensionError:
 		result := q.AssessError(samples, running, p.MaxErrorRate, cut, at)
+		if kind == q.EventReview || kind == q.EventTrial {
+			result = result.ForRecovery()
+		}
 		basis.Threshold = result.Limit
 		basis.Error = &result
 		basis.SourceGroups = append([]int64(nil), result.SourceGroups...)

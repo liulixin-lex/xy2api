@@ -23,6 +23,9 @@ type ErrorAssessment struct {
 	LowerPass    float64  `json:"lower_pass"`
 	AttemptIDs   []string `json:"-"`
 	SourceGroups []int64  `json:"-"` // Actual selected request units, deduplicated and ascending.
+
+	// RecoveryOverLimit explains why an otherwise passing assessment became unknown.
+	RecoveryOverLimit bool `json:"recovery_over_limit,omitempty"`
 }
 
 // 请求单位按 RequestID（为空时用 AttemptID）分组，保留最早开始时间与最终尝试。
@@ -74,6 +77,15 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 		out.Verdict = VerdictPass
 	}
 	return out
+}
+
+// ForRecovery requires a passing assessment's observed failure rate to meet the limit.
+func (a ErrorAssessment) ForRecovery() ErrorAssessment {
+	if a.Verdict == VerdictPass && float64(a.Failed)/float64(a.Clear) > a.Limit {
+		a.Verdict = VerdictUnknown
+		a.RecoveryOverLimit = true
+	}
+	return a
 }
 
 func sortedSourceGroups(groups map[int64]struct{}) []int64 {
