@@ -48,7 +48,7 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 		args = append(args, row.AttemptID, row.StartedAt, row.FinishedAt, row.AccountID, row.GroupID,
 			row.Model, 1, row.Stream, row.Warm, row.TTFOMs, row.CensoredMs, row.Outcome,
 			row.Detail, row.PromptTokens, nil, row.CacheReadTokens, row.SessionKey, row.RequestID, row.InputTokens, row.CacheCreationTokens,
-			schedquality.FullTierTimeoutCaptureVersion, row.FirstEventMs, row.FirstAnswerMs, row.Class, row.HTTPStatus, row.StatusOrigin, row.OutputBytes, row.FullTierFirstOutputTimeout)
+			schedquality.CurrentCaptureVersion, row.FirstEventMs, row.FirstAnswerMs, row.Class, row.HTTPStatus, row.StatusOrigin, row.OutputBytes, row.FullTierFirstOutputTimeout)
 	}
 	_, _ = q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
 	_, err := r.db.ExecContext(ctx, q.String(), args...)

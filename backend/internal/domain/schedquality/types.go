@@ -33,8 +33,12 @@ func (o Outcome) String() string {
 	return ""
 }
 
-// FullTierTimeoutCaptureVersion is the first writer with per-dispatch timeout evidence.
-const FullTierTimeoutCaptureVersion = 3
+const (
+	// CurrentCaptureVersion is written to new samples by the recorder and the ledger.
+	CurrentCaptureVersion = 3
+	// FullTierTimeoutCaptureVersion is the earliest version with per-dispatch timeout evidence.
+	FullTierTimeoutCaptureVersion = 3
+)
 
 type AttemptSample struct {
 	AttemptID                        string
