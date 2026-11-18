@@ -25,13 +25,10 @@ var schedTrialLeaseScript = redis.NewScript(`
 redis.replicate_commands()
 local key = KEYS[1]
 local operation = ARGV[1]
-local now = tonumber(ARGV[2])
-local observed = now
-if not now or operation == 'acquire' or operation == 'touch' then
-    local clock = redis.call('TIME')
-    local storageNow = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
-    now = math.max(storageNow, now or storageNow)
-end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local age = tonumber(ARGV[2])
+local observed = now - age
 local idle = tonumber(ARGV[3])
 local limit = tonumber(ARGV[4])
 local ttl = tonumber(ARGV[5])
@@ -50,7 +47,7 @@ if operation == 'room' then
     return finish(0)
 elseif operation == 'acquire' then
     -- A queued write cannot start a new idle window for an expired decision.
-    if observed <= now - idle then return '' end
+    if age >= idle then return '' end
     local score = redis.call('ZSCORE', key, member)
     if not score and redis.call('ZCARD', key) >= limit then
         return finish('')
@@ -72,10 +69,12 @@ elseif operation == 'promote' then
     local target = ARGV[7]
     local score = redis.call('ZSCORE', key, target)
     redis.call('ZREM', key, member)
-    redis.call('ZADD', key, math.max(now, tonumber(score) or now), target)
+    if age < idle then
+        redis.call('ZADD', key, math.max(observed, tonumber(score) or observed), target)
+    end
 elseif operation == 'touch' then
     local score = redis.call('ZSCORE', key, member)
-    if score then
+    if score and age < idle then
         redis.call('ZADD', key, 'XX', math.max(observed, tonumber(score)), member)
     end
 elseif operation == 'release' then
@@ -95,13 +94,14 @@ return finish(0)
 `)
 
 type schedTrialLeaseCache struct {
-	rdb *redis.Client
+	rdb   *redis.Client
+	since func(time.Time) time.Duration
 }
 
 // NewSchedTrialLeaseCache returns the shared Redis trial capacity store.
 // Construction performs no I/O; Redis failures are returned by each operation.
 func NewSchedTrialLeaseCache(rdb *redis.Client) service.SchedTrialLeases {
-	return &schedTrialLeaseCache{rdb: rdb}
+	return &schedTrialLeaseCache{rdb: rdb, since: time.Since}
 }
 
 func schedTrialLeaseKey(accountID int64, model string) string {
@@ -112,8 +112,10 @@ func schedTrialLeaseGroupPrefix(groupID int64) string {
 	return strconv.FormatInt(groupID, 10) + ":"
 }
 
-func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session, now string, extra ...string) *redis.Cmd {
-	args := []any{operation, now, service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit, int64(schedTrialLeaseTTL / time.Second), schedTrialLeaseGroupPrefix(groupID) + session}
+func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session string, elapsed time.Duration, extra ...string) *redis.Cmd {
+	// Send elapsed monotonic time, never a gateway wall-clock score. Redis
+	// timestamps both pruning and the backdated activity in the same script.
+	args := []any{operation, max(elapsed.Milliseconds(), 0), service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit, int64(schedTrialLeaseTTL / time.Second), schedTrialLeaseGroupPrefix(groupID) + session}
 	for _, arg := range extra {
 		args = append(args, arg)
 	}
@@ -122,29 +124,29 @@ func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accoun
 }
 
 func (c *schedTrialLeaseCache) Room(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error) {
-	v, err := c.run(ctx, "room", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10)).Int()
+	v, err := c.run(ctx, "room", accountID, model, groupID, session, 0).Int()
 	return v == 1, err
 }
 
 func (c *schedTrialLeaseCache) Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, string, error) {
-	generation, err := c.run(ctx, "acquire", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10), schedTrialLeaseGroupPrefix(groupID), uuid.NewString(), strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Text()
+	generation, err := c.run(ctx, "acquire", accountID, model, groupID, session, c.since(now), schedTrialLeaseGroupPrefix(groupID), uuid.NewString(), strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Text()
 	return generation != "", generation, err
 }
 
 func (c *schedTrialLeaseCache) Touch(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) error {
-	return c.run(ctx, "touch", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10)).Err()
+	return c.run(ctx, "touch", accountID, model, groupID, session, c.since(now)).Err()
 }
 
 func (c *schedTrialLeaseCache) Release(ctx context.Context, accountID int64, model string, groupID int64, session string) error {
-	return c.run(ctx, "release", accountID, model, groupID, session, "").Err()
+	return c.run(ctx, "release", accountID, model, groupID, session, 0).Err()
 }
 
 func (c *schedTrialLeaseCache) ReleaseGroup(ctx context.Context, accountID int64, model string, groupID int64) error {
-	return c.run(ctx, "release_group", accountID, model, groupID, "", "", strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Err()
+	return c.run(ctx, "release_group", accountID, model, groupID, "", 0, strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Err()
 }
 
 func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g int64, request, session, generation string, now time.Time) error {
-	v, err := c.run(ctx, "promote", a, m, g, request, strconv.FormatInt(now.UnixMilli(), 10), schedTrialLeaseGroupPrefix(g)+session, schedTrialLeaseGroupPrefix(g), generation).Int()
+	v, err := c.run(ctx, "promote", a, m, g, request, c.since(now), schedTrialLeaseGroupPrefix(g)+session, schedTrialLeaseGroupPrefix(g), generation).Int()
 	if err == nil && v == -1 {
 		return service.ErrTrialGenerationChanged
 	}

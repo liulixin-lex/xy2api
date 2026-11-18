@@ -5,6 +5,9 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,14 +17,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTrialLeaseTestCache(t *testing.T) (service.SchedTrialLeases, *redis.Client, *miniredis.Miniredis, time.Time) {
+type trialLeaseTestClock struct {
+	*miniredis.Miniredis
+	now time.Time
+}
+
+func (clock *trialLeaseTestClock) advanceTo(at time.Time) {
+	clock.FastForward(at.Sub(clock.now))
+	clock.SetTime(at)
+	clock.now = at
+}
+
+func newTrialLeaseTestCache(t *testing.T) (*schedTrialLeaseCache, *redis.Client, *trialLeaseTestClock, time.Time) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	now := time.Unix(10000, 0).UTC()
 	mr.SetTime(now)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return NewSchedTrialLeaseCache(rdb), rdb, mr, now
+	clock := &trialLeaseTestClock{Miniredis: mr, now: now}
+	cache := &schedTrialLeaseCache{rdb: rdb, since: func(observed time.Time) time.Duration { return clock.now.Sub(observed) }}
+	return cache, rdb, clock, now
 }
 
 func requireTrialAcquire(t *testing.T, cache service.SchedTrialLeases, groupID int64, member string, now time.Time) string {
@@ -88,13 +104,14 @@ func TestSchedTrialLeaseSharedCapacityAndRenewal(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, ok, "different account/model has its own capacity")
 	}
-	mr.FastForward(5 * time.Minute)
+	mr.advanceTo(now.Add(5 * time.Minute))
 	requireTrialAcquire(t, cache, 1, member, now.Add(5*time.Minute))
 	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
 	require.NoError(t, err)
 	require.EqualValues(t, 3, count, "reacquisition must not consume another slot")
 	require.Equal(t, time.Hour, mr.TTL(schedTrialLeaseKey(1, "model-a")))
 	// At the original idle deadline only the reacquired holder remains.
+	mr.advanceTo(now.Add(service.TrialLeaseIdle))
 	_, err = cache.Room(ctx, 1, "model-a", 1, member, now.Add(service.TrialLeaseIdle))
 	require.NoError(t, err)
 	members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
@@ -108,15 +125,15 @@ func TestSchedTrialLeaseIdleBoundaryAndRoomDoesNotRenew(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		requireTrialAcquire(t, cache, 1, service.TrialLeaseSessionMember(fmt.Sprint(i)), now)
 	}
-	mr.FastForward(service.TrialLeaseIdle - time.Millisecond)
 	before := now.Add(service.TrialLeaseIdle - time.Millisecond)
+	mr.advanceTo(before)
 	ok, err := cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("new"), before)
 	require.NoError(t, err)
 	require.False(t, ok)
 	ok, err = cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("0"), before)
 	require.NoError(t, err)
 	require.True(t, ok)
-	mr.FastForward(time.Millisecond)
+	mr.advanceTo(now.Add(service.TrialLeaseIdle))
 	ok, err = cache.Room(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("new"), now.Add(service.TrialLeaseIdle))
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -134,20 +151,24 @@ func TestSchedTrialLeaseTouchOnlyLiveMembers(t *testing.T) {
 	a, b := service.TrialLeaseSessionMember("a"), service.TrialLeaseSessionMember("b")
 	requireTrialAcquire(t, cache, 1, a, now)
 	requireTrialAcquire(t, cache, 1, b, now)
+	mr.advanceTo(now.Add(5 * time.Minute))
 	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(5*time.Minute)))
 	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, service.TrialLeaseSessionMember("missing"), now.Add(5*time.Minute)))
 	// Delayed activity must not move a lease's last activity backwards.
 	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(4*time.Minute)))
 	requireTrialAcquire(t, cache, 1, a, now.Add(3*time.Minute))
+	mr.advanceTo(now.Add(service.TrialLeaseIdle))
 	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, b, now.Add(service.TrialLeaseIdle)))
 	members, err := rdb.ZRange(ctx, schedTrialLeaseKey(1, "model-a"), 0, -1).Result()
 	require.NoError(t, err)
 	require.Equal(t, []string{"1:" + a}, members, "Touch must not resurrect expired or missing members")
+	mr.advanceTo(now.Add(15*time.Minute - time.Millisecond))
 	_, err = cache.Room(ctx, 1, "model-a", 1, a, now.Add(15*time.Minute-time.Millisecond))
 	require.NoError(t, err)
 	count, err := rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Result()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
+	mr.advanceTo(now.Add(15 * time.Minute))
 	require.NoError(t, cache.Touch(ctx, 1, "model-a", 1, a, now.Add(15*time.Minute)))
 	require.False(t, mr.Exists(schedTrialLeaseKey(1, "model-a")))
 }
@@ -189,17 +210,22 @@ func TestSchedTrialLeaseReleaseAndRequestNamespace(t *testing.T) {
 }
 
 func TestSchedTrialLeaseEveryOperationPrunesIdle(t *testing.T) {
-	for _, operation := range []string{"room", "acquire", "touch", "release", "release_group"} {
+	for _, operation := range []string{"room", "acquire", "touch", "promote", "release", "release_group"} {
 		t.Run(operation, func(t *testing.T) {
 			cache, rdb, mr, now := newTrialLeaseTestCache(t)
 			ctx := context.Background()
+			// A slow gateway clock must not postpone pruning or timestamp new seats.
+			offset := -5 * time.Second
+			cache.since = func(observed time.Time) time.Duration { return mr.now.Add(offset).Sub(observed) }
+			gatewayNow := now.Add(offset)
 			old := service.TrialLeaseSessionMember("old")
 			live := service.TrialLeaseSessionMember("live")
-			requireTrialAcquire(t, cache, 10, old, now)
-			requireTrialAcquire(t, cache, 10, live, now.Add(time.Second))
-			at := now.Add(service.TrialLeaseIdle)
-			mr.FastForward(service.TrialLeaseIdle)
-			mr.SetTime(at) // FastForward updates TTLs, not the TIME command.
+			requireTrialAcquire(t, cache, 10, old, gatewayNow)
+			generation := requireTrialAcquire(t, cache, 1, "r:source", gatewayNow)
+			mr.advanceTo(now.Add(time.Second))
+			requireTrialAcquire(t, cache, 10, live, gatewayNow.Add(time.Second))
+			mr.advanceTo(now.Add(service.TrialLeaseIdle))
+			at := gatewayNow.Add(service.TrialLeaseIdle)
 			var err error
 			switch operation {
 			case "room":
@@ -207,7 +233,9 @@ func TestSchedTrialLeaseEveryOperationPrunesIdle(t *testing.T) {
 			case "acquire":
 				_, _, err = cache.Acquire(ctx, 1, "model-a", 1, "s:new", at)
 			case "touch":
-				err = cache.Touch(ctx, 1, "model-a", 1, "s:missing", at)
+				err = cache.Touch(ctx, 1, "model-a", 10, live, at)
+			case "promote":
+				err = cache.Promote(ctx, 1, "model-a", 1, "r:source", "s:new", generation, at)
 			case "release":
 				err = cache.Release(ctx, 1, "model-a", 1, "s:missing")
 			case "release_group":
@@ -218,6 +246,16 @@ func TestSchedTrialLeaseEveryOperationPrunesIdle(t *testing.T) {
 			require.ErrorIs(t, err, redis.Nil, "all operations must prune the boundary")
 			_, err = rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "10:"+live).Result()
 			require.NoError(t, err, "a live member in another group must survive")
+			switch operation {
+			case "promote", "acquire":
+				score, err := rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "1:s:new").Result()
+				require.NoError(t, err)
+				require.EqualValues(t, mr.now.UnixMilli(), score)
+			case "touch":
+				score, err := rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "10:"+live).Result()
+				require.NoError(t, err)
+				require.EqualValues(t, mr.now.UnixMilli(), score)
+			}
 		})
 	}
 }
@@ -240,7 +278,7 @@ func TestSchedTrialLeaseRedisErrors(t *testing.T) {
 func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
 	for _, order := range []string{"failure_first", "release_after_commit"} {
 		t.Run(order, func(t *testing.T) {
-			leases, rdb, _, now := newTrialLeaseTestCache(t)
+			leases, rdb, mr, now := newTrialLeaseTestCache(t)
 			ctx := context.Background()
 			first, second, session := service.TrialLeaseRequestMember("request-one"), service.TrialLeaseRequestMember("request-two"), service.TrialLeaseSessionMember("session")
 			requireTrialAcquire(t, leases, 7, first, now)
@@ -257,6 +295,7 @@ func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
 			changed, commitErr := bindings.CommitSessionBinding(ctx, 7, "openai:session", service.StickySessionBinding{}, 1, time.Hour)
 			require.NoError(t, commitErr)
 			require.True(t, changed)
+			mr.advanceTo(now.Add(time.Second))
 			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, second, session, generation, now.Add(time.Second)))
 			if order == "release_after_commit" {
 				close(commit)
@@ -279,7 +318,7 @@ func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
 func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
 	for _, mode := range []string{"missing", "expired", "full"} {
 		t.Run(mode, func(t *testing.T) {
-			leases, rdb, _, now := newTrialLeaseTestCache(t)
+			leases, rdb, mr, now := newTrialLeaseTestCache(t)
 			ctx := context.Background()
 			request, session := service.TrialLeaseRequestMember("request"), service.TrialLeaseSessionMember("committed")
 			generation := requireTrialAcquire(t, leases, 7, request, now)
@@ -288,6 +327,7 @@ func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
 			}
 			if mode == "expired" {
 				now = now.Add(service.TrialLeaseIdle)
+				mr.advanceTo(now)
 			}
 			if mode == "full" {
 				for i := 0; i < service.TrialLeaseLimit; i++ {
@@ -309,13 +349,15 @@ func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
 }
 
 func TestSchedTrialGenerationFencesLatePromotionAcrossGroups(t *testing.T) {
-	leases, rdb, _, at := newTrialLeaseTestCache(t)
+	leases, rdb, mr, at := newTrialLeaseTestCache(t)
 	ctx := context.Background()
 	old := requireTrialAcquire(t, leases, 7, "r:old", at)
 	other := requireTrialAcquire(t, leases, 8, "r:other", at)
 	require.NoError(t, leases.ReleaseGroup(ctx, 1, "model-a", 7))
+	mr.advanceTo(at.Add(21 * time.Minute))
 	newRound := requireTrialAcquire(t, leases, 7, "r:new", at.Add(21*time.Minute))
 	require.NotEqual(t, old, newRound)
+	mr.advanceTo(at.Add(22 * time.Minute))
 	require.ErrorIs(t, leases.Promote(ctx, 1, "model-a", 7, "r:old", "s:old", old, at.Add(22*time.Minute)), service.ErrTrialGenerationChanged)
 	require.NoError(t, leases.Promote(ctx, 1, "model-a", 8, "r:other", "s:other", other, at.Add(22*time.Minute)))
 	require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, "r:new", "s:new", newRound, at.Add(22*time.Minute)))
@@ -331,7 +373,9 @@ func TestSchedTrialReleaseFailureLeavesGenerationUntilNextSuccessfulRelease(t *t
 	mr.SetError("")
 	// The failed Redis reset did not advance its fence. The independent
 	// authoritative check must decline this token if the DB reset committed.
+	mr.advanceTo(at.Add(time.Minute))
 	require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, "r:old", "s:old", token, at.Add(time.Minute)))
+	mr.advanceTo(at.Add(11 * time.Minute))
 	_, err := leases.Room(ctx, 1, "model-a", 7, "s:new", at.Add(11*time.Minute))
 	require.NoError(t, err)
 	require.Zero(t, rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Val())
@@ -344,7 +388,7 @@ func TestSchedTrialLateAcquireCannotOccupyThirdSeat(t *testing.T) {
 			ctx := context.Background()
 			requireTrialAcquire(t, cache, 7, "r:previous", observed)
 			require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 7))
-			mr.SetTime(observed.Add(delay))
+			mr.advanceTo(observed.Add(delay))
 			acquired, _, err := cache.Acquire(ctx, 1, "model-a", 7, "r:old", observed)
 			require.NoError(t, err)
 			require.Equal(t, delay < service.TrialLeaseIdle, acquired)
@@ -356,7 +400,7 @@ func TestSchedTrialLateAcquireCannotOccupyThirdSeat(t *testing.T) {
 				require.ErrorIs(t, err, redis.Nil)
 			}
 			newAt := observed.Add(25 * time.Minute)
-			mr.SetTime(newAt)
+			mr.advanceTo(newAt)
 			for _, member := range []string{"r:first", "r:second"} {
 				requireTrialAcquire(t, cache, 8, member, newAt)
 			}
@@ -373,13 +417,85 @@ func TestSchedTrialGenerationExpiresWithNewEpochOnReuse(t *testing.T) {
 	leases, rdb, mr, now := newTrialLeaseTestCache(t)
 	ctx := context.Background()
 	old := requireTrialAcquire(t, leases, 7, "r:old", now)
-	mr.FastForward(schedTrialGenerationTTL - time.Hour)
+	mr.advanceTo(now.Add(schedTrialGenerationTTL - time.Hour))
 	require.NoError(t, leases.ReleaseGroup(ctx, 1, "model-a", 7))
-	mr.FastForward(schedTrialGenerationTTL)
+	mr.advanceTo(now.Add(2*schedTrialGenerationTTL - time.Hour))
 	require.Zero(t, rdb.DBSize(ctx).Val())
 	next := now.Add(2 * schedTrialGenerationTTL)
-	mr.SetTime(next)
+	mr.advanceTo(next)
 	current := requireTrialAcquire(t, leases, 7, "r:current", next)
 	require.NotEqual(t, old, current)
 	require.ErrorIs(t, leases.Promote(ctx, 1, "model-a", 7, "r:old", "s:old", old, next), service.ErrTrialGenerationChanged)
+}
+
+func TestSchedTrialLeaseClockOffsets(t *testing.T) {
+	_, rdb, _, _ := newTrialLeaseTestCache(t)
+	testTrialLeaseClockOffsets(t, rdb)
+}
+
+func TestSchedTrialLeaseClockOffsetsRealRedis(t *testing.T) {
+	server, err := exec.LookPath("redis-server")
+	if err != nil {
+		t.Skip("redis-server unavailable")
+	}
+	// Darwin limits the full Unix socket path to 104 bytes.
+	dir, err := os.MkdirTemp("/tmp", "trial-redis-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "redis.sock")
+	cmd := exec.Command(server, "--port", "0", "--unixsocket", socket, "--unixsocketperm", "700", "--save", "", "--appendonly", "no")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket, MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	require.Eventually(t, func() bool { return rdb.Ping(context.Background()).Err() == nil }, 5*time.Second, 10*time.Millisecond)
+	t.Run("gateway_monotonic_clock", func(t *testing.T) {
+		cache := NewSchedTrialLeaseCache(rdb)
+		ok, _, err := cache.Acquire(context.Background(), 2, "model-a", 7, "r:expired", time.Now().Add(-service.TrialLeaseIdle))
+		require.NoError(t, err)
+		require.False(t, ok)
+		ok, _, err = cache.Acquire(context.Background(), 2, "model-a", 7, "r:live", time.Now())
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+	testTrialLeaseClockOffsets(t, rdb)
+}
+
+func testTrialLeaseClockOffsets(t *testing.T, rdb *redis.Client) {
+	t.Helper()
+	ctx := context.Background()
+	for _, offset := range []time.Duration{-5 * time.Second, -250 * time.Millisecond, 250 * time.Millisecond, 5 * time.Second} {
+		for _, age := range []time.Duration{service.TrialLeaseIdle - 100*time.Millisecond, service.TrialLeaseIdle, service.TrialLeaseIdle + 4*time.Millisecond} {
+			t.Run(fmt.Sprintf("offset_%v_age_%v", offset, age), func(t *testing.T) {
+				storageNow, err := rdb.Time(ctx).Result()
+				require.NoError(t, err)
+				gatewayNow := storageNow.Add(offset)
+				cache := &schedTrialLeaseCache{rdb: rdb, since: gatewayNow.Sub}
+				require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 7))
+				require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 8))
+				requireTrialAcquire(t, cache, 8, "s:first", gatewayNow)
+				requireTrialAcquire(t, cache, 8, "s:second", gatewayNow)
+
+				before, err := rdb.Time(ctx).Result()
+				require.NoError(t, err)
+				acquired, generation, err := cache.Acquire(ctx, 1, "model-a", 7, "r:delayed", gatewayNow.Add(-age))
+				require.NoError(t, err)
+				after, err := rdb.Time(ctx).Result()
+				require.NoError(t, err)
+				require.Equal(t, age < service.TrialLeaseIdle, acquired)
+				score, err := rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "7:r:delayed").Result()
+				if acquired {
+					require.NotEmpty(t, generation)
+					require.NoError(t, err)
+					require.GreaterOrEqual(t, int64(score), before.Add(-age).UnixMilli())
+					require.LessOrEqual(t, int64(score), after.Add(-age).UnixMilli())
+				} else {
+					require.Empty(t, generation)
+					require.ErrorIs(t, err, redis.Nil)
+					requireTrialAcquire(t, cache, 8, "s:third", gatewayNow)
+				}
+			})
+		}
+	}
 }
