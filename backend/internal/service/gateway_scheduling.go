@@ -2071,7 +2071,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 							if s.debugModelRoutingEnabled() {
 								logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 							}
-							noteLegacyWaitChoice(ctx, true, false, schedGroup)
+							noteLegacyWaitChoice(ctx, true, false)
 							return account, nil
 						}
 					}
@@ -2173,7 +2173,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
 			}
-			noteLegacyWaitChoice(ctx, false, true, schedGroup)
+			noteLegacyWaitChoice(ctx, false, true)
 			return selected, nil
 		}
 		logger.LegacyPrintf("service.gateway", "[ModelRouting] No routed accounts available for model=%s, falling back to normal selection", requestedModel)
@@ -2193,7 +2193,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
 					if !clearSticky && s.isGatewayAccountProfitEligible(ctx, account) && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
-						noteLegacyWaitChoice(ctx, true, true, schedGroup)
+						noteLegacyWaitChoice(ctx, true, true)
 						return account, nil
 					}
 				}
@@ -2299,7 +2299,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 	}
 
-	noteLegacyWaitChoice(ctx, false, false, schedGroup)
+	noteLegacyWaitChoice(ctx, false, false)
 	return selected, nil
 }
 
@@ -2342,7 +2342,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 								}
-								noteLegacyWaitChoice(ctx, true, true, schedGroup)
+								noteLegacyWaitChoice(ctx, true, true)
 								return account, nil
 							}
 						}
@@ -2445,7 +2445,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			if s.debugModelRoutingEnabled() {
 				logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), selected.ID)
 			}
-			noteLegacyWaitChoice(ctx, false, true, schedGroup)
+			noteLegacyWaitChoice(ctx, false, true)
 			return selected, nil
 		}
 		logger.LegacyPrintf("service.gateway", "[ModelRouting] No routed accounts available for model=%s, falling back to normal selection", requestedModel)
@@ -2466,7 +2466,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 					}
 					if !clearSticky && s.isGatewayAccountProfitEligible(ctx, account) && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) && !s.isStickyAccountUpstreamRestricted(ctx, groupID, account, requestedModel) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
-							noteLegacyWaitChoice(ctx, true, false, schedGroup)
+							noteLegacyWaitChoice(ctx, true, false)
 							return account, nil
 						}
 					}
@@ -2572,7 +2572,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 	}
 
-	noteLegacyWaitChoice(ctx, false, false, schedGroup)
+	noteLegacyWaitChoice(ctx, false, false)
 	return selected, nil
 }
 

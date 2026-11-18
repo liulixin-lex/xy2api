@@ -537,7 +537,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				reqLog.Info("gemini.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			if len(fs.FailedAccountIDs) == 0 {
+			if fs.localSelectionExhaustion() {
 				recordSelectionExhausted(c.Request.Context())
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, modelName, modelName, service.PlatformGemini)
 				if !cls.ModelNotFound {
@@ -641,7 +641,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, sessionKey, accountReleaseFunc, nil)
+		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountReleaseFunc, nil)
 		if latest == nil {
 			reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			continue

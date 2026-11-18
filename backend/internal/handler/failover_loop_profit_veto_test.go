@@ -176,13 +176,25 @@ func (s *waitedSlots) ReleaseAccountSlot(_ context.Context, id int64, _ string) 
 type waitedSessions struct {
 	service.SessionLimitCache
 	added, removed []int64
+	active         map[int64]map[string]bool
 }
 
-func (s *waitedSessions) RegisterSession(_ context.Context, id int64, _ string, _ int, _ time.Duration) (bool, error) {
+func (s *waitedSessions) RegisterSession(_ context.Context, id int64, session string, limit int, _ time.Duration) (bool, error) {
+	if s.active == nil {
+		s.active = make(map[int64]map[string]bool)
+	}
+	if s.active[id] == nil {
+		s.active[id] = make(map[string]bool)
+	}
+	if !s.active[id][session] && len(s.active[id]) >= limit {
+		return false, nil
+	}
+	s.active[id][session] = true
 	s.added = append(s.added, id)
 	return true, nil
 }
-func (s *waitedSessions) UnregisterSession(_ context.Context, id int64, _ string) error {
+func (s *waitedSessions) UnregisterSession(_ context.Context, id int64, session string) error {
+	delete(s.active[id], session)
 	s.removed = append(s.removed, id)
 	return nil
 }
@@ -237,13 +249,13 @@ func TestGatewayWaitRechecksBeforeDispatch(t *testing.T) {
 					release = acquired.ReleaseFunc
 					deferred[pick.Account.ID] = pick.Account
 				}
-				latest, veto, _ := fs.admitGatewaySlot(ctx, gateway, pick, "fixture", release, deferred)
+				latest, veto, _ := fs.admitGatewaySlot(ctx, gateway, pick, release, deferred)
 				require.False(t, veto)
 				if latest == nil {
 					continue
 				}
 				dispatched = append(dispatched, latest.ID)
-				require.Len(t, slots.released, len(sessions.removed), "the admitted slot stays held through dispatch")
+				require.Len(t, slots.released, len(fs.invalidAfterWait), "the admitted slot stays held through dispatch")
 				release()
 				break
 			}
@@ -254,7 +266,7 @@ func TestGatewayWaitRechecksBeforeDispatch(t *testing.T) {
 			require.Zero(t, fs.ProfitVetoCount())
 			if tc.want == 2 {
 				require.Equal(t, []int64{1, 2}, sessions.added)
-				require.Equal(t, []int64{1}, sessions.removed)
+				require.Empty(t, sessions.removed)
 				require.NotContains(t, deferred, int64(1))
 				require.Equal(t, []int64{1, 2}, slots.released)
 			} else {
@@ -268,4 +280,46 @@ func TestGatewayWaitRechecksBeforeDispatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGatewayWaitRejectionPreservesOtherServingRequestSession(t *testing.T) {
+	group := &service.Group{ID: 9, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	a := service.Account{ID: 1, Platform: group.Platform, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 2, Extra: map[string]any{"max_sessions": 1}, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}}
+	repo := &waitedAccountRepo{pool: []service.Account{a}, fresh: a}
+	slots := &waitedSlots{}
+	sessions := &waitedSessions{}
+	concurrency := service.NewConcurrencyService(slots)
+	gateway := service.NewGatewayService(repo, nil, nil, nil, nil, nil, nil, nil, &config.Config{}, nil, concurrency, nil, nil, nil, nil, nil, nil, nil, sessions, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	first, err := gateway.SelectAccountWithLoadAwareness(ctx, &group.ID, "existing", "", nil, "", 0)
+	require.NoError(t, err)
+	require.True(t, first.Acquired)
+	defer first.ReleaseFunc()
+	slots.busy = true
+	second, err := gateway.SelectAccountWithLoadAwareness(ctx, &group.ID, "existing", "", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, second.WaitPlan)
+	slots.busy = false
+	slot, err := concurrency.AcquireAccountSlot(ctx, a.ID, 2)
+	require.NoError(t, err)
+	require.True(t, slot.Acquired)
+	repo.fresh.Schedulable = false
+	latest, _, _ := NewFailoverState(1, false).admitGatewaySlot(ctx, gateway, second, slot.ReleaseFunc, nil)
+	require.Nil(t, latest)
+	require.Equal(t, []int64{1}, slots.released)
+	require.True(t, sessions.active[a.ID]["existing"])
+	ok, err := sessions.RegisterSession(ctx, a.ID, "other", 1, time.Minute)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestGatewayWaitInvalidAccountRemainsExcludedAfter503Backoff(t *testing.T) {
+	fs := NewFailoverState(2, false)
+	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
+	fs.SwitchCount = 1
+	fs.invalidAfterWait = map[int64]struct{}{2: {}}
+	fs.FailedAccountIDs = map[int64]struct{}{1: {}, 2: {}}
+	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(context.Background()))
+	require.NotContains(t, fs.FailedAccountIDs, int64(1))
+	require.Contains(t, fs.FailedAccountIDs, int64(2))
 }

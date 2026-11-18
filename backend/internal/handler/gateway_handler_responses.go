@@ -211,7 +211,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			if len(fs.FailedAccountIDs) == 0 {
+			if fs.localSelectionExhaustion() {
 				recordSelectionExhausted(c.Request.Context())
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey), err)
 				cls = classifySelectionFailureError(err, cls)
@@ -270,7 +270,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		// ctx 上（composite/fallback 还可能解析出与入口分组不同的门），直接用
 		// requestCtx 会退化为空操作。
 		admissionCtx := service.ContextWithSelectionProfitGate(requestCtx, selection)
-		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, sessionHash, accountReleaseFunc, nil)
+		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountReleaseFunc, nil)
 		if latest == nil {
 			reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			continue

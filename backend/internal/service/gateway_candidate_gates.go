@@ -137,13 +137,13 @@ func shareAccountStateReason(a *Account, now time.Time) (gatewayCandidateReason,
 }
 
 // gatewayWaitEligibility freezes the policy of the branch that selected this
-// account. ctx is the request's selection context before cost/RPM prefetch.
+// account. Waiting plans mask any cost/RPM prefetch inherited from selection.
 type gatewayWaitEligibility struct {
-	ctx                                     context.Context
-	groupID                                 *int64
-	platform, model                         string
-	useMixed, sticky, lastResort            bool
-	checkGroup, skipChannel, requirePrivacy bool
+	ctx                                   context.Context
+	groupID                               *int64
+	platform, model                       string
+	useMixed, sticky, lastResort          bool
+	checkGroup, skipChannel, checkPrivacy bool
 }
 
 type legacyWaitEligibilityKey struct{}
@@ -155,6 +155,8 @@ func (s *GatewayService) gatewayWaitCriteria(ctx context.Context, groupID *int64
 	if s.schedulerSnapshot != nil {
 		checkGroup = !s.schedulerSnapshot.isRunModeSimple()
 	}
+	ctx = context.WithValue(ctx, windowCostPrefetchContextKey, nil)
+	ctx = context.WithValue(ctx, rpmPrefetchContextKey, nil)
 	return gatewayWaitEligibility{ctx: ctx, groupID: groupID, platform: platform, model: model, useMixed: mixed, checkGroup: checkGroup}
 }
 
@@ -163,11 +165,11 @@ func (w gatewayWaitEligibility) forSticky() gatewayWaitEligibility {
 	return w
 }
 
-func noteLegacyWaitChoice(ctx context.Context, sticky, skipChannel bool, group *Group) {
+func noteLegacyWaitChoice(ctx context.Context, sticky, skipChannel bool) {
 	if w, ok := ctx.Value(legacyWaitEligibilityKey{}).(*gatewayWaitEligibility); ok {
 		w.sticky = sticky
 		w.skipChannel = skipChannel
-		w.requirePrivacy = !sticky && group != nil && group.RequirePrivacySet
+		w.checkPrivacy = !sticky && w.groupID != nil
 		w.checkGroup = w.checkGroup || sticky
 	}
 }
@@ -200,13 +202,8 @@ func (s *GatewayService) GatewayAccountAfterSlot(ctx context.Context, sel *Accou
 		}
 		fresh = withoutSoftPenalties(*fresh, now)
 		gateCtx = withResilienceLastResortGate(gateCtx)
-	} else {
-		if s.isAccountBlockedBySchedulingThreshold(gateCtx, fresh) || (fresh.IsGrok() && len(s.filterGrokFreeQuotaAccountsForGateway(gateCtx, []Account{*fresh})) == 0) {
-			return nil, false, "scheduling_threshold"
-		}
-		if w.requirePrivacy && !fresh.IsPrivacySet() {
-			return nil, false, "privacy_required"
-		}
+	} else if s.isAccountBlockedBySchedulingThreshold(gateCtx, fresh) || (fresh.IsGrok() && len(s.filterGrokFreeQuotaAccountsForGateway(gateCtx, []Account{*fresh})) == 0) {
+		return nil, false, "scheduling_threshold"
 	}
 	if s.checkChannelPricingRestriction(gateCtx, w.groupID, w.model) {
 		return nil, false, "channel_restricted"
@@ -216,6 +213,19 @@ func (s *GatewayService) GatewayAccountAfterSlot(ctx context.Context, sel *Accou
 	gates.profitAtDispatch = true
 	if reason, _ := gates.candidateReason(gateCtx, fresh, w.sticky, now); reason != "" {
 		return nil, false, string(reason)
+	}
+	if w.checkPrivacy && !fresh.IsPrivacySet() && s.groupRepo != nil {
+		group, err := s.groupRepo.GetByIDLite(ctx, *w.groupID)
+		if errors.Is(err, ErrGroupNotFound) || (err == nil && group == nil) {
+			return nil, false, "group_deleted"
+		}
+		if err != nil {
+			slog.Warn("gateway.wait_group_refresh_failed", "group_id", *w.groupID, "account_id", fresh.ID, "platform", w.platform, "error_class", "storage_read")
+			return s.GatewayProfitControlVetoLatest(ctx, sel.Account)
+		}
+		if group.RequirePrivacySet {
+			return nil, false, "privacy_required"
+		}
 	}
 	// The authoritative row already includes current prices and membership.
 	return profitControlVetoLatest(ctx, fresh, nil)

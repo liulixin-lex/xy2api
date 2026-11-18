@@ -155,11 +155,12 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
 	}
 }
 
-// admitGatewaySlot consumes the slot and session registration on rejection.
+// admitGatewaySlot releases only the rejected slot. A session registration is
+// shared with concurrent requests and expires after its usual idle interval.
 // Only waiting plans can lose eligibility. Keep their exclusions through 503
 // backoff without treating them as upstream attempts or profit vetoes.
 func (s *FailoverState) admitGatewaySlot(ctx context.Context, gateway *service.GatewayService, selection *service.AccountSelectionResult,
-	session string, releaseSlot func(), deferredSessions map[int64]*service.Account) (*service.Account, bool, string) {
+	releaseSlot func(), deferredSessions map[int64]*service.Account) (*service.Account, bool, string) {
 	account, profitVeto, reason := gateway.GatewayAccountAfterSlot(ctx, selection)
 	if account != nil && !profitVeto {
 		return account, false, ""
@@ -169,7 +170,6 @@ func (s *FailoverState) admitGatewaySlot(ctx context.Context, gateway *service.G
 	}
 	id := selection.Account.ID
 	if !selection.Acquired {
-		gateway.ReleaseAccountSession(context.WithoutCancel(ctx), selection.Account, session)
 		delete(deferredSessions, id)
 	}
 	if account == nil {
@@ -180,6 +180,12 @@ func (s *FailoverState) admitGatewaySlot(ctx context.Context, gateway *service.G
 		s.FailedAccountIDs[id] = struct{}{}
 	}
 	return account, profitVeto, reason
+}
+
+// Selection failure before any upstream error uses the endpoint's local
+// availability classification, including when the wait invalidated a pick.
+func (s *FailoverState) localSelectionExhaustion() bool {
+	return len(s.FailedAccountIDs) == 0 || s.LastFailoverErr == nil
 }
 
 // RecordProfitVeto 记录一次分组利润门终检否决：把账号加入排除列表（同时登记到
