@@ -47,8 +47,9 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
-	RequireCompact bool
-	ExcludedIDs    map[int64]struct{}
+	RequireCompact     bool
+	ExcludedIDs        map[int64]struct{}
+	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -229,6 +230,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
 		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
+		s.planOpenAIFollow(ctx, groupID, sessionHash, requestedModel, selection, ordinary && err == nil)
 		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)
 	}()
 	if ordinary {
@@ -260,6 +262,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		// this pass. Its request exclusion takes precedence over soft migration.
 		if ownerFailedInRequest {
 			reason = "owner_failed_in_request"
+		} else if reason == "first_output_avoid" && (selected <= 0 || err != nil) {
+			reason = "owner_excluded"
 		}
 		if reason == "" {
 			reason = "unrecorded"
@@ -271,6 +275,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			"selected", selected,
 			"reason", reason,
 		)
+		if reason == "first_output_avoid" {
+			fields = append(fields, "component", "sched_quality")
+		}
 		if reason == "unrecorded" || state.StickyBypassChangesBinding() {
 			slog.Warn("openai.sticky_bypass", fields...)
 		} else {
@@ -304,7 +311,25 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			rejectionScope.selectionPreservesBinding.Store(ownerErr != nil || owner <= 0 || ownerAvoided)
 		}
 	}
-	resilience.StateFrom(ctx).SetAvoided(avoided)
+	// A first-output cutoff leaves the owner bound. Only the existing avoidance
+	// scopes belong in request state, which trial selection uses to detect borrowing.
+	state.SetAvoided(avoided)
+	// This pass must be able to preserve a versioned owner while borrowing.
+	// Legacy callers without a pending binding would otherwise eagerly rebind.
+	var firstOutputAvoided map[int64]struct{}
+	binding := pendingOpenAIStickyChange(ctx)
+	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
+		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
+		firstOutputAvoided, _ = sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
+		if _, hit := firstOutputAvoided[stickyOwner]; hit {
+			_, hard := origExcluded[stickyOwner]
+			_, otherSoft := avoided[stickyOwner]
+			if !hard && !otherSoft {
+				ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, stickyOwner)
+			}
+		}
+		avoided = mergeExcluded(avoided, firstOutputAvoided)
+	}
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	markResilienceConfigError(ctx, err)
@@ -320,7 +345,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			NoWait:  openAISelectionNoWait(ctx),
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
-			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,
+			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
 			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil
@@ -375,6 +400,32 @@ func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(
 }
 
 type openAIGroupPrivacyRequirementContextKey struct{}
+
+// This marker lives for one selection. Keep the owner excluded from the pool,
+// but check its existing sticky release rules before borrowing another account.
+type firstOutputOnlyOwnerKey struct{}
+
+// A strict failure may be recorded after the outer scheduler classified the
+// owner. Both inner selectors use their own strict read for this pass.
+func (s *OpenAIGatewayService) mergeStickyChangeExclusions(ctx context.Context, groupID *int64, session string, excluded map[int64]struct{}) (context.Context, map[int64]struct{}) {
+	strict := s.stickyChangeAvoid(ctx, groupID, session)
+	if id, ok := ctx.Value(firstOutputOnlyOwnerKey{}).(int64); ok {
+		if _, blocked := strict[id]; blocked {
+			ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, int64(0))
+		}
+	}
+	return ctx, mergeExcluded(excluded, strict)
+}
+
+func stickyOwnerExclusions(ctx context.Context, owner int64, excluded map[int64]struct{}) (early, firstOutput bool) {
+	if _, found := excluded[owner]; !found {
+		return false, false
+	}
+	if id, ok := ctx.Value(firstOutputOnlyOwnerKey{}).(int64); ok && id == owner {
+		return false, true
+	}
+	return true, false
+}
 
 type openAIGroupPrivacyRequirement struct {
 	groupID  int64

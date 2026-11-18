@@ -102,8 +102,6 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 			observe(fact)
 		}
 	}
-	// follow: attempt avoidance only for CanTransfer. Use the frozen binding,
-	// pendingOpenAIStickyChange(a.ctx).cache/resetAt and the session avoid duration.
-	// Only a successful write earns a receipt; handoff checks both facts.
+	recordFirstOutputAvoid(a.ctx, fact)
 	return fact, true
 }

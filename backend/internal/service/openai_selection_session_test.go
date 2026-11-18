@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,21 +37,27 @@ func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, 
 }
 
 type selectionBindingFake struct {
-	store       ResilienceStore
-	key         string
-	ttlKeys     []string
-	casKeys     []string
-	avoidScopes []string
-	owner       int64
-	generation  string
-	remaining   time.Duration
-	reads       int
-	events      *[]string
-	casFail     bool
-	casError    bool
+	mu            sync.Mutex
+	avoidDelay    time.Duration
+	avoidRejected bool
+	avoidErr      error
+	store         ResilienceStore
+	key           string
+	ttlKeys       []string
+	casKeys       []string
+	avoidScopes   []string
+	owner         int64
+	generation    string
+	remaining     time.Duration
+	reads         int
+	events        *[]string
+	casFail       bool
+	casError      bool
 }
 
 func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ int64, key string) (int64, time.Duration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reads++
 	f.ttlKeys = append(f.ttlKeys, key)
 	if key != f.key {
@@ -59,6 +66,8 @@ func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ i
 	return f.owner, f.remaining, nil
 }
 func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, avoidScopes ...string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.casKeys = append(f.casKeys, key)
 	f.avoidScopes = append(f.avoidScopes, avoidScopes...)
 	*f.events = append(*f.events, fmt.Sprintf("cas:%d", target))
@@ -74,6 +83,8 @@ func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, 
 }
 
 func (f *selectionBindingFake) GetSessionBinding(_ context.Context, _ int64, key string) (StickySessionBinding, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if key != f.key {
 		return StickySessionBinding{}, ErrStickySessionNotFound
 	}
@@ -352,7 +363,15 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 }
 
 func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
-	if f.owner != expected.AccountID || f.generation != expected.Generation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.avoidDelay > 0 {
+		time.Sleep(f.avoidDelay)
+	}
+	if f.avoidErr != nil {
+		return true, f.avoidErr // Ambiguous reply: the error must win over the write flag.
+	}
+	if f.avoidRejected || key != f.key || f.owner != expected.AccountID || f.generation != expected.Generation {
 		return false, nil
 	}
 	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)

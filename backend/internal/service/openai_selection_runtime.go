@@ -196,7 +196,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	gid := derefGroupID(req.GroupID)
 	migrate := selectionMigrateOwner(view, gid, owner, req.RequestedModel, req.SessionHash, now)
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt, leases: s.selectionTrialLeases()}
+	session := selectionSession{qualityOwnsSticky: s.firstOutputQualityOwnsSticky, view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt, leases: s.selectionTrialLeases()}
 	bindingKey := s.openAISessionCacheKey(req.SessionHash)
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key
