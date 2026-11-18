@@ -126,8 +126,8 @@ func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, accou
 		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
 	if recorder, ok := s.schedAttemptRecorder.(interface {
 		beginAt(SchedAttemptStart, time.Time) SchedAttempt
-	}); ok && !started.IsZero() {
-		a.attempt = recorder.beginAt(in, started)
+	}); ok {
+		a.attempt = recorder.beginAt(in, a.started)
 	} else {
 		a.attempt = s.schedAttemptRecorder.Begin(in)
 	}
@@ -413,7 +413,13 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		}
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: class, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: detail, Usage: a.usage})
 	} else {
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Class: schedquality.ClassFirstOutputTimeout, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
+		// Only the wait up to the guard firing is evidence about upstream output.
+		// Completing avoidance or closing the body can delay finalization.
+		end := time.Now()
+		if a.fullTierFirstOutputTimeout {
+			end = a.dispatch.FiredAt
+		}
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Class: schedquality.ClassFirstOutputTimeout, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: end.Sub(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
