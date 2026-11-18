@@ -734,3 +734,31 @@ func TestFirstOutputFollowSwitchDisabledAfterReceipt(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstOutputFollowPreDispatchFailureKeepsTargetAvailable(t *testing.T) {
+	withResilienceSettings(t, nil)
+	f, svc := selectionNewSessionFixture(), &OpenAIGatewayService{}
+	ctx := followState(t, f, true)
+	state := resilience.StateFrom(ctx)
+	state.SetLastUpstreamFailure(&UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout})
+	target := f.candidates[0]
+	followSelect(svc, ctx, target)
+	late, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	req, err := http.NewRequestWithContext(late, http.MethodPost, "https://upstream.invalid", nil)
+	require.NoError(t, err)
+	var capture *schedAttemptCapture
+	_, err = svc.sendSchedHTTP(late, target, req, "", nil, true, &capture)
+	var fe *UpstreamFailoverError
+	require.ErrorAs(t, err, &fe)
+	require.True(t, fe.PreDispatchSelectionInvalidated)
+	require.Nil(t, capture)
+	logs := captureOpenAIObservationLogs(t)
+	FinishOpenAIStickyForward(late, target.ID, nil, err)
+	require.Contains(t, logs.String(), `"reason":"pre_dispatch_invalidated"`)
+	require.False(t, state.Avoided(target.ID))
+	avoid, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
+	require.NoError(t, err)
+	require.Empty(t, avoid)
+	require.Equal(t, f.owner.ID, f.binding.owner)
+}

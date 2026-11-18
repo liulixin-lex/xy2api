@@ -184,7 +184,9 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	change.mu.Unlock()
 	canceled := attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
 	success := succeeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
-	CompleteOpenAIStickyChange(ctx, accountID, success, canceled)
+	var failover *UpstreamFailoverError
+	beforeSend := !success && change.kind == stickyFollow && errors.As(err, &failover) && failover.PreDispatchSelectionInvalidated
+	change.complete(ctx, success, canceled, beforeSend)
 }
 
 func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
@@ -388,6 +390,10 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if change == nil || change.target != accountID {
 		return
 	}
+	change.complete(ctx, success, canceled, false)
+}
+
+func (change *openAIStickyChange) complete(ctx context.Context, success, canceled, beforeSend bool) {
 	change.mu.Lock()
 	defer change.mu.Unlock()
 	if change.done {
@@ -421,6 +427,10 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if canceled || change.skipCommit {
 		return
 	}
+	if change.kind == stickyFollow && !success && (beforeSend || change.activeAttempt == nil) {
+		change.reason = "pre_dispatch_invalidated"
+		return
+	}
 	if change.kind == stickyFollow && !resilience.Current().SessionOn() {
 		change.reason = "session_disabled"
 		return
@@ -434,13 +444,13 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		if change.expected.AccountID == 0 {
 			return
 		}
-		resilience.StateFrom(ctx).AddAvoided(accountID)
+		resilience.StateFrom(ctx).AddAvoided(change.target)
 		var reset time.Time
 		if change.resetAt != nil {
-			reset = change.resetAt(accountID)
+			reset = change.resetAt(change.target)
 		}
-		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL, reset); err != nil {
-			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
+		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, change.target, openAIStickyChangeAvoidTTL, reset); err != nil {
+			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", change.target, "error", err)
 		}
 		return
 	}
@@ -470,7 +480,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		if change.kind == stickyFollow {
 			change.reason = "commit_error"
 		}
-		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", accountID, "error", err)
+		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", change.target, "error", err)
 		return
 	}
 	if !changed {
@@ -495,8 +505,8 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	}
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
 		if aliases, ok := change.cache.(OpenAIStickyAliasCache); ok {
-			if err := aliases.SyncSessionBindingAlias(stateCtx, change.groupID, change.key, change.expected.LegacyKey, accountID, min(change.ttl, 10*time.Minute), true); err != nil {
-				slog.WarnContext(ctx, "sched_quality.binding_alias_failed", "account_id", accountID, "error", err)
+			if err := aliases.SyncSessionBindingAlias(stateCtx, change.groupID, change.key, change.expected.LegacyKey, change.target, min(change.ttl, 10*time.Minute), true); err != nil {
+				slog.WarnContext(ctx, "sched_quality.binding_alias_failed", "account_id", change.target, "error", err)
 			}
 		}
 	}
