@@ -1078,9 +1078,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
 		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload), sourceEvent)
-		if holdPrelude {
-			firstEvent.noteHeldPrelude()
-		} else if !firstEvent.disarm() && !clientDisconnected {
+		if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
 			streamFailoverErr = s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_output", resp.Header)
 			return true
 		}

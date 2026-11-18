@@ -576,48 +576,84 @@ func TestOwnerCutoffFiredBeforeDispatch(t *testing.T) {
 	})
 }
 
+// Each route receives the same opening frame, then an upstream that waits
+// for cancellation. Receiving metadata keeps the first-output guard armed.
+func TestOwnerCutoffAfterCreatedPrelude(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"responses", "chat", "messages"} {
+		t.Run(route, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := []byte(compatMessagesStreamBody)
+				if route == "responses" {
+					body = []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+				}
+				c, _ := compatStreamContext("/v1/"+route, string(body))
+				account := rawChatCompletionsTestAccount()
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				r, w := io.Pipe()
+				defer w.Close()
+				var a *schedAttemptCapture
+				svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+					RecordOpsUpstreamSendBoundary(req.Context(), id)
+					context.AfterFunc(req.Context(), func() { _ = w.CloseWithError(req.Context().Err()) })
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: r, Request: req}, nil
+				}}, 1, 0, 0)
+				done := make(chan error, 1)
+				go func() {
+					var err error
+					if route == "responses" {
+						_, err = svc.Forward(ctx, c, account, body)
+					} else {
+						_, err = captureForward(svc, c, account, body, route)
+					}
+					done <- err
+				}()
+				_, err := io.WriteString(w, keepaliveStallCreated)
+				require.NoError(t, err)
+				synctest.Wait()
+				_, ok := st.OwnerCutoff()
+				require.False(t, ok)
+				requireFirstOutputFailover(t, <-done)
+				fact, ok := st.OwnerCutoff()
+				require.True(t, ok)
+				require.Equal(t, account.ID, fact.AccountID)
+				require.True(t, a.ownerHit)
+				require.True(t, a.fullTierFirstOutputTimeout)
+			})
+		})
+	}
+}
+
 func TestOwnerCutoffCompatReaderExclusions(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, route := range []string{"messages", "chat"} {
-		for _, mode := range []string{"held_prelude", "disconnected"} {
-			t.Run(route+"/"+mode, func(t *testing.T) {
-				synctest.Test(t, func(t *testing.T) {
-					account := rawChatCompletionsTestAccount()
-					c, _ := compatStreamContext("/v1/"+route, compatMessagesStreamBody)
-					st, ctx := ownerFactsState(c.Request.Context(), account)
-					c.Request = c.Request.WithContext(ctx)
-					keepalive := 0
-					before := keepaliveStallCreated
-					var writer *openAICompatFailingWriter
-					if mode == "disconnected" {
-						keepalive = 1
-						before = ""
-						writer = &openAICompatFailingWriter{ResponseWriter: c.Writer}
-						c.Writer = writer
-					}
-					up := &silentUpstream{headers: true, before: before}
-					var a *schedAttemptCapture
-					svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
-						a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
-						RecordOpsUpstreamSendBoundary(req.Context(), id)
-						return up.Do(req, "", id, 1)
-					}}, 1, 30, keepalive)
-					_, err := captureForward(svc, c, account, []byte(compatMessagesStreamBody), route)
-					if writer != nil {
-						require.Equal(t, 1, writer.failedWrites)
-						require.Error(t, err)
-						require.NoError(t, ctx.Err())
-					} else {
-						requireFirstOutputFailover(t, err)
-						require.True(t, a.holdingCompatPrelude)
-					}
-					require.True(t, a.ownerHit)
-					require.False(t, a.fullTierFirstOutputTimeout)
-					_, ok := st.OwnerCutoff()
-					require.False(t, ok)
-				})
+		t.Run(route+"/disconnected", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				account := rawChatCompletionsTestAccount()
+				c, _ := compatStreamContext("/v1/"+route, compatMessagesStreamBody)
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				writer := &openAICompatFailingWriter{ResponseWriter: c.Writer}
+				c.Writer = writer
+				up := &silentUpstream{headers: true}
+				var a *schedAttemptCapture
+				svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+					RecordOpsUpstreamSendBoundary(req.Context(), id)
+					return up.Do(req, "", id, 1)
+				}}, 1, 30, 1)
+				_, err := captureForward(svc, c, account, []byte(compatMessagesStreamBody), route)
+				require.Equal(t, 1, writer.failedWrites)
+				require.Error(t, err)
+				require.NoError(t, ctx.Err())
+				require.True(t, a.ownerHit)
+				require.False(t, a.fullTierFirstOutputTimeout)
+				_, ok := st.OwnerCutoff()
+				require.False(t, ok)
 			})
-		}
+		})
 	}
 }
 
