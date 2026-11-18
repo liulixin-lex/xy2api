@@ -4,6 +4,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -119,4 +120,47 @@ func TestSchedAttemptHTTPStartMatchesHandoffClock(t *testing.T) {
 			require.Equal(t, a.started, row.StartedAt)
 		})
 	}
+}
+
+func TestSchedAttemptReusedWSStartsAtRecorderBegin(t *testing.T) {
+	withResilienceSettings(t, nil)
+	dialer := &errclassDialScript{conn: newStagedPassthroughConn()}
+	svc, account, st, _ := errclassDialService(t, dialer)
+	st.SetSession(7, "ws-session", nil)
+	ctx := resilience.WithRequestState(context.Background(), st)
+	recorder := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
+	var row schedquality.AttemptSample
+	recorder.SetObserver(func(sample schedquality.AttemptSample) { row = sample })
+	svc.SetSchedAttemptRecorder(recorder)
+
+	acquire, obs := withSchedWSDialObservation(ctx, ctx, svc, account, true)
+	_, _, _, err := dialOpenAIWSWithSchedCapture(acquire, dialer, "", nil, "")
+	require.NoError(t, err)
+	dialStart := obs.successStarted
+	require.False(t, dialStart.IsZero())
+	first := obs.beginSend([]byte(`{"type":"response.create","model":"synthetic-model","input":"first"}`), true)
+	require.Equal(t, dialStart, row.StartedAt)
+	first.finish(&OpenAIForwardResult{}, nil)
+
+	payload := []byte(`{"type":"response.create","model":"synthetic-model","input":"` + strings.Repeat("x", 15<<20) + `"}`)
+	// Observe Begin's own clock read so hashing cost and OS scheduling cannot
+	// move the simulated output events across the millisecond test boundaries.
+	var begin time.Time
+	recorder.now = func() time.Time { begin = time.Now(); return begin }
+	turn := obs.beginSend(payload, true)
+	require.False(t, begin.IsZero(), "a turn without a new dial must use recorder.Begin")
+	require.Equal(t, begin, row.StartedAt)
+	require.EqualValues(t, 1, dialer.calls.Load())
+	markSchedFirstEvent(turn, begin, new(50))
+	turn.observeOutput([]byte(`{"type":"response.reasoning_text.delta","delta":"thinking"}`), begin.Add(14998*time.Millisecond))
+	turn.observeOutput([]byte(`{"type":"response.output_text.delta","delta":"ok"}`), begin.Add(15020*time.Millisecond))
+	recorder.now = func() time.Time { return begin.Add(15100 * time.Millisecond) }
+	turn.finish(&OpenAIForwardResult{}, nil)
+	require.Equal(t, schedquality.OutcomeOK, row.Outcome)
+	require.Equal(t, new(50), row.FirstEventMs)
+	require.Equal(t, new(14998), row.TTFOMs)
+	require.Equal(t, new(15020), row.FirstAnswerMs)
+	counts := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, begin, 15)
+	require.EqualValues(t, 1, counts.N)
+	require.Zero(t, counts.K)
 }
