@@ -71,7 +71,7 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 		a.mu.Unlock()
 		return fact, false
 	}
-	if a.repeatedHTTPSend || a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
+	if a.holdingCompatPrelude || a.repeatedHTTPSend || a.dispatch.AttemptSeq == 0 || firedAt.Before(plan.Start().Add(plan.Effective())) || firedAt.Before(a.dispatch.DispatchAt) ||
 		a.first || a.terminal || a.httpStatus >= 400 || a.done || a.client || a.ctx.Err() != nil || a.state.ClientCanceled() || !a.state.IsCurrentHTTPDispatch(a, a.dispatch.AttemptSeq) {
 		a.mu.Unlock()
 		return resilience.OwnerFirstOutputCutoff{}, false

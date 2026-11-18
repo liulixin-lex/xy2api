@@ -37,6 +37,7 @@ type schedAttemptCapture struct {
 	firstOutputCancel                          context.CancelFunc // nonblocking cancellation of this guarded HTTP request
 	factsOnly                                  bool
 	gotHTTPConn, repeatedHTTPSend              bool
+	holdingCompatPrelude                       bool
 	mu                                         sync.Mutex
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
