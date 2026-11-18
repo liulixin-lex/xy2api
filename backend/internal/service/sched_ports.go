@@ -32,7 +32,7 @@ var ErrSchedPolicyConflict = errors.New("sched policy conflict")
 type SchedAttemptStart struct {
 	AccountID, GroupID    int64
 	Model                 string
-	Stream, Warm          bool
+	Stream                bool
 	SessionKey, RequestID string
 }
 type SchedAttemptUsage struct {

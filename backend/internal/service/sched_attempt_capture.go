@@ -124,7 +124,7 @@ func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, accou
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
-		Stream: stream, Warm: a.ownerHit, SessionKey: sessionKey, RequestID: a.requestID}
+		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
 	if recorder, ok := s.schedAttemptRecorder.(interface {
 		beginAt(SchedAttemptStart, time.Time) SchedAttempt
 	}); ok && !started.IsZero() {

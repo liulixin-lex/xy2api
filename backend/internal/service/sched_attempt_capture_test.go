@@ -81,7 +81,7 @@ func TestSchedCaptureOwnerTimeoutRequiresPhysicalSend(t *testing.T) {
 				_, err := svc.Forward(ctx, c, account, []byte(body))
 				requireFirstOutputFailover(t, err)
 				require.Len(t, recorder.starts, 1)
-				require.False(t, recorder.starts[0].Warm)
+				require.Equal(t, account.ID, recorder.starts[0].AccountID)
 				require.Len(t, recorder.samples, 1)
 				row := recorder.samples[0]
 				require.Equal(t, schedquality.OutcomeTimeout, row.Outcome)
@@ -114,6 +114,46 @@ func TestSchedCaptureOwnerTimeoutRequiresPhysicalSend(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestSchedCaptureOwnerAndRescueFullTierTimeouts(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		const body = `{"model":"wire-model","input":"hello","stream":true}`
+		st := resilience.NewRequestState()
+		ctx := resilience.WithRequestState(context.Background(), st)
+		st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
+		st.SetSession(7, "returning-session", nil)
+		owner, rescue := rawChatCompletionsTestAccount(), rawChatCompletionsTestAccount()
+		rescue.ID = owner.ID + 1
+		recorder := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
+		var rows []schedquality.AttemptSample
+		recorder.SetObserver(func(row schedquality.AttemptSample) { rows = append(rows, row) })
+		svc := compatStreamService(&captureTimeoutUpstream{dispatched: true}, 1, 0, 0)
+		svc.SetSchedAttemptRecorder(recorder)
+		for i, account := range []*Account{owner, rescue} {
+			warm := account.ID == owner.ID
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "wire-model", StickyWarm: warm, HTTPStreamText: true})
+			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "wire-model", Warm: warm, Stream: true, AttemptStart: time.Now()})
+			c, _ := compatStreamContext("/v1/responses", body)
+			c.Request = c.Request.WithContext(ctx)
+			_, err := svc.Forward(ctx, c, account, []byte(body))
+			requireFirstOutputFailover(t, err)
+			require.Len(t, rows, 2*(i+1))
+			begin, finish := rows[2*i], rows[2*i+1]
+			require.True(t, begin.FinishedAt.IsZero())
+			require.False(t, begin.Warm)
+			require.False(t, begin.FullTierFirstOutputTimeout)
+			require.Equal(t, begin.AttemptID, finish.AttemptID)
+			require.Equal(t, account.ID, finish.AccountID)
+			require.Equal(t, schedquality.OutcomeTimeout, finish.Outcome)
+			require.Equal(t, warm, finish.Warm)
+			require.True(t, finish.FullTierFirstOutputTimeout)
+			fact, ok := st.OwnerCutoff()
+			require.True(t, ok)
+			require.Equal(t, owner.ID, fact.AccountID)
+		}
+	})
 }
 
 func TestSchedCaptureA11IQExcluded(t *testing.T) {
