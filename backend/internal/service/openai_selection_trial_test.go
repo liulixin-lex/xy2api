@@ -360,21 +360,20 @@ func (f *selectionTrialLeaseFake) Promote(_ context.Context, a int64, m string, 
 	return nil
 }
 
-func (v *fakeSchedView) ReadTrialRound(_ context.Context, account int64, model string, group int64) (schedquality.StateView, time.Time, error) {
-	return v.StateOf(group, account, model), v.ResetAt(account), nil
+func (v *fakeSchedView) ReadTrialRound(_ context.Context, account int64, model string, group int64) (schedquality.StateView, error) {
+	return v.StateOf(group, account, model), nil
 }
 
 type trialRoundStoreProbe struct {
 	*fakeSchedView
 	current schedquality.StateView
-	reset   time.Time
 	err     error
 	reads   int
 }
 
-func (p *trialRoundStoreProbe) ReadTrialRound(context.Context, int64, string, int64) (schedquality.StateView, time.Time, error) {
+func (p *trialRoundStoreProbe) ReadTrialRound(context.Context, int64, string, int64) (schedquality.StateView, error) {
 	p.reads++
-	return p.current, p.reset, p.err
+	return p.current, p.err
 }
 
 // Selection keeps its pre-reset snapshot while the authoritative store advances.
@@ -408,7 +407,6 @@ func TestTrialPromotionChecksAuthoritativeRoundAfterBinding(t *testing.T) {
 			later := schedquality.LineView{Trial: true, TrialUntil: old.TTFO.TrialUntil.Add(time.Minute)}
 			switch tc.name {
 			case "reset_at_plus_16_minutes":
-				db.reset = f.view.At().Add(time.Second)
 				db.current = schedquality.StateView{}
 			case "different_round":
 				db.current = schedquality.StateView{TTFO: later}
@@ -431,4 +429,43 @@ func TestTrialPromotionChecksAuthoritativeRoundAfterBinding(t *testing.T) {
 			require.Equal(t, tc.promote, leases.held[trialTestKey(1, "m", 7, "s:session")])
 		})
 	}
+}
+
+type delayedTrialView struct {
+	*fakeSchedView
+	afterRead func()
+}
+
+func (v delayedTrialView) StateOf(g, a int64, m string) schedquality.StateView {
+	state := v.fakeSchedView.StateOf(g, a, m)
+	v.afterRead()
+	return state
+}
+
+type observedTrialAcquire struct {
+	*selectionTrialLeaseFake
+	at time.Time
+}
+
+func (l *observedTrialAcquire) Acquire(ctx context.Context, a int64, m string, g int64, member string, at time.Time) (bool, string, error) {
+	l.at = at
+	return l.selectionTrialLeaseFake.Acquire(ctx, a, m, g, member, at)
+}
+func TestTrialReservationUsesDecisionTimeWhenSelectionPauses(t *testing.T) {
+	a := selectionFixtureAccount(1, 1)
+	f := newSelectionRuntimeFixture(t, a)
+	leases := &observedTrialAcquire{selectionTrialLeaseFake: newSelectionTrialLeaseFake()}
+	selectionSetTrial(f, 1, leases.selectionTrialLeaseFake)
+	f.svc.selectionBoard.leases = leases
+	observed := f.view.At()
+	now := observed
+	f.svc.selectionBoard.now = func() time.Time { return now }
+	f.svc.selectionBoard.view = func() schedquality.View {
+		return delayedTrialView{f.view, func() { now = observed.Add(16 * time.Minute) }}
+	}
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	trial := f.svc.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: ptrInt64Selection(7), RequestedModel: "m"}, 0)
+	_, _ = trial.reserve(ctx, &a, false)
+	require.True(t, now.After(observed))
+	require.Equal(t, observed, leases.at)
 }

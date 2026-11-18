@@ -37,7 +37,6 @@ type selectionTrialReservation struct {
 	request        bool
 	generation     string
 	reader         SchedTrialRoundReader
-	resetAt        time.Time
 	lines          [3]time.Time
 	retained       atomic.Bool
 	once           sync.Once
@@ -62,7 +61,6 @@ func trialLineDeadlines(state schedquality.StateView) (deadlines [3]time.Time) {
 func (r *selectionTrialReservation) rememberRound(view schedquality.View, generation string) {
 	r.generation = generation
 	r.reader, _ = view.(SchedTrialRoundReader)
-	r.resetAt = view.ResetAt(r.account)
 	r.lines = trialLineDeadlines(view.StateOf(r.group, r.account, r.model))
 }
 
@@ -70,8 +68,8 @@ func (r *selectionTrialReservation) sameTrial(ctx context.Context, now time.Time
 	if r.reader == nil {
 		return false, errors.New("trial round reader unavailable")
 	}
-	state, reset, err := r.reader.ReadTrialRound(ctx, r.account, r.model, r.group)
-	if err != nil || !reset.Equal(r.resetAt) || state.Placement(true, now) != schedquality.PlaceTrial {
+	state, err := r.reader.ReadTrialRound(ctx, r.account, r.model, r.group)
+	if err != nil || state.Placement(true, now) != schedquality.PlaceTrial {
 		return false, err
 	}
 	for i, until := range trialLineDeadlines(state) {
@@ -140,11 +138,10 @@ func (t *selectionTrial) room(ctx context.Context, account int64, model string) 
 
 func (t *selectionTrial) isTrial(account *Account) bool {
 	gid := derefGroupID(t.request.GroupID)
-	return t.isTrialIn(t.service.selectionView(), gid, account)
+	return t.isTrialIn(t.service.selectionView(), gid, account, t.service.selectionNow())
 }
 
-func (t *selectionTrial) isTrialIn(view schedquality.View, gid int64, account *Account) bool {
-	now := t.service.selectionNow()
+func (t *selectionTrial) isTrialIn(view schedquality.View, gid int64, account *Account, now time.Time) bool {
 	return account.Platform == PlatformOpenAI && !t.manual &&
 		selectionState(view, gid, account, t.request.RequestedModel).Placement(selectionAuto(view, gid, now), now) == schedquality.PlaceTrial
 }
@@ -173,10 +170,11 @@ func (t *selectionTrial) memberFor(ctx context.Context, account int64) string {
 }
 
 func (t *selectionTrial) touch(ctx context.Context, account *Account) {
-	if t.leases == nil || t.request.SessionHash == "" || !t.isTrial(account) {
+	now := t.service.selectionNow()
+	if t.leases == nil || t.request.SessionHash == "" || !t.isTrialIn(t.service.selectionView(), derefGroupID(t.request.GroupID), account, now) {
 		return
 	}
-	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.member, t.service.selectionNow()); err != nil {
+	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.member, now); err != nil {
 		slog.WarnContext(ctx, "sched_quality.trial_touch_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
 	}
 }
@@ -184,8 +182,9 @@ func (t *selectionTrial) touch(ctx context.Context, account *Account) {
 // reserve returns false after a lost race. The caller reorders with room=false
 // and may try this account again in tier 1 after every remaining tier 0 account.
 func (t *selectionTrial) reserve(ctx context.Context, account *Account, full bool) (*selectionTrialReservation, bool) {
+	observedAt := t.service.selectionNow()
 	view := t.service.selectionView()
-	if !t.isTrialIn(view, derefGroupID(t.request.GroupID), account) {
+	if !t.isTrialIn(view, derefGroupID(t.request.GroupID), account, observedAt) {
 		return nil, true
 	}
 	if t.owner == account.ID && t.request.SessionHash != "" {
@@ -195,7 +194,7 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 	model, gid := OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID)
 	member := t.memberFor(ctx, account.ID)
 	if t.leases != nil {
-		acquired, generation, err := t.leases.Acquire(ctx, account.ID, model, gid, member, t.service.selectionNow())
+		acquired, generation, err := t.leases.Acquire(ctx, account.ID, model, gid, member, observedAt)
 		if err == nil && acquired {
 			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}
 			r.rememberRound(view, generation)
@@ -326,7 +325,11 @@ func (r *selectionTrialReservation) promote(ctx context.Context) {
 		return
 	}
 	if err := r.leases.Promote(stateCtx, r.account, r.model, r.group, r.member, r.session, r.generation, now); err != nil {
-		slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+		if errors.Is(err, ErrTrialGenerationChanged) {
+			slog.InfoContext(ctx, "sched_quality.trial_generation_changed", "component", "sched_quality", "account_id", r.account, "group_id", r.group, "model", r.model)
+		} else {
+			slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+		}
 		// The CAS is already committed. Release only our request member: if Redis
 		// executed Promote but lost its reply, the session member remains intact.
 		r.release(ctx)

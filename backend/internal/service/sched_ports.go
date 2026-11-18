@@ -174,12 +174,19 @@ type SchedQualityEngine interface {
 	TTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
 	UpdateTTFTRule(ctx context.Context, expectedVersion int64, p schedquality.RuleBParams) (SchedTTFTRuleUpdate, error)
 }
+
+// SchedTrialGroup identifies a group/model whose seats share an account's trial quota.
+type SchedTrialGroup struct {
+	GroupID int64
+	Model   string
+}
+
 type SchedQualityStore interface {
 	DeleteDecisionsBefore(ctx context.Context, before time.Time) (int64, error)
 	// RunCycle opens a transaction and tries the advisory lock. locked=false: fn is not called.
 	RunCycle(ctx context.Context, fn func(tx SchedQualityTx) error) (locked bool, err error)
-	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and deletes the account's rows.
-	RunReset(ctx context.Context, accountID int64) (resetAt time.Time, err error)
+	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and returns the distinct group/model pairs it deleted after commit.
+	RunReset(ctx context.Context, accountID int64) (resetAt time.Time, deleted []SchedTrialGroup, err error)
 	// LoadRows reads states, overrides and reset times in one read-only repeatable-read transaction.
 	LoadRows(ctx context.Context) (states []schedquality.LineState, overrides []SchedOverride, resetAt map[int64]time.Time, err error)
 	LoadMembers(ctx context.Context) (map[int64][]int64, error) // OpenAI group id -> account ids
@@ -250,8 +257,8 @@ type SchedAutoState struct { // one row of the account's auto-state list (field 
 
 // The admin service also provides ClearLocal(accountID int64, at time.Time), registered by WP0 on engine.OnAccountReset.
 
-// SchedTrialRoundReader reads current placement and reset time directly from
+// SchedTrialRoundReader reads current placement and trial line deadlines directly from
 // storage for the one group/account/model whose binding just committed.
 type SchedTrialRoundReader interface {
-	ReadTrialRound(ctx context.Context, accountID int64, model string, groupID int64) (schedquality.StateView, time.Time, error)
+	ReadTrialRound(ctx context.Context, accountID int64, model string, groupID int64) (schedquality.StateView, error)
 }

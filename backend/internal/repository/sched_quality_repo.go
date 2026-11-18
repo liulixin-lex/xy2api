@@ -58,51 +58,77 @@ func (r *schedQualityRepository) RunCycle(ctx context.Context, fn func(service.S
 	return true, nil
 }
 
-func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) (time.Time, error) {
+func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) (time.Time, []service.SchedTrialGroup, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.ResetLockTimeout)
 	defer cancel()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT set_config('statement_timeout',$1,true)`, fmt.Sprintf("%dms", schedquality.EvalStatementTimeout.Milliseconds())); err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, schedQualityCycleLockID); err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
 	var at time.Time
 	if err = tx.QueryRowContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra,'{}'::jsonb),'{group_quality_reset_at}',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),true) WHERE id=$1 RETURNING (extra->>'group_quality_reset_at')::timestamptz`, accountID).Scan(&at); err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
-	rows, err := loadSchedQualityStates(ctx, tx)
+	groups, decisions, err := deleteSchedAccountLines(ctx, tx, accountID, at)
 	if err != nil {
-		return time.Time{}, err
-	}
-	var decisions []schedquality.Decision
-	for _, row := range rows {
-		if row.AccountID == accountID && (row.Identity == schedquality.IdentityRear || row.Trial) {
-			basis := schedquality.Basis{RuleVersion: schedquality.RuleVersion}
-			if row.Basis != nil {
-				basis = *row.Basis
-			}
-			decisions = append(decisions, schedquality.Decision{At: at, Key: row.LineKey, Action: "reset", Basis: basis})
-		}
+		return time.Time{}, nil, err
 	}
 	if err := (&schedQualityTx{ctx: ctx, tx: tx}).InsertDecisions(decisions); err != nil {
-		return time.Time{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM sched_line_states WHERE account_id=$1`, accountID); err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
 	if err = tx.Commit(); err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
 	}
 	for _, decision := range decisions {
 		service.LogSchedQualityDecision(ctx, decision)
 	}
-	return at, nil
+	return at, groups, nil
+}
+
+// Use the rows actually deleted under the cycle lock for both the decision
+// log and post-commit Redis cleanup. Multiple lines share one group/model seat.
+func deleteSchedAccountLines(ctx context.Context, tx *sql.Tx, accountID int64, at time.Time) ([]service.SchedTrialGroup, []schedquality.Decision, error) {
+	rows, err := tx.QueryContext(ctx, `WITH deleted AS (
+ DELETE FROM sched_line_states WHERE account_id=$1
+ RETURNING group_id,model,line,identity,trial,basis)
+ SELECT group_id,model,line,identity,trial,basis FROM deleted ORDER BY model,group_id,line`, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var groups []service.SchedTrialGroup
+	var decisions []schedquality.Decision
+	for rows.Next() {
+		key := schedquality.LineKey{AccountID: accountID}
+		var identity schedquality.Identity
+		var trial bool
+		var raw []byte
+		if err := rows.Scan(&key.GroupID, &key.Model, &key.Line, &identity, &trial, &raw); err != nil {
+			return nil, nil, err
+		}
+		group := service.SchedTrialGroup{GroupID: key.GroupID, Model: key.Model}
+		if len(groups) == 0 || groups[len(groups)-1] != group {
+			groups = append(groups, group)
+		}
+		if identity != schedquality.IdentityRear && !trial {
+			continue
+		}
+		basis := schedquality.Basis{RuleVersion: schedquality.RuleVersion}
+		if len(raw) > 0 && string(raw) != "{}" {
+			if err := json.Unmarshal(raw, &basis); err != nil {
+				return nil, nil, err
+			}
+		}
+		decisions = append(decisions, schedquality.Decision{At: at, Key: key, Action: "reset", Basis: basis})
+	}
+	return groups, decisions, rows.Err()
 }
 
 func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.LineState, []service.SchedOverride, map[int64]time.Time, error) {
@@ -624,9 +650,8 @@ func (t *schedQualityTx) SaveTTFTRule(expected int64, p schedquality.RuleBParams
 
 // ReadTrialRound reads at most the three lines of the committed account/model
 // in one PostgreSQL snapshot, including membership, policy and exemptions.
-func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, model string, g int64) (schedquality.StateView, time.Time, error) {
+func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, model string, g int64) (schedquality.StateView, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT l.line,l.identity,l.trial,l.trial_until,
- NULLIF(a.extra->>'group_quality_reset_at','')::timestamptz,
  (SELECT value::jsonb->'groups'->(l.group_id::text) FROM settings WHERE key=$4)
  FROM sched_line_states l
  JOIN accounts a ON a.id=l.account_id AND a.deleted_at IS NULL
@@ -638,9 +663,8 @@ func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, mo
  AND o.group_id IN (0,l.group_id) AND o.mode=1 AND (o.expires_at IS NULL OR o.expires_at>CURRENT_TIMESTAMP))`,
 		a, model, g, service.SettingKeyGroupQualityGatePolicies, service.SettingKeySchedQualityEnabled)
 	var view schedquality.StateView
-	var reset sql.NullTime
 	if err != nil {
-		return view, time.Time{}, err
+		return view, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
@@ -648,15 +672,15 @@ func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, mo
 		var line schedquality.LineView
 		var until sql.NullTime
 		var policy []byte
-		if err := rows.Scan(&dimension, &line.Identity, &line.Trial, &until, &reset, &policy); err != nil {
-			return view, time.Time{}, err
+		if err := rows.Scan(&dimension, &line.Identity, &line.Trial, &until, &policy); err != nil {
+			return view, err
 		}
 		if len(policy) == 0 {
-			return schedquality.StateView{}, reset.Time, nil
+			return schedquality.StateView{}, nil
 		}
 		record, err := decodeSchedQualityPolicy(policy, strconv.FormatInt(g, 10))
 		if err != nil || !record.Policy.Enabled {
-			return schedquality.StateView{}, reset.Time, err
+			return schedquality.StateView{}, err
 		}
 		line.TrialUntil = until.Time
 		switch dimension {
@@ -668,7 +692,7 @@ func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, mo
 			view.Cache = line
 		}
 	}
-	return view, reset.Time, rows.Err()
+	return view, rows.Err()
 }
 
 var _ service.SchedTrialRoundReader = (*schedQualityRepository)(nil)

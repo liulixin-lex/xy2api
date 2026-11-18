@@ -418,22 +418,32 @@ func TestSelectionEqualStartRoundsHaveStableOrder(t *testing.T) {
 type selectionPromoteFailure struct {
 	*selectionTrialLeaseFake
 	applied bool
+	err     error
 }
 
 func (l *selectionPromoteFailure) Promote(ctx context.Context, a int64, m string, g int64, request, session, generation string, now time.Time) error {
 	if l.applied {
 		_ = l.selectionTrialLeaseFake.Promote(ctx, a, m, g, request, session, generation, now)
 	}
-	return fmt.Errorf("synthetic promotion transport failure")
+	return l.err
 }
 func TestSelectionPromotionErrorReleasesOnlyOwnRequest(t *testing.T) {
-	for _, applied := range []bool{false, true} {
-		t.Run(fmt.Sprint(applied), func(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		applied      bool
+		err          error
+		event, level string
+	}{
+		{"failed", false, fmt.Errorf("synthetic transport failure"), "sched_quality.trial_promote_failed", "WARN"},
+		{"lost_reply", true, fmt.Errorf("synthetic lost reply"), "sched_quality.trial_promote_failed", "WARN"},
+		{"generation_changed", false, ErrTrialGenerationChanged, "sched_quality.trial_generation_changed", "INFO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			output := captureSchedObsLogs(t)
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
 			leases := newSelectionTrialLeaseFake()
 			selectionSetTrial(f, 1, leases)
-			f.svc.selectionBoard.leases = &selectionPromoteFailure{leases, applied}
+			f.svc.selectionBoard.leases = &selectionPromoteFailure{leases, tc.applied, tc.err}
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 			selected := selectTrialRuntime(t, f, ctx, "session")
 			member := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
@@ -444,12 +454,16 @@ func TestSelectionPromotionErrorReleasesOnlyOwnRequest(t *testing.T) {
 			selected.ReleaseFunc()
 			require.EqualValues(t, 1, f.cache.sessionBindings["openai:session"], "conversion failure must not undo a committed binding")
 			require.False(t, leases.held[requestKey], "best-effort release must not leave the request reservation until expiry")
-			require.Equal(t, applied, leases.held[trialTestKey(1, "m", 7, "s:session")], "lost replies must not cause the session member to be removed")
+			require.Equal(t, tc.applied, leases.held[trialTestKey(1, "m", 7, "s:session")], "lost replies must not cause the session member to be removed")
 			require.Contains(t, leases.calls, "release:"+requestKey)
 			logged := false
 			for _, row := range schedObsLogRecords(t, output) {
-				if row["msg"] == "sched_quality.trial_promote_failed" {
+				if tc.err == ErrTrialGenerationChanged {
+					require.NotEqual(t, "sched_quality.trial_promote_failed", row["msg"])
+				}
+				if row["msg"] == tc.event {
 					logged = true
+					require.Equal(t, tc.level, row["level"])
 					require.Equal(t, "sched_quality", row["component"])
 				}
 			}

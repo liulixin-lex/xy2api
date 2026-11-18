@@ -336,3 +336,50 @@ func TestSchedTrialReleaseFailureLeavesGenerationUntilNextSuccessfulRelease(t *t
 	require.NoError(t, err)
 	require.Zero(t, rdb.ZCard(ctx, schedTrialLeaseKey(1, "model-a")).Val())
 }
+
+func TestSchedTrialLateAcquireCannotOccupyThirdSeat(t *testing.T) {
+	for _, delay := range []time.Duration{time.Minute, service.TrialLeaseIdle, 16 * time.Minute} {
+		t.Run(delay.String(), func(t *testing.T) {
+			cache, rdb, mr, observed := newTrialLeaseTestCache(t)
+			ctx := context.Background()
+			requireTrialAcquire(t, cache, 7, "r:previous", observed)
+			require.NoError(t, cache.ReleaseGroup(ctx, 1, "model-a", 7))
+			mr.SetTime(observed.Add(delay))
+			acquired, _, err := cache.Acquire(ctx, 1, "model-a", 7, "r:old", observed)
+			require.NoError(t, err)
+			require.Equal(t, delay < service.TrialLeaseIdle, acquired)
+			score, err := rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "7:r:old").Result()
+			if acquired {
+				require.NoError(t, err)
+				require.EqualValues(t, observed.UnixMilli(), score)
+			} else {
+				require.ErrorIs(t, err, redis.Nil)
+			}
+			newAt := observed.Add(25 * time.Minute)
+			mr.SetTime(newAt)
+			for _, member := range []string{"r:first", "r:second"} {
+				requireTrialAcquire(t, cache, 8, member, newAt)
+			}
+			ok, err := cache.Room(ctx, 1, "model-a", 8, "r:third", newAt)
+			require.NoError(t, err)
+			require.True(t, ok)
+			_, err = rdb.ZScore(ctx, schedTrialLeaseKey(1, "model-a"), "7:r:old").Result()
+			require.ErrorIs(t, err, redis.Nil)
+		})
+	}
+}
+
+func TestSchedTrialGenerationExpiresWithNewEpochOnReuse(t *testing.T) {
+	leases, rdb, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	old := requireTrialAcquire(t, leases, 7, "r:old", now)
+	mr.FastForward(schedTrialGenerationTTL - time.Hour)
+	require.NoError(t, leases.ReleaseGroup(ctx, 1, "model-a", 7))
+	mr.FastForward(schedTrialGenerationTTL)
+	require.Zero(t, rdb.DBSize(ctx).Val())
+	next := now.Add(2 * schedTrialGenerationTTL)
+	mr.SetTime(next)
+	current := requireTrialAcquire(t, leases, 7, "r:current", next)
+	require.NotEqual(t, old, current)
+	require.ErrorIs(t, leases.Promote(ctx, 1, "model-a", 7, "r:old", "s:old", old, next), service.ErrTrialGenerationChanged)
+}

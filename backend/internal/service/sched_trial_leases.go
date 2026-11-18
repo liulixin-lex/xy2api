@@ -24,7 +24,8 @@ type SchedTrialLeases interface {
 	// It does not reserve or renew a lease. On error it returns false and the error.
 	Room(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error)
 	// Acquire atomically reserves a slot, or renews an existing member even when
-	// full. Only a successful reservation carries the group generation for Promote.
+	// full. The observation time is when selection decided to reserve. An expired
+	// decision cannot acquire. Only a successful reservation carries its generation.
 	Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (acquired bool, generation string, err error)
 	// Promote atomically replaces this request reservation with its committed
 	// session member. An existing session is renewed without consuming another slot.
