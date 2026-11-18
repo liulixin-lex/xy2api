@@ -129,8 +129,3 @@ func (s *RateLimitService) ObserveOpenAIAPIKeyHealthFailure(ctx context.Context,
 	)
 	return true
 }
-
-func (s *RateLimitService) ObserveOpenAIAPIKeyHealthSuccess(context.Context, *Account) {
-	// Health failures are accumulated in a rolling time window. A success does
-	// not reset that window and must not add a Redis round trip to the hot path.
-}

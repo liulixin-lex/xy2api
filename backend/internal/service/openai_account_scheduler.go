@@ -617,12 +617,8 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx 
 	}
 	accountID := account.ID
 	healthTripped := false
-	if s != nil && s.rateLimitService != nil {
-		if success {
-			s.rateLimitService.ObserveOpenAIAPIKeyHealthSuccess(ctx, account)
-		} else if len(observedErr) > 0 && observedErr[0] != nil {
-			healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr[0])
-		}
+	if !success && s != nil && s.rateLimitService != nil && len(observedErr) > 0 && observedErr[0] != nil {
+		healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr[0])
 	}
 	if success {
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
