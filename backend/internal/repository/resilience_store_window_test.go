@@ -57,5 +57,44 @@ func TestSessionFailureWindowIsPerAccount(t *testing.T) {
 	require.Empty(t, failures)
 	fields, err := rdb.HKeys(ctx, resilienceSessionFailurePrefix+"7:sess").Result()
 	require.NoError(t, err)
+	require.NotContains(t, fields, "f:1")
 	require.NotContains(t, fields, "e:1", "clearing removes the window end too")
+}
+
+func TestClearSessionFailuresBeforeDispatch(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	store := NewResilienceStore(rdb).(*resilienceStore)
+	ctx := context.Background()
+	at := time.Unix(1_800_000_000, 0)
+	failure := at
+	store.now = func() time.Time { return failure }
+	key := sessionKey(resilienceSessionFailurePrefix, 7, "sess")
+	add := func(id int64) {
+		_, err := store.IncrSessionFailure(ctx, 7, "sess", id, time.Minute)
+		require.NoError(t, err)
+	}
+	clearAt := func(id int64, start time.Time) {
+		require.NoError(t, store.ClearSessionFailuresBefore(ctx, 7, "sess", id, start))
+	}
+	add(1)
+	add(2)
+	failure = at.Add(-time.Second)
+	add(1) // an out-of-order failure cannot lower the existing watermark
+	for _, d := range []time.Duration{-time.Second, 0, 999 * time.Microsecond} {
+		clearAt(1, at.Add(d))
+		require.Equal(t, "2", rdb.HGet(ctx, key, "1").Val())
+	}
+	clearAt(1, at.Add(time.Millisecond))
+	require.ElementsMatch(t, []string{"2", "e:2", "f:2"}, rdb.HKeys(ctx, key).Val())
+	require.NoError(t, rdb.HDel(ctx, key, "f:2").Err()) // existing live window from an older instance
+	clearAt(2, at.Add(time.Second))
+	require.Equal(t, "1", rdb.HGet(ctx, key, "2").Val())
+	failure = at.Add(time.Minute)
+	counts, err := store.SessionFailures(ctx, 7, "sess")
+	require.NoError(t, err)
+	require.Empty(t, counts)
+	server.FastForward(time.Minute)
+	require.False(t, server.Exists(key))
 }

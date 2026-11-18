@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -308,10 +307,17 @@ func TestSessionFailureStreakRebindsAndAvoids(t *testing.T) {
 	}
 	require.Equal(t, int64(52), cache.sessionBindings["s2"])
 
-	// A success resets the count.
+	// A success on a different instance resets the shared count when its send
+	// follows the last failure, even with no local history.
 	cache.sessionBindings["s3"] = 53
+	store.now = func() time.Time { return time.Now().Add(-time.Minute) }
 	rec.Failure(ctx, 7, "s3", 53, resilience.CategoryRateLimit)
-	rec.Success(ctx, 7, "s3", 53)
+	st := resilience.NewRequestState()
+	other := &GatewayService{cache: cache, resilience: NewResilienceService(nil, store)}
+	st.SetSession(7, "s3", other.gatewaySessionRecorder())
+	st.MarkOpsUpstreamSendBoundary(53)
+	st.SessionSuccess(resilience.WithRequestState(ctx, st), 53)
+	store.now = time.Now
 	rec.Failure(ctx, 7, "s3", 53, resilience.CategoryRateLimit)
 	require.Equal(t, int64(53), cache.sessionBindings["s3"])
 
@@ -407,18 +413,54 @@ func TestResiliencePenaltyOfTiers(t *testing.T) {
 	}
 }
 
-func TestSessionMarksAreSwept(t *testing.T) {
+func TestSessionSuccessCannotClearAnotherSend(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []string{"older_success", "equal_millisecond", "other_account", "no_send", "previous_ws_turn"} {
+		t.Run(tc, func(t *testing.T) {
+			store := newMemResilienceStore()
+			svc := &GatewayService{cache: &mockGatewayCacheForPlatform{}, resilience: NewResilienceService(nil, store)}
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), st)
+			st.SetSession(7, "sess", svc.gatewaySessionRecorder())
+			st.EnableGatewayRequest(time.Now())
+			if tc != "no_send" {
+				st.NoteGatewaySend(51)
+			}
+			at := st.SessionDispatchStart(ctx, 51)
+			switch tc {
+			case "older_success":
+				store.now = func() time.Time { return at.Add(time.Millisecond) }
+			case "equal_millisecond":
+				store.now = func() time.Time { return at.Truncate(time.Millisecond) }
+			case "other_account":
+				store.now = func() time.Time { return at.Add(-time.Second) }
+				st.NoteGatewaySend(52)
+			case "previous_ws_turn":
+				store.now = func() time.Time { return at.Add(-time.Second) }
+				bill, _ := st.ClaimGatewayRequest(true)
+				ctx = resilience.WithGatewayRequestMetadata(ctx, bill)
+				st.BeginGatewayTurn(time.Now())
+				st.NoteGatewaySend(51)
+			}
+			st.SessionFailure(ctx, 51, resilience.CategoryTransient)
+			st.SessionSuccess(ctx, 51)
+			counts, err := store.SessionFailures(ctx, 7, "sess")
+			require.NoError(t, err)
+			require.EqualValues(t, 1, counts[51])
+		})
+	}
+}
+
+func TestSessionMarksSweepPostOutputAndLastResort(t *testing.T) {
 	r := NewResilienceService(nil, newMemResilienceStore())
 	now := time.Now()
-	r.markSessionFailures(7, "gone", -time.Second)
-	r.markSessionFailures(7, "live", time.Minute)
+	r.postOutput.add(11, now.Add(-postOutputCooldownWindow))
+	r.postOutput.add(12, now)
+	r.lastResortGroups.entries = map[int64]lastResortGroupEntry{1: {expires: now.Add(-time.Second)}, 2: {expires: now.Add(time.Minute)}}
 	r.sweepSessionMarks(now)
-	for _, m := range []*sync.Map{&r.failingSessions} {
-		_, gone := m.Load(sessionMarkKey(7, "gone"))
-		_, live := m.Load(sessionMarkKey(7, "live"))
-		require.False(t, gone, "a session that never returns does not stay in memory")
-		require.True(t, live)
-	}
+	require.NotContains(t, r.postOutput.failures, int64(11))
+	require.Contains(t, r.postOutput.failures, int64(12))
+	require.Equal(t, []int64{2}, lastResortGroupIDs(r))
 }
 
 func TestStreakOwnerLosesItsBinding(t *testing.T) {

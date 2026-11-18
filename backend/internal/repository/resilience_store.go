@@ -36,6 +36,7 @@ var resilienceSessionFailureScript = redis.NewScript(`
 	local now = tonumber(ARGV[3])
 	local win = tonumber(ARGV[2])
 	local ek = 'e:' .. ARGV[1]
+	local fk = 'f:' .. ARGV[1]
 	local e = tonumber(redis.call('HGET', KEYS[1], ek) or '0')
 	local v
 	if e <= now then
@@ -44,9 +45,21 @@ var resilienceSessionFailureScript = redis.NewScript(`
 	else
 		v = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
 	end
-	redis.call('HSET', KEYS[1], ek, now + win)
+	-- A delayed increment must not move the failure watermark backwards.
+	local last = math.max(now, tonumber(redis.call('HGET', KEYS[1], fk)) or now)
+	redis.call('HSET', KEYS[1], ek, last + win, fk, last)
 	redis.call('PEXPIRE', KEYS[1], win)
 	return v
+`)
+
+// Clear only a positively identified failure strictly older than this dispatch.
+var resilienceClearPriorFailuresScript = redis.NewScript(`
+	local id = ARGV[1]
+	local last = tonumber(redis.call('HGET', KEYS[1], 'f:' .. id))
+	if last and last > 0 and last < tonumber(ARGV[2]) then
+		return redis.call('HDEL', KEYS[1], id, 'e:' .. id, 'f:' .. id)
+	end
+	return 0
 `)
 
 // sessionFailureEndField names the window end of an account's count.
@@ -119,7 +132,15 @@ func (s *resilienceStore) IncrSessionFailure(ctx context.Context, groupID int64,
 func (s *resilienceStore) ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error {
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
 	id := strconv.FormatInt(accountID, 10)
-	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id).Err()
+	return s.rdb.HDel(ctx, key, id, sessionFailureEndField+id, "f:"+id).Err()
+}
+
+func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error {
+	if start.IsZero() {
+		return nil
+	}
+	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
+	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.UnixMilli()).Err()
 }
 
 // SessionFailures returns the counts whose window has not ended; a count

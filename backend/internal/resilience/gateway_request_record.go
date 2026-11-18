@@ -158,6 +158,9 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 	// from the preceding attempt, even when request statistics are disabled.
 	if accountID > 0 {
 		s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, 0
+		s.sessionDispatch.requestID = s.requestID
+		s.sessionDispatch.accountID = accountID
+		s.sessionDispatch.at = time.Now()
 	}
 	r := s.gatewayRecord
 	if r == nil || r.final != nil || accountID <= 0 {
