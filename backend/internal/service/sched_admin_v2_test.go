@@ -459,8 +459,9 @@ func TestObserveGroupSupplyOutsideRecentModels(t *testing.T) {
 	out, err = s.Order(ctx, 7, "other-model")
 	require.NoError(t, err)
 	require.Equal(t, &SchedAdminSupply{Declared: 2, At: schedAdminStamp(now)}, out.Supply)
-	s.d.Board = &schedAdminBoard{err: fmt.Errorf("member read failed")}
+	repo.accounts = nil
 	out, err = s.Order(ctx, 7, "other-model")
 	require.NoError(t, err)
-	require.Nil(t, out.Supply)
+	require.Empty(t, out.Rows)
+	require.Equal(t, &SchedAdminSupply{At: schedAdminStamp(now)}, out.Supply)
 }

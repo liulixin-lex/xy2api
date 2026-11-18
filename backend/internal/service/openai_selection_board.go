@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -76,7 +77,16 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		return err == nil && room
 	}
 	selectionReq.TokenBilled, selectionReq.OAuthRateMultiplier = true, multiplier
-	checker := s
+	// Dispatch and ranking both reject a shadow whose parent could not be
+	// loaded. Only the supply snapshot needs to distinguish a failed read.
+	parentReadsKnown := true
+	lookupParent := func(id int64) *Account {
+		parent, err := s.lookupShadowParentAccount(ctx, id)
+		if err != nil && !errors.Is(err, ErrAccountNotFound) {
+			parentReadsKnown = false
+		}
+		return parent
+	}
 	channelRestricted := s.checkChannelPricingRestriction(ctx, &groupID, model)
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	type keyedRow struct {
@@ -94,7 +104,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 		if ok {
 			// The shared check includes per-account upstream channel restrictions.
-			ok, reason = checker.isAccountRequestCompatibleReason(ctx, account, req)
+			ok, reason = s.accountRequestCompatibleWithParent(ctx, account, req, lookupParent)
 		}
 		if channelRestricted {
 			ok, reason = false, "channel_pricing_restricted"
@@ -183,6 +193,9 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	for i, item := range ordered {
 		item.row.Rank = i + 1
 		rows = append(rows, item.row)
+	}
+	if !parentReadsKnown {
+		supply = nil
 	}
 	return rows, supply, nil
 }

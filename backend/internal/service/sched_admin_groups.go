@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -282,11 +281,7 @@ func (s *SchedAdminService) Order(ctx context.Context, g int64, model string) (S
 	}
 	rows, supply, err := s.d.Board.Board(ctx, g, out.Model)
 	if err != nil {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
-		slog.WarnContext(ctx, "sched_quality.board_read_failed", "group_id", g, "error", err)
-		return out, nil
+		return out, err
 	}
 	out.Supply = supply
 	for _, r := range rows {
