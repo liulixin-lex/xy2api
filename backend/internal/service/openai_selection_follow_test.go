@@ -176,7 +176,7 @@ func (r *followScopeReader) SessionAvoidWrittenAt(ctx context.Context, group int
 }
 
 func TestFirstOutputFollowTakeoverScope(t *testing.T) {
-	for _, scenario := range []string{"ordinary_empty", "ordinary_avoided", "quality_owned", "not_injected", "read_error", "migrate_avoided"} {
+	for _, scenario := range []string{"ordinary_empty", "ordinary_avoided", "quality_owned", "not_injected", "read_error", "migrate_avoided", "session_disabled"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := selectionNewSessionFixture()
 			store := &followScopeReader{ResilienceStore: f.session.store}
@@ -186,6 +186,9 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 			}
 			if scenario != "ordinary_empty" {
 				require.NoError(t, store.AddSessionAvoid(context.Background(), 7, firstOutputAvoidSession("session"), 1, time.Minute))
+			}
+			if scenario == "session_disabled" {
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
 			}
 			if scenario == "read_error" {
 				store.err = errors.New("unavailable")
@@ -206,7 +209,7 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 			} else {
 				require.EqualValues(t, 1, f.binding.owner)
 			}
-			if scenario == "quality_owned" || scenario == "not_injected" {
+			if scenario == "quality_owned" || scenario == "not_injected" || scenario == "session_disabled" {
 				require.Zero(t, store.reads)
 			} else {
 				require.Equal(t, 1, store.reads)
@@ -412,7 +415,7 @@ func TestFirstOutputFollowGuardWritesOnlyForFullOwner(t *testing.T) {
 
 func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, mode := range []string{"ordinary", "previous_response", "websocket", "encrypted", "guardian", "child", "manual", "quality", "seedance", "image_intent", "protected_chat"} {
+	for _, mode := range []string{"ordinary", "previous_response", "websocket", "encrypted", "guardian", "child", "manual", "quality", "seedance", "image_intent", "protected_chat", "session_disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2))
 			f.cache.sessionBindings["openai:session"] = 10
@@ -423,6 +426,8 @@ func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 			previous, transport := "", OpenAIUpstreamTransportHTTPSSE
 			capability := OpenAIEndpointCapabilityChatCompletions
 			switch mode {
+			case "session_disabled":
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
 			case "protected_chat":
 				ctx = WithOpenAITransferProtected(ctx)
 			case "seedance":
@@ -458,6 +463,10 @@ func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 				require.Positive(t, store.reads)
 			} else {
 				require.Zero(t, store.reads)
+				if mode == "session_disabled" {
+					require.NoError(t, err)
+					require.EqualValues(t, 10, sel.Account.ID)
+				}
 			}
 		})
 	}
@@ -637,6 +646,29 @@ func TestFirstOutputFollowBorrowKeepsTrialLast(t *testing.T) {
 			} else {
 				require.Equal(t, ownerID, f.cache.sessionBindings[key])
 			}
+		})
+	}
+}
+
+func TestFirstOutputFollowSwitchDisabledAfterReceipt(t *testing.T) {
+	for _, planned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("planned=%t", planned), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			f, svc := selectionNewSessionFixture(), &OpenAIGatewayService{}
+			ctx := followState(t, f, true)
+			target := f.candidates[0]
+			if planned {
+				followSelect(svc, ctx, target)
+				require.Equal(t, stickyFollow, pendingOpenAIStickyChange(ctx).kind)
+			}
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
+			if !planned {
+				followSelect(svc, ctx, target)
+				require.Zero(t, pendingOpenAIStickyChange(ctx).target)
+			}
+			followDelivery(svc, ctx, target, 0, &OpenAIForwardResult{})
+			require.Equal(t, f.owner.ID, f.binding.owner)
+			require.Empty(t, f.binding.casKeys)
 		})
 	}
 }

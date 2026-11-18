@@ -105,7 +105,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	avoided = mergeExcluded(avoided, failedTargets)
-	if s.qualityOwnsSticky != nil && firstOutputMigrationAllowed(ctx, sessionHash) && !s.qualityOwnsSticky(ctx, &groupID, sessionHash) {
+	if resilience.Current().SessionOn() && s.qualityOwnsSticky != nil && firstOutputMigrationAllowed(ctx, sessionHash) && !s.qualityOwnsSticky(ctx, &groupID, sessionHash) {
 		soft, err := sessionAvoidAfterReset(ctx, s.store, groupID, firstOutputAvoidSession(sessionHash), s.resetAt)
 		if err != nil {
 			return nil

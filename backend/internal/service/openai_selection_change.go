@@ -68,7 +68,9 @@ func recordFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutpu
 	state := resilience.StateFrom(ctx)
 	confirmed := false
 	reason := "protocol_ineligible"
-	if fact.CanTransfer {
+	if !resilience.Current().SessionOn() {
+		reason = "session_disabled"
+	} else if fact.CanTransfer {
 		if change := pendingOpenAIStickyChange(ctx); change.matchesCutoff(fact) && change.writeFirstOutputAvoid(ctx, fact) {
 			confirmed = state.ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation)
 		}
@@ -331,6 +333,8 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	keptOwner := state.KeptSticky()
 	reason := ""
 	switch {
+	case !resilience.Current().SessionOn():
+		reason = "session_disabled"
 	case !ordinary || !fact.CanTransfer || !firstOutputMigrationAllowed(ctx, session) || s.qualityOwnsSticky(ctx, group, session):
 		reason = "protocol_ineligible"
 	case !confirmed:
@@ -396,6 +400,10 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		change.reason = "canceled"
 	}
 	if canceled || change.skipCommit {
+		return
+	}
+	if change.kind == stickyFollow && !resilience.Current().SessionOn() {
+		change.reason = "session_disabled"
 		return
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)

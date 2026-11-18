@@ -313,7 +313,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	state.SetAvoided(avoided)
 	// This pass must be able to preserve a versioned owner while borrowing.
 	// Legacy callers without a pending binding would otherwise eagerly rebind.
-	if ordinary && preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && s.resilience != nil && s.resilience.store != nil &&
+	if ordinary && resilience.Current().SessionOn() && preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && s.resilience != nil && s.resilience.store != nil &&
 		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
 		soft, _ := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
 		if _, hit := soft[stickyOwner]; hit {
