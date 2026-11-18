@@ -114,9 +114,9 @@ export default {
         title: 'User wait',
         detailsTitle: 'User wait (end-to-end first output, ms)',
         unknown: 'Unknown',
-        none: 'No end-to-end records in this period (periods before the upgrade have none)',
+        none: 'No end-to-end records in this period. Full-hour summaries created before the upgrade lack this data.',
         notProvided: 'The data returned carries no end-to-end figures',
-        samples: 'Over {n} requests; periods before the upgrade have no records and are not counted.',
+        samples: 'Based on {n} requests. Full-hour summaries created before the upgrade lack this data.',
         lastAttempt: 'Last attempt'
       },
       p50: 'p50:',
