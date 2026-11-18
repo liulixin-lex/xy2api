@@ -81,6 +81,71 @@ type followAccountReadBarrier struct {
 	hold func()
 }
 
+type followAccountReads struct {
+	AccountRepository
+	reads map[int64]int
+}
+
+func (r *followAccountReads) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.reads[id]++
+	return r.AccountRepository.GetByID(ctx, id)
+}
+
+func followSnapshotFixture(t *testing.T) (*selectionRuntimeFixture, *followAccountReads) {
+	t.Helper()
+	x, y := selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2)
+	f := newSelectionRuntimeFixture(t, x, y)
+	f.cache.sessionBindings["openai:session"] = x.ID
+	reads := &followAccountReads{AccountRepository: f.repo, reads: make(map[int64]int)}
+	f.svc.accountRepo = reads
+	f.svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{&x, &y}, accountsByID: map[int64]*Account{x.ID: &x, y.ID: &y},
+	}}
+	return f, reads
+}
+
+func TestFirstOutputFollowOwnerReadsBeforeDelivery(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name                 string
+		readX, readY         int
+		selected, finalOwner int64
+	}{
+		{"no_avoid", 1, 0, 10, 10},
+		{"first_output", 1, 1, 11, 10},
+		{"strict_overlap", 0, 1, 11, 10},
+		{"request_overlap", 0, 1, 11, 10},
+		{"disabled_only_in_database", 1, 1, 11, 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, repo := followSnapshotFixture(t)
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			if tc.name != "no_avoid" {
+				require.NoError(t, f.cache.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 10, time.Minute))
+			}
+			var excluded map[int64]struct{}
+			switch tc.name {
+			case "strict_overlap":
+				require.NoError(t, f.cache.store.AddSessionAvoid(ctx, 7, stickyChangeAvoidSession("session"), 10, time.Minute))
+			case "request_overlap":
+				excluded = map[int64]struct{}{10: {}}
+			case "disabled_only_in_database":
+				f.repo.accounts[0].Schedulable = false
+			}
+			sel, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", excluded,
+				OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+			require.NoError(t, err)
+			require.NotNil(t, sel)
+			defer sel.ReleaseFunc()
+			require.Equal(t, tc.selected, sel.Account.ID)
+			require.Equal(t, tc.readX, repo.reads[10])
+			require.Equal(t, tc.readY, repo.reads[11])
+			followDelivery(f.svc, ctx, sel.Account, time.Millisecond, &OpenAIForwardResult{})
+			require.Equal(t, tc.finalOwner, f.cache.sessionBindings["openai:session"])
+		})
+	}
+}
+
 func (r followAccountReadBarrier) GetByID(ctx context.Context, id int64) (*Account, error) {
 	account, err := r.AccountRepository.GetByID(ctx, id)
 	r.hold()
