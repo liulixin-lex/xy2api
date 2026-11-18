@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -346,5 +347,59 @@ func TestOwnerCutoffBeforeCompatReaderReturns(t *testing.T) {
 				})
 			})
 		}
+	}
+}
+
+type factsBlockingCloser struct {
+	io.ReadCloser
+	once  sync.Once
+	enter chan struct{}
+	leave chan struct{}
+}
+
+func (b *factsBlockingCloser) Close() error {
+	b.once.Do(func() { close(b.enter); <-b.leave; _ = b.ReadCloser.Close() })
+	return nil
+}
+
+func TestOwnerCutoffCancelsBeforeBlockingClose(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"responses", "passthrough"} {
+		t.Run(route, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+				c, _ := compatStreamContext("/v1/responses", string(body))
+				account := rawChatCompletionsTestAccount()
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				r, w := io.Pipe()
+				defer w.Close()
+				b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
+				var upstream context.Context
+				up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					upstream = req.Context()
+					RecordOpsUpstreamSendBoundary(req.Context(), id)
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: b, Request: req}, nil
+				}}
+				svc := compatStreamService(up, 1, 0, 0)
+				done := make(chan error, 1)
+				go func() {
+					var err error
+					if route == "passthrough" {
+						_, err = svc.forwardOpenAIPassthrough(ctx, c, account, body, body, "wire-model", false, nil, true, time.Now())
+					} else {
+						_, err = svc.Forward(ctx, c, account, body)
+					}
+					done <- err
+				}()
+				<-b.enter
+				_, frozen := st.OwnerCutoff()
+				canceled := upstream.Err()
+				close(b.leave)
+				requireFirstOutputFailover(t, <-done)
+				require.True(t, frozen)
+				require.ErrorIs(t, canceled, context.Canceled, "cancel must reach the actual transport before waiting for Close")
+			})
+		})
 	}
 }

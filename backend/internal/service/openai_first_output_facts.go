@@ -50,6 +50,14 @@ func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
 	a.ownerHit = seq == 1 && a.httpSelection.StickyWarm && a.dispatch.Session != ""
 }
 
+// The header guard's context remains attached to the response reader. Cancel
+// it without waiting for Body.Close, which may wait on the active read.
+func (a *schedAttemptCapture) cancelFirstOutputUpstream() {
+	if a != nil && a.firstOutputCancel != nil {
+		a.firstOutputCancel()
+	}
+}
+
 // onClaim stops the upstream before any synchronous downstream publication.
 // Only a winning guard calls this. The recorder reads the two booleans under
 // the capture lock; the final request outcome cannot create either fact.

@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -3291,9 +3290,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				_ = resp.Body.Close()
 				return finish(nil)
 			}
-			stopUpstream := sync.OnceFunc(func() { _ = resp.Body.Close() })
-			claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, stopUpstream)
-			stopUpstream()
+			claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, schedCapture.cancelFirstOutputUpstream)
+			_ = resp.Body.Close()
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, schedCapture), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan)
