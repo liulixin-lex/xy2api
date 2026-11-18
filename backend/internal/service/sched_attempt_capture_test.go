@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -38,15 +39,82 @@ func (r *captureServiceRecorder) Begin(in SchedAttemptStart) SchedAttempt {
 func (*captureServiceRecorder) SetObserver(func(schedquality.AttemptSample)) {}
 func (*captureServiceRecorder) Flush(context.Context) error                  { return nil }
 func (*captureServiceAttempt) MarkOutput(SchedOutputKind, time.Time)         {}
-func (a *captureServiceAttempt) finish(outcome schedquality.Outcome, detail string) {
+func (a *captureServiceAttempt) Finish(in SchedAttemptFinish) {
 	if a.done {
 		panic("duplicate finish")
 	}
 	a.done = true
-	row := schedquality.AttemptSample{AccountID: a.in.AccountID, Outcome: outcome, Detail: detail}
+	row := schedquality.AttemptSample{AccountID: a.in.AccountID, Outcome: in.Outcome, Detail: in.Detail, Warm: in.Warm, FullTierFirstOutputTimeout: in.FullTierFirstOutputTimeout}
 	a.r.samples = append(a.r.samples, row)
 }
-func (a *captureServiceAttempt) Finish(in SchedAttemptFinish) { a.finish(in.Outcome, in.Detail) }
+
+type captureTimeoutUpstream struct {
+	silentUpstream
+	dispatched bool
+}
+
+func (u *captureTimeoutUpstream) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
+	if u.dispatched {
+		RecordOpsUpstreamSendBoundary(req.Context(), account)
+	}
+	return u.silentUpstream.Do(req, proxy, account, concurrency)
+}
+
+func TestSchedCaptureOwnerTimeoutRequiresPhysicalSend(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, dispatched := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dispatched=%t", dispatched), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := `{"model":"wire-model","input":"hello","stream":true}`
+				c, _ := compatStreamContext("/v1/responses", body)
+				account := rawChatCompletionsTestAccount()
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(c.Request.Context(), st)
+				st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
+				st.SetSession(7, "session", nil)
+				st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "wire-model", StickyWarm: true, HTTPStreamText: true})
+				st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "wire-model", Warm: true, Stream: true, AttemptStart: time.Now()})
+				c.Request = c.Request.WithContext(ctx)
+				recorder := &captureServiceRecorder{}
+				svc := compatStreamService(&captureTimeoutUpstream{dispatched: dispatched}, 1, 0, 0)
+				svc.SetSchedAttemptRecorder(recorder)
+				_, err := svc.Forward(ctx, c, account, []byte(body))
+				requireFirstOutputFailover(t, err)
+				require.Len(t, recorder.starts, 1)
+				require.False(t, recorder.starts[0].Warm)
+				require.Len(t, recorder.samples, 1)
+				row := recorder.samples[0]
+				require.Equal(t, schedquality.OutcomeTimeout, row.Outcome)
+				require.Equal(t, dispatched, row.Warm)
+				require.Equal(t, dispatched, row.FullTierFirstOutputTimeout)
+				if !dispatched {
+					return
+				}
+
+				// The request retains the original cutoff while another account delivers.
+				rescue := rawChatCompletionsTestAccount()
+				rescue.ID = account.ID + 1
+				st.SetSchedSelection(resilience.SchedSelection{AccountID: rescue.ID, Model: "wire-model", HTTPStreamText: true})
+				svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}}
+				req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)).WithContext(ctx)
+				var attempt *schedAttemptCapture
+				resp, err := svc.sendSchedHTTP(ctx, rescue, req, "", []byte(body), true, &attempt)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				attempt.finish(nil, nil)
+				fact, ok := st.OwnerCutoff()
+				require.True(t, ok)
+				require.Equal(t, account.ID, fact.AccountID)
+				require.Len(t, recorder.samples, 2)
+				row = recorder.samples[1]
+				require.Equal(t, rescue.ID, row.AccountID)
+				require.Equal(t, schedquality.OutcomeOK, row.Outcome)
+				require.False(t, row.Warm)
+				require.False(t, row.FullTierFirstOutputTimeout)
+			})
+		})
+	}
+}
 
 func TestSchedCaptureA11IQExcluded(t *testing.T) {
 	challenge := iqcheck.NewChallenge()

@@ -71,6 +71,7 @@ func TestSchedAttemptAllTerminalTokensRoundTrip(t *testing.T) {
 	for _, outcome := range []schedquality.Outcome{1, 2, 3, 5} {
 		row := schedAttemptTestRow(8612002, start)
 		row.RequestID, row.Outcome = requestID, outcome
+		row.Warm = outcome == schedquality.OutcomeOK
 		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.PromptTokens = &input, &read, &creation, &prompt
 		row.TTFOMs = &ttfo
 		row.Detail = "AUTH" // Cancellation must be read from code 5, not this string.
@@ -82,13 +83,14 @@ func TestSchedAttemptAllTerminalTokensRoundTrip(t *testing.T) {
 	require.Len(t, rows, 4)
 	for _, row := range rows {
 		require.Equal(t, row.Outcome == 5, row.ClientCanceled)
+		require.Equal(t, row.Outcome == schedquality.OutcomeOK, row.Warm)
 		require.Equal(t, 0, *row.InputTokens)
 		require.Equal(t, 80, *row.CacheReadTokens)
 		require.Equal(t, 20, *row.CacheCreationTokens)
 		require.Equal(t, 12, *row.TTFOMs)
 	}
 	var legacyOK bool
-	require.NoError(t, integrationDB.QueryRow("SELECT bool_and(request_class=1 AND warm=false AND prev_prompt_tokens IS NULL) FROM account_attempt_samples WHERE request_id=$1", requestID).Scan(&legacyOK))
+	require.NoError(t, integrationDB.QueryRow("SELECT bool_and(request_class=1 AND prev_prompt_tokens IS NULL) FROM account_attempt_samples WHERE request_id=$1", requestID).Scan(&legacyOK))
 	require.True(t, legacyOK)
 
 }

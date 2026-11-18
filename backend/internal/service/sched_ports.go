@@ -32,7 +32,7 @@ var ErrSchedPolicyConflict = errors.New("sched policy conflict")
 type SchedAttemptStart struct {
 	AccountID, GroupID    int64
 	Model                 string
-	Stream                bool
+	Stream, Warm          bool
 	SessionKey, RequestID string
 }
 type SchedAttemptUsage struct {
@@ -42,14 +42,15 @@ type SchedAttemptUsage struct {
 	CacheReadTokensPresent bool
 }
 type SchedAttemptFinish struct {
-	Outcome      schedquality.Outcome
-	Class        schedquality.ErrorClass
-	HTTPStatus   int // Zero means no status was observed.
-	StatusOrigin schedquality.StatusOrigin
-	Detail       string
-	Waited       time.Duration
-	OutputBytes  int
-	Usage        *SchedAttemptUsage
+	Warm, FullTierFirstOutputTimeout bool
+	Outcome                          schedquality.Outcome
+	Class                            schedquality.ErrorClass
+	HTTPStatus                       int // Zero means no status was observed.
+	StatusOrigin                     schedquality.StatusOrigin
+	Detail                           string
+	Waited                           time.Duration
+	OutputBytes                      int
+	Usage                            *SchedAttemptUsage
 }
 
 type SchedOutputKind uint8

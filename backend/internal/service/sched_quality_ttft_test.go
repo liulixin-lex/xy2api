@@ -329,3 +329,38 @@ func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
 		})
 	}
 }
+
+func TestTTFTBasisIncludesOnlyProvenSwitchedTimeout(t *testing.T) {
+	f := newQualityFixture(t)
+	ctx := context.Background()
+	rows := engineSamples(4, f.now, true)
+	for i := range rows {
+		a := &rows[i]
+		a.SessionKey = fmt.Sprintf("session-%d", i)
+		a.CaptureVersion = 3
+		a.Warm = i == 1 || i == 2
+		a.FullTierFirstOutputTimeout = i == 1 || i == 3
+		if i == 0 {
+			a.CaptureVersion = 2
+		}
+		waited := 1500
+		a.Outcome, a.TTFOMs, a.CensoredMs = q.OutcomeTimeout, nil, &waited
+		pred := *a
+		pred.AttemptID = "previous-" + a.AttemptID
+		pred.AccountID++
+		pred.StartedAt, pred.FinishedAt = a.StartedAt.Add(-time.Minute), a.StartedAt.Add(-time.Second)
+		f.ledger.Rows = append(f.ledger.Rows, pred)
+	}
+	f.ledger.Rows = append(f.ledger.Rows, rows...)
+	require.NoError(t, f.e.loadEvidence(ctx, f.now))
+	d, err := f.e.inputs(ctx, f.now, f.e.window.samples)
+	require.NoError(t, err)
+	state := q.LineState{LineKey: q.LineKey{GroupID: 10, AccountID: 1, Model: rows[0].Model, Line: q.DimensionTTFO}}
+	for _, kind := range []q.EventKind{q.EventRegular, q.EventTrial, q.EventReview} {
+		_, basis := f.e.assessLine(d, state, kind, f.now, nil)
+		require.Equal(t, []string{rows[1].AttemptID}, basis.AttemptIDs)
+		require.Equal(t, []int64{10}, basis.SourceGroups)
+		require.Equal(t, 1.0, basis.TTFT.N)
+		require.Equal(t, 1.0, basis.TTFT.K)
+	}
+}

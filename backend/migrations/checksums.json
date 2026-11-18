@@ -362,6 +362,7 @@
     "314_quality_gate_v2_fields.sql": "8d95c80c5a1da3b13e675d22698bacb53af87f989d5c4fb4e7d5025428b0cd7e",
     "315_sched_line_states.sql": "a086da17300d6976c56aced2ec274d36c826922d893c8d6bdf158b07c93920ae",
     "316_ops_status_origin.sql": "866e930c56080874293f34f118bfc07863f1016d40a909ab1ee9ac39a24633ea",
-    "318_group_ratefloor_auth_cache_invalidation.sql": "c76a4e3a7ee5e31e4c8d23258d4b3fcc9454c8a0c1bbeb4c76bb7c7ad976c979"
+    "318_group_ratefloor_auth_cache_invalidation.sql": "c76a4e3a7ee5e31e4c8d23258d4b3fcc9454c8a0c1bbeb4c76bb7c7ad976c979",
+    "319_sched_attempt_full_tier_timeout.sql": "d2a7aa1b9988b87f749dfbea5da210a5c321614145834bffac5ae74cf2044f78"
   }
 }

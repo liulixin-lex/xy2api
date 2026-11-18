@@ -112,7 +112,7 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
-		Stream: stream, SessionKey: sessionKey, RequestID: a.requestID}
+		Stream: stream, Warm: a.ownerHit, SessionKey: sessionKey, RequestID: a.requestID}
 	if recorder, ok := s.schedAttemptRecorder.(interface {
 		beginAt(SchedAttemptStart, time.Time) SchedAttempt
 	}); ok && !started.IsZero() {
@@ -151,6 +151,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 		written = 0
 	}
 	in.OutputBytes = int(written)
+	in.Warm, in.FullTierFirstOutputTimeout = a.ownerHit, a.fullTierFirstOutputTimeout
 	logFinish := logger.FromContext(a.ctx).Info
 	if in.Outcome == schedquality.OutcomeOK {
 		logFinish = logger.FromContext(a.ctx).Debug

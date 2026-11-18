@@ -33,6 +33,9 @@ func (o Outcome) String() string {
 	return ""
 }
 
+// FullTierTimeoutCaptureVersion is the first writer with per-dispatch timeout evidence.
+const FullTierTimeoutCaptureVersion = 3
+
 type AttemptSample struct {
 	AttemptID                        string
 	StartedAt, FinishedAt            time.Time `json:",omitzero"`
@@ -41,6 +44,8 @@ type AttemptSample struct {
 	Stream                           bool
 	ClientCanceled, Continuation     bool
 	Switched                         bool
+	Warm, FullTierFirstOutputTimeout bool
+	CaptureVersion                   int
 	TTFOMs, CensoredMs               *int
 	FirstEventMs, FirstAnswerMs      *int
 	Outcome                          Outcome

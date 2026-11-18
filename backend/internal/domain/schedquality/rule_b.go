@@ -76,13 +76,23 @@ func CompareRuleBParams(old, next RuleBParams) (RuleBParamChange, error) {
 // known first output; otherwise only OutcomeTimeout supplies censored evidence.
 // SwitchedAccount marks only the first turn after an account switch (cold=2).
 type RuleBSample struct {
-	AccountID, GroupID     int64
-	Model, SessionKey      string
-	StartedAt, AvailableAt float64
-	TTFOMs, CensoredMs     float64
-	Stream                 bool
-	Outcome                Outcome
-	SwitchedAccount        bool
+	AccountID, GroupID               int64
+	Model, SessionKey                string
+	StartedAt, AvailableAt           float64
+	TTFOMs, CensoredMs               float64
+	Stream                           bool
+	Outcome                          Outcome
+	SwitchedAccount                  bool
+	Warm, FullTierFirstOutputTimeout bool
+	CaptureVersion                   int
+}
+
+// Eligible reports whether this attempt belongs in the Rule B evidence window.
+func (s RuleBSample) Eligible(now, cut float64) bool {
+	ownerTimeout := s.CaptureVersion >= FullTierTimeoutCaptureVersion && s.Warm && s.FullTierFirstOutputTimeout && s.Outcome == OutcomeTimeout
+	return s.Stream && (!s.SwitchedAccount || ownerTimeout) &&
+		(s.TTFOMs > 0 || s.Outcome == OutcomeTimeout) &&
+		s.StartedAt >= cut && s.AvailableAt >= math.Max(now-8*RuleBHalfLifeSeconds, cut) && s.AvailableAt <= now
 }
 
 // RuleBScope identifies an account/model and its target group. Evidence for the
@@ -179,11 +189,8 @@ func countRuleB(samples []RuleBSample, now, cut, limitSeconds float64, include f
 		key   string
 	}
 	sessions, slowSessions := make(map[session]bool), make(map[session]bool)
-	start := math.Max(now-8*RuleBHalfLifeSeconds, cut)
 	for _, s := range samples {
-		if !include(s) || !s.Stream || s.SwitchedAccount ||
-			(s.TTFOMs <= 0 && s.Outcome != OutcomeTimeout) ||
-			s.AvailableAt < start || s.AvailableAt > now || s.StartedAt < cut {
+		if !include(s) || !s.Eligible(now, cut) {
 			continue
 		}
 		weight := math.Exp2(-(now - s.AvailableAt) / RuleBHalfLifeSeconds)

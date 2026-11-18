@@ -65,20 +65,29 @@ func ruleBTime(at time.Time) float64 {
 	return float64(at.Unix()) + float64(at.Nanosecond())/1e9
 }
 
+func ruleBSample(r q.AttemptSample) q.RuleBSample {
+	s := q.RuleBSample{
+		AccountID: r.AccountID, GroupID: r.GroupID, Model: r.Model, SessionKey: r.SessionKey,
+		StartedAt: ruleBTime(r.StartedAt), AvailableAt: ruleBTime(schedAvailableAt(r)),
+		Stream: r.Stream, Outcome: r.Outcome, SwitchedAccount: r.Switched,
+		CaptureVersion: r.CaptureVersion, Warm: r.Warm, FullTierFirstOutputTimeout: r.FullTierFirstOutputTimeout,
+	}
+	if r.TTFOMs != nil {
+		s.TTFOMs = float64(*r.TTFOMs)
+	}
+	if r.CensoredMs != nil {
+		s.CensoredMs = float64(*r.CensoredMs)
+	}
+	return s
+}
+
 func ruleBSamples(rows []q.AttemptSample) []q.RuleBSample {
 	out := make([]q.RuleBSample, 0, len(rows))
 	for _, r := range rows {
 		if r.FinishedAt.IsZero() {
 			continue
 		}
-		s := q.RuleBSample{AccountID: r.AccountID, GroupID: r.GroupID, Model: r.Model, SessionKey: r.SessionKey, StartedAt: ruleBTime(r.StartedAt), AvailableAt: ruleBTime(schedAvailableAt(r)), Stream: r.Stream, Outcome: r.Outcome, SwitchedAccount: r.Switched}
-		if r.TTFOMs != nil {
-			s.TTFOMs = float64(*r.TTFOMs)
-		}
-		if r.CensoredMs != nil {
-			s.CensoredMs = float64(*r.CensoredMs)
-		}
-		out = append(out, s)
+		out = append(out, ruleBSample(r))
 	}
 	// Stable accumulation order makes replay independent of map/SQL row order.
 	sort.Slice(out, func(i, j int) bool {
@@ -181,9 +190,9 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 	sources := make(map[int64]bool)
 	switch r.Line {
 	case q.DimensionTTFO:
+		now, cutoff := ruleBTime(at), ruleBTime(cut)
 		for _, a := range samples {
-			available := schedAvailableAt(a)
-			if !a.Stream || a.Switched || a.StartedAt.Before(cut) || available.Before(cut) || available.Before(at.Add(-4*time.Hour)) || (a.TTFOMs == nil || *a.TTFOMs <= 0) && a.Outcome != q.OutcomeTimeout {
+			if !ruleBSample(a).Eligible(now, cutoff) {
 				continue
 			}
 			sources[a.GroupID] = true

@@ -119,6 +119,7 @@ func (s *SchedAttemptRecorderService) beginAt(in SchedAttemptStart, at time.Time
 		AttemptID: uuid.Must(uuid.NewV7()).String(), StartedAt: at,
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
 		SessionKey: in.SessionKey, RequestID: in.RequestID,
+		Warm: in.Warm, CaptureVersion: schedquality.FullTierTimeoutCaptureVersion,
 	}
 	s.observe(row)
 	return &schedAttemptHandle{recorder: s, row: row}
@@ -179,6 +180,7 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	h.mu.Unlock()
 	row.FinishedAt, row.Outcome = h.recorder.now(), outcome
 	row.Class, row.StatusOrigin = in.Class, in.StatusOrigin
+	row.Warm, row.FullTierFirstOutputTimeout = in.Warm, in.FullTierFirstOutputTimeout
 	if in.HTTPStatus != 0 {
 		status := in.HTTPStatus
 		row.HTTPStatus = &status

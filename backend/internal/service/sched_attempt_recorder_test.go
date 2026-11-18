@@ -26,9 +26,10 @@ func TestSchedAttemptLifecycle(t *testing.T) {
 	in := SchedAttemptStart{AccountID: 1, GroupID: 2, Model: "model", Stream: true}
 	a := r.Begin(in)
 	now = now.Add(20 * time.Second)
-	a.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Waited: 20 * time.Second})
+	a.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Waited: 20 * time.Second, Warm: true, FullTierFirstOutputTimeout: true})
 	a.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: "late"})
 	in.AccountID = 2
+	in.Warm = true
 	b := r.Begin(in)
 	b.MarkOutput(OutputFirstEvent, now.Add(time.Second))
 	b.MarkOutput(OutputFirstEvent, now.Add(2*time.Second))
@@ -54,6 +55,9 @@ func TestSchedAttemptLifecycle(t *testing.T) {
 	require.Len(t, events, 10, "Begin and Finish must each notify exactly once")
 	var observed []schedquality.AttemptSample
 	for i := 0; i < len(events); i += 2 {
+		require.Equal(t, 3, events[i].CaptureVersion)
+		require.Equal(t, 3, events[i+1].CaptureVersion)
+		require.False(t, events[i].FullTierFirstOutputTimeout)
 		require.True(t, events[i].FinishedAt.IsZero())
 		require.False(t, events[i+1].FinishedAt.IsZero())
 		require.Equal(t, events[i].AttemptID, events[i+1].AttemptID)
@@ -61,6 +65,12 @@ func TestSchedAttemptLifecycle(t *testing.T) {
 		observed = append(observed, events[i+1])
 	}
 	require.Len(t, observed, 5)
+	require.False(t, events[0].Warm)
+	require.True(t, observed[0].Warm)
+	require.True(t, observed[0].FullTierFirstOutputTimeout)
+	require.True(t, events[2].Warm)
+	require.False(t, observed[1].Warm)
+	require.False(t, observed[1].FullTierFirstOutputTimeout)
 	require.Equal(t, schedquality.OutcomeTimeout, observed[0].Outcome)
 	require.Equal(t, 20000, *observed[0].CensoredMs)
 	require.Equal(t, 3000, *observed[1].TTFOMs)

@@ -350,6 +350,48 @@ func TestRuleBEvidenceBoundaries(t *testing.T) {
 	}
 }
 
+func TestRuleBSwitchedOwnerTimeoutEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		version            int
+		warm, full, stream bool
+		outcome            Outcome
+		want               float64
+	}{
+		{"v2-false", 2, false, false, true, OutcomeTimeout, 0},
+		{"v2-no-proof", 2, true, true, true, OutcomeTimeout, 0},
+		{"owner-full-tier", 3, true, true, true, OutcomeTimeout, 1},
+		{"short-budget", 3, true, false, true, OutcomeTimeout, 0},
+		{"cold-full-tier", 3, false, true, true, OutcomeTimeout, 0},
+		{"non-timeout", 3, true, true, true, OutcomeOK, 0},
+		{"non-stream", 3, true, true, false, OutcomeTimeout, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := ruleBTestInput(1, 1, false)
+			for _, rows := range [][]RuleBSample{in.Samples, in.Peers[0].Samples, in.GroupSamples} {
+				for i := range rows {
+					s := &rows[i]
+					s.SwitchedAccount, s.CaptureVersion = true, tc.version
+					s.Warm, s.FullTierFirstOutputTimeout = tc.warm, tc.full
+					s.Stream, s.Outcome = tc.stream, tc.outcome
+					if tc.outcome == OutcomeTimeout {
+						s.TTFOMs, s.CensoredMs = 0, 10000
+					}
+				}
+			}
+			result := evaluateRuleBTest(t, in, DefaultRuleBParams())
+			for _, counts := range []RuleBCounts{result.Counts, result.PeerCounts, result.PriorLocalCounts} {
+				if counts.N != tc.want || counts.K != tc.want {
+					t.Fatalf("counts = %+v, want N=K=%v", counts, tc.want)
+				}
+			}
+			if c := result.PriorGroupCounts; c.N != 2*tc.want || c.K != 2*tc.want {
+				t.Fatalf("group counts = %+v", c)
+			}
+		})
+	}
+}
+
 func ruleBTestInput(ownCount, peerCount int, slow bool) RuleBInput {
 	rows := func(account int64, n int, isSlow bool) []RuleBSample {
 		out := make([]RuleBSample, n)

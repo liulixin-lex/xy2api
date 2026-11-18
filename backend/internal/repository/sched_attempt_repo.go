@@ -30,8 +30,8 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 		(attempt_id, started_at, finished_at, account_id, group_id, model, request_class,
 		stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens, prev_prompt_tokens,
 		cache_read_tokens, session_key, request_id, input_tokens, cache_creation_tokens,
-		capture_version, first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes) VALUES `)
-	const columns = 27
+		capture_version, first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes, full_tier_first_output_timeout) VALUES `)
+	const columns = 28
 	args := make([]any, 0, len(rows)*columns)
 	for i, row := range rows {
 		if i > 0 {
@@ -46,9 +46,9 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 		}
 		_ = q.WriteByte(')')
 		args = append(args, row.AttemptID, row.StartedAt, row.FinishedAt, row.AccountID, row.GroupID,
-			row.Model, 1, row.Stream, false, row.TTFOMs, row.CensoredMs, row.Outcome,
+			row.Model, 1, row.Stream, row.Warm, row.TTFOMs, row.CensoredMs, row.Outcome,
 			row.Detail, row.PromptTokens, nil, row.CacheReadTokens, row.SessionKey, row.RequestID, row.InputTokens, row.CacheCreationTokens,
-			2, row.FirstEventMs, row.FirstAnswerMs, row.Class, row.HTTPStatus, row.StatusOrigin, row.OutputBytes)
+			schedquality.FullTierTimeoutCaptureVersion, row.FirstEventMs, row.FirstAnswerMs, row.Class, row.HTTPStatus, row.StatusOrigin, row.OutputBytes, row.FullTierFirstOutputTimeout)
 	}
 	_, _ = q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
 	_, err := r.db.ExecContext(ctx, q.String(), args...)
@@ -58,7 +58,8 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 const schedAttemptColumns = `attempt_id, started_at, finished_at, account_id, group_id, model,
 	stream, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
 	cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens,
-	first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes`
+	first_event_ms, first_answer_ms, error_class, http_status, status_origin, output_bytes,
+	warm, full_tier_first_output_timeout, capture_version`
 
 func (r *schedAttemptRepository) read(ctx context.Context, where string, args ...any) ([]schedquality.AttemptSample, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerReadTimeout)
