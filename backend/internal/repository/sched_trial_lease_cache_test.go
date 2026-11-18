@@ -348,6 +348,30 @@ func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
 	}
 }
 
+func TestSchedTrialLeasePromotionActivityIdleBoundary(t *testing.T) {
+	for _, age := range []time.Duration{service.TrialLeaseIdle - time.Millisecond, service.TrialLeaseIdle, service.TrialLeaseIdle + time.Millisecond} {
+		t.Run(age.String(), func(t *testing.T) {
+			leases, db, clock, at := newTrialLeaseTestCache(t)
+			ctx := context.Background()
+			token := requireTrialAcquire(t, leases, 7, "r:request", at)
+			clock.advanceTo(at.Add(age))
+			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, "r:request", "s:committed", token, at))
+			// Inspect the set directly. A later lease operation would already
+			// have pruned an incorrectly inserted session at the idle boundary.
+			key := schedTrialLeaseKey(1, "model-a")
+			_, err := db.ZScore(ctx, key, "7:r:request").Result()
+			require.ErrorIs(t, err, redis.Nil)
+			score, err := db.ZScore(ctx, key, "7:s:committed").Result()
+			if age < service.TrialLeaseIdle {
+				require.NoError(t, err)
+				require.EqualValues(t, at.UnixMilli(), score)
+			} else {
+				require.ErrorIs(t, err, redis.Nil)
+			}
+		})
+	}
+}
+
 func TestSchedTrialGenerationFencesLatePromotionAcrossGroups(t *testing.T) {
 	leases, rdb, mr, at := newTrialLeaseTestCache(t)
 	ctx := context.Background()
@@ -433,7 +457,8 @@ func TestSchedTrialLeaseClockOffsets(t *testing.T) {
 	testTrialLeaseClockOffsets(t, rdb)
 }
 
-func TestSchedTrialLeaseClockOffsetsRealRedis(t *testing.T) {
+func newLocalRedisClient(t *testing.T) *redis.Client {
+	t.Helper()
 	server, err := exec.LookPath("redis-server")
 	if err != nil {
 		t.Skip("redis-server unavailable")
@@ -450,6 +475,11 @@ func TestSchedTrialLeaseClockOffsetsRealRedis(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket, MaxRetries: -1})
 	t.Cleanup(func() { _ = rdb.Close() })
 	require.Eventually(t, func() bool { return rdb.Ping(context.Background()).Err() == nil }, 5*time.Second, 10*time.Millisecond)
+	return rdb
+}
+
+func TestSchedTrialLeaseClockOffsetsRealRedis(t *testing.T) {
+	rdb := newLocalRedisClient(t)
 	t.Run("gateway_monotonic_clock", func(t *testing.T) {
 		cache := NewSchedTrialLeaseCache(rdb)
 		ok, _, err := cache.Acquire(context.Background(), 2, "model-a", 7, "r:expired", time.Now().Add(-service.TrialLeaseIdle))
