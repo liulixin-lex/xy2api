@@ -47,7 +47,7 @@ func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
 		return
 	}
 	a.dispatch.AttemptSeq, a.dispatch.DispatchAt = seq, time.Now()
-	a.ownerHit = seq == 1 && a.httpSelection.StickyWarm && a.dispatch.Session != ""
+	a.ownerHit = a.state.FirstHTTPDispatch(seq) && a.httpSelection.StickyWarm && a.dispatch.Session != ""
 }
 
 // The header guard's context remains attached to the response reader. Cancel
