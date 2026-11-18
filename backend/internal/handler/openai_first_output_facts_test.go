@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,37 +151,64 @@ func TestOwnerCutoffAfterHTTPRedirect(t *testing.T) {
 		s.Budget.ModelOverrides = nil
 		s.Budget.PreOutputBudgetSeconds = 12
 	})
-	var hops atomic.Int32
-	testUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hops.Add(1)
-		if r.URL.Path != "/next" {
-			http.Redirect(w, r, "/next", http.StatusTemporaryRedirect)
-			return
-		}
-		select {
-		case <-r.Context().Done():
-		case <-time.After(4 * time.Second):
-		}
-	}))
-	defer testUpstream.Close()
-	account := service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{4201}, Credentials: map[string]any{"api_key": "test", "base_url": testUpstream.URL}, Extra: map[string]any{"openai_responses_mode": "force_responses"}}
-	repo := &openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}
-	up := &factsRedirectTransport{HTTPUpstream: repository.NewHTTPUpstream(&config.Config{})}
-	h, _, router := captureFixture(t, account, up, captureOptions{cache: &capturePinnedCache{owner: account.ID}, repo: repo})
-	probe := gin.New()
-	probe.Use(router.Handlers...)
-	probe.Use(func(c *gin.Context) {
-		ctx := c.Request.Context()
-		resilience.StateFrom(ctx).SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
-		c.Next()
-	})
-	probe.POST("/v1/responses", h.Responses)
-	response := captureRequest(probe, "/v1/responses", `{"model":"gpt-5.1","input":"hi","stream":true,"prompt_cache_key":"review"}`)
-	require.NotNil(t, up.state)
-	fact, ok := up.state.OwnerCutoff()
-	t.Logf("status=%d wire_hops=%d published=%t fact_seq=%d", response.Code, hops.Load(), ok, fact.AttemptSeq)
-	require.EqualValues(t, 2, hops.Load())
-	require.False(t, ok)
+	for _, phase := range []string{"tls_handshake", "http_request"} {
+		t.Run(phase, func(t *testing.T) {
+			release := make(chan struct{})
+			var clientHello atomic.Bool
+			var requests atomic.Int32
+			second := httptest.NewUnstartedServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				<-release
+			}))
+			if phase == "tls_handshake" {
+				second.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+					clientHello.Store(true)
+					<-release
+					return nil, nil
+				}}
+				second.StartTLS()
+			} else {
+				second.Start()
+			}
+			defer second.Close()
+			defer close(release)
+
+			var redirects atomic.Int32
+			first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				redirects.Add(1)
+				http.Redirect(w, r, second.URL+"/next", http.StatusTemporaryRedirect)
+			}))
+			defer first.Close()
+			account := service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{4201}, Credentials: map[string]any{"api_key": "test", "base_url": first.URL}, Extra: map[string]any{"openai_responses_mode": "force_responses"}}
+			repo := &openAIImagesFailoverAccountRepo{accounts: []service.Account{account}}
+			up := &factsRedirectTransport{HTTPUpstream: repository.NewHTTPUpstream(&config.Config{})}
+			h, _, router := captureFixture(t, account, up, captureOptions{cache: &ownerFactsCache{capturePinnedCache: capturePinnedCache{owner: account.ID}}, repo: repo})
+			previous := service.Resilience()
+			rt := service.ProvideResilienceService(nil, ownerFactsStore{}, nil, nil, repo, nil, nil, &service.GatewayService{}, h.gatewayService)
+			t.Cleanup(func() { rt.Stop(); service.SetResilienceInstance(previous) })
+			probe := gin.New()
+			probe.Use(router.Handlers...)
+			probe.Use(func(c *gin.Context) {
+				ctx := c.Request.Context()
+				resilience.StateFrom(ctx).SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
+				c.Next()
+			})
+			probe.POST("/v1/responses", h.Responses)
+			response := captureRequest(probe, "/v1/responses", `{"model":"gpt-5.1","input":"hi","stream":true,"prompt_cache_key":"review"}`)
+			require.Equal(t, http.StatusBadGateway, response.Code)
+			require.EqualValues(t, 1, redirects.Load())
+			if phase == "tls_handshake" {
+				require.True(t, clientHello.Load(), "second hop reached TLS")
+				require.Zero(t, requests.Load(), "second hop has sent no HTTP request")
+			} else {
+				require.EqualValues(t, 1, requests.Load(), "second hop received the HTTP request")
+			}
+			require.NotNil(t, up.state)
+			_, published := up.state.OwnerCutoff()
+			require.False(t, published, "redirect wait cannot establish an original-owner cutoff")
+		})
+	}
+
 }
 
 func TestOwnerCutoffHTTPSource(t *testing.T) {

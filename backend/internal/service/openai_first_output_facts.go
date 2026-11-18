@@ -11,17 +11,17 @@ import (
 // Only sendSchedHTTP attaches this handle to the built request.
 type schedHTTPAttemptKey struct{}
 
-// A redirect or a transport retry can use another connection (including a
-// reused one) within the same Do. The installed timer spans both wire sends.
+// A second GetConn means this Do is trying another HTTP hop, even while it
+// waits for a pooled connection, a dial, or TLS. Its timer still spans both.
 func (a *schedAttemptCapture) withHTTPDispatchTrace(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, schedHTTPAttemptKey{}, a)
-	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GetConn: func(string) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		if a.gotHTTPConn {
+		if a.requestedHTTPConn {
 			a.invalidateRepeatedSendLocked()
 		}
-		a.gotHTTPConn = true
+		a.requestedHTTPConn = true
 	}})
 }
 

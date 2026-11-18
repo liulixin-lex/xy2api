@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"testing"
@@ -265,31 +266,40 @@ func TestTransferEligibilityProtection(t *testing.T) {
 
 func TestOwnerCutoffRepeatedSendBoundary(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, repeat := range []bool{false, true} {
-		synctest.Test(t, func(t *testing.T) {
-			account := rawChatCompletionsTestAccount()
-			body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
-			c, _ := compatStreamContext("/v1/responses", string(body))
-			st, ctx := ownerFactsState(c.Request.Context(), account)
-			c.Request = c.Request.WithContext(ctx)
-			var a *schedAttemptCapture
-			up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
-				a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
-				RecordOpsUpstreamSendBoundary(req.Context(), id)
-				a.markHTTPDispatch(a.dispatch.AttemptSeq) // repeat notification of the same send
-				if repeat {
+	for _, phase := range []string{"first", "explicit_resend", "next_connection"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				account := rawChatCompletionsTestAccount()
+				body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+				c, _ := compatStreamContext("/v1/responses", string(body))
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				var a *schedAttemptCapture
+				up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
 					RecordOpsUpstreamSendBoundary(req.Context(), id)
-				}
-				<-req.Context().Done()
-				return nil, req.Context().Err()
-			}}
-			svc := compatStreamService(up, 1, 0, 0)
-			_, err := svc.Forward(ctx, c, account, body)
-			requireFirstOutputFailover(t, err)
-			_, ok := st.OwnerCutoff()
-			require.Equal(t, !repeat, ok)
-			require.Equal(t, !repeat, a.ownerHit)
-			require.Equal(t, !repeat, a.fullTierFirstOutputTimeout)
+					a.markHTTPDispatch(a.dispatch.AttemptSeq) // repeat notification of the same send
+					trace := httptrace.ContextClientTrace(req.Context())
+					if trace.GetConn != nil {
+						trace.GetConn("first.invalid:443")
+					}
+					if phase == "next_connection" && trace.GetConn != nil {
+						trace.GetConn("next.invalid:443")
+					}
+					if phase == "explicit_resend" {
+						RecordOpsUpstreamSendBoundary(req.Context(), id)
+					}
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				}}
+				svc := compatStreamService(up, 1, 0, 0)
+				_, err := svc.Forward(ctx, c, account, body)
+				requireFirstOutputFailover(t, err)
+				_, ok := st.OwnerCutoff()
+				require.Equal(t, phase == "first", ok)
+				require.Equal(t, phase == "first", a.ownerHit)
+				require.Equal(t, phase == "first", a.fullTierFirstOutputTimeout)
+			})
 		})
 	}
 }
