@@ -289,6 +289,25 @@ describe('GroupSchedBoard', () => {
     expect(document.querySelector('[data-sq-summary="rear-entries"]')!.textContent).toBe('admin.schedQuality.board.rearEntriesNone')
   })
 
+  // Review item 4: a 24-hour count that was not read is unknown with why; a real zero is zero.
+  it.each([
+    ['not read', null, 'admin.schedQuality.board.rearEntriesUnknown'],
+    ['a real zero', { decisions: 0, account_models: 0 }, 'admin.schedQuality.board.rearEntries:{"decisions":0,"account_models":0}']
+  ])('tells a 24-hour rear count %s apart', async (_, rear_entries_24h, expected) => {
+    api.groupsSummary.mockResolvedValue({
+      at: '', stale: false,
+      groups: [{
+        group_id: 53, accounts: { pass: 1, unknown: 0, trial: 0, rear: 0 },
+        last60: { e2e_first_output_p50_ms: null, e2e_first_output_p90_ms: null, body_first_output_p50_ms: null, body_first_output_p90_ms: null, requests: 0, migration_400: 0 },
+        rear_entries_24h
+      }]
+    })
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-summary="rear-entries"]')!.textContent).toBe(expected)
+  })
+
   it('shows the picked model\'s supply: declared, enabled, able to take it now, and the snapshot time; unknown when not read', async () => {
     mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
@@ -303,9 +322,33 @@ describe('GroupSchedBoard', () => {
     markSchedChanged()
     await flushPromises()
     const unknown = 'admin.schedQuality.board.supplyUnknown'
-    expect(supply('counts')).toBe(`admin.schedQuality.board.supplyCounts:{"declared":"${unknown}","enabled":"${unknown}","available":"${unknown}"}`)
+    const unknownCounts = `admin.schedQuality.board.supplyCounts:{"declared":"${unknown}","enabled":"${unknown}","available":"${unknown}"}`
+    expect(supply('counts')).toBe(unknownCounts)
     expect(supply('at')).toBeUndefined()
     expect(supply('failed')).toBe('admin.schedQuality.board.supplyFailed')
+  })
+
+  // Review item 3: a failed refresh of the same group and model leaves no old snapshot as now's supply.
+  it('reads the supply as unknown when the board\'s latest refresh failed, then shows the next snapshot', async () => {
+    mount(Board, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await flushPromises()
+    const supply = (key: string) => document.querySelector(`[data-sq-board-supply] [data-sq-supply="${key}"]`)?.textContent
+    expect(supply('counts')).toBe('admin.schedQuality.board.supplyCounts:{"declared":"4","enabled":"3","available":"2"}')
+
+    api.groupBoard.mockRejectedValueOnce(new Error('down'))
+    markSchedChanged()
+    await flushPromises()
+    const unknown = 'admin.schedQuality.board.supplyUnknown'
+    expect(supply('counts')).toBe(`admin.schedQuality.board.supplyCounts:{"declared":"${unknown}","enabled":"${unknown}","available":"${unknown}"}`)
+    expect(supply('at')).toBeUndefined()
+    expect(supply('failed')).toBe('admin.schedQuality.board.supplyRefreshFailed')
+
+    api.groupBoard.mockResolvedValueOnce({ ...board(), supply: { declared: 5, enabled: 4, available: 1, at: new Date().toISOString() } })
+    markSchedChanged()
+    await flushPromises()
+    expect(supply('counts')).toBe('admin.schedQuality.board.supplyCounts:{"declared":"5","enabled":"4","available":"1"}')
+    expect(supply('failed')).toBeUndefined()
   })
 
   it('takes a typed model name missing from the list, and keeps the picker when that model fails to load', async () => {
@@ -461,7 +504,8 @@ describe('GroupSchedBoard', () => {
       const search = menu.querySelector('input')!
       expect(document.activeElement).toBe(search)
       const highlighted = () => Array.from(menu.querySelectorAll('[role="option"]')).findIndex((el) => el.classList.contains('select-option-focused'))
-      const arrowDown = () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      // Keys come from the search box that has the focus, and bubble to the menu.
+      const arrowDown = () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
       arrowDown()
       await flushPromises()
       const before = highlighted()
@@ -480,7 +524,7 @@ describe('GroupSchedBoard', () => {
       await flushPromises()
       expect(highlighted()).toBe(0)
 
-      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
       await flushPromises()
       // The menu is leaving (jsdom never ends the leave transition).
       expect(trigger.getAttribute('aria-expanded')).toBe('false')

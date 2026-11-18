@@ -51,7 +51,7 @@
       <dt v-tip="t('admin.schedQuality.board.supplyTip')" class="sq-text-3" tabindex="0">{{ t('admin.schedQuality.board.supplyTitle', { model: data.model }) }}</dt>
       <dd class="sq-num sq-text" data-sq-supply="counts">{{ supplyText.counts }}</dd>
       <dd v-if="supplyText.at" class="sq-num sq-text-3" data-sq-supply="at">{{ supplyText.at }}</dd>
-      <dd v-else class="sq-text-3" data-sq-supply="failed">{{ t('admin.schedQuality.board.supplyFailed') }}</dd>
+      <dd v-else class="sq-text-3" data-sq-supply="failed">{{ supplyText.why }}</dd>
     </dl>
     <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
@@ -202,13 +202,15 @@ function pickModel(value: unknown) {
   if (model) setSchedBoardModel(model)
 }
 
-// The picked model's supply; every count unknown when it was not read.
+// The picked model's supply now; every count unknown when the backend could not read it, or when the board's latest
+// refresh failed (the snapshot shown before is not now's, review item 3). The next answer brings a new snapshot.
 const supplyText = computed(() => {
-  const supply = data.value?.supply ?? null
+  const supply = failed.value ? null : data.value?.supply ?? null
   const count = (value: number | undefined) => (value == null ? t('admin.schedQuality.board.supplyUnknown') : String(value))
   return {
     counts: t('admin.schedQuality.board.supplyCounts', { declared: count(supply?.declared), enabled: count(supply?.enabled), available: count(supply?.available) }),
-    at: supply ? t('admin.schedQuality.board.supplyAt', { time: formatShortTime(supply.at) }) : ''
+    at: supply ? t('admin.schedQuality.board.supplyAt', { time: formatShortTime(supply.at) }) : '',
+    why: failed.value ? t('admin.schedQuality.board.supplyRefreshFailed') : t('admin.schedQuality.board.supplyFailed')
   }
 })
 
@@ -232,9 +234,12 @@ const summaryText = computed(() => {
     migration: last60?.migration_400 == null
       ? t('admin.schedQuality.board.summaryMigrationNone')
       : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 }),
-    rearEntries: summary?.rear_entries_24h
-      ? t('admin.schedQuality.board.rearEntries', { decisions: summary.rear_entries_24h.decisions, account_models: summary.rear_entries_24h.account_models })
-      : t('admin.schedQuality.board.rearEntriesNone')
+    // A summary whose 24-hour count was not read says so (review item 4); no summary at all reads "—" like the rest.
+    rearEntries: !summary
+      ? t('admin.schedQuality.board.rearEntriesNone')
+      : summary.rear_entries_24h
+        ? t('admin.schedQuality.board.rearEntries', { decisions: summary.rear_entries_24h.decisions, account_models: summary.rear_entries_24h.account_models })
+        : t('admin.schedQuality.board.rearEntriesUnknown')
   }
 })
 
