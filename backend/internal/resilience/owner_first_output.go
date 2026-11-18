@@ -76,7 +76,7 @@ func (s *RequestState) ConfirmOwnerAvoid(attemptSeq uint64, generation string) b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v := s.ownerCutoff
-	if !v.CanTransfer || v.AttemptSeq != attemptSeq || v.Generation != generation {
+	if v.AttemptSeq != attemptSeq || v.Generation != generation {
 		return false
 	}
 	s.ownerAvoidConfirmed = true
