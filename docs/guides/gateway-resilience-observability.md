@@ -12,7 +12,7 @@
   - 末位兜底账号的判断不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。OpenAI 的按模型瞬时屏蔽与质量状态不显示在选号解释中，OpenAI 分组的当前名次与层看分组详情的“选号顺序”（见 [分组页](group-quality-gate.md#分组页)）。
 - **账号管理**：余额暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文，“恢复状态”立即放回；被学为仅流式的账号在状态列下方显示“仅流式（自动学习，剩余 X 小时）”，有管理权限时“清除”按钮保持可见，文字过长可悬停看完整说明。
 - **运维错误详情**：每次上游尝试带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`），按完整上游载荷计算，与换号决策一致。
-- **使用记录**：由兜底分组服务的请求，管理端主标签显示原分组，下方提示“兜底 → 兜底组名”，悬停说明“按兜底分组计费”。
+- **使用记录**：由兜底分组服务的请求，管理端主标签显示原分组，下方提示“兜底 → 兜底组名”，悬停说明按原始分组和实际服务分组判定、按兜底分组计费。账单的 `fallback` 标志另有含义，见 [两条日志与 fallback 的含义](#两条日志与-fallback-的含义)。
 
 SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额、用户并发、本地模型配置与上游内容安全拒绝标为业务限制，不计入 SLA。
 
@@ -80,7 +80,7 @@ COMMIT;
 | `budget_exhausted` | 请求预算耗尽 |
 | `last_resort` | 末位兜底选中软罚账号 |
 | `fallback_group` / `fallback_return` | 转投兜底分组 / 切回主分组 |
-| `session_rebind` | 会话失败改绑 |
+| `session_rebind` | 请求提出的会话避让（后台叫“会话避让（请求提出）”），不代表归属已换，见 [两条日志与 fallback 的含义](#两条日志与-fallback-的含义) |
 | `undelivered` / `cdn_cut` | 未送达；按耗时推断的 CDN 切断 |
 | `fast_fail` | 同一 Key 重复 503 快速返回 |
 | `turn_cap` | 会话连续耗尽失败到达上限，改为终止应答 |
@@ -96,6 +96,17 @@ COMMIT;
 
 计数按分钟分桶、保留 1 小时；每分钟的键数有上限，超出后合并为不带分组与账号的 `overflow` 汇总行。
 
+## 两条日志与 fallback 的含义
+
+下面几处名字容易读成“换了号”或“换了分组”，实际含义如下。
+
+| 看到的 | 含义 | 要确认什么，看哪里 |
+|---|---|---|
+| 日志 `resilience.session_rebind`、计数 `session_rebind` | 这次请求提出离开会话当前的号（避让的意图），在提交绑定之前记下 | 归属是否已换，以提交记录为准：看 `sched_quality.session_switch` 的 `committed`。`committed=false` 表示没有换成 |
+| 使用记录的 `fallback=true` | 本次由后排号承接（OpenAI 质量选号落到后排层时也会置上），不表示换了分组 | 门槛组里带这个标志的请求很多，实际跨分组的可以是 0 |
+| 跨没跨分组 | 只看原始分组和实际服务分组：管理端使用记录的 `origin_group_id` 有值且不等于 `group_id`，才是由兜底分组承接（界面上的“兜底 → 组名”） | 日志 `resilience.fallback_group`、`resilience.fallback_return` |
+| 无号可用时的末位候选 | 不进账单，账单里没有对应的列 | 看计数 `last_resort` 和日志 `resilience.last_resort`（选中会话暂避的号时为 `resilience.last_resort_avoided`） |
+
 ## 日志事件
 
 结构化日志的消息固定为事件名，细节在字段中。日志不含正文、Key 或完整会话值。
@@ -105,7 +116,7 @@ COMMIT;
 | 事件 | 说明 |
 |---|---|
 | `resilience.balance_paused` | 账号余额暂停，含暂停时长、档位 `step` 与上游原文 |
-| `resilience.session_rebind` | 会话改绑，`reason` 为 `resil_failure_streak`、`post_output_first_failure` 或 `terminal_rejection_streak`，含会话哈希前缀、分组、账号、类别、连击次数与暂避时长 |
+| `resilience.session_rebind` | 请求提出的会话避让（离开原号的意图，不代表归属已换；是否已换看 `sched_quality.session_switch` 的 `committed`），`reason` 为 `resil_failure_streak`、`post_output_first_failure` 或 `terminal_rejection_streak`，含会话哈希前缀、分组、账号、类别、连击次数与暂避时长 |
 | `resilience.last_resort`、`resilience.last_resort_avoided` | 末位兜底选中软罚账号；后者表示选中的是会话暂避集合中的账号。`candidates` 为本轮扫描的候选数，`penalty_reason` 为按原因计数的摘要 |
 | `resilience.same_site_hold` | 同站断流暂停，含 `host_hash`（主机名摘要）、`account_id`、`peer_account_id`、`until` |
 | `resilience.fallback_group`、`resilience.fallback_return` | 转投兜底分组（`reason` 为 `balance_exhausted` 或 `no_servable_account`，只在首次记住该 Key 时记录）与切回 |

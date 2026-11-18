@@ -2,9 +2,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, 
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
-import { groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
+import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
@@ -682,5 +683,100 @@ describe('SchedQualityPanel', () => {
     expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: undefined })
     expect(rowOf(61).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.action.reset')
     expect(document.querySelector('[data-qp-decision="60"]')).toBeNull()
+  })
+
+  const U = 'admin.schedQuality.evidence.samples.unknownValue'
+  // Round 3 (plan item 9): each line says how much of its counted evidence is this group's; older records say unknown.
+  it('shows this group\'s and all the counted units of each line, the first output\'s weight, and why an error line did not recover', async () => {
+    const value = detail()
+    value.groups[1].by_model[0].lines = {
+      ttfo: line('ttfo', 'pass'),
+      error: line('error', 'unknown', { evidence: errorEvidence({ recovery_over_limit: true }) }),
+      cache: legacyLine('cache', 'unknown')
+    }
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    document.querySelector<HTMLElement>('[data-qp-expand="54"]')!.click()
+    await flushPromises()
+    const lineOf = (dim: string) => document.querySelector<HTMLElement>(`[data-qp-group-detail="54"] [data-qp-line="${dim}"]`)!
+    const text = (el: Element | null) => el?.textContent?.trim()
+    expect(text(lineOf('ttfo').querySelector('[data-qp-evidence-samples]'))).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"11","total":"30"}')
+    expect(text(lineOf('ttfo').querySelector('[data-qp-evidence-weight]'))).toBe('admin.schedQuality.evidence.samples.weight:{"local":"9.5","total":"24.5"}')
+    expect(text(lineOf('error').querySelector('[data-qp-evidence-samples]'))).toBe('admin.schedQuality.evidence.samples.error:{"local":"40","total":"80"}')
+    expect(text(lineOf('error').querySelector('[data-qp-evidence-over-limit]'))).toBe('admin.schedQuality.evidence.recoveryOverLimit')
+    // A record from before the counts were kept: unknown with why, not worked out from the source groups.
+    expect(text(lineOf('cache').querySelector('[data-qp-evidence-samples]'))).toBe(`admin.schedQuality.evidence.samples.cache:${JSON.stringify({ local: U, total: U })}`)
+    expect(lineOf('cache').querySelector('[data-qp-evidence-samples-why]')).not.toBeNull()
+    expect(lineOf('ttfo').querySelector('[data-qp-evidence-samples-why]')).toBeNull()
+    expect(lineOf('ttfo').querySelector('[data-qp-evidence-over-limit]')).toBeNull()
+  })
+
+  // Review item 6: each recorded figure is shown on its own; a missing one is unknown and hides nothing else.
+  it('reads an older first-output record field by field: unknown counts and local weight, the recorded total weight', () => {
+    const ttfo = legacyLine('ttfo', 'pass')
+    const w = mount(SchedEvidence, { props: { dim: 'ttfo', evidence: ttfo.evidence, samples: ttfo, sourceGroups: [53] } })
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.ttfo:${JSON.stringify({ local: U, total: U })}`)
+    expect(w.get('[data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
+    expect(w.get('[data-qp-evidence-samples-why]').text()).toBe('admin.schedQuality.evidence.samples.unknownWhy')
+    const error = legacyLine('error', 'unknown')
+    const e = mount(SchedEvidence, { props: { dim: 'error', evidence: error.evidence, samples: error } })
+    expect(e.find('[data-qp-evidence-over-limit]').exists()).toBe(false)
+    expect(e.find('[data-qp-evidence-weight]').exists()).toBe(false)
+  })
+
+  // Second review item 5: one side missing never hides the other; a recorded 0 is 0, not unknown.
+  it.each([
+    ['this group 0, all missing', { samples_local: 0, samples_total: null }, { local: '0', total: U }],
+    ['this group missing, all 12', { samples_local: null, samples_total: 12 }, { local: U, total: '12' }]
+  ])('shows each side of the counts on its own: %s', (_, samples, expected) => {
+    const w = mount(SchedEvidence, { props: { dim: 'error', evidence: errorEvidence(), samples } })
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.error:${JSON.stringify(expected)}`)
+    expect(w.get('[data-qp-evidence-samples-why]').text()).toBe('admin.schedQuality.evidence.samples.unknownWhy')
+  })
+
+  it('shows a basis\'s own counts when its nested evidence is missing', () => {
+    const w = mount(SchedEvidence, { props: { dim: 'ttfo', evidence: undefined, samples: { samples_local: 4, samples_total: 12 } } })
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"4","total":"12"}')
+    expect(w.text()).toContain('admin.schedQuality.evidence.none')
+    expect(w.find('[data-qp-evidence-weight]').exists()).toBe(false)
+    expect(w.find('[data-qp-evidence-samples-why]').exists()).toBe(false)
+  })
+
+  it('says why a trial ended without a verdict from the basis: no traffic, not enough evidence, the seats, or an older record', async () => {
+    const record = (id: number, patch: Partial<BackendDecision>): BackendDecision =>
+      ({ id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'trial_timeout', level: 0, until: null, ...patch })
+    api.accountDecisions.mockResolvedValueOnce([
+      record(6, { basis: basis('ttfo', { kind: 'trial', samples_local: 0, samples_total: 12, trial_seats: 'full' }) }),
+      record(5, { basis: basis('ttfo', { kind: 'trial', samples_local: 6, ttft: ttfoEvidence({ causes: ['mass_insufficient', 'sessions_insufficient'] }), trial_seats: 'not_observed' }) }),
+      record(4, { line: 'error', basis: basis('error', { kind: 'trial', samples_local: 6, trial_seats: 'unknown' }) }),
+      record(3, { basis: legacyBasis('ttfo', { kind: 'trial' }) }),
+      record(2, { basis: null }),
+      record(8, { basis: legacyBasis('ttfo', { kind: 'trial', trial_seats: 'full' }) }),
+      record(7, { basis: basis('ttfo', { kind: 'trial', samples_local: 0 }) }),
+      record(1, { action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo') })
+    ])
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    await w.get('[data-qp-decisions-toggle]').trigger('click')
+    await flushPromises()
+    const reason = (id: number) => w.find(`[data-qp-trial-timeout="${id}"]`)
+    const line = (reasons: string) => `admin.schedQuality.decisions.timeout.line:${JSON.stringify({ reasons })}`
+    const J = 'admin.schedQuality.decisions.timeout.joiner'
+    expect(reason(6).text()).toBe(line(`admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seats.full`))
+    const causes = 'admin.schedQuality.evidence.causes.mass_insufficientadmin.schedQuality.evidence.joineradmin.schedQuality.evidence.causes.sessions_insufficient'
+    expect(reason(5).text()).toBe(line(`admin.schedQuality.decisions.timeout.evidenceWhy:${JSON.stringify({ reasons: causes })}${J}admin.schedQuality.decisions.timeout.seats.not_observed`))
+    expect(reason(4).text()).toBe(line(`admin.schedQuality.decisions.timeout.evidence${J}admin.schedQuality.decisions.timeout.seats.unknown`))
+    expect(reason(3).text()).toBe(line('admin.schedQuality.decisions.timeout.legacy'))
+    expect(reason(2).text()).toBe(line('admin.schedQuality.decisions.timeout.legacy'))
+    expect(reason(1).exists()).toBe(false)
+    // One part recorded, the other not: the recorded one stays, the other says it was not recorded.
+    expect(reason(8).text()).toBe(line(`admin.schedQuality.decisions.timeout.trafficLegacy${J}admin.schedQuality.decisions.timeout.seats.full`))
+    expect(reason(7).text()).toBe(line(`admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seatsLegacy`))
+    // The basis opens to the same counts the line shows.
+    await w.get('[data-qp-decision-evidence="5"]').trigger('click')
+    expect(w.get('[data-qp-decision="5"] [data-qp-evidence-samples]').text()).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"6","total":"30"}')
+    await w.get('[data-qp-decision-evidence="3"]').trigger('click')
+    expect(w.get('[data-qp-decision="3"] [data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.ttfo:${JSON.stringify({ local: U, total: U })}`)
+    expect(w.get('[data-qp-decision="3"] [data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
   })
 })

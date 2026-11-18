@@ -93,5 +93,11 @@
       "concurrency": 10,
       "last_used_at": "2026-11-11T11:58:00Z"
     }
-  ]
+  ],
+  "supply": {
+    "declared": 4,
+    "enabled": 3,
+    "available": 2,
+    "at": "2026-11-11T12:00:00Z"
+  }
 }

@@ -13,6 +13,7 @@ import type {
   BackendDim,
   BackendEvidenceOf,
   BackendGroupModel,
+  BackendSampleCounts,
   BackendIdentity,
   BackendLine
 } from '@/api/admin/schedQualityTypes'
@@ -157,6 +158,30 @@ export function lineEvidence<D extends BackendDim>(dim: D, evidence: BackendEvid
     { key: 'sessions', value: String(e.sessions) },
     { key: 'low_sessions', value: String(e.low_sessions) }
   ]
+}
+
+/** This group's and all the units of a line, as the copy shows them; each null when the record does not have it. */
+export interface SampleSplit {
+  local: string | null
+  total: string | null
+}
+
+/**
+ * The units the line's rule really counted (samples, clear outcomes or turns): this group's and all, borrowed ones
+ * included, from the line or the basis itself; for the first-output line also the discounted weight (this group's
+ * n_local of all n), from its evidence. Each value is read on its own: one a record does not have is unknown (null),
+ * never worked out from the source groups, and does not hide the others. No weight without first-output evidence.
+ */
+export function lineSamples(
+  dim: BackendDim,
+  counts: BackendSampleCounts | null | undefined,
+  evidence: BackendEvidenceOf[BackendDim] | null | undefined
+): { count: SampleSplit; weight: SampleSplit | null } {
+  const text = (value: number | null | undefined) => (value == null ? null : String(value))
+  const count = { local: text(counts?.samples_local), total: text(counts?.samples_total) }
+  const ttfo = dim === 'ttfo' ? (evidence as BackendEvidenceOf['ttfo'] | null | undefined) : null
+  const weight = ttfo ? { local: ttfo.n_local == null ? null : mass(ttfo.n_local), total: mass(ttfo.n) } : null
+  return { count, weight }
 }
 
 /** Why a first-output verdict is unknown (rule B's reasons); the other lines carry none. */

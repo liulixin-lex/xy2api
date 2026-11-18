@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :stats="usageStats" :e2e-state="usageStatsState" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -135,6 +135,7 @@
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
             show-fallback-origin
+            show-end-to-end
             :data="usageRows"
             :loading="usageLoading"
             :columns="visibleColumns"
@@ -213,6 +214,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import { useUsageStatsState } from './usageStatsState'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
@@ -438,9 +440,24 @@ type DetailTab = 'usage' | 'errors' | 'ranking'
 const activeTab = ref<DetailTab>('usage')
 const usageTableRef = ref<InstanceType<typeof UsageTable> | null>(null)
 const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
+// The user-wait card's state for the current filter (see usageStatsState.ts): the list and the stats requests report
+// to it, each with its generation. The other cards keep the last stats answer until a new one arrives, as before.
+const statsCard = useUsageStatsState(() => JSON.stringify(filters.value))
+const usageStatsState = statsCard.phase
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
-  fetchPage: (signal) => adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal }),
+  fetchPage: async (signal) => {
+    // The stats run only after an active list load succeeds: its failure means the current filter's stats are not
+    // asked. The 5 s membership check uses the same request but starts no stats, so its failure says nothing about
+    // them (fourth review). The engine sets `loading` before an active load asks, and runs no check during one.
+    const list = liveUsage.loading.value ? statsCard.listStarted() : null
+    try {
+      return await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
+    } catch (error) {
+      if (!signal.aborted) list?.failed()
+      throw error
+    }
+  },
   membershipIntervalMs: 5000,
   membershipActive: () => activeTab.value === 'usage',
   tail: {
@@ -468,6 +485,7 @@ const askEndpointStats = (noCache = false) => {
   if (noCache) statsNoCache = true
 }
 const runStatsTask = async (signal: AbortSignal) => {
+  const run = statsCard.statsStarted()
   const withEndpoints = endpointStatsDue
   const noCache = statsNoCache
   const requestType = filters.value.request_type
@@ -478,9 +496,10 @@ const runStatsTask = async (signal: AbortSignal) => {
       stream: legacyStream === null ? undefined : legacyStream,
       ...(noCache ? { nocache: 1 } : {}),
     })
-    if (signal.aborted) return // a load started: the filter may have changed
+    if (signal.aborted || !run.latest()) return // a load started: the filter may have changed
     if (noCache) statsNoCache = false
     usageStats.value = s
+    run.loaded()
     if (!withEndpoints) return
     inboundEndpointStats.value = s.endpoints || []
     upstreamEndpointStats.value = s.upstream_endpoints || []
@@ -488,7 +507,8 @@ const runStatsTask = async (signal: AbortSignal) => {
     endpointStatsDue = false
     endpointStatsLoading.value = false
   } catch (error) {
-    if (signal.aborted) return
+    if (signal.aborted || !run.latest()) return
+    run.failed()
     console.error('Failed to load usage stats:', error)
     if (withEndpoints) endpointStatsLoading.value = false
     throw error // the engine retries it on the back-off beat
@@ -588,6 +608,7 @@ const loadChartData = async () => {
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
 const applyFilters = () => {
+  statsCard.retry()
   pagination.page = 1
   invalidateModelStatsCache()
   usageTableRef.value?.scrollToTop?.()
@@ -603,6 +624,7 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
+  statsCard.retry()
   void adminSettingsStore.fetch(true)
   invalidateModelStatsCache()
   askEndpointStats(true)

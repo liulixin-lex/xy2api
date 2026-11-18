@@ -28,7 +28,9 @@ vi.mock('@/composables/useAdminPermission', async () => {
 // design/copy.md, and none is a sentence. Existing keys reused by the design (column "操作", close) are listed too.
 // The quality panel is not held to it any more: its copy follows the approved prototype of the redesign (spec 5),
 // which has empty states and notes. Nor is the board's group summary (ruling H.9): it carries the report's own
-// sentences ("users' wait for the first useful output, from entering the gateway …", 5.3 and N11).
+// sentences ("users' wait for the first useful output, from entering the gateway …", 5.3 and N11). Nor are the board's
+// supply line and the policy's threshold notes (round 3, plan item 9): they explain what a count means and what the
+// saved error limit takes to judge a line bad, in sentences, as the plan asks.
 const messages = { admin: { ...zhSched, accounts: { columns: { actions: '操作' } } }, common: { close: '关闭' } }
 const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: messages } })
 
@@ -48,16 +50,17 @@ function nonData(text: string) {
   return rest.split(/\s+/).filter(Boolean)
 }
 
+const EXPLAINED = '[data-sq-board-summary], [data-sq-board-supply], [data-sq-policy-notes]'
 // Visible text and tips; screen-reader-only descriptions are checked on their own.
 function rendered(): string[] {
   const out: string[] = []
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent?.trim()
-    if (text && !node.parentElement?.closest('.sr-only, [data-sq-board-summary]')) out.push(text)
+    if (text && !node.parentElement?.closest(`.sr-only, ${EXPLAINED}`)) out.push(text)
   }
   document.querySelectorAll<HTMLElement & { __tipText?: string }>('*').forEach((el) => {
-    if (el.__tipText && !el.closest('[data-sq-board-summary]')) out.push(el.__tipText)
+    if (el.__tipText && !el.closest(EXPLAINED)) out.push(el.__tipText)
   })
   return out
 }

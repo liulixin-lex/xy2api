@@ -992,3 +992,58 @@ describe('admin usage metric visibility', () => {
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
 })
+
+describe('admin usage latency: the user wait first', () => {
+  const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, duration_ms: 70_000, first_token_ms: 800, end_to_end_first_output_ms: 51_000 }
+  const mountLatency = (props = {}, data: unknown[] = [row]) => mount(UsageTable, {
+    props: { data: data as never[], columns: [], ...props },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
+  })
+
+  it('leads with the end-to-end first output and keeps the last attempt as a secondary line on the admin page', () => {
+    const wrapper = mountLatency({ showEndToEnd: true })
+    const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
+    expect(e2e.text()).toBe('51.00s')
+    // The colour follows the user's wait (51 s is "slow"), not the last attempt's 0.8 s.
+    expect(e2e.classes()).toContain('text-orange-600')
+    expect(wrapper.get('[data-testid="usage-latency-last-attempt"]').text()).toBe('800ms')
+    expect(wrapper.text()).toContain('usage.latencyEndToEnd')
+    expect(wrapper.text()).toContain('usage.latencyLastAttempt')
+    expect(wrapper.text()).not.toContain('usage.latencyFirstToken')
+    expect(wrapper.find('span[aria-hidden="true"]').classes()).toContain('from-orange-500')
+  })
+
+  // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other.
+  it.each([
+    ['no end-to-end value', { end_to_end_first_output_ms: null, first_token_ms: 800 }, { e2e: null, last: '800ms' }],
+    ['no last-attempt value', { end_to_end_first_output_ms: 51_000, first_token_ms: null }, { e2e: '51.00s', last: null }],
+    ['neither', { end_to_end_first_output_ms: null, first_token_ms: null }, { e2e: null, last: null }]
+  ])('shows each value or unknown with why on its own: %s', (_, patch, expected) => {
+    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, ...patch }])
+    const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
+    const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
+    if (expected.e2e) {
+      expect(e2e.text()).toBe(expected.e2e)
+      expect(e2e.attributes('title')).toBeUndefined()
+    } else {
+      expect(e2e.text()).toBe('usage.latencyUnknown')
+      expect(e2e.attributes('title')).toBe('usage.latencyEndToEndUnknownHint')
+    }
+    if (expected.last) {
+      expect(last.text()).toBe(expected.last)
+      expect(last.attributes('title')).toBeUndefined()
+    } else {
+      expect(last.text()).toBe('usage.latencyUnknown')
+      expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
+    }
+    expect(wrapper.text()).toContain('usage.latencyDuration1m 10s')
+  })
+
+  it('keeps the first token on the shared user page, whose answer has no end-to-end value', () => {
+    const wrapper = mountLatency()
+    expect(wrapper.find('[data-testid="usage-latency-e2e"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('usage.latencyFirstToken')
+    expect(wrapper.text()).toContain('800ms')
+    expect(wrapper.text()).not.toContain('51.00s')
+  })
+})

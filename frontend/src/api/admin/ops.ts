@@ -72,7 +72,15 @@ export interface OpsDashboardOverview {
   } | null
 
   duration: OpsPercentiles
+  /** First token of the last attempt: health score, scheduled reports and the threshold colour use it. */
   ttft: OpsPercentiles
+  /**
+   * End-to-end first output (gateway entry to the user's first useful output, queueing and earlier failed attempts
+   * included), stored and merged like ttft. Every value is null without samples, e.g. a range before the upgrade.
+   */
+  e2e_first_output?: OpsPercentiles
+  /** Samples merged into e2e_first_output; 0 without any. It does not say which periods have no records. */
+  e2e_first_output_sample_count?: number
 }
 
 export interface OpsPercentiles {
@@ -115,7 +123,7 @@ export interface OpsThroughputTrendResponse {
 
 export type OpsRequestKind = 'success' | 'error'
 export type OpsRequestDetailsKind = OpsRequestKind | 'all'
-export type OpsRequestDetailsSort = 'created_at_desc' | 'duration_desc' | 'ttft_desc'
+export type OpsRequestDetailsSort = 'created_at_desc' | 'duration_desc' | 'ttft_desc' | 'e2e_first_output_desc'
 
 export interface OpsRequestDetail {
   kind: OpsRequestKind
@@ -125,7 +133,10 @@ export interface OpsRequestDetail {
   platform?: string
   model?: string
   duration_ms?: number | null
+  /** First token of the last attempt. */
   first_token_ms?: number | null
+  /** Gateway entry to the user's first useful output (the usage record's or the error record's). */
+  end_to_end_first_output_ms?: number | null
   status_code?: number | null
 
   error_id?: number | null

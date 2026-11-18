@@ -115,7 +115,7 @@ export default {
         last_resort: '末位兜底',
         fallback_group: '兜底分组承接',
         fallback_return: '切回主分组',
-        session_rebind: '会话改绑',
+        session_rebind: '会话避让（请求提出）',
         undelivered: '未送达',
         cdn_cut: '推断的 CDN 切断',
         fast_fail: '快速失败',
@@ -129,6 +129,9 @@ export default {
         collab_call: '协作工具调用（按密文参数状态）',
         collab_call_action: '协作工具调用处理动作',
         state_rejection: '会话状态拒绝'
+      },
+      metricHints: {
+        session_rebind: '一次请求提出离开会话当前的号（避让），不等于会话已经换号。归属是否已换，以提交记录为准（日志 sched_quality.session_switch 的 committed）。'
       }
     },
     undelivered: {
@@ -227,7 +230,7 @@ export default {
     },
     usage: {
       fallback: '兜底 → {group}',
-      fallbackTitle: '原分组无可用账号，由兜底分组承接；按兜底分组计费，用户只看到原分组'
+      fallbackTitle: '按原始分组和实际服务分组判定：两者不同，即原分组无可用账号、由兜底分组承接；按兜底分组计费，用户只看到原分组。账单里的 fallback 标志只表示后排号承接，不表示换了分组'
     }
   }
 }

@@ -40,11 +40,13 @@
               >{{ t('admin.schedQuality.decisions.evidence') }}</button>
             </div>
             <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
+            <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
             <SchedEvidence
               v-if="item.basis && shown.has(item.id)"
               class="drow__basis"
               :dim="item.basis.line"
               :evidence="basisEvidence(item.basis)"
+              :samples="item.basis"
               :source-groups="item.basis.source_groups"
               :group-name="groupName"
             />
@@ -77,6 +79,7 @@ import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
+import { evidenceCauses } from './qualityPanel'
 
 const PAGE = 50
 /** Rear stay of each level, minutes. */
@@ -180,6 +183,35 @@ function detailLine(item: BackendDecision): string {
 }
 
 const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basis.cache ?? null
+
+/**
+ * Why a trial ended without a verdict, from the basis as it is (the backend gives no reason code): no traffic of this
+ * group during the trial, or not enough evidence (the first-output line adds rule B's reasons); then, on its own, what
+ * was seen of the trial seats. Each part is read on its own: one the record does not have says so without hiding the
+ * other, and a record with neither is an older decision. Nothing is worked out.
+ */
+function timeoutReason(item: BackendDecision): string {
+  const basis = item.basis
+  const local = basis?.samples_local
+  const seats = basis?.trial_seats
+  if (!basis || (local == null && seats == null)) {
+    return t('admin.schedQuality.decisions.timeout.line', { reasons: t('admin.schedQuality.decisions.timeout.legacy') })
+  }
+  const parts: string[] = []
+  if (local == null) parts.push(t('admin.schedQuality.decisions.timeout.trafficLegacy'))
+  else if (local === 0) parts.push(t('admin.schedQuality.decisions.timeout.noTraffic'))
+  else {
+    const causes = evidenceCauses(basis.line, basis.ttft).map((cause) => {
+      const key = `admin.schedQuality.evidence.causes.${cause}`
+      return te(key) ? t(key) : t('admin.schedQuality.unknown')
+    })
+    parts.push(causes.length
+      ? t('admin.schedQuality.decisions.timeout.evidenceWhy', { reasons: causes.join(t('admin.schedQuality.evidence.joiner')) })
+      : t('admin.schedQuality.decisions.timeout.evidence'))
+  }
+  parts.push(seats == null ? t('admin.schedQuality.decisions.timeout.seatsLegacy') : t(`admin.schedQuality.decisions.timeout.seats.${seats}`))
+  return t('admin.schedQuality.decisions.timeout.line', { reasons: parts.join(t('admin.schedQuality.decisions.timeout.joiner')) })
+}
 </script>
 
 <style scoped>

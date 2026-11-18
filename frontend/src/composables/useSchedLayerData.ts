@@ -55,11 +55,13 @@ const board = shallowReactive({
   data: null as BackendOrder | null,
   /** The group over all its models (POST …/groups/summary), written on its own; null when it did not load. */
   summary: null as BackendGroupSummary | null,
+  /** The group whose summary request failed last (not one still on its way, nor an answer without the group). */
+  summaryFailedGroup: null as number | null,
   failedKey: null as string | null
 })
 let refreshTask: ((name: string) => Promise<void>) | null = null
 const forgetPanel = () => Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
-const forgetBoard = () => Object.assign(board, { key: null, data: null, summary: null, failedKey: null })
+const forgetBoard = () => Object.assign(board, { key: null, data: null, summary: null, summaryFailedGroup: null, failedKey: null })
 
 const { drawer, board: boardRequest, changed } = useSchedLayers()
 const boardKey = () => (boardRequest.groupId === null ? null : `${boardRequest.groupId}:${boardRequest.model ?? ''}`)
@@ -115,14 +117,16 @@ export function useSchedLayerTasks() {
         const groupId = boardRequest.groupId
         if (groupId === null) return
         let summary: BackendGroupSummary | null = null
+        let failed = false
         try {
           const value = await schedQualityAPI.groupsSummary([groupId], { signal })
           summary = value?.groups?.find((group) => group.group_id === groupId) ?? null
         } catch {
-          summary = null
+          failed = true
         }
         if (signal.aborted || boardRequest.groupId !== groupId) return
         board.summary = summary
+        board.summaryFailedGroup = failed ? groupId : null
       }
     }
   ]
@@ -142,6 +146,7 @@ export function useSchedLayerTasks() {
     // The summary is the group's over all models: a model switch keeps it, another group asks again.
     watch(() => boardRequest.groupId, (groupId) => {
       board.summary = null
+      board.summaryFailedGroup = null
       if (groupId !== null) void refresh(SCHED_BOARD_SUMMARY_TASK)
     })
     // Any quality action (in the panel, the row menu, a batch) reloads the open layers; a recovery waits for the panel.

@@ -11,7 +11,9 @@ const dynamicKeys = [
   ...['balancePause', 'codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
   'admin.resilience.explain.reasons.capability_stream_only',
   'admin.resilience.panel.metrics.pre_created_delta',
-  ...['collab_plaintext', 'collab_call', 'collab_call_action', 'state_rejection'].map((k) => `admin.resilience.panel.metrics.${k}`)
+  ...['collab_plaintext', 'collab_call', 'collab_call_action', 'state_rejection'].map((k) => `admin.resilience.panel.metrics.${k}`),
+  // Round 3: the session_rebind counter is the request's avoidance; its hint says where the committed switch is.
+  'admin.resilience.panel.metricHints.session_rebind'
 ]
 
 function lookup(messages: unknown, key: string): unknown {
