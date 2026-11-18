@@ -102,6 +102,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
+	// Responses-shaped Chat requests can forward the original continuation ID.
+	if strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()) != "" &&
+		!gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+		c.Request = c.Request.WithContext(service.WithOpenAITransferProtected(c.Request.Context()))
+	}
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	if !service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body) {
