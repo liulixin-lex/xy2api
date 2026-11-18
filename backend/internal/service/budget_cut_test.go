@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -46,7 +47,11 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 			account := &Account{ID: 7, Platform: PlatformOpenAI}
 			fe := svc.newOpenAIFirstOutputTimeoutError(ctx, c, account, nil, "", profile.AttemptStart, "alias", "", plan.Effective(), "first_output", nil, plan)
 			require.Equal(t, PlannedFirstOutputTimeoutReason, fe.Reason)
-			require.Equal(t, mode == resilience.BudgetAttributionEnforce, BudgetCutApplied(fmt.Errorf("wrapped: %w", fe)))
+			var wrappedFailover *UpstreamFailoverError
+			require.True(t, errors.As(fmt.Errorf("wrapped: %w", fe), &wrappedFailover))
+			require.NotNil(t, wrappedFailover.BudgetCutPlan)
+			require.Equal(t, plan.Start(), wrappedFailover.BudgetCutPlan.Start())
+			require.Equal(t, mode == resilience.BudgetAttributionEnforce, wrappedFailover.BudgetCutPlan.Applied())
 			require.True(t, fe.ShouldReportAccountScheduleFailure())
 			_, _, counted := classifyOpenAIAPIKeyHealthFailure(fe)
 			require.False(t, counted, "planned classifier stays exempt")
@@ -59,8 +64,11 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 			require.True(t, counted)
 		})
 	}
-	require.False(t, BudgetCutApplied(nil))
-	require.False(t, BudgetCutApplied(&UpstreamFailoverError{}))
+	var failover *UpstreamFailoverError
+	require.False(t, errors.As(nil, &failover))
+	noPlan := newOpenAIUpstreamFailoverError(http.StatusBadGateway, nil, nil, "", false)
+	require.True(t, errors.As(noPlan, &failover))
+	require.Nil(t, failover.BudgetCutPlan)
 }
 
 func TestBudgetLateWarningsReachSystemSink(t *testing.T) {
