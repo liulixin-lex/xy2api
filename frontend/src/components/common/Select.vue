@@ -336,9 +336,10 @@ const filteredOptions = computed(() => {
       if (opt.description && String(opt.description).toLowerCase().includes(query)) return true
       return false
     })
-    // In creatable mode, always prepend a fuzzy search option
-    if (props.creatable && searchQuery.value.trim()) {
-      const trimmed = searchQuery.value.trim()
+    // In creatable mode, prepend a fuzzy search option, unless an option already has exactly that value (picking
+    // either gives the same value, so the list would show it twice)
+    const trimmed = searchQuery.value.trim()
+    if (props.creatable && trimmed && !opts.some((opt) => getOptionValue(opt) === trimmed)) {
       const prefix = props.creatablePrefix || t('common.search')
       opts = [{ [props.valueKey]: trimmed, [props.labelKey]: `${prefix} "${trimmed}"`, _creatable: true }, ...opts]
     }
