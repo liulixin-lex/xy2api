@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -83,11 +84,15 @@ type followAccountReadBarrier struct {
 
 type followAccountReads struct {
 	AccountRepository
-	reads map[int64]int
+	reads    map[int64]int
+	ownerErr error
 }
 
 func (r *followAccountReads) GetByID(ctx context.Context, id int64) (*Account, error) {
 	r.reads[id]++
+	if id == 10 && r.ownerErr != nil {
+		return nil, r.ownerErr
+	}
 	return r.AccountRepository.GetByID(ctx, id)
 }
 
@@ -375,6 +380,98 @@ func TestFirstOutputFollowLateStrictAvoid(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestFirstOutputFollowSessionHashReadError(t *testing.T) {
+	withResilienceSettings(t, nil)
+	transient := errors.New("repository unavailable")
+	for _, tc := range []struct {
+		name                  string
+		snapshot, firstOutput bool
+		err                   error
+		reason                string
+		released              bool
+	}{
+		{"recheck_transient", true, true, transient, "owner_recheck_transient", false},
+		{"initial_lookup_transient", false, true, transient, "owner_recheck_transient", false},
+		{"deleted", true, true, ErrAccountNotFound, "owner_recheck_failed", true},
+		{"legacy_transient", true, false, transient, "owner_recheck_failed", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, repo := followSnapshotFixture(t)
+			if !tc.snapshot {
+				f.svc.schedulerSnapshot = nil
+			}
+			repo.ownerErr = tc.err
+			group := int64(7)
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), st)
+			f.svc.prepareOpenAIStickyChange(ctx, &group, "session")
+			req := OpenAIAccountScheduleRequest{GroupID: &group, Platform: PlatformOpenAI, SessionHash: "session", RequestedModel: "m",
+				StickyAccountID: 10, RequiredTransport: OpenAIUpstreamTransportHTTPSSE, RequiredCapability: OpenAIEndpointCapabilityResponses}
+			if tc.firstOutput {
+				ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, int64(10))
+				req.ExcludedIDs = map[int64]struct{}{10: {}}
+			}
+			sel, _, err := f.svc.selectBySessionHash(ctx, req)
+			require.NoError(t, err)
+			require.Nil(t, sel)
+			require.Equal(t, tc.reason, st.StickyBypassReason())
+			require.Equal(t, tc.released, pendingOpenAIStickyChange(ctx).ownerReleased)
+			require.Equal(t, 1, repo.reads[10])
+			y := &f.repo.accounts[1]
+			planOpenAIStickyReplacement(ctx, &group, "session", "m", &AccountSelectionResult{Account: y})
+			followDelivery(f.svc, ctx, y, time.Millisecond, &OpenAIForwardResult{})
+			if tc.released {
+				require.Equal(t, y.ID, f.cache.sessionBindings["openai:session"])
+			} else {
+				require.EqualValues(t, 10, f.cache.sessionBindings["openai:session"])
+				require.Empty(t, f.cache.casKeys)
+			}
+		})
+	}
+}
+
+// Controls for the other consumers of the original before-profit recheck.
+func TestFirstOutputFollowExistingRecheckCallers(t *testing.T) {
+	group := int64(7)
+	t.Run("model_filter_keeps_dependency_reason", func(t *testing.T) {
+		f, repo := followSnapshotFixture(t)
+		repo.ownerErr = errors.New("repository unavailable")
+		ctx := withSelectionFailureEvidence(context.Background())
+		best, _, _ := f.svc.selectBestAccount(ctx, &group, PlatformOpenAI, f.repo.accounts, "m", nil, false, OpenAIEndpointCapabilityResponses, true)
+		require.NotNil(t, best)
+		require.EqualValues(t, 11, best.ID)
+		evidence := ctx.Value(selectionFailureEvidenceKey{}).(*selectionFailureEvidence)
+		require.Equal(t, SelectionReasonDependencyError, evidence.reasons[10])
+		require.ErrorIs(t, evidence.cause, repo.ownerErr)
+		require.Equal(t, map[int64]int{10: 1, 11: 1}, repo.reads)
+	})
+	t.Run("terminal_profit_gate_runs_once", func(t *testing.T) {
+		f, repo := followSnapshotFixture(t)
+		x := &f.repo.accounts[0]
+		x.RateMultiplier = floatPtr(0.9)
+		st := resilience.NewRequestState()
+		st.EnableGatewayRequest(time.Now())
+		ctx := resilience.WithRequestState(context.Background(), st)
+		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: group, platform: PlatformOpenAI, ceilingOn: true, threshold: 0.8})
+		require.NotNil(t, f.svc.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, x, &group, PlatformOpenAI, "m", false, OpenAIEndpointCapabilityResponses))
+		require.Nil(t, f.svc.recheckSelectedOpenAIAccountFromDB(ctx, x, &group, PlatformOpenAI, "m", false, OpenAIEndpointCapabilityResponses))
+		require.Equal(t, 2, repo.reads[x.ID])
+		meta, _ := st.ClaimGatewayRequest(false)
+		require.Len(t, meta.ProfitBasis.Vetoes, 1)
+		require.Equal(t, openAIProfitFilterReasonThreshold, meta.ProfitBasis.Vetoes[0].Verdict)
+	})
+	t.Run("sticky_owner_without_snapshot", func(t *testing.T) {
+		f, repo := followSnapshotFixture(t)
+		f.svc.schedulerSnapshot = nil
+		x := &f.repo.accounts[0]
+		got, transient, reason := f.svc.recheckOpenAIStickyOwnerFromDB(context.Background(), x, &group, PlatformOpenAI, "m", false, OpenAIEndpointCapabilityResponses)
+		require.Same(t, x, got)
+		require.False(t, transient)
+		require.Empty(t, reason)
+		require.Empty(t, repo.reads)
+	})
 }
 
 func TestFirstOutputFollowEmptyScopePreservesBindingChanges(t *testing.T) {

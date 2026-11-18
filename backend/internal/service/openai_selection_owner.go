@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -41,9 +42,17 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 	if accountID <= 0 {
 		return nil, false, nil
 	}
+	excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, req.ExcludedIDs)
+	noteUnavailable := func(reason string, err error) {
+		if firstOutput && err != nil && !errors.Is(err, ErrAccountNotFound) {
+			noteBypass("owner_recheck_transient")
+			return
+		}
+		clearBinding(reason)
+	}
 	account, err := s.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
-		clearBinding("owner_unavailable")
+		noteUnavailable("owner_unavailable", err)
 		return nil, false, nil
 	}
 	// A configured floor is a persistent owner exclusion, including while a
@@ -52,7 +61,6 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		clearBinding(openAIProfitFilterReasonFloor)
 		return nil, false, nil
 	}
-	excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, req.ExcludedIDs)
 	if excluded {
 		noteBypass("owner_excluded")
 		return nil, false, nil
@@ -83,9 +91,13 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		clearBinding("transport_incompatible")
 		return nil, false, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	if firstOutput && s.schedulerSnapshot != nil && s.accountRepo != nil {
+		account, err = s.readAndRecheckOpenAIAccountBeforeProfit(ctx, account.ID, req.GroupID, NormalizeOpenAICompatiblePlatform(req.Platform), req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	} else {
+		account = s.recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	}
 	if account == nil {
-		clearBinding("owner_recheck_failed")
+		noteUnavailable("owner_recheck_failed", err)
 		return nil, false, nil
 	}
 	if !s.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {

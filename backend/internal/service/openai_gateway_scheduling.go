@@ -1623,12 +1623,19 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return account
 	}
 
-	latest, err := s.accountRepo.GetByID(ctx, account.ID)
+	latest, _ := s.readAndRecheckOpenAIAccountBeforeProfit(ctx, account.ID, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	return latest
+}
+
+// The caller has a scheduling snapshot. Return the underlying read error so
+// a first-output borrower can distinguish it from a failed admission check.
+func (s *OpenAIGatewayService) readAndRecheckOpenAIAccountBeforeProfit(ctx context.Context, accountID int64, groupID *int64, platform, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) (*Account, error) {
+	latest, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil || latest == nil {
-		observeSelectionFailure(ctx, account.ID, string(SelectionReasonDependencyError), err)
-		return nil
+		observeSelectionFailure(ctx, accountID, string(SelectionReasonDependencyError), err)
+		return nil, err
 	}
-	return s.recheckLatestOpenAIAccount(ctx, latest, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	return s.recheckLatestOpenAIAccount(ctx, latest, groupID, platform, requestedModel, requireCompact, requiredCapability), nil
 }
 
 // recheckLatestOpenAIAccount applies the DB recheck to an account just read.
