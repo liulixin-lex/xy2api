@@ -3283,7 +3283,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			// Attribute the timer at firing. Delivery still resolves disconnects and
 			// bare errors after Close has allowed any in-flight read to finish.
-			if !clientDisconnected && reqCtx.Err() == nil && !(codexFailureTerminal && sawBareError && !sawResponseFailed) {
+			if !clientDisconnected && reqCtx.Err() == nil && (!codexFailureTerminal || !sawBareError || sawResponseFailed) {
 				claimOpenAIFirstOutputCutoff(schedCapture, firstOutputPlan, firedAt, schedCapture.cancelFirstOutputUpstream)
 			}
 			_ = resp.Body.Close()
