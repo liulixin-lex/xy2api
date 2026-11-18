@@ -18,18 +18,19 @@ type selectionSessionSlots interface {
 // selectionSession receives already admitted candidates. Recheck repeats fresh
 // account admission before and after acquiring a slot; view always reads latest.
 type selectionSession struct {
-	view       func() schedquality.View
-	now        func() time.Time
-	slots      selectionSessionSlots
-	cache      OpenAIStickyVersionedCache
-	store      ResilienceStore
-	cacheKey   func(string) string
-	bindings   gatewaySessionBindingReader
-	marks      *fullMarks
-	bindingTTL time.Duration
-	recheck    func(context.Context, *Account) *Account
-	resetAt    func(int64) time.Time
-	leases     SchedTrialLeases
+	view              func() schedquality.View
+	now               func() time.Time
+	slots             selectionSessionSlots
+	cache             OpenAIStickyVersionedCache
+	store             ResilienceStore
+	cacheKey          func(string) string
+	bindings          gatewaySessionBindingReader
+	marks             *fullMarks
+	bindingTTL        time.Duration
+	recheck           func(context.Context, *Account) *Account
+	resetAt           func(int64) time.Time
+	leases            SchedTrialLeases
+	qualityOwnsSticky func(context.Context, *int64, string) bool
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
@@ -104,6 +105,13 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	avoided = mergeExcluded(avoided, failedTargets)
+	if s.qualityOwnsSticky != nil && firstOutputMigrationAllowed(ctx, sessionHash) && !s.qualityOwnsSticky(ctx, &groupID, sessionHash) {
+		soft, err := sessionAvoidAfterReset(ctx, s.store, groupID, firstOutputAvoidSession(sessionHash), s.resetAt)
+		if err != nil {
+			return nil
+		}
+		avoided = mergeExcluded(avoided, soft)
+	}
 	s.marks.observe(candidates, req.Loads, now)
 	type candidate struct {
 		account *Account

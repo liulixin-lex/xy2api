@@ -229,6 +229,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
 		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
+		s.planOpenAIFollow(ctx, groupID, sessionHash, requestedModel, selection, ordinary && err == nil)
 		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)
 	}()
 	if ordinary {
@@ -303,6 +304,13 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			// Keep affinity reads, but suppress this selection's binding writes.
 			rejectionScope.selectionPreservesBinding.Store(ownerErr != nil || owner <= 0 || ownerAvoided)
 		}
+	}
+	// This pass must be able to preserve a versioned owner while borrowing.
+	// Legacy callers without a pending binding would otherwise eagerly rebind.
+	if ordinary && preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && s.resilience != nil && s.resilience.store != nil &&
+		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
+		soft, _ := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
+		avoided = mergeExcluded(avoided, soft)
 	}
 	resilience.StateFrom(ctx).SetAvoided(avoided)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)

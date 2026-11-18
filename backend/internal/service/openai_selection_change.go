@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
@@ -31,15 +32,83 @@ func (s *OpenAIGatewayService) stickyChangeAvoid(ctx context.Context, groupID *i
 	return avoided
 }
 
+const stickyFollow = "first_output_follow"
+
+func firstOutputAvoidSession(session string) string {
+	return "first_output:" + strings.TrimSpace(session)
+}
+
+func firstOutputMigrationAllowed(ctx context.Context, session string) bool {
+	if scope, ok := resilience.StateFrom(ctx).GatewayRequestScope(); ok && scope != resilience.GatewayRequestScopeText {
+		return false
+	}
+	req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if req.RequiredCapability == OpenAIEndpointCapabilitySeedance {
+		return false
+	}
+	_, guardian := openAIGuardianParentAffinityFromContext(ctx)
+	return session != "" && !openAINoStickyMigration(ctx) && !guardian &&
+		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session)
+}
+
+func (s *OpenAIGatewayService) firstOutputQualityOwnsSticky(ctx context.Context, group *int64, session string) bool {
+	if q := qualityRequest(ctx); q != nil && q.group == derefGroupID(group) && q.session == session {
+		s.loadQuality(ctx, q)
+	}
+	return s.qualityOwnsSticky(ctx, group, session)
+}
+
+func (c *openAIStickyChange) matchesCutoff(f resilience.OwnerFirstOutputCutoff) bool {
+	return c != nil && c.groupID == f.GroupID && c.session == f.Session && c.key == f.BindingKey &&
+		c.expected.AccountID == f.AccountID && c.expected.Generation == f.Generation && !c.skipCommit
+}
+
+func recordFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) {
+	state := resilience.StateFrom(ctx)
+	confirmed := false
+	reason := "protocol_ineligible"
+	if fact.CanTransfer {
+		if change := pendingOpenAIStickyChange(ctx); change.matchesCutoff(fact) && change.writeFirstOutputAvoid(ctx, fact) {
+			confirmed = state.ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation)
+		}
+		reason = "unconfirmed"
+		if confirmed {
+			reason = "confirmed"
+		}
+	}
+	slog.InfoContext(ctx, "sched_quality.first_output_avoid", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
+		"group_id", fact.GroupID, "model", fact.Model, "account_id", fact.AccountID, "reason", reason, "confirmed", confirmed)
+}
+
+func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) bool {
+	if c.cache == nil {
+		return false
+	}
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	var reset time.Time
+	if c.resetAt != nil {
+		reset = c.resetAt(fact.AccountID)
+	}
+	ttl := time.Until(fact.FiredAt.Add(time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second))
+	if ttl <= 0 {
+		return false
+	}
+	written, err := c.cache.RecordSessionBindingFailure(stateCtx, fact.GroupID, fact.BindingKey, firstOutputAvoidSession(fact.Session), c.expected, fact.AccountID, ttl, reset)
+	return written && err == nil && stateCtx.Err() == nil
+}
+
 // A selection only plans a change. Admission and billing must never commit it.
 type openAIStickyChange struct {
 	mu               sync.Mutex
 	done             bool
+	commitAttempted  bool
 	attemptSucceeded bool
 	attemptCanceled  bool
 	activeAttempt    *schedAttemptCapture
 
-	canTransfer                   bool // Final selection's protocol authorization for expected.
+	ownerFirstOutputLimit         time.Duration // Frozen on the original send, only for first_output_follow.
+	canTransfer                   bool          // Final selection's protocol authorization for expected.
 	targetUpstreamFirstValidDelay time.Duration
 	targetUpstreamFirstValidKnown bool
 
@@ -187,8 +256,7 @@ func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Conte
 	eligible := ordinary && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
 		change.expected.AccountID == selection.Account.ID && change.expected.Generation != "" && !change.skipCommit &&
 		change.groupID == derefGroupID(groupID) && session != "" && change.session == session && change.key != "" &&
-		!openAINoStickyMigration(ctx) && !preserveOpenAIGuardianParentBinding(ctx, session) &&
-		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session) && !s.qualityOwnsSticky(ctx, groupID, session)
+		firstOutputMigrationAllowed(ctx, session) && !s.qualityOwnsSticky(ctx, groupID, session)
 	change.mu.Lock()
 	change.canTransfer = eligible
 	change.mu.Unlock()
@@ -211,15 +279,73 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID == 0 {
 		kind = "create"
 	}
-	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
+	resilience.StateFrom(ctx).SetStickyChange(change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason()))
+}
+
+func (change *openAIStickyChange) replacement(kind, model string, target int64, reason string) *openAIStickyChange {
+	return &openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
-		dualWriteLegacy: change.dualWriteLegacy,
-		skipCommit:      change.skipCommit,
-		ownerReleased:   change.ownerReleased,
-		resetAt:         change.resetAt,
-		leases:          change.leases, fromModel: change.fromModel, ownerLookup: change.ownerLookup, trialSession: change.trialSession, reason: resilience.StateFrom(ctx).StickyBypassReason(),
-	})
+		kind: kind, expected: change.expected, target: target, ttl: change.ttl, cache: change.cache,
+		dualWriteLegacy: change.dualWriteLegacy, skipCommit: change.skipCommit, ownerReleased: change.ownerReleased,
+		resetAt: change.resetAt, leases: change.leases, fromModel: change.fromModel,
+		ownerLookup: change.ownerLookup, trialSession: change.trialSession, reason: reason,
+	}
+}
+
+// Only the final scheduler result includes trial borrowing and last-resort state.
+// Each reselection retires the previous follow target, even if admission later
+// sends the same account under a protected protocol.
+func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int64, session, model string, selection *AccountSelectionResult, ordinary bool) {
+	state := resilience.StateFrom(ctx)
+	fact, hit := state.OwnerCutoff()
+	if !hit {
+		return
+	}
+	change := pendingOpenAIStickyChange(ctx)
+	if change != nil && change.kind == stickyFollow {
+		change.mu.Lock()
+		if change.commitAttempted {
+			change.mu.Unlock()
+			return
+		}
+		change.done = true
+		base := change.replacement("migrate", change.model, 0, "")
+		change.mu.Unlock()
+		state.SetStickyChange(base)
+		change = base
+	}
+	if selection == nil || selection.Account == nil || fact.AccountID == selection.Account.ID {
+		return
+	}
+	target := selection.Account.ID
+	_, confirmed := state.ConfirmedOwnerCutoff()
+	keptOwner := state.KeptSticky()
+	reason := ""
+	switch {
+	case !ordinary || !fact.CanTransfer || !firstOutputMigrationAllowed(ctx, session) || s.qualityOwnsSticky(ctx, group, session):
+		reason = "protocol_ineligible"
+	case !confirmed:
+		reason = "avoid_unconfirmed"
+	case !change.matchesCutoff(fact) || fact.GroupID != derefGroupID(group) || fact.Session != session:
+		reason = "binding_changed"
+	case change.ownerReleased || change.target != 0:
+		return // An independently planned create, release or takeover owns this outcome.
+	case selection.StickyCapacitySpillover || openAIStickyBindingKept(ctx, session, target) || keptOwner != 0 && keptOwner != target:
+		reason = "borrowed"
+	default:
+		view, now := s.selectionView(), s.selectionNow()
+		if selectionState(view, fact.GroupID, selection.Account, model).Placement(selectionAuto(view, fact.GroupID, now), now) != schedquality.PlaceFront {
+			reason = "not_front"
+		}
+	}
+	if reason != "" {
+		slog.InfoContext(ctx, "sched_quality.session_switch", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
+			"group_id", fact.GroupID, "model", model, "from", fact.AccountID, "to", target, "kind", stickyFollow, "reason", reason, "committed", false)
+		return
+	}
+	next := change.replacement(stickyFollow, model, target, "faster_delivery")
+	next.ownerFirstOutputLimit = fact.Effective
+	state.SetStickyChange(next)
 }
 
 // CompleteOpenAIStickyChange must be called by the actual attempt terminal path,
@@ -236,7 +362,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		return
 	}
 	change.done = true
-	committed := false
+	committed, fasterDelivery := false, false
 	defer func() {
 		if committed && change.trial != nil {
 			change.trial.promote(ctx)
@@ -248,17 +374,27 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		if reason == "" {
 			reason = change.kind
 		}
-		slog.InfoContext(ctx, "sched_quality.session_switch", "component", "sched_quality",
+		fields := []any{"component", "sched_quality",
 			"gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(), "group_id", change.groupID,
 			"model", change.model, "from", change.expected.AccountID, "to", change.target,
-			"kind", change.kind, "reason", reason, "committed", committed)
+			"kind", change.kind, "reason", reason, "committed", committed}
+		if change.kind == stickyFollow {
+			fields = append(fields, "faster_complete", fasterDelivery, "commit_attempted", change.commitAttempted)
+		}
+		slog.InfoContext(ctx, "sched_quality.session_switch", fields...)
 	}()
+	if canceled && change.kind == stickyFollow {
+		change.reason = "canceled"
+	}
 	if canceled || change.skipCommit {
 		return
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	if !success {
+		if change.kind == stickyFollow {
+			change.reason = "incomplete_delivery"
+		}
 		if change.expected.AccountID == 0 {
 			return
 		}
@@ -272,15 +408,39 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		}
 		return
 	}
+	if change.kind == stickyFollow {
+		switch {
+		case !change.attemptSucceeded || change.attemptCanceled:
+			change.reason = "incomplete_delivery"
+			return
+		case !change.targetUpstreamFirstValidKnown || change.targetUpstreamFirstValidDelay < 0 || change.ownerFirstOutputLimit <= 0:
+			change.reason = "missing_clock"
+			return
+		case change.targetUpstreamFirstValidDelay >= change.ownerFirstOutputLimit:
+			change.reason = "not_faster"
+			return
+		}
+		fasterDelivery = true
+	}
 	if openAIStickyBindingKept(ctx, change.session, change.target) {
+		if change.kind == stickyFollow {
+			change.reason = "borrowed"
+		}
 		return
 	}
+	change.commitAttempted = true
 	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
 	if err != nil {
+		if change.kind == stickyFollow {
+			change.reason = "commit_error"
+		}
 		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", accountID, "error", err)
 		return
 	}
 	if !changed {
+		if change.kind == stickyFollow {
+			change.reason = "binding_changed"
+		}
 		return
 	}
 	committed = true

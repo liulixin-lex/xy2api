@@ -56,6 +56,6 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 		onClaim()
 	}
 
-	// follow: use this first publication to record avoidance outside the attempt lock.
+	recordFirstOutputAvoid(a.ctx, fact)
 	return fact, true
 }
