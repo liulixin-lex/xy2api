@@ -208,6 +208,7 @@ export default {
       rearEntries: '{decisions} decisions · {account_models} account × model keys',
       rearEntriesNone: '—',
       rearEntriesUnknown: 'unknown (the 24-hour count was not read)',
+      rearEntriesFailed: 'unknown (the group summary failed to load, so the 24-hour count was not read)',
       rearEntriesTip: 'Decisions moving an account to the rear, renewing a rear stay or failing a trial, and the distinct account × model keys they hit',
       supplyTitle: 'Supply of {model}',
       supplyCounts: 'Declared {declared} · Enabled {enabled} · Eligible now {available}',

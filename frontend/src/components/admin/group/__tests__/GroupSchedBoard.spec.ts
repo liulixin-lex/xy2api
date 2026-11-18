@@ -308,6 +308,33 @@ describe('GroupSchedBoard', () => {
     expect(document.querySelector('[data-sq-summary="rear-entries"]')!.textContent).toBe(expected)
   })
 
+  // Second review item 3: a failed summary request is not a summary on its way: the 24-hour count says it was not read.
+  it('says the 24-hour rear count was not read when the summary request fails, and shows it once a summary comes', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => { vi.useRealTimers() })
+    mount(Board, { attachTo: document.body })
+    await vi.advanceTimersByTimeAsync(0)
+    api.groupsSummary.mockRejectedValueOnce(new Error('down'))
+    openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.groupsSummary).toHaveBeenCalledTimes(1)
+    const rear = () => document.querySelector('[data-sq-summary="rear-entries"]')!.textContent
+    expect(rows()).toHaveLength(5)
+    expect(rear()).toBe('admin.schedQuality.board.rearEntriesFailed')
+    expect(document.querySelector('[data-sq-summary="migration"]')!.textContent).toBe('admin.schedQuality.board.summaryMigrationNone')
+
+    api.groupsSummary.mockResolvedValueOnce({
+      at: '', stale: false,
+      groups: [{
+        group_id: 53, accounts: { pass: 1, unknown: 0, trial: 0, rear: 0 },
+        last60: { e2e_first_output_p50_ms: null, e2e_first_output_p90_ms: null, body_first_output_p50_ms: null, body_first_output_p90_ms: null, requests: 0, migration_400: 0 },
+        rear_entries_24h: { decisions: 0, account_models: 0 }
+      }]
+    })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(rear()).toBe('admin.schedQuality.board.rearEntries:{"decisions":0,"account_models":0}')
+  })
+
   it('shows the picked model\'s supply: declared, enabled, able to take it now, and the snapshot time; unknown when not read', async () => {
     mount(Board, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')

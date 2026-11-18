@@ -234,9 +234,12 @@ const summaryText = computed(() => {
     migration: last60?.migration_400 == null
       ? t('admin.schedQuality.board.summaryMigrationNone')
       : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 }),
-    // A summary whose 24-hour count was not read says so (review item 4); no summary at all reads "—" like the rest.
+    // A 24-hour count that was not read says so: the summary failed (second review item 3) or came without it (review
+    // item 4). A summary still on its way reads "—" like the rest.
     rearEntries: !summary
-      ? t('admin.schedQuality.board.rearEntriesNone')
+      ? t(boardData.summaryFailedGroup !== null && boardData.summaryFailedGroup === board.groupId
+        ? 'admin.schedQuality.board.rearEntriesFailed'
+        : 'admin.schedQuality.board.rearEntriesNone')
       : summary.rear_entries_24h
         ? t('admin.schedQuality.board.rearEntries', { decisions: summary.rear_entries_24h.decisions, account_models: summary.rear_entries_24h.account_models })
         : t('admin.schedQuality.board.rearEntriesUnknown')

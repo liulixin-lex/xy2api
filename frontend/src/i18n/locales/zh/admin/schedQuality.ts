@@ -208,6 +208,7 @@ export default {
       rearEntries: '{decisions} 次判定 · {account_models} 个账号×模型',
       rearEntriesNone: '—',
       rearEntriesUnknown: '未知（未读到近 24 小时统计）',
+      rearEntriesFailed: '未知（分组摘要读取失败，未读到近 24 小时统计）',
       rearEntriesTip: '进后排、到期续期、试用不达标三类判定的次数，以及涉及的账号×模型数（去重）',
       supplyTitle: '{model} 的供给',
       supplyCounts: '声明支持 {declared} · 启用 {enabled} · 此刻资格可接 {available}',
