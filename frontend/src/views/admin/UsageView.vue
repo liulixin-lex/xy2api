@@ -447,12 +447,14 @@ const usageStatsState = statsCard.phase
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: async (signal) => {
-    // The stats run only after a list load succeeds: while the current filter's list fails, they are not asked.
-    const list = statsCard.listStarted()
+    // The stats run only after an active list load succeeds: its failure means the current filter's stats are not
+    // asked. The 5 s membership check uses the same request but starts no stats, so its failure says nothing about
+    // them (fourth review). The engine sets `loading` before an active load asks, and runs no check during one.
+    const list = liveUsage.loading.value ? statsCard.listStarted() : null
     try {
       return await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
     } catch (error) {
-      if (!signal.aborted) list.failed()
+      if (!signal.aborted) list?.failed()
       throw error
     }
   },

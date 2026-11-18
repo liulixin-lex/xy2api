@@ -493,6 +493,39 @@ describe('admin UsageView native compaction filter', () => {
     wrapper.unmount()
   })
 
+  // Fourth review: the 5 s membership check shares the list request but starts no stats; its failure is no block.
+  it('keeps loading, then the stats failure, when the background membership check fails meanwhile', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    let fail!: (error: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    ;(wrapper.vm as any).filters.group_id = 54
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('loading')
+    const statsCalls = getStats.mock.calls.length
+
+    list.mockRejectedValue(new Error('membership down'))
+    const listCalls = list.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(list.mock.calls.length).toBeGreaterThan(listCalls)
+    expect(cards().props('e2eState')).toBe('loading')
+
+    fail(new Error('stats down'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+    const afterFailure = list.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(list.mock.calls.length).toBeGreaterThan(afterFailure)
+    expect(cards().props('e2eState')).toBe('failed')
+    expect(getStats.mock.calls.length).toBe(statsCalls)
+    wrapper.unmount()
+  })
+
   it('propagates the filter to list/stats/model/snapshot requests and clears it on reset', async () => {
     const wrapper = mountRouteFilteredUsageView()
     vi.advanceTimersByTime(120)

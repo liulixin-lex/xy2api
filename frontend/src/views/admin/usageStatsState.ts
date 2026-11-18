@@ -19,7 +19,10 @@ export interface UsageStatsState {
    * `latest()` tells whether its answer may be put on the page at all.
    */
   statsStarted: () => { latest: () => boolean; loaded: () => void; failed: () => void }
-  /** A list request starts for the current filter. Only the latest one's failure counts. */
+  /**
+   * An active list load starts for the current filter (the one the stats follow; not the background membership
+   * check). Only the latest one's failure counts.
+   */
   listStarted: () => { failed: () => void }
 }
 
