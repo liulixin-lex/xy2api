@@ -193,8 +193,11 @@ func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
 }
 
 func preservePendingOpenAIStickyBinding(ctx context.Context, groupID *int64, session string) bool {
-	change := pendingOpenAIStickyChange(ctx)
-	return change != nil && change.groupID == derefGroupID(groupID) && change.session == strings.TrimSpace(session)
+	return pendingOpenAIStickyChange(ctx).matchesSession(groupID, session)
+}
+
+func (c *openAIStickyChange) matchesSession(groupID *int64, session string) bool {
+	return c != nil && c.groupID == derefGroupID(groupID) && c.session == strings.TrimSpace(session)
 }
 
 // releasePendingOpenAIStickyOwner keeps the binding while a change is pending

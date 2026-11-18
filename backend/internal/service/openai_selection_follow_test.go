@@ -474,7 +474,7 @@ func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 
 func TestFirstOutputFollowLegacySelectionKeepsOwner(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, mode := range []string{"no_request_state", "unversioned_cache"} {
+	for _, mode := range []string{"no_request_state", "unversioned_cache", "snapshot_error"} {
 		for _, avoid := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/avoid=%t", mode, avoid), func(t *testing.T) {
 				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2))
@@ -483,9 +483,13 @@ func TestFirstOutputFollowLegacySelectionKeepsOwner(t *testing.T) {
 				store := &followScopeReader{ResilienceStore: f.svc.resilience.store}
 				f.svc.resilience.store = store
 				ctx := context.Background()
-				if mode == "unversioned_cache" {
+				if mode != "no_request_state" {
 					ctx = resilience.WithRequestState(ctx, resilience.NewRequestState())
-					f.svc.cache = struct{ GatewayCache }{f.cache}
+					if mode == "snapshot_error" {
+						f.svc.cache = &bindingReadErrorCache{f.cache}
+					} else {
+						f.svc.cache = struct{ GatewayCache }{f.cache}
+					}
 				}
 				if avoid {
 					require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 10, time.Minute))
@@ -498,7 +502,11 @@ func TestFirstOutputFollowLegacySelectionKeepsOwner(t *testing.T) {
 				}
 				require.EqualValues(t, 10, sel.Account.ID)
 				require.EqualValues(t, 10, f.cache.sessionBindings[key])
-				require.Nil(t, pendingOpenAIStickyChange(ctx))
+				if mode == "snapshot_error" {
+					require.True(t, pendingOpenAIStickyChange(ctx).skipCommit)
+				} else {
+					require.Nil(t, pendingOpenAIStickyChange(ctx))
+				}
 				require.Zero(t, store.reads)
 			})
 		}
