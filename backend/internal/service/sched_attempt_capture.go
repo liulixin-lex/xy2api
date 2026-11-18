@@ -34,22 +34,24 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
-	firstOutputCancel                          context.CancelFunc // nonblocking cancellation of this guarded HTTP request
-	factsOnly                                  bool
-	gotHTTPConn, repeatedHTTPSend              bool
-	holdingCompatPrelude                       bool
-	mu                                         sync.Mutex
-	state                                      *resilience.RequestState
-	ctx                                        context.Context
-	accountID                                  int64
-	allowModel401                              bool
-	attempt                                    SchedAttempt
-	sendErr                                    error
-	networkErr                                 error
-	started                                    time.Time
-	upstreamFirstValidAt                       time.Time
-	httpSelection                              resilience.SchedSelection
-	dispatch                                   resilience.OwnerFirstOutputCutoff
+	firstOutputCancel             context.CancelFunc // nonblocking cancellation of this guarded HTTP request
+	factsOnly                     bool
+	gotHTTPConn, repeatedHTTPSend bool
+	holdingCompatPrelude          bool
+	mu                            sync.Mutex
+	state                         *resilience.RequestState
+	ctx                           context.Context
+	accountID                     int64
+	allowModel401                 bool
+	attempt                       SchedAttempt
+	sendErr                       error
+	networkErr                    error
+	started                       time.Time
+	upstreamFirstValidAt          time.Time
+	httpSelection                 resilience.SchedSelection
+	dispatch                      resilience.OwnerFirstOutputCutoff
+	// Begin precedes dispatch. Only the conjunction on the final timeout row
+	// proves the original owner received a full tier for this send.
 	ownerHit, fullTierFirstOutputTimeout       bool
 	first, done, client                        bool
 	stream                                     bool
