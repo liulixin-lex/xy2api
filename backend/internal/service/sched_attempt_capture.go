@@ -74,6 +74,10 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 }
 
 func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool, started time.Time) *schedAttemptCapture {
+	return s.newSchedAttemptCapture(ctx, account, body, stream, started, nil)
+}
+
+func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, account *Account, body []byte, stream bool, started time.Time, guard *openAIFirstOutputHeaderGuard) *schedAttemptCapture {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -82,10 +86,13 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
 	change := pendingOpenAIStickyChange(ctx)
 	factsOnly := !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled()
-	if factsOnly && (!stream || !st.OwnerHTTPDispatchPending(account.ID) || resilienceTextBudget(ctx) == nil) {
+	if factsOnly && (guard == nil || !stream || !st.OwnerHTTPDispatchPending(account.ID) || resilienceTextBudget(ctx) == nil) {
 		return nil
 	}
 	a := &schedAttemptCapture{factsOnly: factsOnly, allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), requestID: st.GatewayRequestID()}
+	if guard != nil {
+		a.firstOutputCancel = guard.cancel
+	}
 	if !factsOnly {
 		a.bodyHash = sha256.Sum256(body)
 	}
@@ -597,9 +604,8 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		previous.mu.Unlock()
 		previous.finish(nil, nil)
 	}
-	// Builders may add group prompts or normalize cache fields after the caller's
-	// payload is prepared; ContentLength is the final wire length without a reread.
-	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
+	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
+	*owner = s.newSchedAttemptCapture(ctx, account, body, stream, time.Time{}, guard)
 	if *owner != nil && !(*owner).factsOnly {
 		if target := schedHTTPAttemptTarget(account, req); target != nil && !strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/responses/compact") {
 			(*owner).learnCapability = s.capabilityFailureLearner(ctx, account, body, target.Protocol)
@@ -611,9 +617,7 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		}
 		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
 	}
-	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
 	if guard != nil && *owner != nil {
-		(*owner).firstOutputCancel = guard.cancel
 		guard.capture.Store(*owner)
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)

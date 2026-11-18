@@ -255,7 +255,7 @@ func TestTransferEligibilityProtection(t *testing.T) {
 			}
 			svc.freezeOpenAITransferEligibility(ctx, ptrInt64Selection(7), "session", &AccountSelectionResult{Account: account}, scenario != "not_ordinary")
 			require.Equal(t, scenario == "ordinary", change.canTransfer)
-			a := svc.beginSchedAttempt(ctx, account, nil, 0, true)
+			a := svc.newSchedAttemptCapture(ctx, account, nil, true, time.Time{}, &openAIFirstOutputHeaderGuard{})
 			require.NotNil(t, a)
 			require.True(t, a.factsOnly)
 			st.MarkOpsUpstreamSendBoundary(account.ID)
@@ -470,4 +470,30 @@ func TestOwnerCutoffLightweightCapturePreservesDiagnosticClock(t *testing.T) {
 		require.Equal(t, 3*time.Second, fact.DispatchAt.Sub(start))
 		require.Equal(t, 17*time.Second, fact.FiredAt.Sub(fact.DispatchAt))
 	})
+}
+
+func TestOwnerCutoffGuardlessRawChatBypass(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := rawChatCompletionsTestAccount()
+	account.Extra = map[string]any{"openai_responses_mode": "force_chat_completions"}
+	c, _ := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
+	st, ctx := ownerFactsState(c.Request.Context(), account)
+	c.Request = c.Request.WithContext(ctx)
+	var a *schedAttemptCapture
+	var guard bool
+	var path string
+	svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+		path = req.URL.Path
+		a, _ = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+		guard = req.Context().Value(openAIHeaderGuardKey{}) != nil
+		RecordOpsUpstreamSendBoundary(req.Context(), id)
+		wire := "data: " + `{"id":"x","choices":[{"delta":{"content":"hi"},"index":0,"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
+	}}, 1, 0, 0)
+	_, err := captureForward(svc, c, account, []byte(compatChatStreamBody), "chat")
+	require.NoError(t, err)
+	require.Equal(t, "/v1/chat/completions", path)
+	require.False(t, guard)
+	require.False(t, st.GatewayRequestEnabled())
+	require.Nil(t, a, "guardless stream cannot produce a cutoff for follow")
 }
