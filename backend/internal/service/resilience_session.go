@@ -689,7 +689,7 @@ func (rec *sessionFailureRecorder) Success(ctx context.Context, groupID int64, s
 	if rec != nil && rec.r != nil {
 		rec.r.terminalRejections.reset(groupID, openAITerminalRejectionSession(ctx, sessionHash), accountID)
 	}
-	if rec == nil || rec.r == nil || rec.r.store == nil || sessionHash == "" || accountID <= 0 {
+	if rec == nil || rec.r == nil || rec.r.store == nil || sessionHash == "" || accountID <= 0 || !resilience.Current().SessionOn() {
 		return
 	}
 	start := resilience.StateFrom(ctx).SessionDispatchStart(ctx, accountID)

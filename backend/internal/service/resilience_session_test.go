@@ -415,7 +415,7 @@ func TestResiliencePenaltyOfTiers(t *testing.T) {
 
 func TestSessionSuccessCannotClearAnotherSend(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, tc := range []string{"older_success", "equal_millisecond", "other_account", "no_send", "previous_ws_turn"} {
+	for _, tc := range []string{"older_success", "equal_millisecond", "fast_sending_instance", "other_account", "no_send", "previous_ws_turn"} {
 		t.Run(tc, func(t *testing.T) {
 			store := newMemResilienceStore()
 			svc := &GatewayService{cache: &mockGatewayCacheForPlatform{}, resilience: NewResilienceService(nil, store)}
@@ -432,11 +432,15 @@ func TestSessionSuccessCannotClearAnotherSend(t *testing.T) {
 				store.now = func() time.Time { return at.Add(time.Millisecond) }
 			case "equal_millisecond":
 				store.now = func() time.Time { return at.Truncate(time.Millisecond) }
+			case "fast_sending_instance":
+				// The send host leads by 8 ms. A real failure 4 ms after
+				// dispatch therefore carries a timestamp 4 ms before its send.
+				store.now = func() time.Time { return at.Add(-4 * time.Millisecond) }
 			case "other_account":
-				store.now = func() time.Time { return at.Add(-time.Second) }
+				store.now = func() time.Time { return at.Add(-2 * SessionFailureClockSkewAllowance) }
 				st.NoteGatewaySend(52)
 			case "previous_ws_turn":
-				store.now = func() time.Time { return at.Add(-time.Second) }
+				store.now = func() time.Time { return at.Add(-2 * SessionFailureClockSkewAllowance) }
 				bill, _ := st.ClaimGatewayRequest(true)
 				ctx = resilience.WithGatewayRequestMetadata(ctx, bill)
 				st.BeginGatewayTurn(time.Now())
@@ -525,4 +529,14 @@ func TestSessionAvoidReadsFailureRecordedByAnotherInstance(t *testing.T) {
 	group := int64(7)
 	require.Contains(t, second.sessionAvoid(ctx, &group, "shared-session"), int64(101))
 	require.True(t, resilience.StateFrom(ctx).Avoided(101))
+}
+
+func TestSessionSuccessDisabledSkipsSharedStore(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
+	store := &conversationStateSessionStore{memResilienceStore: newMemResilienceStore()}
+	rec := &sessionFailureRecorder{r: NewResilienceService(nil, store)}
+	st := resilience.NewRequestState()
+	st.NoteGatewaySend(7)
+	rec.Success(resilience.WithRequestState(context.Background(), st), 1, "sess", 7)
+	require.Zero(t, store.successClears.Load())
 }

@@ -59,7 +59,7 @@ func (m *memResilienceStore) ClearSessionFailuresBefore(_ context.Context, g int
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := memSessionKey(g, h)
-	if last := m.lastFailure[k][a]; last > 0 && last < start.UnixMilli() {
+	if last := m.lastFailure[k][a]; last > 0 && last < start.Add(-SessionFailureClockSkewAllowance).UnixMilli() {
 		delete(m.sf[k], a)
 		delete(m.lastFailure[k], a)
 	}

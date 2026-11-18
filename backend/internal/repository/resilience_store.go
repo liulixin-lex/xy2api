@@ -140,7 +140,7 @@ func (s *resilienceStore) ClearSessionFailuresBefore(ctx context.Context, groupI
 		return nil
 	}
 	key := sessionKey(resilienceSessionFailurePrefix, groupID, sessionHash)
-	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.UnixMilli()).Err()
+	return resilienceClearPriorFailuresScript.Run(ctx, s.rdb, []string{key}, accountID, start.Add(-service.SessionFailureClockSkewAllowance).UnixMilli()).Err()
 }
 
 // SessionFailures returns the counts whose window has not ended; a count

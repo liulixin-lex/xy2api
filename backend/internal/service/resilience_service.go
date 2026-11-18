@@ -13,6 +13,10 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
+// SessionFailureClockSkewAllowance covers small relative clock offsets between
+// gateway instances without a Redis read on every physical send.
+const SessionFailureClockSkewAllowance = 2 * time.Second
+
 const (
 	resilienceSettingsRefreshInterval = 10 * time.Second
 	// Expire post-output failure windows and cached last-resort groups.
@@ -28,7 +32,7 @@ type ResilienceStore interface {
 	IncrSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64, window time.Duration) (int64, error)
 	// ClearSessionFailure resets the count of an account within a session.
 	ClearSessionFailure(ctx context.Context, groupID int64, sessionHash string, accountID int64) error
-	// ClearSessionFailuresBefore clears only failures strictly older than start.
+	// ClearSessionFailuresBefore preserves failures within the skew allowance of start.
 	ClearSessionFailuresBefore(ctx context.Context, groupID int64, sessionHash string, accountID int64, start time.Time) error
 	// SessionFailures returns all counts of a session (Explain).
 	SessionFailures(ctx context.Context, groupID int64, sessionHash string) (map[int64]int64, error)

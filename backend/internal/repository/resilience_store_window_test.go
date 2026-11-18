@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -82,11 +83,11 @@ func TestClearSessionFailuresBeforeDispatch(t *testing.T) {
 	add(2)
 	failure = at.Add(-time.Second)
 	add(1) // an out-of-order failure cannot lower the existing watermark
-	for _, d := range []time.Duration{-time.Second, 0, 999 * time.Microsecond} {
+	for _, d := range []time.Duration{-time.Second, 0, 4 * time.Millisecond, service.SessionFailureClockSkewAllowance, service.SessionFailureClockSkewAllowance + 999*time.Microsecond} {
 		clearAt(1, at.Add(d))
 		require.Equal(t, "2", rdb.HGet(ctx, key, "1").Val())
 	}
-	clearAt(1, at.Add(time.Millisecond))
+	clearAt(1, at.Add(service.SessionFailureClockSkewAllowance+time.Millisecond))
 	require.ElementsMatch(t, []string{"2", "e:2", "f:2"}, rdb.HKeys(ctx, key).Val())
 	require.NoError(t, rdb.HDel(ctx, key, "f:2").Err()) // existing live window from an older instance
 	clearAt(2, at.Add(time.Second))
