@@ -619,11 +619,18 @@ func TestFirstOutputFollowBorrowKeepsTrialLast(t *testing.T) {
 			if tc.extraScope != "" {
 				require.NoError(t, f.svc.resilience.store.AddSessionAvoid(ctx, 7, tc.extraScope, ownerID, time.Minute))
 			}
-
+			logs := captureOpenAIObservationLogs(t)
 			result := selectFor(ctx, excluded)
 			defer result.ReleaseFunc()
 			require.Equal(t, tc.wantSelected, result.Account.ID)
 			require.Equal(t, tc.extraScope == "session", state.Avoided(ownerID))
+			var reasons []string
+			for _, row := range schedObsLogRecords(t, logs) {
+				if row["msg"] == "openai.sticky_bypass" {
+					reasons = append(reasons, fmt.Sprint(row["reason"]))
+				}
+			}
+			require.Equal(t, []string{tc.bypass}, reasons)
 			followDelivery(f.svc, ctx, result.Account, time.Millisecond, &OpenAIForwardResult{})
 			if tc.retry {
 				require.Equal(t, tc.wantSelected, f.cache.sessionBindings[key])
