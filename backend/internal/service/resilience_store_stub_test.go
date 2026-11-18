@@ -67,7 +67,7 @@ func (m *memResilienceStore) IncrSessionFailure(_ context.Context, g int64, h st
 	return m.sf[k][a], nil
 }
 func (m *memResilienceStore) monotonicMillis(at time.Time) int64 {
-	if at == at.Round(0) || at.Before(m.clockStart) {
+	if at == at.Round(0) || at.Before(m.clockStart) { //nolint:staticcheck // QF1009: Equal compares instants and cannot detect the stripped monotonic reading.
 		return -1
 	}
 	return at.Sub(m.clockStart).Milliseconds()

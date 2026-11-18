@@ -131,7 +131,7 @@ var sessionFailureProcessStart = time.Now()
 func sessionMonotonicMillis(at time.Time) int64 {
 	// Round(0) strips only the monotonic reading. Sub would silently use the
 	// wall clock for a decoded timestamp, so mark that reading unavailable.
-	if at == at.Round(0) || at.Before(sessionFailureProcessStart) {
+	if at == at.Round(0) || at.Before(sessionFailureProcessStart) { //nolint:staticcheck // QF1009: Equal compares instants and cannot detect the stripped monotonic reading.
 		return -1
 	}
 	return at.Sub(sessionFailureProcessStart).Milliseconds()
