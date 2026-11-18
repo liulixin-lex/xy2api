@@ -317,7 +317,10 @@ export interface BackendGroupPolicy {
   policy: BackendPolicy
   /** The error limit in force: the group's or 5 %, whichever is larger. */
   effective_max_error_rate: number
-  /** With the limit in force: the fewest failures among `known` clear outcomes (50, 100) that judge the line bad once. */
+  /**
+   * With the limit in force: the fewest failures among `known` clear outcomes (50, 100) that judge the line bad once.
+   * Only examples that can trip are listed: with a high limit one or both are left out, and the list may be empty.
+   */
   error_trip_examples: { known: number; failed: number }[]
 }
 

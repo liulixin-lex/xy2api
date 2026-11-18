@@ -379,6 +379,7 @@ export default {
       errorTrip: '按已保存的上限 {limit}：{examples}，才判坏一次；进后排还要相邻两次评估都判坏；恢复时失败占比不能高于上限。',
       errorTripItem: '{known} 个明确结果里至少 {failed} 次失败',
       errorTripJoiner: '，或 ',
+      errorTripNone: '按已保存的上限 {limit}，100 个明确结果内不会判坏一次。',
       cacheHigh: '已保存的缓存下限高于 85%：号在线附近反复进出的情况会更集中（这是观察到的关系）。',
       trialStable: '试用通过不代表稳定：通过只说明试用期间没有证据表明它差，之后照常评估。',
     },
