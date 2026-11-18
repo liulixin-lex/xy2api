@@ -228,7 +228,7 @@ func TestN12AlphaLateWaiverResult(t *testing.T) {
 // This is a recorded legacy gap, intentionally outside the Search-only rollout.
 // The waiver marker proves RecordUsage was reached, rather than treating an
 // unrelated early rejection as evidence that billing consumed the trace.
-func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
+func TestN12TextWaiverWritesOneCanceledUnbilledRow(t *testing.T) {
 	for _, entry := range []string{"responses", "chat/completions", "messages"} {
 		t.Run(entry, func(t *testing.T) {
 			withHandlerResilience(t, nil)
@@ -257,8 +257,12 @@ func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
 			require.NotEmpty(t, usage, "real billing must reach the waiver exit")
 			require.False(t, billed)
 			require.Empty(t, repo.bills)
-			require.Empty(t, repo.unbilled)
-			t.Logf("N12_TEXT_BASELINE %s usage=0 unbilled=0 explicit_waiver=true", entry)
+			require.Len(t, repo.unbilled, 1)
+			row := repo.unbilled[0]
+			require.Equal(t, resilience.GatewayRequestScopeText, row.RequestScope)
+			require.EqualValues(t, resilience.RequestCanceled, row.Result)
+			require.NotEmpty(t, row.RequestID)
+			require.Equal(t, st.GatewayRequestID(), row.RequestID)
 		})
 	}
 	for _, entry := range []string{"responses", "chat", "messages"} {
@@ -291,8 +295,12 @@ func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
 			require.Positive(t, writer.calls)
 			require.Zero(t, writer.Body.Len())
 			require.Empty(t, f.usage.logs)
-			require.Empty(t, f.usage.unbilled)
-			t.Logf("N12_TEXT_BASELINE generic_%s usage=0 unbilled=0 explicit_waiver=true", entry)
+			require.Len(t, f.usage.unbilled, 1)
+			row := f.usage.unbilled[0]
+			require.Equal(t, resilience.GatewayRequestScopeText, row.RequestScope)
+			require.EqualValues(t, resilience.RequestCanceled, row.Result)
+			require.NotEmpty(t, row.RequestID)
+			require.Equal(t, st.GatewayRequestID(), row.RequestID)
 		})
 	}
 }

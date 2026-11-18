@@ -140,7 +140,11 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	s.ownerCutoff = OwnerFirstOutputCutoff{}
 	s.ownerAvoidConfirmed = false
 	s.schedSelection.HTTPStreamText = false
-	s.gatewayRecord = &gatewayRequestTrace{started: at}
+	var scope GatewayRequestScope
+	if s.gatewayRecord != nil {
+		scope = s.gatewayRecord.RequestScope
+	}
+	s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: scope}
 	s.firstOutput = time.Time{}
 	s.firstOutputNoted.Store(false)
 	s.mu.Unlock()
@@ -298,9 +302,9 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	return cloneGatewayRequest(r.final), writeUnbilled
 }
 
-// Roll out waiver audit rows by scope; legacy text billing ownership is unchanged.
+// Text and search transfer ownership only after an explicit undelivered waiver.
 func gatewayRequestWaiverTailEnabled(scope GatewayRequestScope) bool {
-	return scope == GatewayRequestScopeSearch
+	return scope == GatewayRequestScopeSearch || scope == GatewayRequestScopeText
 }
 
 func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
