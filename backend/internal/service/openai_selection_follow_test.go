@@ -525,7 +525,8 @@ func TestFirstOutputFollowReceiptBeforeBlockingClose(t *testing.T) {
 				c.Request = c.Request.WithContext(ctx)
 				f := selectionNewSessionFixture()
 				f.binding.owner, f.binding.generation = account.ID, "v1"
-				pendingOpenAIStickyChange(ctx).cache = f.binding
+				gate := &followWriteBarrier{f.binding, make(chan string), make(chan struct{})}
+				pendingOpenAIStickyChange(ctx).cache = gate
 				r, w := io.Pipe()
 				defer w.Close()
 				b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
@@ -545,15 +546,27 @@ func TestFirstOutputFollowReceiptBeforeBlockingClose(t *testing.T) {
 					}
 					done <- err
 				}()
+				scope := <-gate.enter
+				canceledAtWrite := transport.Err()
+				_, earlyReceipt := st.ConfirmedOwnerCutoff()
+				closeStarted := false
+				select {
+				case <-b.enter:
+					closeStarted = true
+				default:
+				}
+				close(gate.resume)
 				<-b.enter
 				fact, confirmed := st.ConfirmedOwnerCutoff()
-				canceled := transport.Err()
 				avoid, err := f.session.store.SessionAvoid(ctx, 7, firstOutputAvoidSession("session"))
 				close(b.leave)
 				requireFirstOutputFailover(t, <-done)
 				require.NoError(t, err)
 				require.True(t, confirmed)
-				require.ErrorIs(t, canceled, context.Canceled)
+				require.Equal(t, firstOutputAvoidSession("session"), scope)
+				require.ErrorIs(t, canceledAtWrite, context.Canceled)
+				require.False(t, earlyReceipt)
+				require.False(t, closeStarted, "close waits until the write and receipt finish")
 				require.Equal(t, map[int64]struct{}{fact.AccountID: {}}, avoid)
 			})
 		})
