@@ -249,3 +249,9 @@ type SchedAutoState struct { // one row of the account's auto-state list (field 
 }
 
 // The admin service also provides ClearLocal(accountID int64, at time.Time), registered by WP0 on engine.OnAccountReset.
+
+// SchedTrialRoundReader reads current placement and reset time directly from
+// storage for the one group/account/model whose binding just committed.
+type SchedTrialRoundReader interface {
+	ReadTrialRound(ctx context.Context, accountID int64, model string, groupID int64) (schedquality.StateView, time.Time, error)
+}

@@ -26,18 +26,69 @@ func (p *engineLeaseProbe) ReleaseGroup(_ context.Context, a int64, m string, g 
 	p.released = append(p.released, schedQualityKey{a, m, g})
 	return p.err
 }
-func TestEngineResetReleasesAllModelsBeforeDeletingStates(t *testing.T) {
-	f := newQualityFixture(t)
-	f.badTTFT()
-	f.cycle()
-	probe := &engineLeaseProbe{err: errors.New("synthetic Redis outage")}
-	probe.beforeRelease = func() { require.NotEmpty(t, f.store.Rows, "release precedes deletion") }
-	f.e.SetTrialLeases(probe)
-	_, err := f.e.Reset(context.Background(), 1)
-	require.NoError(t, err)
-	require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.released)
-	for _, r := range f.store.Rows {
-		require.NotEqual(t, int64(1), r.AccountID)
+
+type resetFailureStore struct {
+	SchedQualityStore
+	err error
+}
+
+func (s resetFailureStore) RunReset(context.Context, int64) (time.Time, error) {
+	return time.Time{}, s.err
+}
+
+type resetRebuildFailureStore struct {
+	SchedQualityStore
+	committed bool
+}
+
+func (s *resetRebuildFailureStore) RunReset(ctx context.Context, id int64) (time.Time, error) {
+	at, err := s.SchedQualityStore.RunReset(ctx, id)
+	s.committed = err == nil
+	return at, err
+}
+func (s *resetRebuildFailureStore) LoadRows(ctx context.Context) ([]q.LineState, []SchedOverride, map[int64]time.Time, error) {
+	if s.committed {
+		return nil, nil, nil, errors.New("rebuild read failed")
+	}
+	return s.SchedQualityStore.LoadRows(ctx)
+}
+
+func TestEngineResetReleasesOnlyAfterCommit(t *testing.T) {
+	for _, mode := range []string{"success", "db_failure", "release_failure", "rebuild_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newQualityFixture(t)
+			f.badTTFT()
+			f.cycle()
+			probe := &engineLeaseProbe{}
+			probe.beforeRelease = func() {
+				require.NotZero(t, f.store.Resets[1])
+				for _, row := range f.store.Rows {
+					require.NotEqual(t, int64(1), row.AccountID)
+				}
+			}
+			f.e.SetTrialLeases(probe)
+			switch mode {
+			case "db_failure":
+				f.e.store = resetFailureStore{f.store, errors.New("db reset failed")}
+			case "release_failure":
+				probe.err = errors.New("Redis unavailable")
+			case "rebuild_failure":
+				f.e.store = &resetRebuildFailureStore{SchedQualityStore: f.store}
+			}
+			_, err := f.e.Reset(context.Background(), 1)
+			if mode == "db_failure" {
+				require.ErrorContains(t, err, "db reset failed")
+				require.Empty(t, probe.released)
+				require.Empty(t, f.store.Resets)
+				return
+			}
+			if mode == "rebuild_failure" {
+				require.ErrorContains(t, err, "rebuild read failed")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.released)
+		})
 	}
 }
 func TestEngineReleaseWaitsForLastTrialLine(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -41,16 +43,22 @@ if operation == 'room' then
     return finish(0)
 elseif operation == 'acquire' then
     local score = redis.call('ZSCORE', key, member)
-    if score then
-        redis.call('ZADD', key, math.max(now, tonumber(score)), member)
-        return finish(1)
+    if not score and redis.call('ZCARD', key) >= limit then
+        return finish('')
     end
-    if redis.call('ZCARD', key) >= limit then
-        return finish(0)
-    end
-    redis.call('ZADD', key, now, member)
-    return finish(1)
+    -- The incarnation changes if Redis ever loses the fence hash. Never
+    -- recycle a token just because every seat expired or the hash was evicted.
+    redis.call('HSETNX', KEYS[2], 'epoch', ARGV[8])
+    local epoch = redis.call('HGET', KEYS[2], 'epoch')
+    local generation = redis.call('HGET', KEYS[2], ARGV[7]) or '0'
+    redis.call('ZADD', key, math.max(now, tonumber(score) or now), member)
+    return finish(epoch .. ':' .. generation)
 elseif operation == 'promote' then
+    local epoch = redis.call('HGET', KEYS[2], 'epoch')
+    local generation = redis.call('HGET', KEYS[2], ARGV[8]) or '0'
+    if not epoch or ARGV[9] ~= epoch .. ':' .. generation then
+        return -1
+    end
     local target = ARGV[7]
     local score = redis.call('ZSCORE', key, target)
     redis.call('ZREM', key, member)
@@ -63,6 +71,9 @@ elseif operation == 'touch' then
 elseif operation == 'release' then
     redis.call('ZREM', key, member)
 elseif operation == 'release_group' then
+    if redis.call('HEXISTS', KEYS[2], 'epoch') == 1 then
+        redis.call('HINCRBY', KEYS[2], member, 1)
+    end
     for _, value in ipairs(redis.call('ZRANGE', key, 0, -1)) do
         if string.sub(value, 1, string.len(member)) == member then
             redis.call('ZREM', key, value)
@@ -90,42 +101,41 @@ func schedTrialLeaseGroupPrefix(groupID int64) string {
 	return strconv.FormatInt(groupID, 10) + ":"
 }
 
-func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session, now string, promoted ...string) (bool, error) {
+func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accountID int64, model string, groupID int64, session, now string, extra ...string) *redis.Cmd {
 	args := []any{operation, now, service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit, int64(schedTrialLeaseTTL / time.Second), schedTrialLeaseGroupPrefix(groupID) + session}
-	if len(promoted) > 0 {
-		args = append(args, schedTrialLeaseGroupPrefix(groupID)+promoted[0])
+	for _, arg := range extra {
+		args = append(args, arg)
 	}
-	result, err := schedTrialLeaseScript.Run(ctx, c.rdb, []string{schedTrialLeaseKey(accountID, model)}, args...).Int()
-	if err != nil {
-		return false, err
-	}
-	return result == 1, nil
+	keys := []string{schedTrialLeaseKey(accountID, model), "sched:trial-generation:" + strconv.FormatInt(accountID, 10) + ":" + model}
+	return schedTrialLeaseScript.Run(ctx, c.rdb, keys, args...)
 }
 
 func (c *schedTrialLeaseCache) Room(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error) {
-	return c.run(ctx, "room", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10))
+	v, err := c.run(ctx, "room", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10)).Int()
+	return v == 1, err
 }
 
-func (c *schedTrialLeaseCache) Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error) {
-	return c.run(ctx, "acquire", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10))
+func (c *schedTrialLeaseCache) Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, string, error) {
+	generation, err := c.run(ctx, "acquire", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10), schedTrialLeaseGroupPrefix(groupID), uuid.NewString()).Text()
+	return generation != "", generation, err
 }
 
 func (c *schedTrialLeaseCache) Touch(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) error {
-	_, err := c.run(ctx, "touch", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10))
-	return err
+	return c.run(ctx, "touch", accountID, model, groupID, session, strconv.FormatInt(now.UnixMilli(), 10)).Err()
 }
 
 func (c *schedTrialLeaseCache) Release(ctx context.Context, accountID int64, model string, groupID int64, session string) error {
-	_, err := c.run(ctx, "release", accountID, model, groupID, session, "")
-	return err
+	return c.run(ctx, "release", accountID, model, groupID, session, "").Err()
 }
 
 func (c *schedTrialLeaseCache) ReleaseGroup(ctx context.Context, accountID int64, model string, groupID int64) error {
-	_, err := c.run(ctx, "release_group", accountID, model, groupID, "", "")
-	return err
+	return c.run(ctx, "release_group", accountID, model, groupID, "", "").Err()
 }
 
-func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g int64, request, session string, now time.Time) error {
-	_, err := c.run(ctx, "promote", a, m, g, request, strconv.FormatInt(now.UnixMilli(), 10), session)
+func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g int64, request, session, generation string, now time.Time) error {
+	v, err := c.run(ctx, "promote", a, m, g, request, strconv.FormatInt(now.UnixMilli(), 10), schedTrialLeaseGroupPrefix(g)+session, schedTrialLeaseGroupPrefix(g), generation).Int()
+	if err == nil && v == -1 {
+		return service.ErrTrialGenerationChanged
+	}
 	return err
 }

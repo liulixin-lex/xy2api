@@ -124,7 +124,7 @@ func TestSelectionTurnUsesResolvedModelAndRequestLease(t *testing.T) {
 	f.svc.selectionBoard.leases = leases
 	account := &f.repo.accounts[0]
 	account.Credentials = map[string]any{"model_mapping": map[string]any{"channel-alias": "upstream", "upstream": "must-not-map-twice"}}
-	f.view.States[fakeSchedViewKey{7, 1, "upstream"}] = q.StateView{TTFO: q.LineView{Trial: true}}
+	f.view.States[fakeSchedViewKey{7, 1, "upstream"}] = q.StateView{TTFO: q.LineView{Trial: true, TrialUntil: f.view.At().Add(q.TrialDuration)}}
 	st := resilience.NewRequestState()
 	st.SetSession(7, "session", nil)
 	ctx := resilience.WithRequestState(context.Background(), st)
@@ -165,7 +165,7 @@ func TestSelectionActiveAliasedTurnsRenewBeyondIdleLimit(t *testing.T) {
 	now := f.svc.selectionNow()
 	account := &f.repo.accounts[0]
 	account.Credentials = map[string]any{"model_mapping": map[string]any{"channel": "upstream", "upstream": "wrong"}}
-	f.view.States[fakeSchedViewKey{7, 1, "upstream"}] = q.StateView{TTFO: q.LineView{Trial: true}}
+	f.view.States[fakeSchedViewKey{7, 1, "upstream"}] = q.StateView{TTFO: q.LineView{Trial: true, TrialUntil: f.view.At().Add(q.TrialDuration)}}
 	key := trialTestKey(1, "upstream", 7, "s:session")
 	leases := &selectionExpiringLeases{newSelectionTrialLeaseFake(), map[string]time.Time{key: now}}
 	f.svc.selectionBoard.leases = leases
@@ -420,9 +420,9 @@ type selectionPromoteFailure struct {
 	applied bool
 }
 
-func (l *selectionPromoteFailure) Promote(ctx context.Context, a int64, m string, g int64, request, session string, now time.Time) error {
+func (l *selectionPromoteFailure) Promote(ctx context.Context, a int64, m string, g int64, request, session, generation string, now time.Time) error {
 	if l.applied {
-		_ = l.selectionTrialLeaseFake.Promote(ctx, a, m, g, request, session, now)
+		_ = l.selectionTrialLeaseFake.Promote(ctx, a, m, g, request, session, generation, now)
 	}
 	return fmt.Errorf("synthetic promotion transport failure")
 }

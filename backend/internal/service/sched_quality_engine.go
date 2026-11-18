@@ -296,11 +296,11 @@ func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.T
 			groups[schedQualityKey{r.AccountID, r.Model, r.GroupID}] = true
 		}
 	}
-	s.releaseGroups(ctx, groups)
 	at, err := s.store.RunReset(ctx, id)
 	if err != nil {
 		return time.Time{}, err
 	}
+	s.releaseGroups(ctx, groups)
 	notifications, err = s.rebuild(ctx)
 	return at, err
 }

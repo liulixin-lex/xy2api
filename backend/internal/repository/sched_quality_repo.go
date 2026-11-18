@@ -621,3 +621,54 @@ func (t *schedQualityTx) SaveTTFTRule(expected int64, p schedquality.RuleBParams
 	_, err = t.tx.ExecContext(t.ctx, `UPDATE settings SET value=$2,updated_at=NOW() WHERE key=$1`, service.SettingKeySchedQualityTTFTRule, string(encoded))
 	return result, err
 }
+
+// ReadTrialRound reads at most the three lines of the committed account/model
+// in one PostgreSQL snapshot, including membership, policy and exemptions.
+func (r *schedQualityRepository) ReadTrialRound(ctx context.Context, a int64, model string, g int64) (schedquality.StateView, time.Time, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT l.line,l.identity,l.trial,l.trial_until,
+ NULLIF(a.extra->>'group_quality_reset_at','')::timestamptz,
+ (SELECT value::jsonb->'groups'->(l.group_id::text) FROM settings WHERE key=$4)
+ FROM sched_line_states l
+ JOIN accounts a ON a.id=l.account_id AND a.deleted_at IS NULL
+ JOIN groups g ON g.id=l.group_id AND lower(g.platform)='openai' AND g.deleted_at IS NULL
+ JOIN account_groups ag ON ag.account_id=l.account_id AND ag.group_id=l.group_id
+ WHERE l.account_id=$1 AND l.model=$2 AND l.group_id=$3
+ AND COALESCE((SELECT value FROM settings WHERE key=$5),'') IN ('','true')
+ AND NOT EXISTS (SELECT 1 FROM account_quality_overrides o WHERE o.account_id=l.account_id
+ AND o.group_id IN (0,l.group_id) AND o.mode=1 AND (o.expires_at IS NULL OR o.expires_at>CURRENT_TIMESTAMP))`,
+		a, model, g, service.SettingKeyGroupQualityGatePolicies, service.SettingKeySchedQualityEnabled)
+	var view schedquality.StateView
+	var reset sql.NullTime
+	if err != nil {
+		return view, time.Time{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var dimension schedquality.Dimension
+		var line schedquality.LineView
+		var until sql.NullTime
+		var policy []byte
+		if err := rows.Scan(&dimension, &line.Identity, &line.Trial, &until, &reset, &policy); err != nil {
+			return view, time.Time{}, err
+		}
+		if len(policy) == 0 {
+			return schedquality.StateView{}, reset.Time, nil
+		}
+		record, err := decodeSchedQualityPolicy(policy, strconv.FormatInt(g, 10))
+		if err != nil || !record.Policy.Enabled {
+			return schedquality.StateView{}, reset.Time, err
+		}
+		line.TrialUntil = until.Time
+		switch dimension {
+		case schedquality.DimensionTTFO:
+			view.TTFO = line
+		case schedquality.DimensionError:
+			view.Error = line
+		case schedquality.DimensionCache:
+			view.Cache = line
+		}
+	}
+	return view, reset.Time, rows.Err()
+}
+
+var _ service.SchedTrialRoundReader = (*schedQualityRepository)(nil)

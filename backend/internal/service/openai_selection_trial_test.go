@@ -32,17 +32,17 @@ func (f *selectionTrialLeaseFake) Room(_ context.Context, a int64, m string, g i
 	f.calls = append(f.calls, "room:"+trialTestKey(a, m, g, s))
 	return !f.full[a], f.roomErr
 }
-func (f *selectionTrialLeaseFake) Acquire(_ context.Context, a int64, m string, g int64, s string, _ time.Time) (bool, error) {
+func (f *selectionTrialLeaseFake) Acquire(_ context.Context, a int64, m string, g int64, s string, _ time.Time) (bool, string, error) {
 	k := trialTestKey(a, m, g, s)
 	f.calls = append(f.calls, "acquire:"+k)
 	if f.acquireErr != nil {
-		return false, f.acquireErr
+		return false, "", f.acquireErr
 	}
 	if f.full[a] || f.lose[a] {
-		return false, nil
+		return false, "", nil
 	}
 	f.held[k] = true
-	return true, nil
+	return true, "test-generation", nil
 }
 func (f *selectionTrialLeaseFake) Touch(_ context.Context, a int64, m string, g int64, s string, _ time.Time) error {
 	f.calls = append(f.calls, "touch:"+trialTestKey(a, m, g, s))
@@ -58,7 +58,7 @@ func (f *selectionTrialLeaseFake) ReleaseGroup(context.Context, int64, string, i
 	return nil
 }
 func selectionSetTrial(f *selectionRuntimeFixture, id int64, leases *selectionTrialLeaseFake) {
-	f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}
+	f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}}
 	f.svc.selectionBoard.leases = leases
 }
 func selectTrialRuntime(t *testing.T, f *selectionRuntimeFixture, ctx context.Context, session string) *AccountSelectionResult {
@@ -127,7 +127,7 @@ func TestOpenAISelectionTrialExistingAndOtherGroup(t *testing.T) {
 		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
 		leases := newSelectionTrialLeaseFake()
 		f.svc.selectionBoard.leases = leases
-		f.view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true}}
+		f.view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}}
 		f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityPass}}
 		require.Equal(t, int64(1), f.selectNow(t, context.Background(), "new", nil).Account.ID)
 		require.Empty(t, leases.calls)
@@ -141,7 +141,7 @@ func TestOpenAISelectionTrialSessionLifecycle(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1))
 			leases := newSelectionTrialLeaseFake()
 			selectionSetTrial(f, 1, leases)
-			f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, TTFO: schedquality.LineView{Trial: true}}
+			f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}, TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}}
 			leases.held[trialTestKey(10, "m", 7, "s:raw-session")] = true
 			f.cache.sessionBindings["openai:raw-session"] = 10
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
@@ -205,7 +205,7 @@ func TestOpenAISelectionTrialMigrationTargetAndPinnedTakeover(t *testing.T) {
 			f.session.leases = leases
 			req := selectionRequest{Room: func(int64, string) bool { return mode != "trial_full" }}
 			if mode != "pinned_same_priority" {
-				f.state(1, schedquality.StateView{TTFO: schedquality.LineView{Trial: true}})
+				f.state(1, schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}})
 			}
 			if mode == "trial_race" {
 				leases.lose[1] = true
@@ -308,7 +308,7 @@ func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	f := selectionNewSessionFixture()
 	f.candidates = f.candidates[:1]
 	f.state(10, schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}})
-	f.state(1, schedquality.StateView{TTFO: schedquality.LineView{Trial: true}})
+	f.state(1, schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}})
 	leases := newSelectionTrialLeaseFake()
 	f.session.leases = leases
 	barrier := &selectionCommitBarrier{selectionBindingFake: f.binding, entered: make(chan struct{}), finish: make(chan struct{})}
@@ -353,9 +353,82 @@ func TestOpenAISelectionTrialConcurrentSessionFailureKeepsCommittedLease(t *test
 	require.True(t, leases.held[trialTestKey(1, "m", 7, "s:session")])
 }
 
-func (f *selectionTrialLeaseFake) Promote(_ context.Context, a int64, m string, g int64, request, session string, _ time.Time) error {
+func (f *selectionTrialLeaseFake) Promote(_ context.Context, a int64, m string, g int64, request, session, generation string, _ time.Time) error {
 	f.calls = append(f.calls, "promote:"+trialTestKey(a, m, g, request)+"->"+session)
 	delete(f.held, trialTestKey(a, m, g, request))
 	f.held[trialTestKey(a, m, g, session)] = true
 	return nil
+}
+
+func (v *fakeSchedView) ReadTrialRound(_ context.Context, account int64, model string, group int64) (schedquality.StateView, time.Time, error) {
+	return v.StateOf(group, account, model), v.ResetAt(account), nil
+}
+
+type trialRoundStoreProbe struct {
+	*fakeSchedView
+	current schedquality.StateView
+	reset   time.Time
+	err     error
+	reads   int
+}
+
+func (p *trialRoundStoreProbe) ReadTrialRound(context.Context, int64, string, int64) (schedquality.StateView, time.Time, error) {
+	p.reads++
+	return p.current, p.reset, p.err
+}
+
+// Selection keeps its pre-reset snapshot while the authoritative store advances.
+// The binding may commit sixteen minutes later, before another group's new trial.
+func TestTrialPromotionChecksAuthoritativeRoundAfterBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		promote bool
+	}{
+		{"reset_at_plus_16_minutes", false}, {"different_round", false}, {"only_new_line", false}, {"one_original_line_remains", true},
+		{"rear_on_other_line", false}, {"read_failure", false}, {"same_round_source_expired", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+			leases := newSelectionTrialLeaseFake()
+			selectionSetTrial(f, 1, leases)
+			key := fakeSchedViewKey{7, 1, "m"}
+			old := f.view.States[key]
+			old.Error = old.TTFO
+			f.view.States[key] = old
+			db := &trialRoundStoreProbe{fakeSchedView: f.view, current: old}
+			f.svc.selectionBoard.view = func() schedquality.View { return db }
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			selected := selectTrialRuntime(t, f, ctx, "session")
+			member := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
+			request := trialTestKey(1, "m", 7, member)
+			require.True(t, leases.held[request])
+			require.Zero(t, db.reads, "checking the DB belongs to promotion only")
+			// Move the physical completion, not the pre-reset selection snapshot.
+			f.svc.selectionBoard.now = func() time.Time { return f.view.At().Add(16 * time.Minute) }
+			later := schedquality.LineView{Trial: true, TrialUntil: old.TTFO.TrialUntil.Add(time.Minute)}
+			switch tc.name {
+			case "reset_at_plus_16_minutes":
+				db.reset = f.view.At().Add(time.Second)
+				db.current = schedquality.StateView{}
+			case "different_round":
+				db.current = schedquality.StateView{TTFO: later}
+			case "only_new_line":
+				db.current = schedquality.StateView{Cache: later}
+			case "one_original_line_remains":
+				db.current = schedquality.StateView{Error: old.Error, Cache: later}
+			case "rear_on_other_line":
+				db.current.Cache.Identity = schedquality.IdentityRear
+			case "read_failure":
+				db.err = errors.New("read failed")
+			case "same_round_source_expired":
+				delete(leases.held, request)
+			}
+			CompleteOpenAIStickyChange(ctx, 1, true, false)
+			selected.ReleaseFunc()
+			require.Equal(t, 1, db.reads)
+			require.EqualValues(t, 1, f.cache.sessionBindings["openai:session"])
+			require.False(t, leases.held[request])
+			require.Equal(t, tc.promote, leases.held[trialTestKey(1, "m", 7, "s:session")])
+		})
+	}
 }
