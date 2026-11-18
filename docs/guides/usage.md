@@ -141,6 +141,7 @@ WebSocket 请求继续沿用既有档位与计费规则，仅通过模型名后�
 - 没有账单的请求存在表 `gateway_unbilled_requests`，保留期与使用记录相同。
 - 通用 Chat/Responses、Images、Responses 生图、Embeddings 与 Alpha Search 在准入后追踪网关请求 ID；`request_scope` 分别为文本 `text`、图片 `image`、向量 `embedding`、Alpha Search `search`。后三类不计入分组近 60 分钟的文本请求统计；历史空范围仍按文本处理，不回填旧记录。
 - Alpha Search 的成功收费行保存 `gateway_request_id` 与 `result`；准入后失败或取消且没有账单时，写一条未计费尾记录。金额与扣费规则不变。
+- 显式文本请求在客户端断连、还未交付内容、已取得上游用量且明确免收时，也会用同一网关请求 ID 写一条未计费尾记录，范围为 `text`，结果为 `canceled`。
 - 已知局限：WebSocket 直通二进制帧、`count_tokens` / `input_tokens`、独立 Web/X Search、SystemOne、Grok 媒体/语音/Realtime、Live 与批量图片入口的计费记录没有请求编号和结果。
 - 每个请求只写一行：有账单时写使用记录，没有账单时写 `gateway_unbilled_requests`；记账失败时不再另补一行无账单记录。
 
