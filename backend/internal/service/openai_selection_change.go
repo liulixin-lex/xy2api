@@ -459,6 +459,17 @@ func (change *openAIStickyChange) completeLocked(ctx context.Context, success, c
 	final.finish(ctx, success, canceled, beforeSend)
 }
 
+// The trace belongs to this capture, including when a repair retries the same
+// account. Read it after releasing change.mu (capture completion takes it last).
+func (a *schedAttemptCapture) followAttemptSent() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.dispatch.AttemptSeq != 0
+}
+
 func (change *openAIStickyChange) finish(ctx context.Context, success, canceled, beforeSend bool) {
 	committed, fasterDelivery, commitAttempted := false, false, false
 	defer func() {
@@ -487,7 +498,7 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	if canceled || change.skipCommit {
 		return
 	}
-	if change.kind == stickyFollow && !success && (beforeSend || change.activeAttempt == nil) {
+	if change.kind == stickyFollow && (beforeSend || !change.activeAttempt.followAttemptSent()) {
 		change.reason = "pre_dispatch_invalidated"
 		return
 	}

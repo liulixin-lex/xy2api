@@ -37,8 +37,10 @@ func followSelect(svc *OpenAIGatewayService, ctx context.Context, acc *Account) 
 }
 
 func followDelivery(svc *OpenAIGatewayService, ctx context.Context, acc *Account, delay time.Duration, result *OpenAIForwardResult) {
+	resilience.StateFrom(ctx).SetSchedSelection(resilience.SchedSelection{AccountID: acc.ID, Model: "m", HTTPStreamText: true})
 	a := svc.beginSchedAttempt(ctx, acc, nil, 0, true)
 	if a != nil {
+		RecordOpsUpstreamSendBoundary(a.withHTTPDispatchTrace(ctx), acc.ID)
 		a.expectTerminal = true
 		if delay >= 0 {
 			a.observeOutput([]byte(`{"type":"response.output_text.delta","delta":"ok"}`), a.started.Add(delay))
@@ -790,6 +792,50 @@ func TestFirstOutputFollowPreDispatchFailureKeepsTargetAvailable(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, avoid)
 	require.Equal(t, f.owner.ID, f.binding.owner)
+}
+
+func TestFirstOutputFollowUnavailablePluginBeforeSend(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, earlierSend := range []bool{false, true} {
+		t.Run(fmt.Sprintf("same_account_sent_earlier=%t", earlierSend), func(t *testing.T) {
+			f, svc := selectionNewSessionFixture(), &OpenAIGatewayService{}
+			ctx := followState(t, f, true)
+			y := *f.candidates[0]
+			y.Type = AccountTypeOAuth
+			followSelect(svc, ctx, &y)
+			require.Equal(t, stickyFollow, pendingOpenAIStickyChange(ctx).kind)
+			st := resilience.StateFrom(ctx)
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: y.ID, Model: "m", HTTPStreamText: true})
+			if earlierSend {
+				prior := svc.beginSchedAttempt(ctx, &y, nil, 0, true)
+				RecordOpsUpstreamSendBoundary(prior.withHTTPDispatchTrace(ctx), y.ID)
+				require.True(t, prior.followAttemptSent())
+				prior.finish(nil, errors.New("prior upstream attempt failed"))
+			}
+			pm := &PluginManager{}
+			pm.route.Store(&pluginRoute{rolloutPercent: 100, unavailable: "plugin offline"})
+			svc.SetPluginManager(pm)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upstream.invalid/v1/responses", nil)
+			require.NoError(t, err)
+			var attempt *schedAttemptCapture
+			_, err = svc.sendSchedHTTP(ctx, &y, req, "", nil, true, &attempt)
+			require.ErrorContains(t, err, "plugin offline")
+			require.NotNil(t, attempt)
+			_, sent := st.OpsUpstreamSendBoundary(y.ID)
+			require.Equal(t, earlierSend, sent)
+			require.False(t, attempt.followAttemptSent())
+			attempt.finish(nil, err)
+			logs := captureOpenAIObservationLogs(t)
+			FinishOpenAIStickyForward(ctx, y.ID, nil, err)
+			require.Contains(t, logs.String(), `"reason":"pre_dispatch_invalidated"`)
+			require.False(t, st.Avoided(y.ID))
+			strict, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
+			require.NoError(t, err)
+			require.Empty(t, strict)
+			require.Empty(t, f.binding.casKeys)
+			require.Equal(t, f.owner.ID, f.binding.owner)
+		})
+	}
 }
 
 type followWriteBarrier struct {
