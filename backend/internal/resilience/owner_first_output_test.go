@@ -56,5 +56,15 @@ func TestOwnerCutoffClearedOnNextGatewayTurn(t *testing.T) {
 	require.False(t, st.OwnerHTTPDispatchPending(2))
 	sel, _ := st.SchedSelection()
 	require.False(t, sel.HTTPStreamText)
-	require.EqualValues(t, 1, st.MarkOpsUpstreamSendBoundary(2))
+	next := st.MarkOpsUpstreamSendBoundary(2)
+	require.Greater(t, next, seq)
+	require.True(t, st.FirstHTTPDispatch(next))
+	require.False(t, st.RecordOwnerCutoff(fact), "old turn after the next physical send")
+	sameBinding := fact
+	sameBinding.AttemptSeq = next
+	require.True(t, st.RecordOwnerCutoff(sameBinding))
+	require.False(t, st.ConfirmOwnerAvoid(seq, fact.Generation))
+	_, ok = st.ConfirmedOwnerCutoff()
+	require.False(t, ok)
+	require.True(t, st.ConfirmOwnerAvoid(next, fact.Generation))
 }

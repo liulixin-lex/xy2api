@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -254,7 +255,7 @@ func TestTransferEligibilityProtection(t *testing.T) {
 			}
 			svc.freezeOpenAITransferEligibility(ctx, ptrInt64Selection(7), "session", &AccountSelectionResult{Account: account}, scenario != "not_ordinary")
 			require.Equal(t, scenario == "ordinary", change.canTransfer)
-			a := svc.beginSchedAttempt(ctx, account, nil, 0, true)
+			a := svc.newSchedAttemptCapture(ctx, account, nil, true, time.Time{}, &openAIFirstOutputHeaderGuard{})
 			require.NotNil(t, a)
 			require.True(t, a.factsOnly)
 			st.MarkOpsUpstreamSendBoundary(account.ID)
@@ -263,4 +264,236 @@ func TestTransferEligibilityProtection(t *testing.T) {
 			require.Equal(t, scenario == "ordinary", a.dispatch.CanTransfer)
 		})
 	}
+}
+
+func TestOwnerCutoffRepeatedSendBoundary(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, repeat := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			account := rawChatCompletionsTestAccount()
+			body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+			c, _ := compatStreamContext("/v1/responses", string(body))
+			st, ctx := ownerFactsState(c.Request.Context(), account)
+			c.Request = c.Request.WithContext(ctx)
+			var a *schedAttemptCapture
+			up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+				a = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+				RecordOpsUpstreamSendBoundary(req.Context(), id)
+				a.markHTTPDispatch(a.dispatch.AttemptSeq) // repeat notification of the same send
+				if repeat {
+					RecordOpsUpstreamSendBoundary(req.Context(), id)
+				}
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			}}
+			svc := compatStreamService(up, 1, 0, 0)
+			_, err := svc.Forward(ctx, c, account, body)
+			requireFirstOutputFailover(t, err)
+			_, ok := st.OwnerCutoff()
+			require.Equal(t, !repeat, ok)
+			require.Equal(t, !repeat, a.ownerHit)
+			require.Equal(t, !repeat, a.fullTierFirstOutputTimeout)
+		})
+	}
+}
+
+func TestOwnerCutoffBeforeCompatReaderReturns(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"chat", "messages"} {
+		for _, mode := range []string{"delayed_read", "cancel_after_fire"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					account := rawChatCompletionsTestAccount()
+					c, _ := compatStreamContext("/v1/"+route, compatMessagesStreamBody)
+					client, cancel := context.WithCancel(c.Request.Context())
+					defer cancel()
+					st, ctx := ownerFactsState(client, account)
+					c.Request = c.Request.WithContext(ctx)
+					release := make(chan struct{})
+					guardCanceled := make(chan struct{})
+					up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+						RecordOpsUpstreamSendBoundary(req.Context(), id)
+						reader, writer := io.Pipe()
+						go func() {
+							<-req.Context().Done()
+							close(guardCanceled)
+							<-release
+							_ = writer.CloseWithError(req.Context().Err())
+						}()
+						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader, Request: req}, nil
+					}}
+					svc := compatStreamService(up, 1, 0, 0)
+					done := make(chan error, 1)
+					go func() {
+						_, err := captureForward(svc, c, account, []byte(compatMessagesStreamBody), route)
+						done <- err
+					}()
+					<-guardCanceled
+					synctest.Wait()
+					_, atFire := st.OwnerCutoff()
+					if mode == "cancel_after_fire" {
+						cancel()
+					}
+					close(release)
+					err := <-done
+					_, atReturn := st.OwnerCutoff()
+					require.True(t, atFire, "timer must publish before the reader releases")
+					require.True(t, atReturn)
+					if mode == "delayed_read" {
+						requireFirstOutputFailover(t, err)
+					} else {
+						require.Error(t, err)
+					}
+				})
+			})
+		}
+	}
+}
+
+type factsBlockingCloser struct {
+	io.ReadCloser
+	once  sync.Once
+	enter chan struct{}
+	leave chan struct{}
+}
+
+func (b *factsBlockingCloser) Close() error {
+	b.once.Do(func() { close(b.enter); <-b.leave; _ = b.ReadCloser.Close() })
+	return nil
+}
+
+func TestOwnerCutoffCancelsBeforeBlockingClose(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"responses", "passthrough"} {
+		t.Run(route, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+				c, _ := compatStreamContext("/v1/responses", string(body))
+				account := rawChatCompletionsTestAccount()
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				r, w := io.Pipe()
+				defer w.Close()
+				b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
+				var upstream context.Context
+				up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					upstream = req.Context()
+					RecordOpsUpstreamSendBoundary(req.Context(), id)
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: b, Request: req}, nil
+				}}
+				svc := compatStreamService(up, 1, 0, 0)
+				done := make(chan error, 1)
+				go func() {
+					var err error
+					if route == "passthrough" {
+						_, err = svc.forwardOpenAIPassthrough(ctx, c, account, body, body, "wire-model", false, nil, true, time.Now())
+					} else {
+						_, err = svc.Forward(ctx, c, account, body)
+					}
+					done <- err
+				}()
+				<-b.enter
+				_, frozen := st.OwnerCutoff()
+				canceled := upstream.Err()
+				close(b.leave)
+				requireFirstOutputFailover(t, <-done)
+				require.True(t, frozen)
+				require.ErrorIs(t, canceled, context.Canceled, "cancel must reach the actual transport before waiting for Close")
+			})
+		})
+	}
+}
+
+func TestOwnerCutoffPassthroughDisconnectDuringClose(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+		account := rawChatCompletionsTestAccount()
+		c, _ := compatStreamContext("/v1/responses", string(body))
+		client, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+		st, ctx := ownerFactsState(client, account)
+		c.Request = c.Request.WithContext(ctx)
+		r, w := io.Pipe()
+		defer w.Close()
+		b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
+		up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+			RecordOpsUpstreamSendBoundary(req.Context(), id)
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: b, Request: req}, nil
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := compatStreamService(up, 1, 0, 0).forwardOpenAIPassthrough(ctx, c, account, body, body, "wire-model", false, nil, true, time.Now())
+			done <- err
+		}()
+		<-b.enter
+		before, ok := st.OwnerCutoff()
+		cancel()
+		close(b.leave)
+		require.EqualError(t, <-done, "stream usage incomplete: client disconnected before output")
+		require.True(t, IsResponseCommitted(c))
+		after, preserved := st.OwnerCutoff()
+		require.True(t, ok && preserved)
+		require.Equal(t, before, after)
+	})
+}
+
+func TestOwnerCutoffLightweightCapturePreservesDiagnosticClock(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		account := rawChatCompletionsTestAccount()
+		c, _ := compatStreamContext("/v1/responses", "")
+		st, ctx := ownerFactsState(c.Request.Context(), account)
+		c.Request = c.Request.WithContext(ctx)
+		start := time.Now()
+		plan := st.PlanAttemptTimeout(20*time.Second, false, start)
+		upstream, g := newOpenAIFirstOutputHeaderGuard(ctx, func() {}, start.Add(plan.Effective()), plan)
+		defer g.close()
+		time.Sleep(3 * time.Second) // construction after the timer was armed
+		req, err := http.NewRequestWithContext(upstream, http.MethodPost, "https://upstream.invalid/responses", nil)
+		require.NoError(t, err)
+		svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+			RecordOpsUpstreamSendBoundary(req.Context(), id)
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}}, 1, 0, 0)
+		var a *schedAttemptCapture
+		_, err = svc.sendSchedHTTP(ctx, account, req, "", nil, true, &a)
+		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, g.stopHeaderWait())
+		require.True(t, a.factsOnly)
+		svc.newOpenAIFirstOutputTimeoutError(ctx, c, account, nil, "", start, "wire-model", "", plan.Effective(), "response_headers", nil, plan)
+		raw, _ := c.Get(OpsUpstreamErrorsKey)
+		require.EqualValues(t, 20000, raw.([]*OpsUpstreamErrorEvent)[0].AttemptElapsedMs)
+		fact, ok := st.OwnerCutoff()
+		require.True(t, ok)
+		require.Equal(t, 3*time.Second, fact.DispatchAt.Sub(start))
+		require.Equal(t, 17*time.Second, fact.FiredAt.Sub(fact.DispatchAt))
+	})
+}
+
+func TestOwnerCutoffGuardlessRawChatBypass(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := rawChatCompletionsTestAccount()
+	account.Extra = map[string]any{"openai_responses_mode": "force_chat_completions"}
+	c, _ := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
+	st, ctx := ownerFactsState(c.Request.Context(), account)
+	c.Request = c.Request.WithContext(ctx)
+	var a *schedAttemptCapture
+	var guard bool
+	var path string
+	svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+		path = req.URL.Path
+		a, _ = req.Context().Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+		guard = req.Context().Value(openAIHeaderGuardKey{}) != nil
+		RecordOpsUpstreamSendBoundary(req.Context(), id)
+		wire := "data: " + `{"id":"x","choices":[{"delta":{"content":"hi"},"index":0,"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
+	}}, 1, 0, 0)
+	_, err := captureForward(svc, c, account, []byte(compatChatStreamBody), "chat")
+	require.NoError(t, err)
+	require.Equal(t, "/v1/chat/completions", path)
+	require.False(t, guard)
+	require.False(t, st.GatewayRequestEnabled())
+	require.Nil(t, a, "guardless stream cannot produce a cutoff for follow")
 }
