@@ -861,15 +861,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			if vetoed {
 				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				// Profit admission declined this account before it served the session.
+				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+				delete(sessionSlotAccounts, account.ID)
 				if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 					markOpsRoutingCapacityLimited(c)
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
 					return
-				}
-				if selection.Acquired {
-					h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
-					delete(sessionSlotAccounts, account.ID)
 				}
 				continue
 			}

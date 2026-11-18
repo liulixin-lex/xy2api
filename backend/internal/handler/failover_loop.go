@@ -169,10 +169,8 @@ func (s *FailoverState) admitGatewaySlot(ctx context.Context, gateway *service.G
 		releaseSlot()
 	}
 	id := selection.Account.ID
-	if !selection.Acquired {
-		delete(deferredSessions, id)
-	}
 	if account == nil {
+		delete(deferredSessions, id)
 		if s.invalidAfterWait == nil {
 			s.invalidAfterWait = make(map[int64]struct{})
 		}

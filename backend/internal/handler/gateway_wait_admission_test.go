@@ -27,6 +27,7 @@ func (r *waitAdmissionAccounts) GetByID(_ context.Context, _ int64) (*service.Ac
 type waitAdmissionSlots struct {
 	fakeConcurrencyCache
 	repo          *waitAdmissionAccounts
+	afterWait     func(*service.Account)
 	firstAcquires int
 	released      []int64
 }
@@ -38,7 +39,7 @@ func (s *waitAdmissionSlots) AcquireAccountSlot(_ context.Context, id int64, _ i
 			return false, nil
 		}
 		// The published scheduler snapshot remains eligible while the DB changes.
-		s.repo.current.Status = service.StatusDisabled
+		s.afterWait(&s.repo.current)
 	}
 	return true, nil
 }
@@ -54,7 +55,7 @@ func TestGatewayWaitResponsesBillsOnlyDispatchedReplacement(t *testing.T) {
 	b.ID++
 	b.Priority = f.account.Priority + 1
 	f.snapshot.accounts = append(f.snapshot.accounts, &b)
-	repo, slots := installWaitAdmissionGateway(f)
+	repo, slots := installWaitAdmissionGateway(f, nil)
 	f.response = func(uint64) string { return scopeAnthropicSSE }
 	rec := httptest.NewRecorder()
 	f.call("responses", `{"model":"claude-opus-4-8","input":"fixture"}`, rec)
@@ -68,16 +69,16 @@ func TestGatewayWaitResponsesBillsOnlyDispatchedReplacement(t *testing.T) {
 	require.Equal(t, b.ID, f.usage.logs[0].AccountID)
 }
 
-func installWaitAdmissionGateway(f *handlerCompatFixture) (*waitAdmissionAccounts, *waitAdmissionSlots) {
+func installWaitAdmissionGateway(f *handlerCompatFixture, sessions service.SessionLimitCache) (*waitAdmissionAccounts, *waitAdmissionSlots) {
 	repo := &waitAdmissionAccounts{handlerCompatAccounts: f.accounts, current: *f.account}
-	slots := &waitAdmissionSlots{repo: repo}
+	slots := &waitAdmissionSlots{repo: repo, afterWait: func(a *service.Account) { a.Status = service.StatusDisabled }}
 	concurrency := service.NewConcurrencyService(slots)
 	f.handler.concurrencyHelper = NewConcurrencyHelper(concurrency, SSEPingFormatClaude, 0)
 	f.handler.cfg.Gateway.Scheduling.FallbackWaitTimeout = time.Second
 	f.handler.gatewayService = service.NewGatewayService(repo, &fakeGroupRepo{group: f.group}, f.usage, nil, nil, nil, nil, f.store, f.handler.cfg,
 		service.NewSchedulerSnapshotService(f.snapshot, nil, nil, nil, nil), concurrency, service.NewBillingService(f.handler.cfg, nil),
 		service.NewRateLimitService(repo, nil, f.handler.cfg, nil, nil), f.handler.billingCacheService, nil, &handlerCompatHTTP{client: http.DefaultClient},
-		service.NewDeferredService(repo, nil, time.Hour), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		service.NewDeferredService(repo, nil, time.Hour), nil, sessions, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	return repo, slots
 }
 
@@ -90,7 +91,7 @@ func TestGatewayWaitExhaustionBeforeDispatchIsLocal(t *testing.T) {
 		t.Run(tc.entry, func(t *testing.T) {
 			withHandlerResilience(t, nil)
 			f := newHandlerCompatFixture(t)
-			repo, slots := installWaitAdmissionGateway(f)
+			repo, slots := installWaitAdmissionGateway(f, nil)
 			rec := httptest.NewRecorder()
 			f.call(tc.entry, tc.body, rec)
 			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
@@ -110,4 +111,31 @@ func TestGatewayWaitLocalExhaustionPreservesRealUpstreamFailure(t *testing.T) {
 	require.True(t, fs.localSelectionExhaustion())
 	fs.LastFailoverErr = &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}
 	require.False(t, fs.localSelectionExhaustion())
+}
+
+func TestGatewayWaitMessagesProfitVetoReleasesSession(t *testing.T) {
+	withHandlerResilience(t, nil)
+	f := newHandlerCompatFixture(t)
+	f.group.ProfitControlEnabled = true
+	f.account.Type = service.AccountTypeOAuth
+	f.account.Extra["max_sessions"] = 1
+	allowedRate := 0.5
+	f.account.RateMultiplier = &allowedRate
+	sessions := &waitedSessions{}
+	repo, slots := installWaitAdmissionGateway(f, sessions)
+	slots.afterWait = func(a *service.Account) {
+		vetoedRate := 5.0
+		a.RateMultiplier = &vetoedRate
+	}
+	rec := httptest.NewRecorder()
+	f.call("messages", `{"model":"claude-opus-4-8","max_tokens":32,"messages":[{"role":"user","content":"fixture"}],"metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account__session_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`, rec)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, 2, slots.firstAcquires, "initial slot miss followed by a successful wait")
+	require.Equal(t, 1, repo.reads)
+	require.Equal(t, []int64{f.account.ID}, slots.released)
+	require.Equal(t, []int64{f.account.ID}, sessions.added)
+	require.Equal(t, []int64{f.account.ID}, sessions.removed)
+	require.Empty(t, sessions.active[f.account.ID])
+	require.Empty(t, f.wire)
+	require.Empty(t, f.usage.logs)
 }
