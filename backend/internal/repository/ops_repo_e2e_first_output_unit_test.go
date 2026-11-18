@@ -66,16 +66,16 @@ func TestObserveEndToEndPostgres(t *testing.T) {
 	run("INSERT INTO users(id,email,password_hash) VALUES ($1,'fixture@example.test','fixture')", id)
 	run("INSERT INTO accounts(id,name,platform,type) VALUES ($1,'fixture','openai','apikey')", id)
 	run("INSERT INTO api_keys(id,user_id,key,name) VALUES ($1,$1,'synthetic-observe','fixture')", id)
-	addUsage := func(at time.Time, first int, e2e *int) {
+	addUsage := func(at time.Time, first, e2e *int) {
 		t.Helper()
 		run(`INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,model,request_id,created_at,first_token_ms,end_to_end_first_output_ms)
 			VALUES ($1,$1,$1,$1,'fixture',$2,$3,$4,$5)`, id, at.Format(time.RFC3339Nano), at, first, e2e)
 	}
-	addUsage(head, 1, new(20))
-	addUsage(oldHour, 9, nil)
-	addUsage(measuredHour, 20, new(20))
+	addUsage(head, new(1), new(20))
+	addUsage(oldHour, new(9), nil)
+	addUsage(measuredHour, new(20), new(20))
 
-	addUsage(tail, 2, new(200))
+	addUsage(tail, new(2), new(200))
 	// The historical hour already has TTFT but no E2E measurements.
 	run(`INSERT INTO ops_metrics_hourly(bucket_start,success_count,ttft_sample_count,ttft_p50_ms)
 		VALUES ($1,1,1,9)`, oldHour)
@@ -99,7 +99,7 @@ func TestObserveEndToEndPostgres(t *testing.T) {
 	// must update the sample count and every percentile on conflict.
 	require.NoError(t, repo.UpsertHourlyMetrics(ctx, measuredHour, tail))
 	require.NoError(t, repo.UpsertDailyMetrics(ctx, epoch, epoch.Add(24*time.Hour)))
-	addUsage(measuredHour.Add(time.Minute), 60, new(60))
+	addUsage(measuredHour.Add(time.Minute), new(60), new(60))
 	raw := overview(measuredHour, tail, service.OpsQueryModeRaw)
 	require.Equal(t, service.OpsPercentiles{P50: new(40), P90: new(56), P95: new(58), P99: new(60), Avg: new(40), Max: new(60)}, raw.E2EFirstOutput)
 	require.Equal(t, raw.TTFT, raw.E2EFirstOutput)
@@ -146,4 +146,53 @@ func TestObserveEndToEndPostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, stats.E2EFirstOutputSamples)
 	require.Nil(t, stats.E2EFirstOutputP50Ms)
+
+	// A separate hour shares this database and group. The two clocks have
+	// different missing observations and opposite sort orders.
+	start := epoch.Add(6 * time.Hour)
+	stop := start.Add(time.Hour)
+	addUsage(start, new(600), new(80))
+	addUsage(start.Add(time.Minute), new(300), nil)
+	addUsage(start.Add(2*time.Minute), new(450), nil)
+	addUsage(start.Add(3*time.Minute), nil, new(20))
+	t.Run("independent_hourly_clocks", func(t *testing.T) {
+		require.NoError(t, repo.UpsertHourlyMetrics(ctx, start, stop))
+		var ttftCount, e2eCount, ttftP50, e2eP50 int
+		err := db.QueryRow(`SELECT ttft_sample_count,e2e_first_output_sample_count,ttft_p50_ms,e2e_first_output_p50_ms
+			FROM ops_metrics_hourly WHERE bucket_start=$1 AND group_id=$2 AND platform='openai'`, start, id).
+			Scan(&ttftCount, &e2eCount, &ttftP50, &e2eP50)
+		require.NoError(t, err)
+		require.Equal(t, 3, ttftCount)
+		require.Equal(t, 2, e2eCount, "only the two measured end-to-end clocks contribute")
+		require.Equal(t, 450, ttftP50)
+		require.Equal(t, 50, e2eP50)
+		result, err := repo.GetDashboardOverview(ctx, &service.OpsDashboardFilter{
+			StartTime: start, EndTime: stop, GroupID: new(id), QueryMode: service.OpsQueryModePreagg,
+		})
+		require.NoError(t, err)
+		require.EqualValues(t, 2, result.E2EFirstOutputSampleCount)
+		require.Equal(t, new(450), result.TTFT.P50)
+		require.Equal(t, new(50), result.E2EFirstOutput.P50)
+	})
+	t.Run("independent_detail_clocks", func(t *testing.T) {
+		_, err := db.Exec(`INSERT INTO ops_error_logs(request_id,created_at,group_id,error_phase,error_type,status_code,time_to_first_token_ms,end_to_end_first_output_ms)
+			VALUES ('fixture-error',$1,$2,'upstream','upstream_error',502,1,510)`, start, id)
+		require.NoError(t, err)
+		rows, total, err := repo.ListRequestDetails(ctx, &service.OpsRequestDetailFilter{
+			StartTime: &start, EndTime: &stop, GroupID: new(id), Sort: "e2e_first_output_desc",
+		})
+		require.NoError(t, err)
+		require.EqualValues(t, 5, total)
+		require.Len(t, rows, 5)
+		require.Equal(t, service.OpsRequestKindError, rows[0].Kind, "510 ms error must sort ahead of 80 ms success")
+		require.Equal(t, "fixture-error", rows[0].RequestID)
+		require.Equal(t, new(1), rows[0].FirstTokenMs)
+		require.Equal(t, new(int64(510)), rows[0].EndToEndFirstOutputMs)
+		require.Equal(t, service.OpsRequestKindSuccess, rows[1].Kind)
+		require.Equal(t, new(600), rows[1].FirstTokenMs)
+		require.Equal(t, new(int64(80)), rows[1].EndToEndFirstOutputMs)
+		require.Equal(t, new(int64(20)), rows[2].EndToEndFirstOutputMs)
+		require.Nil(t, rows[3].EndToEndFirstOutputMs)
+		require.Nil(t, rows[4].EndToEndFirstOutputMs)
+	})
 }
