@@ -64,7 +64,7 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	for k, v := range s.selectionFullMarks.at {
 		before[k] = v
 	}
-	rows, err := board.Board(context.Background(), 7, "m")
+	rows, _, err := board.Board(context.Background(), 7, "m")
 	require.NoError(t, err)
 	require.Len(t, rows, 5)
 	var ids []int64
@@ -140,7 +140,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 			}
 			s.accountRepo = &selectionBoardRepo{accounts: []Account{*a}}
 			b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
-			rows, err := b.Board(context.Background(), 7, "m")
+			rows, _, err := b.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Equal(t, "stopped", rows[0].Layer)
 			if kind == "iq" {
@@ -154,7 +154,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 	t.Run("group_profit_applies", func(t *testing.T) {
 		s := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}}
 		b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
-		rows, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
+		rows, _, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
 		require.NoError(t, err)
 		require.Equal(t, "stopped", rows[0].Layer)
 	})
@@ -182,7 +182,7 @@ func TestSchedBoardSchedulingThresholdReadOnly(t *testing.T) {
 			s.accountRepo = repo
 			board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 			board.now = func() time.Time { return now }
-			rows, err := board.Board(context.Background(), 7, "m")
+			rows, _, err := board.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			require.Equal(t, tt.paused, rows[0].Layer == "stopped")
@@ -215,7 +215,7 @@ func TestSchedBoardUpstreamChannelRestriction(t *testing.T) {
 	require.True(t, s.needsUpstreamChannelRestrictionCheck(ctx, ptrInt64Selection(7)))
 	require.False(t, s.checkChannelPricingRestriction(ctx, ptrInt64Selection(7), "m"), "the group-level check cannot resolve account mapping")
 	board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(time.Now()) })
-	rows, err := board.Board(ctx, 7, "m")
+	rows, _, err := board.Board(ctx, 7, "m")
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, allowed.ID, rows[0].AccountID)
@@ -236,4 +236,56 @@ func TestSchedBoardRejectUntilInjectedClock(t *testing.T) {
 	until := selectionRejectUntil(ctx, &OpenAIGatewayService{}, a, "m", "model_rate_limited", now)
 	require.NotNil(t, until)
 	require.WithinDuration(t, now.Add(remaining), *until, time.Second)
+}
+
+type boardParentRepo struct {
+	*selectionBoardRepo
+	parent  *Account
+	err     error
+	lookups []int64
+}
+
+func (r *boardParentRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	r.lookups = append(r.lookups, id)
+	return r.parent, r.err
+}
+
+func TestObserveBoardShadowParentRead(t *testing.T) {
+	now := time.Now().UTC()
+	parent := selectionTestAccount(12, 1)
+	parent.Type = AccountTypeOAuth
+	shadow := selectionTestAccount(13, 1)
+	shadow.Type, shadow.QuotaDimension, shadow.ParentAccountID = AccountTypeOAuth, QuotaDimensionSpark, &parent.ID
+	const model = "gpt-5.3-codex-spark"
+	shadow.Credentials = map[string]any{"model_mapping": map[string]any{model: model}}
+	for _, tc := range []struct {
+		name    string
+		parent  *Account
+		readErr error
+		layer   string
+		supply  *SchedAdminSupply
+	}{
+		{"healthy", parent, nil, "front", &SchedAdminSupply{Declared: 1, Enabled: 1, Available: 1, At: schedAdminStamp(now)}},
+		{"missing", nil, ErrAccountNotFound, "stopped", &SchedAdminSupply{Declared: 1, Enabled: 1, At: schedAdminStamp(now)}},
+		{"storage error", nil, errors.New("parent read failed"), "stopped", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &boardParentRepo{selectionBoardRepo: &selectionBoardRepo{accounts: []Account{*shadow}}, parent: tc.parent, err: tc.readErr}
+			gateway := &OpenAIGatewayService{accountRepo: repo}
+			board := NewOpenAISelectionBoard(gateway, nil)
+			board.now = func() time.Time { return now }
+			rows, supply, err := board.Board(context.Background(), 7, model)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, tc.layer, rows[0].Layer)
+			require.Equal(t, tc.supply, supply)
+			require.Equal(t, []int64{parent.ID}, repo.lookups)
+
+			ok, reason := gateway.isAccountRequestCompatibleReason(context.Background(), shadow, OpenAIAccountScheduleRequest{RequestedModel: model})
+			require.Equal(t, tc.parent != nil, ok)
+			if !ok {
+				require.Equal(t, "shadow_parent_unhealthy", reason)
+			}
+		})
+	}
 }

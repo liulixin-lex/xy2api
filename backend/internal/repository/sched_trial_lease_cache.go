@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -125,11 +126,19 @@ func (c *schedTrialLeaseCache) run(ctx context.Context, operation string, accoun
 
 func (c *schedTrialLeaseCache) Room(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error) {
 	v, err := c.run(ctx, "room", accountID, model, groupID, session, 0).Int()
+	if err == nil && v == 0 {
+		c.recordFull(ctx, accountID, model, groupID)
+	}
 	return v == 1, err
 }
 
 func (c *schedTrialLeaseCache) Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, string, error) {
-	generation, err := c.run(ctx, "acquire", accountID, model, groupID, session, c.since(now), schedTrialLeaseGroupPrefix(groupID), uuid.NewString(), strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Text()
+	elapsed := c.since(now)
+	generation, err := c.run(ctx, "acquire", accountID, model, groupID, session, elapsed, schedTrialLeaseGroupPrefix(groupID), uuid.NewString(), strconv.FormatInt(int64(schedTrialGenerationTTL/time.Second), 10)).Text()
+	// The lease script also returns an empty token for expired decisions.
+	if err == nil && generation == "" && elapsed < service.TrialLeaseIdle {
+		c.recordFull(ctx, accountID, model, groupID)
+	}
 	return generation != "", generation, err
 }
 
@@ -151,4 +160,58 @@ func (c *schedTrialLeaseCache) Promote(ctx context.Context, a int64, m string, g
 		return service.ErrTrialGenerationChanged
 	}
 	return err
+}
+
+// Retain observations beyond a one-hour trial and its next evaluation.
+const schedTrialFullTTL = 24 * time.Hour
+
+var schedTrialPeekRoomScript = redis.NewScript(`
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local holders = redis.call('ZCOUNT', KEYS[1], '(' .. (now - tonumber(ARGV[1])), '+inf')
+return holders < tonumber(ARGV[2]) and 1 or 0
+`)
+
+var schedTrialRecordFullScript = redis.NewScript(`
+redis.replicate_commands()
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local previous = redis.call('HGET', KEYS[1], ARGV[1])
+if not previous or tonumber(previous) < now then
+    redis.call('HSET', KEYS[1], ARGV[1], now)
+    redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 1
+`)
+
+func schedTrialFullKey(accountID int64, model string) string {
+	return "sched:trial_full:" + strconv.FormatInt(accountID, 10) + ":" + model
+}
+
+func (c *schedTrialLeaseCache) recordFull(ctx context.Context, accountID int64, model string, groupID int64) {
+	// Observability is best effort and must not turn a full seat into a dispatch error.
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	err := schedTrialRecordFullScript.Run(ctx, c.rdb, []string{schedTrialFullKey(accountID, model)},
+		groupID, int64(schedTrialFullTTL/time.Second)).Err()
+	if err != nil {
+		slog.WarnContext(ctx, "sched_quality.trial_full_record_failed", "account_id", accountID, "group_id", groupID, "error", err)
+	}
+}
+
+func (c *schedTrialLeaseCache) PeekRoom(ctx context.Context, accountID int64, model string) (bool, error) {
+	result, err := schedTrialPeekRoomScript.Run(ctx, c.rdb, []string{schedTrialLeaseKey(accountID, model)},
+		service.TrialLeaseIdle.Milliseconds(), service.TrialLeaseLimit).Int()
+	return result == 1, err
+}
+
+func (c *schedTrialLeaseCache) LastFull(ctx context.Context, accountID int64, model string, groupID int64) (time.Time, error) {
+	ms, err := c.rdb.HGet(ctx, schedTrialFullKey(accountID, model), strconv.FormatInt(groupID, 10)).Int64()
+	if err == redis.Nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(ms).UTC(), nil
 }

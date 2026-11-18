@@ -133,3 +133,26 @@ func TestSchedAdminRepositoryDecisionsUsePersistedUntil(t *testing.T) {
 		require.NotContains(t, string(raw), `"read_tokens"`)
 	}
 }
+
+func TestObserveRearEntriesDistinctAndWindow(t *testing.T) {
+	db := observePostgres(t)
+	_, err := db.Exec(`CREATE TABLE sched_decisions(at timestamptz, group_id bigint, account_id bigint, model text, action text)`)
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, r := range []struct {
+		age            time.Duration
+		group, account int
+		model, action  string
+	}{
+		{24 * time.Hour, 1, 2, "a", "enter"}, {time.Hour, 1, 2, "a", "renew"}, {time.Minute, 1, 2, "b", "trial_fail"},
+		{0, 1, 3, "a", "enter"}, {0, 1, 3, "b", "release"}, {24*time.Hour + time.Second, 1, 4, "a", "enter"},
+		{-time.Second, 1, 5, "a", "enter"}, {time.Minute, 2, 2, "a", "enter"}, {time.Minute, 9, 3, "a", "enter"},
+	} {
+		_, err = db.Exec("INSERT INTO sched_decisions VALUES ($1,$2,$3,$4,$5)", now.Add(-r.age), r.group, r.account, r.model, r.action)
+		require.NoError(t, err)
+	}
+	repo := newAccountRepositoryWithSQL(nil, db, nil)
+	got, err := repo.SchedAdminRearEntries24h(context.Background(), []int64{1, 2, 3}, now)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]service.SchedAdminRearEntries{1: {Decisions: 4, AccountModels: 3}, 2: {Decisions: 1, AccountModels: 1}}, got)
+}

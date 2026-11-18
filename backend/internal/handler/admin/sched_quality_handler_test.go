@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -80,10 +82,14 @@ func (schedAdminHandlerGroups) GetByID(_ context.Context, id int64) (*service.Gr
 	return &service.Group{ID: id, Name: "group", Platform: service.PlatformOpenAI}, nil
 }
 
-type schedAdminHandlerBoard struct{}
+type schedAdminHandlerBoard struct {
+	rows   []service.SchedBoardRow
+	supply *service.SchedAdminSupply
+	err    error
+}
 
-func (schedAdminHandlerBoard) Board(context.Context, int64, string) ([]service.SchedBoardRow, error) {
-	return []service.SchedBoardRow{{AccountID: 1, Rank: 1, Name: "one", Layer: "normal"}}, nil
+func (b schedAdminHandlerBoard) Board(context.Context, int64, string) ([]service.SchedBoardRow, *service.SchedAdminSupply, error) {
+	return b.rows, b.supply, b.err
 }
 
 type schedAdminHandlerAudit struct {
@@ -100,7 +106,7 @@ func schedAdminHandlerFixture() (*SchedQualityHandler, *schedAdminHandlerEngine,
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminHandlerEngine{p: &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, GroupRows: map[int64][]service.SchedGroupRow{}, Accounts: map[int64]schedquality.AccountSummary{}}, version: 63}
 	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}, Groups: []*service.Group{{ID: 1, Name: "group", Platform: service.PlatformOpenAI}}}}
-	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{}, Usage: schedAdminHandlerUsage{}, Now: func() time.Time { return now }})
+	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{rows: []service.SchedBoardRow{{AccountID: 1, Rank: 1, Name: "one", Layer: "normal"}}}, Usage: schedAdminHandlerUsage{}, Now: func() time.Time { return now }})
 	return NewSchedQualityHandler(s), engine, repo
 }
 func schedAdminHandlerRoutes(r *gin.Engine, h *SchedQualityHandler) {
@@ -143,11 +149,44 @@ func schedAdminHandlerData(t *testing.T, w *httptest.ResponseRecorder) map[strin
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
 	return envelope.Data
 }
+func TestObserveOrderMemberReadFailureAndEmptyGroup(t *testing.T) {
+	now := time.Now().UTC()
+	board := &schedAdminHandlerBoard{
+		rows:   []service.SchedBoardRow{{AccountID: 3, Layer: "front", Rank: 1}},
+		supply: &service.SchedAdminSupply{Declared: 1, Enabled: 1, Available: 1, At: now.Format(time.RFC3339Nano)},
+	}
+	admin := service.NewSchedAdminService(service.SchedAdminDependencies{
+		Engine: &schedAdminHandlerEngine{p: &service.SchedQualitySnapshot{At: now}}, Groups: schedAdminHandlerGroups{}, Board: board,
+	})
+	router := schedAdminHandlerRouter(NewSchedQualityHandler(admin))
+	refresh := func() *httptest.ResponseRecorder {
+		return schedAdminHandlerRequest(router, "GET", "/groups/1/order?model=fixture", "")
+	}
+	initial := schedAdminHandlerData(t, refresh())
+	var rows []service.SchedAdminOrderRow
+	require.NoError(t, json.Unmarshal(initial["rows"], &rows))
+	require.Len(t, rows, 1)
+	require.EqualValues(t, 3, rows[0].AccountID)
+
+	board.rows, board.supply, board.err = nil, nil, errors.New("member query failed")
+	failed := refresh()
+	require.Equal(t, http.StatusInternalServerError, failed.Code)
+	require.NotContains(t, failed.Body.String(), `"rows"`)
+
+	board.err = nil
+	board.supply = &service.SchedAdminSupply{At: now.Format(time.RFC3339Nano)}
+	empty := schedAdminHandlerData(t, refresh())
+	require.JSONEq(t, "[]", string(empty["rows"]))
+	var supply *service.SchedAdminSupply
+	require.NoError(t, json.Unmarshal(empty["supply"], &supply))
+	require.Equal(t, board.supply, supply)
+}
+
 func TestSchedQualityContractShapes(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		keys               []string
-	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"rear", "trial", "unknown", "exempt"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"relaxed_lines", "lines", "changed"}}}
+	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"rear", "trial", "unknown", "exempt"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "stop", "reset_at", "groups", "auto_states", "exemptions"}}, {"POST", "/accounts/1/reset", "", []string{"account_id", "reset_at", "cleared", "kept", "failed"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "effective_max_error_rate", "error_trip_examples", "policy"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "effective_max_error_rate", "error_trip_examples", "policy", "relaxed_lines", "cleared"}}, {"GET", "/groups/1/order", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "rows", "supply"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}, {"POST", "/groups/summary", `{"group_ids":[1]}`, []string{"at", "stale", "groups"}}, {"POST", "/groups/1/policy/preview", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"max_error_rate":0.05,"min_cache_ratio":0,"takeover_idle_seconds":0}}`, []string{"relaxed_lines", "lines", "changed"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h, _, repo := schedAdminHandlerFixture()
@@ -445,6 +484,9 @@ func TestSchedQualityDemoteAndRemovedEndpoints(t *testing.T) {
 	require.Equal(t, 404, schedAdminHandlerRequest(r, "GET", "/groups/1/board", "").Code)
 }
 
+func (r *schedAdminHandlerAccounts) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]service.SchedAdminRearEntries, error) {
+	return nil, nil
+}
 func (r *schedAdminHandlerAccounts) SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]service.SchedAdminGroupLast60, error) {
 	return map[int64]service.SchedAdminGroupLast60{}, nil
 }

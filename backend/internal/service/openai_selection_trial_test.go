@@ -32,6 +32,13 @@ func (f *selectionTrialLeaseFake) Room(_ context.Context, a int64, m string, g i
 	f.calls = append(f.calls, "room:"+trialTestKey(a, m, g, s))
 	return !f.full[a], f.roomErr
 }
+func (f *selectionTrialLeaseFake) PeekRoom(_ context.Context, a int64, _ string) (bool, error) {
+	f.calls = append(f.calls, "peek_room")
+	return !f.full[a], f.roomErr
+}
+func (f *selectionTrialLeaseFake) LastFull(context.Context, int64, string, int64) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (f *selectionTrialLeaseFake) Acquire(_ context.Context, a int64, m string, g int64, s string, _ time.Time) (bool, string, error) {
 	k := trialTestKey(a, m, g, s)
 	f.calls = append(f.calls, "acquire:"+k)
@@ -237,7 +244,7 @@ func TestOpenAISelectionTrialBoardAndPinnedOrder(t *testing.T) {
 	selectionSetTrial(f, 3, leases)
 	leases.full[3] = true
 	f.repo.accounts[1].AccountGroups = []AccountGroup{{GroupID: 7, Pinned: true}}
-	rows, err := f.svc.selectionBoard.Board(context.Background(), 7, "m")
+	rows, _, err := f.svc.selectionBoard.Board(context.Background(), 7, "m")
 	require.NoError(t, err)
 	require.Equal(t, []int64{2, 1, 3}, []int64{rows[0].AccountID, rows[1].AccountID, rows[2].AccountID})
 	require.True(t, rows[0].Pinned)

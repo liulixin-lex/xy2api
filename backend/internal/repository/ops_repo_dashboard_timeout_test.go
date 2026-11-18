@@ -41,8 +41,8 @@ func TestOpsOutputTPSOverviewFailurePolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			repo := &opsRepository{db: db}
-			// The six existing raw overview queries run before the output-rate query.
-			for _, count := range []int{2, 13, 6, 2, 6, 2} {
+			// Raw latency returns six duration values and seven for each first-output clock.
+			for _, count := range []int{2, 20, 6, 2, 6, 2} {
 				columns := make([]string, count)
 				values := make([]driver.Value, count)
 				for i := range columns {

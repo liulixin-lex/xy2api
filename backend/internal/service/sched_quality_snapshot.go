@@ -119,6 +119,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		verdict, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
 		switch key.Line {
 		case q.DimensionTTFO:
+			row.TTFTSamples = basis.SampleCounts
 			row.View.TTFO = lv
 			row.TTFTVerdict = verdict
 			row.TTFTSourceGroups = append([]int64(nil), basis.SourceGroups...)
@@ -126,11 +127,13 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 				row.TTFT = *basis.TTFT
 			}
 		case q.DimensionError:
+			row.ErrorSamples = basis.SampleCounts
 			row.View.Error = lv
 			if basis.Error != nil {
 				row.Error = *basis.Error
 			}
 		case q.DimensionCache:
+			row.CacheSamples = basis.SampleCounts
 			row.View.Cache = lv
 			if basis.Cache != nil {
 				row.Cache = *basis.Cache

@@ -25,6 +25,9 @@ type schedAdminConcurrentStats struct {
 	load func(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error)
 }
 
+func (r *schedAdminConcurrentStats) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error) {
+	return nil, nil
+}
 func (r *schedAdminConcurrentStats) SchedAdminGroupLast60(ctx context.Context, ids []int64, at time.Time) (map[int64]SchedAdminGroupLast60, error) {
 	return r.load(ctx, ids, at)
 }

@@ -51,11 +51,14 @@
                 "z": null,
                 "causes": [
                   "no_peers"
-                ]
+                ],
+                "n_local": 25
               },
               "source_groups": [
                 1
-              ]
+              ],
+              "samples_local": 30,
+              "samples_total": 30
             },
             "error": {
               "identity": "pass",
@@ -74,7 +77,9 @@
               },
               "source_groups": [
                 1
-              ]
+              ],
+              "samples_local": 50,
+              "samples_total": 50
             },
             "cache": {
               "identity": "pass",
@@ -91,7 +96,9 @@
               },
               "source_groups": [
                 1
-              ]
+              ],
+              "samples_local": 21,
+              "samples_total": 21
             }
           }
         }

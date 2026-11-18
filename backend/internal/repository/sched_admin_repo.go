@@ -215,3 +215,27 @@ func (r *accountRepository) SchedAdminGroupLast60(ctx context.Context, ids []int
 	}
 	return out, rows.Err()
 }
+
+func (r *accountRepository) SchedAdminRearEntries24h(ctx context.Context, ids []int64, now time.Time) (map[int64]service.SchedAdminRearEntries, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	rows, err := r.sql.QueryContext(ctx, `SELECT group_id, COUNT(*), COUNT(DISTINCT (account_id, model))
+		FROM sched_decisions
+		WHERE group_id=ANY($1::bigint[]) AND at >= $2 AND at <= $3
+		AND action IN ('enter','renew','trial_fail')
+		GROUP BY group_id`, pq.Array(ids), now.Add(-24*time.Hour), now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[int64]service.SchedAdminRearEntries)
+	for rows.Next() {
+		var id int64
+		var count service.SchedAdminRearEntries
+		if err := rows.Scan(&id, &count.Decisions, &count.AccountModels); err != nil {
+			return nil, err
+		}
+		out[id] = count
+	}
+	return out, rows.Err()
+}

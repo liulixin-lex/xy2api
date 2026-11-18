@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -35,11 +36,11 @@ func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedqua
 	return board
 }
 
-func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, error) {
+func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, *SchedAdminSupply, error) {
 	s := b.service
 	accounts, err := s.accountRepo.ListAllWithFilters(ctx, "", "", "", "", groupID, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ctx = resilience.WithCapabilityRequest(ctx, "responses", true)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -52,6 +53,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 	}
 	now := b.now()
+	supply := &SchedAdminSupply{At: schedAdminStamp(now)}
 	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: model, RequiredTransport: OpenAIUpstreamTransportHTTPSSE, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, &groupID)}
 	loads := make(map[int64]*AccountLoadInfo)
 	if s.concurrencyService != nil {
@@ -65,8 +67,26 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	}
 	multiplier := s.openAIOAuthSchedulingRateMultiplier(ctx)
 	selectionReq := s.selectionRequest(ctx, req, loads)
+	// A dashboard preview represents a new session. Dispatch-time Room refreshes
+	// the lease key and reports full seats. Preview only counts active members.
+	selectionReq.Room = func(id int64, attemptModel string) bool {
+		if b.leases == nil {
+			return false
+		}
+		room, err := b.leases.PeekRoom(ctx, id, attemptModel)
+		return err == nil && room
+	}
 	selectionReq.TokenBilled, selectionReq.OAuthRateMultiplier = true, multiplier
-	checker := s
+	// Dispatch and ranking both reject a shadow whose parent could not be
+	// loaded. Only the supply snapshot needs to distinguish a failed read.
+	parentReadsKnown := true
+	lookupParent := func(id int64) *Account {
+		parent, err := s.lookupShadowParentAccount(ctx, id)
+		if err != nil && !errors.Is(err, ErrAccountNotFound) {
+			parentReadsKnown = false
+		}
+		return parent
+	}
 	channelRestricted := s.checkChannelPricingRestriction(ctx, &groupID, model)
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	type keyedRow struct {
@@ -84,10 +104,20 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 		if ok {
 			// The shared check includes per-account upstream channel restrictions.
-			ok, reason = checker.isAccountRequestCompatibleReason(ctx, account, req)
+			ok, reason = s.accountRequestCompatibleWithParent(ctx, account, req, lookupParent)
 		}
 		if channelRestricted {
 			ok, reason = false, "channel_pricing_restricted"
+		}
+		if openAIConfiguredModelFailureReason(ctx, account, model) == "" {
+			supply.Declared++
+			if account.IsActive() && account.Schedulable {
+				supply.Enabled++
+				// Use this board request's admission result, independent of occupancy.
+				if ok {
+					supply.Available++
+				}
+			}
 		}
 		key := buildSelectionKey(view, groupID, model, account, selectionReq, now)
 		row := SchedBoardRow{AccountID: account.ID, Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
@@ -164,7 +194,10 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		item.row.Rank = i + 1
 		rows = append(rows, item.row)
 	}
-	return rows, nil
+	if !parentReadsKnown {
+		supply = nil
+	}
+	return rows, supply, nil
 }
 
 // selectionRejectUntil describes an existing veto; admission stays in the

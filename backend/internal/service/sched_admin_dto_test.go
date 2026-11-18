@@ -7,6 +7,9 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSchedAdminDTOExamples(t *testing.T) {
@@ -43,5 +46,37 @@ func TestSchedAdminDTOExamples(t *testing.T) {
 				t.Fatalf("round trip mismatch: %s", encoded)
 			}
 		})
+	}
+}
+
+func TestObserveLegacyDecisionBasis(t *testing.T) {
+	raw, err := os.ReadFile("testdata/sched_quality/legacy_basis.json")
+	require.NoError(t, err)
+	var stored q.Basis
+	require.NoError(t, json.Unmarshal(raw, &stored))
+	out := schedAdminJSON(t, SchedAdminDecisionBasis(stored))
+	for _, name := range []string{"samples_local", "samples_total", "trial_seats"} {
+		require.Contains(t, out, name)
+		require.Nil(t, out[name])
+	}
+	ttft := out["ttft"].(map[string]any)
+	require.Contains(t, ttft, "n_local")
+	require.Nil(t, ttft["n_local"])
+	require.EqualValues(t, 25, ttft["n"])
+}
+
+func TestObservePolicyTripExamples(t *testing.T) {
+	for _, tc := range []struct {
+		rate, effective float64
+		want            []SchedAdminErrorTripExample
+	}{
+		{.02, .05, []SchedAdminErrorTripExample{{50, 6}, {100, 10}}},
+		{.05, .05, []SchedAdminErrorTripExample{{50, 6}, {100, 10}}},
+		{.95, .95, []SchedAdminErrorTripExample{{100, 100}}},
+		{1, 1, []SchedAdminErrorTripExample{}},
+	} {
+		policy := schedAdminPolicy(SchedPolicyRecord{Policy: q.Policy{MaxErrorRate: tc.rate}})
+		require.Equal(t, tc.effective, policy.EffectiveMaxErrorRate)
+		require.Equal(t, tc.want, policy.ErrorTripExamples)
 	}
 }

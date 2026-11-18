@@ -53,12 +53,12 @@ func TestAdminRequestTimingPreservesV064ValuesAndSeparatesGroupExperience(t *tes
 		require.Equal(t, tc.duration, page[0].Log.DurationMs, "D27 keeps v0.6.4 duration_ms")
 		stats, err := repo.AdminRequestStats(ctx, filters)
 		require.NoError(t, err)
+		require.EqualValues(t, tc.endToEndFirst, *stats.E2EFirstOutputP50Ms)
+		require.EqualValues(t, 1, stats.E2EFirstOutputSamples)
 		if tc.first == nil {
 			require.Nil(t, page[0].TTFOOver)
-			require.Nil(t, stats.TTFOP50Ms, "end-to-end output must not fill missing original timing")
 		} else {
 			require.Equal(t, *tc.first > 150, *page[0].TTFOOver)
-			require.EqualValues(t, *tc.first, *stats.TTFOP50Ms)
 			require.EqualValues(t, *tc.duration, stats.AverageDurationMs)
 		}
 	}
@@ -90,13 +90,19 @@ func TestAdminRequestTimingPreservesV064ValuesAndSeparatesGroupExperience(t *tes
 			usagestats.UsageLogFilters{RequestID: id, StartTime: &start, EndTime: &end})
 		require.NoError(t, err)
 		require.Len(t, page, 1)
-		require.Equal(t, first, page[0].Log.FirstTokenMs)
+		require.Nil(t, page[0].Log.FirstTokenMs)
+		if first == nil {
+			require.Nil(t, page[0].Log.EndToEndFirstOutputMs)
+		} else {
+			require.EqualValues(t, *first, *page[0].Log.EndToEndFirstOutputMs)
+		}
 		require.Equal(t, 100, *page[0].Log.DurationMs)
 	}
 	stats, err := repo.AdminRequestStats(ctx, usagestats.UsageLogFilters{GroupID: g.ID, StartTime: &start, EndTime: &end})
 	require.NoError(t, err)
 	require.EqualValues(t, 6, stats.TotalRequests)
-	require.Equal(t, new(50.0), stats.TTFOP50Ms, "original row values: 0,50,75,300; nulls excluded")
+	require.Equal(t, new(220.0), stats.E2EFirstOutputP50Ms)
+	require.EqualValues(t, 5, stats.E2EFirstOutputSamples)
 	experience, err := repo.GroupLast60(ctx, []int64{g.ID}, end)
 	require.NoError(t, err)
 	require.EqualValues(t, 6, experience[g.ID].Requests)

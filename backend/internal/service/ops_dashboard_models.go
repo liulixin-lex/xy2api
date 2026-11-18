@@ -75,8 +75,10 @@ type OpsDashboardOverview struct {
 	TPS       OpsRateSummary `json:"tps"`
 	OutputTPS *OpsOutputTPS  `json:"output_tps"`
 
-	Duration OpsPercentiles `json:"duration"`
-	TTFT     OpsPercentiles `json:"ttft"`
+	Duration                  OpsPercentiles `json:"duration"`
+	TTFT                      OpsPercentiles `json:"ttft"`
+	E2EFirstOutput            OpsPercentiles `json:"e2e_first_output"`
+	E2EFirstOutputSampleCount int64          `json:"e2e_first_output_sample_count"`
 }
 
 type OpsLatencyHistogramBucket struct {

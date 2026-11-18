@@ -7,5 +7,16 @@
     "max_error_rate": 0.05,
     "min_cache_ratio": 0.9,
     "takeover_idle_seconds": 900
-  }
+  },
+  "effective_max_error_rate": 0.05,
+  "error_trip_examples": [
+    {
+      "known": 50,
+      "failed": 6
+    },
+    {
+      "known": 100,
+      "failed": 10
+    }
+  ]
 }

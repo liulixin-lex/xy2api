@@ -348,6 +348,75 @@ func TestSchedTrialLeasePromotionMissingSourceAndFullCapacity(t *testing.T) {
 	}
 }
 
+func TestSchedTrialLeaseFullObservations(t *testing.T) {
+	cache, _, mr, now := newTrialLeaseTestCache(t)
+	ctx := context.Background()
+	assertLastFull := func(group int64, want time.Time) {
+		t.Helper()
+		at, err := cache.LastFull(ctx, 1, "model-a", group)
+		require.NoError(t, err)
+		require.True(t, want.Equal(at), "group %d: got %v, want %v", group, at, want)
+	}
+	for i := 0; i < service.TrialLeaseLimit; i++ {
+		member := service.TrialLeaseSessionMember(fmt.Sprint(i))
+		room, err := cache.Room(ctx, 1, "model-a", 1, member, now)
+		require.NoError(t, err)
+		require.True(t, room)
+		requireTrialAcquire(t, cache, 1, member, now)
+	}
+	assertLastFull(1, time.Time{})
+	key := schedTrialLeaseKey(1, "model-a")
+	mr.advanceTo(now.Add(time.Minute))
+	before := mr.TTL(key)
+	for i := 0; i < 3; i++ {
+		room, err := cache.PeekRoom(ctx, 1, "model-a")
+		require.NoError(t, err)
+		require.False(t, room)
+	}
+	require.Equal(t, before, mr.TTL(key))
+	require.False(t, mr.Exists(schedTrialFullKey(1, "model-a")))
+	member := service.TrialLeaseRequestMember("new")
+	room, err := cache.Room(ctx, 1, "model-a", 2, member, now)
+	require.NoError(t, err)
+	require.False(t, room)
+	assertLastFull(2, now.Add(time.Minute))
+	newer := mr.now.Add(time.Second)
+	mr.advanceTo(newer)
+	ok, generation, err := cache.Acquire(ctx, 1, "model-a", 1, member, newer)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Empty(t, generation)
+	assertLastFull(1, newer)
+	_, err = cache.Room(ctx, 1, "model-a", 1, member, now)
+	require.NoError(t, err)
+	assertLastFull(1, newer)
+	assertLastFull(2, now.Add(time.Minute))
+	mr.advanceTo(now.Add(service.TrialLeaseIdle))
+	room, err = cache.PeekRoom(ctx, 1, "model-a")
+	require.NoError(t, err)
+	require.True(t, room, "Redis time places holders exactly at their idle deadline")
+	ok, generation, err = cache.Acquire(ctx, 1, "model-a", 3, member, now)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Empty(t, generation)
+	assertLastFull(3, time.Time{}) // Expired decision, despite room in the pool.
+	mr.advanceTo(mr.now.Add(schedTrialFullTTL))
+	assertLastFull(1, time.Time{})
+	// A failed diagnostic write must not change a successful capacity decision.
+	for i := 0; i < service.TrialLeaseLimit; i++ {
+		requireTrialAcquire(t, cache, 1, service.TrialLeaseSessionMember(fmt.Sprint(i)), mr.now)
+	}
+	require.NoError(t, mr.Set(schedTrialFullKey(1, "model-a"), "wrong-type"))
+	ok, _, err = cache.Acquire(ctx, 1, "model-a", 2, member, mr.now)
+	require.NoError(t, err)
+	require.False(t, ok)
+	_, err = cache.LastFull(ctx, 1, "model-a", 2)
+	require.Error(t, err)
+	mr.Close()
+	_, err = cache.LastFull(ctx, 1, "model-a", 1)
+	require.Error(t, err)
+}
+
 func TestSchedTrialLeasePromotionActivityIdleBoundary(t *testing.T) {
 	for _, age := range []time.Duration{service.TrialLeaseIdle - time.Millisecond, service.TrialLeaseIdle, service.TrialLeaseIdle + time.Millisecond} {
 		t.Run(age.String(), func(t *testing.T) {
@@ -528,4 +597,45 @@ func testTrialLeaseClockOffsets(t *testing.T, rdb *redis.Client) {
 			})
 		}
 	}
+}
+
+func TestObserveLeaseReadsRedisClockAndRecordsOnlyConfirmedFull(t *testing.T) {
+	ctx := context.Background()
+	db := newLocalRedisClient(t)
+	leases := NewSchedTrialLeaseCache(db)
+	key := schedTrialLeaseKey(33, "clock-model")
+	// Five seconds of gateway skew would prune these three holders too early.
+	serverNow, err := db.Time(ctx).Result()
+	require.NoError(t, err)
+	for i := 0; i < service.TrialLeaseLimit; i++ {
+		err = db.ZAdd(ctx, key, redis.Z{Score: float64(serverNow.Add(-service.TrialLeaseIdle + 5*time.Second).UnixMilli()), Member: fmt.Sprint(i)}).Err()
+		require.NoError(t, err)
+	}
+	room, err := leases.PeekRoom(ctx, 33, "clock-model")
+	require.NoError(t, err)
+	require.False(t, room)
+	at, err := leases.LastFull(ctx, 33, "clock-model", 7)
+	require.NoError(t, err)
+	require.True(t, at.IsZero())
+
+	room, err = leases.Room(ctx, 33, "clock-model", 7, "r:request", serverNow.Add(time.Hour))
+	require.NoError(t, err)
+	require.False(t, room)
+	at, err = leases.LastFull(ctx, 33, "clock-model", 7)
+	require.NoError(t, err)
+	after, err := db.Time(ctx).Result()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, at.UnixMilli(), serverNow.UnixMilli())
+	require.LessOrEqual(t, at.UnixMilli(), after.UnixMilli())
+	require.NoError(t, db.Set(ctx, schedTrialLeaseKey(34, "clock-model"), "wrong-type", time.Minute).Err())
+	room, err = leases.Room(ctx, 34, "clock-model", 7, "r:request", time.Now())
+	require.Error(t, err)
+	require.False(t, room)
+	acquired, token, err := leases.Acquire(ctx, 34, "clock-model", 7, "r:request", time.Now())
+	require.Error(t, err)
+	require.False(t, acquired)
+	require.Empty(t, token)
+	at, err = leases.LastFull(ctx, 34, "clock-model", 7)
+	require.NoError(t, err)
+	require.True(t, at.IsZero())
 }

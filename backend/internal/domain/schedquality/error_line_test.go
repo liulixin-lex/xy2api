@@ -214,3 +214,30 @@ func TestAssessErrorCutWindowAndOrdering(t *testing.T) {
 		t.Fatal("bad attempts are not newest first")
 	}
 }
+
+func TestObserveCountsOnlyAdmittedUnits(t *testing.T) {
+	rows := machineSamples(104)
+	for i := range rows {
+		rows[i].StartedAt = machineNow.Add(time.Duration(i-105) * time.Second)
+		rows[i].FinishedAt = rows[i].StartedAt.Add(time.Millisecond)
+		rows[i].GroupID = 20
+	}
+	// Four old, local requests are outside the latest 100 slots.
+	for i := range rows[:4] {
+		rows[i].GroupID = 10
+	}
+	rows[103].GroupID, rows[103].Outcome, rows[103].Class = 10, OutcomeAccountFault, ClassUpstream
+	rows[102].GroupID, rows[102].Outcome, rows[102].Class = 10, OutcomeOther, ClassUnknown
+	assessment, local := AssessErrorForGroup(rows, nil, .05, time.Time{}, machineNow, 10)
+	if local != 1 || assessment.Clear != 99 || assessment.Unknown != 1 {
+		t.Fatalf("local=%d clear=%d unknown=%d", local, assessment.Clear, assessment.Unknown)
+	}
+
+	turns := machineSamples(4)
+	turns[0].GroupID, turns[1].GroupID = 20, 20
+	turns[2].CacheReadTokens = nil
+	cache, local := AssessCacheForGroup(turns, .8, time.Time{}, machineNow, 10)
+	if local != 1 || cache.Turns != 3 {
+		t.Fatalf("cache local=%d total=%d", local, cache.Turns)
+	}
+}
