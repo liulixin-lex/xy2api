@@ -296,6 +296,13 @@ func openAICompatibleRequestPlatform(ctx context.Context, apiKey *service.APIKey
 	return service.PlatformOpenAI
 }
 
+func openAIResponsesRequestScope(explicitImageIntent bool) resilience.GatewayRequestScope {
+	if explicitImageIntent {
+		return resilience.GatewayRequestScopeImage
+	}
+	return resilience.GatewayRequestScopeText
+}
+
 func openAIResponsesRequiredCapability(imageIntent bool, platform string) service.OpenAIEndpointCapability {
 	if imageIntent && platform == service.PlatformOpenAI {
 		return service.OpenAIEndpointCapabilityResponses
@@ -704,10 +711,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
-	scope := resilience.GatewayRequestScopeText
-	if imageIntent {
-		scope = resilience.GatewayRequestScopeImage
-	}
+	scope := openAIResponsesRequestScope(imageIntent)
 	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, scope)()
 
 	requireCompact := legacyCompact
@@ -3098,7 +3102,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
-	beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService)
+	beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService, openAIResponsesRequestScope(imageIntent))
 	gatewayTurnModel := reqModel
 	pendingGatewayTurnModel := reqModel
 	resilience.StateFrom(c.Request.Context()).BeginGatewayTurn(firstTurnStartedAt)

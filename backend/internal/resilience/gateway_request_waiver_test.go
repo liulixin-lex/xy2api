@@ -169,3 +169,30 @@ func TestWebSocketWaiverPreservesAdmittedScopeAcrossTurns(t *testing.T) {
 		}
 	}
 }
+
+func TestWebSocketTextWaiverAfterBinaryExcludedTurn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st := NewRequestState()
+	st.InitDelivery(ctx, time.Now(), func() int64 { return 0 })
+	st.EnableGatewayRequest(time.Now(), GatewayRequestScopeText)
+	st.BeginGatewayTurn(time.Now())
+	st.ExcludeGatewayRequest()
+	first, write := st.ClaimGatewayRequest(false)
+	require.False(t, write)
+	require.Empty(t, first.RequestScope)
+	st.BeginGatewayTurn(time.Now())
+	st.NoteGatewaySend(1)
+	bill, _ := st.ClaimGatewayRequest(true)
+	cancel()
+	st.ResolveDisconnect()
+	st.NoteUndeliveredUsage([]byte(`{"input_tokens":2}`), 0, false)
+	tail, write := st.ClaimGatewayRequest(false)
+	require.True(t, write)
+	require.Equal(t, GatewayRequestScopeText, tail.RequestScope)
+	require.Equal(t, RequestCanceled, tail.Result)
+	require.Equal(t, bill.RequestID, tail.RequestID)
+	require.NotEqual(t, first.RequestID, tail.RequestID)
+	_, write = st.ClaimGatewayRequest(false)
+	require.False(t, write)
+}

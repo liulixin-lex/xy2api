@@ -46,9 +46,10 @@ type RequestState struct {
 	prelude preludeTrace
 
 	// requestID is generated locally, independent of client correlation IDs.
-	requestID     string
-	gatewayRecord *gatewayRequestTrace
-	firstOutput   time.Time
+	requestID             string
+	gatewayRecord         *gatewayRequestTrace
+	gatewayAdmissionScope GatewayRequestScope
+	firstOutput           time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile

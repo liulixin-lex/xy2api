@@ -92,6 +92,7 @@ func (s *RequestState) EnableGatewayRequest(at time.Time, scopes ...GatewayReque
 			at = s.d.started
 		}
 		s.d.mu.Unlock()
+		s.gatewayAdmissionScope = scope
 		s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: scope}
 	}
 }
@@ -140,11 +141,7 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	s.ownerCutoff = OwnerFirstOutputCutoff{}
 	s.ownerAvoidConfirmed = false
 	s.schedSelection.HTTPStreamText = false
-	var scope GatewayRequestScope
-	if s.gatewayRecord != nil {
-		scope = s.gatewayRecord.RequestScope
-	}
-	s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: scope}
+	s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: s.gatewayAdmissionScope}
 	s.firstOutput = time.Time{}
 	s.firstOutputNoted.Store(false)
 	s.mu.Unlock()
