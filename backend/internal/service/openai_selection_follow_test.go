@@ -412,7 +412,7 @@ func TestFirstOutputFollowGuardWritesOnlyForFullOwner(t *testing.T) {
 
 func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, mode := range []string{"ordinary", "previous_response", "websocket", "encrypted", "guardian", "child", "manual", "quality", "seedance", "image_intent"} {
+	for _, mode := range []string{"ordinary", "previous_response", "websocket", "encrypted", "guardian", "child", "manual", "quality", "seedance", "image_intent", "protected_chat"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2))
 			f.cache.sessionBindings["openai:session"] = 10
@@ -423,6 +423,8 @@ func TestFirstOutputFollowProtectedSelectionsDoNotReadScope(t *testing.T) {
 			previous, transport := "", OpenAIUpstreamTransportHTTPSSE
 			capability := OpenAIEndpointCapabilityChatCompletions
 			switch mode {
+			case "protected_chat":
+				ctx = WithOpenAITransferProtected(ctx)
 			case "seedance":
 				capability = OpenAIEndpointCapabilitySeedance
 			case "image_intent":
@@ -491,5 +493,52 @@ func TestFirstOutputFollowLegacySelectionKeepsOwner(t *testing.T) {
 				require.Zero(t, store.reads)
 			})
 		}
+	}
+}
+
+func TestFirstOutputFollowReceiptBeforeBlockingClose(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, route := range []string{"responses", "passthrough"} {
+		t.Run(route, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+				c, _ := compatStreamContext("/v1/responses", string(body))
+				account := rawChatCompletionsTestAccount()
+				st, ctx := ownerFactsState(c.Request.Context(), account)
+				c.Request = c.Request.WithContext(ctx)
+				f := selectionNewSessionFixture()
+				f.binding.owner, f.binding.generation = account.ID, "v1"
+				pendingOpenAIStickyChange(ctx).cache = f.binding
+				r, w := io.Pipe()
+				defer w.Close()
+				b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
+				var transport context.Context
+				svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+					transport = req.Context()
+					RecordOpsUpstreamSendBoundary(transport, id)
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: b, Request: req}, nil
+				}}, 1, 0, 0)
+				done := make(chan error, 1)
+				go func() {
+					var err error
+					if route == "passthrough" {
+						_, err = svc.forwardOpenAIPassthrough(ctx, c, account, body, body, "wire-model", false, nil, true, time.Now())
+					} else {
+						_, err = svc.Forward(ctx, c, account, body)
+					}
+					done <- err
+				}()
+				<-b.enter
+				fact, confirmed := st.ConfirmedOwnerCutoff()
+				canceled := transport.Err()
+				avoid, err := f.session.store.SessionAvoid(ctx, 7, firstOutputAvoidSession("session"))
+				close(b.leave)
+				requireFirstOutputFailover(t, <-done)
+				require.NoError(t, err)
+				require.True(t, confirmed)
+				require.ErrorIs(t, canceled, context.Canceled)
+				require.Equal(t, map[int64]struct{}{fact.AccountID: {}}, avoid)
+			})
+		})
 	}
 }

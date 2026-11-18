@@ -46,8 +46,9 @@ func firstOutputMigrationAllowed(ctx context.Context, session string) bool {
 	if req.RequiredCapability == OpenAIEndpointCapabilitySeedance {
 		return false
 	}
+	protected, _ := ctx.Value(openAITransferProtectedKey{}).(bool)
 	_, guardian := openAIGuardianParentAffinityFromContext(ctx)
-	return session != "" && !openAINoStickyMigration(ctx) && !guardian &&
+	return !protected && session != "" && !openAINoStickyMigration(ctx) && !guardian &&
 		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session)
 }
 
@@ -249,7 +250,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 type openAITransferProtectedKey struct{}
 
 // WithOpenAITransferProtected carries an ingress protocol constraint solely
-// for the first-output transfer decision at the end of account selection.
+// for first-output avoidance and transfer. Other selection rules stay in force.
 func WithOpenAITransferProtected(ctx context.Context) context.Context {
 	return context.WithValue(ctx, openAITransferProtectedKey{}, true)
 }
@@ -261,8 +262,7 @@ func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Conte
 	if change == nil {
 		return
 	}
-	protected, _ := ctx.Value(openAITransferProtectedKey{}).(bool)
-	eligible := ordinary && !protected && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
+	eligible := ordinary && selection != nil && selection.Account != nil && !selection.StickyCapacitySpillover &&
 		change.expected.AccountID == selection.Account.ID && change.expected.Generation != "" && !change.skipCommit &&
 		change.groupID == derefGroupID(groupID) && session != "" && change.session == session && change.key != "" &&
 		firstOutputMigrationAllowed(ctx, session) && !s.qualityOwnsSticky(ctx, groupID, session)
