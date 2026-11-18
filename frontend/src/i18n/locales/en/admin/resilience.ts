@@ -115,7 +115,7 @@ export default {
         last_resort: 'Last-resort selections',
         fallback_group: 'Served by fallback group',
         fallback_return: 'Returned to group',
-        session_rebind: 'Session rebinds',
+        session_rebind: 'Session avoidance (asked by a request)',
         undelivered: 'Undelivered',
         cdn_cut: 'Inferred CDN cuts',
         fast_fail: 'Fast fails',
@@ -129,6 +129,9 @@ export default {
         collab_call: 'Collaboration tool calls (by encrypted args state)',
         collab_call_action: 'Collaboration tool call actions',
         state_rejection: 'Conversation state rejections'
+      },
+      metricHints: {
+        session_rebind: 'A request asked to move the session off its current account (avoidance); it does not mean the session changed accounts. Whether the binding changed is what the commit record says (committed on the sched_quality.session_switch log).'
       }
     },
     undelivered: {
@@ -227,7 +230,7 @@ export default {
     },
     usage: {
       fallback: 'Fallback → {group}',
-      fallbackTitle: 'The original group had no available account and the fallback group served the request; billed by the fallback group, while the user sees only the original group'
+      fallbackTitle: 'Judged by the original group and the group that actually served the request: they differ, so the original group had no available account and the fallback group served it; billed by the fallback group, while the user sees only the original group. The fallback flag on the bill only means a rear account took the request, not that the group changed'
     }
   }
 }

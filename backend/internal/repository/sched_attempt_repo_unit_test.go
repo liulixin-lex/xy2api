@@ -97,6 +97,11 @@ func TestSchedAttemptRepositoryV2Evidence(t *testing.T) {
 	require.NoError(t, err)
 	busyMigration("313_sched_attempt_v2.sql", "account_attempt_samples", "UPDATE account_attempt_samples SET detail=detail")
 	apply("313_sched_attempt_v2.sql") // Replay after the successful retry must be harmless.
+	busyMigration("319_sched_attempt_full_tier_timeout.sql", "account_attempt_samples", "UPDATE account_attempt_samples SET detail=detail")
+	apply("319_sched_attempt_full_tier_timeout.sql")
+	var fullTier bool
+	require.NoError(t, db.QueryRow("SELECT full_tier_first_output_timeout FROM account_attempt_samples WHERE attempt_id=$1", legacyID).Scan(&fullTier))
+	require.False(t, fullTier)
 	var version int
 	require.NoError(t, db.QueryRow("SELECT capture_version FROM account_attempt_samples WHERE attempt_id=$1", legacyID).Scan(&version))
 	require.Equal(t, 1, version)
@@ -110,4 +115,5 @@ func TestSchedAttemptRepositoryV2Evidence(t *testing.T) {
 	require.False(t, duplicateColumn, "request-level timing reuses end_to_end_first_output_ms")
 
 	assertSchedAttemptV2Evidence(t, db)
+	t.Run("mixed-owner-timeouts", func(t *testing.T) { assertSchedAttemptOwnerTimeoutEvidence(t, db) })
 }

@@ -23,7 +23,7 @@
     <template v-else>
       <div class="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="resilience-totals">
         <div v-for="item in totals" :key="item.name" class="rounded-lg border border-gray-100 px-3 py-2 dark:border-dark-700">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ metricLabel(item.name) }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400" :title="metricHint(item.name)">{{ metricLabel(item.name) }}</p>
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ formatNumber(item.count) }}</p>
         </div>
       </div>
@@ -40,7 +40,7 @@
           </thead>
           <tbody>
             <tr v-for="row in counters" :key="rowKey(row)" class="border-b border-gray-100 text-gray-700 last:border-b-0 dark:border-dark-800 dark:text-gray-200">
-              <td class="px-2 py-1.5">{{ metricLabel(row.name) }}</td>
+              <td class="px-2 py-1.5" :title="metricHint(row.name)">{{ metricLabel(row.name) }}</td>
               <td class="px-2 py-1.5">{{ groupLabel(row.group_id) }}</td>
               <td class="px-2 py-1.5">{{ row.account_id ? `#${row.account_id}` : '-' }}</td>
               <td class="px-2 py-1.5">{{ row.label || '-' }}</td>
@@ -177,6 +177,12 @@ function rowKey(row: ResilienceMetricRow): string {
 function metricLabel(name: string): string {
   const key = `admin.resilience.panel.metrics.${name}`
   return te(key) ? t(key) : name
+}
+
+/** What a counter does not say on its own (session_rebind is the request's avoidance, not a committed switch). */
+function metricHint(name: string): string | undefined {
+  const key = `admin.resilience.panel.metricHints.${name}`
+  return te(key) ? t(key) : undefined
 }
 
 function stageLabel(stage: string): string {

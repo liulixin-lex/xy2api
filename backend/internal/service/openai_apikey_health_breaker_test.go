@@ -129,12 +129,27 @@ func TestOpenAIAPIKeyHealthSuccessDoesNotTouchSettingsOrCache(t *testing.T) {
 	settingRepo := &openAIAPIKeyHealthSettingRepo{value: string(encoded)}
 	settings := NewSettingService(settingRepo, &config.Config{})
 	cache := &openAIAPIKeyHealthCacheStub{}
-	svc := NewRateLimitService(&openAIAPIKeyHealthAccountRepo{}, nil, &config.Config{}, nil, cache)
-	svc.SetSettingService(settings)
-	svc.SetOpenAIAPIKeyHealthCache(cache)
+	rateLimit := NewRateLimitService(&openAIAPIKeyHealthAccountRepo{}, nil, &config.Config{}, nil, cache)
+	rateLimit.SetSettingService(settings)
+	rateLimit.SetOpenAIAPIKeyHealthCache(cache)
+	svc := &OpenAIGatewayService{rateLimitService: rateLimit}
+	account := openAIHealthPoolAccount()
+	const model = "test-model"
+	now := time.Now()
+	svc.openaiOAuth429RetryStartedAt.Store(account.ID, now)
+	svc.recordOpenAIAccountModelTransientFailure(account, model, now)
+	state := svc.getOpenAIAccountModelTransientState()
+	_, hadFailure := state.readEntry(account.ID, model, now)
+	require.True(t, hadFailure)
 
-	svc.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), openAIHealthPoolAccount())
-	svc.ObserveOpenAIAPIKeyHealthSuccess(context.Background(), &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey})
+	observedErr := &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+	require.False(t, svc.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, true, nil, observedErr))
+
 	require.Zero(t, settingRepo.getCalls)
 	require.Zero(t, cache.recordCalls)
+	require.Zero(t, cache.setCalls)
+	_, retryStarted := svc.openaiOAuth429RetryStartedAt.Load(account.ID)
+	require.False(t, retryStarted)
+	_, stillHasFailure := state.readEntry(account.ID, model, now)
+	require.False(t, stillHasFailure)
 }

@@ -16,7 +16,8 @@ func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
 		&row.Model, &row.Stream, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
 		&row.Detail, &row.PromptTokens, &row.CacheReadTokens, &row.SessionKey,
 		&row.RequestID, &row.InsertedAt, &row.InputTokens, &row.CacheCreationTokens,
-		&row.FirstEventMs, &row.FirstAnswerMs, &row.Class, &row.HTTPStatus, &row.StatusOrigin, &row.OutputBytes}
+		&row.FirstEventMs, &row.FirstAnswerMs, &row.Class, &row.HTTPStatus, &row.StatusOrigin, &row.OutputBytes,
+		&row.Warm, &row.FullTierFirstOutputTimeout, &row.CaptureVersion}
 }
 
 func (r *schedAttemptRepository) LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {

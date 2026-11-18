@@ -19,6 +19,51 @@ function mountHeader(value = overview) {
   })
 }
 
+describe('OpsDashboardHeader user wait', () => {
+  const ttft = { p50_ms: 700, p90_ms: 900, p95_ms: 950, p99_ms: 1200, avg_ms: 750, max_ms: 1500 }
+  const e2e = { p50_ms: 51000, p90_ms: 60000, p95_ms: 62000, p99_ms: 64000, avg_ms: 40000, max_ms: 70000 }
+  const mountWait = (value: Partial<OpsDashboardOverview>) => mount(OpsDashboardHeader, {
+    props: {
+      overview: { ...overview, ttft, ...value } as OpsDashboardOverview, platform: '', groupId: null, timeRange: '1h', queryMode: 'auto',
+      loading: false, lastUpdated: null, thresholds: { ttft_p99_ms_max: 1000 }
+    },
+    global: { stubs: { Select: true, HelpTooltip: { props: ['content'], template: '<i data-testid="help" :data-content="content" />' }, BaseDialog: true, Icon: true } }
+  })
+
+  it('leads with the end-to-end percentiles, says how many requests, and keeps the last attempt red over its threshold', async () => {
+    const wrapper = mountWait({ e2e_first_output: e2e, e2e_first_output_sample_count: 1234 })
+    await flushPromises()
+    const card = wrapper.get('[data-testid="ops-e2e-card"]')
+    expect(card.get('[data-testid="ops-e2e-p99"]').text()).toBe('64000')
+    expect(card.text()).toContain('51000')
+    expect(card.text()).not.toContain('TTFT')
+    expect(card.find('[data-testid="ops-e2e-none"]').exists()).toBe(false)
+    expect(card.get('[data-testid="help"]').attributes('data-content')).toBe(
+      'admin.ops.tooltips.e2eFirstOutput admin.ops.e2eFirstOutput.samples:{"n":"1,234"}'
+    )
+    const last = card.get('[data-testid="ops-e2e-last-attempt"]')
+    expect(last.text()).toContain('admin.ops.e2eFirstOutput.lastAttempt')
+    expect(last.text()).toContain('1200')
+    expect(last.findAll('.font-bold').map((el) => el.classes().some((c) => c.startsWith('text-red')))).toEqual([true, false])
+    wrapper.unmount()
+  })
+
+  // Review item 7: an answer that counted no samples and one without the count say different things.
+  it.each([
+    ['no samples counted', { e2e_first_output: { p50_ms: null, p90_ms: null, p95_ms: null, p99_ms: null, avg_ms: null, max_ms: null }, e2e_first_output_sample_count: 0 }, 'admin.ops.e2eFirstOutput.none'],
+    ['an answer without the count', {}, 'admin.ops.e2eFirstOutput.notProvided']
+  ])('shows the user wait as unknown with why for %s, the last attempt still shown', async (_, value, why) => {
+    const wrapper = mountWait(value)
+    await flushPromises()
+    const card = wrapper.get('[data-testid="ops-e2e-card"]')
+    expect(card.get('[data-testid="ops-e2e-p99"]').text()).toBe('admin.ops.e2eFirstOutput.unknown')
+    expect(card.get('[data-testid="ops-e2e-none"]').text()).toBe(why)
+    expect(card.get('[data-testid="help"]').attributes('data-content')).toBe(`admin.ops.tooltips.e2eFirstOutput ${why}`)
+    expect(card.get('[data-testid="ops-e2e-last-attempt"]').text()).toContain('1200')
+    wrapper.unmount()
+  })
+})
+
 describe('OpsDashboardHeader output TPS', () => {
 
   it('shows per-request P50, slower-tail percentiles and sample count separately from traffic TPS', async () => {
