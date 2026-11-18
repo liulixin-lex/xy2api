@@ -437,3 +437,37 @@ func TestOwnerCutoffPassthroughDisconnectDuringClose(t *testing.T) {
 		require.Equal(t, before, after)
 	})
 }
+
+func TestOwnerCutoffLightweightCapturePreservesDiagnosticClock(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		account := rawChatCompletionsTestAccount()
+		c, _ := compatStreamContext("/v1/responses", "")
+		st, ctx := ownerFactsState(c.Request.Context(), account)
+		c.Request = c.Request.WithContext(ctx)
+		start := time.Now()
+		plan := st.PlanAttemptTimeout(20*time.Second, false, start)
+		upstream, g := newOpenAIFirstOutputHeaderGuard(ctx, func() {}, start.Add(plan.Effective()), plan)
+		defer g.close()
+		time.Sleep(3 * time.Second) // construction after the timer was armed
+		req, err := http.NewRequestWithContext(upstream, http.MethodPost, "https://upstream.invalid/responses", nil)
+		require.NoError(t, err)
+		svc := compatStreamService(factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
+			RecordOpsUpstreamSendBoundary(req.Context(), id)
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}}, 1, 0, 0)
+		var a *schedAttemptCapture
+		_, err = svc.sendSchedHTTP(ctx, account, req, "", nil, true, &a)
+		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, g.stopHeaderWait())
+		require.True(t, a.factsOnly)
+		svc.newOpenAIFirstOutputTimeoutError(ctx, c, account, nil, "", start, "wire-model", "", plan.Effective(), "response_headers", nil, plan)
+		raw, _ := c.Get(OpsUpstreamErrorsKey)
+		require.EqualValues(t, 20000, raw.([]*OpsUpstreamErrorEvent)[0].AttemptElapsedMs)
+		fact, ok := st.OwnerCutoff()
+		require.True(t, ok)
+		require.Equal(t, 3*time.Second, fact.DispatchAt.Sub(start))
+		require.Equal(t, 17*time.Second, fact.FiredAt.Sub(fact.DispatchAt))
+	})
+}

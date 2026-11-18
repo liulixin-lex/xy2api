@@ -290,7 +290,7 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		attempt = currentSchedAttempt(ctx)
 	}
 	elapsedStart := startTime
-	if attempt != nil {
+	if attempt != nil && !attempt.factsOnly {
 		// A handler/response stage can start earlier than this account's send.
 		// Censored wait and diagnostic elapsed must use the attempt's clock.
 		elapsedStart = attempt.started
