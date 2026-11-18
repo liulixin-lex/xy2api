@@ -898,3 +898,45 @@ func TestFirstOutputFollowRechecksTargetBeforeCAS(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstOutputFollowProductionTakeoverReader(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, mode := range []string{"ordinary", "avoided", "read_error", "quality_owned"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 8), selectionFixtureAccount(1, 1))
+			f.cache.sessionBindings["openai:session"] = 10
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			if mode == "quality_owned" {
+				f.svc.cfg.Gateway.OpenAIQualityRouting.Mode = "enforce"
+				ctx = context.WithValue(withOpenAIQualityRouting(ctx), openAIQualityContextKey{}, &openAIQualityRequest{loaded: true, pinned: true, group: 7, session: "session", scope: "synthetic", state: OpenAIQualityState{Generation: 1, Binding: 10, Owner: 10}})
+			}
+			store := &followScopeReader{ResilienceStore: f.svc.resilience.store}
+			f.svc.resilience.store = store
+			if mode == "read_error" {
+				store.err = errors.New("unavailable")
+			}
+			if mode == "avoided" || mode == "quality_owned" {
+				require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
+			}
+			gid := int64(7)
+			f.svc.prepareOpenAIStickyChange(ctx, &gid, "session")
+			req := OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "session", RequestedModel: "m", RequiredCapability: OpenAIEndpointCapabilityResponses, RequiredTransport: OpenAIUpstreamTransportHTTPSSE}
+			sel := f.svc.selectSessionOwner(ctx, req, &f.repo.accounts[0], func() ([]Account, error) { return f.repo.accounts, nil })
+			if sel != nil {
+				defer sel.ReleaseFunc()
+			}
+			switch mode {
+			case "quality_owned":
+				require.Zero(t, store.reads)
+			case "ordinary":
+				require.Equal(t, 1, store.reads)
+				require.NotNil(t, sel)
+				require.EqualValues(t, 1, sel.Account.ID)
+			default:
+				require.Equal(t, 1, store.reads)
+				require.Nil(t, sel)
+			}
+			require.EqualValues(t, 10, f.cache.sessionBindings["openai:session"])
+		})
+	}
+}
