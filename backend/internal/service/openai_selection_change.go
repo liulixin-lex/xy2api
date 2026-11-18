@@ -121,7 +121,7 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 type openAIStickyChange struct {
 	mu               sync.Mutex
 	done             bool
-	commitAttempted  bool
+	followDelivered  bool
 	attemptSucceeded bool
 	attemptCanceled  bool
 	activeAttempt    *schedAttemptCapture
@@ -179,14 +179,12 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	if change == nil || change.target != accountID {
 		return
 	}
-	change.mu.Lock()
-	succeeded, attemptCanceled := change.attemptSucceeded, change.attemptCanceled
-	change.mu.Unlock()
-	canceled := attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
-	success := succeeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
 	var failover *UpstreamFailoverError
-	beforeSend := !success && change.kind == stickyFollow && errors.As(err, &failover) && failover.PreDispatchSelectionInvalidated
-	change.complete(ctx, success, canceled, beforeSend)
+	beforeSend := change.kind == stickyFollow && errors.As(err, &failover) && failover.PreDispatchSelectionInvalidated
+	change.mu.Lock()
+	canceled := change.attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
+	success := change.attemptSucceeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
+	change.completeLocked(ctx, success, canceled, beforeSend)
 }
 
 func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
@@ -336,7 +334,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	change := pendingOpenAIStickyChange(ctx)
 	if change != nil && change.kind == stickyFollow {
 		change.mu.Lock()
-		if change.commitAttempted {
+		if change.followDelivered {
 			change.mu.Unlock()
 			return
 		}
@@ -390,17 +388,35 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if change == nil || change.target != accountID {
 		return
 	}
-	change.complete(ctx, success, canceled, false)
+	change.mu.Lock()
+	change.completeLocked(ctx, success, canceled, false)
 }
 
-func (change *openAIStickyChange) complete(ctx context.Context, success, canceled, beforeSend bool) {
-	change.mu.Lock()
-	defer change.mu.Unlock()
+// completeLocked owns the caller's lock. Legacy changes coordinate the slot's
+// trial lease through completion. A follow target is front-row and has no
+// reservation, so its one claimed outcome can perform storage I/O independently.
+func (change *openAIStickyChange) completeLocked(ctx context.Context, success, canceled, beforeSend bool) {
 	if change.done {
+		change.mu.Unlock()
 		return
 	}
 	change.done = true
-	committed, fasterDelivery := false, false
+	if change.kind != stickyFollow {
+		defer change.mu.Unlock()
+		change.finish(ctx, success, canceled, beforeSend)
+		return
+	}
+	change.followDelivered = success
+	final := change.replacement(change.kind, change.model, change.target, change.reason)
+	final.ownerFirstOutputLimit = change.ownerFirstOutputLimit
+	final.activeAttempt, final.attemptSucceeded, final.attemptCanceled = change.activeAttempt, change.attemptSucceeded, change.attemptCanceled
+	final.targetUpstreamFirstValidKnown, final.targetUpstreamFirstValidDelay = change.targetUpstreamFirstValidKnown, change.targetUpstreamFirstValidDelay
+	change.mu.Unlock()
+	final.finish(ctx, success, canceled, beforeSend)
+}
+
+func (change *openAIStickyChange) finish(ctx context.Context, success, canceled, beforeSend bool) {
+	committed, fasterDelivery, commitAttempted := false, false, false
 	defer func() {
 		if committed && change.trial != nil {
 			change.trial.promote(ctx)
@@ -417,7 +433,7 @@ func (change *openAIStickyChange) complete(ctx context.Context, success, cancele
 			"model", change.model, "from", change.expected.AccountID, "to", change.target,
 			"kind", change.kind, "reason", reason, "committed", committed}
 		if change.kind == stickyFollow {
-			fields = append(fields, "faster_complete", fasterDelivery, "commit_attempted", change.commitAttempted)
+			fields = append(fields, "faster_complete", fasterDelivery, "commit_attempted", commitAttempted)
 		}
 		slog.InfoContext(ctx, "sched_quality.session_switch", fields...)
 	}()
@@ -474,7 +490,7 @@ func (change *openAIStickyChange) complete(ctx context.Context, success, cancele
 		}
 		return
 	}
-	change.commitAttempted = true
+	commitAttempted = true
 	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
 	if err != nil {
 		if change.kind == stickyFollow {

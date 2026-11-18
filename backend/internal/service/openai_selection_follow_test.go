@@ -762,3 +762,67 @@ func TestFirstOutputFollowPreDispatchFailureKeepsTargetAvailable(t *testing.T) {
 	require.Empty(t, avoid)
 	require.Equal(t, f.owner.ID, f.binding.owner)
 }
+
+type followWriteBarrier struct {
+	OpenAIStickyVersionedCache
+	enter  chan string
+	resume chan struct{}
+}
+
+func (b *followWriteBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, id int64, ttl time.Duration, scopes ...string) (bool, error) {
+	b.enter <- "commit"
+	<-b.resume
+	return b.OpenAIStickyVersionedCache.CommitSessionBinding(ctx, g, key, expected, id, ttl, scopes...)
+}
+
+func (b *followWriteBarrier) RecordSessionBindingFailure(ctx context.Context, g int64, key, scope string, expected StickySessionBinding, id int64, ttl time.Duration, reset ...time.Time) (bool, error) {
+	b.enter <- scope
+	<-b.resume
+	return b.OpenAIStickyVersionedCache.RecordSessionBindingFailure(ctx, g, key, scope, expected, id, ttl, reset...)
+}
+
+func TestFirstOutputFollowTerminalUnlocksBeforeWrite(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f, svc := selectionNewSessionFixture(), &OpenAIGatewayService{}
+				ctx := followState(t, f, true)
+				y := f.candidates[0]
+				followSelect(svc, ctx, y)
+				change := pendingOpenAIStickyChange(ctx)
+				gate := &followWriteBarrier{change.cache, make(chan string), make(chan struct{})}
+				change.cache = gate
+				result := &OpenAIForwardResult{PartialFailure: partial}
+				done := make(chan struct{})
+				go func() { followDelivery(svc, ctx, y, time.Millisecond, result); close(done) }()
+				op := <-gate.enter
+				unlocked := change.mu.TryLock()
+				if unlocked {
+					change.mu.Unlock()
+				}
+				repeated := make(chan struct{})
+				go func() { FinishOpenAIStickyForward(ctx, y.ID, result, nil); close(repeated) }()
+				synctest.Wait()
+				var returned bool
+				select {
+				case <-repeated:
+					returned = true
+				default:
+				}
+				close(gate.resume)
+				<-done
+				<-repeated
+				require.True(t, unlocked)
+				require.True(t, returned, "duplicate finish returns while the claimed write is blocked")
+				if partial {
+					require.Equal(t, stickyChangeAvoidSession("session"), op)
+					require.Empty(t, f.binding.casKeys)
+				} else {
+					require.Equal(t, "commit", op)
+					require.Len(t, f.binding.casKeys, 1)
+				}
+			})
+		})
+	}
+}
