@@ -4,15 +4,77 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFirstOutputFollowBorrowPersistsThroughSlog(t *testing.T) {
+	withResilienceSettings(t, nil)
+	previous := slog.Default()
+	require.NoError(t, logger.Init(logger.InitOptions{Level: "info", Format: "json", ServiceName: "follow-test", Environment: "test",
+		Output: logger.OutputOptions{ToStdout: true}}))
+	t.Cleanup(func() {
+		logger.SetSink(nil)
+		slog.SetDefault(previous)
+	})
+	var saved []*OpsInsertSystemLogInput
+	sink := NewOpsSystemLogSink(&opsRepoMock{BatchInsertSystemLogsFn: func(_ context.Context, rows []*OpsInsertSystemLogInput) (int64, error) {
+		saved = append(saved, rows...)
+		return int64(len(rows)), nil
+	}})
+	defer sink.Stop()
+	sink.SetPersistAccessLogs(false)
+	logger.SetSink(sink)
+
+	var borrowID string
+	for _, scope := range []string{"session", firstOutputAvoidSession("session")} {
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2))
+		f.cache.sessionBindings["openai:session"] = 10
+		st := resilience.NewRequestState()
+		ctx := resilience.WithRequestState(context.Background(), st)
+		require.NoError(t, f.cache.store.AddSessionAvoid(ctx, 7, scope, 10, time.Minute))
+		sel := selectTrialRuntime(t, f, ctx, "session")
+		require.EqualValues(t, 11, sel.Account.ID)
+		sel.ReleaseFunc()
+		if scope == "session" {
+			require.Equal(t, "owner_excluded", st.StickyBypassReason())
+		} else {
+			borrowID = st.GatewayRequestID()
+		}
+	}
+	var batch []*logger.LogEvent
+	for len(sink.queue) > 0 {
+		batch = append(batch, <-sink.queue)
+	}
+	written, err := sink.flushBatch(context.Background(), batch)
+	require.NoError(t, err)
+	require.Equal(t, len(batch), written)
+	var bypass []*OpsInsertSystemLogInput
+	for _, row := range saved {
+		if row.Message == "openai.sticky_bypass" {
+			bypass = append(bypass, row)
+		}
+	}
+	require.Len(t, bypass, 1)
+	row := bypass[0]
+	require.Equal(t, "info", row.Level)
+	require.Equal(t, "sched_quality", row.Component)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(row.ExtraJSON), &fields))
+	require.Equal(t, "first_output_avoid", fields["reason"])
+	require.Equal(t, borrowID, fields["gateway_request_id"])
+	require.Equal(t, float64(10), fields["owner"])
+	require.Equal(t, float64(11), fields["selected"])
+}
 
 type followAccountReadBarrier struct {
 	AccountRepository

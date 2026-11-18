@@ -275,6 +275,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			"selected", selected,
 			"reason", reason,
 		)
+		if reason == "first_output_avoid" {
+			fields = append(fields, "component", "sched_quality")
+		}
 		if reason == "unrecorded" || state.StickyBypassChangesBinding() {
 			slog.Warn("openai.sticky_bypass", fields...)
 		} else {
