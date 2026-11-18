@@ -47,8 +47,9 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
-	RequireCompact bool
-	ExcludedIDs    map[int64]struct{}
+	RequireCompact     bool
+	ExcludedIDs        map[int64]struct{}
+	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -313,16 +314,17 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	state.SetAvoided(avoided)
 	// This pass must be able to preserve a versioned owner while borrowing.
 	// Legacy callers without a pending binding would otherwise eagerly rebind.
+	var firstOutputAvoided map[int64]struct{}
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
 		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
-		soft, _ := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
-		if _, hit := soft[stickyOwner]; hit {
+		firstOutputAvoided, _ = sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
+		if _, hit := firstOutputAvoided[stickyOwner]; hit {
 			_, hard := origExcluded[stickyOwner]
 			_, otherSoft := avoided[stickyOwner]
 			ownerOnlyFirstOutputAvoid = !hard && !otherSoft
 		}
-		avoided = mergeExcluded(avoided, soft)
+		avoided = mergeExcluded(avoided, firstOutputAvoided)
 	}
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
@@ -339,7 +341,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			NoWait:  openAISelectionNoWait(ctx),
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
-			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded,
+			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
 			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil

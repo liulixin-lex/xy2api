@@ -969,3 +969,35 @@ func TestFirstOutputFollowProductionTakeoverReader(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstOutputFollowLastResortAvoidSource(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, source := range []string{"session", "first_output", "both"} {
+		t.Run(source, func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1))
+			f.cache.sessionBindings["openai:session"] = 10
+			store := &followScopeReader{ResilienceStore: f.svc.resilience.store}
+			f.svc.resilience.store = store
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			if source != "first_output" {
+				require.NoError(t, store.AddSessionAvoid(ctx, 7, "session", 10, time.Minute))
+			}
+			if source != "session" {
+				require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 10, time.Minute))
+			}
+			logs := captureOpenAIObservationLogs(t)
+			sel := selectTrialRuntime(t, f, ctx, "session")
+			defer sel.ReleaseFunc()
+			require.EqualValues(t, 10, sel.Account.ID)
+			require.EqualValues(t, 10, resilience.StateFrom(ctx).LastResort())
+			require.Equal(t, 1, store.reads, "attribution uses the normal pass's read")
+			var sources []any
+			for _, row := range schedObsLogRecords(t, logs) {
+				if row["msg"] == "resilience.last_resort_avoided" {
+					sources = append(sources, row["avoid_source"])
+				}
+			}
+			require.Equal(t, []any{source}, sources)
+		})
+	}
+}
