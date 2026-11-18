@@ -305,6 +305,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			rejectionScope.selectionPreservesBinding.Store(ownerErr != nil || owner <= 0 || ownerAvoided)
 		}
 	}
+	// A first-output cutoff leaves the owner bound. Only the existing avoidance
+	// scopes belong in request state, which trial selection uses to detect borrowing.
+	state.SetAvoided(avoided)
 	// This pass must be able to preserve a versioned owner while borrowing.
 	// Legacy callers without a pending binding would otherwise eagerly rebind.
 	if ordinary && preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && s.resilience != nil && s.resilience.store != nil &&
@@ -312,7 +315,6 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		soft, _ := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
 		avoided = mergeExcluded(avoided, soft)
 	}
-	resilience.StateFrom(ctx).SetAvoided(avoided)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	markResilienceConfigError(ctx, err)

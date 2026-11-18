@@ -571,3 +571,65 @@ func TestFirstOutputFollowReceiptWithoutTransferAuthority(t *testing.T) {
 	require.Equal(t, f.owner.ID, f.binding.owner)
 	require.Empty(t, f.binding.casKeys)
 }
+
+func TestFirstOutputFollowBorrowKeepsTrialLast(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name, extraScope, bypass string
+		retry                    bool
+		wantSelected             int64
+	}{
+		{"same_request", "", "owner_failed_in_request", true, 2},
+		{"next_request", "", "first_output_avoid", false, 2},
+		{"strict_overlap", stickyChangeAvoidSession("session"), "owner_excluded", false, 2},
+		{"ordinary_overlap", "session", "owner_excluded", false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const ownerID, trialID = int64(10), int64(1)
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(ownerID, 5), selectionFixtureAccount(trialID, 1), selectionFixtureAccount(2, 9))
+			const key = "openai:session"
+			f.cache.sessionBindings[key] = ownerID
+			selectionSetTrial(f, trialID, newSelectionTrialLeaseFake())
+			selectFor := func(ctx context.Context, excluded map[int64]struct{}) *AccountSelectionResult {
+				t.Helper()
+				sel, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+				require.NoError(t, err)
+				require.NotNil(t, sel)
+				return sel
+			}
+			state := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), state)
+			owner := selectFor(ctx, nil)
+			require.Equal(t, ownerID, owner.Account.ID)
+			owner.ReleaseFunc()
+			change := pendingOpenAIStickyChange(ctx)
+			fact := resilience.OwnerFirstOutputCutoff{GroupID: 7, Session: "session", BindingKey: key, AccountID: ownerID, Generation: change.expected.Generation, AttemptSeq: state.MarkOpsUpstreamSendBoundary(ownerID), Effective: time.Second, FiredAt: time.Now(), CanTransfer: change.canTransfer}
+			require.True(t, state.RecordOwnerCutoff(fact))
+			recordFirstOutputAvoid(ctx, fact)
+			_, ok := state.ConfirmedOwnerCutoff()
+			require.True(t, ok)
+			var excluded map[int64]struct{}
+			if tc.retry {
+				state.MarkAccountFailed(ownerID)
+				excluded = map[int64]struct{}{ownerID: {}}
+			} else {
+				state = resilience.NewRequestState()
+				ctx = resilience.WithRequestState(context.Background(), state)
+			}
+			if tc.extraScope != "" {
+				require.NoError(t, f.svc.resilience.store.AddSessionAvoid(ctx, 7, tc.extraScope, ownerID, time.Minute))
+			}
+
+			result := selectFor(ctx, excluded)
+			defer result.ReleaseFunc()
+			require.Equal(t, tc.wantSelected, result.Account.ID)
+			require.Equal(t, tc.extraScope == "session", state.Avoided(ownerID))
+			followDelivery(f.svc, ctx, result.Account, time.Millisecond, &OpenAIForwardResult{})
+			if tc.retry {
+				require.Equal(t, tc.wantSelected, f.cache.sessionBindings[key])
+			} else {
+				require.Equal(t, ownerID, f.cache.sessionBindings[key])
+			}
+		})
+	}
+}
