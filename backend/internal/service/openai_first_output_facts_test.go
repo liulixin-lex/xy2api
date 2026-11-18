@@ -9,11 +9,13 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -359,13 +361,19 @@ func TestOwnerCutoffBeforeCompatReaderReturns(t *testing.T) {
 
 type factsBlockingCloser struct {
 	io.ReadCloser
-	once  sync.Once
-	enter chan struct{}
-	leave chan struct{}
+	closed atomic.Bool
+	once   sync.Once
+	enter  chan struct{}
+	leave  chan struct{}
 }
 
 func (b *factsBlockingCloser) Close() error {
-	b.once.Do(func() { close(b.enter); <-b.leave; _ = b.ReadCloser.Close() })
+	b.once.Do(func() {
+		close(b.enter)
+		<-b.leave
+		_ = b.ReadCloser.Close()
+		b.closed.Store(true)
+	})
 	return nil
 }
 
@@ -378,11 +386,21 @@ func TestOwnerCutoffCancelsBeforeBlockingClose(t *testing.T) {
 				c, _ := compatStreamContext("/v1/responses", string(body))
 				account := rawChatCompletionsTestAccount()
 				st, ctx := ownerFactsState(c.Request.Context(), account)
-				c.Request = c.Request.WithContext(ctx)
 				r, w := io.Pipe()
 				defer w.Close()
 				b := &factsBlockingCloser{ReadCloser: r, enter: make(chan struct{}), leave: make(chan struct{})}
 				var upstream context.Context
+				type notification struct {
+					fact          resilience.OwnerFirstOutputCutoff
+					delay         time.Duration
+					upstreamErr   error
+					closeFinished bool
+				}
+				var received []notification
+				ctx = context.WithValue(ctx, ownerCutoffObserverKey{}, func(fact resilience.OwnerFirstOutputCutoff) {
+					received = append(received, notification{fact: fact, delay: time.Since(fact.FiredAt), upstreamErr: upstream.Err(), closeFinished: b.closed.Load()})
+				})
+				c.Request = c.Request.WithContext(ctx)
 				up := factsUpstream{send: func(req *http.Request, id int64) (*http.Response, error) {
 					upstream = req.Context()
 					RecordOpsUpstreamSendBoundary(req.Context(), id)
@@ -400,12 +418,20 @@ func TestOwnerCutoffCancelsBeforeBlockingClose(t *testing.T) {
 					done <- err
 				}()
 				<-b.enter
-				_, frozen := st.OwnerCutoff()
-				canceled := upstream.Err()
+				fact, frozen := st.OwnerCutoff()
+				// A synchronous Close in the cancellation callback would consume the
+				// whole avoidance window before reaching the notification.
+				time.Sleep(601 * time.Second)
 				close(b.leave)
 				requireFirstOutputFailover(t, <-done)
 				require.True(t, frozen)
-				require.ErrorIs(t, canceled, context.Canceled, "cancel must reach the actual transport before waiting for Close")
+				require.Len(t, received, 1)
+				note := received[0]
+				require.Equal(t, fact, note.fact)
+				require.ErrorIs(t, note.upstreamErr, context.Canceled)
+				assert.False(t, note.closeFinished, "follow notification arrived after Close finished")
+				assert.Zero(t, note.delay, "follow notification delay since the winning deadline")
+
 			})
 		})
 	}

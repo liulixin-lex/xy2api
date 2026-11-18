@@ -11,6 +11,9 @@ import (
 // Only sendSchedHTTP attaches this handle to the built request.
 type schedHTTPAttemptKey struct{}
 
+// Request-local observation of the follow notification in test builds.
+type ownerCutoffObserverKey struct{}
+
 // A second GetConn means this Do is trying another HTTP hop, even while it
 // waits for a pooled connection, a dial, or TLS. Its timer still spans both.
 func (a *schedAttemptCapture) withHTTPDispatchTrace(ctx context.Context) context.Context {
@@ -92,6 +95,13 @@ func claimOpenAIFirstOutputCutoff(a *schedAttemptCapture, plan resilience.Timeou
 		onClaim()
 	}
 
+	// Observe the synchronous notification here, after cancellation and outside
+	// the capture lock, so a blocked reader cannot hide its delivery time.
+	if resilience.BudgetTraceEnabledForTest {
+		if observe, ok := a.ctx.Value(ownerCutoffObserverKey{}).(func(resilience.OwnerFirstOutputCutoff)); ok {
+			observe(fact)
+		}
+	}
 	// follow: attempt avoidance only for CanTransfer. Use the frozen binding,
 	// pendingOpenAIStickyChange(a.ctx).cache/resetAt and the session avoid duration.
 	// Only a successful write earns a receipt; handoff checks both facts.
