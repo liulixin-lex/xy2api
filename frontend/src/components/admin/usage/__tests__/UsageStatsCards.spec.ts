@@ -87,3 +87,26 @@ describe('UsageStatsCards', () => {
     expect(tooltip?.classes()).not.toContain('opacity-0')
   })
 })
+
+describe('UsageStatsCards user wait (admin)', () => {
+  const mountCards = (value: Record<string, unknown>) => mount(UsageStatsCards, {
+    props: { stats: { ...stats, ...value } as never },
+    global: { stubs: { Icon: true } },
+  })
+
+  it('shows the median end-to-end first output with the requests it is over', () => {
+    const wrapper = mountCards({ e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 1234 })
+    expect(wrapper.get('[data-testid="usage-e2e-p50"]').text()).toBe('51.00s')
+    expect(wrapper.get('[data-testid="usage-e2e-samples"]').text()).toBe('usage.e2eFirstOutputSamples')
+  })
+
+  it('reads unknown without samples', () => {
+    const wrapper = mountCards({ e2e_first_output_p50_ms: null, e2e_first_output_samples: 0 })
+    expect(wrapper.get('[data-testid="usage-e2e-p50"]').text()).toBe('usage.latencyUnknown')
+    expect(wrapper.get('[data-testid="usage-e2e-samples"]').text()).toBe('usage.e2eFirstOutputNone')
+  })
+
+  it('has no card on the user page, whose stats carry no end-to-end fields', () => {
+    expect(mountCards({}).find('[data-testid="usage-e2e-card"]').exists()).toBe(false)
+  })
+})

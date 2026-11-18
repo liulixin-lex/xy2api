@@ -1,5 +1,5 @@
 <template>
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+  <div :class="['grid grid-cols-2 gap-4', e2e ? 'lg:grid-cols-5' : 'lg:grid-cols-4']">
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 text-blue-600">
         <Icon name="document" size="md" />
@@ -89,6 +89,19 @@
       </div>
       <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
     </div>
+    <!-- 管理端：端到端首输出的中位数（用户实际等了多久）和样本数；用户端没有这些字段，不显示 -->
+    <div v-if="e2e" class="card p-4 flex items-center gap-3" data-testid="usage-e2e-card" :title="t('usage.e2eFirstOutputHint')">
+      <div class="rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 text-sky-600">
+        <Icon name="clock" size="md" />
+      </div>
+      <div>
+        <p class="text-xs font-medium text-gray-500">{{ t('usage.e2eFirstOutputP50') }}</p>
+        <p class="text-xl font-bold" data-testid="usage-e2e-p50">{{ e2e.p50 == null ? t('usage.latencyUnknown') : formatDuration(e2e.p50) }}</p>
+        <p class="text-xs text-gray-400" data-testid="usage-e2e-samples">
+          {{ e2e.samples > 0 ? t('usage.e2eFirstOutputSamples', { n: e2e.samples.toLocaleString() }) : t('usage.e2eFirstOutputNone') }}
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -123,6 +136,12 @@ const outcomes = computed(() => {
     rescued: (stats.rescued ?? 0).toLocaleString(),
     failed: (stats.failed ?? 0).toLocaleString()
   }
+})
+// The end-to-end first output of the admin request stats; absent on the user page.
+const e2e = computed(() => {
+  const stats = props.stats as (AdminUsageStatsResponse | null)
+  if (!stats || typeof stats.e2e_first_output_samples !== 'number') return null
+  return { p50: stats.e2e_first_output_samples > 0 ? stats.e2e_first_output_p50_ms ?? null : null, samples: stats.e2e_first_output_samples }
 })
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)

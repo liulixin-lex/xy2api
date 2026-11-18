@@ -135,6 +135,7 @@
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
             show-fallback-origin
+            show-end-to-end
             :data="usageRows"
             :loading="usageLoading"
             :columns="visibleColumns"
