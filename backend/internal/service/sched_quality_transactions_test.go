@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -335,6 +336,28 @@ func (p *timeoutSeatProbe) LastFull(ctx context.Context, a int64, m string, g in
 	return p.at, p.err
 }
 
+// ReplayTrialTimeoutBasisForTest projects a persisted timeout decision for clock-boundary tests.
+func ReplayTrialTimeoutBasisForTest(t *testing.T, leases SchedTrialLeases, start, horizon time.Time) *SchedAdminBasis {
+	t.Helper()
+	end := start.Add(q.TrialDuration)
+	f := newQualityFixture(t)
+	f.now = horizon
+	f.e.SetTrialLeases(leases)
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}
+	f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: start, TrialUntil: end, EvaluatedAt: end.Add(-time.Minute)}}
+	f.cycle()
+	require.Len(t, f.store.Decisions, 1)
+	decision := f.store.Decisions[0]
+	require.Equal(t, key, decision.Key)
+	require.Equal(t, q.ActionTrialTimeout, decision.Action)
+	require.Equal(t, &decision.Basis, f.line(key.Line).Basis)
+	raw, err := json.Marshal(decision.Basis)
+	require.NoError(t, err)
+	var stored q.Basis
+	require.NoError(t, json.Unmarshal(raw, &stored))
+	return SchedAdminDecisionBasis(stored)
+}
+
 func TestObserveTimeoutSeatEvidenceAtTrialDeadline(t *testing.T) {
 	for _, tc := range []struct {
 		name, want string
@@ -342,31 +365,29 @@ func TestObserveTimeoutSeatEvidenceAtTrialDeadline(t *testing.T) {
 		missing    bool
 		err        error
 	}{
-		{"start", "full", 0, false, nil},
-		{"end", "full", q.TrialDuration, false, nil},
+		{"start", "unknown", 0, false, nil},
+		{"end", "unknown", q.TrialDuration, false, nil},
+		{"start minus two seconds", "unknown", -2 * time.Second, false, nil},
+		{"start plus two seconds", "unknown", 2 * time.Second, false, nil},
+		{"end minus two seconds", "unknown", q.TrialDuration - 2*time.Second, false, nil},
+		{"end plus two seconds", "unknown", q.TrialDuration + 2*time.Second, false, nil},
+		{"before start band", "not_observed", -2*time.Second - time.Millisecond, false, nil},
+		{"after start band", "full", 2*time.Second + time.Millisecond, false, nil},
+		{"before end band", "full", q.TrialDuration - 2*time.Second - time.Millisecond, false, nil},
+		{"after end band", "unknown", q.TrialDuration + 2*time.Second + time.Millisecond, false, nil},
 		{"absent", "not_observed", 0, true, nil},
-		{"earlier", "not_observed", -time.Millisecond, false, nil},
-		{"overwritten", "unknown", q.TrialDuration + time.Millisecond, false, nil},
 		{"storage error", "unknown", 0, true, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newQualityFixture(t)
-			end := f.now.Add(-10 * time.Second)
-			start := end.Add(-q.TrialDuration)
+			start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+			horizon := start.Add(q.TrialDuration + 10*time.Second)
 			probe := &timeoutSeatProbe{err: tc.err}
 			if !tc.missing {
 				probe.at = start.Add(tc.offset)
 			}
-			f.e.SetTrialLeases(probe)
-			key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}
-			f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: start, TrialUntil: end, EvaluatedAt: end.Add(-time.Minute)}}
-			f.cycle()
-			require.Len(t, f.store.Decisions, 1)
-			decision := f.store.Decisions[0]
-			require.Equal(t, q.ActionTrialTimeout, decision.Action)
-			require.Equal(t, new(tc.want), decision.Basis.TrialSeats)
-			require.Equal(t, q.NewSampleCounts(0, 0), decision.Basis.SampleCounts)
-			require.Equal(t, &decision.Basis, f.line(q.DimensionError).Basis)
+			basis := ReplayTrialTimeoutBasisForTest(t, probe, start, horizon)
+			require.Equal(t, new(tc.want), basis.TrialSeats)
+			require.Equal(t, q.NewSampleCounts(0, 0), basis.SampleCounts)
 			require.True(t, probe.bounded)
 			require.Equal(t, []schedQualityKey{{1, "synthetic-model", 10}}, probe.reads)
 		})

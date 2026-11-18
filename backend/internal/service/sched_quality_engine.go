@@ -408,6 +408,11 @@ func (s *SchedQualityEngineService) countDecision(action schedquality.Action) {
 	}
 }
 
+// The Redis observation is written after the lease check and compared with
+// the evaluator's clock. Use the same two-second allowance as cross-instance
+// session-failure clearing for the uncertainty at each end of the trial.
+const trialSeatBoundaryAllowance = SessionFailureClockSkewAllowance
+
 // trialSeats describes the original trial window even when its deadline is replayed late.
 func (s *SchedQualityEngineService) trialSeats(ctx context.Context, trial schedquality.LineState, budget time.Duration) string {
 	if s.leases == nil || budget <= 0 || trial.Epoch.IsZero() || trial.TrialUntil.IsZero() {
@@ -417,11 +422,13 @@ func (s *SchedQualityEngineService) trialSeats(ctx context.Context, trial schedq
 	defer cancel()
 	at, err := s.leases.LastFull(readCtx, trial.AccountID, trial.Model, trial.GroupID)
 	switch {
-	case err != nil || at.After(trial.TrialUntil):
+	case err != nil:
 		return "unknown"
-	case at.IsZero() || at.Before(trial.Epoch):
+	case at.IsZero() || at.Before(trial.Epoch.Add(-trialSeatBoundaryAllowance)):
 		return "not_observed"
-	default:
+	case at.After(trial.Epoch.Add(trialSeatBoundaryAllowance)) && at.Before(trial.TrialUntil.Add(-trialSeatBoundaryAllowance)):
 		return "full"
+	default:
+		return "unknown"
 	}
 }
