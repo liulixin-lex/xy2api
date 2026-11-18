@@ -2,13 +2,13 @@ export default {
   resilience: {
     settings: {
       title: 'Gateway Resilience',
-      hint: 'Controls upstream failure classification, cooldowns and balance pauses, session rebinding, request budgets, stream prelude staging, pre-output keepalive, disconnect billing, stream-only account learning and no-account fallback. Turning the master switch off restores the previous behaviour.',
+      hint: 'Controls upstream failure classification, cooldowns and balance pauses, session avoidance and rebinding, request budgets, stream prelude staging, pre-output keepalive, disconnect billing, stream-only account learning and no-account fallback. Turning the master switch off restores the previous behaviour.',
       openPanel: 'Open ops panel',
       enabled: 'Master switch',
       enabledHint: 'When off, every resilience feature is disabled and the gateway behaves as before.',
       sections: {
         session: 'Session rebinding',
-        sessionHint: 'After consecutive failures of a session on one account reach the threshold, the session is rebound and avoids that account for a while (default 2 failures, 10 minutes).',
+        sessionHint: 'When a session reaches the failure threshold on one account (2 consecutive failures by default), the gateway avoids that account and tries another. The avoid period (avoid_seconds, 10 minutes by default) also applies to first-output avoidance for OpenAI HTTP text streams. Turning this off also disables first-output avoidance and handoff to the account that handled the retry.',
         lastResort: 'Last-resort selection',
         lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
         anthropicLatencyHold: 'Hold back slow Claude accounts',
