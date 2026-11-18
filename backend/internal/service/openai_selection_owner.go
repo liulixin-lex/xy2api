@@ -52,7 +52,8 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		clearBinding(openAIProfitFilterReasonFloor)
 		return nil, false, nil
 	}
-	if _, excluded := req.ExcludedIDs[accountID]; excluded {
+	excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, req.ExcludedIDs)
+	if excluded {
 		noteBypass("owner_excluded")
 		return nil, false, nil
 	}
@@ -118,6 +119,10 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 	}
 	if account != nil && isGrokModelQuotaBlocked(account.ID, upstreamModel, now) {
 		clearBinding("grok_model_quota_blocked")
+		return nil, false, nil
+	}
+	if firstOutput {
+		noteBypass("first_output_avoid")
 		return nil, false, nil
 	}
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)

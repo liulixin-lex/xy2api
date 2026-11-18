@@ -1056,7 +1056,8 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
-	if _, excluded := excludedIDs[accountID]; excluded {
+	excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, excludedIDs)
+	if excluded {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 		return nil
 	}
@@ -1114,6 +1115,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 
+	if firstOutput {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("first_output_avoid")
+		return nil
+	}
 	// 刷新会话 TTL 并返回账号
 	// Refresh session TTL and return account
 	_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), accountID)
@@ -1209,7 +1214,8 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
-	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
+	strictAvoid := s.stickyChangeAvoid(ctx, groupID, sessionHash)
+	excludedIDs = mergeExcluded(excludedIDs, strictAvoid)
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 	}
@@ -1251,12 +1257,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		return accounts, membersErr
 	}
-	isExcluded := func(id int64) bool { _, ok := excludedIDs[id]; return ok }
 	// ============ Layer 1: Sticky session ============
 	if sessionHash != "" {
 		accountID := stickyAccountID
 		if accountID > 0 {
 			account, err := s.getSchedulableAccount(ctx, accountID)
+			excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, excludedIDs)
+			if _, strict := strictAvoid[accountID]; strict {
+				excluded, firstOutput = true, false
+			}
 			softOwner := false
 			if err != nil {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
@@ -1270,16 +1279,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					account = nil
 				}
 			}
-			if err == nil && account != nil && isExcluded(accountID) {
+			if err == nil && account != nil && excluded {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 			}
-			if err == nil && account != nil && !isExcluded(accountID) {
+			if err == nil && account != nil && !excluded {
 				softOwner = s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel)
 			}
 			if softOwner {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("soft_owner_preserved")
 			}
-			if err == nil && account != nil && !isExcluded(accountID) && !softOwner {
+			if err == nil && account != nil && !excluded && !softOwner {
 				clearSticky := shouldClearStickySession(account, requestedModel)
 				if clearSticky {
 					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_should_clear")
@@ -1321,6 +1330,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
 					} else if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("transport_incompatible")
+					} else if firstOutput {
+						resilience.StateFrom(ctx).NoteStickyBypassReason("first_output_avoid")
 					} else {
 						if moved := s.selectSessionOwner(ctx, req, account, members); moved != nil {
 							return moved, nil

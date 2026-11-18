@@ -248,7 +248,6 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		state.NoteStickyOwner(stickyOwner)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]
-	ownerOnlyFirstOutputAvoid := false
 	ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))
 	defer func() {
 		selected := int64(0)
@@ -263,8 +262,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		// this pass. Its request exclusion takes precedence over soft migration.
 		if ownerFailedInRequest {
 			reason = "owner_failed_in_request"
-		} else if ownerOnlyFirstOutputAvoid && reason == "owner_excluded" && selected > 0 && err == nil {
-			reason = "first_output_avoid"
+		} else if reason == "first_output_avoid" && (selected <= 0 || err != nil) {
+			reason = "owner_excluded"
 		}
 		if reason == "" {
 			reason = "unrecorded"
@@ -322,7 +321,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		if _, hit := firstOutputAvoided[stickyOwner]; hit {
 			_, hard := origExcluded[stickyOwner]
 			_, otherSoft := avoided[stickyOwner]
-			ownerOnlyFirstOutputAvoid = !hard && !otherSoft
+			if !hard && !otherSoft {
+				ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, stickyOwner)
+			}
 		}
 		avoided = mergeExcluded(avoided, firstOutputAvoided)
 	}
@@ -396,6 +397,20 @@ func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(
 }
 
 type openAIGroupPrivacyRequirementContextKey struct{}
+
+// This marker lives for one selection. Keep the owner excluded from the pool,
+// but check its existing sticky release rules before borrowing another account.
+type firstOutputOnlyOwnerKey struct{}
+
+func stickyOwnerExclusions(ctx context.Context, owner int64, excluded map[int64]struct{}) (early, firstOutput bool) {
+	if _, found := excluded[owner]; !found {
+		return false, false
+	}
+	if id, ok := ctx.Value(firstOutputOnlyOwnerKey{}).(int64); ok && id == owner {
+		return false, true
+	}
+	return true, false
+}
 
 type openAIGroupPrivacyRequirement struct {
 	groupID  int64
