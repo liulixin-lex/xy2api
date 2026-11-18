@@ -53,5 +53,6 @@ describe('OpsDashboard custom window', () => {
       expect(modal.props('customStartTime')).toBe(window.start)
       expect(modal.props('customEndTime')).toBe(window.end)
     }
+    wrapper.unmount()
   })
 })
