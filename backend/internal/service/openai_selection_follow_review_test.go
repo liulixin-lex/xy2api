@@ -311,6 +311,72 @@ func TestFirstOutputFollowStickyOwnerEligibilityOrder(t *testing.T) {
 	}
 }
 
+type followStrictReads struct {
+	ResilienceStore
+	reads int
+}
+
+func (r *followStrictReads) SessionAvoidWrittenAt(ctx context.Context, group int64, scope string) (map[int64]time.Time, error) {
+	if scope == stickyChangeAvoidSession("session") {
+		r.reads++
+	}
+	return r.ResilienceStore.SessionAvoidWrittenAt(ctx, group, scope)
+}
+
+func TestFirstOutputFollowLateStrictAvoid(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"model", "load"} {
+		for _, scenario := range []string{"first_output_only", "later_strict_write"} {
+			t.Run(path+"/"+scenario, func(t *testing.T) {
+				x, y := selectionFixtureAccount(10, 1), selectionFixtureAccount(11, 2)
+				f := newSelectionRuntimeFixture(t, x, y)
+				f.cache.sessionBindings["openai:session"] = x.ID
+				store := &followStrictReads{ResilienceStore: f.cache.store}
+				f.svc.resilience.store = store
+				group := int64(7)
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(context.Background(), st)
+				f.svc.prepareOpenAIStickyChange(ctx, &group, "session")
+				require.NoError(t, store.AddSessionAvoid(ctx, group, firstOutputAvoidSession("session"), x.ID, time.Minute))
+				excluded, err := sessionAvoidAfterReset(ctx, store, group, firstOutputAvoidSession("session"), nil)
+				require.NoError(t, err)
+				require.Contains(t, excluded, x.ID)
+				require.Empty(t, f.svc.stickyChangeAvoid(ctx, &group, "session"))
+				ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, x.ID)
+				f.repo.accounts[0].Schedulable = false
+				if scenario == "later_strict_write" {
+					require.NoError(t, store.AddSessionAvoid(context.Background(), group, stickyChangeAvoidSession("session"), x.ID, time.Minute))
+				}
+				before := store.reads
+				var selected *Account
+				if path == "model" {
+					selected, err = f.svc.selectAccountForModelWithExclusions(ctx, &group, PlatformOpenAI, "session", "m", excluded, false, x.ID, OpenAIEndpointCapabilityResponses, true)
+				} else {
+					var sel *AccountSelectionResult
+					sel, err = f.svc.selectAccountWithLoadAwareness(ctx, &group, PlatformOpenAI, "session", "m", excluded, false, OpenAIEndpointCapabilityResponses, true)
+					require.NoError(t, err)
+					require.NotNil(t, sel)
+					defer sel.ReleaseFunc()
+					selected = sel.Account
+				}
+				require.NoError(t, err)
+				require.NotNil(t, selected)
+				require.Equal(t, y.ID, selected.ID)
+				require.Equal(t, before+1, store.reads)
+				followDelivery(f.svc, ctx, selected, time.Millisecond, &OpenAIForwardResult{})
+				if scenario == "later_strict_write" {
+					require.Equal(t, "owner_excluded", st.StickyBypassReason())
+					require.Equal(t, x.ID, f.cache.sessionBindings["openai:session"])
+					require.Empty(t, f.cache.casKeys)
+				} else {
+					require.Equal(t, "owner_should_clear", st.StickyBypassReason())
+					require.Equal(t, y.ID, f.cache.sessionBindings["openai:session"])
+				}
+			})
+		}
+	}
+}
+
 func TestFirstOutputFollowEmptyScopePreservesBindingChanges(t *testing.T) {
 	withResilienceSettings(t, nil)
 	const key = "openai:session"

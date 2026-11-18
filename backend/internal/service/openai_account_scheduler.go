@@ -405,6 +405,18 @@ type openAIGroupPrivacyRequirementContextKey struct{}
 // but check its existing sticky release rules before borrowing another account.
 type firstOutputOnlyOwnerKey struct{}
 
+// A strict failure may be recorded after the outer scheduler classified the
+// owner. Both inner selectors use their own strict read for this pass.
+func (s *OpenAIGatewayService) mergeStickyChangeExclusions(ctx context.Context, groupID *int64, session string, excluded map[int64]struct{}) (context.Context, map[int64]struct{}) {
+	strict := s.stickyChangeAvoid(ctx, groupID, session)
+	if id, ok := ctx.Value(firstOutputOnlyOwnerKey{}).(int64); ok {
+		if _, blocked := strict[id]; blocked {
+			ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, int64(0))
+		}
+	}
+	return ctx, mergeExcluded(excluded, strict)
+}
+
 func stickyOwnerExclusions(ctx context.Context, owner int64, excluded map[int64]struct{}) (early, firstOutput bool) {
 	if _, found := excluded[owner]; !found {
 		return false, false

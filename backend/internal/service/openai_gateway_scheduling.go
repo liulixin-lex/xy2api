@@ -962,7 +962,7 @@ func resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel string) strin
 }
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, error) {
-	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
+	ctx, excludedIDs = s.mergeStickyChangeExclusions(ctx, groupID, sessionHash, excludedIDs)
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 	}
@@ -1214,8 +1214,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
-	strictAvoid := s.stickyChangeAvoid(ctx, groupID, sessionHash)
-	excludedIDs = mergeExcluded(excludedIDs, strictAvoid)
+	ctx, excludedIDs = s.mergeStickyChangeExclusions(ctx, groupID, sessionHash, excludedIDs)
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 	}
@@ -1263,9 +1262,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			excluded, firstOutput := stickyOwnerExclusions(ctx, accountID, excludedIDs)
-			if _, strict := strictAvoid[accountID]; strict {
-				excluded, firstOutput = true, false
-			}
 			softOwner := false
 			if err != nil {
 				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
