@@ -128,13 +128,13 @@ func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
 		return nil
 	}
 	last := r.LastAssessment[len(r.LastAssessment)-1]
-	if !last.LastAt.Equal(r.EvaluatedAt) {
+	if !last.MatchesWatermark(r.EvaluatedAt) {
 		return nil
 	}
 	return &SchedAdminLastEval{
 		At: schedAdminStamp(last.LastAt), Since: schedAdminStamp(last.FirstAt), Count: last.Count,
 		Acted: last.Action != "", Action: last.Action, Reason: last.Reason,
-		Causes: last.Causes.Names(), Have: last.Have, Need: last.Need,
+		Causes: last.CauseNames(), Have: last.Have, Need: last.Need,
 	}
 }
 

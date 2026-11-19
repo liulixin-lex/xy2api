@@ -110,20 +110,30 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, full.LastAssessment, rows[1].LastAssessment)
-	// A rejudge uses the wall clock. PostgreSQL alone rounds both JSON times
-	// and the state watermark, including a half-microsecond boundary.
-	for _, ns := range []time.Duration{123456789, 123456500, 123457500} {
+	// Compare the initially published DTO with the committed PostgreSQL row,
+	// including ties in both directions and a carry into the next second.
+	for _, ns := range []time.Duration{123456789, 123456500, 123457500, 500, 1500, 999999500} {
 		now := at.Truncate(time.Second).Add(ns)
 		relaxed := eval(q.Relaxed(old.LineKey), now, 3)
+		before := service.SchedAdminLastEvalFromState(relaxed)
+		require.NotNil(t, before)
 		save(relaxed, true)
 		rows, err := loadSchedQualityStates(ctx, db)
 		require.NoError(t, err)
 		last := service.SchedAdminLastEvalFromState(rows[0])
 		require.NotNil(t, last)
 		require.Equal(t, rows[0].EvaluatedAt.UTC().Format(time.RFC3339Nano), last.At)
+		require.Equal(t, before, last)
 		require.Equal(t, last.At, last.Since)
 		next := eval(rows[0], at.Add(q.RegularInterval), 8)
-		require.EqualValues(t, 2, service.SchedAdminLastEvalFromState(next).Count)
+		continued := service.SchedAdminLastEvalFromState(next)
+		require.NotNil(t, continued)
+		require.EqualValues(t, 2, continued.Count)
+		require.Equal(t, before.Since, continued.Since)
+		save(next, true)
+		rows, err = loadSchedQualityStates(ctx, db)
+		require.NoError(t, err)
+		require.Equal(t, continued, service.SchedAdminLastEvalFromState(rows[0]))
 	}
 	var bytes int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_column_size(last_assessment) FROM sched_line_states WHERE line='ttfo'`).Scan(&bytes))

@@ -313,25 +313,17 @@ func (t *schedQualityTx) Upsert(rows []schedquality.LineState) error {
 			return err
 		}
 		var assessment *string
-		var alignTimestamps bool
 		if len(r.LastAssessment) > 0 {
 			data, err := json.Marshal(r.LastAssessment)
 			if err != nil {
 				return err
 			}
 			assessment = new(string(data))
-			// Configuration rejudges may use a nanosecond clock. Let PostgreSQL
-			// apply exactly the same precision as its evaluated_at column.
-			last := r.LastAssessment[len(r.LastAssessment)-1]
-			alignTimestamps = last.LastAt.Nanosecond()%1000 != 0 || last.FirstAt.Nanosecond()%1000 != 0
 		}
 		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis,last_assessment)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
- CASE WHEN $19 THEN jsonb_set($18::jsonb, '{-1}', ($18::jsonb -> -1) || jsonb_build_object(
-   'f', ($18::jsonb -> -1 ->> 'f')::timestamptz, 'l', ($18::jsonb -> -1 ->> 'l')::timestamptz))
- ELSE $18::jsonb END)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
  ON CONFLICT(account_id,model,group_id,line) DO UPDATE SET identity=EXCLUDED.identity,trial=EXCLUDED.trial,level=EXCLUDED.level,admissions=EXCLUDED.admissions,pending_at=EXCLUDED.pending_at,epoch=EXCLUDED.epoch,entry=EXCLUDED.entry,until=EXCLUDED.until,trial_until=EXCLUDED.trial_until,good_since=EXCLUDED.good_since,last_rear=EXCLUDED.last_rear,evaluated_at=EXCLUDED.evaluated_at,basis=EXCLUDED.basis,last_assessment=EXCLUDED.last_assessment,updated_at=NOW()`,
-			r.AccountID, r.Model, r.GroupID, r.Line, r.Identity, r.Trial, r.Level, r.Admissions, nullableQualityTime(r.PendingAt), nullableQualityTime(r.Epoch), nullableQualityTime(r.Entry), nullableQualityTime(r.Until), nullableQualityTime(r.TrialUntil), nullableQualityTime(r.GoodSince), nullableQualityTime(r.LastRear), nullableQualityTime(r.EvaluatedAt), string(raw), assessment, alignTimestamps)
+			r.AccountID, r.Model, r.GroupID, r.Line, r.Identity, r.Trial, r.Level, r.Admissions, nullableQualityTime(r.PendingAt), nullableQualityTime(r.Epoch), nullableQualityTime(r.Entry), nullableQualityTime(r.Until), nullableQualityTime(r.TrialUntil), nullableQualityTime(r.GoodSince), nullableQualityTime(r.LastRear), nullableQualityTime(r.EvaluatedAt), string(raw), assessment)
 		if err != nil {
 			return err
 		}

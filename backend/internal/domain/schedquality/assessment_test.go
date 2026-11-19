@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/build"
+	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"math"
-	"strconv"
 	"testing"
 	"time"
 
@@ -49,7 +52,7 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 			}
 			seg := RecordAssessment(LineState{}, machineNow, EventRegular, VerdictUnknown, "", b)[0]
 			require.Equal(t, tc.reason, seg.Reason)
-			require.Equal(t, []string{string(tc.cause)}, seg.Causes.Names())
+			require.Equal(t, []string{string(tc.cause)}, seg.CauseNames())
 			if tc.need > 0 {
 				require.Equal(t, new(tc.have), seg.Have)
 				require.Equal(t, new(tc.need), seg.Need)
@@ -59,29 +62,27 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 			}
 		})
 	}
-	// Read the actual enum declarations so adding a cause requires a classification case.
-	file, err := parser.ParseFile(token.NewFileSet(), "rule_b.go", nil, 0)
+	// Type-check the whole production package so constants in another file,
+	// including unexported, inferred and converted constants, are also covered.
+	src, err := build.Default.ImportDir(".", 0)
 	require.NoError(t, err)
+	fs := token.NewFileSet()
+	var files []*ast.File
+	for _, name := range src.GoFiles {
+		file, err := parser.ParseFile(fs, name, nil, parser.SkipObjectResolution)
+		require.NoError(t, err)
+		files = append(files, file)
+	}
+	conf := types.Config{IgnoreFuncBodies: true, Importer: importer.Default()}
+	pkg, err := conf.Check("schedquality", fs, files, nil)
+	require.NoError(t, err)
+	scope := pkg.Scope()
+	enum := scope.Lookup("RuleBUnknownReason").Type()
 	var declared []string
-	for _, group := range file.Decls {
-		decl, ok := group.(*ast.GenDecl)
-		if !ok || decl.Tok != token.CONST {
-			continue
-		}
-		for _, spec := range decl.Specs {
-			value, ok := spec.(*ast.ValueSpec)
-			require.True(t, ok)
-			typ, ok := value.Type.(*ast.Ident)
-			if !ok || typ.Name != "RuleBUnknownReason" {
-				continue
-			}
-			for _, expr := range value.Values {
-				literal, ok := expr.(*ast.BasicLit)
-				require.True(t, ok)
-				name, err := strconv.Unquote(literal.Value)
-				require.NoError(t, err)
-				declared = append(declared, name)
-			}
+	for _, name := range scope.Names() {
+		c, ok := scope.Lookup(name).(*types.Const)
+		if ok && types.Identical(c.Type(), enum) {
+			declared = append(declared, constant.StringVal(c.Val()))
 		}
 	}
 	require.ElementsMatch(t, declared, tested)
@@ -136,7 +137,7 @@ func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
 			for _, cause := range tc.reasons {
 				causes = append(causes, string(cause))
 			}
-			require.ElementsMatch(t, causes, seg.Causes.Names())
+			require.ElementsMatch(t, causes, seg.CauseNames())
 			require.Equal(t, tc.primary, seg.Reason)
 			if tc.primary == ReasonOwnShort {
 				require.Equal(t, new(1.0), seg.Have)
@@ -188,7 +189,7 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := RecordAssessment(LineState{}, machineNow, tc.kind, tc.verdict, tc.action, tc.basis)[0]
 			require.Equal(t, tc.reason, s.Reason)
-			require.Equal(t, tc.causes, s.Causes.Names())
+			require.Equal(t, tc.causes, s.CauseNames())
 			if tc.need != 0 {
 				require.Equal(t, new(tc.have), s.Have)
 				require.Equal(t, new(tc.need), s.Need)
@@ -231,7 +232,6 @@ func TestAssessmentRuns(t *testing.T) {
 		}
 		state.EvaluatedAt, state.LastAssessment = at, h
 	}
-	require.Equal(t, state.LastAssessment, RecordAssessment(state, state.EvaluatedAt.Add(time.Second), EventClock, VerdictUnknown, ActionClear, Basis{}))
 	require.Equal(t, state.LastAssessment, RecordAssessment(state, state.EvaluatedAt, EventRegular, VerdictUnknown, "", Basis{}))
 	state.EvaluatedAt = state.EvaluatedAt.Add(time.Minute) // A legacy writer advanced the watermark.
 	h := RecordAssessment(state, state.EvaluatedAt.Add(time.Minute), EventRegular, VerdictPass, "", Basis{})
@@ -261,6 +261,7 @@ func TestAssessmentEightSegmentSize(t *testing.T) {
 		s := &state.LastAssessment[i]
 		s.FirstAt = machineNow.Add(123456789 * time.Nanosecond)
 		s.LastAt = s.FirstAt
+		s.Watermark = new(int64(math.MaxInt64))
 		s.Count = math.MaxInt64
 		s.Kind = EventReview
 		s.Action = ActionTrialTimeout
@@ -273,4 +274,17 @@ func TestAssessmentEightSegmentSize(t *testing.T) {
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(worst), 2048)
 	t.Logf("compact JSON bytes: one own_short=%d, eight maximal-width segments=%d", len(typical), len(worst))
+}
+
+func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
+	b := Basis{Line: DimensionTTFO, TTFT: &TTFTEvidence{Causes: []RuleBUnknownReason{RuleBPeerKnownInsufficient, "new_reason", "another_reason"}}}
+	h := RecordAssessment(LineState{}, machineNow, EventRegular, VerdictUnknown, "", b)
+	data, err := json.Marshal(h)
+	require.NoError(t, err)
+	var after []AssessmentSegment
+	require.NoError(t, json.Unmarshal(data, &after))
+	require.Equal(t, ReasonOther, after[0].Reason)
+	require.Nil(t, after[0].Have)
+	require.Nil(t, after[0].Need)
+	require.Equal(t, []string{"peer_known_insufficient", "new_reason", "another_reason"}, after[0].CauseNames())
 }

@@ -1,6 +1,7 @@
 package schedquality
 
 import (
+	"math"
 	"slices"
 	"time"
 )
@@ -22,15 +23,17 @@ const maxAssessmentSegments = 8
 // AssessmentSegment uses short JSON keys for the bounded last_assessment column.
 // Times are UTC. Cause bits have permanent positions in assessmentCauseNames.
 type AssessmentSegment struct {
-	FirstAt time.Time        `json:"f"`
-	LastAt  time.Time        `json:"l"`
-	Count   int64            `json:"n"`
-	Kind    EventKind        `json:"k"`
-	Action  Action           `json:"a,omitempty"`
-	Reason  AssessmentReason `json:"r"`
-	Causes  AssessmentCauses `json:"c,omitempty"`
-	Have    *float64         `json:"h,omitempty"`
-	Need    *int             `json:"t,omitempty"`
+	Watermark   *int64           `json:"w,omitempty"` // UTC epoch microseconds at the last verified state advance.
+	ExtraCauses []string         `json:"u,omitempty"` // Raw causes without an assigned bit.
+	FirstAt     time.Time        `json:"f"`
+	LastAt      time.Time        `json:"l"`
+	Count       int64            `json:"n"`
+	Kind        EventKind        `json:"k"`
+	Action      Action           `json:"a,omitempty"`
+	Reason      AssessmentReason `json:"r"`
+	Causes      AssessmentCauses `json:"c,omitempty"`
+	Have        *float64         `json:"h,omitempty"`
+	Need        *int             `json:"t,omitempty"`
 }
 
 type AssessmentCauses uint32
@@ -53,10 +56,12 @@ var assessmentCauseNames = [...]string{
 	cacheTurnsShort, cacheLowSessionsShort, errorClearShort, errorBoundsUnconfirmed, errorRecoveryOverLimit,
 }
 
-func (c *AssessmentCauses) add(name string) {
-	if i := slices.Index(assessmentCauseNames[:], name); i >= 0 {
-		*c |= 1 << i
+func (s *AssessmentSegment) addCause(name string) {
+	if i := slices.Index(assessmentCauseNames[:], name); i >= 0 && i < 32 {
+		s.Causes |= 1 << i
+		return
 	}
+	s.ExtraCauses = append(s.ExtraCauses, name)
 }
 
 func (c AssessmentCauses) Names() []string {
@@ -69,19 +74,45 @@ func (c AssessmentCauses) Names() []string {
 	return names
 }
 
+func (s AssessmentSegment) CauseNames() []string {
+	return append(s.Causes.Names(), s.ExtraCauses...)
+}
+
+// PostgreSQL parses the fractional second of a text timestamp as a double,
+// then rounds fractional microseconds to nearest-even (including half ties).
+func assessmentTime(at time.Time) time.Time {
+	fraction := float64(at.Nanosecond()) / 1e9
+	micros := time.Duration(math.RoundToEven(fraction * 1e6))
+	return at.UTC().Truncate(time.Second).Add(micros * time.Microsecond)
+}
+
+func (s AssessmentSegment) MatchesWatermark(at time.Time) bool {
+	return s.Watermark != nil && !at.IsZero() && *s.Watermark == assessmentTime(at).UnixMicro()
+}
+
 // RecordAssessment folds an accepted Step into a new history without mutating
 // the committed state. A watermark advanced by an older writer breaks a run.
 func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verdict, action Action, basis Basis) []AssessmentSegment {
-	if kind == EventClock || !at.After(prev.EvaluatedAt) {
+	if !at.After(prev.EvaluatedAt) {
 		return prev.LastAssessment
 	}
-	at = at.UTC()
-	segment := AssessmentSegment{FirstAt: at, LastAt: at, Count: 1, Kind: kind, Action: action}
-	segment.classify(verdict, basis)
+	at = assessmentTime(at)
 	history := prev.LastAssessment
+	if kind == EventClock {
+		// A clock can carry a verified assessment forward, but cannot repair a
+		// gap left by an older writer. Never mutate a committed segment.
+		if len(history) == 0 || !history[len(history)-1].MatchesWatermark(prev.EvaluatedAt) {
+			return history
+		}
+		history = slices.Clone(history)
+		history[len(history)-1].Watermark = new(at.UnixMicro())
+		return history
+	}
+	segment := AssessmentSegment{FirstAt: at, LastAt: at, Watermark: new(at.UnixMicro()), Count: 1, Kind: kind, Action: action}
+	segment.classify(verdict, basis)
 	if n := len(history); n > 0 {
 		last := history[n-1]
-		if last.LastAt.Equal(prev.EvaluatedAt) && last.Kind == kind && last.Action == action && last.Reason == segment.Reason {
+		if last.MatchesWatermark(prev.EvaluatedAt) && last.Kind == kind && last.Action == action && last.Reason == segment.Reason {
 			segment.FirstAt, segment.Count = last.FirstAt, last.Count+1
 			history = history[:n-1]
 		}
@@ -108,25 +139,25 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		case b.Cache != nil:
 			cache := b.Cache
 			if cache.Turns < CacheMinTurns {
-				s.Causes.add(cacheTurnsShort)
+				s.addCause(cacheTurnsShort)
 				s.consider(ReasonOwnShort, float64(cache.Turns), CacheMinTurns)
 			}
 			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
-				s.Causes.add(cacheLowSessionsShort)
+				s.addCause(cacheLowSessionsShort)
 				s.consider(ReasonOwnShort, float64(cache.LowSessions), cacheMinLowSessions)
 			}
 		case b.Error != nil:
 			errLine := b.Error
 			if errLine.LowerPass > errLine.Limit {
-				s.Causes.add(errorBoundsUnconfirmed)
+				s.addCause(errorBoundsUnconfirmed)
 				s.consider(ReasonWithin, 0, 0)
 			}
 			if errLine.RecoveryOverLimit {
-				s.Causes.add(errorRecoveryOverLimit)
+				s.addCause(errorRecoveryOverLimit)
 				s.consider(ReasonPending, 0, 0)
 			}
 			if errLine.Clear < ErrorMinClear {
-				s.Causes.add(errorClearShort)
+				s.addCause(errorClearShort)
 				s.consider(ReasonOwnShort, float64(errLine.Clear), ErrorMinClear)
 			}
 		}
@@ -156,8 +187,9 @@ func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need
 }
 
 func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
+	unclassified := false
 	for _, cause := range e.Causes {
-		s.Causes.add(string(cause))
+		s.addCause(string(cause))
 		switch cause {
 		case RuleBNoPeers, RuleBAllPeersRear, RuleBPeerKnownInsufficient:
 			s.consider(ReasonPeerShort, peerKnown, ruleBMinMass)
@@ -172,6 +204,11 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 			}
 		case RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance, RuleBRelativeVeto:
 			s.consider(ReasonWithin, 0, 0)
+		default:
+			unclassified = true
 		}
+	}
+	if unclassified {
+		s.Reason, s.Have, s.Need = ReasonOther, nil, nil
 	}
 }

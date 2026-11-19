@@ -90,10 +90,10 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	require.Equal(t, q.EventRegular, seg.Kind)
 	require.Equal(t, q.ReasonPeerShort, seg.Reason)
 	require.Empty(t, seg.Action)
-	require.Equal(t, f.now, seg.FirstAt)
-	require.Equal(t, f.now, seg.LastAt)
+	require.Equal(t, f.now.Round(time.Microsecond), seg.FirstAt)
+	require.Equal(t, f.now.Round(time.Microsecond), seg.LastAt)
 	require.EqualValues(t, 1, seg.Count)
-	relaxAt := f.now
+	relaxAt := f.now.Round(time.Microsecond)
 	f.now = f.now.Add(3 * time.Minute)
 	f.cycle()
 	next := f.line(q.DimensionTTFO)
@@ -103,4 +103,70 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	require.NotNil(t, last)
 	require.EqualValues(t, 2, last.Count)
 	require.Equal(t, relaxAt.Format(time.RFC3339Nano), last.Since)
+}
+
+func TestSchedAssessmentClockPreservesRun(t *testing.T) {
+	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := at.Add(95 * time.Second)
+	b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: 7}}
+	r := q.LineState{LineKey: q.LineKey{Line: q.DimensionCache}, Admissions: 1, LastRear: clock.Add(-q.LevelClearQuiet)}
+	first, _ := q.Step(r, q.EventRegular, q.VerdictUnknown, b, at)
+	firstDTO := SchedAdminLastEvalFromState(first)
+	require.NotNil(t, firstDTO)
+	cleared, action := q.Step(first, q.EventClock, q.VerdictUnknown, q.Basis{}, clock)
+	require.Equal(t, q.ActionClear, action)
+	require.Equal(t, clock, cleared.EvaluatedAt)
+	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(cleared))
+	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(first))
+	next, _ := q.Step(cleared, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
+	require.Len(t, next.LastAssessment, 1)
+	last := SchedAdminLastEvalFromState(next)
+	require.NotNil(t, last)
+	require.Equal(t, firstDTO.Since, last.Since)
+	require.Equal(t, at.Add(q.RegularInterval).Format(time.RFC3339Nano), last.At)
+	require.EqualValues(t, 2, last.Count)
+
+	for _, missing := range []bool{true, false} {
+		stale := first
+		stale.LastAssessment = append([]q.AssessmentSegment{}, first.LastAssessment...)
+		if missing {
+			stale.LastAssessment[0].Watermark = nil
+		} else {
+			stale.EvaluatedAt = at.Add(time.Microsecond)
+		}
+		require.Nil(t, SchedAdminLastEvalFromState(stale))
+		cleared, _ := q.Step(stale, q.EventClock, q.VerdictUnknown, q.Basis{}, clock)
+		require.Nil(t, SchedAdminLastEvalFromState(cleared))
+		next, _ := q.Step(cleared, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
+		require.Len(t, next.LastAssessment, 2)
+		require.EqualValues(t, 1, SchedAdminLastEvalFromState(next).Count)
+	}
+}
+
+func TestSchedAssessmentPolicySaveKeepsHistory(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	before := f.line(q.DimensionTTFO)
+	require.Equal(t, q.ActionEnter, before.LastAssessment[0].Action)
+	f.now = before.Until.Add(10 * time.Second)
+	f.cycle()
+	before = f.line(q.DimensionTTFO)
+	require.Len(t, before.LastAssessment, 2)
+	require.Equal(t, q.ActionTrial, before.LastAssessment[1].Action)
+	f.now = f.now.Add(2 * time.Second)
+	policy := f.store.Policies[10].Policy
+	policy.TTFTSeconds = 100
+	_, err := f.e.UpdatePolicy(t.Context(), 10, 0, policy)
+	require.NoError(t, err)
+	after := f.line(q.DimensionTTFO)
+	require.Len(t, after.LastAssessment, 3)
+	require.Equal(t, before.LastAssessment, after.LastAssessment[:2])
+	seg := after.LastAssessment[2]
+	require.Equal(t, q.EventRegular, seg.Kind)
+	require.Equal(t, q.ReasonWithin, seg.Reason)
+	want := &SchedAdminLastEval{At: f.now.Format(time.RFC3339Nano), Since: f.now.Format(time.RFC3339Nano), Count: 1, Reason: q.ReasonWithin, Causes: []string{}}
+	require.Equal(t, want, SchedAdminLastEvalFromState(after))
+	published := SchedAdminGroupModel(f.e.Snapshot().RowsForAccount(1)[0], false).Lines.TTFO.LastEval
+	require.Equal(t, want, published)
 }
