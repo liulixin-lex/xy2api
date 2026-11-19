@@ -13,6 +13,7 @@ import type {
   BackendGroupPolicySaved,
   BackendGroupsSummary,
   BackendOrder,
+  BackendPerformance,
   BackendPolicyPreview,
   BackendResetResult,
   BackendTTFTRule,
@@ -109,6 +110,18 @@ export async function groupBoard(groupId: number, model?: string, options?: Requ
   return data
 }
 
+/** The group's accounts over the last 12 hours, every model (the board's 12-hour view). */
+export async function groupPerformance(groupId: number, options?: RequestOptions): Promise<BackendPerformance> {
+  const { data } = await apiClient.get<BackendPerformance>(`${base}/groups/${groupId}/performance`, { signal: options?.signal })
+  return data
+}
+
+/** One account over the last 12 hours in each of its OpenAI groups, every model (the panel's 12-hour section). */
+export async function accountPerformance(accountId: number, options?: RequestOptions): Promise<BackendPerformance> {
+  const { data } = await apiClient.get<BackendPerformance>(`${base}/accounts/${accountId}/performance`, { signal: options?.signal })
+  return data
+}
+
 /** The first-output line's three global settings, their defaults and the replayed ranges. */
 export async function getTTFTRule(): Promise<BackendTTFTRule> {
   const { data } = await apiClient.get<BackendTTFTRule>(`${base}/ttft-rule`)
@@ -133,6 +146,8 @@ export const schedQualityAPI = {
   previewGroupPolicy,
   groupBoard,
   groupsSummary,
+  groupPerformance,
+  accountPerformance,
   getTTFTRule,
   updateTTFTRule
 }
