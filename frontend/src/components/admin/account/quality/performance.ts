@@ -49,9 +49,9 @@ export interface PerfView {
   expectedRate: number | null
   /** The expected share rests on enough comparable first sends to set it against. */
   expectedEnough: boolean
-  /** Slow share minus expected, in tenths of a point (334 is +33.4 points), worked out on the counts. */
+  /** Slow share minus expected, rounded to tenths of a point for display (334 is +33.4 points). */
   excessTenths: number | null
-  /** The same as a share (0.334). */
+  /** The same, unrounded, as a share (0.334), worked out on the counts. */
   excess: number | null
   /** Slow requests above expected (first sends × excess), rounded. */
   extra: number | null
@@ -99,23 +99,27 @@ export function perfView(row: BackendPerfRow, group: BackendPerfGroup | undefine
   // Slow minus expected on the counts first (the expected count taken to all the known first sends; they are the
   // same when every one is comparable), then points, the mark and the rounding from that, never from a float gap:
   // 30 slow against 20 expected of 100 is +10.0 and marked; 3 against 2.5 of 20 is one extra slow request.
+  let over: number | null = null
   let excessTenths: number | null = null
   let extra: number | null = null
+  const scale = first.n * first.expected_n
   if (slowRate !== null && expectedEnough) {
-    const over = first.slow * first.expected_n - first.expected_slow! * first.n
-    excessTenths = roundHalfAway((over * 1000) / (first.n * first.expected_n))
+    over = tidy(first.slow * first.expected_n - first.expected_slow! * first.n)
+    excessTenths = roundHalfAway((over * 1000) / scale)
     extra = roundHalfAway(over / first.expected_n)
   }
-  const excess = excessTenths === null ? null : excessTenths / 1000
+  const excess = over === null ? null : over / scale
   const cacheEnough = cont.turns >= MIN_TURNS && cont.sessions >= MIN_TURN_SESSIONS && cont.input_tokens > 0
   const cacheRate = cacheEnough ? cont.read_tokens / cont.input_tokens : null
   const timeoutRate = attempts.n >= MIN_ATTEMPTS ? attempts.timeouts / attempts.n : null
   let slowMark: PerfView['slowMark'] = null
-  if (excessTenths !== null) {
+  if (over !== null) {
+    // 10 points or more on the counts themselves (over / scale ≥ 1/10, so 10 × over ≥ scale); only the display rounds:
+    // 2,999 slow against 2,000 expected of 10,000 is 9.99 points, shown +10.0 and not marked.
     const bounds = wilson(first.slow, first.n)
-    const flag = Math.round(FLAG_EXCESS * 1000)
-    if (excessTenths >= flag && bounds.lower > expectedRate!) slowMark = 'slow'
-    else if (excessTenths <= -flag && bounds.upper < expectedRate!) slowMark = 'fast'
+    const per = Math.round(1 / FLAG_EXCESS)
+    if (tidy(per * over - scale) >= 0 && bounds.lower > expectedRate!) slowMark = 'slow'
+    else if (tidy(per * over + scale) <= 0 && bounds.upper < expectedRate!) slowMark = 'fast'
   }
   const cacheLow = cacheRate !== null && group !== undefined && cacheRate < group.min_cache_ratio
   return {
@@ -184,7 +188,7 @@ function sortValue(view: PerfView, key: PerfSortKey): number | null {
     case 'slow':
       return view.slowRate
     case 'excess':
-      return view.excessTenths
+      return view.excess
     case 'extra':
       return view.extra
     case 'cache':

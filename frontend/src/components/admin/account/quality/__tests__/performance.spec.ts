@@ -51,6 +51,17 @@ describe('performance figures', () => {
     expect([fmtPoints(small.excess!), small.slowMark]).toEqual(['+12.0', null])
   })
 
+  // Re-review item 1: the 10 points are judged on the counts; only the display rounds 9.99 to 10.0.
+  it.each([
+    [2999, 2000, '+10.0', null],
+    [3000, 2000, '+10.0', 'slow'],
+    [2000, 2999, '−10.0', null],
+    [2000, 3000, '−10.0', 'fast']
+  ])('marks %i slow against %i expected of 10,000 (%s) as %s', (slow, expected, shown, mark) => {
+    const item = view(1, { first: { slow, expected_slow: expected, expected_n: 10_000, n: 10_000 } }, { n: 10_000 })
+    expect([fmtPoints(item.excess!), item.slowMark]).toEqual([shown, mark])
+  })
+
   it('does not mark 6 slow of 20 against 20% expected: 10 points over, but the lower bound is under expected', () => {
     expect(wilson(6, 20).lower).toBeCloseTo(0.188, 3)
     const edge = view(1, {}, { n: 20, slowRate: 0.3, expectedRate: 0.2 })

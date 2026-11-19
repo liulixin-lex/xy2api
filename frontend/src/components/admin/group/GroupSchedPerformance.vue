@@ -260,7 +260,10 @@ const loadingStats = computed(() => !perf.value?.at || (!perf.value.complete && 
 const coveredHours = computed(() => (perf.value?.at ? Math.max(0, (Date.parse(perf.value.at) - Date.parse(perf.value.window_from)) / 3_600_000) : 0))
 /** "No requests" only for a window fully covered; a partly covered one says what it covers. */
 const emptyText = computed(() => {
-  if (!perf.value?.complete) return t('admin.schedQuality.perf.emptyPartial', { hours: coveredHours.value.toFixed(1) })
+  if (!perf.value?.complete) {
+    const hours = coveredHours.value.toFixed(1)
+    return model.value === null ? t('admin.schedQuality.perf.emptyPartial', { hours }) : t('admin.schedQuality.perf.emptyPartialModel', { hours, model: modelText.value })
+  }
   return model.value === null ? t('admin.schedQuality.perf.empty') : t('admin.schedQuality.perf.emptyModel', { model: modelText.value })
 })
 
@@ -538,12 +541,17 @@ function whyOf(view: PerfView): string {
   gap: 10px;
   height: 20px;
 }
-/* Why not acted: under the marks, wrapping in a narrow column instead of widening the table, yet never squeezed to a
-   few characters a line on a phone. */
+/* Why not acted: under the marks, wrapping in a narrow column instead of widening the table. On a phone the table
+   scrolls sideways anyway: there it never gets squeezed to a few characters a line. From 640px the table must fit the
+   dialog (1024 in English included), so no floor there. */
 .gperf__why {
-  min-width: 8em;
   max-width: 11em;
   white-space: normal;
+}
+@media (max-width: 639px) {
+  .gperf__why {
+    min-width: 8em;
+  }
 }
 .gperf__detail-row td {
   padding-top: 0;

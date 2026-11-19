@@ -63,14 +63,25 @@ const board = shallowReactive({
   failedKey: null as string | null
 })
 /**
- * The latest request of each 12-hour state, by what it asks: the id and the quality change it follows. Opening a layer
- * can run the same task twice within a moment (the host's first load runs every task, the opening asks again, and the
- * table aborts the run on its way): a run takes the answer of the same request when it is still on its way or came in
- * less than PERF_REUSE_MS ago, instead of asking again. A quality change asks anew; so do the next beat and a retry
- * after a failure (a failed request is not kept).
+ * The latest 12-hour request of each state, by what it asks: the id, the quality change it follows and the opening
+ * (the panel's account and raise; the board's group, raise and entry into the 12-hour view). One opening can run the
+ * task twice within a moment (the host's first load runs every task, the opening asks again, the table aborts the
+ * first run): the second run takes the same request's answer while it is on its way or for PERF_REUSE_MS after. Any
+ * other opening, another target or a quality change asks anew at once and cancels a request still on its way for the
+ * previous one; so does closing the layer. The next beat and a retry ask anew.
  */
 const PERF_REUSE_MS = 2000
-const perfRequests = new Map<object, { key: string; answer: Promise<BackendPerformance>; settledAt: number | null }>()
+interface PerfRequest {
+  key: string
+  answer: Promise<BackendPerformance>
+  settledAt: number | null
+  controller: AbortController
+}
+const perfRequests = new Map<object, PerfRequest>()
+function dropPerfRequest(state: object) {
+  perfRequests.get(state)?.controller.abort()
+  perfRequests.delete(state)
+}
 /**
  * The 12-hour performance of the panel's account (`id` = account id) and of the board's group (`id` = group id): kept
  * through a failed refresh (`failedId` says so); a failure does not fail the page, the view offers its own retry.
@@ -83,12 +94,12 @@ let refreshTask: ((name: string) => Promise<void>) | null = null
 const forgetPanel = () => {
   Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
   Object.assign(panelPerf, perfState())
-  perfRequests.delete(panelPerf)
+  dropPerfRequest(panelPerf)
 }
 const forgetBoard = () => {
   Object.assign(board, { key: null, data: null, summary: null, summaryFailedGroup: null, failedKey: null })
   Object.assign(boardPerf, perfState())
-  perfRequests.delete(boardPerf)
+  dropPerfRequest(boardPerf)
 }
 
 const { drawer, board: boardRequest, changed } = useSchedLayers()
@@ -96,15 +107,33 @@ const boardKey = () => (boardRequest.groupId === null ? null : `${boardRequest.g
 const boardPerfOn = () => boardRequest.groupId !== null && boardRequest.view === 'perf'
 
 
-/** Fetches one 12-hour performance into `state` while `id()` stays the one asked for. */
-async function loadPerf(state: typeof panelPerf, id: () => number | null, fetch: (id: number) => Promise<BackendPerformance>, signal: AbortSignal) {
-  const asked = id()
+/** The answer, or ABORTED as soon as the run is aborted: an aborted run ends at once, the request may go on. */
+const ABORTED = Symbol('aborted')
+function unlessAborted<T>(answer: Promise<T>, signal: AbortSignal): Promise<T | typeof ABORTED> {
+  if (signal.aborted) return Promise.resolve(ABORTED)
+  return new Promise<T | typeof ABORTED>((resolve, reject) => {
+    const stop = () => resolve(ABORTED)
+    signal.addEventListener('abort', stop, { once: true })
+    answer.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop))
+  })
+}
+
+/** Fetches one 12-hour performance into `state` while the target's id stays the one asked for. */
+async function loadPerf(
+  state: typeof panelPerf,
+  target: () => { id: number; opening: string } | null,
+  fetch: (id: number, signal: AbortSignal) => Promise<BackendPerformance>,
+  signal: AbortSignal
+) {
+  const asked = target()
   if (asked === null) return
-  const key = `${asked}:${changed.value}`
+  const same = () => target()?.id === asked.id
+  const key = `${asked.id}:${changed.value}:${asked.opening}`
   let request = perfRequests.get(state)
-  const reusable = request?.key === key && (request.settledAt === null || Date.now() - request.settledAt < PERF_REUSE_MS)
-  if (!request || !reusable) {
-    const current = { key, answer: fetch(asked), settledAt: null as number | null }
+  if (request?.key !== key || (request.settledAt !== null && Date.now() - request.settledAt >= PERF_REUSE_MS)) {
+    request?.controller.abort()
+    const controller = new AbortController()
+    const current: PerfRequest = { key, answer: fetch(asked.id, controller.signal), settledAt: null, controller }
     request = current
     perfRequests.set(state, current)
     current.answer.then(
@@ -112,14 +141,18 @@ async function loadPerf(state: typeof panelPerf, id: () => number | null, fetch:
       () => { if (perfRequests.get(state) === current) perfRequests.delete(state) }
     )
   }
+  const mine = request
+  let data: BackendPerformance | typeof ABORTED
   try {
-    const data = await request.answer
-    if (signal.aborted || id() !== asked) return
-    Object.assign(state, { id: asked, data, failedId: null })
+    data = await unlessAborted(mine.answer, signal)
   } catch {
-    if (signal.aborted || id() !== asked) return
-    state.failedId = asked
+    // Cancelled for another target or opening: not a failure of this one.
+    if (signal.aborted || mine.controller.signal.aborted || !same()) return
+    state.failedId = asked.id
+    return
   }
+  if (data === ABORTED || signal.aborted || !same()) return
+  Object.assign(state, { id: asked.id, data, failedId: null })
 }
 
 /** The tasks for the host's live table, and bind() to hand it the table once it exists. */
@@ -190,12 +223,22 @@ export function useSchedLayerTasks() {
     {
       name: SCHED_PANEL_PERF_TASK,
       intervalMs: SUMMARY_MS,
-      run: (signal) => loadPerf(panelPerf, () => drawer.accountId, (id) => schedQualityAPI.accountPerformance(id), signal)
+      run: (signal) => loadPerf(
+        panelPerf,
+        () => (drawer.accountId === null ? null : { id: drawer.accountId, opening: `${drawer.raise}` }),
+        (id, s) => schedQualityAPI.accountPerformance(id, { signal: s }),
+        signal
+      )
     },
     {
       name: SCHED_BOARD_PERF_TASK,
       intervalMs: SUMMARY_MS,
-      run: (signal) => loadPerf(boardPerf, () => (boardPerfOn() ? boardRequest.groupId : null), (id) => schedQualityAPI.groupPerformance(id), signal)
+      run: (signal) => loadPerf(
+        boardPerf,
+        () => (boardPerfOn() ? { id: boardRequest.groupId!, opening: `${boardRequest.raise}:${boardRequest.perfEntry}` } : null),
+        (id, s) => schedQualityAPI.groupPerformance(id, { signal: s }),
+        signal
+      )
     }
   ]
 
@@ -219,7 +262,7 @@ export function useSchedLayerTasks() {
     })
     // The 12-hour view covers every model: another model is only another filter, so it asks again only on opening it,
     // another group or another opening.
-    watch(() => [boardPerfOn() ? boardRequest.groupId : null, boardRequest.raise] as const, ([groupId]) => {
+    watch(() => [boardPerfOn() ? boardRequest.groupId : null, boardRequest.raise, boardRequest.perfEntry] as const, ([groupId]) => {
       if (groupId !== null) void refresh(SCHED_BOARD_PERF_TASK)
     })
     // The summary is the group's over all models: a model switch keeps it, another group asks again.

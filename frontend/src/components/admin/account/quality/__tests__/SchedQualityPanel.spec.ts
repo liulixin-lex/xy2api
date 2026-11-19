@@ -889,7 +889,7 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
-    expect(api.accountPerformance).toHaveBeenCalledWith(7)
+    expect(api.accountPerformance).toHaveBeenCalledWith(7, expect.anything())
     expect(perfRows()).toEqual(['53:7:gpt-b', '54:none', '99:7:gpt-b'])
     expect(document.querySelector('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell="requests"]')!.textContent).toBe('463')
     expect(document.querySelector('[data-qp-perf-row="99:7:gpt-b"]')!.textContent).toContain('admin.schedQuality.perf.notMember')
@@ -992,13 +992,14 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     api.accountDetail.mockResolvedValue(value)
     const onlyA = perfOf(7)
     onlyA.rows = onlyA.rows.filter((row) => row.model === 'gpt-a')
+    // The account endpoint lists the groups of its rows only.
+    onlyA.groups = onlyA.groups.filter((group) => group.group_id !== 54)
     api.accountPerformance.mockResolvedValue(onlyA)
     await openOn(7, { model: 'gpt-b' })
     expect(perfRows()).toEqual(['53:none', '54:none'])
-    expect(document.querySelector('[data-qp-perf-model-empty]')!.textContent).toBe('admin.schedQuality.perf.panel.emptyModel:{"model":"gpt-b"}')
+    expect(document.querySelector('[data-qp-perf-empty="model"]')!.textContent).toBe('admin.schedQuality.perf.panel.emptyModel:{"model":"gpt-b"}')
     expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')).not.toBeNull()
     expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-gate-off]')).toBeNull()
-    expect(document.querySelector('[data-qp-perf-empty]')).toBeNull()
   })
 
   // Review item 7: the 12-hour snapshot's own staleness, apart from the account's detail and from a failed refresh.
@@ -1032,6 +1033,69 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(perfRows()).toEqual([])
     next.resolve(perfOf(8))
     await flushPromises()
+    expect(perfRows()).toContain('53:8:gpt-b')
+  })
+
+  // Re-review item 2: a group's setting as counted in the snapshot first; groups not counted keep their row; "no
+  // requests" only in the counted groups; nothing at all says so instead of a bare header.
+  it('keeps groups not counted, takes the snapshot\'s own gate first, and scopes "no requests" to the counted groups', async () => {
+    const value = detail()
+    value.groups[1].policy = { ...policy, enabled: false }
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockResolvedValue(perfAnswer([]))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(perfRows()).toEqual(['53:none', '54:none'])
+    expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-perf-empty="account"]')!.textContent).toBe('admin.schedQuality.perf.panel.empty')
+
+    // The gate switched off after the snapshot counted the group: it was counted, so it is no "not counted" row.
+    closeSchedDrawer()
+    await flushPromises()
+    const counted = detail()
+    counted.groups[0].policy = { ...policy, enabled: false }
+    api.accountDetail.mockResolvedValue(counted)
+    const snapshot = perfOf(7)
+    snapshot.rows = snapshot.rows.filter((row) => row.model === 'gpt-a')
+    api.accountPerformance.mockResolvedValue(snapshot)
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-gate-off]')).toBeNull()
+
+    // No group now and no row in the window: one sentence, not a bare header.
+    closeSchedDrawer()
+    await flushPromises()
+    api.accountDetail.mockResolvedValue({ ...detail(), groups: [] })
+    api.accountPerformance.mockResolvedValue(perfAnswer([]))
+    await openOn(7)
+    expect(document.querySelector('[data-qp-perf-none]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-section="perf"] [role="table"]')).toBeNull()
+  })
+
+  // Re-review item 3: a partly covered window keeps its coverage and draws no "no requests" conclusion.
+  it('keeps the coverage and draws no "no requests" conclusion while the window is partly covered', async () => {
+    const partial = perfOf(7)
+    partial.rows = partial.rows.filter((row) => row.model === 'gpt-a')
+    Object.assign(partial, { complete: false, window_from: '2026-11-19T08:40:00Z' })
+    api.accountPerformance.mockResolvedValue(partial)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-note]')!.textContent).toContain('admin.schedQuality.perf.windowPartial:{"hours":"3.5"')
+    expect(document.querySelector('[data-qp-perf-empty]')!.getAttribute('data-qp-perf-empty')).toBe('partial')
+    expect(document.querySelector('[data-qp-perf-empty]')!.textContent).toBe('admin.schedQuality.perf.panel.partialModel:{"hours":"3.5","model":"gpt-b"}')
+  })
+
+  // Re-review item 4: another account asks at once, and the request still on its way for the previous one is cancelled.
+  it('asks for another account at once, cancelling the previous account\'s request on its way', async () => {
+    const signals: AbortSignal[] = []
+    api.accountPerformance.mockImplementation((id: number, options: { signal: AbortSignal }) => {
+      signals.push(options.signal)
+      return id === 7 ? new Promise(() => {}) : Promise.resolve(perfOf(id))
+    })
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    await openOn(8, { model: 'gpt-b' })
+    expect(api.accountPerformance.mock.calls.map((call) => call[0])).toEqual([7, 8])
+    expect(signals[0].aborted).toBe(true)
     expect(perfRows()).toContain('53:8:gpt-b')
   })
 })

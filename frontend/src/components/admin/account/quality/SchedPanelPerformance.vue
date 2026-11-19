@@ -15,7 +15,7 @@
       <button type="button" class="qp-text-btn" @click="retry(SCHED_PANEL_PERF_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
     </div>
     <p v-else-if="loadingStats" class="qp-note" data-qp-perf-loading-stats>{{ t('admin.schedQuality.perf.loadingStats') }}</p>
-    <p v-else-if="accountEmpty" class="qp-note" data-qp-perf-empty>{{ t('admin.schedQuality.perf.panel.empty') }}</p>
+    <p v-else-if="!rows.length" class="qp-note" data-qp-perf-none>{{ t('admin.schedQuality.perf.panel.none') }}</p>
     <div v-else class="prows" role="table" :aria-label="t('admin.schedQuality.perf.panel.title')">
       <div class="prow prow--head" role="row">
         <span role="columnheader">{{ t('admin.schedQuality.perf.col.group') }}</span>
@@ -87,7 +87,7 @@
           </div>
         </div>
       </template>
-      <p v-if="modelEmpty" class="qp-note prows__note" data-qp-perf-model-empty>{{ modelEmpty }}</p>
+      <p v-if="emptyNote" class="qp-note prows__note" :data-qp-perf-empty="emptyNote.kind">{{ emptyNote.text }}</p>
     </div>
   </section>
 </template>
@@ -143,10 +143,9 @@ const note = computed(() => {
   const time = formatShortTime(data.at)
   const parts = [props.model ? t('admin.schedQuality.perf.panel.note', { model: props.model, time }) : t('admin.schedQuality.perf.panel.noteAll', { time })]
   if (!data.complete) {
-    const hours = data.at ? Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000) : 0
-    parts.push(hours < 0.05
+    parts.push(coveredHours.value < 0.05
       ? t('admin.schedQuality.perf.windowLoading')
-      : t('admin.schedQuality.perf.windowPartial', { hours: hours.toFixed(1), from: formatShortTime(data.window_from) }))
+      : t('admin.schedQuality.perf.windowPartial', { hours: coveredHours.value.toFixed(1), from: formatShortTime(data.window_from) }))
   }
   return parts.join(' · ')
 })
@@ -166,13 +165,32 @@ interface PanelPerfRow {
 const accountRows = computed(() => perf.value?.rows.filter((row) => row.account_id === props.detail.account.id) ?? [])
 /** No snapshot yet, or one still loading the window with nothing for the account yet. */
 const loadingStats = computed(() => !!perf.value && (!perf.value.at || (!perf.value.complete && accountRows.value.length === 0)))
-const gateOn = (groupId: number) => props.detail.groups.find((g) => g.group_id === groupId)?.policy.enabled !== false
-/** A fully covered window without any request of the account in a group that is counted. */
-const accountEmpty = computed(() => !!perf.value?.complete && accountRows.value.length === 0 && props.detail.groups.some((g) => gateOn(g.group_id)))
-/** The account has requests, none on this model: the rows stay, and say so. */
-const modelEmpty = computed(() => (props.model !== null && accountRows.value.length > 0 && !accountRows.value.some((row) => row.model === props.model)
-  ? t('admin.schedQuality.perf.panel.emptyModel', { model: modelLabel(props.model, t) })
-  : ''))
+/**
+ * A group is counted when its gate was on: the snapshot's own setting first (the one it was counted with), else the
+ * account's detail (a group without rows is not in the snapshot).
+ */
+const counted = (groupId: number) => {
+  const own = perf.value?.groups.find((g) => g.group_id === groupId)
+  return own ? own.gate_enabled : props.detail.groups.find((g) => g.group_id === groupId)?.policy.enabled !== false
+}
+const coveredHours = computed(() => (perf.value?.at ? Math.max(0, (Date.parse(perf.value.at) - Date.parse(perf.value.window_from)) / 3_600_000) : 0))
+/**
+ * Under the rows when the model (or the account) has none: "no requests" only for a fully covered window and in the
+ * groups counted; a partly covered one says what it covers so far.
+ */
+const emptyNote = computed(() => {
+  const data = perf.value
+  if (!data || !rows.value.some((row) => !row.gateOff)) return null
+  const model = props.model === null ? null : modelLabel(props.model, t)
+  const none = model === null ? accountRows.value.length === 0 : !accountRows.value.some((row) => row.model === props.model)
+  if (!none) return null
+  if (!data.complete) {
+    return model === null ? null : { kind: 'partial', text: t('admin.schedQuality.perf.panel.partialModel', { hours: coveredHours.value.toFixed(1), model }) }
+  }
+  return model === null || accountRows.value.length === 0
+    ? { kind: 'account', text: t('admin.schedQuality.perf.panel.empty') }
+    : { kind: 'model', text: t('admin.schedQuality.perf.panel.emptyModel', { model }) }
+})
 
 const rows = computed<PanelPerfRow[]>(() => {
   const data = perf.value
@@ -190,7 +208,7 @@ const rows = computed<PanelPerfRow[]>(() => {
       title: label,
       info: props.groupInfo(groupId) ?? { name },
       view,
-      gateOff: !view && !gateOn(groupId)
+      gateOff: !view && !counted(groupId)
     }
   }
   const list: PanelPerfRow[] = []

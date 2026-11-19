@@ -76,7 +76,7 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(document.querySelector('[data-sq-board-table]')).not.toBeNull()
 
     await click('[data-sq-board-view="perf"]')
-    expect(api.groupPerformance).toHaveBeenCalledWith(18)
+    expect(api.groupPerformance).toHaveBeenCalledWith(18, expect.anything())
     expect(document.querySelector('[data-sq-board-table]')).toBeNull()
     expect(document.querySelector('[data-sq-board-view="perf"]')!.getAttribute('aria-selected')).toBe('true')
     // The order rests in this view: another model asks nothing of it.
@@ -301,7 +301,8 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(document.querySelector('[data-sq-perf-window]')!.textContent).toContain('admin.schedQuality.perf.windowPartial:{"hours":"3.5"')
     setSchedBoardModel('gpt-y')
     await flushPromises()
-    expect(document.querySelector('[data-sq-perf-empty]')!.textContent!.trim()).toBe('admin.schedQuality.perf.emptyPartial:{"hours":"3.5"}')
+    // Re-review item 3: no "no requests" before the window is covered, and the model named.
+    expect(document.querySelector('[data-sq-perf-empty]')!.textContent!.trim()).toBe('admin.schedQuality.perf.emptyPartialModel:{"hours":"3.5","model":"gpt-y"}')
   })
 
   // Review item 8: older switches without a model are a model of their own, not every model.
@@ -347,5 +348,41 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(scoped).not.toMatch(/:global\(\.dark\)\s*[.#[\w]/)
     const plain = perfSource.slice(perfSource.indexOf('<style>'))
     expect(plain).toMatch(/\.dark \.gperf__acct \{\s*background:/)
+  })
+
+  // Re-review item 4: another group asks at once, and the request still on its way for the previous one is cancelled.
+  it('asks for another group at once, cancelling the previous group\'s request on its way', async () => {
+    const signals: AbortSignal[] = []
+    api.groupPerformance.mockImplementation((id: number, options: { signal: AbortSignal }) => {
+      signals.push(options.signal)
+      return id === 31 ? new Promise(() => {}) : Promise.resolve(answer())
+    })
+    mount(Board, { attachTo: document.body })
+    setSchedBoardView('perf')
+    openSchedBoard({ id: 31, name: 'A' })
+    await flushPromises()
+    openSchedBoard({ id: 18, name: '晨星组' })
+    await flushPromises()
+    expect(api.groupPerformance.mock.calls.map((call) => call[0])).toEqual([31, 18])
+    expect(signals[0].aborted).toBe(true)
+    expect(rows()).toHaveLength(5)
+    // Closing cancels a request still on its way.
+    api.groupPerformance.mockImplementation((_: number, options: { signal: AbortSignal }) => {
+      signals.push(options.signal)
+      return new Promise(() => {})
+    })
+    await markSchedChanged()
+    closeSchedBoard()
+    await flushPromises()
+    expect(signals.at(-1)!.aborted).toBe(true)
+  })
+
+  // Re-review item 5: each entry into the 12-hour view asks again at once.
+  it('asks again each time the 12-hour view is entered, even right after the last answer', async () => {
+    await openPerf()
+    expect(api.groupPerformance).toHaveBeenCalledTimes(1)
+    await click('[data-sq-board-view="order"]')
+    await click('[data-sq-board-view="perf"]')
+    expect(api.groupPerformance).toHaveBeenCalledTimes(2)
   })
 })

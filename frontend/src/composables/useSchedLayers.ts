@@ -26,11 +26,13 @@ export interface BoardRequest {
   model: string | null
   /** Kept while the page lives: the board opens again on the view it was left on. */
   view: BoardView
+  /** Bumped each time the 12-hour view is entered: each entry asks for the figures anew. */
+  perfEntry: number
   raise: number
 }
 
 const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, raise: 0 })
-const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, view: 'order', raise: 0 })
+const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, view: 'order', perfEntry: 0, raise: 0 })
 /** Bumped after any action that changes an account's quality state, so lists and the open layers reload. */
 const changed = ref(0)
 /** Reloads the open layers started for a change; markSchedChanged() waits for them. */
@@ -67,6 +69,7 @@ export function setSchedBoardModel(model: string | null) {
 }
 
 export function setSchedBoardView(view: BoardView) {
+  if (view === 'perf' && board.view !== 'perf') board.perfEntry++
   board.view = view
 }
 
