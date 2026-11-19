@@ -5,9 +5,11 @@ import (
 	"math"
 	"math/big"
 	"slices"
+	"strconv"
 	"time"
 
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/shopspring/decimal"
 )
 
 const schedPerfWindow = 12 * time.Hour
@@ -138,10 +140,16 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 	s := &SchedPerfSnapshot{at: at, from: at.Add(-schedPerfWindow), complete: true, policies: policies, rows: make(map[schedQualityKey]*schedPerfRow), scores: make(map[SchedAccountModel]schedPerfScore), first15: make(map[int64]int)}
 	training := make(map[schedQualityKey]*perfTraining)
 	peers := make(map[schedGroupModel]perfStrata)
+	limits := make(map[int64]uint64, len(policies))
+	for group, record := range policies {
+		if record.Policy.Enabled {
+			limits[group] = perfLimitMillis(record.Policy.TTFTSeconds)
+		}
+	}
 	end, begin := at.UnixMicro(), s.from.UnixMicro()
 	for _, f := range facts {
-		policy := policies[f.Group].Policy
-		if !policy.Enabled || f.Finish < begin || f.Finish >= end || f.Start > f.Finish || f.Start <= resets[f.Account].UnixMicro() {
+		limit, enabled := limits[f.Group]
+		if !enabled || f.Finish < begin || f.Finish >= end || f.Start > f.Finish || f.Start <= resets[f.Account].UnixMicro() {
 			continue
 		}
 		key := schedQualityKey{f.Account, f.Model, f.Group}
@@ -179,7 +187,7 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		if age < (30 * time.Minute).Microseconds() {
 			r.recent.First30++
 		}
-		slow, known := perfSlow(f, policy.TTFTSeconds)
+		slow, known := perfSlow(f, limit)
 		if !known {
 			r.First.Unknown++
 			continue
@@ -270,20 +278,27 @@ func perfScoreMicros(excess *big.Rat, n int) int64 {
 	return whole.Int64()
 }
 
-func perfSlow(f SchedPerfFact, seconds float64) (int, bool) {
-	ms := math.Round(seconds * 1000)
-	// A policy can exceed the range of an integer clock; every observed TTFO then passes.
-	if ms >= 1<<63 {
-		return 0, f.TTFO > 0
+// Round the published decimal policy, including exact half-millisecond ties.
+func perfLimitMillis(seconds float64) uint64 {
+	value, err := decimal.NewFromString(strconv.FormatFloat(seconds, 'f', -1, 64))
+	if err != nil {
+		return math.MaxUint64
 	}
-	limit := int64(ms)
+	millis := value.Shift(3).Round(0).BigInt()
+	if !millis.IsUint64() {
+		return math.MaxUint64 // Beyond every signed ledger clock.
+	}
+	return millis.Uint64()
+}
+
+func perfSlow(f SchedPerfFact, limit uint64) (int, bool) {
 	if f.TTFO > 0 {
-		if int64(f.TTFO) > limit {
+		if uint64(f.TTFO) > limit {
 			return 1, true
 		}
 		return 0, true
 	}
-	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored >= 0 && int64(f.Censored) >= limit {
+	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored >= 0 && uint64(f.Censored) >= limit {
 		return 1, true
 	}
 	return 0, false
