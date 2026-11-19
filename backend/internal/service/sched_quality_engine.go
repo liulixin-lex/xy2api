@@ -27,6 +27,7 @@ type SchedQualityEngineService struct {
 	mu                     sync.Mutex
 	window                 schedQualityWindow
 	snapshot               atomic.Pointer[SchedQualitySnapshot]
+	performance            atomic.Pointer[SchedPerfSnapshot]
 	processedAt            time.Time
 	loaded                 bool
 	loadSince, loadThrough time.Time
@@ -61,6 +62,8 @@ func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttempt
 		now = time.Now
 	}
 	s := &SchedQualityEngineService{store: store, attempts: attempts, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs), rule: SchedTTFTRuleRecord{Params: schedquality.DefaultRuleBParams()}}
+	at := now().UTC().Truncate(schedPerfTick)
+	s.performance.Store(&SchedPerfSnapshot{at: at, from: at})
 	s.snapshot.Store(&SchedQualitySnapshot{View: &schedQualityView{}})
 	return s
 }
@@ -80,8 +83,12 @@ func (s *SchedQualityEngineService) Start(ctx context.Context) {
 	if err := s.cycle(ctx); err != nil {
 		slog.ErrorContext(ctx, "sched_quality.cycle", "error", err)
 	}
+	perfCtx, cancel := context.WithCancel(ctx)
+	perfDone := make(chan struct{})
+	go func() { defer close(perfDone); s.runPerformance(perfCtx) }()
 	go func() {
 		defer close(s.done)
+		defer func() { cancel(); <-perfDone }()
 		eval, cleanup := time.NewTicker(schedquality.EvalInterval), time.NewTicker(schedquality.CleanupInterval)
 		defer eval.Stop()
 		defer cleanup.Stop()

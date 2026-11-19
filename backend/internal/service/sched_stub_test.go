@@ -13,6 +13,7 @@ import (
 
 // fakeSchedAttemptStore holds visible samples and delays pending inserts until Reveal is called.
 type fakeSchedAttemptStore struct {
+	SchedPerfLedger
 	mu            sync.Mutex
 	Rows, Pending []schedquality.AttemptSample
 	DelayVisible  bool
