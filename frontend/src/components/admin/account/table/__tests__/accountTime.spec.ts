@@ -22,6 +22,13 @@ describe('formatShortTime', () => {
     expect([formatShortTime(null), formatShortTime(''), formatShortTime('not a time')]).toEqual(['—', '—', '—'])
   })
 
+  // Local calendar, not elapsed time: 20 minutes from 23:59 is tomorrow, so it carries the date.
+  it('dates a time 20 minutes after a local 23:59', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 18, 23, 59))
+    expect(formatShortTime(new Date(Date.now() + 20 * 60_000).toISOString())).toBe('11-19 00:19')
+  })
+
   it('reads the same with an English interface and an English browser locale', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 10, 15, 9, 30))
