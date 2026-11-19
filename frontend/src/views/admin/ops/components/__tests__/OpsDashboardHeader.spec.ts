@@ -64,6 +64,41 @@ describe('OpsDashboardHeader user wait', () => {
   })
 })
 
+// Browser check #2 and #3: the user-wait card in a narrow column (1024) and the last-attempt line's layout.
+describe('OpsDashboardHeader user wait layout', () => {
+  const mountWait = (value: Partial<OpsDashboardOverview>) => mount(OpsDashboardHeader, {
+    props: { overview: { ...overview, ...value } as OpsDashboardOverview, platform: '', groupId: null, timeRange: '1h', queryMode: 'auto', loading: false, lastUpdated: null, thresholds: { ttft_p99_ms_max: 1000 } },
+    global: { stubs: { Select: true, HelpTooltip: true, BaseDialog: true, Icon: true } }
+  })
+  const parts = (el: ReturnType<ReturnType<typeof mountWait>['get']>) => el.findAll(':scope > span').map((span) => span.text())
+
+  it('lays the last attempt out like the percentiles, "P99: 250 ms", and an empty value as unknown without a unit', async () => {
+    const wrapper = mountWait({ ttft: { p99_ms: 1200, p50_ms: null }, e2e_first_output: { p99_ms: 1850 }, e2e_first_output_sample_count: 1 })
+    await flushPromises()
+    const p99 = wrapper.get('[data-testid="ops-e2e-last-P99"]')
+    expect(p99.classes()).toEqual(expect.arrayContaining(['inline-flex', 'gap-1']))
+    expect(parts(p99)).toEqual(['P99:', '1200', 'ms'])
+    expect(parts(wrapper.get('[data-testid="ops-e2e-last-P50"]'))).toEqual(['P50:', 'admin.ops.e2eFirstOutput.unknown'])
+    expect(wrapper.get('[data-testid="ops-e2e-last-attempt"]').text()).not.toContain('-')
+  })
+
+  it('lets the header and the number row wrap and the number shrink in a narrow card, so nothing is cut', async () => {
+    const wrapper = mountWait({ e2e_first_output: { p99_ms: 18500 }, e2e_first_output_sample_count: 3 })
+    await flushPromises()
+    const card = wrapper.get('[data-testid="ops-e2e-card"]')
+    expect(card.classes()).toContain('min-w-0')
+    expect(card.get(':scope > div').classes()).toEqual(expect.arrayContaining(['flex-wrap']))
+    const number = card.get('[data-testid="ops-e2e-p99"]')
+    expect(number.classes()).toEqual(expect.arrayContaining(['text-2xl', 'xl:text-3xl', 'break-all']))
+    expect(number.element.parentElement!.className).toContain('flex-wrap')
+
+    const empty = mountWait({ e2e_first_output_sample_count: 0 })
+    await flushPromises()
+    expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).toEqual(expect.arrayContaining(['text-lg', 'break-words']))
+    expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).not.toContain('text-3xl')
+  })
+})
+
 describe('OpsDashboardHeader output TPS', () => {
 
   it('shows per-request P50, slower-tail percentiles and sample count separately from traffic TPS', async () => {
