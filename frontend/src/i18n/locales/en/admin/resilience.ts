@@ -128,7 +128,13 @@ export default {
         collab_plaintext: 'Collaboration plaintext attempts',
         collab_call: 'Collaboration tool calls (by encrypted args state)',
         collab_call_action: 'Collaboration tool call actions',
-        state_rejection: 'Conversation state rejections'
+        state_rejection: 'Conversation state rejections',
+        budget_snapshot: 'Text request budgets set (by budget start)',
+        budget_cut_fot: 'First-output timeouts: did the budget shorten the limit (would / applied)',
+        ttfo_lower_bound: 'Wait at first-output timeouts (by model, bucketed)',
+        late_attempt_start: 'Attempts started with the budget nearly spent',
+        body_receipt_repeat: 'Request body received again (only the first counts)',
+        anthropic_response_stage_timeout: 'Claude response stage timeouts'
       },
       metricHints: {
         session_rebind: 'A request asked to move the session off its current account (avoidance); it does not mean the session changed accounts. Whether the binding changed is what the commit record says (committed on the sched_quality.session_switch log).'

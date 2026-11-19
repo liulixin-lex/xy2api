@@ -128,7 +128,15 @@ export default {
         collab_plaintext: '协作消息明文化尝试',
         collab_call: '协作工具调用（按密文参数状态）',
         collab_call_action: '协作工具调用处理动作',
-        state_rejection: '会话状态拒绝'
+        state_rejection: '会话状态拒绝',
+        // Request budget observation (backend resilience/budget.go, request_timing.go, body_receipt.go,
+        // service/resilience_timeout_observe.go, anthropic_stream_stage.go); the breakdown column carries the label.
+        budget_snapshot: '文本请求建立预算（细分为预算起算点）',
+        budget_cut_fot: '首输出超时：预算是否截短时限（会截 / 已截）',
+        ttfo_lower_bound: '首输出超时时已等时长（按模型分档）',
+        late_attempt_start: '预算将尽才开始的尝试',
+        body_receipt_repeat: '请求体重复接收（只按第一次计）',
+        anthropic_response_stage_timeout: 'Claude 响应阶段超时'
       },
       metricHints: {
         session_rebind: '一次请求提出离开会话当前的号（避让），不等于会话已经换号。归属是否已换，以提交记录为准（日志 sched_quality.session_switch 的 committed）。'
