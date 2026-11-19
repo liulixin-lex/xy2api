@@ -1376,7 +1376,7 @@ function handleToolbarRefresh() {
               <span class="whitespace-nowrap text-xs font-bold text-gray-400">ms (P99)</span>
             </div>
             <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-              <div v-for="item in e2eStats" :key="item.label" class="flex items-baseline gap-1 whitespace-nowrap">
+              <div v-for="item in e2eStats" :key="item.label" class="flex flex-wrap items-baseline gap-x-1" :data-testid="`ops-e2e-stat-${item.label}`">
                 <span class="text-gray-500">{{ item.label }}:</span>
                 <span class="font-bold text-gray-900 dark:text-white">{{ item.value ?? '-' }}</span>
                 <span class="text-gray-400">ms</span>
@@ -1389,8 +1389,9 @@ function handleToolbarRefresh() {
           </template>
           <div class="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700" data-testid="ops-e2e-last-attempt">
             <span class="text-gray-500">{{ t('admin.ops.e2eFirstOutput.lastAttempt') }}</span>
-            <!-- Laid out like the percentiles above ("P99: 250 ms"); a missing value reads unknown, without a unit. -->
-            <span v-for="item in lastAttemptStats" :key="item.label" class="inline-flex items-baseline gap-1 whitespace-nowrap" :data-testid="`ops-e2e-last-${item.label}`">
+            <!-- Laid out like the percentiles above ("P99: 250 ms"); a missing value reads unknown, without a unit. Like
+                 them, the unit may wrap to the next line in a narrow card rather than stick out of it (120000 ms at 1024). -->
+            <span v-for="item in lastAttemptStats" :key="item.label" class="inline-flex flex-wrap items-baseline gap-x-1" :data-testid="`ops-e2e-last-${item.label}`">
               <span class="text-gray-500">{{ item.label }}:</span>
               <template v-if="item.value != null">
                 <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(item.value))">{{ item.value }}</span>

@@ -76,7 +76,11 @@ describe('OpsDashboardHeader user wait layout', () => {
     const wrapper = mountWait({ ttft: { p99_ms: 1200, p50_ms: null }, e2e_first_output: { p99_ms: 1850 }, e2e_first_output_sample_count: 1 })
     await flushPromises()
     const p99 = wrapper.get('[data-testid="ops-e2e-last-P99"]')
-    expect(p99.classes()).toEqual(expect.arrayContaining(['inline-flex', 'gap-1']))
+    // Spaced like the rows above; the unit may wrap in a narrow card rather than stick out (final-fe review suggestion).
+    expect(p99.classes()).toEqual(expect.arrayContaining(['inline-flex', 'flex-wrap', 'gap-x-1']))
+    expect(p99.classes()).not.toContain('whitespace-nowrap')
+    expect(wrapper.get('[data-testid="ops-e2e-stat-P95"]').classes()).toEqual(expect.arrayContaining(['flex-wrap', 'gap-x-1']))
+    expect(wrapper.get('[data-testid="ops-e2e-stat-P95"]').classes()).not.toContain('whitespace-nowrap')
     expect(parts(p99)).toEqual(['P99:', '1200', 'ms'])
     expect(parts(wrapper.get('[data-testid="ops-e2e-last-P50"]'))).toEqual(['P50:', 'admin.ops.e2eFirstOutput.unknown'])
     expect(wrapper.get('[data-testid="ops-e2e-last-attempt"]').text()).not.toContain('-')
