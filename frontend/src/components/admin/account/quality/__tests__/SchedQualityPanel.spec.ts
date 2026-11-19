@@ -617,6 +617,50 @@ describe('SchedQualityPanel', () => {
     expect(heading).toMatch(/flex-wrap:\s*wrap/)
   })
 
+  // Round 4 (16-②): on a 320 or 390 drawer Evidence ran out of view, the row being one line nothing in it could narrow.
+  // jsdom lays nothing out: the narrow rule and the row it lays out are checked here, the geometry in a browser.
+  it('lays a decision row out in three columns on a narrow list, Evidence whole and still the same button', async () => {
+    const style = decisionsSource.slice(decisionsSource.indexOf('<style scoped>'))
+    const block = (css: string, selector: string) => {
+      const start = css.indexOf(`${selector} {`)
+      expect(start).toBeGreaterThanOrEqual(0)
+      return css.slice(start, css.indexOf('}', start))
+    }
+    // The list's own width decides, not the viewport's.
+    expect(block(style, '.dlist')).toMatch(/container:\s*sched-decisions\s*\/\s*inline-size/)
+    const at = style.indexOf('@container sched-decisions (max-width: 420px) {')
+    expect(at).toBeGreaterThan(0)
+    const narrow = style.slice(at)
+    const main = block(narrow, '.drow__main')
+    expect(main).toMatch(/display:\s*grid/)
+    expect(main).toMatch(/grid-template-columns:\s*auto minmax\(0, 1fr\) max-content/)
+    expect(main).toMatch(/grid-template-areas:\s*'time what ev'\s*'\.\s+where where'/)
+    expect(block(narrow, '.drow__what')).toMatch(/grid-area:\s*what;\s*overflow-wrap:\s*anywhere/)
+    expect(block(narrow, '.drow__where')).toMatch(/grid-area:\s*where;\s*overflow-wrap:\s*anywhere;\s*white-space:\s*normal/)
+    expect(block(narrow, '.drow__ev')).toMatch(/grid-area:\s*ev/)
+
+    const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+      id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'trial_timeout', level: 0, until: null, basis: basis('ttfo'), ...patch
+    })
+    api.accountDecisions.mockResolvedValueOnce([record(2), record(1, { line: '', action: 'relax', basis: null })])
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    await w.get('[data-qp-decisions-toggle]').trigger('click')
+    await flushPromises()
+    const cells = (id: number) =>
+      Array.from(w.get(`[data-qp-decision="${id}"] .drow__main`).element.children, (cell) => [...cell.classList].find((name) => name.startsWith('drow__')))
+    expect(cells(2)).toEqual(['drow__time', 'drow__what', 'drow__where', 'drow__ev'])
+    // A record of the previous rules has no basis and so no Evidence.
+    expect(cells(1)).toEqual(['drow__time', 'drow__what', 'drow__where'])
+    const button = w.get<HTMLButtonElement>('[data-qp-decision-evidence="2"]').element
+    expect([button.tagName, button.type, button.disabled, button.hasAttribute('tabindex')]).toEqual(['BUTTON', 'button', false, false])
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    button.click()
+    await flushPromises()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(w.find('[data-qp-decision="2"] [data-qp-evidence]').exists()).toBe(true)
+  })
+
   // M1: a recovery while the list is collapsed: opening it again shows the new record, not the history loaded before.
   it('reloads a collapsed decision list on its next opening after a recovery or an exemption', async () => {
     const record = (id: number, action: string): BackendDecision =>

@@ -275,7 +275,9 @@ function timeoutReason(item: BackendDecision): string {
   align-items: center;
   gap: 10px;
 }
+/* The list is the container the rows lay out by: the drawer's width is not the viewport's. */
 .dlist {
+  container: sched-decisions / inline-size;
   display: grid;
   margin: 0;
   padding: 0;
@@ -329,6 +331,34 @@ function timeoutReason(item: BackendDecision): string {
 }
 .drow__ev {
   flex: none;
+}
+/* A narrow list: one line cannot hold the time, the longest action (English trial_timeout) and Evidence, and nothing
+   in it gave way, so Evidence ended up out of view. Here the time, the action (wrapping, long words too) and Evidence
+   share the first line, Evidence keeping its whole width; the group, model and line go under the action. */
+@container sched-decisions (max-width: 420px) {
+  .drow__main {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) max-content;
+    grid-template-areas:
+      'time what ev'
+      '.    where where';
+    row-gap: 2px;
+  }
+  .drow__time {
+    grid-area: time;
+  }
+  .drow__what {
+    grid-area: what;
+    overflow-wrap: anywhere;
+  }
+  .drow__where {
+    grid-area: where;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .drow__ev {
+    grid-area: ev;
+  }
 }
 .drow__sub {
   color: var(--color-text-secondary);
