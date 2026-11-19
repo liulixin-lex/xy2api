@@ -49,6 +49,8 @@
             <span v-else class="prow__toggle" aria-hidden="true" />
             <GroupAliasPill :group="item.info" />
             <span class="prow__name">{{ item.name }}</span>
+            <!-- On a phone the name is cut short and groups named alike read the same: the id tells them apart. -->
+            <span class="prow__gid" aria-hidden="true">#{{ item.groupId }}</span>
           </span>
           <!-- A short note that fits the figures' width (268px, 196px on a phone); the tip says why, for a gate that was off
                when the snapshot was made and for a group that joined after it alike. -->
@@ -284,9 +286,9 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 }
 .prow {
   display: grid;
-  /* Group, requests, slow, excess, cache, switches; two headings are short words (English "Reqs", "Sw."; the whole word
-     is their title), so the group name keeps its room. */
-  grid-template-columns: minmax(0, 1fr) 52px 48px 52px 56px 44px;
+  /* Group, requests, slow, excess, cache, switches; the slow share takes "100.0%" whole (56px, as the cache); two
+     headings are short words (English "Reqs", "Sw."; the whole word is their title), so the group name keeps its room. */
+  grid-template-columns: minmax(0, 1fr) 52px 56px 52px 56px 44px;
   align-items: center;
   column-gap: 4px;
   min-height: 36px;
@@ -333,6 +335,12 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   font-size: var(--font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.prow__gid {
+  display: none;
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
 }
 .prow--none .prow__name {
   color: var(--color-text-muted);
@@ -393,6 +401,9 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   }
   .prow__slow {
     display: none;
+  }
+  .prow__gid {
+    display: inline;
   }
 }
 </style>
