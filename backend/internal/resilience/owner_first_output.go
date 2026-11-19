@@ -21,7 +21,7 @@ func (s *RequestState) OwnerHTTPDispatchPending(accountID int64) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.httpSendSeq == s.turnStartHTTPSeq && s.sessionHash != "" && s.schedSelection.HTTPStreamText &&
+	return s.upstreamSendSeq == s.turnStartSendSeq && s.sessionHash != "" && s.schedSelection.HTTPStreamText &&
 		s.schedSelection.AccountID == accountID && s.schedSelection.StickyWarm
 }
 
@@ -32,7 +32,7 @@ func (s *RequestState) FirstHTTPDispatch(seq uint64) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return seq == s.turnStartHTTPSeq+1 && seq == s.httpSendSeq
+	return seq == s.turnStartSendSeq+1 && seq == s.upstreamSendSeq
 }
 
 // IsCurrentHTTPDispatch checks both the handle and the physical send. A
@@ -43,7 +43,7 @@ func (s *RequestState) IsCurrentHTTPDispatch(handle any, seq uint64) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return seq > s.turnStartHTTPSeq && s.currentAttempt == handle && s.httpSendSeq == seq
+	return seq > s.turnStartSendSeq && s.currentAttempt == handle && s.upstreamSendSeq == seq
 }
 
 func (s *RequestState) RecordOwnerCutoff(v OwnerFirstOutputCutoff) bool {
@@ -52,7 +52,7 @@ func (s *RequestState) RecordOwnerCutoff(v OwnerFirstOutputCutoff) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ownerCutoff.AttemptSeq != 0 || s.httpSendSeq != v.AttemptSeq || v.AttemptSeq <= s.turnStartHTTPSeq {
+	if s.ownerCutoff.AttemptSeq != 0 || s.upstreamSendSeq != v.AttemptSeq || v.AttemptSeq <= s.turnStartSendSeq {
 		return false
 	}
 	s.ownerCutoff = v

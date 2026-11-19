@@ -440,7 +440,7 @@ func (c *openAIWSTerminalClientConn) finishTerminalWrite(succeeded bool, onSucce
 
 type openAIWSPassthroughFirstOutputFrameConn struct {
 	inner             openaiwsv2.FrameConn
-	beforeSend        func(payload []byte)
+	beforeSend        func(payload []byte) *schedAttemptCapture
 	resolveDeadline   func(payload []byte) openAIWSPassthroughFirstOutputDeadline
 	activeReadTimeout time.Duration
 
@@ -542,16 +542,21 @@ func (c *openAIWSPassthroughFirstOutputFrameConn) WriteFrame(ctx context.Context
 	if c == nil || c.inner == nil {
 		return errOpenAIWSConnClosed
 	}
-	generation := uint64(0)
-	if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+	isCreate := (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create"
+	var generation uint64
+	if isCreate && msgType == coderws.MessageText {
 		generation = c.armDeadline(payload)
 	}
-	if c.beforeSend != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
-		c.beforeSend(payload)
+	var capture *schedAttemptCapture
+	if isCreate && c.beforeSend != nil {
+		capture = c.beforeSend(payload)
 	}
 	if err := c.inner.WriteFrame(ctx, msgType, payload); err != nil {
 		c.disarmDeadline(generation)
 		return err
+	}
+	if isCreate {
+		capture.confirmNativeWSWrite(ctx)
 	}
 	return nil
 }
@@ -1043,10 +1048,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
-	var schedBeforeSend func([]byte)
+	var schedBeforeSend func([]byte) *schedAttemptCapture
 	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
-		schedBeforeSend = func(payload []byte) {
-			schedTurns.begin(s, ctx, account, payload, schedDial)
+		schedBeforeSend = func(payload []byte) *schedAttemptCapture {
+			return schedTurns.begin(s, ctx, account, payload, schedDial)
 		}
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{

@@ -138,7 +138,7 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	// admitted turn; takeover is a one-time binding change and must not leak.
 	s.selectionFlags.takeover = false
 	s.currentAttempt = nil
-	s.turnStartHTTPSeq = s.httpSendSeq
+	s.turnStartSendSeq = s.upstreamSendSeq
 	s.ownerCutoff = OwnerFirstOutputCutoff{}
 	s.ownerAvoidConfirmed = false
 	s.schedSelection.HTTPStreamText = false

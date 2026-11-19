@@ -58,8 +58,8 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	httpSendSeq          uint64 // never reused by another turn on this connection
-	turnStartHTTPSeq     uint64
+	upstreamSendSeq      uint64 // never reused by another turn on this connection
+	turnStartSendSeq     uint64
 	ownerCutoff          OwnerFirstOutputCutoff
 	ownerAvoidConfirmed  bool
 	currentAttempt       any
@@ -388,10 +388,25 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) uint64 {
 	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
-	s.httpSendSeq++
-	seq := s.httpSendSeq
+	seq := s.nextUpstreamSendSeqLocked()
 	s.mu.Unlock()
 	return seq
+}
+
+// ConfirmNativeWSSend assigns the physical sequence after an application frame
+// was written. Gateway request accounting already started before that write.
+func (s *RequestState) ConfirmNativeWSSend() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextUpstreamSendSeqLocked()
+}
+
+func (s *RequestState) nextUpstreamSendSeqLocked() uint64 {
+	s.upstreamSendSeq++
+	return s.upstreamSendSeq
 }
 
 // OpsUpstreamSendBoundary returns the latest send boundary for accountID.
@@ -1030,7 +1045,7 @@ func (s *RequestState) BeginNewPickSelection() bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	first := !s.newPickSelectionStarted && !s.turnFailed && len(s.failedAccounts) == 0 && s.httpSendSeq == s.turnStartHTTPSeq
+	first := !s.newPickSelectionStarted && !s.turnFailed && len(s.failedAccounts) == 0 && s.upstreamSendSeq == s.turnStartSendSeq
 	s.newPickSelectionStarted = true
 	return first
 }
