@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,11 +21,14 @@ import (
 
 func TestOwnerGuardPublicVetoOpportunity(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, mode := range []string{"only_owner_pinned", "quality_owner_only_pass", "independently_rate_limited", "capacity_full", "idle_not_met", "failed_target"} {
+	for _, mode := range []string{"only_owner_pinned", "quality_owner_only_pass", "quality_with_avoided_target", "quality_with_alternative", "independently_rate_limited", "capacity_full", "idle_not_met", "failed_target"} {
 		t.Run(mode, func(t *testing.T) {
 			members := []Account{selectionFixtureAccount(2, 2)}
 			if mode != "only_owner_pinned" {
 				members = append(members, selectionFixtureAccount(1, 1))
+			}
+			if mode == "quality_with_alternative" {
+				members = append(members, selectionFixtureAccount(3, 1))
 			}
 			f := newSelectionRuntimeFixture(t, members...)
 			f.cache.sessionBindings["openai:session"] = 2
@@ -34,10 +38,15 @@ func TestOwnerGuardPublicVetoOpportunity(t *testing.T) {
 			switch mode {
 			case "only_owner_pinned":
 				ctx = withOpenAIStickyMigrationGuard(ctx, "previous-response", OpenAIUpstreamTransportHTTPSSE)
-			case "quality_owner_only_pass":
+			case "quality_owner_only_pass", "quality_with_avoided_target", "quality_with_alternative":
 				f.svc.cfg.Gateway.OpenAIQualityRouting.Mode = "enforce"
 				ctx = context.WithValue(withOpenAIQualityRouting(ctx), openAIQualityContextKey{}, &openAIQualityRequest{loaded: true, group: 7, session: "session", scope: "synthetic", state: OpenAIQualityState{Generation: 1, Binding: 2, Owner: 2}})
-				want = []string{"quality_owned"}
+				if mode != "quality_owner_only_pass" {
+					require.NoError(t, f.cache.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
+				}
+				if mode != "quality_with_avoided_target" {
+					want = []string{"quality_owned"}
+				}
 			case "idle_not_met":
 				require.NoError(t, f.cache.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
 				f.view.Takeovers[7] = fakeSchedTakeover{Enabled: true, Idle: time.Hour}
@@ -61,6 +70,10 @@ func TestOwnerGuardPublicVetoOpportunity(t *testing.T) {
 			for _, row := range schedObsLogRecords(t, logs) {
 				if row["msg"] == "sched_quality.session_switch" {
 					reasons = append(reasons, row["reason"].(string))
+					if mode == "quality_with_alternative" {
+						require.EqualValues(t, 3, row["to"])
+						require.Equal(t, true, row["avoid_seen_at_select"])
+					}
 				}
 			}
 			t.Logf("selected=%d reasons=%v", selected.Account.ID, reasons)
@@ -333,4 +346,93 @@ func TestOwnerGuardProfitFloorModels(t *testing.T) {
 		}
 	}
 	t.Fatal("missing release event")
+}
+
+func CheckOwnerCutoffDuringTLS(t *testing.T, up HTTPUpstream) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Budget.ModelOverrides = map[string]int{"wire-model": 1} })
+	wait := make(chan struct{})
+	seen := make(chan struct{}, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+		<-wait
+		return nil, nil
+	}}
+	server.StartTLS()
+	defer server.Close()
+	defer close(wait)
+	body := []byte(`{"model":"wire-model","input":"hello","stream":true}`)
+	c, _ := compatStreamContext("/v1/responses", string(body))
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["base_url"] = server.URL
+	st, ctx := ownerFactsState(c.Request.Context(), account)
+	c.Request = c.Request.WithContext(ctx)
+	logs := captureOpenAIObservationLogs(t)
+	svc := compatStreamService(up, 1, 0, 0)
+	_, err := svc.Forward(ctx, c, account, body)
+	requireFirstOutputFailover(t, err)
+	select {
+	case <-seen:
+	default:
+		t.Fatal("did not reach TLS handshake")
+	}
+	_, hit := st.OwnerCutoff()
+	t.Logf("TLS handshake entered, full-tier timeout, owner cutoff=%t", hit)
+	require.True(t, hit)
+	var seqs []any
+	for _, row := range schedObsLogRecords(t, logs) {
+		if row["msg"] == "resilience.budget_timeout_plan" {
+			seqs = append(seqs, row["attempt_seq"])
+		}
+	}
+	require.Equal(t, []any{nil}, seqs)
+}
+
+func TestOwnerGuardFollowUsesCutoffModel(t *testing.T) {
+	for _, declined := range []bool{false, true} {
+		t.Run(fmt.Sprintf("declined_%t", declined), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			owner, target := selectionFixtureAccount(2, 2), selectionFixtureAccount(1, 1)
+			owner.Credentials = map[string]any{"model_mapping": map[string]any{"m": "owner-before"}}
+			target.Credentials = map[string]any{"model_mapping": map[string]any{"m": "target-wire"}}
+			f := newSelectionRuntimeFixture(t, owner, target)
+			f.cache.sessionBindings["openai:session"] = owner.ID
+			f.view.Takeovers[7] = fakeSchedTakeover{}
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(t.Context(), st)
+			first := selectTrialRuntime(t, f, ctx, "session")
+			require.Equal(t, owner.ID, first.Account.ID)
+			first.ReleaseFunc()
+			c := pendingOpenAIStickyChange(ctx)
+			require.NotNil(t, c)
+			fact := resilience.OwnerFirstOutputCutoff{GroupID: 7, Session: "session", AccountID: owner.ID, BindingKey: c.key, Generation: c.expected.Generation, AttemptSeq: st.MarkOpsUpstreamSendBoundary(owner.ID), Effective: time.Second, FiredAt: time.Now(), CanTransfer: true, Model: "owner-before"}
+			require.True(t, st.RecordOwnerCutoff(fact))
+			recordFirstOutputAvoid(ctx, fact)
+			_, ok := st.ConfirmedOwnerCutoff()
+			require.True(t, ok)
+			f.repo.accounts[0].Credentials = map[string]any{"model_mapping": map[string]any{"m": "owner-after"}}
+			logs := captureOpenAIObservationLogs(t)
+			if declined {
+				ctx = WithOpenAITransferProtected(ctx)
+			}
+			second, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", map[int64]struct{}{owner.ID: {}}, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+			require.NoError(t, err)
+			require.NotNil(t, second)
+			defer second.ReleaseFunc()
+			require.Equal(t, target.ID, second.Account.ID)
+			followDelivery(f.svc, ctx, second.Account, time.Millisecond, &OpenAIForwardResult{})
+			for _, row := range schedObsLogRecords(t, logs) {
+				if row["msg"] == "sched_quality.session_switch" && row["kind"] == stickyFollow {
+					t.Logf("cutoff model=%s, follow from_model=%v, to_model=%v, result=%v", fact.Model, row["from_model"], row["to_model"], row["commit_result"])
+					require.Equal(t, !declined, row["committed"])
+					require.Equal(t, fact.Model, row["from_model"])
+					return
+				}
+			}
+			t.Fatal("missing follow event")
+		})
+	}
 }

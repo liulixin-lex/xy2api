@@ -49,6 +49,7 @@ type OpenAIAccountScheduleRequest struct {
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact     bool
 	ExcludedIDs        map[int64]struct{}
+	baseExclusions     map[int64]struct{} // Independent exclusions before first-output and quality routing.
 	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
 }
 
@@ -319,7 +320,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	// Retain the independent request restrictions before first-output and
 	// quality routing add their own. Veto attribution uses the full membership.
 	if ordinary && sessionHash != "" {
-		ctx = context.WithValue(ctx, voluntaryBaseExclusionsKey{}, mergeExcluded(origExcluded, avoided))
+		request.baseExclusions = mergeExcluded(origExcluded, avoided)
+		if request.baseExclusions == nil {
+			request.baseExclusions = map[int64]struct{}{}
+		}
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	}
 	var firstOutputAvoided map[int64]struct{}
 	binding := pendingOpenAIStickyChange(ctx)
@@ -408,7 +413,6 @@ type openAIGroupPrivacyRequirementContextKey struct{}
 
 // This marker lives for one selection. Keep the owner excluded from the pool,
 // but check its existing sticky release rules before borrowing another account.
-type voluntaryBaseExclusionsKey struct{}
 type firstOutputOnlyOwnerKey struct{}
 
 // A strict failure may be recorded after the outer scheduler classified the
@@ -496,8 +500,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
-		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
+		baseExclusions: parent.baseExclusions,
+		GroupID:        groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
 	})

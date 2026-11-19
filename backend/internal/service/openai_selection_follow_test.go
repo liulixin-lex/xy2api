@@ -242,7 +242,7 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 				require.Empty(t, f.binding.casKeys)
 				require.Equal(t, f.owner.ID, f.binding.owner)
 			}
-			if scenario == "quality_owned" || scenario == "protocol" {
+			if scenario == "protocol" {
 				require.Zero(t, store.reads)
 			} else {
 				require.Equal(t, 1, store.reads)
@@ -1114,7 +1114,7 @@ func TestFirstOutputFollowProductionTakeoverReader(t *testing.T) {
 			switch mode {
 			case "quality_owned":
 				require.Nil(t, sel)
-				require.Zero(t, store.reads)
+				require.Equal(t, 1, store.reads)
 			case "ordinary":
 				require.Equal(t, 1, store.reads)
 				require.NotNil(t, sel)

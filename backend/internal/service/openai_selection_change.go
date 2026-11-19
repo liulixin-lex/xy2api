@@ -386,7 +386,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 		if change != nil && change.expected.AccountID == fact.AccountID {
 			change.mu.Lock()
 			declined.fromPriority = change.fromPriority
-			if change.fromModel != "" {
+			if declined.fromModel == "" {
 				declined.fromModel = change.fromModel
 			}
 			change.mu.Unlock()
@@ -399,7 +399,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	change.mu.Unlock()
 	next.toPriority = new(selection.Account.Priority)
 	next.toModel = OpenAIAttemptModel(selection.Account, model)
-	if next.fromModel == "" {
+	if fact.Model != "" {
 		next.fromModel = fact.Model
 	}
 	next.ownerFirstOutputLimit = fact.Effective

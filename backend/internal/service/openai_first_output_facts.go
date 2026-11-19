@@ -41,8 +41,8 @@ func (a *schedAttemptCapture) sentSequence() *uint64 {
 	return logKnown(a.sendSeq.Load())
 }
 
+// Owner cutoff starts at transport entry, including connection and TLS wait.
 func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
-	a.sendSeq.Store(seq)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.httpSelection.HTTPStreamText || a.done || seq == 0 || a.state.CurrentAttempt() != a {

@@ -48,15 +48,15 @@ func (s *selectionSession) voluntaryAvoid(ctx context.Context, group int64, sess
 	if s.qualityOwnsSticky != nil {
 		owned := s.qualityOwnsSticky(ctx, &group, session)
 		v.qualityOwned = &owned
-		if owned {
-			return nil, "quality_owned"
-		}
 	}
 	avoided, err := sessionAvoidAfterReset(ctx, s.store, group, firstOutputAvoidSession(session), s.resetAt)
 	if err != nil {
 		return nil, "avoid_read_error"
 	}
 	v.avoidSeen = new(len(avoided) != 0)
+	if v.qualityOwned != nil && *v.qualityOwned {
+		return avoided, "quality_owned"
+	}
 	return avoided, ""
 }
 
@@ -187,6 +187,12 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		}
 	}
 	if veto != "" {
+		if facts.qualityOwned != nil && *facts.qualityOwned {
+			if facts.avoidSeen == nil {
+				return nil
+			} // An unreadable scope cannot establish an independent opportunity.
+			avoided = mergeExcluded(avoided, soft)
+		}
 		logOpportunity(veto)
 		return nil
 	}
