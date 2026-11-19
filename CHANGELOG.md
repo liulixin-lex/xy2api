@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-11-19
+
 本版给 OpenAI 分组加了账号长期表现：分组看板新增“长期表现”视图，账号质量抽屉新增“过去 12 小时”，按账号 × 模型列出近 12 小时的慢占比、比本组应有多慢多少、续接缓存、超时、换号和分数，并写明系统为什么还没判。新会话可以在同一优先级、价格不更高的账号里，优先给 12 小时表现明显更好的账号。优先级接管和质量迁移不再把会话接回它正在首输出避让的账号。修复了利润终检否决误删同会话共享登记、质量抽屉窄屏时“依据”按钮被挤出两处缺陷，换号、避让和首输出时限计划的日志补了归因字段。升级会执行迁移 321。
 
 ### 调度与账号
@@ -2459,7 +2461,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.10...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.11...HEAD
+[0.6.11]: https://github.com/liulixin-lex/xy2api/compare/v0.6.10...v0.6.11
 [0.6.10]: https://github.com/liulixin-lex/xy2api/compare/v0.6.9...v0.6.10
 [0.6.9]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...v0.6.8
