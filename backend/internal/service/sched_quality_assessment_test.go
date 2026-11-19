@@ -76,14 +76,17 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	f := newQualityFixture(t)
 	f.ledger.Rows = engineSamples(1, f.now.Add(-time.Minute), true)
 	f.cycle()
+	before := f.line(q.DimensionTTFO).LastAssessment
+	require.Len(t, before, 1)
 	f.now = f.now.Add(2*time.Minute + 123456789*time.Nanosecond)
 	rule := q.DefaultRuleBParams()
 	rule.Confidence = .9
 	_, err := f.e.UpdateTTFTRule(t.Context(), 0, rule)
 	require.NoError(t, err)
 	relaxed := f.line(q.DimensionTTFO)
-	require.Len(t, relaxed.LastAssessment, 1)
-	seg := relaxed.LastAssessment[0]
+	require.Len(t, relaxed.LastAssessment, 2)
+	require.Equal(t, before[0], relaxed.LastAssessment[0])
+	seg := relaxed.LastAssessment[1]
 	require.Equal(t, q.EventRegular, seg.Kind)
 	require.Equal(t, q.ReasonPeerShort, seg.Reason)
 	require.Empty(t, seg.Action)
@@ -94,7 +97,8 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	f.now = f.now.Add(3 * time.Minute)
 	f.cycle()
 	next := f.line(q.DimensionTTFO)
-	require.Len(t, next.LastAssessment, 1)
+	require.Len(t, next.LastAssessment, 2)
+	require.Equal(t, before[0], next.LastAssessment[0])
 	last := SchedAdminLastEvalFromState(next)
 	require.NotNil(t, last)
 	require.EqualValues(t, 2, last.Count)

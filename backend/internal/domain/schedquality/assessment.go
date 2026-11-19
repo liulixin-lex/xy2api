@@ -43,7 +43,8 @@ const (
 	errorRecoveryOverLimit = "recovery_over_limit"
 )
 
-// Append only. Bit 0 is no_peers. SQL readers can test c & (1 << index).
+// Append only: indexes are persisted bit positions, never gate priorities.
+// Bit 0 is no_peers. SQL readers can test c & (1 << index).
 var assessmentCauseNames = [...]string{
 	string(RuleBNoPeers), string(RuleBAllPeersRear), string(RuleBPeerKnownInsufficient),
 	string(RuleBNoSamples), string(RuleBMassInsufficient), string(RuleBSessionsInsufficient),
@@ -106,27 +107,27 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 			s.classifyTTFT(b.TTFT, b.PeerKnown)
 		case b.Cache != nil:
 			cache := b.Cache
-			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
-				s.Causes.add(cacheLowSessionsShort)
-				s.short(ReasonOwnShort, float64(cache.LowSessions), cacheMinLowSessions)
-			}
 			if cache.Turns < CacheMinTurns {
 				s.Causes.add(cacheTurnsShort)
-				s.short(ReasonOwnShort, float64(cache.Turns), CacheMinTurns)
+				s.consider(ReasonOwnShort, float64(cache.Turns), CacheMinTurns)
+			}
+			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
+				s.Causes.add(cacheLowSessionsShort)
+				s.consider(ReasonOwnShort, float64(cache.LowSessions), cacheMinLowSessions)
 			}
 		case b.Error != nil:
 			errLine := b.Error
 			if errLine.LowerPass > errLine.Limit {
 				s.Causes.add(errorBoundsUnconfirmed)
-				s.Reason = ReasonWithin
+				s.consider(ReasonWithin, 0, 0)
 			}
 			if errLine.RecoveryOverLimit {
 				s.Causes.add(errorRecoveryOverLimit)
-				s.Reason = ReasonPending
+				s.consider(ReasonPending, 0, 0)
 			}
 			if errLine.Clear < ErrorMinClear {
 				s.Causes.add(errorClearShort)
-				s.short(ReasonOwnShort, float64(errLine.Clear), ErrorMinClear)
+				s.consider(ReasonOwnShort, float64(errLine.Clear), ErrorMinClear)
 			}
 		}
 		if s.Kind == EventTrial && s.Action == "" {
@@ -135,31 +136,42 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 	}
 }
 
-func (s *AssessmentSegment) short(reason AssessmentReason, have float64, need int) {
-	s.Reason, s.Have, s.Need = reason, &have, &need
+// Only unknown verdicts select among competing causes. At equal priority keep
+// the first gate reported by the rule (e.g. TTFT mass before session count).
+var unknownReasonPriority = map[AssessmentReason]int{
+	ReasonPeerShort: 4,
+	ReasonOwnShort:  3,
+	ReasonPending:   2,
+	ReasonWithin:    1,
+}
+
+func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need int) {
+	if unknownReasonPriority[reason] <= unknownReasonPriority[s.Reason] {
+		return
+	}
+	s.Reason = reason
+	if need > 0 {
+		s.Have, s.Need = &have, &need
+	}
 }
 
 func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 	for _, cause := range e.Causes {
 		s.Causes.add(string(cause))
-	}
-	// Resolve by gate priority even if the rule supplies causes in another order.
-	for i, name := range assessmentCauseNames {
-		if s.Causes&(1<<i) == 0 {
-			continue
-		}
-		switch RuleBUnknownReason(name) {
+		switch cause {
 		case RuleBNoPeers, RuleBAllPeersRear, RuleBPeerKnownInsufficient:
-			s.short(ReasonPeerShort, peerKnown, ruleBMinMass)
+			s.consider(ReasonPeerShort, peerKnown, ruleBMinMass)
 		case RuleBNoSamples, RuleBMassInsufficient:
-			s.short(ReasonOwnShort, e.N, ruleBMinMass)
+			s.consider(ReasonOwnShort, e.N, ruleBMinMass)
 		case RuleBSessionsInsufficient:
-			s.short(ReasonOwnShort, float64(e.S), ruleBMinSessions)
+			s.consider(ReasonOwnShort, float64(e.S), ruleBMinSessions)
 		case RuleBSlowSessionsInsufficient:
-			s.short(ReasonOwnShort, float64(e.D), ruleBMinSlowSessions)
+			// D gates a bad verdict only after both probability tests confirm it.
+			if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) && !slices.Contains(e.Causes, RuleBRelativeUnconfirmed) {
+				s.consider(ReasonOwnShort, float64(e.D), ruleBMinSlowSessions)
+			}
 		case RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance, RuleBRelativeVeto:
-			s.Reason = ReasonWithin
+			s.consider(ReasonWithin, 0, 0)
 		}
-		return
 	}
 }

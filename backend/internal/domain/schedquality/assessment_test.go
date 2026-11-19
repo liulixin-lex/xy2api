@@ -4,6 +4,7 @@ package schedquality
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -84,6 +85,68 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, declared, tested)
+}
+
+func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		slow, censored, peerSlow int
+		absolute, relative       bool
+		reasons                  []RuleBUnknownReason
+		primary                  AssessmentReason
+	}{
+		{"relative veto", 4, 0, 0, false, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeVeto}, ReasonWithin},
+		{"censored worst mean", 0, 16, 0, false, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
+		{"relative unconfirmed", 22, 0, 30, true, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
+		{"both confirmed", 22, 0, 0, true, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := RuleBInput{Scope: RuleBScope{GroupID: 1, AccountID: 1, Model: "m"}, Now: machineNow, LimitSeconds: 15}
+			for account := int64(1); account <= 4; account++ {
+				var samples []RuleBSample
+				for i := 0; i < 40; i++ {
+					at := in.Now.Add(-time.Duration(i) * time.Second)
+					sample := RuleBSample{AccountID: account, GroupID: 1, Model: "m", SessionKey: fmt.Sprintf("s%d", i/8), StartedAt: at.Add(-time.Second), AvailableAt: at, TTFOMs: 2000, Stream: true, Outcome: OutcomeOK}
+					if account == 1 && i < tc.slow {
+						sample.TTFOMs, sample.SessionKey = 30000, "s0"
+					} else if account != 1 && i < tc.peerSlow {
+						sample.TTFOMs = 30000
+					}
+					samples = append(samples, sample)
+				}
+				if account == 1 {
+					for i := 0; i < tc.censored; i++ {
+						at := in.Now.Add(-time.Duration(100+i) * time.Second)
+						samples = append(samples, RuleBSample{AccountID: account, GroupID: 1, Model: "m", SessionKey: fmt.Sprintf("t%d", i), StartedAt: at.Add(-5 * time.Second), AvailableAt: at, CensoredMs: 5000, Stream: true, Outcome: OutcomeTimeout})
+					}
+					in.Samples = samples
+				} else {
+					in.Peers = append(in.Peers, RuleBPeer{Scope: RuleBScope{AccountID: account, GroupID: 1, Model: "m"}, Identity: -1, Samples: samples})
+				}
+				in.GroupSamples = append(in.GroupSamples, samples...)
+			}
+			result := evaluateRuleBTest(t, in, DefaultRuleBParams())
+			require.Equal(t, RuleBUnknown, result.State)
+			require.Equal(t, tc.absolute, result.Absolute)
+			require.Equal(t, tc.relative, result.Relative)
+			require.ElementsMatch(t, tc.reasons, result.UnknownReasons)
+			b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds), PeerKnown: result.PeerCounts.N - result.PeerCounts.X}
+			seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
+			var causes []string
+			for _, cause := range tc.reasons {
+				causes = append(causes, string(cause))
+			}
+			require.ElementsMatch(t, causes, seg.Causes.Names())
+			require.Equal(t, tc.primary, seg.Reason)
+			if tc.primary == ReasonOwnShort {
+				require.Equal(t, new(1.0), seg.Have)
+				require.Equal(t, new(2), seg.Need)
+			} else {
+				require.Nil(t, seg.Have)
+				require.Nil(t, seg.Need)
+			}
+		})
+	}
 }
 
 func TestAssessmentLineOutcomes(t *testing.T) {
