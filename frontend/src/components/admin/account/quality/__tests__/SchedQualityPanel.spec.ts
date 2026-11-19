@@ -5,6 +5,7 @@ import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendP
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
+import decisionsSource from '../SchedDecisions.vue?raw'
 import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
@@ -605,6 +606,15 @@ describe('SchedQualityPanel', () => {
     const heading = w.get('h3').text()
     expect(heading).toMatch(/admin\.schedQuality\.decisions\.title\s+admin\.schedQuality\.decisions\.note$/)
     expect(w.get('[data-qp-decisions-note]').classes()).toContain('qp-h-note')
+  })
+
+  // final-fe review item 5: jsdom applies no SFC styles, so the rule itself is checked: the note wraps, never cut.
+  it('lets the decisions note wrap instead of cutting it on a narrow drawer', () => {
+    const style = decisionsSource.slice(decisionsSource.indexOf('<style scoped>'))
+    const note = style.slice(style.indexOf('.qp-h-note {'), style.indexOf('}', style.indexOf('.qp-h-note {')))
+    const heading = style.slice(style.indexOf('.qp-h {'), style.indexOf('}', style.indexOf('.qp-h {')))
+    expect(note).not.toMatch(/white-space:\s*nowrap|text-overflow:\s*ellipsis|overflow:\s*hidden/)
+    expect(heading).toMatch(/flex-wrap:\s*wrap/)
   })
 
   // M1: a recovery while the list is collapsed: opening it again shows the new record, not the history loaded before.
