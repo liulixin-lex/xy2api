@@ -215,6 +215,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx = beginNewPickSelection(ctx)
 	// A new selection must not inherit the previous account's rescue pass.
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
@@ -244,7 +245,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	stickyOwner := state.StickyOwner()
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
-		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		var missing bool
+		stickyOwner, missing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
+		if isFirstNewPickSelection(ctx) && !missing {
+			ctx = context.WithValue(ctx, newPickFirstSelectionKey{}, false)
+		}
 		state.NoteStickyOwner(stickyOwner)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]

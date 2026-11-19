@@ -144,6 +144,9 @@ type RequestState struct {
 	opsUpstreamEventSequence  uint64
 	opsUpstreamSendBoundaries map[int64]uint64
 	postOutputFailureFacts    []PostOutputFailureFact
+	// Performance-based new placement emits at most one capped event per request.
+	newPickSelectionStarted bool
+	newPickCappedLogged     bool
 }
 
 // AllowStateSwitch grants one request-scoped state-repair account switch,
@@ -1019,4 +1022,29 @@ func (s *RequestState) LastResortSessionLimited() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastResortSessionLimited
+}
+
+// BeginNewPickSelection identifies the first selection of this logical request.
+func (s *RequestState) BeginNewPickSelection() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first := !s.newPickSelectionStarted && !s.turnFailed && len(s.failedAccounts) == 0 && s.httpSendSeq == s.turnStartHTTPSeq
+	s.newPickSelectionStarted = true
+	return first
+}
+
+func (s *RequestState) ClaimNewPickCappedLog() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.newPickCappedLogged {
+		return false
+	}
+	s.newPickCappedLogged = true
+	return true
 }

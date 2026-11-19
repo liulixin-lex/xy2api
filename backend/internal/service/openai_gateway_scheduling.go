@@ -1202,6 +1202,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+	ctx = beginNewPickSelection(ctx)
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -1237,8 +1238,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
+	var bindingMissing bool
 	if sessionHash != "" && s.cache != nil {
-		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		stickyAccountID, bindingMissing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 	}
 	trial := s.newSelectionTrial(ctx, req, stickyAccountID)
 	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
@@ -1390,18 +1392,31 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				slot.ReleaseFunc()
 				continue
 			}
-			full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
-			reservation, accepted := trial.reserve(ctx, latest, full)
-			if !accepted {
-				slot.ReleaseFunc()
-				available = append(available, latest)
-				s.sortSelectionAccounts(ctx, available, req, loads)
-				continue
+			var selected *AccountSelectionResult
+			if bindingMissing && isFirstNewPickSelection(ctx) {
+				selected = s.newSessionPick(ctx, req, latest, available, loads)
+				if selected != nil {
+					slot.ReleaseFunc()
+					latest = selected.Account
+				} else if err := ctx.Err(); err != nil {
+					slot.ReleaseFunc()
+					return nil, true, err
+				}
 			}
-			trial.selected = reservation
-			selected, err := s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
-			if err != nil {
-				return nil, true, err
+			if selected == nil {
+				full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
+				reservation, accepted := trial.reserve(ctx, latest, full)
+				if !accepted {
+					slot.ReleaseFunc()
+					available = append(available, latest)
+					s.sortSelectionAccounts(ctx, available, req, loads)
+					continue
+				}
+				trial.selected = reservation
+				selected, err = s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
+				if err != nil {
+					return nil, true, err
+				}
 			}
 			if sessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
 				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
@@ -1438,6 +1453,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if req.NoWait {
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary("concurrency_full"))
 	}
+	bindingMissing = false // a later probe is no longer an immediate placement
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
 	}

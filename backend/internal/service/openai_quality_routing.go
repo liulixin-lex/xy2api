@@ -75,6 +75,7 @@ type openAIQualityRequest struct {
 	apiID           int64
 	session         string
 	loaded          bool
+	bindingsReadOK  bool
 	state           OpenAIQualityState
 	routeGeneration uint64
 	sticky          int64
@@ -191,6 +192,7 @@ func (s *OpenAIGatewayService) AdvanceOpenAIQualityTurn(ctx context.Context, acc
 	q.model = canonical
 	q.scope = qualityDigest(fmt.Sprintf("%d\x00%d\x00%s\x00%s", q.apiID, q.group, q.session, canonical))
 	q.loaded = false
+	q.bindingsReadOK = false
 	q.state = OpenAIQualityState{}
 	q.sticky = 0
 	previous := gjson.GetBytes(body, "previous_response_id").String()
@@ -421,6 +423,7 @@ func (s *OpenAIGatewayService) loadQuality(ctx context.Context, q *openAIQuality
 			}
 		}
 		st, bindings, err := store.ReadOpenAIQualityRouting(ctx, q.scope, q.group, keys)
+		q.bindingsReadOK = err == nil && len(bindings) == len(keys)
 		if err != nil {
 			qualityEvent("storage_read_failed", q.scope, 0, 0)
 		}
@@ -732,19 +735,19 @@ func qualityExclusionTiers(accounts []Account, st OpenAIQualityState, excluded m
 	return tiers
 }
 
-func (s *OpenAIGatewayService) qualitySticky(ctx context.Context, group *int64, session string) (int64, bool) {
+func (s *OpenAIGatewayService) qualitySticky(ctx context.Context, group *int64, session string) (int64, bool, bool) {
 	q := qualityRequest(ctx)
 	if q == nil || q.group != derefGroupID(group) || q.session != session {
-		return 0, false
+		return 0, false, false
 	}
 	s.loadQuality(ctx, q)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.state.Generation > 0 && !q.pinned && s.qualityConfig().EffectiveMode() == "enforce" {
-		return q.state.Binding, true
+		return q.state.Binding, true, false
 	}
 	_, batched := s.cache.(OpenAIQualityRoutingStore)
-	return q.sticky, batched
+	return q.sticky, batched, q.bindingsReadOK && q.sticky == 0 && !q.pinned
 }
 
 func (s *OpenAIGatewayService) qualityOwnsSticky(ctx context.Context, group *int64, session string) bool {
