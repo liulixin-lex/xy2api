@@ -275,6 +275,8 @@ func TestOpenAISelectionSwitchLogTerminalStates(t *testing.T) {
 			t.Run(kind+"/"+outcome, func(t *testing.T) {
 				output := captureSchedObsLogs(t)
 				old, target := selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1)
+				old.Credentials = map[string]any{"model_mapping": map[string]any{"m": "from-alias"}}
+				target.Credentials = map[string]any{"model_mapping": map[string]any{"m": "to-alias"}}
 				f := newSelectionRuntimeFixture(t, old, target)
 				if kind == "owner_released" {
 					f.cache.sessionBindings["openai:session"] = 10
@@ -293,6 +295,12 @@ func TestOpenAISelectionSwitchLogTerminalStates(t *testing.T) {
 				}
 				require.Len(t, events, 1)
 				require.Equal(t, kind, events[0]["kind"])
+				require.Equal(t, "to-alias", events[0]["to_model"])
+				if kind == "owner_released" {
+					require.Equal(t, "from-alias", events[0]["from_model"])
+				} else {
+					require.Nil(t, events[0]["from_model"])
+				}
 				require.Equal(t, outcome == "success", events[0]["committed"])
 				require.Equal(t, resilience.StateFrom(ctx).GatewayRequestID(), events[0]["gateway_request_id"])
 				require.Equal(t, float64(1), events[0]["to"])

@@ -184,33 +184,55 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 	return available
 }
 
-// The protocol guard precedes membership and Redis reads. Report only the
-// owner and configured policy; neither a target nor an idle TTL was observed.
-func (s *OpenAIGatewayService) logPinnedSwitchVeto(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account) {
-	view, now := s.selectionView(), s.selectionNow()
-	if owner == nil || !selectionLive(view, now) {
-		return
+// Inspect the counterfactual candidate through normal admission and current
+// capacity without acquiring a slot, changing full marks or selection evidence.
+func (s *OpenAIGatewayService) switchVetoOpportunity(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members []Account, reason string, soft, strict map[int64]struct{}, allowed func(*Account) bool) *Account {
+	if original, ok := ctx.Value(voluntaryBaseExclusionsKey{}).(map[int64]struct{}); ok {
+		req.ExcludedIDs = original
 	}
-	group := derefGroupID(req.GroupID)
-	change := &openAIStickyChange{groupID: group, model: req.RequestedModel, kind: "migrate", expected: StickySessionBinding{AccountID: owner.ID},
-		fromPriority: new(owner.Priority), voluntary: &voluntarySwitchEvidence{sessionOn: resilience.Current().SessionOn()}}
-	if !selectionMigrateOwner(view, group, owner, req.RequestedModel, req.SessionHash, now) {
-		idle, enabled := view.TakeoverIdle(group)
-		if !enabled || idle < 0 {
-			return
+	ctx = context.WithValue(withSelectionFailureEvidence(ctx), openAISelectionRequestKey{}, req)
+	candidates, _ := s.selectionCandidates(ctx, req, members)
+	eligible := candidates[:0]
+	for _, a := range candidates {
+		if a.ID == owner.ID || !allowed(a) {
+			continue
 		}
-		change.kind = "takeover"
-		change.voluntary.idleSetting = new(int64(idle / time.Second))
+		if _, skip := strict[a.ID]; skip {
+			continue
+		}
+		if _, hit := soft[a.ID]; reason == "target_avoided" && !hit {
+			continue
+		}
+		fresh := s.recheckSelectionAccount(ctx, req, a)
+		if fresh == nil || !allowed(fresh) {
+			continue
+		}
+		if latest, veto, _ := s.SelectionAdmissionVeto(ctx, fresh); !veto && allowed(latest) {
+			eligible = append(eligible, latest)
+		}
 	}
-	change.logVeto(ctx, nil, "protocol_ineligible")
+	if len(eligible) == 0 {
+		return nil
+	}
+	var loads map[int64]*AccountLoadInfo
+	if s.concurrencyService != nil {
+		var err error
+		loads, err = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(eligible))
+		if err != nil {
+			return nil
+		}
+	}
+	for _, a := range eligible {
+		load := loads[a.ID]
+		if load == nil || load.LoadRate < 100 && (a.Concurrency <= 0 || load.CurrentConcurrency < a.Concurrency) {
+			return a
+		}
+	}
+	return nil
 }
 
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
-	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
-		return nil
-	}
-	if openAINoStickyMigration(ctx) {
-		s.logPinnedSwitchVeto(ctx, req, owner)
+	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
 	cache, ok := s.cache.(OpenAIStickyVersionedCache)
@@ -248,14 +270,8 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if !possible {
 		return nil
 	}
-	// Reuse the ordinary pass's exclusion facts only for veto attribution.
-	if excluded, _ := ctx.Value(firstOutputExcludedKey{}).(map[int64]struct{}); len(excluded) != 0 {
-		for i := range accounts {
-			a := &accounts[i]
-			if _, hit := excluded[a.ID]; hit && a.Platform == req.Platform && (req.RequestedModel == "" || a.IsModelSupported(req.RequestedModel)) {
-				session.excludedMembers = append(session.excludedMembers, a)
-			}
-		}
+	session.vetoOpportunity = func(reason string, soft, strict map[int64]struct{}, allowed func(*Account) bool) *Account {
+		return s.switchVetoOpportunity(ctx, req, owner, accounts, reason, soft, strict, allowed)
 	}
 	candidates, _ := s.selectionCandidates(ctx, req, accounts)
 	var loads map[int64]*AccountLoadInfo

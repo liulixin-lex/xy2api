@@ -226,7 +226,7 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 			}
 			ctx := context.Background()
 			if scenario == "protocol" {
-				ctx = WithOpenAITransferProtected(ctx)
+				ctx = withOpenAINoStickyMigration(ctx)
 			}
 			if scenario == "gate_off" {
 				f.session.view = func() schedquality.View { return &selectionPolicyView{View: f.view, disabled: true} }
@@ -298,7 +298,7 @@ func TestFirstOutputFollowSchedulerVeto(t *testing.T) {
 				store.err = errors.New("offline")
 			}
 			if mode == "protected" {
-				ctx = WithOpenAITransferProtected(ctx)
+				ctx = withOpenAINoStickyMigration(ctx)
 			}
 			require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
 			output := captureSchedObsLogs(t)
@@ -319,11 +319,11 @@ func TestFirstOutputFollowSchedulerVeto(t *testing.T) {
 					reasons = append(reasons, row["reason"])
 				}
 			}
-			if mode == "already_excluded" {
+			if mode == "already_excluded" || mode == "protected" {
 				require.Empty(t, reasons)
 				return
 			}
-			require.Equal(t, []any{map[string]string{"avoided": "target_avoided", "scope_unavailable": "avoid_read_error", "protected": "protocol_ineligible"}[mode]}, reasons)
+			require.Equal(t, []any{map[string]string{"avoided": "target_avoided", "scope_unavailable": "avoid_read_error"}[mode]}, reasons)
 		})
 	}
 }
@@ -1132,8 +1132,8 @@ func TestFirstOutputFollowLastResortAvoidSource(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, source := range []string{"session", "first_output", "both"} {
 		t.Run(source, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1))
-			f.cache.sessionBindings["openai:session"] = 10
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(2, 2))
+			f.cache.sessionBindings["openai:session"] = 2
 			store := &followScopeReader{ResilienceStore: f.svc.resilience.store}
 			f.svc.resilience.store = store
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
@@ -1144,13 +1144,15 @@ func TestFirstOutputFollowLastResortAvoidSource(t *testing.T) {
 				require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 10, time.Minute))
 			}
 			logs := captureOpenAIObservationLogs(t)
-			sel := selectTrialRuntime(t, f, ctx, "session")
+			sel, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", map[int64]struct{}{2: {}}, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+			require.NoError(t, err)
+			require.NotNil(t, sel)
 			defer sel.ReleaseFunc()
 			require.EqualValues(t, 10, sel.Account.ID)
 			require.EqualValues(t, 10, resilience.StateFrom(ctx).LastResort())
 			followDelivery(f.svc, ctx, sel.Account, time.Millisecond, &OpenAIForwardResult{})
 			require.Empty(t, f.cache.casKeys)
-			require.EqualValues(t, 10, f.cache.sessionBindings["openai:session"])
+			require.EqualValues(t, 2, f.cache.sessionBindings["openai:session"])
 			require.Equal(t, 1, store.reads, "attribution uses the normal pass's read")
 			var sources []any
 			for _, row := range schedObsLogRecords(t, logs) {

@@ -30,7 +30,7 @@ type selectionSession struct {
 	recheck           func(context.Context, *Account) *Account
 	resetAt           func(int64) time.Time
 	leases            SchedTrialLeases
-	excludedMembers   []*Account // Membership before admission, only for attributing upstream avoid exclusions.
+	vetoOpportunity   func(string, map[int64]struct{}, map[int64]struct{}, func(*Account) bool) *Account
 	qualityOwnsSticky func(context.Context, *int64, string) bool
 }
 
@@ -45,9 +45,6 @@ type voluntarySwitchEvidence struct {
 func (s *selectionSession) voluntaryAvoid(ctx context.Context, group int64, session string, v *voluntarySwitchEvidence) (map[int64]struct{}, string) {
 	v.sessionOn = resilience.Current().SessionOn()
 	v.transferAllowed = firstOutputMigrationAllowed(ctx, session)
-	if !v.transferAllowed {
-		return nil, "protocol_ineligible"
-	}
 	if s.qualityOwnsSticky != nil {
 		owned := s.qualityOwnsSticky(ctx, &group, session)
 		v.qualityOwned = &owned
@@ -69,6 +66,7 @@ func (change *openAIStickyChange) logVeto(ctx context.Context, target *Account, 
 	}
 	if target != nil {
 		change.target, change.toPriority = target.ID, new(target.Priority)
+		change.toModel = OpenAIAttemptModel(target, change.model)
 	}
 	change.logSwitch(ctx, reason, BindingCommitResult{})
 }
@@ -115,7 +113,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAISelectionExempt(ctx) || req.ManualOnly {
+	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
 		return nil
 	}
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil {
@@ -153,17 +151,8 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		kind = "migrate"
 	}
 	change := &openAIStickyChange{groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model, expected: expected,
-		fromPriority: new(owner.Priority), kind: kind, voluntary: facts, ttl: s.bindingTTL, cache: s.cache, resetAt: s.resetAt, leases: s.leases, trialSession: sessionHash}
+		fromPriority: new(owner.Priority), fromModel: OpenAIAttemptModel(owner, model), kind: kind, voluntary: facts, ttl: s.bindingTTL, cache: s.cache, resetAt: s.resetAt, leases: s.leases, trialSession: sessionHash}
 	soft, veto := s.voluntaryAvoid(ctx, groupID, sessionHash, facts)
-	if veto != "" {
-		for _, target := range candidates {
-			if target != nil && target.ID != owner.ID && s.candidateAllowed(view, groupID, model, owner, target, migrate, req, now) {
-				change.logVeto(ctx, target, veto)
-				break
-			}
-		}
-		return nil
-	}
 	avoided, err := sessionAvoidAfterReset(ctx, s.store, groupID, strings.TrimSpace(sessionHash), s.resetAt)
 	if err != nil {
 		return nil
@@ -173,7 +162,34 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	avoided = mergeExcluded(avoided, failedTargets)
-	var denied *Account
+	allowedForVeto := func(a *Account) bool {
+		return a != nil && s.candidateAllowed(view, groupID, model, owner, a, migrate, req, now)
+	}
+	logOpportunity := func(reason string) {
+		var target *Account
+		if s.vetoOpportunity != nil {
+			target = s.vetoOpportunity(reason, soft, avoided, allowedForVeto)
+		} else {
+			for _, a := range candidates {
+				if a == nil || a.ID == owner.ID || !allowedForVeto(a) {
+					continue
+				}
+				_, strict := avoided[a.ID]
+				_, hit := soft[a.ID]
+				if !strict && (reason != "target_avoided" || hit) {
+					target = a
+					break
+				}
+			}
+		}
+		if target != nil {
+			change.logVeto(ctx, target, reason)
+		}
+	}
+	if veto != "" {
+		logOpportunity(veto)
+		return nil
+	}
 	s.marks.observe(candidates, req.Loads, now)
 	type candidate struct {
 		account *Account
@@ -188,23 +204,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			continue
 		}
 		if _, blocked := soft[account.ID]; blocked {
-			denied = account
 			continue
 		}
 		ordered = append(ordered, candidate{account, buildSelectionKey(view, groupID, model, account, req, now)})
-	}
-	if denied == nil && len(soft) != 0 {
-		// The ordinary pass may already have excluded an avoided member before
-		// selectOwner received its admitted candidates. Never re-admit it here.
-		for _, a := range s.excludedMembers {
-			if _, independentlyAvoided := avoided[a.ID]; independentlyAvoided {
-				continue
-			}
-			if _, blocked := soft[a.ID]; blocked && a.ID != owner.ID && s.candidateAllowed(view, groupID, model, owner, a, migrate, req, now) {
-				denied = a
-				break
-			}
-		}
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		// Compact capability routing predates quality ranking and applies only
@@ -282,12 +284,12 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
 		change.reason, change.target, change.trial = reason, latest.ID, reservation
 		change.fromPriority, change.toPriority = new(latestOwner.Priority), new(latest.Priority)
-		change.fromModel = OpenAIAttemptModel(owner, model)
+		change.fromModel, change.toModel = OpenAIAttemptModel(latestOwner, model), OpenAIAttemptModel(latest, model)
 		resilience.StateFrom(ctx).SetStickyChange(change)
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: releaseSelectionTrialWithSlot(ctx, change, reservation, slot.ReleaseFunc)})
 	}
-	if denied != nil {
-		change.logVeto(ctx, denied, "target_avoided")
+	if len(soft) != 0 {
+		logOpportunity("target_avoided")
 	}
 	return nil
 }

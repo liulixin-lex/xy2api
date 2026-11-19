@@ -133,14 +133,14 @@ type openAIStickyChange struct {
 	targetUpstreamFirstValidKnown bool
 
 	fromPriority, toPriority *int
-	voluntary                *voluntarySwitchEvidence
+	voluntary                *voluntarySwitchEvidence // Non-nil opts this plan into the atomic first-output target check.
 	groupID                  int64
 	session                  string
 	key                      string
 	model                    string
 	kind                     string
 	reason                   string
-	fromModel                string
+	fromModel, toModel       string
 	ownerLookup              func(context.Context, int64) *Account
 	trialSession             string
 	leases                   SchedTrialLeases
@@ -331,6 +331,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	}
 	next := change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason())
 	next.toPriority = new(selection.Account.Priority)
+	next.toModel = OpenAIAttemptModel(selection.Account, model)
 	resilience.StateFrom(ctx).SetStickyChange(next)
 }
 
@@ -395,10 +396,13 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	}
 	if reason != "" {
 		declined := &openAIStickyChange{groupID: fact.GroupID, expected: StickySessionBinding{AccountID: fact.AccountID, Generation: fact.Generation},
-			kind: stickyFollow, target: target, model: model, toPriority: new(selection.Account.Priority)}
+			kind: stickyFollow, target: target, model: model, toPriority: new(selection.Account.Priority), toModel: OpenAIAttemptModel(selection.Account, model), fromModel: fact.Model, ownerLookup: s.selectionTrialOwner}
 		if change != nil && change.expected.AccountID == fact.AccountID {
 			change.mu.Lock()
 			declined.fromPriority = change.fromPriority
+			if change.fromModel != "" {
+				declined.fromModel = change.fromModel
+			}
 			change.mu.Unlock()
 		}
 		declined.logSwitch(ctx, reason, BindingCommitResult{})
@@ -408,6 +412,10 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	next := change.replacement(stickyFollow, model, target, "faster_delivery")
 	change.mu.Unlock()
 	next.toPriority = new(selection.Account.Priority)
+	next.toModel = OpenAIAttemptModel(selection.Account, model)
+	if next.fromModel == "" {
+		next.fromModel = fact.Model
+	}
 	next.ownerFirstOutputLimit = fact.Effective
 	req, _ := ContextWithSelectionProfitGate(ctx, selection).Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	req.GroupID, req.SessionHash, req.RequestedModel, req.Platform = group, session, model, PlatformOpenAI
@@ -483,7 +491,7 @@ func (change *openAIStickyChange) completeLocked(ctx context.Context, success, c
 	}
 	change.followDelivered = success
 	final := change.replacement(change.kind, change.model, change.target, change.reason)
-	final.toPriority = change.toPriority
+	final.toPriority, final.toModel = change.toPriority, change.toModel
 	final.ownerFirstOutputLimit, final.recheckFollow = change.ownerFirstOutputLimit, change.recheckFollow
 	final.activeAttempt, final.attemptSucceeded, final.attemptCanceled = change.activeAttempt, change.attemptSucceeded, change.attemptCanceled
 	final.targetUpstreamFirstValidKnown, final.targetUpstreamFirstValidDelay = change.targetUpstreamFirstValidKnown, change.targetUpstreamFirstValidDelay
@@ -512,9 +520,28 @@ func logKnown[T comparable](value T) *T {
 	return &value
 }
 
+// A released owner may never have reached normal admission. Resolve a
+// missing mapping only with the actual endpoint's account snapshot.
+func (change *openAIStickyChange) accountModel(ctx context.Context, id int64, frozen string) string {
+	if id <= 0 {
+		return ""
+	}
+	if frozen != "" || change.ownerLookup == nil || change.model == "" {
+		return frozen
+	}
+	lookupCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	if account := change.ownerLookup(lookupCtx, id); account != nil && account.ID == id {
+		return OpenAIAttemptModel(account, change.model)
+	}
+	return ""
+}
+
 func (change *openAIStickyChange) logSwitch(ctx context.Context, reason string, result BindingCommitResult, extra ...any) {
+	fromModel := change.accountModel(ctx, change.expected.AccountID, change.fromModel)
+	toModel := change.accountModel(ctx, change.target, change.toModel)
 	fields := []any{"component", "sched_quality", "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
-		"group_id", change.groupID, "model", change.model, "from", change.expected.AccountID, "to", logKnown(change.target),
+		"group_id", change.groupID, "model", change.model, "from_model", logKnown(fromModel), "to_model", logKnown(toModel), "from", change.expected.AccountID, "to", logKnown(change.target),
 		"kind", change.kind, "reason", reason, "committed", result.Status == BindingCommitted,
 		"expected_gen", logKnown(change.expected.Generation), "observed_gen", logKnown(result.ObservedGen), "new_gen", logKnown(result.NewGen),
 		"commit_attempted", result.Status != "", "commit_result", logKnown(result.Status), "attempt_seq", change.activeAttempt.sentSequence(),
@@ -637,12 +664,8 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 		return
 	}
 	if change.leases != nil && change.expected.AccountID > 0 && change.expected.AccountID != change.target {
+		change.fromModel = change.accountModel(stateCtx, change.expected.AccountID, change.fromModel)
 		model := change.fromModel
-		if model == "" && change.ownerLookup != nil {
-			if owner := change.ownerLookup(stateCtx, change.expected.AccountID); owner != nil {
-				model = OpenAIAttemptModel(owner, change.model)
-			}
-		}
 		// Without the owner's mapping, let the member expire instead of removing
 		// a member under the client model, which may name a different upstream key.
 		if model != "" {
