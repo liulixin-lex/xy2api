@@ -258,7 +258,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	}
 	if missing && legacy != "" && !fallback {
 		missing = false
-		if isFirstNewPickSelection(ctx) && selectionAuto(s.selectionView(), derefGroupID(groupID), s.selectionNow()) {
+		if s.newPickNeedsAliasRead(ctx, derefGroupID(groupID), session) {
 			// The normal resolver ignores the alias when legacy adoption is off.
 			// This read must neither adopt it nor change the existing CAS plan.
 			old, oldErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
