@@ -529,7 +529,7 @@ export default {
       short: {
         peer_short: 'Not judged: too few peer samples',
         own_short: 'Not judged: too few samples',
-        within: 'Not judged: within the line lately',
+        within: 'Not judged: not worse than the group',
         pending: 'Not judged: still confirming',
         trial_open: 'On trial, no verdict yet',
         other: 'Not judged: other',
@@ -537,7 +537,7 @@ export default {
       long: {
         peer_short: 'other accounts on this model in the group have too few samples{counts}',
         own_short: 'this account has too few samples{counts}',
-        within: 'recent data is not over the group\'s limit (the 12-hour figures average a longer time)',
+        within: 'within the line, the rule has not found it worse than the group\'s other accounts (the 12-hour figures average a longer time)',
         pending: 'signs of falling short, not confirmed by the rule yet',
         trial_open: 'on trial with no verdict yet',
         over: 'over the line',

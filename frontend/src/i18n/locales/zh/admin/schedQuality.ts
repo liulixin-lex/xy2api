@@ -530,7 +530,7 @@ export default {
       short: {
         peer_short: '没判：同伴样本不够',
         own_short: '没判：本号样本不够',
-        within: '没判：近期在线内',
+        within: '没判：不比同组差',
         pending: '没判：还在确认',
         trial_open: '试用中，还没结论',
         other: '没判：其他',
@@ -538,7 +538,7 @@ export default {
       long: {
         peer_short: '同组同模型其他号的样本不够{counts}',
         own_short: '这个号自己的样本不够{counts}',
-        within: '近期的数据没有超过本组的线（12 小时的数字是更长时间的平均）',
+        within: '在线内，规则没认定它比同组其他号差（12 小时的数字是更长时间的平均）',
         pending: '有不达标的迹象，规则还没确认',
         trial_open: '试用中，还没有结论',
         over: '判定超线',
