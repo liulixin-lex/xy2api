@@ -209,6 +209,27 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(row(483).querySelector('[data-sq-perf-why]')?.textContent ?? null).toBe(expected)
   })
 
+  // 裁决 6 on the board: from the row's own counts; nothing when they are missing or null, or this group has samples.
+  it('says in the detail when a rear line\'s evidence all came from other groups', async () => {
+    const rear = (counts: { samples_local?: number | null; samples_total?: number | null }) => ({ identity: 'rear' as const, until: null, last_eval: null, ...counts })
+    const value = answer()
+    const lines = (ttfo: ReturnType<typeof rear>) => ({ ttfo, error: pass, cache: pass })
+    value.rows[0].lines = lines(rear({ samples_local: 0, samples_total: 14 }))
+    value.rows[1].lines = lines(rear({ samples_local: 2, samples_total: 14 }))
+    value.rows[2].lines = lines(rear({ samples_local: null, samples_total: null }))
+    value.rows[3].lines = lines(rear({}))
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    const said = async (id: number) => {
+      const key = `18:${id}:gpt-x`
+      await click(`[data-sq-perf-expand="${key}"]`)
+      return document.querySelector(`[data-sq-perf-detail="${key}"] [data-sq-perf-detail-item="verdict"]`)!.textContent!.includes('admin.schedQuality.perf.detail.elsewhere')
+    }
+    const shown = []
+    for (const id of [483, 615, 285, 620]) shown.push(await said(id))
+    expect(shown).toEqual([true, false, false, false])
+  })
+
   it('puts the reason in the mark\'s tip, and no reason on a red row never assessed', async () => {
     const value = answer()
     value.rows[0].lines = { ttfo: unknown(lastEval()), error: pass, cache: pass }

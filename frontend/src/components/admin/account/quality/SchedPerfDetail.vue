@@ -13,8 +13,8 @@
 /**
  * One 12-hour performance row opened (the board's 12-hour view and the panel's "过去 12 小时"): every figure of the row
  * in plain sentences, then each line's latest assessment. A figure short of its minimum is told as counts; what the
- * backend did not send is left out, not written as unknown. `samples` (the panel has them, from the account's detail)
- * adds when a rear line's evidence all came from other groups.
+ * backend did not send is left out, not written as unknown. A rear line whose counted units are all from other groups
+ * says so: from the row's own counts, else `samples` (the panel has them, from the account's detail).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -98,6 +98,12 @@ function scoreLines(): string[] {
   return lines
 }
 
+/** The counted units of a line: the row's own when sent, else the panel's (from the account's detail). */
+function samplesOf(dim: BackendDim): BackendSampleCounts | undefined {
+  const line = props.view.row.lines[dim]
+  return line && (line.samples_local != null || line.samples_total != null) ? line : props.samples?.[dim]
+}
+
 function verdictLines(): string[] {
   const { row, group } = props.view
   if (!row.member) return [T('notMember')]
@@ -115,7 +121,7 @@ function verdictLines(): string[] {
       const reason = noActionLong(latest, t, te, { trialEnd: line?.identity === 'trial' ? line.until : null, formatTime: formatShortTime })
       lines.push(T('evalNoAction', { line: name, time: formatShortTime(latest.at), reason }))
     }
-    if (line && evidenceElsewhere(line.identity, props.samples?.[dim])) lines.push(T('elsewhere', { line: name }))
+    if (line && evidenceElsewhere(line.identity, samplesOf(dim))) lines.push(T('elsewhere', { line: name }))
     return lines
   })
 }

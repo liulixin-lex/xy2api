@@ -466,8 +466,8 @@ export default {
         fast: 'Clearly faster: the slow share\'s cautious upper bound {upper} is below the expected {expected}',
         cacheLow: 'Large deviation: cache on continued turns {rate} is under the group\'s minimum {min}',
       },
-      scoreUse: 'A new session goes first to a clearly lower-scored account (lower by 3.0 or more) of the same priority and no higher price. ',
-      scoreUseFull: 'A new session goes first to a clearly lower-scored account (lower by 3.0 or more) of the same priority and no higher price; in any 15 minutes no account takes more of these extra new sessions than a quarter of those it gets anyway. Sessions already held by an account are not affected.',
+      scoreUse: 'A new session goes first to a clearly lower-scored account (lower by 3.0 or more) with the same priority and no higher price. ',
+      scoreUseFull: 'A new session goes first to a clearly lower-scored account (lower by 3.0 or more) with the same priority and no higher price. In each 15-minute slot, an account takes at most a quarter of its own last-15-minute first requests this way. Sessions that already have an account are not affected.',
       detail: {
         first: 'First output',
         cache: 'Cache',

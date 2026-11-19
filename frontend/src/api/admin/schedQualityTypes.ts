@@ -514,8 +514,11 @@ export interface BackendPerfGroup {
   gate_enabled: boolean
 }
 
-/** A line of a performance row: its identity now, the end of its rear stay or trial, and its latest assessment. */
-export interface BackendPerfLine {
+/**
+ * A line of a performance row: its identity now, the end of its rear stay or trial, its latest assessment, and the
+ * units its rule counted from this group and from all (absent or null until the backend sends them).
+ */
+export interface BackendPerfLine extends BackendSampleCounts {
   identity: BackendIdentity
   until: string | null
   last_eval: BackendLastEval | null
