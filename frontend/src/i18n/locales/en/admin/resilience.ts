@@ -129,14 +129,20 @@ export default {
         collab_call: 'Collaboration tool calls (by encrypted args state)',
         collab_call_action: 'Collaboration tool call actions',
         state_rejection: 'Conversation state rejections',
-        budget_snapshot: 'Text request budgets set (by budget start)',
-        budget_cut_fot: 'First-output timeouts: did the budget shorten the limit (would / applied)',
-        ttfo_lower_bound: 'Wait at first-output timeouts (by model, bucketed)',
-        late_attempt_start: 'Attempts started with the budget nearly spent',
-        body_receipt_repeat: 'Request body received again (only the first counts)',
+        budget_snapshot: 'Text request budgets (by configured budget start mode)',
+        budget_cut_fot: 'First-output timeouts: budget limited the planned window (would) / budget-cut attribution applied (applied)',
+        ttfo_lower_bound: 'First-output wait lower bound of the attempt (by model and length)',
+        late_attempt_start: 'Late-started attempts, counted from request arrival',
+        body_receipt_repeat: 'Repeat request-body receipts',
         anthropic_response_stage_timeout: 'Claude response stage timeouts'
       },
       metricHints: {
+        budget_snapshot: 'Counted once when a text request sets its budget, possibly before the body is fully read. The breakdown is the configured budget start mode (body_eof, say); it does not mean the start moved: a body received quickly leaves it in place and still counts there.',
+        budget_cut_fot: 'Counted when a first-output timeout fires. would=true: the remaining budget was shorter than the planned window, so the timer ran on the budget and the window was limited; applied=true: the cut was attributed to the budget, which happens only in enforce mode. In the default observe mode a limited window still reads applied=false.',
+        ttfo_lower_bound: 'Bucketed by the first-output window frozen for the attempt: the least that was waited, not a measured time. A 9 s window whose timeout is handled at 11 s still counts as lt10.',
+        late_attempt_start: 'At dispatch, more than the budget minus 2 s had passed since the request arrived. With the start at the end of the body (body_eof) the real deadline is later and plenty of budget may be left; it does not mean the deadline has passed.',
+        body_receipt_repeat: 'The first receipt keeps the receipt details and is not counted; each later receipt counts once, so three receipts of the same request show 2. Only the first receipt can set the budget start.',
+        anthropic_response_stage_timeout: 'The response stage timer of a Claude request ran out; the breakdown is the budget\'s start basis.',
         session_rebind: 'A request asked to move the session off its current account (avoidance); it does not mean the session changed accounts. Whether the binding changed is what the commit record says (committed on the sched_quality.session_switch log).'
       }
     },
