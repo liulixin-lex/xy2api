@@ -10,11 +10,25 @@
   >
     <template #title>
       <span class="truncate">{{ board.groupName }}</span>
-      <SchedPauseMark v-if="data" :global-enabled="data.global_enabled" :stale="data.stale" />
+      <SchedPauseMark v-if="board.view === 'order' && data" :global-enabled="data.global_enabled" :stale="data.stale" />
+      <SchedPauseMark v-else-if="board.view === 'perf' && perf" :global-enabled="perf.global_enabled" :stale="perf.stale" />
     </template>
     <template #header-actions>
       <!-- The models with samples, or any model name typed in (one declared only by accounts that are off has no traffic). -->
+      <!-- The 12-hour view: every model, or one of those with traffic in the window. -->
       <Select
+        v-if="board.view === 'perf'"
+        :model-value="board.model === null ? ALL_MODELS : board.model || UNKNOWN_MODEL"
+        :options="perfModelOptions"
+        :search-placeholder="t('admin.schedQuality.board.modelSearch')"
+        :aria-label="t('admin.schedQuality.aria.model')"
+        searchable
+        class="sq-select-sm w-[180px]"
+        data-sq-board-model
+        @update:model-value="pickPerfModel"
+      />
+      <Select
+        v-else
         :model-value="data?.model ?? board.model ?? null"
         :options="modelOptions"
         searchable
@@ -28,6 +42,29 @@
       />
     </template>
 
+    <!-- Two views: the selection order now, and the accounts over the last 12 hours (kept while the page lives). -->
+    <div v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.perf.viewsLabel')" class="mb-4 flex gap-1" data-sq-board-views>
+      <button
+        v-for="view in BOARD_VIEWS"
+        :key="view"
+        type="button"
+        role="tab"
+        :aria-selected="board.view === view"
+        :tabindex="board.view === view ? 0 : -1"
+        :class="[
+          'whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
+          board.view === view
+            ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
+        ]"
+        :data-sq-board-view="view"
+        @click="setSchedBoardView(view)"
+      >{{ t(`admin.schedQuality.perf.view.${view}`) }}</button>
+    </div>
+
+    <GroupSchedPerformance v-show="board.view === 'perf'" />
+
+    <template v-if="board.view === 'order'">
     <!-- The group over all its models (H.9): identities of its account × model keys, the users' waits, migration 400s. -->
     <dl v-if="data" class="mb-4 grid gap-1 text-[13px]" data-sq-board-summary>
       <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -143,6 +180,7 @@
         </tbody>
       </table>
     </div>
+    </template>
   </BaseDialog>
 </template>
 
@@ -153,16 +191,18 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import AccountSwitch from '@/components/admin/account/table/AccountSwitch.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
+import GroupSchedPerformance from './GroupSchedPerformance.vue'
 import { adminAPI } from '@/api/admin'
-import type { BackendIdentity, BackendOrderRow } from '@/api/admin/schedQualityTypes'
+import type { BackendOrderRow } from '@/api/admin/schedQualityTypes'
 import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
-import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, setSchedBoardView, useSchedLayers, type BoardView } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { DASH, fmtCountdown, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
+import { DASH, fmtCountdown, IDENTITY_SHAPES, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatRecentSeconds } from '@/components/admin/account/table/accountRecent'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
+import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
@@ -174,7 +214,8 @@ import { vTip } from '@/utils/tip'
 const { t, te } = useI18n()
 const word = (table: string, value: string) => schedWord(table, value, t, te)
 const { board } = useSchedLayers()
-const { board: boardData, boardKey, retry } = useSchedLayerData()
+const { board: boardData, boardKey, boardPerf, retry } = useSchedLayerData()
+const BOARD_VIEWS: BoardView[] = ['order', 'perf']
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
 const { canManage: canManageGroups } = useAdminPermission('groups')
@@ -200,6 +241,27 @@ const modelOptions = computed(() => {
 function pickModel(value: unknown) {
   const model = String(value ?? '').trim()
   if (model) setSchedBoardModel(model)
+}
+
+// ---- The 12-hour view's model: every model first, then those with traffic in the window, busiest first (and the one
+// asked for, should it have none). The empty model (older switches the backend could not tie to one) is a model of its
+// own, "unknown", not every model. ----
+const ALL_MODELS = '\u0000all'
+const UNKNOWN_MODEL = '\u0000unknown'
+const perf = computed(() => (boardPerf.id !== null && boardPerf.id === board.groupId ? boardPerf.data : null))
+const perfModelOptions = computed(() => {
+  const totals = new Map<string, number>()
+  for (const row of perf.value?.rows ?? []) totals.set(row.model, (totals.get(row.model) ?? 0) + row.requests)
+  if (board.model !== null && !totals.has(board.model)) totals.set(board.model, 0)
+  const models = [...totals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model]) => model)
+  return [
+    { value: ALL_MODELS, label: t('admin.schedQuality.perf.allModels') },
+    ...models.map((m) => (m ? { value: m, label: m } : { value: UNKNOWN_MODEL, label: t('admin.schedQuality.perf.unknownModel') }))
+  ]
+})
+function pickPerfModel(value: unknown) {
+  const model = String(value ?? '')
+  setSchedBoardModel(model === UNKNOWN_MODEL ? '' : model === ALL_MODELS || !model ? null : model)
 }
 
 // The picked model's supply now; every count unknown when the backend could not read it, or when the board's latest
@@ -245,13 +307,6 @@ const summaryText = computed(() => {
         : t('admin.schedQuality.board.rearEntriesUnknown')
   }
 })
-
-const IDENTITY_SHAPES: Record<BackendIdentity, string> = {
-  pass: 'sq-shape sq-shape--pass',
-  rear: 'sq-shape sq-shape--fail',
-  trial: 'sq-shape sq-shape--trial',
-  unknown: 'sq-text-3'
-}
 
 const stopped = (row: BackendOrderRow) => row.layer === 'stopped'
 /** Takes no part in the group: stopped, or outside the rate range (`excluded` is absent or null otherwise). */

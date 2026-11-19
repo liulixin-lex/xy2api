@@ -12,6 +12,8 @@
  * - GET | PUT /admin/sched-quality/groups/:id/policy (+ POST …/preview): BackendGroupPolicy, SchedGroupPolicyUpdate,
  *   BackendPolicyPreview
  * - GET /admin/sched-quality/groups/:id/order?model=: BackendOrder (the group board; any model name, listed or not)
+ * - GET /admin/sched-quality/groups/:id/performance: BackendPerformance (the board's 12-hour view, every model)
+ * - GET /admin/sched-quality/accounts/:id/performance: BackendPerformance (the account in each of its OpenAI groups)
  * - GET | PUT /admin/sched-quality/ttft-rule: BackendTTFTRule, SchedTTFTRuleUpdate
  */
 
@@ -182,6 +184,35 @@ export interface BackendLine<D extends BackendDim = BackendDim> extends BackendS
   evidence: BackendEvidenceOf[D]
   /** Groups the evidence comes from (the account's quality is judged on the requests of all its groups). */
   source_groups: number[]
+  /** The line's latest real assessment; null on rows written before it was kept, or not assessed yet. */
+  last_eval?: BackendLastEval | null
+}
+
+/**
+ * Why the latest assessment of a line came out as it did: other accounts of the model in the group have too few samples
+ * (peer_short), the account itself has too few (own_short), within the line (within), a first sign of falling short
+ * awaiting confirmation (pending), on trial without a verdict (trial_open), judged over the line (over, only with an
+ * action), anything else (other). A code the copy does not know reads as other.
+ */
+export type BackendNoActionReason = 'peer_short' | 'own_short' | 'within' | 'pending' | 'trial_open' | 'over' | 'other'
+
+/** The latest run of identical assessments of a line (same kind, action and reason). */
+export interface BackendLastEval {
+  /** The latest assessment of the run. */
+  at: string
+  /** It changed the identity or renewed the stay. */
+  acted: boolean
+  /** The action (a decisions.action code) when acted, else empty. */
+  action: string
+  reason: BackendNoActionReason | string
+  /** The rule's own reasons (evidence.causes codes), all of them. */
+  causes: string[]
+  /** The evidence that held it up and how much is needed (weighted, so possibly fractional); null when not relevant. */
+  have: number | null
+  need: number | null
+  /** The first assessment of the run. */
+  since: string
+  count: number
 }
 
 /** One model of one group: each line's identity and evidence, and the place they add up to. */
@@ -467,4 +498,69 @@ export interface BackendTTFTRuleSaved extends BackendTTFTRule {
   change: SchedRuleChange
   /** First-output line states cleared and re-judged. */
   cleared: number
+}
+
+// ---- GET /groups/:id/performance, GET /accounts/:id/performance ----
+
+/** Why a session on the account was moved to another account. */
+export type BackendSwitchReason = 'handoff' | 'takeover' | 'migrate' | 'profit_floor' | 'other'
+
+/** The current settings of a group that has rows. */
+export interface BackendPerfGroup {
+  group_id: number
+  name: string
+  ttft_seconds: number
+  min_cache_ratio: number
+  gate_enabled: boolean
+}
+
+/**
+ * A line of a performance row: its identity now, the end of its rear stay or trial, its latest assessment, and the
+ * units its rule counted from this group and from all (absent or null until the backend sends them).
+ */
+export interface BackendPerfLine extends BackendSampleCounts {
+  identity: BackendIdentity
+  until: string | null
+  last_eval: BackendLastEval | null
+}
+
+/**
+ * One group × account × model with traffic in the window: counts and sums only (the shares are worked out in
+ * performance.ts). The score is the account × model's over every group with the gate on, the same in each of its rows.
+ */
+export interface BackendPerfRow {
+  group_id: number
+  account_id: number
+  name: string
+  model: string
+  /** The account's priority now. */
+  priority: number
+  /** Still a member of the group (rows of accounts that left it are kept while the window has their traffic). */
+  member: boolean
+  /** Requests delivered by this account in the group for this model. */
+  requests: number
+  /** Streaming requests first sent to this account: known ones (n), slow ones by the group's current limit, from how
+   *  many sessions; the comparable ones and the slow count other accounts would have had on them (null when none). */
+  first: { n: number; slow: number; sessions: number; expected_n: number; expected_slow: number | null; unknown: number }
+  /** Turns that continued a session on this same account. */
+  cont: { turns: number; sessions: number; read_tokens: number; input_tokens: number }
+  /** Attempts on the account: all, cut off at the first-output limit, other failures. */
+  attempts: { n: number; timeouts: number; failures: number }
+  switches: Record<BackendSwitchReason, number>
+  /** value null: no score (too few comparable first sends); excess is the sum of slow over expected on them. */
+  score: { value: number | null; n: number; sessions: number; excess: number }
+  lines: { [D in BackendDim]: BackendPerfLine }
+}
+
+export interface BackendPerformance {
+  /** When the 12-hour figures were worked out. */
+  at: string
+  /** Start of the window really covered (later than at − 12 h while it fills after a restart). */
+  window_from: string
+  window_hours: number
+  complete: boolean
+  stale: boolean
+  global_enabled: boolean
+  groups: BackendPerfGroup[]
+  rows: BackendPerfRow[]
 }
