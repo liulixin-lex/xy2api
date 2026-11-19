@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,6 +117,55 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Equal(t, int64(10), binding.owner)
 	require.Zero(t, binding.reads)
 	require.Empty(t, events)
+}
+
+func TestSchedBoardDefaultTextCapabilityMatchesDispatch(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		capability OpenAIEndpointCapability
+		available  int
+		layer      string
+	}{
+		{OpenAIEndpointCapabilityEmbeddings, 0, "stopped"},
+		{OpenAIEndpointCapabilityChatCompletions, 1, "front"},
+	} {
+		t.Run(string(tc.capability), func(t *testing.T) {
+			account := selectionFixtureAccount(10, 1)
+			account.Credentials = map[string]any{
+				openAIEndpointCapabilitiesCredentialKey: []string{string(tc.capability)},
+				"model_mapping":                         map[string]any{"m": "m"},
+			}
+			f := newSelectionRuntimeFixture(t, account)
+			groupID := int64(7)
+			rows, supply, err := f.svc.selectionBoard.Board(context.Background(), groupID, "m")
+			require.NoError(t, err)
+			require.NotNil(t, supply)
+			require.Len(t, rows, 1)
+			require.Equal(t, account.ID, rows[0].AccountID)
+			require.Equal(t, 1, supply.Declared)
+			require.Equal(t, 1, supply.Enabled)
+			require.Equal(t, tc.available, supply.Available)
+			require.Equal(t, tc.layer, rows[0].Layer)
+
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			ctx = resilience.WithCapabilityRequest(ctx, "responses", true)
+			selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, &groupID, "", "", "m", nil,
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformOpenAI)
+			if tc.available == 0 {
+				require.ErrorIs(t, err, ErrNoAvailableAccounts)
+				require.ErrorContains(t, err, "capability_mismatch=1")
+				require.Nil(t, selected)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			if selected.ReleaseFunc != nil {
+				t.Cleanup(selected.ReleaseFunc)
+			}
+			require.NotNil(t, selected.Account)
+			require.Equal(t, account.ID, selected.Account.ID)
+		})
+	}
 }
 
 func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
