@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-11-19
+
 本版调整 OpenAI 流式文本会话的选号和质量判定：原号等够首输出时限后，会话优先避开它，能更早给出有效输出并完整交付的账号可以接手。512 KiB 及以上热请求的首输出下限降至 30 秒。修复了排队后的账号复验、免收请求记录、连续失败计数清零和试用名额清理，也修正了 Codex 模型目录中 gpt-6.2-sol、gpt-6.2-astra 的推理档位，默认使用 low。管理端改看用户实际等待，并显示质量样本量、试用超时原因和模型供给。升级会执行迁移 319、320。
 
 ### 调度与账号
@@ -2412,7 +2414,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.10...HEAD
+[0.6.10]: https://github.com/liulixin-lex/xy2api/compare/v0.6.9...v0.6.10
 [0.6.9]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/liulixin-lex/xy2api/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/liulixin-lex/xy2api/compare/v0.6.6...v0.6.7
