@@ -648,8 +648,10 @@ describe('SchedQualityPanel', () => {
     const narrow = style.slice(at)
     const main = block(narrow, '.drow__main')
     expect(main).toMatch(/display:\s*grid/)
-    expect(main).toMatch(/grid-template-columns:\s*auto minmax\(0, 1fr\) max-content/)
-    expect(main).toMatch(/grid-template-areas:\s*'time what ev'\s*'\.\s+where where'/)
+    expect(main).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) max-content/)
+    expect(main).toMatch(/grid-template-areas:\s*'what ev'\s*'where where'/)
+    // The time has its own column; the action's line and the lines under it share the next one (design 6.5).
+    expect(block(style, '.drow')).toMatch(/grid-template-columns:\s*auto minmax\(0, 1fr\)/)
     expect(block(narrow, '.drow__what')).toMatch(/grid-area:\s*what;\s*overflow-wrap:\s*anywhere/)
     expect(block(narrow, '.drow__where')).toMatch(/grid-area:\s*where;\s*overflow-wrap:\s*anywhere;\s*white-space:\s*normal/)
     expect(block(narrow, '.drow__ev')).toMatch(/grid-area:\s*ev/)
@@ -663,11 +665,13 @@ describe('SchedQualityPanel', () => {
     const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
     await w.get('[data-qp-decisions-toggle]').trigger('click')
     await flushPromises()
-    const cells = (id: number) =>
-      Array.from(w.get(`[data-qp-decision="${id}"] .drow__main`).element.children, (cell) => [...cell.classList].find((name) => name.startsWith('drow__')))
-    expect(cells(2)).toEqual(['drow__time', 'drow__what', 'drow__where', 'drow__ev'])
+    const cells = (selector: string) =>
+      Array.from(w.get(selector).element.children, (cell) => [...cell.classList].find((name) => name.startsWith('drow__')))
+    expect(cells('[data-qp-decision="2"]')).toEqual(['drow__time', 'drow__body'])
+    expect(cells('[data-qp-decision="2"] .drow__body')).toEqual(['drow__main', 'drow__sub'])
+    expect(cells('[data-qp-decision="2"] .drow__main')).toEqual(['drow__what', 'drow__where', 'drow__ev'])
     // A record of the previous rules has no basis and so no Evidence.
-    expect(cells(1)).toEqual(['drow__time', 'drow__what', 'drow__where'])
+    expect(cells('[data-qp-decision="1"] .drow__main')).toEqual(['drow__what', 'drow__where'])
     const button = w.get<HTMLButtonElement>('[data-qp-decision-evidence="2"]').element
     expect([button.tagName, button.type, button.disabled, button.hasAttribute('tabindex')]).toEqual(['BUTTON', 'button', false, false])
     button.focus()

@@ -25,30 +25,33 @@
       <template v-else>
         <ol class="dlist">
           <li v-for="item in items" :key="item.id" class="drow" :data-qp-decision="item.id">
-            <div class="drow__main">
-              <span class="drow__time">{{ formatShortTime(item.at) }}</span>
-              <span class="drow__what" :class="`drow__what--${tone(item)}`">{{ actionWord(item) }}</span>
-              <span class="drow__where">{{ where(item) }}</span>
-              <button
-                v-if="item.basis"
-                type="button"
-                class="qp-text-btn drow__ev"
-                :aria-expanded="shown.has(item.id)"
-                :data-qp-decision-evidence="item.id"
-                @click="toggleEvidence(item.id)"
-              >{{ t('admin.schedQuality.decisions.evidence') }}</button>
+            <span class="drow__time">{{ formatShortTime(item.at) }}</span>
+            <!-- Everything after the time, so the lines under the action start where it starts (design 6.5). -->
+            <div class="drow__body">
+              <div class="drow__main">
+                <span class="drow__what" :class="`drow__what--${tone(item)}`">{{ actionWord(item) }}</span>
+                <span class="drow__where">{{ where(item) }}</span>
+                <button
+                  v-if="item.basis"
+                  type="button"
+                  class="qp-text-btn drow__ev"
+                  :aria-expanded="shown.has(item.id)"
+                  :data-qp-decision-evidence="item.id"
+                  @click="toggleEvidence(item.id)"
+                >{{ t('admin.schedQuality.decisions.evidence') }}</button>
+              </div>
+              <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
+              <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
+              <SchedEvidence
+                v-if="item.basis && shown.has(item.id)"
+                class="drow__basis"
+                :dim="item.basis.line"
+                :evidence="basisEvidence(item.basis)"
+                :samples="item.basis"
+                :source-groups="item.basis.source_groups"
+                :group-name="groupName"
+              />
             </div>
-            <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
-            <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
-            <SchedEvidence
-              v-if="item.basis && shown.has(item.id)"
-              class="drow__basis"
-              :dim="item.basis.line"
-              :evidence="basisEvidence(item.basis)"
-              :samples="item.basis"
-              :source-groups="item.basis.source_groups"
-              :group-name="groupName"
-            />
           </li>
         </ol>
         <div v-if="more || state === 'failed'" class="dec__more">
@@ -283,11 +286,20 @@ function timeoutReason(item: BackendDecision): string {
   padding: 0;
   list-style: none;
 }
+/* The time, then the rest of the record beside it: the action's line, and under the action its detail lines and opened
+   evidence. */
 .drow {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 8px;
   padding: 8px 0;
   border-top: 1px solid var(--color-line-row);
+}
+.drow__body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
 }
 .drow:first-child {
   border-top: 0;
@@ -299,7 +311,6 @@ function timeoutReason(item: BackendDecision): string {
   gap: 8px;
 }
 .drow__time {
-  flex: none;
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
@@ -337,21 +348,18 @@ function timeoutReason(item: BackendDecision): string {
   flex: none;
 }
 /* A narrow list: one line cannot hold the time, the longest action and Evidence, and nothing in it gave way, so
-   Evidence ended up out of view. Here the time, the action (wrapping, long words too) and Evidence share the first
-   line, Evidence keeping its whole width; the group, model and line go under the action. 454px is the widest list
+   Evidence ended up out of view. Here the action (wrapping, long words too) and Evidence share the first line beside
+   the time, Evidence keeping its whole width; the group, model and line go under the action. 454px is the widest list
    measured to need it (English, a record of another day: "11-18 06:55 Not enough evidence at the review, trial
    started", Evidence); the 500px drawer from 1280px (a 459px list) keeps the one-line row. */
 @container sched-decisions (max-width: 454px) {
   .drow__main {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) max-content;
     grid-template-areas:
-      'time what ev'
-      '.    where where';
+      'what ev'
+      'where where';
     row-gap: 2px;
-  }
-  .drow__time {
-    grid-area: time;
   }
   .drow__what {
     grid-area: what;
