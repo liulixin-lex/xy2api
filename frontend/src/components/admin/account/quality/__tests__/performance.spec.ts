@@ -10,6 +10,7 @@ import {
   nextSort,
   noAction,
   countText,
+  fmtAmount,
   fmtAmountSigned,
   fmtShortfall,
   fmtTenths,
@@ -257,6 +258,11 @@ describe('performance formats', () => {
 describe('acceptance round 2 formats', () => {
   it('writes a negative amount with a real minus, as every other negative figure', () => {
     expect([fmtAmountSigned(-26.7), fmtAmountSigned(26.74), fmtAmountSigned(0)]).toEqual(['−26.7', '26.7', '0'])
+    // Rounded as the plain amount, the minus swapped after: a half tenth rounds as before (−1.25 is "−1.2", not "−1.3"),
+    // and a negative that rounds to zero is "0", never "−0".
+    expect([-1.25, -0.05, -0.04, -0.03, -0.06].map((v) => fmtAmountSigned(v))).toEqual(['−1.2', '0', '0', '0', '−0.1'])
+    const values = [-1.25, -0.05, -0.04, 1.25, -26.75, -9.25]
+    expect(values.map((v) => fmtAmountSigned(v))).toEqual(values.map((v) => fmtAmount(v).replace('-', '−')))
   })
 
   it('asks the copy for a count with its number, so English can pick one turn or many', () => {

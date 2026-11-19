@@ -122,4 +122,3 @@ it('writes durations in minutes and capitalizes every English result', () => {
   const results = [lookup(en, 'admin.schedQuality.perf.detail.resultNone'), ...Object.values(lookup(en, 'admin.schedQuality.decisions.action') as Record<string, string>)]
   expect(results.map(String).filter((text) => text[0] !== text[0].toUpperCase())).toEqual([])
 })
-

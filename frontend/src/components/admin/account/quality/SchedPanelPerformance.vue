@@ -49,7 +49,9 @@
             <span v-else class="prow__toggle" aria-hidden="true" />
             <GroupAliasPill :group="item.info" />
             <span class="prow__name">{{ item.name }}</span>
-            <!-- On a phone the name is cut short and groups named alike read the same: the id tells them apart. -->
+            <!-- A group the account left says so beside the name, never cut with it (as on the board). -->
+            <span v-if="item.left" class="prow__left" data-qp-perf-left>{{ t('admin.schedQuality.perf.left') }}</span>
+            <!-- On a phone names cut alike read the same: the id tells them apart. -->
             <span class="prow__gid" aria-hidden="true">#{{ item.groupId }}</span>
           </span>
           <!-- A short note that fits the figures' width (268px, 196px on a phone); the tip says why, for a gate that was off
@@ -115,8 +117,9 @@
  * to SchedPerfDetail. Ranks need the whole group: the board has them, this section does not. Under 440px the slow
  * share goes (it is in the detail).
  *
- * A group with the gate off is not counted (its row says so); a snapshot still loading says so instead of "no
- * requests"; an account with requests on other models only keeps its group rows and says this model had none.
+ * A group with the gate off, or one a full snapshot does not list, is not counted (its row says so); a snapshot still
+ * loading says so instead of "no requests"; an account with requests on other models only keeps its group rows and
+ * says this model had none.
  */
 import { computed, reactive, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -171,6 +174,8 @@ interface PanelPerfRow {
   title: string
   info: { name: string; alias?: string | null }
   view: PerfView | null
+  /** The account has left the group (its traffic is still in the window). */
+  left: boolean
   /** The group's gate is off: the backend counts nothing there. */
   gateOff: boolean
 }
@@ -180,12 +185,15 @@ const accountRows = computed(() => perf.value?.rows.filter((row) => row.account_
 /** No snapshot yet, or one still loading the window with nothing for the account yet. */
 const loadingStats = computed(() => !!perf.value && (!perf.value.at || (!perf.value.complete && accountRows.value.length === 0)))
 /**
- * A group is counted when its gate was on: the snapshot's own setting first (the one it was counted with), else the
- * account's detail (a group without rows is not in the snapshot).
+ * A group is counted when the snapshot lists it with its gate on (the setting it was counted with). A full snapshot lists
+ * every group the account was in, rows or none: a group it lacks (one the account's detail, refreshed every 5 s, has
+ * and the snapshot of up to a minute ago has not) was not counted in it, never "no requests". A snapshot still loading
+ * the window lists only some: the detail's gate stands in for a group it lacks.
  */
 const counted = (groupId: number) => {
   const own = perf.value?.groups.find((g) => g.group_id === groupId)
-  return own ? own.gate_enabled : props.detail.groups.find((g) => g.group_id === groupId)?.policy.enabled !== false
+  if (own) return own.gate_enabled
+  return !perf.value?.complete && props.detail.groups.find((g) => g.group_id === groupId)?.policy.enabled !== false
 }
 const coveredHours = computed(() => (perf.value?.at ? Math.max(0, (Date.parse(perf.value.at) - Date.parse(perf.value.window_from)) / 3_600_000) : 0))
 /**
@@ -214,12 +222,14 @@ const rows = computed<PanelPerfRow[]>(() => {
   const nameOf = (id: number) => props.groupInfo(id)?.name ?? data.groups.find((g) => g.group_id === id)?.name ?? props.detail.groups.find((g) => g.group_id === id)?.name ?? `#${id}`
   const item = (groupId: number, view: PerfView | null): PanelPerfRow => {
     const name = nameOf(groupId)
-    const label = [name, props.model === null && view ? modelLabel(view.row.model, t) : '', view && !view.row.member ? t('admin.schedQuality.perf.notMember').trim() : ''].filter(Boolean).join(' · ')
+    const left = !!view && !view.row.member
+    const label = [name, props.model === null && view ? modelLabel(view.row.model, t) : ''].filter(Boolean).join(' · ')
     return {
       key: view ? view.key : `${groupId}:none`,
       groupId,
       name: label,
-      title: label,
+      title: left ? `${label}${t('admin.schedQuality.perf.notMember')}` : label,
+      left,
       info: props.groupInfo(groupId) ?? { name },
       view,
       gateOff: !view && !counted(groupId)
@@ -338,6 +348,12 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prow__left {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  white-space: nowrap;
+}
 .prow__gid {
   display: none;
   flex: none;
@@ -396,10 +412,29 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   margin: 0 -8px;
   padding: 4px 8px 12px 32px;
 }
-/* A phone (prototype, panel under 440px): the slow share goes to the detail; five columns fit 288px. */
+/* A phone (prototype, panel under 440px): the slow share goes to the detail; each group takes two lines, the group
+   across the whole width (pill, name, id, "left") over its figures under their headings, as in "各分组" (one line left
+   the name no room and pushed the id over the figures). */
 @media (max-width: 439px) {
   .prow {
     grid-template-columns: minmax(0, 1fr) 44px 48px 52px 40px;
+    row-gap: 2px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .prow--head {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .prow:not(.prow--head) > .prow__group {
+    grid-column: 1 / -1;
+  }
+  .prow:not(.prow--head) > :not(.prow__group) {
+    grid-row: 2;
+  }
+  .prow [data-qp-perf-cell='requests'],
+  .prow > .prow__off {
+    grid-column-start: 2;
   }
   .prow__slow {
     display: none;

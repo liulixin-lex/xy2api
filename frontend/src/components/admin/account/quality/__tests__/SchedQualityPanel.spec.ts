@@ -7,6 +7,7 @@ import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/s
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
 import decisionsSource from '../SchedDecisions.vue?raw'
+import panelPerfSource from '../SchedPanelPerformance.vue?raw'
 import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
@@ -892,7 +893,12 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(api.accountPerformance).toHaveBeenCalledWith(7, expect.anything())
     expect(perfRows()).toEqual(['53:7:gpt-b', '54:none', '99:7:gpt-b'])
     expect(document.querySelector('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell="requests"]')!.textContent).toBe('463')
-    expect(document.querySelector('[data-qp-perf-row="99:7:gpt-b"]')!.textContent).toContain('admin.schedQuality.perf.notMember')
+    // A group the account left: marked beside the name (which a phone cuts), not inside it, and only once.
+    const leftRow = document.querySelector<HTMLElement>('[data-qp-perf-row="99:7:gpt-b"]')!
+    expect(leftRow.querySelector('[data-qp-perf-left]')!.textContent).toBe('admin.schedQuality.perf.left')
+    expect(leftRow.querySelector('.prow__name')!.textContent).not.toContain('notMember')
+    expect(leftRow.textContent!.match(/admin\.schedQuality\.perf\.(left|notMember)/g)).toEqual(['admin.schedQuality.perf.left'])
+    expect(leftRow.getAttribute('title')).toContain('admin.schedQuality.perf.notMember')
     tab('gpt-a').click()
     await flushPromises()
     expect(perfRows()).toEqual(['53:7:gpt-a', '54:none'])
@@ -992,7 +998,7 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     api.accountDetail.mockResolvedValue(value)
     const onlyA = perfOf(7)
     onlyA.rows = onlyA.rows.filter((row) => row.model === 'gpt-a')
-    // The account endpoint lists the groups of its rows only.
+    // A full snapshot lists every group the account is in: one it does not list was not counted in it.
     onlyA.groups = onlyA.groups.filter((group) => group.group_id !== 54)
     api.accountPerformance.mockResolvedValue(onlyA)
     await openOn(7, { model: 'gpt-b' })
@@ -1003,7 +1009,7 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
     expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-no-requests]')).toBeNull()
     expect(document.querySelector('[data-qp-perf-row="53:none"] .prow__gid')!.textContent).toBe('#53')
-    // A short note in the cell; why (the gate off when the snapshot was made, or the group joined after it) in its tip.
+    // A short note in the cell; why (the gate off when the snapshot was made, or the group came after it) in its tip.
     const off = document.querySelector<HTMLElement>('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')!
     expect(off.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
     expect((off as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.perf.panel.gateOffTip')
@@ -1048,14 +1054,13 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
   // Re-review item 2: a group's setting as counted in the snapshot first; groups not counted keep their row; "no
   // requests" only in the counted groups; nothing at all says so instead of a bare header.
   it('keeps groups not counted, takes the snapshot\'s own gate first, and scopes "no requests" to the counted groups', async () => {
-    const value = detail()
-    value.groups[1].policy = { ...policy, enabled: false }
-    api.accountDetail.mockResolvedValue(value)
-    api.accountPerformance.mockResolvedValue(perfAnswer([]))
+    // The detail has both gates on now; the snapshot counted 北辰组 with its gate off.
+    api.accountPerformance.mockResolvedValue(perfAnswer([], [perfGroup({ group_id: 53 }), perfGroup({ group_id: 54, gate_enabled: false })]))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
     expect(perfRows()).toEqual(['53:none', '54:none'])
     expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
     expect(document.querySelector('[data-qp-perf-empty="account"]')!.textContent).toBe('admin.schedQuality.perf.panel.empty')
 
     // The gate switched off after the snapshot counted the group: it was counted, so it is no "not counted" row.
@@ -1106,6 +1111,66 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(api.accountPerformance.mock.calls.map((call) => call[0])).toEqual([7, 8])
     expect(signals[0].aborted).toBe(true)
     expect(perfRows()).toContain('53:8:gpt-b')
+  })
+
+  // fe-polish review (Astra 1): the account's detail comes every 5 s, the 12-hour snapshot every minute. A group the
+  // newer detail has and the full snapshot does not list was not counted in it: never "no requests" from the detail's
+  // own gate. A snapshot still loading the window lists only some groups: there the detail's gate stands in, as before.
+  it('says a group the full snapshot does not list was not counted, never "no requests", when the detail is newer', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    const snapshot = perfOf(7)
+    snapshot.rows = snapshot.rows.filter((row) => row.model === 'gpt-a')
+    api.accountPerformance.mockResolvedValue(snapshot)
+    mount(Panel, { attachTo: document.body })
+    openSchedDrawer({ id: 7, name: 'acc-7' }, { model: 'gpt-b' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(perfRows()).toEqual(['53:none', '54:none'])
+
+    const newer = detail()
+    newer.groups.push({ group_id: 98, name: '新组', policy, exemption: null, by_model: [model('gpt-b')] })
+    api.accountDetail.mockResolvedValue(newer)
+    await vi.advanceTimersByTimeAsync(5000)
+    // The detail came again, the snapshot did not.
+    expect(api.accountPerformance).toHaveBeenCalledTimes(1)
+    expect(perfRows()).toEqual(['53:none', '54:none', '98:none'])
+    const added = document.querySelector('[data-qp-perf-row="98:none"]')!
+    expect(added.querySelector('[data-qp-perf-gate-off]')!.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
+    expect(added.querySelector('[data-qp-perf-no-requests]')).toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
+
+    closeSchedDrawer()
+    await vi.advanceTimersByTimeAsync(0)
+    api.accountPerformance.mockResolvedValue({ ...snapshot, complete: false, window_from: '2026-11-19T08:40:00Z' })
+    openSchedDrawer({ id: 7, name: 'acc-7' }, { model: 'gpt-b' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(document.querySelector('[data-qp-perf-row="98:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noFiguresYet')
+    expect(document.querySelector('[data-qp-perf-row="98:none"] [data-qp-perf-gate-off]')).toBeNull()
+  })
+
+  // fe-polish review (Astra 3, Opus 4): at 320px the group's cell kept 80px, the pill took 50 and the id ran over the
+  // requests. jsdom lays nothing out, so the rule is checked here (the text boxes in a browser): under 440px the group
+  // takes a line of its own across the row, every figure (or note) the line under it, so the id and "left the group"
+  // never share a line with a figure.
+  it('gives the group a line of its own on a phone, the figures under it, so the id never runs over a figure', () => {
+    const style = panelPerfSource.slice(panelPerfSource.indexOf('<style scoped>'))
+    const block = (css: string, selector: string) => {
+      const start = css.indexOf(`${selector} {`)
+      expect(start).toBeGreaterThanOrEqual(0)
+      return css.slice(start, css.indexOf('}', start))
+    }
+    const at = style.indexOf('@media (max-width: 439px) {')
+    expect(at).toBeGreaterThan(0)
+    const narrow = style.slice(at)
+    expect(block(narrow, '.prow:not(.prow--head) > .prow__group')).toMatch(/grid-column:\s*1 \/ -1/)
+    expect(block(narrow, '.prow:not(.prow--head) > :not(.prow__group)')).toMatch(/grid-row:\s*2/)
+    expect(block(narrow, '.prow__gid')).toMatch(/display:\s*inline/)
+    // The id and the "left" mark never shrink: on its own line the name is what gives way.
+    expect(block(style, '.prow__gid')).toMatch(/flex:\s*none/)
+    expect(block(style, '.prow__left')).toMatch(/flex:\s*none/)
+    expect(block(style, '.prow__name')).toMatch(/min-width:\s*0/)
   })
 
   // Acceptance round 2: a counted group without requests while the window is still filling says "no figures yet".

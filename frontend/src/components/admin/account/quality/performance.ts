@@ -279,8 +279,11 @@ export function fmtScore(value: number): string {
 }
 /** An evidence count as recorded (weighted ones may be fractional): 9.25 → "9.3", 20 → "20". */
 export const fmtAmount = (value: number) => String(Math.round(value * 10) / 10)
-/** The same with a real minus when negative: −26.7 → "−26.7" (as every other negative figure here). */
-export const fmtAmountSigned = (value: number) => (value < 0 ? `−${fmtAmount(-value)}` : fmtAmount(value))
+/**
+ * The same with a real minus when negative: −26.7 → "−26.7" (as every other negative figure here). Rounded as the plain
+ * amount, the minus swapped after: −1.25 stays "−1.2", and −0.04 (rounded to −0, written "0") stays "0", never "−0".
+ */
+export const fmtAmountSigned = (value: number) => fmtAmount(value).replace(/^-/, '−')
 
 // ---- Counts in words: "1 turn", "210 turns" in English (plural forms), "210 轮" in Chinese ----
 
