@@ -396,11 +396,10 @@ func TestNewPickCrossWindowReleasesTarget(t *testing.T) {
 			l := &f.svc.selectionBoard.newPickLimit
 			other := new(atomic.Bool)
 			other.Store(true)
-			c, _, capped := l.reserve(other, []newPickCandidate{{target: newPickAccount{account: &Account{ID: 2}}, first15: 4, recent: SchedPerfRecent{First10: 1, First30: 3}}}, 30_000, now)
+			c, r, _ := l.reserve(other, []newPickCandidate{{target: newPickAccount{account: &Account{ID: 2}}, first15: 4, recent: SchedPerfRecent{First10: 1, First30: 3}}}, 30_000, now)
 			require.NotNil(t, c)
-			require.False(t, capped)
-			_, ok := l.finish(context.Background(), 2, 4, now, now, true)
-			require.True(t, ok)
+			require.NotNil(t, r)
+			require.NoError(t, r.commit(context.Background()))
 		}
 	}
 	r := selectTrialRuntime(t, f, resilience.WithRequestState(context.Background(), resilience.NewRequestState()), "cross")

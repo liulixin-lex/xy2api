@@ -368,6 +368,12 @@ func TestNewPickConcurrentSessions(t *testing.T) {
 			if result == nil {
 				results <- base.ID
 			} else {
+				pass := newPickPassFrom(ctx)
+				defer pass.release()
+				if err := pass.deliver(ctx, result); err != nil {
+					t.Error(err)
+					return
+				}
 				results <- result.Account.ID
 				result.ReleaseFunc()
 			}
@@ -525,16 +531,25 @@ func TestNewPickReservationAcrossWindow(t *testing.T) {
 	next := old.Add(15 * time.Minute)
 	for _, alreadyUsed := range []bool{false, true} {
 		var limit newPickLimit
-		_, used, capped := limit.reserve(newPickOpportunity(beginNewPickSelection(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))), []newPickCandidate{c}, 30_000, old)
-		require.False(t, capped)
-		require.Equal(t, 1, used)
-		if alreadyUsed {
-			limit.reserve(newPickOpportunity(beginNewPickSelection(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))), []newPickCandidate{c}, 30_000, next)
-			limit.finish(context.Background(), 5, 4, next, next, true)
+		reserve := func(window time.Time) *newPickReservation {
+			t.Helper()
+			ctx := beginNewPickSelection(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))
+			_, r, used := limit.reserve(newPickOpportunity(ctx), []newPickCandidate{c}, 30_000, window)
+			require.NotNil(t, r)
+			require.Equal(t, 1, used)
+			return r
 		}
-		used, ok := limit.finish(context.Background(), 5, 4, old, next, true)
+		r := reserve(old)
+		if alreadyUsed {
+			require.NoError(t, reserve(next).commit(context.Background()))
+		}
+		ok := r.confirm(context.Background(), next, 4)
 		require.Equal(t, !alreadyUsed, ok)
-		require.Equal(t, 1, used)
+		if ok {
+			require.NoError(t, r.commit(context.Background()))
+		} else {
+			r.release()
+		}
 		require.Equal(t, newPickCount{picked: 1}, limit.counts[5])
 	}
 }
@@ -566,8 +581,12 @@ func TestNewPickUsesAdmittedTargetRow(t *testing.T) {
 	req := OpenAIAccountScheduleRequest{GroupID: ptrInt64Selection(7), Platform: PlatformOpenAI, SessionHash: "session", RequiredCapability: OpenAIEndpointCapabilityResponses, RequestedModel: "m"}
 	ctx := context.WithValue(resilience.WithRequestState(context.Background(), resilience.NewRequestState()), openAISelectionRequestKey{}, req)
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{groupID: 7, session: "session", kind: "create", newPickMissing: true})
-	r := f.svc.newSessionPick(beginNewPickSelection(ctx), req, base, []*Account{target}, nil)
+	ctx = beginNewPickSelection(ctx)
+	r := f.svc.newSessionPick(ctx, req, base, []*Account{target}, nil)
 	require.NotNil(t, r)
+	pass := newPickPassFrom(ctx)
+	defer pass.release()
+	require.NoError(t, pass.deliver(ctx, r))
 	require.Same(t, target, r.Account)
 	require.Equal(t, []int64{7}, r.Account.GroupIDs)
 	require.Equal(t, 1, cache.targetReads)

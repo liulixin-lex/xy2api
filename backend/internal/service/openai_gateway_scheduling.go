@@ -1202,7 +1202,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
-	ctx = beginNewPickSelection(ctx)
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -1367,13 +1366,21 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	loadRequests := selectionLoadRequests(candidates)
 	checked := make(map[int64]*Account)
+	var triedForPick map[int64]bool
+	if bindingMissing && isFirstNewPickSelection(ctx) {
+		triedForPick = make(map[int64]bool)
+	}
 	tryAcquire := func(loads map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
 		available := s.selectionAvailable(ctx, candidates, loads)
 		s.sortSelectionAccounts(ctx, available, req, loads)
+		original := available
 		attempted := len(available) > 0
 		for len(available) > 0 {
 			a := available[0]
 			available = available[1:]
+			if triedForPick != nil {
+				triedForPick[a.ID] = true
+			}
 			if ctx.Err() != nil {
 				return nil, true, ctx.Err()
 			}
@@ -1388,8 +1395,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			realBaseSlot := s.concurrencyService != nil && slotConcurrency > 0
-			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, available, loads,
-				realBaseSlot && bindingMissing && isFirstNewPickSelection(ctx))
+			var suffix []*Account
+			if realBaseSlot && triedForPick != nil && isFirstNewPickSelection(ctx) {
+				suffix = newPickSuffix(original, fresh.ID, triedForPick)
+			}
+			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, suffix, loads, len(suffix) > 0)
 			if err != nil {
 				return nil, true, err
 			}
@@ -1397,7 +1407,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if retryTrial == nil {
 					delete(checked, fresh.ID) // a vetoed row cannot be reused for a wait plan
 				} else {
-					available = append(available, retryTrial)
+					// The ordinary trial requeue must not reorder the original suffix.
+					available = append(available[:len(available):len(available)], retryTrial)
 					s.sortSelectionAccounts(ctx, available, req, loads)
 				}
 				continue

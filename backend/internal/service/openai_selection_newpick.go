@@ -13,20 +13,57 @@ import (
 
 type newPickFirstSelectionKey struct{}
 
+type newPickPass struct {
+	opportunity atomic.Bool
+	target      *AccountSelectionResult
+	reservation *newPickReservation
+	log         func(string)
+}
+
+// Called at the outermost return, after all inner selection defers have run.
+// On panic the caller's other defer still owns both the reservation and slot.
+func (p *newPickPass) deliver(ctx context.Context, selected *AccountSelectionResult) error {
+	if p.target == nil || p.target != selected {
+		return nil
+	}
+	if err := p.reservation.commit(ctx); err != nil {
+		p.log("target_vetoed")
+		return err
+	}
+	p.log("picked")
+	p.target, p.reservation, p.log = nil, nil, nil
+	return nil
+}
+
+func (p *newPickPass) release() {
+	if p.target != nil {
+		defer p.target.ReleaseFunc()
+		p.reservation.release()
+		p.target, p.reservation, p.log = nil, nil, nil
+	}
+}
+
 // The first public selection owns one opportunity, shared by its internal passes.
 func beginNewPickSelection(ctx context.Context) context.Context {
-	var opportunity *atomic.Bool
+	var pass *newPickPass
 	nativeCompact, _ := ctx.Value(nativeCompactionContextKey{}).(bool)
 	if resilience.StateFrom(ctx).BeginNewPickSelection() && !nativeCompact && !openAIQualityRoutingActive(ctx) {
-		opportunity = new(atomic.Bool)
-		opportunity.Store(true)
+		pass = new(newPickPass)
+		pass.opportunity.Store(true)
 	}
-	return context.WithValue(ctx, newPickFirstSelectionKey{}, opportunity)
+	return context.WithValue(ctx, newPickFirstSelectionKey{}, pass)
+}
+
+func newPickPassFrom(ctx context.Context) *newPickPass {
+	pass, _ := ctx.Value(newPickFirstSelectionKey{}).(*newPickPass)
+	return pass
 }
 
 func newPickOpportunity(ctx context.Context) *atomic.Bool {
-	pass, _ := ctx.Value(newPickFirstSelectionKey{}).(*atomic.Bool)
-	return pass
+	if pass := newPickPassFrom(ctx); pass != nil {
+		return &pass.opportunity
+	}
+	return nil
 }
 
 func isFirstNewPickSelection(ctx context.Context) bool {
@@ -112,48 +149,89 @@ func (l *newPickLimit) advance(window time.Time) {
 	}
 }
 
-// The short critical section uses only already materialized values.
-func (l *newPickLimit) reserve(opportunity *atomic.Bool, candidates []newPickCandidate, baseScore int64, window time.Time) (*newPickCandidate, int, bool) {
+// Keep the actual bucket alive until the scheduler returns. Another request
+// may advance the process window while the selected slot is being handed off.
+type newPickReservation struct {
+	limit     *newPickLimit
+	counts    map[int64]newPickCount
+	window    time.Time
+	id        int64
+	used      int
+	committed bool
+}
+
+func (l *newPickLimit) reserve(opportunity *atomic.Bool, candidates []newPickCandidate, baseScore int64, window time.Time) (*newPickCandidate, *newPickReservation, int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.advance(window)
 	if opportunity == nil || !opportunity.Load() || window.Before(l.window) {
-		return nil, 0, false
+		return nil, nil, 0
 	}
 	c, capped := chooseNewPick(candidates, baseScore, l.counts)
-	if c == nil {
-		return nil, 0, false
+	if c == nil || !opportunity.CompareAndSwap(true, false) {
+		return nil, nil, 0
 	}
 	id := c.target.account.ID
 	count := l.counts[id]
-	if !opportunity.CompareAndSwap(true, false) {
-		return nil, 0, false
-	}
 	if capped {
-		return c, count.picked + count.pending, true
+		return c, nil, count.picked + count.pending
 	}
 	count.pending++
 	l.counts[id] = count
-	return c, count.picked + count.pending, false
+	used := count.picked + count.pending
+	return c, &newPickReservation{limit: l, counts: l.counts, window: window, id: id, used: used}, used
 }
 
-// Finish in the actual decision window. A delayed release cannot refund a
-// newer window, and a successful attempt crossing a boundary needs room there.
-func (l *newPickLimit) finish(ctx context.Context, id int64, first15 int, reserved, current time.Time, picked bool) (int, bool) {
+// Before B is released, obtain capacity in the decision window if it changed.
+func (r *newPickReservation) confirm(ctx context.Context, window time.Time, first15 int) bool {
+	l := r.limit
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.advance(current)
-	count := l.counts[id]
-	if reserved.Equal(l.window) {
+	l.advance(window)
+	if ctx.Err() != nil || !window.Equal(l.window) {
+		return false
+	}
+	if r.window.Equal(window) {
+		return true
+	}
+	next := l.counts[r.id]
+	if next.picked+next.pending >= first15/4 {
+		return false
+	}
+	old := r.counts[r.id]
+	old.pending--
+	r.counts[r.id] = old
+	next.pending++
+	l.counts[r.id] = next
+	r.counts, r.window, r.used = l.counts, window, next.picked+next.pending
+	return true
+}
+
+func (r *newPickReservation) commit(ctx context.Context) error {
+	r.limit.mu.Lock()
+	defer r.limit.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	count := r.counts[r.id]
+	count.pending--
+	count.picked++
+	r.counts[r.id] = count
+	r.committed = true
+	return nil
+}
+
+// Also undo a commit if the decision logger panics before the result returns.
+func (r *newPickReservation) release() {
+	r.limit.mu.Lock()
+	defer r.limit.mu.Unlock()
+	count := r.counts[r.id]
+	if r.committed {
+		count.picked--
+	} else {
 		count.pending--
 	}
-	if picked && ctx.Err() == nil && current.Equal(l.window) && count.pending+count.picked < first15/4 {
-		count.picked++
-	} else {
-		picked = false
-	}
-	l.counts[id] = count
-	return count.picked + count.pending, picked
+	r.counts[r.id] = count
 }
 
 func (change *openAIStickyChange) readyForNewPick(req OpenAIAccountScheduleRequest) bool {
@@ -218,55 +296,48 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 		return nil
 	}
 	window := now.UTC().Truncate(15 * time.Minute)
-	c, used, capped := board.newPickLimit.reserve(newPickOpportunity(ctx), candidates, fromScore, window)
+	c, reservation, used := board.newPickLimit.reserve(newPickOpportunity(ctx), candidates, fromScore, window)
 	if c == nil {
 		return nil
 	}
-	outcome := "capped"
+	logDecision := func(outcome string) {
+		slog.InfoContext(ctx, "sched_quality.new_pick", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
+			"group_id", group, "model", b.model, "from", b.account.ID, "to", c.target.account.ID,
+			"from_score", fromScore, "to_score", c.score, "snapshot_at", at, "first15", c.first15, "used", used,
+			"window", window, "first10", c.recent.First10, "first30", c.recent.First30, "from_priority", b.key.Priority, "to_priority", c.target.key.Priority,
+			"from_rate_known", b.key.RateKnown, "from_rate", newPickRate(b.key), "to_rate_known", c.target.key.RateKnown, "to_rate", newPickRate(c.target.key), "result", outcome)
+	}
+	if reservation == nil {
+		logDecision("capped")
+		return nil
+	}
+
+	// Until ownership passes to the scheduler's return guard, this scope
+	// owns T and the reservation on every rejection, cancellation or panic.
 	var target *AccountSelectionResult
 	defer func() {
-		if target != nil && selected == nil {
-			target.ReleaseFunc()
+		if selected == nil {
+			if target != nil {
+				defer target.ReleaseFunc()
+			}
+			reservation.release()
 		}
 	}()
-	if !capped {
-		// Unwind the reservation even if an account, cache, policy or clock read panics.
-		limit := &board.newPickLimit
-		pending := true
-		defer func() {
-			if pending {
-				limit.finish(ctx, c.target.account.ID, c.first15, window, window, false)
-			}
-		}()
-		target, outcome = s.tryNewPick(ctx, req, c.target)
-		eligible := false
-		if target != nil {
-			bNow, tNow, ok := s.validateNewPick(ctx, req, b, target.Account, request, snap, at)
-			eligible = ok
-			if ok {
-				b, c.target = bNow, tNow
-			}
-		}
-		end := s.selectionNow().UTC().Truncate(15 * time.Minute)
-		finalUsed, committed := limit.finish(ctx, c.target.account.ID, c.first15, window, end, eligible)
-		pending = false
-		if target != nil && !committed {
-			outcome = "target_vetoed"
-		} else if committed && !end.Equal(window) {
-			window, used = end, finalUsed
-		}
+	target, outcome := s.tryNewPick(ctx, req, c.target)
+	if target == nil {
+		logDecision(outcome)
+		return nil
 	}
-
-	slog.InfoContext(ctx, "sched_quality.new_pick", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
-		"group_id", group, "model", b.model, "from", b.account.ID, "to", c.target.account.ID,
-		"from_score", fromScore, "to_score", c.score, "snapshot_at", at, "first15", c.first15, "used", used,
-		"window", window, "first10", c.recent.First10, "first30", c.recent.First30, "from_priority", b.key.Priority, "to_priority", c.target.key.Priority,
-		"from_rate_known", b.key.RateKnown, "from_rate", newPickRate(b.key), "to_rate_known", c.target.key.RateKnown, "to_rate", newPickRate(c.target.key), "result", outcome)
-
-	if outcome == "picked" {
-		return target
+	bNow, tNow, eligible := s.validateNewPick(ctx, req, b, target.Account, request, snap, at)
+	if !eligible || !reservation.confirm(ctx, s.selectionNow().UTC().Truncate(15*time.Minute), c.first15) {
+		logDecision("target_vetoed")
+		return nil
 	}
-	return nil
+	b, c.target, window, used = bNow, tNow, reservation.window, reservation.used
+	pass := newPickPassFrom(ctx)
+	target.ReleaseFunc = sync.OnceFunc(target.ReleaseFunc)
+	pass.target, pass.reservation, pass.log = target, reservation, logDecision
+	return target
 }
 
 func newPickRate(key selectionKey) any {
@@ -308,6 +379,31 @@ func (s *OpenAIGatewayService) validateNewPick(ctx context.Context, req OpenAIAc
 	b, baseFront := newPickFront(view, group, req.RequestedModel, original.account, request, now, at)
 	t, targetFront := newPickFront(view, group, req.RequestedModel, target, request, now, at)
 	return b, t, baseFront && targetFront && b.permits(t) && b.model == original.model && !openAIStickyBindingKept(ctx, req.SessionHash, target.ID)
+}
+
+// Load filtering/sorting establishes this pass's order. A requeued trial
+// remains available to ordinary selection but cannot become a fresh target.
+func newPickSuffix(original []*Account, base int64, tried map[int64]bool) []*Account {
+	for i, a := range original {
+		if a.ID != base {
+			continue
+		}
+		suffix := original[i+1:]
+		for j, t := range suffix {
+			if !tried[t.ID] {
+				continue
+			}
+			clean := append([]*Account(nil), suffix[:j]...)
+			for _, other := range suffix[j+1:] {
+				if !tried[other.ID] {
+					clean = append(clean, other)
+				}
+			}
+			return clean
+		}
+		return suffix
+	}
+	return nil
 }
 
 // The acquired slot is owned here until the final result is handed
