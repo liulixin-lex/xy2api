@@ -54,7 +54,13 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	}
 	now := b.now()
 	supply := &SchedAdminSupply{At: schedAdminStamp(now)}
-	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: model, RequiredTransport: OpenAIUpstreamTransportHTTPSSE, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, &groupID)}
+	// Preview the same endpoint capability used for ordinary text Responses requests.
+	req := OpenAIAccountScheduleRequest{
+		GroupID: &groupID, Platform: PlatformOpenAI, RequestedModel: model,
+		RequiredCapability: OpenAIEndpointCapabilityChatCompletions,
+		RequiredTransport:  OpenAIUpstreamTransportHTTPSSE,
+		RequirePrivacySet:  s.openAIGroupRequiresPrivacySet(ctx, &groupID),
+	}
 	loads := make(map[int64]*AccountLoadInfo)
 	if s.concurrencyService != nil {
 		loadReq := make([]AccountWithConcurrency, 0, len(accounts))
