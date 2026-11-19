@@ -119,6 +119,7 @@ import { fmtCountdown, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 import SchedEvidence from './SchedEvidence.vue'
 import { gateOff, groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
+import { evidenceElsewhere, noActionLong } from './performance'
 
 const props = defineProps<{
   detail: BackendAccountDetail
@@ -157,18 +158,24 @@ function toggle(groupId: number) {
 const groupName = (id: number) => props.groupInfo(id)?.name ?? props.detail.groups.find((group) => group.group_id === id)?.name
 
 /**
- * What follows the identity word: why it is unknown (the gate switched off for everything or for this group, else not
- * enough evidence), the trial's time left, the rear stay and its end.
+ * What follows the identity word: why it is unknown (a stale view or the gate switched off first; else the reason of
+ * the latest assessment that took no action, with what held it up and for how long; else not enough evidence), the
+ * trial's time left, the rear stay and its end, and for a rear line without a sample of this group that its evidence
+ * all came from other groups.
  */
-function lineStatus(line: BackendLine | undefined, left: number | null, unknownWhy: string): string {
+function lineStatus(line: BackendLine | undefined, left: number | null, unknownWhy: string, off: boolean): string {
   const identity = line?.identity ?? 'unknown'
-  if (identity === 'unknown') return unknownWhy
+  if (identity === 'unknown') {
+    const latest = line?.last_eval
+    return !off && latest && !latest.acted ? noActionLong(latest, t, te) : unknownWhy
+  }
   if (identity === 'trial') return left === null ? '' : t('admin.schedQuality.identity.trialLeft', { time: fmtCountdown(left) })
   if (identity === 'rear' && line) {
     const minutes = STAY_MINUTES[Math.min(Math.max(line.level, 0), STAY_MINUTES.length - 1)]
-    return line.until
+    const stay = line.until
       ? t('admin.schedQuality.identity.rearUntil', { time: formatShortTime(line.until), minutes })
       : t('admin.schedQuality.identity.rearStay', { minutes })
+    return evidenceElsewhere(identity, line) ? t('admin.schedQuality.perf.then', { a: stay, b: t('admin.schedQuality.perf.elsewhere') }) : stay
   }
   return ''
 }
@@ -183,7 +190,7 @@ const rows = computed(() =>
       const line = row?.lines[dim]
       const identity = lineIdentity(row, dim)
       const left = lineSecondsLeft(line, props.now)
-      const status = lineStatus(line, left, unknownWhy)
+      const status = lineStatus(line, left, unknownWhy, off !== null)
       const name = word('identity', identity)
       return { dim, identity, left, status, word: name, tip: [t(`admin.schedQuality.dim.${dim}`), name, status].filter(Boolean).join(' · ') }
     })

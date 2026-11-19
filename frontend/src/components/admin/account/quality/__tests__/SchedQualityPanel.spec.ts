@@ -3,6 +3,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
 import decisionsSource from '../SchedDecisions.vue?raw'
@@ -12,7 +13,7 @@ import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
 
 const { api, backendSummary } = vi.hoisted(() => ({
-  api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
+  api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
   backendSummary: vi.fn()
 }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api, backendSummary }))
@@ -105,6 +106,7 @@ beforeEach(() => {
   api.accountDetail.mockReset().mockImplementation(async (id: number) => detail(id))
   api.setOverride.mockReset().mockResolvedValue(undefined)
   api.accountDecisions.mockReset().mockResolvedValue([])
+  api.accountPerformance.mockReset().mockResolvedValue(perfAnswer([]))
   backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] })
 })
 
@@ -859,5 +861,84 @@ describe('SchedQualityPanel', () => {
     await w.get('[data-qp-decision-evidence="3"]').trigger('click')
     expect(w.get('[data-qp-decision="3"] [data-qp-evidence-samples]').text()).toBe(counts('ttfo', U, null))
     expect(w.get('[data-qp-decision="3"] [data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
+  })
+})
+
+describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
+  const perfOf = (id: number) => {
+    const row = (groupId: number, model: string, patch: Parameters<typeof perfRow>[1] = {}) => perfRow(id, { group_id: groupId, model, ...patch }, { n: 463, slowRate: 0.531 })
+    return perfAnswer(
+      [row(53, 'gpt-b'), row(53, 'gpt-a', { requests: 120 }), row(99, 'gpt-b', { member: false, requests: 30 })],
+      [perfGroup({ group_id: 53, name: '晨星组' }), perfGroup({ group_id: 54, name: '北辰组' }), perfGroup({ group_id: 99, name: '旧组' })]
+    )
+  }
+  const perfRows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-qp-perf-row]'), (row) => row.dataset.qpPerfRow)
+
+  it('lists the account in each group for the model tab, a group without traffic in grey, then a group it left', async () => {
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(api.accountPerformance).toHaveBeenCalledWith(7, expect.anything())
+    expect(perfRows()).toEqual(['53:7:gpt-b', '54:none', '99:7:gpt-b'])
+    expect(document.querySelector('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell="requests"]')!.textContent).toBe('463')
+    expect(document.querySelector('[data-qp-perf-row="99:7:gpt-b"]')!.textContent).toContain('admin.schedQuality.perf.notMember')
+    tab('gpt-a').click()
+    await flushPromises()
+    expect(perfRows()).toEqual(['53:7:gpt-a', '54:none'])
+    document.querySelector<HTMLElement>('[data-qp-perf-expand="53:7:gpt-a"]')!.click()
+    await flushPromises()
+    // The panel has one account's rows: no rank there.
+    const score = document.querySelector('[data-qp-perf-detail="53:7:gpt-a"] [data-sq-perf-detail-item="score"]')!.textContent!
+    expect(score).not.toContain('scoreRank')
+  })
+
+  it('offers a retry when the 12 hours did not load, without failing the rest of the panel', async () => {
+    api.accountPerformance.mockRejectedValue(new Error('down'))
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(document.querySelector('[data-qp-perf-failed]')).not.toBeNull()
+    expect(groupRow(53)).not.toBeNull()
+    api.accountPerformance.mockResolvedValue(perfOf(7))
+    document.querySelector<HTMLElement>('[data-qp-perf-failed] button')!.click()
+    await flushPromises()
+    expect(perfRows()).toContain('53:7:gpt-a')
+  })
+
+  it('says why an unknown line was not judged, from its latest assessment, and keeps 证据不够 without one', async () => {
+    const value = detail()
+    const row = value.groups[0].by_model[1]
+    row.lines.error = line('error', 'unknown', { last_eval: lastEval({ reason: 'own_short', have: 31, need: 50 }) })
+    row.lines.cache = line('cache', 'unknown', { last_eval: null })
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const tips = Array.from(groupRow(53).querySelectorAll<HTMLElement>('[data-qp-mark]'), (mark) => mark.getAttribute('aria-label'))
+    expect(tips[1]).toMatch(/^admin\.schedQuality\.dim\.error · admin\.schedQuality\.identity\.unknown · admin\.schedQuality\.noAction\.long\.own_short:.*"have\\":\\"31\\".*noAction\.since/)
+    expect(tips[2]).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
+  })
+
+  // 裁决 6: a rear line on other groups' evidence alone says so, in 各分组 and in the opened 12-hour row.
+  it('says a rear line\'s evidence all came from other groups when this group has no sample', async () => {
+    const value = detail()
+    Object.assign(value.groups[0].by_model[1].lines.ttfo, { samples_local: 0, samples_total: 14 })
+    api.accountDetail.mockResolvedValue(value)
+    const perf = perfOf(7)
+    perf.rows[0].lines.ttfo = { identity: 'rear', until: null, last_eval: lastEval({ acted: true, action: 'enter', reason: 'over' }) }
+    api.accountPerformance.mockResolvedValue(perf)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const tip = groupRow(53).querySelector<HTMLElement>('[data-qp-mark="ttfo"]')!.getAttribute('aria-label')!
+    expect(tip).toContain('admin.schedQuality.perf.then:')
+    expect(tip).toContain('admin.schedQuality.perf.elsewhere')
+    document.querySelector<HTMLElement>('[data-qp-perf-expand="53:7:gpt-b"]')!.click()
+    await flushPromises()
+    const verdict = document.querySelector('[data-qp-perf-detail="53:7:gpt-b"] [data-sq-perf-detail-item="verdict"]')!.textContent!
+    expect(verdict).toContain('admin.schedQuality.perf.detail.elsewhere')
+    // A rear line with samples of its own says nothing of the kind.
+    Object.assign(value.groups[0].by_model[1].lines.ttfo, { samples_local: 3, samples_total: 14 })
+    api.accountDetail.mockResolvedValue(structuredClone(value))
+    await markSchedChanged()
+    await flushPromises()
+    expect(groupRow(53).querySelector<HTMLElement>('[data-qp-mark="ttfo"]')!.getAttribute('aria-label')).not.toContain('elsewhere')
   })
 })
