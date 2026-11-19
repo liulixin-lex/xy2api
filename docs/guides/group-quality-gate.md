@@ -263,6 +263,8 @@ OpenAI 分组用首字上限、报错上限、缓存下限判断账号质量。�
 
 表现接口返回快照时刻 `at`、窗口起点 `window_from`、装载状态 `complete` 和过期标志 `stale`。比例由前端按计数计算。每条线的 `last_eval` 包含最新评估段的起止时刻（`since`、`at`）、次数（`count`）、动作（`acted`、`action`）及原因和证据缺口（`reason`、`causes`、`have`、`need`）。没有与水位相符的摘要时为 `null`。
 
+账号表现接口在完整快照的 `groups` 中列出账号现属的 OpenAI 分组和有表现行的分组。各组的门槛设置取自生成这版统计时使用的配置，刚改过的设置最多 5 分钟后反映在下一版统计中。这版统计没有该组配置时（例如快照后新建的分组），`gate_enabled` 为 `false`。
+
 固定开关另走 `PUT /api/v1/admin/groups/:id/members/:account_id`，字段 `pinned`，需要 `groups:manage`。账号列表的 `sched_quality` 筛选值为 `normal`、`rear`、`trial`、`unknown`、`exempt`。
 
 ## 已知局限
