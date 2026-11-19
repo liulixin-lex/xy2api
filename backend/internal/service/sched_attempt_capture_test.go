@@ -242,7 +242,7 @@ func TestSchedCaptureWebSocketFrameKindsAndSupersededTurn(t *testing.T) {
 	deadlineCalls := 0
 	conn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:      inner,
-		beforeSend: func(payload []byte) { turns.begin(svc, ctx, account, payload) },
+		beforeSend: func(payload []byte) *schedAttemptCapture { return turns.begin(svc, ctx, account, payload) },
 		resolveDeadline: func([]byte) openAIWSPassthroughFirstOutputDeadline {
 			deadlineCalls++
 			return openAIWSPassthroughFirstOutputDeadline{startedAt: time.Now(), timeout: time.Second}
@@ -254,8 +254,12 @@ func TestSchedCaptureWebSocketFrameKindsAndSupersededTurn(t *testing.T) {
 	require.Zero(t, deadlineCalls)
 	require.False(t, conn.deadlineState().armed)
 	first := turns.active
+	require.Equal(t, new(uint64(1)), first.sentSequence())
+	require.NoError(t, conn.WriteFrame(ctx, coderws.MessageText, []byte(`{"type":"session.update"}`)))
 	require.NoError(t, conn.WriteFrame(ctx, coderws.MessageText, payload))
-	require.Len(t, inner.writes, 2)
+	require.Equal(t, new(uint64(2)), turns.active.sentSequence())
+	require.Equal(t, new(uint64(1)), first.sentSequence())
+	require.Len(t, inner.writes, 3)
 	require.Len(t, rec.starts, 2)
 	require.Equal(t, 1, deadlineCalls)
 	require.True(t, conn.deadlineState().armed)
