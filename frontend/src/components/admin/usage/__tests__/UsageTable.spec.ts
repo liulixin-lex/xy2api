@@ -982,7 +982,7 @@ describe('admin usage metric visibility', () => {
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
   it('uses the same rate and explanation when first-token time is missing', () => {
-    const wrapper = mountMetrics({ showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
+    const wrapper = mountMetrics({ showEndToEnd: true, showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
     expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
     expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.outputTpsHint')
   })
@@ -1053,9 +1053,11 @@ describe('admin usage latency: the user wait first', () => {
   })
 
   it('keeps the first token on the shared user page, whose answer has no end-to-end value', () => {
-    const wrapper = mountLatency()
+    const wrapper = mountLatency({ showTokenSpeed: true })
     expect(wrapper.find('[data-testid="usage-latency-e2e"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('usage.latencyFirstToken')
+    expect(wrapper.text()).toContain('Avg TPS')
+    expect(wrapper.find('[title]').exists()).toBe(false)
     expect(wrapper.text()).toContain('800ms')
     expect(wrapper.text()).not.toContain('51.00s')
   })
