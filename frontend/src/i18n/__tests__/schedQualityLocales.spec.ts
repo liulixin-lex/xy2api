@@ -93,4 +93,25 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     )
     expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
   })
+
+  // Final review: the panel's not-counted note sits in one line of the figures' width (196px on a phone, 13px text);
+  // the whole explanation is in its tip and covers a gate that was off and a group that joined after the snapshot.
+  it('keeps the panel\'s not-counted note short and its tip complete', () => {
+    const note = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOff'))
+    const width = [...note].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 13 : 7), 0)
+    expect(width).toBeLessThanOrEqual(196)
+    const tip = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOffTip'))
+    expect(tip.length).toBeGreaterThan(note.length)
+  })
+})
+
+// Final review suggestion 5: one apostrophe in the English copy.
+it('uses the straight apostrophe in the English quality copy', () => {
+  const texts: string[] = []
+  const walk = (node: unknown) => {
+    if (typeof node === 'string') texts.push(node)
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+  }
+  walk(lookup(en, 'admin.schedQuality'))
+  expect(texts.filter((text) => /[‘’]/.test(text))).toEqual([])
 })
