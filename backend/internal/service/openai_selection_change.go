@@ -67,26 +67,26 @@ func (c *openAIStickyChange) matchesCutoff(f resilience.OwnerFirstOutputCutoff) 
 }
 
 func recordFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) {
-	reason, errorClass := pendingOpenAIStickyChange(ctx).writeFirstOutputAvoid(ctx, fact)
+	reason, errorClass, expiry := pendingOpenAIStickyChange(ctx).writeFirstOutputAvoid(ctx, fact)
 	fields := []any{"component", "sched_quality", "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
-		"group_id", fact.GroupID, "model", fact.Model, "account_id", fact.AccountID, "reason", reason, "confirmed", reason == "confirmed"}
+		"group_id", fact.GroupID, "model", fact.Model, "account_id", fact.AccountID, "owner_gen", logKnown(fact.Generation), "expires_at_ms", logKnown(expiry), "reason", reason, "confirmed", reason == "confirmed"}
 	if errorClass != "" {
 		fields = append(fields, "error_class", errorClass)
 	}
 	slog.InfoContext(ctx, "sched_quality.first_output_avoid", fields...)
 }
 
-func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) (reason, errorClass string) {
+func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact resilience.OwnerFirstOutputCutoff) (reason, errorClass string, expiry int64) {
 	cfg := resilience.Current()
 	switch {
 	case !cfg.SessionOn():
-		return "session_disabled", ""
+		return "session_disabled", "", 0
 	case !fact.CanTransfer:
-		return "protocol_ineligible", ""
+		return "protocol_ineligible", "", 0
 	case !c.matchesCutoff(fact):
-		return "binding_changed", ""
+		return "binding_changed", "", 0
 	case c.cache == nil:
-		return "error", "cache_unavailable"
+		return "error", "cache_unavailable", 0
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
@@ -96,7 +96,7 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 	}
 	ttl := time.Until(fact.FiredAt.Add(time.Duration(cfg.Session.AvoidSeconds) * time.Second))
 	if ttl <= 0 {
-		return "expired", ""
+		return "expired", "", 0
 	}
 	written, err := c.cache.RecordSessionBindingFailure(stateCtx, fact.GroupID, fact.BindingKey, firstOutputAvoidSession(fact.Session), c.expected, fact.AccountID, ttl, reset)
 	if ctxErr := stateCtx.Err(); ctxErr != nil {
@@ -104,17 +104,17 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 	}
 	if err != nil {
 		if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
-			return "timeout", fmt.Sprintf("%T", netErr)
+			return "timeout", fmt.Sprintf("%T", netErr), 0
 		}
-		return "error", fmt.Sprintf("%T", err)
+		return "error", fmt.Sprintf("%T", err), 0
 	}
-	if !written {
-		return "rejected", ""
+	if written == 0 {
+		return "rejected", "", 0
 	}
 	if !resilience.StateFrom(ctx).ConfirmOwnerAvoid(fact.AttemptSeq, fact.Generation) {
-		return "receipt_stale", ""
+		return "receipt_stale", "", written
 	}
-	return "confirmed", ""
+	return "confirmed", "", written
 }
 
 // A selection only plans a change. Admission and billing must never commit it.
@@ -132,23 +132,25 @@ type openAIStickyChange struct {
 	targetUpstreamFirstValidDelay time.Duration
 	targetUpstreamFirstValidKnown bool
 
-	groupID         int64
-	session         string
-	key             string
-	model           string
-	kind            string
-	reason          string
-	fromModel       string
-	ownerLookup     func(context.Context, int64) *Account
-	trialSession    string
-	leases          SchedTrialLeases
-	trial           *selectionTrialReservation
-	expected        StickySessionBinding
-	target          int64
-	ttl             time.Duration
-	cache           OpenAIStickyVersionedCache
-	dualWriteLegacy bool
-	skipCommit      bool // The snapshot read failed; keep all selection writes suppressed.
+	fromPriority, toPriority *int
+	voluntary                *voluntarySwitchEvidence
+	groupID                  int64
+	session                  string
+	key                      string
+	model                    string
+	kind                     string
+	reason                   string
+	fromModel                string
+	ownerLookup              func(context.Context, int64) *Account
+	trialSession             string
+	leases                   SchedTrialLeases
+	trial                    *selectionTrialReservation
+	expected                 StickySessionBinding
+	target                   int64
+	ttl                      time.Duration
+	cache                    OpenAIStickyVersionedCache
+	dualWriteLegacy          bool
+	skipCommit               bool // The snapshot read failed; keep all selection writes suppressed.
 	// ownerReleased: selection hit a branch that deletes the owner's binding
 	// (hard unavailable, failure streak). Only then may an ordinary placement
 	// replace an existing owner (§5.2); other bypasses serve the request elsewhere.
@@ -289,6 +291,9 @@ func (s *OpenAIGatewayService) freezeOpenAITransferEligibility(ctx context.Conte
 		change.groupID == derefGroupID(groupID) && session != "" && change.session == session && change.key != "" &&
 		firstOutputMigrationAllowed(ctx, session) && !s.qualityOwnsSticky(ctx, groupID, session)
 	change.mu.Lock()
+	if selection != nil && selection.Account != nil && change.expected.AccountID == selection.Account.ID {
+		change.fromPriority = new(selection.Account.Priority)
+	}
 	change.canTransfer = eligible
 	change.mu.Unlock()
 }
@@ -310,13 +315,16 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID == 0 {
 		kind = "create"
 	}
-	resilience.StateFrom(ctx).SetStickyChange(change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason()))
+	next := change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason())
+	next.toPriority = new(selection.Account.Priority)
+	resilience.StateFrom(ctx).SetStickyChange(next)
 }
 
 func (change *openAIStickyChange) replacement(kind, model string, target int64, reason string) *openAIStickyChange {
 	return &openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: kind, expected: change.expected, target: target, ttl: change.ttl, cache: change.cache,
+		fromPriority: change.fromPriority,
+		kind:         kind, expected: change.expected, target: target, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy, skipCommit: change.skipCommit, ownerReleased: change.ownerReleased,
 		resetAt: change.resetAt, leases: change.leases, fromModel: change.fromModel,
 		ownerLookup: change.ownerLookup, trialSession: change.trialSession, reason: reason,
@@ -372,11 +380,20 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 		}
 	}
 	if reason != "" {
-		slog.InfoContext(ctx, "sched_quality.session_switch", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
-			"group_id", fact.GroupID, "model", model, "from", fact.AccountID, "to", target, "kind", stickyFollow, "reason", reason, "committed", false)
+		declined := &openAIStickyChange{groupID: fact.GroupID, expected: StickySessionBinding{AccountID: fact.AccountID, Generation: fact.Generation},
+			kind: stickyFollow, target: target, model: model, toPriority: new(selection.Account.Priority)}
+		if change != nil && change.expected.AccountID == fact.AccountID {
+			change.mu.Lock()
+			declined.fromPriority = change.fromPriority
+			change.mu.Unlock()
+		}
+		declined.logSwitch(ctx, reason, BindingCommitResult{})
 		return
 	}
+	change.mu.Lock()
 	next := change.replacement(stickyFollow, model, target, "faster_delivery")
+	change.mu.Unlock()
+	next.toPriority = new(selection.Account.Priority)
 	next.ownerFirstOutputLimit = fact.Effective
 	req, _ := ContextWithSelectionProfitGate(ctx, selection).Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	req.GroupID, req.SessionHash, req.RequestedModel, req.Platform = group, session, model, PlatformOpenAI
@@ -452,6 +469,7 @@ func (change *openAIStickyChange) completeLocked(ctx context.Context, success, c
 	}
 	change.followDelivered = success
 	final := change.replacement(change.kind, change.model, change.target, change.reason)
+	final.toPriority = change.toPriority
 	final.ownerFirstOutputLimit, final.recheckFollow = change.ownerFirstOutputLimit, change.recheckFollow
 	final.activeAttempt, final.attemptSucceeded, final.attemptCanceled = change.activeAttempt, change.attemptSucceeded, change.attemptCanceled
 	final.targetUpstreamFirstValidKnown, final.targetUpstreamFirstValidDelay = change.targetUpstreamFirstValidKnown, change.targetUpstreamFirstValidDelay
@@ -470,27 +488,49 @@ func (a *schedAttemptCapture) followAttemptSent() bool {
 	return a.dispatch.AttemptSeq != 0
 }
 
+// Zero values of these fields designate unavailable evidence. Priorities and
+// idle settings use pointers because zero is a real policy value.
+func logKnown[T comparable](value T) *T {
+	var zero T
+	if value == zero {
+		return nil
+	}
+	return &value
+}
+
+func (change *openAIStickyChange) logSwitch(ctx context.Context, reason string, result BindingCommitResult, extra ...any) {
+	fields := []any{"component", "sched_quality", "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
+		"group_id", change.groupID, "model", change.model, "from", change.expected.AccountID, "to", logKnown(change.target),
+		"kind", change.kind, "reason", reason, "committed", result.Status == BindingCommitted,
+		"expected_gen", logKnown(change.expected.Generation), "observed_gen", logKnown(result.ObservedGen), "new_gen", logKnown(result.NewGen),
+		"commit_attempted", result.Status != "", "commit_result", logKnown(result.Status), "attempt_seq", change.activeAttempt.sentSequence(),
+		"from_priority", change.fromPriority, "to_priority", change.toPriority}
+	if v := change.voluntary; v != nil && change.kind == "takeover" {
+		fields = append(fields, "takeover_idle_setting", v.idleSetting, "takeover_idle_observed", v.idleObserved,
+			"avoid_seen_at_select", v.avoidSeen, "session_on", v.sessionOn, "transfer_allowed", v.transferAllowed, "quality_owned", v.qualityOwned)
+	}
+	slog.InfoContext(ctx, "sched_quality.session_switch", append(fields, extra...)...)
+}
+
 func (change *openAIStickyChange) finish(ctx context.Context, success, canceled, beforeSend bool) {
-	committed, fasterDelivery, commitAttempted := false, false, false
+	var result BindingCommitResult
+	fasterDelivery := false
 	defer func() {
-		if committed && change.trial != nil {
+		if result.Status == BindingCommitted && change.trial != nil {
 			change.trial.promote(ctx)
 		}
-		if !committed {
+		if result.Status != BindingCommitted {
 			change.releaseTrial(ctx)
 		}
 		reason := change.reason
 		if reason == "" {
 			reason = change.kind
 		}
-		fields := []any{"component", "sched_quality",
-			"gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(), "group_id", change.groupID,
-			"model", change.model, "from", change.expected.AccountID, "to", change.target,
-			"kind", change.kind, "reason", reason, "committed", committed}
+		var extra []any
 		if change.kind == stickyFollow {
-			fields = append(fields, "faster_complete", fasterDelivery, "commit_attempted", commitAttempted)
+			extra = append(extra, "faster_complete", fasterDelivery)
 		}
-		slog.InfoContext(ctx, "sched_quality.session_switch", fields...)
+		change.logSwitch(ctx, reason, result, extra...)
 	}()
 	if canceled && change.kind == stickyFollow {
 		change.reason = "canceled"
@@ -521,7 +561,7 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 			reset = change.resetAt(change.target)
 		}
 		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, change.target, openAIStickyChangeAvoidTTL, reset); err != nil {
-			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", change.target, "error", err)
+			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", change.target, "error_class", fmt.Sprintf("%T", err))
 		}
 		return
 	}
@@ -559,22 +599,29 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 			return
 		}
 	}
-	commitAttempted = true
-	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
+	options := BindingCommitOptions{FailureScope: stickyChangeAvoidSession(change.session)}
+	if change.voluntary != nil {
+		options.RejectScope = firstOutputAvoidSession(change.session)
+		if change.resetAt != nil {
+			options.TargetResetAt = change.resetAt(change.target)
+		}
+	}
+	var err error
+	result, err = change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, options)
 	if err != nil {
+		result = BindingCommitResult{Status: BindingCommitError}
 		if change.kind == stickyFollow {
 			change.reason = "commit_error"
 		}
-		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", change.target, "error", err)
+		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", change.target, "error_class", fmt.Sprintf("%T", err))
 		return
 	}
-	if !changed {
-		if change.kind == stickyFollow {
-			change.reason = "binding_changed"
+	if result.Status != BindingCommitted {
+		if change.kind == stickyFollow || result.Status == BindingTargetAvoided {
+			change.reason = string(result.Status)
 		}
 		return
 	}
-	committed = true
 	if change.leases != nil && change.expected.AccountID > 0 && change.expected.AccountID != change.target {
 		model := change.fromModel
 		if model == "" && change.ownerLookup != nil {
@@ -591,7 +638,7 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
 		if aliases, ok := change.cache.(OpenAIStickyAliasCache); ok {
 			if err := aliases.SyncSessionBindingAlias(stateCtx, change.groupID, change.key, change.expected.LegacyKey, change.target, min(change.ttl, 10*time.Minute), true); err != nil {
-				slog.WarnContext(ctx, "sched_quality.binding_alias_failed", "account_id", change.target, "error", err)
+				slog.WarnContext(ctx, "sched_quality.binding_alias_failed", "account_id", change.target, "error_class", fmt.Sprintf("%T", err))
 			}
 		}
 	}

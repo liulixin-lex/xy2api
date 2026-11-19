@@ -33,7 +33,15 @@ func (a *schedAttemptCapture) invalidateRepeatedSendLocked() {
 	a.ownerHit, a.fullTierFirstOutputTimeout = false, false
 }
 
+func (a *schedAttemptCapture) sentSequence() *uint64 {
+	if a == nil {
+		return nil
+	}
+	return logKnown(a.sendSeq.Load())
+}
+
 func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
+	a.sendSeq.Store(seq)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.httpSelection.HTTPStreamText || a.done || seq == 0 || a.state.CurrentAttempt() != a {

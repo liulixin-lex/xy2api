@@ -184,8 +184,33 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 	return available
 }
 
+// The protocol guard precedes membership and Redis reads. Report only the
+// owner and configured policy; neither a target nor an idle TTL was observed.
+func (s *OpenAIGatewayService) logPinnedSwitchVeto(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account) {
+	view, now := s.selectionView(), s.selectionNow()
+	if owner == nil || !selectionLive(view, now) {
+		return
+	}
+	group := derefGroupID(req.GroupID)
+	change := &openAIStickyChange{groupID: group, model: req.RequestedModel, kind: "migrate", expected: StickySessionBinding{AccountID: owner.ID},
+		fromPriority: new(owner.Priority), voluntary: &voluntarySwitchEvidence{sessionOn: resilience.Current().SessionOn()}}
+	if !selectionMigrateOwner(view, group, owner, req.RequestedModel, req.SessionHash, now) {
+		idle, enabled := view.TakeoverIdle(group)
+		if !enabled || idle < 0 {
+			return
+		}
+		change.kind = "takeover"
+		change.voluntary.idleSetting = new(int64(idle / time.Second))
+	}
+	change.logVeto(ctx, nil, "protocol_ineligible")
+}
+
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
-	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
+	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
+		return nil
+	}
+	if openAINoStickyMigration(ctx) {
+		s.logPinnedSwitchVeto(ctx, req, owner)
 		return nil
 	}
 	cache, ok := s.cache.(OpenAIStickyVersionedCache)
@@ -201,7 +226,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key
 	}
-	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now) {
+	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now, nil) {
 		return nil
 	}
 	accounts, err := members()
@@ -222,6 +247,15 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	}
 	if !possible {
 		return nil
+	}
+	// Reuse the ordinary pass's exclusion facts only for veto attribution.
+	if excluded, _ := ctx.Value(firstOutputExcludedKey{}).(map[int64]struct{}); len(excluded) != 0 {
+		for i := range accounts {
+			a := &accounts[i]
+			if _, hit := excluded[a.ID]; hit && a.Platform == req.Platform && (req.RequestedModel == "" || a.IsModelSupported(req.RequestedModel)) {
+				session.excludedMembers = append(session.excludedMembers, a)
+			}
+		}
 	}
 	candidates, _ := s.selectionCandidates(ctx, req, accounts)
 	var loads map[int64]*AccountLoadInfo

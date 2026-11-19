@@ -581,6 +581,9 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) *OpsUpstre
 // before one real HTTP send for accountID.
 func RecordOpsUpstreamSendBoundary(ctx context.Context, accountID int64) {
 	seq := resilience.StateFrom(ctx).MarkOpsUpstreamSendBoundary(accountID)
+	if g := firstEventGuardFrom(ctx); g != nil {
+		g.sendSeq.Store(seq)
+	}
 	if ctx != nil {
 		if a, _ := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture); a != nil && a.accountID == accountID {
 			a.markHTTPDispatch(seq)

@@ -296,7 +296,7 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		elapsedStart = attempt.started
 	}
 	attempt.timeout(plan)
-	noteTimeoutPlan(ctx, account, plan)
+	noteTimeoutPlan(ctx, account, plan, attempt.sentSequence())
 	elapsed := time.Since(elapsedStart)
 	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)
 	logger.LegacyPrintf(

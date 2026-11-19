@@ -306,10 +306,10 @@ type selectionCommitBarrier struct {
 	entered, finish chan struct{}
 }
 
-func (b *selectionCommitBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, target int64, ttl time.Duration, scopes ...string) (bool, error) {
+func (b *selectionCommitBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, target int64, ttl time.Duration, scopes BindingCommitOptions) (BindingCommitResult, error) {
 	close(b.entered)
 	<-b.finish
-	return b.selectionBindingFake.CommitSessionBinding(ctx, g, key, expected, target, ttl, scopes...)
+	return b.selectionBindingFake.CommitSessionBinding(ctx, g, key, expected, target, ttl, scopes)
 }
 func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	f := selectionNewSessionFixture()

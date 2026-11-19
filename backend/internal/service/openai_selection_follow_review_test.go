@@ -503,6 +503,15 @@ func TestFirstOutputFollowEmptyScopePreservesBindingChanges(t *testing.T) {
 				return outcome{sel.Account.ID, change.target, f.cache.sessionBindings[key], change.kind, change.reason, f.attempts, f.cache.casKeys}
 			}
 			before := run(false)
+			if kind == "takeover" {
+				require.EqualValues(t, 10, before.owner)
+				require.Empty(t, before.cas)
+				ordinary := run(true)
+				require.Equal(t, kind, ordinary.kind)
+				require.EqualValues(t, 11, ordinary.owner)
+				require.Equal(t, []string{key}, ordinary.cas)
+				return
+			}
 			require.Equal(t, kind, before.kind)
 			require.EqualValues(t, 11, before.owner)
 			require.Equal(t, []string{key}, before.cas)

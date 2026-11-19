@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -35,6 +36,7 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
 	firstOutputCancel                   context.CancelFunc // nonblocking cancellation of this guarded HTTP request
+	sendSeq                             atomic.Uint64      // Latest real HTTP send on this handle, including non-stream requests.
 	factsOnly                           bool
 	requestedHTTPConn, repeatedHTTPSend bool
 	mu                                  sync.Mutex
@@ -631,6 +633,8 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 			a.dispatch.Model = model
 		}
 		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
+	} else if a != nil {
+		req = req.WithContext(context.WithValue(req.Context(), schedHTTPAttemptKey{}, a))
 	}
 	if guard != nil && *owner != nil {
 		guard.capture.Store(*owner)

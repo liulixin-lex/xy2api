@@ -18,3 +18,17 @@ func (s *RequestState) SetStickyChange(change any) {
 	s.stickyChange = change
 	s.mu.Unlock()
 }
+
+// ClaimVoluntarySwitchVeto limits selection-time veto evidence across scheduler retries.
+func (s *RequestState) ClaimVoluntarySwitchVeto() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.voluntarySwitchVetoLogged {
+		return false
+	}
+	s.voluntarySwitchVetoLogged = true
+	return true
+}

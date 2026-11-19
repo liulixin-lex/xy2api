@@ -103,7 +103,7 @@ const resilienceAvoidAddLua = `
 		redis.call('PEXPIREAT', KEYS[1], latest[2])
 		redis.call('PEXPIREAT', KEYS[#KEYS], latest[2])
 	end
-	return 1
+	return deadline
 `
 
 var resilienceAvoidAddScript = redis.NewScript(resilienceAvoidAddLua)

@@ -77,6 +77,7 @@ type RequestState struct {
 	keptSticky                 int64
 	stickyBypassReason         string
 	stickyBypassLogged         bool
+	voluntarySwitchVetoLogged  bool
 	stickyBypassChangesBinding bool
 	// stateRepairAvoidedAccount is diagnostic-only evidence from this request's
 	// M3 switch. Unlike avoided, it never imports historical session avoidance.

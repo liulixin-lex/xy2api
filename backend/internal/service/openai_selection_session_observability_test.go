@@ -38,12 +38,26 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 				if kind == "migrate" {
 					reason = "quality_migration_error"
 				}
-				require.Equal(t, []map[string]any{{
+				want := map[string]any{
 					"level": "INFO", "msg": "sched_quality.session_switch", "component": "sched_quality",
 					"kind": kind, "reason": reason, "committed": outcome == "success",
 					"gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
 					"model": "m", "from": float64(10), "to": float64(1),
-				}}, events)
+					"commit_attempted": true, "attempt_seq": nil, "from_priority": float64(5), "to_priority": float64(1),
+					"expected_gen": "g1", "observed_gen": "g1", "new_gen": nil, "commit_result": "binding_changed",
+				}
+				switch outcome {
+				case "success":
+					want["commit_result"], want["new_gen"] = "committed", "g1-next"
+				case "error":
+					want["commit_result"], want["observed_gen"] = "error", nil
+				}
+				if kind == "takeover" {
+					want["takeover_idle_setting"], want["takeover_idle_observed"] = float64(0), nil
+					want["avoid_seen_at_select"], want["session_on"] = false, resilience.Current().SessionOn()
+					want["transfer_allowed"], want["quality_owned"] = true, nil
+				}
+				require.Equal(t, []map[string]any{want}, events)
 				if outcome != "success" {
 					require.Equal(t, int64(10), f.binding.owner)
 					return
