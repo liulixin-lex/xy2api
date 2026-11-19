@@ -11,8 +11,7 @@
       >
         <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
         <span>{{ t('admin.schedQuality.decisions.title') }}</span>
-      </button>
-      <span class="qp-h-note">{{ t('admin.schedQuality.decisions.note') }}</span>
+      </button>{{ ' ' }}<span class="qp-h-note" data-qp-decisions-note>{{ t('admin.schedQuality.decisions.note') }}</span>
     </h3>
     <div v-if="open" :id="listId" class="dec" :aria-busy="state === 'loading'">
       <div v-if="state === 'failed' && !items.length" class="dec__failed" data-qp-decisions-failed>
@@ -215,6 +214,25 @@ function timeoutReason(item: BackendDecision): string {
 </script>
 
 <style scoped>
+/* The panel's heading rule is scoped to the panel and does not reach this component's heading: a heading layout here,
+   so the title and the note stand apart (they ran together in English: "DecisionsOne record …"). The note is never
+   cut: it wraps, and on a narrow drawer (390 or 320 px) it moves under the title. */
+.qp-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-body);
+}
+.qp-h-note {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-regular);
+}
 .dec-toggle {
   display: inline-flex;
   align-items: center;

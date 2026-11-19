@@ -227,9 +227,15 @@ export default {
       joiner: '、',
       sources: '证据来自分组：{names}',
       samples: {
-        ttfo: '样本 本组 {local} / 全部 {total} 条',
-        error: '明确结果 本组 {local} / 全部 {total} 个',
-        cache: '续接轮 本组 {local} / 全部 {total} 个',
+        ttfo: '样本 本组 {local} / 全部 {total}',
+        error: '明确结果 本组 {local} / 全部 {total}',
+        cache: '续接轮 本组 {local} / 全部 {total}',
+        // The unit follows a known total only: "全部 30 条", never "全部 未知 条".
+        total: {
+          ttfo: '{n} 条',
+          error: '{n} 个',
+          cache: '{n} 个',
+        },
         weight: '权重 本组 {local} / 全部 {total}',
         unknownValue: '未知',
         unknownWhy: '标“未知”的数：这条记录写于开始记录它之前，没有这一项',

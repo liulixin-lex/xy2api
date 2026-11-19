@@ -446,6 +446,8 @@ export default {
     latencyEndToEndHint: '端到端首输出：从请求进入网关到用户收到首个有效输出，含排队和之前失败的尝试，是用户实际等了多久。',
     latencyEndToEndUnknownHint: '未知：这次请求没有端到端首输出的记录（没有产生有效输出，或是开始记录之前的请求）。',
     latencyLastAttempt: '末次首字',
+    latencyLastAttemptDuration: '末次耗时',
+    latencyLastAttemptDurationHint: '最后一次尝试的耗时；用户等待含之前的尝试。',
     latencyLastAttemptHint: '最后一次尝试的首字：只从最后一次尝试开始计，不含之前失败的尝试和排队；按系统设置里的首 token 统计口径。',
     latencyLastAttemptUnknownHint: '未知：最后一次尝试没有首字记录（没有计费的请求不记这一项）。',
     latencyUnknown: '未知',

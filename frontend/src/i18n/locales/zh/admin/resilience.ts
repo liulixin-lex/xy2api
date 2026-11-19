@@ -128,9 +128,23 @@ export default {
         collab_plaintext: '协作消息明文化尝试',
         collab_call: '协作工具调用（按密文参数状态）',
         collab_call_action: '协作工具调用处理动作',
-        state_rejection: '会话状态拒绝'
+        state_rejection: '会话状态拒绝',
+        // Request budget observation (backend resilience/budget.go, request_timing.go, body_receipt.go,
+        // service/resilience_timeout_observe.go, anthropic_stream_stage.go); the breakdown column carries the label.
+        budget_snapshot: '文本请求预算（按配置的预算起算模式）',
+        budget_cut_fot: '首输出超时：是否记录到预算限制（would）/ 截短归因是否生效（applied）',
+        ttfo_lower_bound: '该尝试的首输出等待下界（按模型和时长分档）',
+        late_attempt_start: '按请求到达时间计算的晚启动尝试',
+        body_receipt_repeat: '请求体重复接收次数',
+        anthropic_response_stage_timeout: 'Claude 响应阶段超时'
       },
       metricHints: {
+        budget_snapshot: '每个文本请求建立预算时计一次，此时请求体可能还没收完。细分是配置的预算起算模式（如 body_eof），不代表起算点真的移动了：请求体收得很快时起算点不动，也计入该档。',
+        budget_cut_fot: '首输出超时触发时计一次。would=true：记录到剩余预算比计划窗口短，定时器按剩余预算计时；applied=true：这次截短按“预算截断”归因，只在归因模式为 enforce 时出现，默认 observe 下窗口即使被限制也是 applied=false。归因模式为 off 时两个标记都不计算、都是 false，但窗口照样可能被预算缩短：预算 60 秒、第 55 秒启动 15 秒档的尝试，计时器只给 5 秒。',
+        ttfo_lower_bound: '按这次尝试冻结的首输出计时窗口分档，是至少等了的时长，不是实测耗时：窗口 9 秒、第 11 秒才处理超时，也计入 lt10。',
+        late_attempt_start: '派发尝试时，从请求到达算起已超过“预算 − 2 秒”。起算点在收完请求体（body_eof）时实际截止更晚，这时可能还剩充足的预算，不等于真实截止已过。',
+        body_receipt_repeat: '首次接收保存接收信息、不计数，之后每多收到一次各计一次：同一请求收三次显示 2。预算的起算点只看首次接收。',
+        anthropic_response_stage_timeout: 'Claude 请求的响应阶段计时器到期；细分是预算的起算依据。',
         session_rebind: '一次请求提出离开会话当前的号（避让），不等于会话已经换号。归属是否已换，以提交记录为准（日志 sched_quality.session_switch 的 committed）。'
       }
     },

@@ -17,7 +17,10 @@ const pluralKeys = new Set([
   'admin.accounts.table.tip.turns',
   'admin.accounts.table.tip.turnsShort',
   'admin.schedQuality.panel.allRequests',
-  'admin.schedQuality.board.summaryWaitRequests'
+  'admin.schedQuality.board.summaryWaitRequests',
+  'usage.e2eFirstOutputSamples',
+  'usage.e2eFirstOutputP50Missing',
+  'admin.ops.e2eFirstOutput.samples'
 ])
 
 function pipeMessages(node: unknown, prefix = ''): Array<[string, string]> {

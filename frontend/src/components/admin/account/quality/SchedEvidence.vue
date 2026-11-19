@@ -3,7 +3,7 @@
     <ul class="ev__list">
       <!-- This group's and all the counted units (the rule's own set), each as recorded or unknown; kept apart from the
            evidence, so a record without one still shows the other. -->
-      <li class="ev__i" data-qp-evidence-samples>{{ t(`admin.schedQuality.evidence.samples.${dim}`, split(samples.count)) }}</li>
+      <li class="ev__i" data-qp-evidence-samples>{{ t(`admin.schedQuality.evidence.samples.${dim}`, split(samples.count, true)) }}</li>
       <li v-if="samples.weight" class="ev__i" data-qp-evidence-weight>{{ t('admin.schedQuality.evidence.samples.weight', split(samples.weight)) }}</li>
       <li v-for="item in items" :key="item.key" class="ev__i" :data-qp-evidence-item="item.key">
         {{ t(`admin.schedQuality.evidence.${dim}.${item.key}`, { v: item.value }) }}
@@ -48,10 +48,12 @@ const { t, te } = useI18n()
 
 const items = computed(() => (props.evidence ? lineEvidence(props.dim, props.evidence) : []))
 const samples = computed(() => lineSamples(props.dim, props.samples, props.evidence))
-const split = (value: SampleSplit) => ({
-  local: value.local ?? t('admin.schedQuality.evidence.samples.unknownValue'),
-  total: value.total ?? t('admin.schedQuality.evidence.samples.unknownValue')
-})
+/** Each side as recorded or unknown; with `unit`, a known total carries the line's unit ("全部 30 条"), an unknown one none. */
+const split = (value: SampleSplit, unit = false) => {
+  const unknown = t('admin.schedQuality.evidence.samples.unknownValue')
+  const total = value.total === null ? unknown : unit ? t(`admin.schedQuality.evidence.samples.total.${props.dim}`, { n: value.total }) : value.total
+  return { local: value.local ?? unknown, total }
+}
 const samplesUnknown = computed(() =>
   [samples.value.count, samples.value.weight].some((value) => value && (value.local === null || value.total === null))
 )
