@@ -279,6 +279,14 @@ export function fmtScore(value: number): string {
 }
 /** An evidence count as recorded (weighted ones may be fractional): 9.25 → "9.3", 20 → "20". */
 export const fmtAmount = (value: number) => String(Math.round(value * 10) / 10)
+/** The same with a real minus when negative: −26.7 → "−26.7" (as every other negative figure here). */
+export const fmtAmountSigned = (value: number) => (value < 0 ? `−${fmtAmount(-value)}` : fmtAmount(value))
+
+// ---- Counts in words: "1 turn", "210 turns" in English (plural forms), "210 轮" in Chinese ----
+
+export type CountKind = 'times' | 'turns' | 'sessions' | 'attempts' | 'firstSends' | 'comparable' | 'scoredAccounts'
+type PluralTranslate = (key: string, named: Record<string, unknown>, plural: number) => string
+export const countText = (t: PluralTranslate, kind: CountKind, n: number) => t(`admin.schedQuality.perf.count.${kind}`, { n: fmtCount(n) }, n)
 
 // ---- Why not acted, in words (the board's "now" cell and tips, the detail, the panel's groups) ----
 

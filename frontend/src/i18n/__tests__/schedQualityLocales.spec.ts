@@ -115,3 +115,11 @@ it('uses the straight apostrophe in the English quality copy', () => {
   walk(lookup(en, 'admin.schedQuality'))
   expect(texts.filter((text) => /[‘’]/.test(text))).toEqual([])
 })
+
+// Acceptance round 2: durations read as minutes, not points ("分" next to scores); English results start alike.
+it('writes durations in minutes and capitalizes every English result', () => {
+  expect([lookup(zh, 'admin.schedQuality.duration.minutes'), lookup(zh, 'admin.schedQuality.duration.hoursMinutes')]).toEqual(['{m} 分钟', '{h} 小时 {m} 分钟'])
+  const results = [lookup(en, 'admin.schedQuality.perf.detail.resultNone'), ...Object.values(lookup(en, 'admin.schedQuality.decisions.action') as Record<string, string>)]
+  expect(results.map(String).filter((text) => text[0] !== text[0].toUpperCase())).toEqual([])
+})
+

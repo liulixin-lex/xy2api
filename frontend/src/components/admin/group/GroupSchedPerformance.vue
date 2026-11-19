@@ -17,7 +17,7 @@
       <p v-else-if="loadingStats" class="sq-text-3 text-sm" data-sq-perf-loading-stats>{{ t('admin.schedQuality.perf.loadingStats') }}</p>
       <div v-if="priorities.length > 1 || redCount > 0" class="gperf__filters">
         <div v-if="priorities.length > 1" class="gperf__prio">
-          <span class="sq-text-3" aria-hidden="true">{{ t('admin.schedQuality.perf.priority') }}</span>
+          <span class="gperf__prio-label sq-text-3" aria-hidden="true">{{ t('admin.schedQuality.perf.priority') }}</span>
           <div v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.perf.priority')" class="gperf__tabs" data-sq-perf-priorities>
             <button
               v-for="option in [null, ...priorities]"
@@ -74,7 +74,7 @@
                       <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
                     </button>
                     <div class="gperf__id">
-                      <span class="gperf__name" :title="view.row.name">
+                      <span class="gperf__name" :title="view.row.member ? view.row.name : `${view.row.name}${t('admin.schedQuality.perf.notMember')}`">
                         <button
                           v-if="canViewAccounts"
                           type="button"
@@ -84,9 +84,12 @@
                           @click="openSchedDrawer({ id: view.row.account_id, name: view.row.name }, { model: view.row.model, groupId: view.row.group_id })"
                         >{{ view.row.name }}</button>
                         <span v-else :class="{ 'sq-text-3': !view.row.member }">{{ view.row.name }}</span>
-                        <span v-if="!view.row.member" class="sq-text-3" data-sq-perf-left>{{ t('admin.schedQuality.perf.notMember') }}</span>
                       </span>
-                      <span class="gperf__sub gperf__model" :title="view.row.model">{{ subOf(view) }}</span>
+                      <!-- An account that left the group says so at the start of the second line, which a long name cannot
+                           cut (it sat after the name and went with it on a phone). -->
+                      <span class="gperf__sub gperf__model" :title="view.row.model">
+                        <span v-if="!view.row.member" class="gperf__left" data-sq-perf-left>{{ t('admin.schedQuality.perf.left') }} · </span>{{ subOf(view) }}
+                      </span>
                     </div>
                   </div>
                 </td>
@@ -121,14 +124,14 @@
                     <span v-tip="flagTip(view, 'cache')" :class="['gperf__main', view.cacheLow ? 'gperf__red-cell' : '']" :tabindex="view.cacheLow ? 0 : undefined">
                       <span v-if="view.cacheLow" class="sr-only">{{ flagTip(view, 'cache') }}</span>{{ fmtPct(view.cacheRate) }}
                     </span>
-                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }) }}</span>
+                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }, view.row.cont.turns) }}</span>
                   </template>
-                  <span v-else v-tip="cacheShortTip" class="gperf__main sq-text-3" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }) }}</span>
+                  <span v-else v-tip="cacheShortTip" class="gperf__main sq-text-3" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }, view.row.cont.turns) }}</span>
                 </td>
                 <td class="sq-r sq-num" data-sq-cell="timeouts">
                   <template v-if="view.timeoutRate !== null">
                     <span class="gperf__main">{{ fmtPct(view.timeoutRate) }}</span>
-                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.times', { n: fmtCount(view.row.attempts.timeouts) }) }}</span>
+                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.times', { n: fmtCount(view.row.attempts.timeouts) }, view.row.attempts.timeouts) }}</span>
                   </template>
                   <span v-else v-tip="timeoutsShortTip" class="gperf__main sq-text-3" tabindex="0">{{ fmtCount(view.row.attempts.timeouts) }} / {{ fmtCount(view.row.attempts.n) }}</span>
                 </td>
@@ -298,7 +301,8 @@ const { width: visible } = useElementSize(scrollRef)
 const windowText = computed(() => {
   const data = perf.value!
   if (!data.at) return t('admin.schedQuality.perf.windowLoading')
-  const requests = fmtCount(ofModel.value.reduce((sum, view) => sum + view.row.requests, 0))
+  const total = ofModel.value.reduce((sum, view) => sum + view.row.requests, 0)
+  const requests = t('admin.schedQuality.perf.total', { n: fmtCount(total) }, total)
   const parts = [
     t('admin.schedQuality.perf.window', { hours: data.window_hours, from: formatShortTime(data.window_from), to: formatShortTime(data.at) })
   ]
@@ -309,7 +313,7 @@ const windowText = computed(() => {
   }
   parts.push(t('admin.schedQuality.perf.updated', { time: formatShortTime(data.at) }))
   if (!loadingStats.value && !gateOff.value) {
-    parts.push(model.value === null ? t('admin.schedQuality.perf.total', { n: requests }) : t('admin.schedQuality.perf.totalModel', { model: modelText.value, n: requests }))
+    parts.push(model.value === null ? requests : t('admin.schedQuality.perf.totalModel', { model: modelText.value, requests }))
   }
   return parts.join(' · ')
 })
@@ -404,6 +408,10 @@ function whyOf(view: PerfView): string {
   gap: 8px 16px;
   margin-bottom: 12px;
   font-size: 13px;
+}
+.gperf__prio-label {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .gperf__prio {
   display: flex;

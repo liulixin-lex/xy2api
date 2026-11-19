@@ -23,7 +23,8 @@ import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { SCHED_DIMS, schedWord } from '@/utils/schedQualityFormat'
 import {
   evidenceElsewhere,
-  fmtAmount,
+  countText,
+  fmtAmountSigned,
   fmtCount,
   fmtPct,
   fmtScore,
@@ -35,19 +36,21 @@ import {
   MIN_TURN_SESSIONS,
   reasonLong,
   SWITCH_REASONS,
+  type CountKind,
   type PerfView
 } from './performance'
 
 const props = defineProps<{ view: PerfView }>()
 const { t, te } = useI18n()
+const count = (kind: CountKind, n: number) => countText(t, kind, n)
 const T = (key: string, values?: Record<string, unknown>) => t(`admin.schedQuality.perf.detail.${key}`, values ?? {})
 
 function firstLines(): string[] {
   const { row, group } = props.view
   const { first } = row
   if (first.n === 0 && first.unknown === 0) return [T('firstNone')]
-  const lines = [T('firstLine', { n: fmtCount(first.n), slow: fmtCount(first.slow), s: group?.ttft_seconds ?? '—' })]
-  if (first.unknown > 0) lines.push(T('firstUnknown', { n: fmtCount(first.unknown) }))
+  const lines = [T('firstLine', { times: count('times', first.n), slow: fmtCount(first.slow), s: group?.ttft_seconds ?? '—' })]
+  if (first.unknown > 0) lines.push(T('firstUnknown', { sends: count('firstSends', first.unknown) }))
   const { firstEnough, expectedRate, expectedEnough, extra } = props.view
   if (!firstEnough) lines.push(T('firstShort', { min: MIN_FIRST, sessions: MIN_FIRST_SESSIONS }))
   else if (expectedRate === null) lines.push(T('firstNoPeers'))
@@ -61,15 +64,15 @@ function cacheLines(): string[] {
   const { cont } = row
   if (cont.turns === 0) return [T('cacheNone')]
   if (cacheRate === null) {
-    return [T('cacheShort', { turns: fmtCount(cont.turns), sessions: fmtCount(cont.sessions), minTurns: MIN_TURNS, minSessions: MIN_TURN_SESSIONS })]
+    return [T('cacheShort', { turns: count('turns', cont.turns), sessions: count('sessions', cont.sessions), minTurns: MIN_TURNS, minSessions: MIN_TURN_SESSIONS })]
   }
-  return [T('cacheLine', { turns: fmtCount(cont.turns), sessions: fmtCount(cont.sessions), rate: fmtPct(cacheRate), min: group ? fmtPct(group.min_cache_ratio, 0) : '—' })]
+  return [T('cacheLine', { turns: count('turns', cont.turns), sessions: count('sessions', cont.sessions), rate: fmtPct(cacheRate), min: group ? fmtPct(group.min_cache_ratio, 0) : '—' })]
 }
 
 function timeoutLines(): string[] {
   const { row, timeoutRate } = props.view
   const { attempts } = row
-  const values = { n: fmtCount(attempts.n), k: fmtCount(attempts.timeouts) }
+  const values = { attempts: count('attempts', attempts.n), k: fmtCount(attempts.timeouts) }
   const lines = [timeoutRate === null ? T('timeoutsShort', { ...values, min: MIN_ATTEMPTS }) : T('timeoutsLine', { ...values, rate: fmtPct(timeoutRate) })]
   if (attempts.failures > 0) lines.push(T('failures', { n: fmtCount(attempts.failures) }))
   return lines
@@ -80,17 +83,17 @@ function switchLines(): string[] {
   if (switchTotal === 0) return [T('switchesNone')]
   const reasons = SWITCH_REASONS.map((reason) =>
     T('switchItem', { reason: schedWord('perf.switchReason', reason, t, te), n: fmtCount(row.switches?.[reason] ?? 0) }))
-  return [T('switchesLine', { n: fmtCount(switchTotal), reasons: reasons.join(' · ') })]
+  return [T('switchesLine', { times: count('times', switchTotal), reasons: reasons.join(' · ') })]
 }
 
 function scoreLines(): string[] {
   const { row, rank } = props.view
   const { score } = row
   if (score.value === null) {
-    return [T('scoreNone', { n: fmtCount(score.n), sessions: fmtCount(score.sessions), min: MIN_FIRST, minSessions: MIN_FIRST_SESSIONS })]
+    return [T('scoreNone', { sends: count('comparable', score.n), sessions: count('sessions', score.sessions), min: MIN_FIRST, minSessions: MIN_FIRST_SESSIONS })]
   }
-  const lines = [T('scoreLine', { value: fmtScore(score.value), n: fmtCount(score.n), sessions: fmtCount(score.sessions), excess: fmtAmount(score.excess) })]
-  if (rank) lines.push(T('scoreRank', { place: rank.place, of: rank.of }))
+  const lines = [T('scoreLine', { value: fmtScore(score.value), sends: count('comparable', score.n), sessions: count('sessions', score.sessions), excess: fmtAmountSigned(score.excess) })]
+  if (rank) lines.push(T('scoreRank', { place: rank.place, of: rank.of, accounts: count('scoredAccounts', rank.of) }))
   lines.push(t('admin.schedQuality.perf.scoreUseFull'))
   return lines
 }

@@ -9,6 +9,8 @@ import {
   fmtSigned,
   nextSort,
   noAction,
+  countText,
+  fmtAmountSigned,
   fmtShortfall,
   fmtTenths,
   modelLabel,
@@ -249,5 +251,22 @@ describe('performance formats', () => {
     expect([fmtScore(0.251), fmtScore(-0.059), fmtScore(0.03), fmtScore(-0.0001)]).toEqual(['25.1', '−5.9', '3.0', '0.0'])
     expect([fmtPoints(0.335), fmtPoints(-0.128), fmtPoints(0.0001)]).toEqual(['+33.5', '−12.8', '0.0'])
     expect([fmtSigned(155), fmtSigned(-658), fmtSigned(0), fmtSigned(1234)]).toEqual(['+155', '−658', '0', '+1,234'])
+  })
+})
+
+describe('acceptance round 2 formats', () => {
+  it('writes a negative amount with a real minus, as every other negative figure', () => {
+    expect([fmtAmountSigned(-26.7), fmtAmountSigned(26.74), fmtAmountSigned(0)]).toEqual(['−26.7', '26.7', '0'])
+  })
+
+  it('asks the copy for a count with its number, so English can pick one turn or many', () => {
+    const calls: unknown[][] = []
+    const plural = (...args: unknown[]) => { calls.push(args); return 'x' }
+    countText(plural as never, 'turns', 1)
+    countText(plural as never, 'sessions', 1234)
+    expect(calls).toEqual([
+      ['admin.schedQuality.perf.count.turns', { n: '1' }, 1],
+      ['admin.schedQuality.perf.count.sessions', { n: '1,234' }, 1234]
+    ])
   })
 })

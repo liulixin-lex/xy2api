@@ -49,6 +49,8 @@
             <span v-else class="prow__toggle" aria-hidden="true" />
             <GroupAliasPill :group="item.info" />
             <span class="prow__name">{{ item.name }}</span>
+            <!-- On a phone the name is cut short and groups named alike read the same: the id tells them apart. -->
+            <span class="prow__gid" aria-hidden="true">#{{ item.groupId }}</span>
           </span>
           <!-- A short note that fits the figures' width (268px, 196px on a phone); the tip says why, for a gate that was off
                when the snapshot was made and for a group that joined after it alike. -->
@@ -83,13 +85,15 @@
                 :class="{ prow__red: item.view.cacheLow }"
                 :tabindex="item.view.cacheLow ? 0 : undefined"
               ><span v-if="item.view.cacheLow" class="sr-only">{{ cacheTip(item.view) }}</span>{{ fmtPct(item.view.cacheRate) }}</span>
-              <span v-else v-tip="cacheShortTip" class="qp-muted" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(item.view.row.cont.turns) }) }}</span>
+              <span v-else v-tip="cacheShortTip" class="qp-muted" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(item.view.row.cont.turns) }, item.view.row.cont.turns) }}</span>
             </span>
             <span class="prow__r" role="cell" data-qp-perf-cell="switches">{{ fmtCount(item.view.switchTotal) }}</span>
           </template>
-          <template v-else>
-            <span v-for="cell in 5" :key="cell" :class="['prow__r qp-muted', cell === 2 ? 'prow__slow' : '']" role="cell">{{ DASH }}</span>
-          </template>
+          <!-- A counted group without a request of this model in the window: a short note in place of five dashes ("no
+               figures yet" while the window is still filling). -->
+          <span v-else class="prow__off qp-muted" role="cell" data-qp-perf-no-requests>{{
+            perf?.complete ? t('admin.schedQuality.perf.panel.noRequests') : t('admin.schedQuality.perf.panel.noFiguresYet')
+          }}</span>
         </div>
         <div v-if="item.view && expanded.has(item.key)" :id="`${detailIdPrefix}-${item.key}`" class="pdet-row" role="row" :data-qp-perf-detail="item.key">
           <div role="cell">
@@ -284,9 +288,9 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 }
 .prow {
   display: grid;
-  /* Group, requests, slow, excess, cache, switches; two headings are short words (English "Reqs", "Sw."; the whole word
-     is their title), so the group name keeps its room. */
-  grid-template-columns: minmax(0, 1fr) 52px 48px 52px 56px 44px;
+  /* Group, requests, slow, excess, cache, switches; the slow share takes "100.0%" whole (56px, as the cache); two
+     headings are short words (English "Reqs", "Sw."; the whole word is their title), so the group name keeps its room. */
+  grid-template-columns: minmax(0, 1fr) 52px 56px 52px 56px 44px;
   align-items: center;
   column-gap: 4px;
   min-height: 36px;
@@ -333,6 +337,12 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   font-size: var(--font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.prow__gid {
+  display: none;
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
 }
 .prow--none .prow__name {
   color: var(--color-text-muted);
@@ -393,6 +403,9 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   }
   .prow__slow {
     display: none;
+  }
+  .prow__gid {
+    display: inline;
   }
 }
 </style>

@@ -998,6 +998,11 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     await openOn(7, { model: 'gpt-b' })
     expect(perfRows()).toEqual(['53:none', '54:none'])
     expect(document.querySelector('[data-qp-perf-empty="model"]')!.textContent).toBe('admin.schedQuality.perf.panel.emptyModel:{"model":"gpt-b"}')
+    // Acceptance round 2: a counted group without requests says so in one short note, not five dashes; each row carries
+    // its group's id for a phone, where names are cut alike.
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
+    expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-no-requests]')).toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] .prow__gid')!.textContent).toBe('#53')
     // A short note in the cell; why (the gate off when the snapshot was made, or the group joined after it) in its tip.
     const off = document.querySelector<HTMLElement>('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')!
     expect(off.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
@@ -1101,5 +1106,16 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(api.accountPerformance.mock.calls.map((call) => call[0])).toEqual([7, 8])
     expect(signals[0].aborted).toBe(true)
     expect(perfRows()).toContain('53:8:gpt-b')
+  })
+
+  // Acceptance round 2: a counted group without requests while the window is still filling says "no figures yet".
+  it('says no figures yet for a group without requests while the window is partly covered', async () => {
+    const partial = perfOf(7)
+    partial.rows = partial.rows.filter((row) => row.model === 'gpt-a')
+    Object.assign(partial, { complete: false, window_from: '2026-11-19T08:40:00Z' })
+    api.accountPerformance.mockResolvedValue(partial)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noFiguresYet')
   })
 })
