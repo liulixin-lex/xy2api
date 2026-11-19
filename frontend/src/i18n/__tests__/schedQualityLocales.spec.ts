@@ -95,13 +95,15 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
   })
 
   // Final review: the panel's not-counted note sits in one line of the figures' width (196px on a phone, 13px text);
-  // the whole explanation is in its tip and covers a gate that was off and a group that joined after the snapshot.
+  // the whole explanation is in its tip and covers a gate that was off and an account not in the group yet (a new group,
+  // or one the account joined after the snapshot: the detail, every 5 s, shows it before the snapshot, every minute).
   it('keeps the panel\'s not-counted note short and its tip complete', () => {
     const note = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOff'))
     const width = [...note].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 13 : 7), 0)
     expect(width).toBeLessThanOrEqual(196)
     const tip = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOffTip'))
     expect(tip.length).toBeGreaterThan(note.length)
+    expect(tip).toMatch(/这个号当时还不在本分组|this account was not in the group yet/)
   })
 })
 

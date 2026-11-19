@@ -55,7 +55,7 @@
             <span class="prow__gid" aria-hidden="true">#{{ item.groupId }}</span>
           </span>
           <!-- A short note that fits the figures' width (268px, 196px on a phone); the tip says why, for a gate that was off
-               when the snapshot was made and for a group that joined after it alike. -->
+               when the snapshot was made and for an account not in the group yet (a new group, or one it joined since). -->
           <span
             v-if="item.gateOff"
             v-tip="t('admin.schedQuality.perf.panel.gateOffTip')"
