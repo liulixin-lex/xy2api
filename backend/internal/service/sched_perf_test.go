@@ -426,6 +426,45 @@ func TestSchedPerfAdminAndSwitches(t *testing.T) {
 	require.Contains(t, string(raw), `"last_eval":null`)
 }
 
+func TestSchedPerfAccountGroupScopeWithoutRows(t *testing.T) {
+	admin, engine, accounts := schedAdminFixture()
+	paused := SchedPolicyRecord{Policy: q.Policy{Enabled: false, TTFTSeconds: 6, MinCacheRatio: .4}}
+	enabled := SchedPolicyRecord{Policy: q.Policy{Enabled: true, TTFTSeconds: 12, MinCacheRatio: .8}}
+	published := map[int64]SchedPolicyRecord{1: paused, 2: enabled, 3: enabled}
+	group2 := &Group{ID: 2, Name: "paused after publication", Platform: PlatformOpenAI}
+	account := accounts.rows[1]
+	account.Groups = append(account.Groups, group2)
+	account.GroupIDs = append(account.GroupIDs, group2.ID)
+	fact := perfFact(1, 1)
+	fact.Delivered = true
+	engine.perf = buildSchedPerf(map[string]SchedPerfFact{"delivered": fact}, nil, published, nil, perfAt)
+
+	// Flip both gates, join an existing group and a newly created group before the next publication.
+	engine.snapshot.At = perfAt.Add(30 * time.Second)
+	admin.d.Now = func() time.Time { return engine.snapshot.At }
+	engine.snapshot.Policies = map[int64]SchedPolicyRecord{1: enabled, 2: paused, 3: enabled, 4: enabled}
+	for _, g := range []*Group{
+		{ID: 3, Name: "new membership", Platform: PlatformOpenAI},
+		{ID: 4, Name: "new group", Platform: PlatformOpenAI},
+		{ID: 5, Name: "other platform", Platform: PlatformAnthropic},
+	} {
+		account.Groups = append(account.Groups, g)
+		account.GroupIDs = append(account.GroupIDs, g.ID)
+	}
+
+	result, err := admin.AccountPerformance(t.Context(), account.ID)
+	require.NoError(t, err)
+	require.True(t, result.Complete)
+	require.Empty(t, result.Rows)
+	fallback := q.DefaultPolicy()
+	require.Equal(t, []schedPerfGroup{
+		{GroupID: 1, Name: "group", GateEnabled: false, TTFTSeconds: 6, MinCacheRatio: .4},
+		{GroupID: 2, Name: group2.Name, GateEnabled: true, TTFTSeconds: 12, MinCacheRatio: .8},
+		{GroupID: 3, Name: "new membership", GateEnabled: true, TTFTSeconds: 12, MinCacheRatio: .8},
+		{GroupID: 4, Name: "new group", GateEnabled: false, TTFTSeconds: fallback.TTFTSeconds, MinCacheRatio: fallback.MinCacheRatio},
+	}, result.Groups)
+}
+
 func TestSchedPerfAdminLineAssessments(t *testing.T) {
 	admin, engine, _ := schedAdminFixture()
 	now := engine.snapshot.At
