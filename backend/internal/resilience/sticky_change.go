@@ -19,6 +19,16 @@ func (s *RequestState) SetStickyChange(change any) {
 	s.mu.Unlock()
 }
 
+// VoluntarySwitchVetoLogged reports whether this request has already logged a veto.
+func (s *RequestState) VoluntarySwitchVetoLogged() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.voluntarySwitchVetoLogged
+}
+
 // ClaimVoluntarySwitchVeto limits selection-time veto evidence across scheduler retries.
 func (s *RequestState) ClaimVoluntarySwitchVeto() bool {
 	if s == nil {

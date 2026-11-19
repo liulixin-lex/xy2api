@@ -382,7 +382,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 	}
 	if reason != "" {
 		declined := &openAIStickyChange{groupID: fact.GroupID, expected: StickySessionBinding{AccountID: fact.AccountID, Generation: fact.Generation},
-			kind: stickyFollow, target: target, model: model, toPriority: new(selection.Account.Priority), toModel: OpenAIAttemptModel(selection.Account, model), fromModel: fact.Model, ownerLookup: s.selectionTrialOwner}
+			kind: stickyFollow, target: target, model: model, toPriority: new(selection.Account.Priority), toModel: OpenAIAttemptModel(selection.Account, model), fromModel: fact.Model}
 		if change != nil && change.expected.AccountID == fact.AccountID {
 			change.mu.Lock()
 			declined.fromPriority = change.fromPriority
@@ -506,28 +506,9 @@ func logKnown[T comparable](value T) *T {
 	return &value
 }
 
-// A released owner may never have reached normal admission. Resolve a
-// missing mapping only with the actual endpoint's account snapshot.
-func (change *openAIStickyChange) accountModel(ctx context.Context, id int64, frozen string) string {
-	if id <= 0 {
-		return ""
-	}
-	if frozen != "" || change.ownerLookup == nil || change.model == "" {
-		return frozen
-	}
-	lookupCtx, cancel := resilienceStateContext(ctx)
-	defer cancel()
-	if account := change.ownerLookup(lookupCtx, id); account != nil && account.ID == id {
-		return OpenAIAttemptModel(account, change.model)
-	}
-	return ""
-}
-
 func (change *openAIStickyChange) logSwitch(ctx context.Context, reason string, result BindingCommitResult, extra ...any) {
-	fromModel := change.accountModel(ctx, change.expected.AccountID, change.fromModel)
-	toModel := change.accountModel(ctx, change.target, change.toModel)
 	fields := []any{"component", "sched_quality", "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
-		"group_id", change.groupID, "model", change.model, "from_model", logKnown(fromModel), "to_model", logKnown(toModel), "from", change.expected.AccountID, "to", logKnown(change.target),
+		"group_id", change.groupID, "model", change.model, "from_model", logKnown(change.fromModel), "to_model", logKnown(change.toModel), "from", change.expected.AccountID, "to", logKnown(change.target),
 		"kind", change.kind, "reason", reason, "committed", result.Status == BindingCommitted,
 		"expected_gen", logKnown(change.expected.Generation), "observed_gen", logKnown(result.ObservedGen), "new_gen", logKnown(result.NewGen),
 		"commit_attempted", result.Status != "", "commit_result", logKnown(result.Status), "attempt_seq", change.activeAttempt.sentSequence(),
@@ -650,8 +631,12 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 		return
 	}
 	if change.leases != nil && change.expected.AccountID > 0 && change.expected.AccountID != change.target {
-		change.fromModel = change.accountModel(stateCtx, change.expected.AccountID, change.fromModel)
 		model := change.fromModel
+		if model == "" && change.model != "" && change.ownerLookup != nil {
+			if owner := change.ownerLookup(stateCtx, change.expected.AccountID); owner != nil && owner.ID == change.expected.AccountID {
+				model = OpenAIAttemptModel(owner, change.model)
+			}
+		}
 		// Without the owner's mapping, let the member expire instead of removing
 		// a member under the client model, which may name a different upstream key.
 		if model != "" {

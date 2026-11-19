@@ -166,6 +166,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return a != nil && s.candidateAllowed(view, groupID, model, owner, a, migrate, req, now)
 	}
 	logOpportunity := func(reason string) {
+		if resilience.StateFrom(ctx).VoluntarySwitchVetoLogged() {
+			return
+		}
 		var target *Account
 		if s.vetoOpportunity != nil {
 			target = s.vetoOpportunity(reason, soft, avoided, allowedForVeto)
