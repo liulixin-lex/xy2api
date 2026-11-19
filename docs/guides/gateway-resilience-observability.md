@@ -4,6 +4,7 @@
 
 ## 管理后台
 
+- **运维看板**。全局或按平台查看时，自动或预聚合模式使用的整点小时汇总不含无分组 Key 请求的末次首字和端到端首输出。只有开启 `allow_ungrouped_key_scheduling` 才会有这类请求，原始查询会计入符合筛选条件的这类请求。
 - **运维监控 → 网关韧性**：当前实例最近 5 分钟至 1 小时的计数（按指标、分组、账号与细分标签），以及未送达请求列表。计数在进程内存中，多实例部署时只反映所在实例。
 - **选号解释**：在同一面板底部选择任一分组（含原版调度分组），可选填模型、会话哈希与请求类型，只读查看每个账号的档位（健康、软罚、硬罚）、原因、恢复时间、会话失败次数与是否被暂避，以及末位兜底账号与兜底分组的决策。
   - 填了模型时，若该模型不在分组白名单或渠道定价不含它（所有请求在选号前即失败），在账号表上方提示。
@@ -12,7 +13,7 @@
   - 末位兜底账号的判断不计模型、渠道、额度等逐请求条件，实际选中的可能是后一个候选。OpenAI 的按模型瞬时屏蔽与质量状态不显示在选号解释中，OpenAI 分组的当前名次与层看分组详情的“选号顺序”（见 [分组页](group-quality-gate.md#分组页)）。
 - **账号管理**：余额暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文，“恢复状态”立即放回；被学为仅流式的账号在状态列下方显示“仅流式（自动学习，剩余 X 小时）”，有管理权限时“清除”按钮保持可见，文字过长可悬停看完整说明。
 - **运维错误详情**：每次上游尝试带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`），按完整上游载荷计算，与换号决策一致。
-- **使用记录**：由兜底分组服务的请求，管理端主标签显示原分组，下方提示“兜底 → 兜底组名”，悬停说明“按兜底分组计费”。
+- **使用记录**：由兜底分组服务的请求，管理端主标签显示原分组，下方提示“兜底 → 兜底组名”，悬停说明按原始分组和实际服务分组判定、按兜底分组计费。账单的 `fallback` 标志另有含义，见 [两条日志与 fallback 的含义](#两条日志与-fallback-的含义)。
 
 SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额、用户并发、本地模型配置与上游内容安全拒绝标为业务限制，不计入 SLA。
 
@@ -80,7 +81,7 @@ COMMIT;
 | `budget_exhausted` | 请求预算耗尽 |
 | `last_resort` | 末位兜底选中软罚账号 |
 | `fallback_group` / `fallback_return` | 转投兜底分组 / 切回主分组 |
-| `session_rebind` | 会话失败改绑 |
+| `session_rebind` | 请求提出的会话避让（后台叫“会话避让（请求提出）”），不代表归属已换，见 [两条日志与 fallback 的含义](#两条日志与-fallback-的含义) |
 | `undelivered` / `cdn_cut` | 未送达；按耗时推断的 CDN 切断 |
 | `fast_fail` | 同一 Key 重复 503 快速返回 |
 | `turn_cap` | 会话连续耗尽失败到达上限，改为终止应答 |
@@ -96,6 +97,17 @@ COMMIT;
 
 计数按分钟分桶、保留 1 小时；每分钟的键数有上限，超出后合并为不带分组与账号的 `overflow` 汇总行。
 
+## 两条日志与 fallback 的含义
+
+下面几处名字容易读成“换了号”或“换了分组”，实际含义如下。
+
+| 看到的 | 含义 | 要确认什么，看哪里 |
+|---|---|---|
+| 日志 `resilience.session_rebind`、计数 `session_rebind` | 这次请求提出离开会话当前的号（避让的意图），在提交绑定之前记下 | 归属是否已换，以提交记录为准：看 `sched_quality.session_switch` 的 `committed`。`committed=false` 表示没有换成 |
+| 使用记录的 `fallback=true` | 本次由后排号承接（OpenAI 质量选号落到后排层时也会置上），不表示换了分组 | 门槛组里带这个标志的请求很多，实际跨分组的可以是 0 |
+| 跨没跨分组 | 只看原始分组和实际服务分组：管理端使用记录的 `origin_group_id` 有值且不等于 `group_id`，才是由兜底分组承接（界面上的“兜底 → 组名”） | 日志 `resilience.fallback_group`、`resilience.fallback_return` |
+| 无号可用时的末位候选 | 不进账单，账单里没有对应的列 | 看计数 `last_resort` 和日志 `resilience.last_resort`。选中会话避让的账号时另记 `resilience.last_resort_avoided` |
+
 ## 日志事件
 
 结构化日志的消息固定为事件名，细节在字段中。日志不含正文、Key 或完整会话值。
@@ -105,8 +117,8 @@ COMMIT;
 | 事件 | 说明 |
 |---|---|
 | `resilience.balance_paused` | 账号余额暂停，含暂停时长、档位 `step` 与上游原文 |
-| `resilience.session_rebind` | 会话改绑，`reason` 为 `resil_failure_streak`、`post_output_first_failure` 或 `terminal_rejection_streak`，含会话哈希前缀、分组、账号、类别、连击次数与暂避时长 |
-| `resilience.last_resort`、`resilience.last_resort_avoided` | 末位兜底选中软罚账号；后者表示选中的是会话暂避集合中的账号。`candidates` 为本轮扫描的候选数，`penalty_reason` 为按原因计数的摘要 |
+| `resilience.session_rebind` | 请求提出的会话避让（离开原号的意图，不代表归属已换；是否已换看 `sched_quality.session_switch` 的 `committed`），`reason` 为 `resil_failure_streak`、`post_output_first_failure` 或 `terminal_rejection_streak`，含会话哈希前缀、分组、账号、类别、连击次数与暂避时长 |
+| `resilience.last_resort`、`resilience.last_resort_avoided` | 末位兜底选中软罚账号；后者表示选中了本会话避让的账号。OpenAI 的 `avoid_source` 为 `session`（普通会话避让）、`first_output`（首输出避让）或 `both`（同时命中）。`candidates` 为本轮扫描的候选数，`penalty_reason` 为按原因计数的摘要 |
 | `resilience.same_site_hold` | 同站断流暂停，含 `host_hash`（主机名摘要）、`account_id`、`peer_account_id`、`until` |
 | `resilience.fallback_group`、`resilience.fallback_return` | 转投兜底分组（`reason` 为 `balance_exhausted` 或 `no_servable_account`，只在首次记住该 Key 时记录）与切回 |
 | `resilience.budget_exhausted`、`resilience.capacity_switch_exhausted` | 请求预算或容量换号额度耗尽 |
@@ -131,7 +143,7 @@ COMMIT;
 OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不记录请求或响应正文、凭据与完整会话值。查询入口分三类：
 
 - 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选。
-- Warn 及以上会落库，但以下日志不带 `component`，须按事件名找：`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error。
+- Warn 及以上会落库。`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.rear_entries_read_failed`、`sched_quality.trial_full_record_failed`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error 均按事件名查找。这些事件不带 `component`。
 - 不带 `component` 的 Info 只在应用标准输出里，包括 `sched_quality.capability_mark_evicted` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录；不能在系统日志中查到。
 
 成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
@@ -142,7 +154,9 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 | `sched_quality.replay` | Debug | 处理积压的事务提交后；带组件，`horizon` 为处理水位，`batches`、`assessments` 为补跑批次与判定次数，需启用 Debug |
 | `sched_quality.summary` | Info | 每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`clear` |
 | `sched_quality.state` | Info | 产生判定动作时；含 `at`、`rule_version`、`account_id`、`model`、`group_id`、`action`、`line`、`level`、`until`、`basis`、`attempt_ids` |
-| `sched_quality.session_switch` | Info | 会话绑定事务结束，成功、失败、取消、冲突均可写；见下表 |
+| `sched_quality.first_output_avoid` | Info | 原归属号等够首输出时限后记录避让结果；含 `gateway_request_id`、`group_id`、`model`、`account_id`、`reason`、`confirmed`，存储错误或超时另有 `error_class` |
+| `sched_quality.session_switch` | Info | 会话绑定事务结束，或选号时放弃救场交接；见下表 |
+| `openai.sticky_bypass` | `reason=first_output_avoid` 时为 Info | `reason=first_output_avoid` 表示仅因首输出避让绕开仍合格的归属号，另选账号临时服务。含 `gateway_request_id`、`group_id`、`owner`、`selected`。此原因带 `component=sched_quality`，可在系统日志查询。会改绑定的原因和 `unrecorded` 记为 Warn |
 | `sched_quality.attempt_finished` | 成功 Debug，其余 Info | 尝试收尾；请求、尝试 ID、分类、状态来源、终态及实际输出字节，见下文 |
 | `sched_quality.policy_changed` | Info | 保存分组门槛或全局首字规则；`operator_id`、`old`、`new`、`affected_lines`、`cleared`，分组门槛另有 `group_id` |
 | `sched_quality.cleanup` | Info；失败 Error | 清理真正执行时；`kind=ledger` 为超过 7 天的尝试，`kind=decisions` 为超过 30 天的判定；含 `rows`，尝试清理另有 `duration_ms`，失败有 `error`；`ledger` 可按组件筛，`decisions` 成功仅标准输出，失败按事件名找 |
@@ -155,8 +169,10 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 | `sched_quality.binding_alias_failed` | Warn | 保存绑定别名失败；`account_id`、`error` |
 | `sched_quality.takeover_avoid_failed` | Warn | 换号失败后写会话避让失败；`account_id`、`error` |
 | `sched_quality.takeover_commit_failed` | Warn | 会话绑定提交存储失败；`account_id`、`error` |
+| `sched_quality.rear_entries_read_failed` | Warn | 分组摘要的近 24 小时进后排统计读取失败，`rear_entries_24h` 为 `null`。含 `error` |
 | `sched_quality.trial_room_failed` | Warn | 试用名额查询失败，按满额降层；`account_id`、`error` |
 | `sched_quality.trial_acquire_failed` | Warn | 试用名额获取失败，按满额继续选号；`error`，部分调用另带 `account_id` |
+| `sched_quality.trial_full_record_failed` | Warn | 满位时刻写入失败，本轮试用超时时，名额状态可能记为 `not_observed`（未观察到名额已满）。含 `error`、`account_id`、`group_id` |
 | `sched_quality.trial_touch_failed` | Warn | 试用名额续期失败；`error`，部分调用另带 `account_id` |
 | `sched_quality.trial_promote_failed` | Warn | 已提交绑定后，请求名额转会话名额失败；`account_id`、`error`，随后尽力释放请求名额 |
 | `sched_quality.trial_release_failed` | Warn | 单个名额释放失败；`account_id`、`group_id`、`error` |
@@ -167,16 +183,27 @@ OpenAI 质量判定、换号与尝试收尾使用以下事件。事件字段不�
 
 `state` 的 `line` 是 `ttfo`、`error` 或 `cache`，一次动作对应一条线。动作包括 `enter`、`renew`、`release`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，含义见 [判定记录](group-quality-gate.md#判定记录)。`level` 为 0–4，对应 20、40、60、90、120 分钟。`until` 仅在进入 / 续期 / 试用失败时写后排期限，进入试用时写试用期限，其余为空。`basis` 包含门槛、证据来源和该线的证据；`attempt_ids` 最多 50 个。首字证据有时间折扣与同伴比较，不能只看 P50 推断判定。
 
-**`sched_quality.session_switch`**：
+**`sched_quality.first_output_avoid`** 的 `confirmed=true` 表示写入成功，且回执已由当前请求确认。未确认时，`reason` 可为 `session_disabled`（开关已关）、`protocol_ineligible`（请求无交接资格）、`binding_changed`（原绑定不匹配）、`rejected`（存储拒绝）、`error`（存储错误）、`timeout`（超时）、`expired`（避让期已过）或 `receipt_stale`（回执已不匹配当前轮次）。`error_class` 只记录错误类别。
+
+**`sched_quality.session_switch`** 字段
 
 | 字段 | 含义 |
 |---|---|
-| `gateway_request_id` | 触发绑定事务的网关本地请求 ID |
+| `gateway_request_id` | 网关本地请求 ID，可关联避让与尝试记录 |
 | `group_id`、`model` | 分组与调度模型名 |
 | `from`、`to` | 原账号与目标账号 |
-| `kind` | 如 `create`（新绑定）、`migrate`（迁移）、`takeover`（接管） |
-| `reason` | 换号原因；首字和报错迁移分别为 `quality_migration_ttfo`、`quality_migration_error`；无单独原因时取 `kind` |
-| `committed` | 是否实际提交绑定；`false` 不代表已经换号成功，需结合尝试结果及提交告警 |
+| `kind` | 如 `create`（新绑定）、`migrate`（迁移）、`takeover`（接管）、`first_output_follow`（救场交接） |
+| `reason` | 首字和报错迁移分别为 `quality_migration_ttfo`、`quality_migration_error`；救场交接用 `faster_delivery` 或下列放弃原因；其他未单列原因时取 `kind` |
+| `committed` | `true` 表示绑定已提交。请求是否交付需结合尝试结果 |
+| `faster_complete` | 救场交接收尾时记录，是否完整交付且首输出严格更快 |
+| `commit_attempted` | 救场交接收尾时记录，是否尝试提交绑定 |
+
+救场交接放弃时可按 `reason` 查询：
+
+- `session_disabled`（开关已关）、`protocol_ineligible`（请求无交接资格）、`avoid_unconfirmed`（避让未确认）、`existing_change`（已有其他绑定变更）。
+- `not_front`（目标不在前排）、`borrowed`（临时借号）、`target_ineligible`（目标未通过准入复核）、`quality_owned`（归属由会话质量路由持有）、`quality_unavailable`（无法确认质量路由归属）。
+- `pre_dispatch_invalidated`（目标未实际派发）、`incomplete_delivery`（未完整交付）、`canceled`（请求取消）、`missing_clock`（缺计时）、`not_faster`（首输出相等或更慢）。
+- `binding_changed`（原绑定不匹配或已变化）、`commit_error`（绑定提交出错）。
 
 **`sched_quality.attempt_finished`**：`request_id` 是网关本地 ID，`attempt_id` 标识本次发送；`outcome`、`class` 是采样结果与归责类别，`http_status`、`status_origin` 分开记录状态与来源。`client_disconnect`、`terminal_seen`、`terminal_event`、`terminal_failed`、`error_source`、`send_error`、`context_done` 用于区分终态、网络、取消与清理。`terminal_ms`、`finished_ms` 相对本次尝试开始；`first_output_request_ms` 是请求级端到端首输出；`output_bytes` 是实际写给客户端的字节，含已写前奏，不等同语义输出字节。
 

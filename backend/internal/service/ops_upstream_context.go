@@ -580,7 +580,12 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) *OpsUpstre
 // RecordOpsUpstreamSendBoundary records the current upstream-event sequence
 // before one real HTTP send for accountID.
 func RecordOpsUpstreamSendBoundary(ctx context.Context, accountID int64) {
-	resilience.StateFrom(ctx).MarkOpsUpstreamSendBoundary(accountID)
+	seq := resilience.StateFrom(ctx).MarkOpsUpstreamSendBoundary(accountID)
+	if ctx != nil {
+		if a, _ := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture); a != nil && a.accountID == accountID {
+			a.markHTTPDispatch(seq)
+		}
+	}
 }
 
 // MergeOpsPostOutputFailureEvents adds confirmed HTTP stream failures to the

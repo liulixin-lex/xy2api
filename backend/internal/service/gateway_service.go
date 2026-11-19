@@ -553,10 +553,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 }
 
 type AccountWaitPlan struct {
-	AccountID      int64
-	MaxConcurrency int
-	Timeout        time.Duration
-	MaxWaiting     int
+	gatewayEligibility gatewayWaitEligibility
+	AccountID          int64
+	MaxConcurrency     int
+	Timeout            time.Duration
+	MaxWaiting         int
 }
 
 type AccountSelectionResult struct {

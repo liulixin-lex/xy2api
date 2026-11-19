@@ -66,6 +66,44 @@ func TestAssessErrorWilsonBoundaries(t *testing.T) {
 	}
 }
 
+func TestAssessErrorRecoveryBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		clear, failed, unknown int
+		limit                  float64
+		regular, recovery      Verdict
+	}{
+		{"above-floor", 52, 5, 0, .03, VerdictPass, VerdictUnknown},
+		{"equal-to-floor", 100, 5, 0, .05, VerdictPass, VerdictPass},
+		{"equal-to-group-limit", 100, 7, 0, .07, VerdictPass, VerdictPass},
+		{"equal-to-rounded-group-limit", 100, 29, 0, .29, VerdictPass, VerdictPass},
+		{"below-group-limit", 52, 5, 0, .10, VerdictPass, VerdictPass},
+		{"above-group-limit", 52, 5, 0, .08, VerdictPass, VerdictUnknown},
+		{"unknown-excluded-from-rate", 97, 5, 3, .05, VerdictPass, VerdictUnknown},
+		{"already-failed", 52, 6, 0, .05, VerdictFail, VerdictFail},
+		{"already-unknown", 49, 5, 0, .05, VerdictUnknown, VerdictUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := machineSamples(tc.clear + tc.unknown)
+			failSamples(rows, tc.failed)
+			for i := tc.clear; i < len(rows); i++ {
+				rows[i].Outcome = OutcomeOther
+				rows[i].Class = ClassUnknown
+			}
+			regular := AssessError(rows, nil, tc.limit, time.Time{}, machineNow)
+			if regular.Verdict != tc.regular || regular.RecoveryOverLimit {
+				t.Fatalf("regular assessment: %+v", regular)
+			}
+			want := regular
+			want.Verdict = tc.recovery
+			want.RecoveryOverLimit = tc.regular != tc.recovery
+			if got := regular.ForRecovery(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("recovery assessment: %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestAssessErrorRequestFinalResult(t *testing.T) {
 	rows := machineSamples(50)
 	retry := rows[0]
@@ -174,5 +212,32 @@ func TestAssessErrorCutWindowAndOrdering(t *testing.T) {
 	}
 	if got.AttemptIDs[0] != "attempt-049" {
 		t.Fatal("bad attempts are not newest first")
+	}
+}
+
+func TestObserveCountsOnlyAdmittedUnits(t *testing.T) {
+	rows := machineSamples(104)
+	for i := range rows {
+		rows[i].StartedAt = machineNow.Add(time.Duration(i-105) * time.Second)
+		rows[i].FinishedAt = rows[i].StartedAt.Add(time.Millisecond)
+		rows[i].GroupID = 20
+	}
+	// Four old, local requests are outside the latest 100 slots.
+	for i := range rows[:4] {
+		rows[i].GroupID = 10
+	}
+	rows[103].GroupID, rows[103].Outcome, rows[103].Class = 10, OutcomeAccountFault, ClassUpstream
+	rows[102].GroupID, rows[102].Outcome, rows[102].Class = 10, OutcomeOther, ClassUnknown
+	assessment, local := AssessErrorForGroup(rows, nil, .05, time.Time{}, machineNow, 10)
+	if local != 1 || assessment.Clear != 99 || assessment.Unknown != 1 {
+		t.Fatalf("local=%d clear=%d unknown=%d", local, assessment.Clear, assessment.Unknown)
+	}
+
+	turns := machineSamples(4)
+	turns[0].GroupID, turns[1].GroupID = 20, 20
+	turns[2].CacheReadTokens = nil
+	cache, local := AssessCacheForGroup(turns, .8, time.Time{}, machineNow, 10)
+	if local != 1 || cache.Turns != 3 {
+		t.Fatalf("cache local=%d total=%d", local, cache.Turns)
 	}
 }

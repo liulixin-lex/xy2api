@@ -166,7 +166,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 				f.loads.loadBatchErr = fmt.Errorf("load unavailable")
 			}
 			bindings := maps.Clone(f.cache.sessionBindings)
-			rows, err := f.svc.selectionBoard.Board(context.Background(), 7, "m")
+			rows, _, err := f.svc.selectionBoard.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Empty(t, f.attempts)
 			require.Empty(t, f.svc.selectionFullMarks.at)

@@ -118,9 +118,6 @@ func (s *OpenAIGatewayService) openAIFirstOutputPlanFor(ctx context.Context, acc
 }
 
 func warmFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {
-	if bodyBytes >= 512*1024 && tier < 40*time.Second {
-		return 40 * time.Second
-	}
 	if bodyBytes >= 256*1024 && tier < 30*time.Second {
 		return 30 * time.Second
 	}

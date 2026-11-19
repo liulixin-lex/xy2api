@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -60,8 +61,18 @@ func (s *SchedAdminService) GroupsSummary(ctx context.Context, ids []int64) (Sch
 	if err != nil {
 		return out, err
 	}
+	rear, rearErr := s.d.Accounts.SchedAdminRearEntries24h(ctx, groups, now)
+	if rearErr != nil {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		slog.WarnContext(ctx, "sched_quality.rear_entries_read_failed", "error", rearErr)
+	}
 	for _, g := range groups {
 		x := SchedAdminGroupSummary{GroupID: g, Last60: stats[g]}
+		if rearErr == nil {
+			x.RearEntries24h = new(rear[g])
+		}
 		effective := schedAdminEffective(p, now, schedAdminGroupPolicy(p, g).Enabled)
 		for _, a := range accounts {
 			if a == nil || a.Platform != PlatformOpenAI || !schedAdminMember(a, g) {
@@ -279,10 +290,11 @@ func (s *SchedAdminService) Order(ctx context.Context, g int64, model string) (S
 	if out.Model == "" {
 		return out, nil
 	}
-	rows, err := s.d.Board.Board(ctx, g, out.Model)
+	rows, supply, err := s.d.Board.Board(ctx, g, out.Model)
 	if err != nil {
 		return out, err
 	}
+	out.Supply = supply
 	for _, r := range rows {
 		x := SchedAdminOrderRow{Rank: r.Rank, AccountID: r.AccountID, Name: r.Name, Layer: r.Layer, Lines: r.Lines, Pinned: r.Pinned, Exempt: r.Exempt, Priority: r.Priority, Rate: r.Rate, LoadRate: r.LoadRate, InFlight: r.InFlight, Concurrency: r.Concurrency}
 		if r.Excluded != "" {

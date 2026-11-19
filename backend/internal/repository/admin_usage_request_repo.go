@@ -34,7 +34,7 @@ const adminRequestsCTE = `WITH requests AS (
 		created_at, user_id, api_key_id, account_id, group_id, model, model, request_id,
 		request_type, stream, request_type=3, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, 0,
-		first_output_ms, first_output_ms, duration_ms, input_tokens, NULL, cache_read_tokens,
+		first_output_ms, NULL, duration_ms, input_tokens, NULL, cache_read_tokens,
 		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL
 	FROM gateway_unbilled_requests
 ) `
@@ -222,12 +222,23 @@ func (r *usageLogRepository) annotateAdminTTFO(ctx context.Context, items []serv
 	}
 	for i := range items {
 		l := &items[i].Log
-		if l.GroupID == nil || l.FirstTokenMs == nil {
+		if l.GroupID == nil {
+			continue
+		}
+		// Unbilled requests have only a gateway clock. Keep its historical
+		// threshold comparison independent of the displayed attempt clock.
+		var ms int64
+		switch {
+		case items[i].Source == "unbilled" && l.EndToEndFirstOutputMs != nil:
+			ms = *l.EndToEndFirstOutputMs
+		case l.FirstTokenMs != nil:
+			ms = int64(*l.FirstTokenMs)
+		default:
 			continue
 		}
 		p := policies.Groups[strconv.FormatInt(*l.GroupID, 10)].V4
 		if p.Enabled && p.Seconds > 0 {
-			over := float64(*l.FirstTokenMs) > p.Seconds*1000
+			over := float64(ms) > p.Seconds*1000
 			items[i].TTFOOver = &over
 		}
 	}

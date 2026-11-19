@@ -364,7 +364,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if fs.localSelectionExhaustion() {
 					recordSelectionExhausted(c.Request.Context())
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini, err)
 					if !cls.ModelNotFound {
@@ -475,11 +475,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountReleaseFunc, nil)
+			if latest == nil {
+				reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				continue
+			}
 			if vetoed {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
-				}
 				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 				if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
@@ -718,7 +719,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusForbidden, "permission_error", err.Error(), streamStarted)
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if fs.localSelectionExhaustion() {
 					recordSelectionExhausted(c.Request.Context())
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform, err)
 					if !cls.ModelNotFound {
@@ -853,21 +854,22 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountReleaseFunc, sessionSlotAccounts)
+			if latest == nil {
+				reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				continue
+			}
 			if vetoed {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
-				}
 				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				// Profit admission declined this account before it served the session.
+				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+				delete(sessionSlotAccounts, account.ID)
 				if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 					markOpsRoutingCapacityLimited(c)
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
 					return
 				}
-				// 尝试被否决（从未转发），立即释放该账号的会话注册
-				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
-				delete(sessionSlotAccounts, account.ID)
 				continue
 			}
 			account = latest

@@ -11,8 +11,7 @@
       >
         <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
         <span>{{ t('admin.schedQuality.decisions.title') }}</span>
-      </button>
-      <span class="qp-h-note">{{ t('admin.schedQuality.decisions.note') }}</span>
+      </button>{{ ' ' }}<span class="qp-h-note" data-qp-decisions-note>{{ t('admin.schedQuality.decisions.note') }}</span>
     </h3>
     <div v-if="open" :id="listId" class="dec" :aria-busy="state === 'loading'">
       <div v-if="state === 'failed' && !items.length" class="dec__failed" data-qp-decisions-failed>
@@ -40,11 +39,13 @@
               >{{ t('admin.schedQuality.decisions.evidence') }}</button>
             </div>
             <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
+            <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
             <SchedEvidence
               v-if="item.basis && shown.has(item.id)"
               class="drow__basis"
               :dim="item.basis.line"
               :evidence="basisEvidence(item.basis)"
+              :samples="item.basis"
               :source-groups="item.basis.source_groups"
               :group-name="groupName"
             />
@@ -77,6 +78,7 @@ import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
+import { evidenceCauses } from './qualityPanel'
 
 const PAGE = 50
 /** Rear stay of each level, minutes. */
@@ -180,9 +182,57 @@ function detailLine(item: BackendDecision): string {
 }
 
 const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basis.cache ?? null
+
+/**
+ * Why a trial ended without a verdict, from the basis as it is (the backend gives no reason code): no traffic of this
+ * group during the trial, or not enough evidence (the first-output line adds rule B's reasons); then, on its own, what
+ * was seen of the trial seats. Each part is read on its own: one the record does not have says so without hiding the
+ * other, and a record with neither is an older decision. Nothing is worked out.
+ */
+function timeoutReason(item: BackendDecision): string {
+  const basis = item.basis
+  const local = basis?.samples_local
+  const seats = basis?.trial_seats
+  if (!basis || (local == null && seats == null)) {
+    return t('admin.schedQuality.decisions.timeout.line', { reasons: t('admin.schedQuality.decisions.timeout.legacy') })
+  }
+  const parts: string[] = []
+  if (local == null) parts.push(t('admin.schedQuality.decisions.timeout.trafficLegacy'))
+  else if (local === 0) parts.push(t('admin.schedQuality.decisions.timeout.noTraffic'))
+  else {
+    const causes = evidenceCauses(basis.line, basis.ttft).map((cause) => {
+      const key = `admin.schedQuality.evidence.causes.${cause}`
+      return te(key) ? t(key) : t('admin.schedQuality.unknown')
+    })
+    parts.push(causes.length
+      ? t('admin.schedQuality.decisions.timeout.evidenceWhy', { reasons: causes.join(t('admin.schedQuality.evidence.joiner')) })
+      : t('admin.schedQuality.decisions.timeout.evidence'))
+  }
+  parts.push(seats == null ? t('admin.schedQuality.decisions.timeout.seatsLegacy') : t(`admin.schedQuality.decisions.timeout.seats.${seats}`))
+  return t('admin.schedQuality.decisions.timeout.line', { reasons: parts.join(t('admin.schedQuality.decisions.timeout.joiner')) })
+}
 </script>
 
 <style scoped>
+/* The panel's heading rule is scoped to the panel and does not reach this component's heading: a heading layout here,
+   so the title and the note stand apart (they ran together in English: "DecisionsOne record …"). The note is never
+   cut: it wraps, and on a narrow drawer (390 or 320 px) it moves under the title. */
+.qp-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-body);
+}
+.qp-h-note {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-regular);
+}
 .dec-toggle {
   display: inline-flex;
   align-items: center;

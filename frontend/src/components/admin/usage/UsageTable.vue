@@ -134,7 +134,7 @@
             </span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
             <span
-              v-if="showFallbackOrigin && row.origin_group_id"
+              v-if="crossGroup(row)"
               data-testid="usage-fallback-marker"
               class="text-xs text-amber-700 dark:text-amber-300"
               :title="t('admin.resilience.usage.fallbackTitle')"
@@ -262,21 +262,32 @@
           </div>
         </template>
 
-        <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
+        <!-- 延迟健康度列：左侧色条上端随首个输出档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况。
+             管理端的主值是端到端首输出（用户实际等了多久），最后一次尝试的首字是辅助的一行；用户端接口没有端到端，仍显示首字。 -->
         <template #cell-latency="{ row }">
           <div class="flex items-stretch gap-2">
             <span
               class="w-1 shrink-0 rounded-full"
-              :class="row.first_token_ms != null
-                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
+              :class="leadLatency(row) != null
+                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(leadLatency(row)!)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
                 : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
               aria-hidden="true"
             ></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
-              <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyFirstTokenHint')">{{ t('usage.latencyFirstToken') }}</span>
-              <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
-              <span v-else class="text-gray-400 dark:text-gray-500">-</span>
-              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
+              <template v-if="showEndToEnd">
+                <span class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyEndToEnd') }}</span>
+                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.end_to_end_first_output_ms)]">{{ formatDuration(row.end_to_end_first_output_ms) }}</span>
+                <span v-else data-testid="usage-latency-e2e" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+                <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="tabular-nums text-gray-500 dark:text-gray-400">{{ formatDuration(row.first_token_ms) }}</span>
+                <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+              </template>
+              <template v-else>
+                <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyFirstTokenHint')">{{ t('usage.latencyFirstToken') }}</span>
+                <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
+                <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+              </template>
+              <span class="text-gray-400 dark:text-gray-500" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.latencyLastAttemptDuration') : t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
                 <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
@@ -643,6 +654,8 @@ interface Props {
   showUpstreamEndpoint?: boolean
   /** 无号兜底只是内部路由：只有管理端显示“兜底：原分组 → 实际分组”，用户端只看到原分组 */
   showFallbackOrigin?: boolean
+  /** 管理端：延迟的主值是端到端首输出，最后一次尝试的首字是辅助的一行（用户端接口没有端到端，仍显示首字） */
+  showEndToEnd?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
   /** Passed to DataTable's rowClass (a stable function from the page's setup). */
@@ -659,6 +672,7 @@ const props = withDefaults(defineProps<Props>(), {
   showAccountBilling: true,
   showUpstreamEndpoint: true,
   showFallbackOrigin: false,
+  showEndToEnd: false,
   flat: false
 })
 const emit = defineEmits<{
@@ -686,6 +700,16 @@ const scrollToTop = () => tableRef.value?.scrollToTop()
 defineExpose({ isAtTop, scrollToTop })
 
 const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
+/**
+ * Served by another group than the request's: judged only by the original and the serving group ids, both known and
+ * different (the bill's fallback flag means a rear account took the request, not another group).
+ */
+const crossGroup = (row: AdminUsageLog) =>
+  props.showFallbackOrigin && row.origin_group_id != null && row.group_id != null && row.origin_group_id !== row.group_id
+// duration_ms is the last attempt's: on the admin page, under the user wait (which includes earlier attempts), the
+// latency cell names it "last attempt" with why (browser check #5); the user page keeps "total" with no tip.
+/** The wait the colour bar's top follows: the end-to-end first output on the admin page, the first token otherwise. */
+const leadLatency = (row: AdminUsageLog) => (props.showEndToEnd ? row.end_to_end_first_output_ms : row.first_token_ms) ?? null
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const unbilledWord = (row: AdminUsageLog) =>
   row.result === 3 ? t('admin.usage.resultFailed') : row.result === 4 ? t('admin.usage.resultCanceled') : ''

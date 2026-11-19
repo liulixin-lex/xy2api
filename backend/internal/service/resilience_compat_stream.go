@@ -78,12 +78,12 @@ func (fe *openAICompatFirstEvent) expired() bool {
 	if fe == nil || fe.disarmed.Load() {
 		return false
 	}
-	select {
-	case <-fe.guard.fired:
-		return true
-	default:
+	if !fe.guard.expiring.Load() {
 		return false
 	}
+	// Cancel can wake Do while the winning timer is publishing its facts.
+	<-fe.guard.fired
+	return true
 }
 
 // ownsStall reports a guard still waiting for effective output: the
@@ -111,6 +111,14 @@ func (fe *openAICompatFirstEvent) close() {
 
 // timeoutError is the failover error of an expired guard.
 func (s *OpenAIGatewayService) openAICompatFirstEventTimeout(ctx context.Context, c *gin.Context, account *Account, fe *openAICompatFirstEvent, phase string, header http.Header) *UpstreamFailoverError {
+	if fe.guard != nil {
+		select {
+		case <-fe.guard.fired:
+			a := fe.guard.capture.Load()
+			ctx = context.WithValue(ctx, schedHTTPAttemptKey{}, a)
+		default:
+		}
+	}
 	return s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 		fe.started, fe.model, fe.effort, fe.timeout, phase, header, fe.plan)
 }

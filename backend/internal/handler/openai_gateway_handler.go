@@ -296,6 +296,13 @@ func openAICompatibleRequestPlatform(ctx context.Context, apiKey *service.APIKey
 	return service.PlatformOpenAI
 }
 
+func openAIResponsesRequestScope(explicitImageIntent bool) resilience.GatewayRequestScope {
+	if explicitImageIntent {
+		return resilience.GatewayRequestScopeImage
+	}
+	return resilience.GatewayRequestScopeText
+}
+
 func openAIResponsesRequiredCapability(imageIntent bool, platform string) service.OpenAIEndpointCapability {
 	if imageIntent && platform == service.PlatformOpenAI {
 		return service.OpenAIEndpointCapabilityResponses
@@ -704,10 +711,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
-	scope := resilience.GatewayRequestScopeText
-	if imageIntent {
-		scope = resilience.GatewayRequestScopeImage
-	}
+	scope := openAIResponsesRequestScope(imageIntent)
 	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, scope)()
 
 	requireCompact := legacyCompact
@@ -885,7 +889,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
-			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
+			st.SetSchedSelection(resilience.SchedSelection{
+				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel),
+				HTTPStreamText: reqStream && scope == resilience.GatewayRequestScopeText,
+				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+			})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, forwardModel),
@@ -1370,6 +1378,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(c, apiKey, reqModel)
 	reqStream := gjson.GetBytes(body, "stream").Bool()
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/messages", reqModel, body)
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
@@ -1443,7 +1452,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, openAIResponsesRequestScope(imageIntent))()
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -1553,7 +1562,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
-			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, currentRoutingModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
+			st.SetSchedSelection(resilience.SchedSelection{
+				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, currentRoutingModel),
+				HTTPStreamText: reqStream && !imageIntent,
+				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+			})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, currentRoutingModel),
@@ -3090,7 +3103,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
-	beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService)
+	beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService, openAIResponsesRequestScope(imageIntent))
 	gatewayTurnModel := reqModel
 	pendingGatewayTurnModel := reqModel
 	resilience.StateFrom(c.Request.Context()).BeginGatewayTurn(firstTurnStartedAt)

@@ -286,20 +286,12 @@ func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.T
 	s.mu.Lock()
 	var notifications map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(notifications) }()
-	rows, _, _, err := s.store.LoadRows(ctx)
+	at, groups, err := s.store.RunReset(ctx, id)
 	if err != nil {
 		return time.Time{}, err
 	}
-	groups := make(map[schedQualityKey]bool)
-	for _, r := range rows {
-		if r.AccountID == id {
-			groups[schedQualityKey{r.AccountID, r.Model, r.GroupID}] = true
-		}
-	}
-	s.releaseGroups(ctx, groups)
-	at, err := s.store.RunReset(ctx, id)
-	if err != nil {
-		return time.Time{}, err
+	for _, group := range groups {
+		s.releaseGroup(ctx, schedQualityKey{id, group.Model, group.GroupID})
 	}
 	notifications, err = s.rebuild(ctx)
 	return at, err
@@ -379,16 +371,16 @@ func (s *SchedQualityEngineService) releaseEndedTrials(ctx context.Context, befo
 			groups[k] = true
 		}
 	}
-	s.releaseGroups(ctx, groups)
+	for k := range groups {
+		s.releaseGroup(ctx, k)
+	}
 }
-func (s *SchedQualityEngineService) releaseGroups(ctx context.Context, groups map[schedQualityKey]bool) {
+func (s *SchedQualityEngineService) releaseGroup(ctx context.Context, k schedQualityKey) {
 	if s.leases == nil {
 		return
 	}
-	for k := range groups {
-		if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
-			slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
-		}
+	if err := s.leases.ReleaseGroup(ctx, k.account, k.model, k.group); err != nil {
+		slog.WarnContext(ctx, "sched_quality.release_trial_group", "account_id", k.account, "model", k.model, "group_id", k.group, "error", err)
 	}
 }
 
@@ -413,5 +405,30 @@ func (s *SchedQualityEngineService) countDecision(action schedquality.Action) {
 		s.obs.Count("trial", 1)
 	case schedquality.ActionClear:
 		s.obs.Count("clear", 1)
+	}
+}
+
+// The Redis observation is written after the lease check and compared with
+// the evaluator's clock. Use the same two-second allowance as cross-instance
+// session-failure clearing for the uncertainty at each end of the trial.
+const trialSeatBoundaryAllowance = SessionFailureClockSkewAllowance
+
+// trialSeats describes the original trial window even when its deadline is replayed late.
+func (s *SchedQualityEngineService) trialSeats(ctx context.Context, trial schedquality.LineState, budget time.Duration) string {
+	if s.leases == nil || budget <= 0 || trial.Epoch.IsZero() || trial.TrialUntil.IsZero() {
+		return "unknown"
+	}
+	readCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	at, err := s.leases.LastFull(readCtx, trial.AccountID, trial.Model, trial.GroupID)
+	switch {
+	case err != nil:
+		return "unknown"
+	case at.IsZero() || at.Before(trial.Epoch.Add(-trialSeatBoundaryAllowance)):
+		return "not_observed"
+	case at.After(trial.Epoch.Add(trialSeatBoundaryAllowance)) && at.Before(trial.TrialUntil.Add(-trialSeatBoundaryAllowance)):
+		return "full"
+	default:
+		return "unknown"
 	}
 }

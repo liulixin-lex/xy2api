@@ -46,9 +46,10 @@ type RequestState struct {
 	prelude preludeTrace
 
 	// requestID is generated locally, independent of client correlation IDs.
-	requestID     string
-	gatewayRecord *gatewayRequestTrace
-	firstOutput   time.Time
+	requestID             string
+	gatewayRecord         *gatewayRequestTrace
+	gatewayAdmissionScope GatewayRequestScope
+	firstOutput           time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile
@@ -57,6 +58,10 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
+	httpSendSeq          uint64 // never reused by another turn on this connection
+	turnStartHTTPSeq     uint64
+	ownerCutoff          OwnerFirstOutputCutoff
+	ownerAvoidConfirmed  bool
 	currentAttempt       any
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
@@ -105,9 +110,14 @@ type RequestState struct {
 	groupNoAccount bool
 
 	// session identifies the request's sticky session for failure streaks.
-	sessionGroupID int64
-	sessionHash    string
-	sessionRec     SessionRecorder
+	sessionGroupID  int64
+	sessionHash     string
+	sessionRec      SessionRecorder
+	sessionDispatch struct {
+		requestID string
+		accountID int64
+		at        time.Time
+	}
 	stickyChange   any // Service-owned pending binding change; completed by the send lifecycle.
 	selectionFlags schedSelectionFlags
 
@@ -364,9 +374,9 @@ func (s *RequestState) RecordOpsUpstreamEvent() uint64 {
 
 // MarkOpsUpstreamSendBoundary snapshots the current upstream event sequence
 // immediately before an HTTP send for accountID.
-func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
+func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) uint64 {
 	if s == nil || accountID <= 0 {
-		return
+		return 0
 	}
 	s.mu.Lock()
 	if s.opsUpstreamSendBoundaries == nil {
@@ -375,7 +385,10 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
+	s.httpSendSeq++
+	seq := s.httpSendSeq
 	s.mu.Unlock()
+	return seq
 }
 
 // OpsUpstreamSendBoundary returns the latest send boundary for accountID.
@@ -498,6 +511,24 @@ func IsPostOutputSessionFailure(ctx context.Context) bool {
 	return postOutput
 }
 
+// SessionDispatchStart returns the physical send observed for this turn and
+// account. A delayed bill for an earlier WebSocket turn cannot use a later send.
+func (s *RequestState) SessionDispatchStart(ctx context.Context, accountID int64) time.Time {
+	if s == nil || accountID <= 0 {
+		return time.Time{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.sessionDispatch
+	if d.requestID != s.requestID || d.accountID != accountID {
+		return time.Time{}
+	}
+	if meta, _ := ctx.Value(gatewayRequestMetadataKey{}).(*GatewayRequestMetadata); meta != nil && meta.RequestID != d.requestID {
+		return time.Time{}
+	}
+	return d.at
+}
+
 // SessionSuccess reports a successful request of the session on an account.
 func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 	g, h, rec := s.session()
@@ -510,9 +541,10 @@ func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 type stateKey struct{}
 
 type SchedSelection struct {
-	AccountID  int64
-	Model      string
-	StickyWarm bool
+	AccountID      int64
+	Model          string
+	StickyWarm     bool
+	HTTPStreamText bool
 }
 
 func (s *RequestState) SetSchedSelection(v SchedSelection) {

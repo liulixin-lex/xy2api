@@ -17,6 +17,10 @@
         "body_first_output_p90_ms": 2900,
         "requests": 50,
         "migration_400": 2
+      },
+      "rear_entries_24h": {
+        "decisions": 4,
+        "account_models": 2
       }
     }
   ]

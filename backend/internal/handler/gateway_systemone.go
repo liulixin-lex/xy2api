@@ -136,7 +136,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 				reqLog.Info("systemone.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
-			if len(fs.FailedAccountIDs) == 0 {
+			if fs.localSelectionExhaustion() {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, model, model, service.PlatformTypeSafe)
 				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
@@ -179,11 +179,12 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		}
 		// 准入终检：与其他网关入口一致，利润控制否决的账号不得承接本次请求。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountRelease, nil)
+		if latest == nil {
+			reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			continue
+		}
 		if vetoed {
-			if accountRelease != nil {
-				accountRelease()
-			}
 			reqLog.Debug("systemone.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 				reqLog.Warn("systemone.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))

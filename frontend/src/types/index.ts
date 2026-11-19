@@ -1894,6 +1894,11 @@ export interface AdminUsageLog extends UsageLog {
   switches?: number | null
   /** 网关请求 id：同一请求的多次账号尝试共用。 */
   gateway_request_id?: string | null
+  /**
+   * 端到端首输出：从请求进入网关到用户收到首个有效输出，含排队和之前失败的尝试（用户实际等了多久）。没有记录为 null。
+   * 管理端的 first_token_ms 是最后一次尝试的首字（未计费请求为 null）。
+   */
+  end_to_end_first_output_ms?: number | null
   // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id，仅管理员可见；用户端的 group 已是原分组）
   origin_group_id?: number | null
   origin_group_name?: string

@@ -22,7 +22,8 @@ import (
 
 type conversationStateSessionStore struct {
 	*memResilienceStore
-	failureCalls atomic.Int64
+	failureCalls  atomic.Int64
+	successClears atomic.Int64
 }
 
 func TestPostOutputConversationStateRejectionKeepsFailureUsageAndOps(t *testing.T) {
@@ -80,6 +81,7 @@ func TestPostOutputConversationStateRejectionKeepsFailureUsageAndOps(t *testing.
 			require.Equal(t, account.ID, cache.sessionBindings["sess"])
 			require.False(t, resilience.StateFrom(ctx).Avoided(account.ID))
 			require.Zero(t, store.failureCalls.Load())
+			require.Zero(t, store.successClears.Load())
 			require.Empty(t, r.postOutput.failures)
 			require.Empty(t, repo.tempReason)
 		})
@@ -89,6 +91,11 @@ func TestPostOutputConversationStateRejectionKeepsFailureUsageAndOps(t *testing.
 func (s *conversationStateSessionStore) IncrSessionFailure(ctx context.Context, groupID int64, session string, accountID int64, window time.Duration) (int64, error) {
 	s.failureCalls.Add(1)
 	return s.memResilienceStore.IncrSessionFailure(ctx, groupID, session, accountID, window)
+}
+
+func (s *conversationStateSessionStore) ClearSessionFailuresBefore(ctx context.Context, groupID int64, session string, accountID int64, start time.Time) error {
+	s.successClears.Add(1)
+	return s.memResilienceStore.ClearSessionFailuresBefore(ctx, groupID, session, accountID, start)
 }
 
 func conversationStateErrorPayload(t *testing.T, eventType, code, message string, wrapped bool) []byte {

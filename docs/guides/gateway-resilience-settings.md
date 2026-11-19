@@ -109,11 +109,11 @@
 
 | 字段 | 默认 | 范围 | 说明 |
 |---|---|---|---|
-| `enabled` | true | 布尔 | 会话失败改绑 |
+| `enabled` | true | 布尔 | 会话失败改绑。关闭同时停用 OpenAI 首输出避让与救场交接 |
 | `post_output_rebind` | true | 布尔 | 仅 OpenAI 账号：输出后首次失败即改绑；依赖 `session.enabled` |
 | `streak_threshold` | 2 | 1–20 | 同一会话在同一账号上连续失败多少次后改绑 |
 | `streak_window_seconds` | 600 | 1–86400 | 连续失败的计数窗口 |
-| `avoid_seconds` | 600 | 1–86400 | 改绑后避开原账号的时长 |
+| `avoid_seconds` | 600 | 1–86400 | 失败改绑的回避时长，也是 OpenAI 首输出避让从截止时刻起算的时长 |
 
 ### 单开关能力
 

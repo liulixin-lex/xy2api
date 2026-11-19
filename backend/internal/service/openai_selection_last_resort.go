@@ -154,7 +154,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 				continue
 			}
 			acc = latest
-			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt, avoided, meta)
+			s.noteOpenAILastResort(ctx, req, acc, c.recoverAt, avoided, meta)
 			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
 		meta.addReason("capacity")
@@ -164,7 +164,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	}
 	cfg := s.schedulingConfig()
 	acc := verified[0].account
-	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt, avoided, meta)
+	s.noteOpenAILastResort(ctx, req, acc, verified[0].recoverAt, avoided, meta)
 	return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
@@ -176,8 +176,10 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	})
 }
 
-func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
-	resilience.StateFrom(ctx).SetLastResort(account.ID)
+func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, req OpenAIAccountScheduleRequest, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
+	state := resilience.StateFrom(ctx)
+	state.SetLastResort(account.ID)
+	groupID := req.GroupID
 	s.resilience.noteLastResortSelected(account.ID)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
@@ -190,10 +192,17 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 		"penalty_reason", meta.penaltyReason(),
 	)...)
 	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
+		source := "session"
+		if _, hit := req.firstOutputAvoided[account.ID]; hit {
+			source = "first_output"
+			if state.Avoided(account.ID) {
+				source = "both"
+			}
+		}
 		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
 			"group_id", derefGroupID(groupID),
 			"account_id", account.ID,
-			"reason", "session_avoid",
+			"reason", "session_avoid", "avoid_source", source,
 			"candidates", meta.candidates,
 			"penalty_reason", meta.penaltyReason(),
 		)...)
