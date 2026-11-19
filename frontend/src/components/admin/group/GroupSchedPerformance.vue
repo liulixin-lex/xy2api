@@ -102,8 +102,8 @@
                   <span v-else v-tip="shortTip" class="gperf__main sq-text-3" tabindex="0">{{ t('admin.schedQuality.perf.slowCount', { slow: fmtCount(view.row.first.slow), n: fmtCount(view.row.first.n) }) }}</span>
                 </td>
                 <td class="sq-r sq-num" data-sq-cell="excess">
-                  <span v-if="view.excess !== null" v-tip="flagTip(view, 'excess')" :class="['gperf__main', markClass(view)]" :tabindex="flagTip(view, 'excess') ? 0 : undefined">
-                    <span v-if="flagTip(view, 'excess')" class="sr-only">{{ flagTip(view, 'excess') }}</span>{{ fmtPoints(view.excess) }}
+                  <span v-if="view.excessTenths !== null" v-tip="flagTip(view, 'excess')" :class="['gperf__main', markClass(view)]" :tabindex="flagTip(view, 'excess') ? 0 : undefined">
+                    <span v-if="flagTip(view, 'excess')" class="sr-only">{{ flagTip(view, 'excess') }}</span>{{ fmtTenths(view.excessTenths) }}
                   </span>
                   <span v-else v-tip="missingTip(view)" class="gperf__main sq-text-3" tabindex="0">{{ DASH }}</span>
                 </td>
@@ -208,7 +208,7 @@ import {
   DEFAULT_SORT,
   fmtCount,
   fmtPct,
-  fmtPoints,
+  fmtTenths,
   fmtScore,
   fmtSigned,
   MIN_ATTEMPTS,

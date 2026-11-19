@@ -385,4 +385,13 @@ describe('GroupSchedBoard 12-hour view', () => {
     await click('[data-sq-board-view="perf"]')
     expect(api.groupPerformance).toHaveBeenCalledTimes(2)
   })
+
+  // Increment review item 2: both views show the rounded tenths (29 above 80 of 400 is 7.25 points: +7.3).
+  it('shows 7.25 points as +7.3', async () => {
+    const value = answer()
+    value.rows.push(perfRow(400, { requests: 400, first: { n: 400, slow: 109, expected_n: 400, expected_slow: 80 } }, { n: 400 }))
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    expect(cell(400, 'excess').textContent!.trim()).toBe('+7.3')
+  })
 })

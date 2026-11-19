@@ -85,6 +85,9 @@ export function wilson(k: number, n: number, z = WILSON_Z): { lower: number; upp
 
 export const rowKey = (row: Pick<BackendPerfRow, 'group_id' | 'account_id' | 'model'>) => `${row.group_id}:${row.account_id}:${row.model}`
 
+/** A millionth of a request: the float noise an expected count (a sum of shares) may carry at a threshold. */
+const COUNT_TOLERANCE = 1e-6
+
 /** Float noise off (a sum of shares read 2.4999999999999996), then rounded half away from zero. */
 const tidy = (value: number) => Math.round(value * 1e9) / 1e9
 const roundHalfAway = (value: number) => Math.sign(value) * Math.round(Math.abs(tidy(value)))
@@ -114,12 +117,18 @@ export function perfView(row: BackendPerfRow, group: BackendPerfGroup | undefine
   const timeoutRate = attempts.n >= MIN_ATTEMPTS ? attempts.timeouts / attempts.n : null
   let slowMark: PerfView['slowMark'] = null
   if (over !== null) {
-    // 10 points or more on the counts themselves (over / scale ≥ 1/10, so 10 × over ≥ scale); only the display rounds:
-    // 2,999 slow against 2,000 expected of 10,000 is 9.99 points, shown +10.0 and not marked.
+    // 10 points or more, judged in the count domain: the expected count against the bound the slow count puts on it
+    // (slow / n − expected / expected_n ≥ 1/10 ⟺ expected ≤ expected_n × (10 × slow − n) / (10 × n)), whose numerator
+    // and denominator are whole numbers. The expected count is a sum of per-request shares carrying float noise, so a
+    // millionth of a request is the tolerance: exactly 10 points is marked; 9.99 (2,999 against 2,000 of 10,000) is
+    // not, though the display rounds it to +10.0.
     const bounds = wilson(first.slow, first.n)
     const per = Math.round(1 / FLAG_EXCESS)
-    if (tidy(per * over - scale) >= 0 && bounds.lower > expectedRate!) slowMark = 'slow'
-    else if (tidy(per * over + scale) <= 0 && bounds.upper < expectedRate!) slowMark = 'fast'
+    const expected = first.expected_slow!
+    const slowBound = (first.expected_n * (per * first.slow - first.n)) / (per * first.n)
+    const fastBound = (first.expected_n * (per * first.slow + first.n)) / (per * first.n)
+    if (expected - slowBound <= COUNT_TOLERANCE && bounds.lower > expectedRate!) slowMark = 'slow'
+    else if (fastBound - expected <= COUNT_TOLERANCE && bounds.upper < expectedRate!) slowMark = 'fast'
   }
   const cacheLow = cacheRate !== null && group !== undefined && cacheRate < group.min_cache_ratio
   return {
@@ -247,6 +256,11 @@ const grouped = new Intl.NumberFormat('en-US')
 export const fmtCount = (value: number) => grouped.format(value)
 /** 0.531 → "53.1%". */
 export const fmtPct = (value: number, digits = 1) => `${(value * 100).toFixed(digits)}%`
+/** Tenths of a point, already rounded, with their sign: 73 → "+7.3", −128 → "−12.8", 0 → "0.0". */
+export function fmtTenths(tenths: number): string {
+  const text = (Math.abs(tenths) / 10).toFixed(1)
+  return tenths > 0 ? `+${text}` : tenths < 0 ? `−${text}` : text
+}
 /** Points with their sign: 0.335 → "+33.5", −0.128 → "−12.8", 0 → "0.0". */
 export function fmtPoints(value: number): string {
   const text = Math.abs(value * 100).toFixed(1)

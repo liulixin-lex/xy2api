@@ -59,11 +59,11 @@
             </span>
             <span class="prow__r" role="cell" data-qp-perf-cell="excess">
               <span
-                v-if="item.view.excess !== null"
+                v-if="item.view.excessTenths !== null"
                 v-tip="flagTip(item.view)"
                 :class="item.view.slowMark === 'slow' ? 'prow__red' : item.view.slowMark === 'fast' ? 'prow__fast' : ''"
                 :tabindex="item.view.slowMark ? 0 : undefined"
-              ><span v-if="item.view.slowMark" class="sr-only">{{ flagTip(item.view) }}</span>{{ fmtPoints(item.view.excess) }}</span>
+              ><span v-if="item.view.slowMark" class="sr-only">{{ flagTip(item.view) }}</span>{{ fmtTenths(item.view.excessTenths) }}</span>
               <span v-else class="qp-muted">{{ DASH }}</span>
             </span>
             <span class="prow__r" role="cell" data-qp-perf-cell="cache">
@@ -115,7 +115,7 @@ import { DASH } from '@/utils/schedQualityFormat'
 import SchedPauseMark from './SchedPauseMark.vue'
 import { vTip } from '@/utils/tip'
 import SchedPerfDetail from './SchedPerfDetail.vue'
-import { fmtCount, fmtPct, fmtPoints, MIN_FIRST, MIN_FIRST_SESSIONS, MIN_TURNS, MIN_TURN_SESSIONS, modelLabel, perfViews, wilson, type PerfView } from './performance'
+import { fmtCount, fmtPct, fmtTenths, MIN_FIRST, MIN_FIRST_SESSIONS, MIN_TURNS, MIN_TURN_SESSIONS, modelLabel, perfViews, wilson, type PerfView } from './performance'
 
 const props = defineProps<{
   detail: BackendAccountDetail

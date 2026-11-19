@@ -10,6 +10,7 @@ import {
   nextSort,
   noAction,
   fmtShortfall,
+  fmtTenths,
   modelLabel,
   reasonLong,
   noActionShort,
@@ -60,6 +61,22 @@ describe('performance figures', () => {
   ])('marks %i slow against %i expected of 10,000 (%s) as %s', (slow, expected, shown, mark) => {
     const item = view(1, { first: { slow, expected_slow: expected, expected_n: 10_000, n: 10_000 } }, { n: 10_000 })
     expect([fmtPoints(item.excess!), item.slowMark]).toEqual([shown, mark])
+  })
+
+  // Increment review item 1: a fractional expected count (a sum of per-request shares) exactly 10 points away still
+  // marks; the float products must not tip it.
+  it.each([
+    ['slow', 2268, 2106, (2268 * 29) / 35, '+10.0'],
+    ['fast', 2088, 1827, (2088 * 39) / 40, '−10.0']
+  ])('marks a fractional expected count exactly 10 points away as %s', (mark, n, slow, expected, shown) => {
+    const item = view(1, { first: { n, slow, expected_n: n, expected_slow: expected } }, { n })
+    expect([fmtTenths(item.excessTenths!), item.slowMark]).toEqual([shown, mark])
+  })
+
+  // Increment review item 2: the display is the rounded tenths, not a second rounding of the float (7.25 is +7.3).
+  it('shows the excess from its rounded tenths', () => {
+    const item = view(1, { first: { n: 400, slow: 109, expected_n: 400, expected_slow: 80 } }, { n: 400 })
+    expect([item.excessTenths, fmtTenths(item.excessTenths!), fmtTenths(-128), fmtTenths(0)]).toEqual([73, '+7.3', '−12.8', '0.0'])
   })
 
   it('does not mark 6 slow of 20 against 20% expected: 10 points over, but the lower bound is under expected', () => {
