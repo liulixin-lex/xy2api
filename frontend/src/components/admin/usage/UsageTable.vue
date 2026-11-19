@@ -262,24 +262,23 @@
           </div>
         </template>
 
-        <!-- 延迟健康度列：左侧色条上端随首个输出档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况。
-             管理端的主值是端到端首输出（用户实际等了多久），最后一次尝试的首字是辅助的一行；用户端接口没有端到端，仍显示首字。 -->
+        <!-- 色条上端按末次首字分档，下端按耗时分档。 -->
         <template #cell-latency="{ row }">
           <div class="flex items-stretch gap-2">
             <span
               class="w-1 shrink-0 rounded-full"
-              :class="leadLatency(row) != null
-                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(leadLatency(row)!)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
+              :class="row.first_token_ms != null
+                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
                 : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
               aria-hidden="true"
             ></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
               <template v-if="showEndToEnd">
                 <span class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyEndToEnd') }}</span>
-                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.end_to_end_first_output_ms)]">{{ formatDuration(row.end_to_end_first_output_ms) }}</span>
+                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="tabular-nums text-gray-500 dark:text-gray-400">{{ formatDuration(row.end_to_end_first_output_ms) }}</span>
                 <span v-else data-testid="usage-latency-e2e" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
                 <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</span>
-                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="tabular-nums text-gray-500 dark:text-gray-400">{{ formatDuration(row.first_token_ms) }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
                 <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
               </template>
               <template v-else>
@@ -706,10 +705,6 @@ const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
  */
 const crossGroup = (row: AdminUsageLog) =>
   props.showFallbackOrigin && row.origin_group_id != null && row.group_id != null && row.origin_group_id !== row.group_id
-// duration_ms is the last attempt's: on the admin page, under the user wait (which includes earlier attempts), the
-// latency cell names it "last attempt" with why (browser check #5); the user page keeps "total" with no tip.
-/** The wait the colour bar's top follows: the end-to-end first output on the admin page, the first token otherwise. */
-const leadLatency = (row: AdminUsageLog) => (props.showEndToEnd ? row.end_to_end_first_output_ms : row.first_token_ms) ?? null
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const unbilledWord = (row: AdminUsageLog) =>
   row.result === 3 ? t('admin.usage.resultFailed') : row.result === 4 ? t('admin.usage.resultCanceled') : ''

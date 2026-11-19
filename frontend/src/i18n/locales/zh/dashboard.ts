@@ -435,7 +435,7 @@ export default {
     firstToken: '首 Token',
     duration: '耗时',
     latency: '延迟',
-    latencyFirstToken: '首字（使用记录口径）',
+    latencyFirstToken: '首字',
     latencyFirstTokenHint: '按系统设置里的首 token 统计口径（默认是首个事件，保活帧也算）；与质量判定用的“首个有效输出”不同。',
     cacheHitRateHint: '缓存读取占比（计费用量）= 缓存读取 Token ÷（未缓存输入 + 缓存创建 + 缓存读取 Token）。强制缓存计费会改变此比例，不能据此判断上游真实命中率；无有效输入时显示 —。',
     tokenSpeed: '平均输出速率',

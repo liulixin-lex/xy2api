@@ -1000,17 +1000,18 @@ describe('admin usage latency: the user wait first', () => {
     global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
   })
 
-  it('leads with the end-to-end first output and keeps the last attempt as a secondary line on the admin page', () => {
+  it('shows user wait in neutral text and colors the last first token and upper bar by its severity', () => {
     const wrapper = mountLatency({ showEndToEnd: true })
     const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
     expect(e2e.text()).toBe('51.00s')
-    // The colour follows the user's wait (51 s is "slow"), not the last attempt's 0.8 s.
-    expect(e2e.classes()).toContain('text-orange-600')
-    expect(wrapper.get('[data-testid="usage-latency-last-attempt"]').text()).toBe('800ms')
+    expect(e2e.classes()).toContain('text-gray-500')
+    const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
+    expect(last.text()).toBe('800ms')
+    expect(last.classes()).toContain('text-emerald-600')
     expect(wrapper.text()).toContain('usage.latencyEndToEnd')
     expect(wrapper.text()).toContain('usage.latencyLastAttempt')
     expect(wrapper.text()).not.toContain('usage.latencyFirstToken')
-    expect(wrapper.find('span[aria-hidden="true"]').classes()).toContain('from-orange-500')
+    expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining(['from-emerald-500', 'to-amber-400']))
   })
 
   // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other.
@@ -1035,6 +1036,7 @@ describe('admin usage latency: the user wait first', () => {
     } else {
       expect(last.text()).toBe('usage.latencyUnknown')
       expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
+      expect(wrapper.get('span[aria-hidden="true"]').classes()).toContain('bg-amber-400')
     }
     expect(wrapper.text()).toContain('usage.latencyLastAttemptDuration1m 10s')
   })

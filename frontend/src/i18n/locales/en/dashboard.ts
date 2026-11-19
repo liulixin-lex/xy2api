@@ -430,7 +430,7 @@ export default {
     firstToken: 'First Token',
     duration: 'Duration',
     latency: 'Latency',
-    latencyFirstToken: 'First token (usage metric)',
+    latencyFirstToken: 'First token',
     latencyFirstTokenHint: 'Measured as the first-token metric in system settings says (by default the first event, keep-alive frames included); not the "first useful output" quality judging uses.',
     cacheHitRateHint: 'Cache read share (billing usage) = cache read tokens ÷ (uncached input + cache creation + cache read tokens). Forced cache billing changes this ratio; it does not establish the actual upstream cache hit rate. — means no valid input.',
     tokenSpeed: 'Average output rate',
