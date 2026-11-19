@@ -1014,6 +1014,18 @@ describe('admin usage latency: the user wait first', () => {
     expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining(['from-emerald-500', 'to-amber-400']))
   })
 
+  it.each([
+    [800, ['from-emerald-500', 'to-gray-400']],
+    [null, ['bg-gray-400']],
+  ] as const)('shows missing duration in neutral colors with first-token value %s', (firstTokenMs, expectedBar) => {
+    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, first_token_ms: firstTokenMs, duration_ms: null }])
+    expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining([...expectedBar]))
+    const durationLabel = wrapper.findAll('span').find(el => el.text() === 'usage.latencyLastAttemptDuration')
+    const duration = durationLabel?.element.nextElementSibling
+    expect(duration?.textContent).toBe('-')
+    expect(duration?.classList.contains('text-gray-400')).toBe(true)
+  })
+
   // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other.
   it.each([
     ['no end-to-end value', { end_to_end_first_output_ms: null, first_token_ms: 800 }, { e2e: null, last: '800ms' }],

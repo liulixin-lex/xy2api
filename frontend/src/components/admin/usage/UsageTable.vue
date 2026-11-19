@@ -267,9 +267,7 @@
           <div class="flex items-stretch gap-2">
             <span
               class="w-1 shrink-0 rounded-full"
-              :class="row.first_token_ms != null
-                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
-                : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
+              :class="latencyBarClasses(row)"
               aria-hidden="true"
             ></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
@@ -287,7 +285,7 @@
                 <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               </template>
               <span class="text-gray-400 dark:text-gray-500" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.latencyLastAttemptDuration') : t('usage.latencyDuration') }}</span>
-              <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
+              <span class="font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
                 <span class="text-gray-500 dark:text-gray-400" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ t('usage.outputTps') }}</span>
                 <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ formatTokenSpeed(row) }}</span>
@@ -814,6 +812,18 @@ const formatUserAgent = (ua: string): string => {
 }
 
 // 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）
+function latencyBarClasses(row: AdminUsageLog) {
+  const duration = row.duration_ms == null ? null : durationSeverity(row.duration_ms)
+  if (row.first_token_ms == null) {
+    return duration == null ? 'bg-gray-400 dark:bg-gray-500' : LATENCY_BAR_CLASSES[duration]
+  }
+  return [
+    'bg-gradient-to-b from-40% to-60%',
+    LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)],
+    duration == null ? 'to-gray-400 dark:to-gray-500' : LATENCY_BAR_TO_CLASSES[duration],
+  ]
+}
+
 const formatDuration = (ms: number | null | undefined): string => {
   if (ms == null) return '-'
   if (ms < 1000) return `${ms}ms`
