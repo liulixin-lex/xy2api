@@ -419,6 +419,7 @@ export default {
       emptyPartial: '统计还没补满 12 小时（已覆盖 {hours} 小时），这个分组还没有数据',
       unknownModel: '模型未知',
       notMember: '（已不在本组）',
+      left: '已不在本组',
       sub: '优先级 {priority}',
       subModel: '优先级 {priority} · {model}',
       expand: '{name} 的明细',

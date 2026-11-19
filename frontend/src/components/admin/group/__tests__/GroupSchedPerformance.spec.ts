@@ -128,7 +128,11 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(cell(620, 'slow').textContent!.trim()).toBe('admin.schedQuality.perf.slowCount:{"slow":"3","n":"7"}')
     expect(cell(620, 'score').textContent!.trim()).toBe('admin.schedQuality.perf.scoreShort')
     expect(row(620).classList.contains('sq-weak')).toBe(true)
-    expect(row(510).querySelector('[data-sq-perf-left]')).not.toBeNull()
+    // Acceptance round 2: "left the group" opens the second line, out of the name a phone cuts; the name's title has it.
+    const left = row(510).querySelector('[data-sq-perf-left]')!
+    expect(left.closest('.gperf__name')).toBeNull()
+    expect(left.closest('.gperf__model')).not.toBeNull()
+    expect(row(510).querySelector('.gperf__name')!.getAttribute('title')).toBe('acc-510admin.schedQuality.perf.notMember')
     // The score in points; the rank among scored members of the same priority and model (510 left: no rank, not counted).
     expect(cell(483, 'score').textContent).toContain('25.1')
     expect(cell(483, 'score').textContent).toContain('admin.schedQuality.perf.rank:{"place":2,"of":2}')

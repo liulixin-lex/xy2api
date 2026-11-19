@@ -17,7 +17,7 @@
       <p v-else-if="loadingStats" class="sq-text-3 text-sm" data-sq-perf-loading-stats>{{ t('admin.schedQuality.perf.loadingStats') }}</p>
       <div v-if="priorities.length > 1 || redCount > 0" class="gperf__filters">
         <div v-if="priorities.length > 1" class="gperf__prio">
-          <span class="sq-text-3" aria-hidden="true">{{ t('admin.schedQuality.perf.priority') }}</span>
+          <span class="gperf__prio-label sq-text-3" aria-hidden="true">{{ t('admin.schedQuality.perf.priority') }}</span>
           <div v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.perf.priority')" class="gperf__tabs" data-sq-perf-priorities>
             <button
               v-for="option in [null, ...priorities]"
@@ -74,7 +74,7 @@
                       <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
                     </button>
                     <div class="gperf__id">
-                      <span class="gperf__name" :title="view.row.name">
+                      <span class="gperf__name" :title="view.row.member ? view.row.name : `${view.row.name}${t('admin.schedQuality.perf.notMember')}`">
                         <button
                           v-if="canViewAccounts"
                           type="button"
@@ -84,9 +84,12 @@
                           @click="openSchedDrawer({ id: view.row.account_id, name: view.row.name }, { model: view.row.model, groupId: view.row.group_id })"
                         >{{ view.row.name }}</button>
                         <span v-else :class="{ 'sq-text-3': !view.row.member }">{{ view.row.name }}</span>
-                        <span v-if="!view.row.member" class="sq-text-3" data-sq-perf-left>{{ t('admin.schedQuality.perf.notMember') }}</span>
                       </span>
-                      <span class="gperf__sub gperf__model" :title="view.row.model">{{ subOf(view) }}</span>
+                      <!-- An account that left the group says so at the start of the second line, which a long name cannot
+                           cut (it sat after the name and went with it on a phone). -->
+                      <span class="gperf__sub gperf__model" :title="view.row.model">
+                        <span v-if="!view.row.member" class="gperf__left" data-sq-perf-left>{{ t('admin.schedQuality.perf.left') }} · </span>{{ subOf(view) }}
+                      </span>
                     </div>
                   </div>
                 </td>
@@ -404,6 +407,10 @@ function whyOf(view: PerfView): string {
   gap: 8px 16px;
   margin-bottom: 12px;
   font-size: 13px;
+}
+.gperf__prio-label {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .gperf__prio {
   display: flex;

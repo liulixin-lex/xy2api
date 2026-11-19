@@ -418,6 +418,7 @@ export default {
       emptyPartial: 'The statistics cover {hours} of the 12 hours so far: no figures for this group yet',
       unknownModel: 'Unknown model',
       notMember: ' (no longer in the group)',
+      left: 'left the group',
       sub: 'Priority {priority}',
       subModel: 'Priority {priority} · {model}',
       expand: 'Details of {name}',
