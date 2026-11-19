@@ -1,6 +1,11 @@
 package service
 
-import "strings"
+import (
+	"context"
+	"strings"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+)
 
 // resolveOpenAIForwardModel 解析 OpenAI 兼容转发使用的模型。
 // messagesDispatchMappedModel 是调用方已为 /v1/messages 解析的显式调度结果；
@@ -19,6 +24,56 @@ func resolveOpenAIForwardModel(account *Account, requestedModel, messagesDispatc
 		return messagesDispatchMappedModel
 	}
 	return mappedModel
+}
+
+// resolveOpenAICompatForwardModels is the mapping used by the Chat and
+// Messages adapters, including upstream normalization of the billing model.
+func resolveOpenAICompatForwardModels(account *Account, model, defaultModel string) (billing, upstream string) {
+	billing = resolveOpenAIForwardModel(account, model, defaultModel)
+	return billing, normalizeOpenAIModelForUpstream(account, billing)
+}
+
+type messagesForwardModel struct{ body, fallback string }
+type messagesForwardModelKey struct{}
+
+// WithOpenAIMessagesForwardModel identifies the channel-mapped body model
+// and dispatch fallback used by ForwardAsAnthropic for this selection.
+func WithOpenAIMessagesForwardModel(ctx context.Context, bodyModel, fallback string) context.Context {
+	return context.WithValue(ctx, messagesForwardModelKey{}, messagesForwardModel{bodyModel, fallback})
+}
+
+func (s *OpenAIGatewayService) newPickForwardModel(ctx context.Context, a *Account, requested string) string {
+	if m, ok := ctx.Value(messagesForwardModelKey{}).(messagesForwardModel); ok {
+		_, native := resolveOpenAICompatForwardModels(a, strings.TrimSpace(m.body), m.fallback)
+		msg := apicompat.AnthropicRequest{Model: m.body}
+		applyOpenAICompatModelNormalization(&msg)
+		_, converted := resolveOpenAICompatForwardModels(a, msg.Model, m.fallback)
+		// Native Messages keeps the original spelling. Only resolve the protocol
+		// if the two forwarding paths actually produce different models.
+		if native != converted && s.newPickProtocol(ctx, a, APIProtocolAnthropic, native) == APIProtocolAnthropic {
+			return native
+		}
+		return converted
+	}
+	if chat, ok := ChatRequestRequirementFromContext(ctx); ok {
+		_, upstream := resolveOpenAICompatForwardModels(a, chat.DispatchModel, "")
+		return upstream
+	}
+	// Responses passthrough preserves the body model on the native endpoint.
+	// A Responses request bridged to Chat or Messages takes the adapter mapping.
+	_, native := resolveOpenAIForwardMappedModels(a, requested, false)
+	_, bridged := resolveOpenAICompatForwardModels(a, requested, "")
+	if native != bridged && s.newPickProtocol(ctx, a, APIProtocolResponses, bridged) != APIProtocolResponses {
+		return bridged
+	}
+	return native
+}
+
+func (s *OpenAIGatewayService) newPickProtocol(ctx context.Context, a *Account, inbound, mapped string) string {
+	if !a.routesByModel() {
+		mapped = ""
+	}
+	return s.resolveUpstreamProtocolFor(ctx, a, inbound, mapped)
 }
 
 // openAIOAuthForeignModelPrefixes 列出明确属于其他厂商家族的模型名前缀。

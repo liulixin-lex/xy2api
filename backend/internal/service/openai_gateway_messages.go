@@ -103,8 +103,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	clientStream := anthropicReq.Stream // client's original stream preference
 
 	// 2. Model mapping
-	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, normalizedModel, defaultMappedModel)
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
 	if projectionErr != nil {

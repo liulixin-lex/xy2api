@@ -363,6 +363,9 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
 		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
+		if pass := newPickPassFrom(ctx); pass != nil {
+			pass.firstOutputAvoidRead = true
+		}
 		firstOutputAvoided, _ = sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
 		if _, hit := firstOutputAvoided[stickyOwner]; hit {
 			_, hard := origExcluded[stickyOwner]

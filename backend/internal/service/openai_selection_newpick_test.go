@@ -452,6 +452,7 @@ func TestNewPickDoubleMiss(t *testing.T) {
 			f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = tc.fallback
 			f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = true
 			ctx := beginNewPickSelection(withOpenAILegacySessionHash(resilience.WithRequestState(context.Background(), resilience.NewRequestState()), "old"))
+			ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequiredCapability: OpenAIEndpointCapabilityResponses})
 			f.svc.prepareOpenAIStickyChange(ctx, ptrInt64Selection(7), "session")
 			change := pendingOpenAIStickyChange(ctx)
 			require.NotNil(t, change)

@@ -14,10 +14,11 @@ import (
 type newPickFirstSelectionKey struct{}
 
 type newPickPass struct {
-	opportunity atomic.Bool
-	target      *AccountSelectionResult
-	reservation *newPickReservation
-	log         func(string)
+	opportunity          atomic.Bool
+	firstOutputAvoidRead bool
+	target               *AccountSelectionResult
+	reservation          *newPickReservation
+	log                  func(string)
 }
 
 // Called at the outermost return, after all inner selection defers have run.
@@ -90,14 +91,15 @@ type newPickAccount struct {
 	model   string
 }
 
-func newPickFront(view schedquality.View, group int64, model string, acc *Account, request selectionRequest, now, snapshotAt time.Time) (newPickAccount, bool) {
+func (s *OpenAIGatewayService) newPickFront(ctx context.Context, view schedquality.View, group int64, model string, acc *Account, request selectionRequest, now, snapshotAt time.Time) (newPickAccount, bool) {
 	state := selectionState(view, group, acc, model)
 	override, _ := state.EffectiveOverride(now)
 	if acc.Concurrency <= 0 || view.ResetAt(acc.ID).After(snapshotAt) || override.Mode == schedquality.OverrideExempt || state.Placement(true, now) != schedquality.PlaceFront {
 		return newPickAccount{}, false
 	}
 	key := buildSelectionKey(view, group, model, acc, request, now)
-	return newPickAccount{acc, key, OpenAIAttemptModel(acc, model)}, key.Tier == 0
+	attemptModel := OpenAIAttemptModel(acc, model)
+	return newPickAccount{acc, key, attemptModel}, key.Tier == 0 && s.newPickForwardModel(ctx, acc, model) == attemptModel
 }
 
 func (b newPickAccount) permits(t newPickAccount) bool {
@@ -244,19 +246,40 @@ func (change *openAIStickyChange) readyForNewPick(req OpenAIAccountScheduleReque
 		!change.ownerReleased && change.target == 0 && !change.done
 }
 
+func (s *OpenAIGatewayService) newPickNeedsAliasRead(ctx context.Context, group int64, session string) bool {
+	if !isFirstNewPickSelection(ctx) || s.concurrencyService == nil || s.selectionBoard == nil || s.selectionBoard.performance == nil {
+		return false
+	}
+	req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if !ok || !newPickRequestEligible(ctx, req, session) {
+		return false
+	}
+	now := s.selectionNow()
+	if !selectionAuto(s.selectionView(), group, now) {
+		return false
+	}
+	snap, _ := s.selectionBoard.performance()
+	return snap != nil && snap.Usable(now)
+}
+
+// These exclusions are already known before reading any binding evidence.
+func newPickRequestEligible(ctx context.Context, req OpenAIAccountScheduleRequest, session string) bool {
+	state := resilience.StateFrom(ctx)
+	_, scoped := state.GatewayRequestScope()
+	return req.Platform == PlatformOpenAI && !openAISelectionNoWait(ctx) && !req.NoWait &&
+		!req.RequireCompact && req.RequiredImageCapability == "" && len(req.ExcludedIDs) == 0 &&
+		!openAISelectionManualOnly(ctx) && !openAISelectionExempt(ctx) && firstOutputMigrationAllowed(ctx, session) &&
+		state.StickyOwner() == 0 && state.KeptSticky() == 0 && state.Budget().Attempts() == 0 &&
+		!resilienceLastResortGate(ctx) && !openAIProxyStreamQuarantineBypassed(ctx) &&
+		(scoped || req.RequiredCapability == OpenAIEndpointCapabilityChatCompletions || req.RequiredCapability == OpenAIEndpointCapabilityResponses)
+}
+
 func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAccountScheduleRequest, base *Account, remaining []*Account, loads map[int64]*AccountLoadInfo) (selected *AccountSelectionResult) {
 	board, state := s.selectionBoard, resilience.StateFrom(ctx)
-	if board == nil || board.performance == nil || len(remaining) == 0 || s.concurrencyService == nil ||
-		req.Platform != PlatformOpenAI || req.NoWait || req.RequireCompact || req.RequiredImageCapability != "" || len(req.ExcludedIDs) != 0 ||
-		openAISelectionManualOnly(ctx) || openAISelectionExempt(ctx) || !firstOutputMigrationAllowed(ctx, req.SessionHash) ||
-		state.StickyOwner() > 0 || state.KeptSticky() > 0 || resilienceLastResortGate(ctx) || openAIProxyStreamQuarantineBypassed(ctx) {
+	if board == nil || board.performance == nil || len(remaining) == 0 || s.concurrencyService == nil || !newPickRequestEligible(ctx, req, req.SessionHash) {
 		return nil
 	}
 	if !pendingOpenAIStickyChange(ctx).readyForNewPick(req) {
-		return nil
-	}
-	_, scoped := state.GatewayRequestScope()
-	if !scoped && req.RequiredCapability != OpenAIEndpointCapabilityChatCompletions && req.RequiredCapability != OpenAIEndpointCapabilityResponses {
 		return nil
 	}
 	if s.firstOutputQualityOwnsSticky(ctx, req.GroupID, req.SessionHash) || openAIStickyBindingKept(ctx, req.SessionHash, base.ID) {
@@ -271,7 +294,7 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 		return nil
 	}
 	request := s.selectionRequest(ctx, req, loads)
-	b, ok := newPickFront(view, group, req.RequestedModel, base, request, now, at)
+	b, ok := s.newPickFront(ctx, view, group, req.RequestedModel, base, request, now, at)
 	if !ok || request.Borrow {
 		return nil
 	}
@@ -281,7 +304,7 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 	}
 	candidates := make([]newPickCandidate, 0, len(remaining))
 	for _, a := range remaining {
-		t, front := newPickFront(view, group, req.RequestedModel, a, request, now, at)
+		t, front := s.newPickFront(ctx, view, group, req.RequestedModel, a, request, now, at)
 		if !front || !b.permits(t) || s.selectionFullMarks.Recently(a.ID, now) {
 			continue
 		}
@@ -292,7 +315,7 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 	if len(candidates) == 0 {
 		return nil
 	}
-	if resilienceLastCandidate(ctx, base.ID) || state.Budget().Attempts() > 0 {
+	if resilienceLastCandidate(ctx, base.ID) {
 		return nil
 	}
 	window := now.UTC().Truncate(15 * time.Minute)
@@ -323,6 +346,15 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 			reservation.release()
 		}
 	}()
+	pass := newPickPassFrom(ctx)
+	if !pass.firstOutputAvoidRead {
+		// The ordinary path may have skipped this scope with session resilience off.
+		// Existing avoid records still apply to voluntary placement.
+		avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, group, firstOutputAvoidSession(req.SessionHash), s.resilience.sessionResetAt)
+		if _, blocked := avoided[c.target.account.ID]; err != nil || blocked {
+			return nil
+		}
+	}
 	target, outcome := s.tryNewPick(ctx, req, c.target)
 	if target == nil {
 		logDecision(outcome)
@@ -334,7 +366,6 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 		return nil
 	}
 	b, c.target, window, used = bNow, tNow, reservation.window, reservation.used
-	pass := newPickPassFrom(ctx)
 	target.ReleaseFunc = sync.OnceFunc(target.ReleaseFunc)
 	pass.target, pass.reservation, pass.log = target, reservation, logDecision
 	return target
@@ -376,8 +407,8 @@ func (s *OpenAIGatewayService) validateNewPick(ctx context.Context, req OpenAIAc
 	if !selectionAuto(view, group, now) || !snap.Usable(now) || s.selectionFullMarks.Recently(target.ID, now) {
 		return b, t, false
 	}
-	b, baseFront := newPickFront(view, group, req.RequestedModel, original.account, request, now, at)
-	t, targetFront := newPickFront(view, group, req.RequestedModel, target, request, now, at)
+	b, baseFront := s.newPickFront(ctx, view, group, req.RequestedModel, original.account, request, now, at)
+	t, targetFront := s.newPickFront(ctx, view, group, req.RequestedModel, target, request, now, at)
 	return b, t, baseFront && targetFront && b.permits(t) && b.model == original.model && !openAIStickyBindingKept(ctx, req.SessionHash, target.ID)
 }
 
