@@ -123,7 +123,16 @@ describe('UsageStatsCards user wait (admin)', () => {
 
 // Browser check #1 and #7: the admin page's five cards fit at 1024 and 1440, and never show another filter's totals.
 describe('UsageStatsCards admin layout and unread totals', () => {
-  const big = { ...stats, total_requests: 12002, total_tokens: 652_440_000, total_actual_cost: 30750.12, total_cost: 30750.12, average_duration_ms: 1850 }
+  const big = {
+    ...stats, total_requests: 12002, total_tokens: 652_440_000, total_input_tokens: 423_750_000, total_output_tokens: 1_230_000,
+    total_actual_cost: 30750.12, total_cost: 30750.12, average_duration_ms: 1850, success: 11_990, rescued: 7, failed: 5
+  }
+  // The breakdown lines under the totals: tokens, request outcomes, cost; each carries recognizable figures.
+  const breakdowns = (w: ReturnType<typeof mountCards>) => ({
+    tokens: w.findAll('p').some((p) => p.text().includes('423.75M')),
+    outcomes: w.find('[data-testid="usage-request-outcomes"]').exists(),
+    cost: w.findAll('p').some((p) => p.text().includes('Standard'))
+  })
   const mountCards = (e2eState?: 'loading' | 'failed' | 'loaded' | 'blocked') => mount(UsageStatsCards, {
     props: { stats: { ...big, e2e_first_output_p50_ms: 1850, e2e_first_output_samples: 1 } as never, e2eState },
     global: { stubs: { Icon: true } },
@@ -152,11 +161,18 @@ describe('UsageStatsCards admin layout and unread totals', () => {
     expect(totals(w)).toEqual(expected)
     expect(w.text()).not.toContain('12,002')
     expect(w.text()).not.toContain('30750')
-    expect(w.text()).not.toContain('usage.in')
+    // No breakdown of another filter's figures either (final-fe review, Astra item 9: the old check looked for a key
+    // the copy stub never renders).
+    expect(w.text()).not.toContain('423.75M')
+    expect(breakdowns(w)).toEqual({ tokens: false, outcomes: false, cost: false })
   })
 
-  it('shows the totals on the admin page once loaded, and always on the user page', () => {
-    expect(totals(mountCards('loaded'))).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
-    expect(totals(mountCards())).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+  it('shows the totals and their breakdowns on the admin page once loaded, and always on the user page', () => {
+    const loaded = mountCards('loaded')
+    expect(totals(loaded)).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+    expect(breakdowns(loaded)).toEqual({ tokens: true, outcomes: true, cost: true })
+    const user = mountCards()
+    expect(totals(user)).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+    expect(breakdowns(user)).toEqual({ tokens: true, outcomes: true, cost: true })
   })
 })
