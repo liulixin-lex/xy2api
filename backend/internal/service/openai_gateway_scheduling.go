@@ -1382,44 +1382,25 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			checked[fresh.ID] = fresh
-			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			slotConcurrency := fresh.Concurrency
+			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, slotConcurrency)
 			if err != nil || slot == nil || !slot.Acquired {
 				continue
 			}
-			latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
-			if vetoed || latest == nil {
-				delete(checked, fresh.ID) // a changed cached rate cannot reuse its earlier wait-plan row
-				slot.ReleaseFunc()
-				continue
-			}
-			var selected *AccountSelectionResult
-			if bindingMissing && isFirstNewPickSelection(ctx) {
-				selected = s.newSessionPick(ctx, req, latest, available, loads)
-				if selected != nil {
-					slot.ReleaseFunc()
-					latest = selected.Account
-				} else if err := ctx.Err(); err != nil {
-					slot.ReleaseFunc()
-					return nil, true, err
-				}
+			realBaseSlot := s.concurrencyService != nil && slotConcurrency > 0
+			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, available, loads,
+				realBaseSlot && bindingMissing && isFirstNewPickSelection(ctx))
+			if err != nil {
+				return nil, true, err
 			}
 			if selected == nil {
-				full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
-				reservation, accepted := trial.reserve(ctx, latest, full)
-				if !accepted {
-					slot.ReleaseFunc()
-					available = append(available, latest)
+				if retryTrial == nil {
+					delete(checked, fresh.ID) // a vetoed row cannot be reused for a wait plan
+				} else {
+					available = append(available, retryTrial)
 					s.sortSelectionAccounts(ctx, available, req, loads)
-					continue
 				}
-				trial.selected = reservation
-				selected, err = s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
-				if err != nil {
-					return nil, true, err
-				}
-			}
-			if sessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
-				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
+				continue
 			}
 			return selected, true, nil
 		}
@@ -1453,7 +1434,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if req.NoWait {
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary("concurrency_full"))
 	}
-	bindingMissing = false // a later probe is no longer an immediate placement
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
 	}
@@ -1791,12 +1771,18 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 		}
 		return nil, err
 	}
+	return selectionResultForAccount(ctx, hydrated, acquired, release, waitPlan), nil
+}
+
+// Selection on a fully admitted account can construct the result without a
+// second hydration that could replace the admitted row.
+func selectionResultForAccount(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) *AccountSelectionResult {
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-		Account:     hydrated,
+		Account:     account,
 		Acquired:    acquired,
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
-	}), nil
+	})
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {

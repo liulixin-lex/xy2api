@@ -248,7 +248,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		var missing bool
 		stickyOwner, missing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 		if isFirstNewPickSelection(ctx) && !missing {
-			ctx = context.WithValue(ctx, newPickFirstSelectionKey{}, false)
+			stopNewPick(ctx)
 		}
 		state.NoteStickyOwner(stickyOwner)
 	}

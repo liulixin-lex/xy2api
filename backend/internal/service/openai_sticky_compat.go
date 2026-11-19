@@ -129,8 +129,8 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 // The extra result preserves absence evidence for new-session placement. Legacy
 // callers keep their original ID and error even when a fallback read fails.
 func (s *OpenAIGatewayService) lookupStickySessionAccount(ctx context.Context, groupID *int64, sessionHash string) (int64, bool, error) {
-	if id, handled, missing := s.qualitySticky(ctx, groupID, sessionHash); handled {
-		return id, missing, nil
+	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
+		return id, false, nil
 	}
 	if s == nil || s.cache == nil {
 		return 0, false, nil

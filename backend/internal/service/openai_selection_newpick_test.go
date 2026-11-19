@@ -525,14 +525,14 @@ func TestNewPickReservationAcrossWindow(t *testing.T) {
 	next := old.Add(15 * time.Minute)
 	for _, alreadyUsed := range []bool{false, true} {
 		var limit newPickLimit
-		_, used, capped := limit.reserve([]newPickCandidate{c}, 30_000, old)
+		_, used, capped := limit.reserve(newPickOpportunity(beginNewPickSelection(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))), []newPickCandidate{c}, 30_000, old)
 		require.False(t, capped)
 		require.Equal(t, 1, used)
 		if alreadyUsed {
-			limit.reserve([]newPickCandidate{c}, 30_000, next)
-			limit.finish(5, 4, next, next, true)
+			limit.reserve(newPickOpportunity(beginNewPickSelection(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))), []newPickCandidate{c}, 30_000, next)
+			limit.finish(context.Background(), 5, 4, next, next, true)
 		}
-		used, ok := limit.finish(5, 4, old, next, true)
+		used, ok := limit.finish(context.Background(), 5, 4, old, next, true)
 		require.Equal(t, !alreadyUsed, ok)
 		require.Equal(t, 1, used)
 		require.Equal(t, newPickCount{picked: 1}, limit.counts[5])
@@ -545,16 +545,19 @@ type newPickHydrationCache struct {
 }
 
 func (c *newPickHydrationCache) GetAccount(ctx context.Context, id int64) (*Account, error) {
+	row, err := c.snapshotHydrationCache.GetAccount(ctx, id)
 	if id == 2 {
 		c.targetReads++
-		if c.targetReads == 3 { // selected-result hydration, after both eligibility reads
-			return nil, errors.New("target disappeared")
+		if c.targetReads > 1 {
+			other := *row
+			other.GroupIDs = []int64{99}
+			return &other, nil
 		}
 	}
-	return c.snapshotHydrationCache.GetAccount(ctx, id)
+	return row, err
 }
 
-func TestNewPickHydrationReleasesTargetOnce(t *testing.T) {
+func TestNewPickUsesAdmittedTargetRow(t *testing.T) {
 	f, _ := newPickFixture(t)
 	base, target := &f.repo.accounts[0], &f.repo.accounts[1]
 	cache := &newPickHydrationCache{snapshotHydrationCache: snapshotHydrationCache{accounts: map[int64]*Account{1: base, 2: target}}}
@@ -563,9 +566,11 @@ func TestNewPickHydrationReleasesTargetOnce(t *testing.T) {
 	req := OpenAIAccountScheduleRequest{GroupID: ptrInt64Selection(7), Platform: PlatformOpenAI, SessionHash: "session", RequiredCapability: OpenAIEndpointCapabilityResponses, RequestedModel: "m"}
 	ctx := context.WithValue(resilience.WithRequestState(context.Background(), resilience.NewRequestState()), openAISelectionRequestKey{}, req)
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{groupID: 7, session: "session", kind: "create", newPickMissing: true})
-	r := f.svc.newSessionPick(ctx, req, base, []*Account{target}, nil)
-	require.Nil(t, r)
-	require.Equal(t, 3, cache.targetReads)
+	r := f.svc.newSessionPick(beginNewPickSelection(ctx), req, base, []*Account{target}, nil)
+	require.NotNil(t, r)
+	require.Same(t, target, r.Account)
+	require.Equal(t, []int64{7}, r.Account.GroupIDs)
+	require.Equal(t, 1, cache.targetReads)
+	r.ReleaseFunc()
 	require.Equal(t, []int64{2}, f.releases)
-	require.Equal(t, newPickCount{}, f.svc.selectionBoard.newPickLimit.counts[2])
 }

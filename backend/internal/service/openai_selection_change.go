@@ -256,11 +256,14 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 		missing = missing && stickyLookupMissing(expected.AccountID, err)
 	}
-	if missing && legacy != "" && !fallback && isFirstNewPickSelection(ctx) {
-		// The normal resolver ignores the alias when legacy adoption is off.
-		// This read must neither adopt it nor change the existing CAS plan.
-		old, oldErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
-		missing = stickyLookupMissing(old, oldErr)
+	if missing && legacy != "" && !fallback {
+		missing = false
+		if isFirstNewPickSelection(ctx) && selectionAuto(s.selectionView(), derefGroupID(groupID), s.selectionNow()) {
+			// The normal resolver ignores the alias when legacy adoption is off.
+			// This read must neither adopt it nor change the existing CAS plan.
+			old, oldErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
+			missing = stickyLookupMissing(old, oldErr)
+		}
 	}
 	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
 	kind := "migrate"

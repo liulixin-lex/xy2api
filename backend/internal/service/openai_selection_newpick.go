@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -12,13 +13,31 @@ import (
 
 type newPickFirstSelectionKey struct{}
 
+// The first public selection owns one opportunity, shared by its internal passes.
 func beginNewPickSelection(ctx context.Context) context.Context {
-	return context.WithValue(ctx, newPickFirstSelectionKey{}, resilience.StateFrom(ctx).BeginNewPickSelection())
+	var opportunity *atomic.Bool
+	nativeCompact, _ := ctx.Value(nativeCompactionContextKey{}).(bool)
+	if resilience.StateFrom(ctx).BeginNewPickSelection() && !nativeCompact && !openAIQualityRoutingActive(ctx) {
+		opportunity = new(atomic.Bool)
+		opportunity.Store(true)
+	}
+	return context.WithValue(ctx, newPickFirstSelectionKey{}, opportunity)
+}
+
+func newPickOpportunity(ctx context.Context) *atomic.Bool {
+	pass, _ := ctx.Value(newPickFirstSelectionKey{}).(*atomic.Bool)
+	return pass
 }
 
 func isFirstNewPickSelection(ctx context.Context) bool {
-	first, _ := ctx.Value(newPickFirstSelectionKey{}).(bool)
-	return first
+	pass := newPickOpportunity(ctx)
+	return pass != nil && pass.Load()
+}
+
+func stopNewPick(ctx context.Context) {
+	if pass := newPickOpportunity(ctx); pass != nil {
+		pass.Store(false)
+	}
 }
 
 type newPickSnapshot interface {
@@ -34,10 +53,10 @@ type newPickAccount struct {
 	model   string
 }
 
-func newPickFront(view schedquality.View, group int64, model string, acc *Account, request selectionRequest, now time.Time) (newPickAccount, bool) {
+func newPickFront(view schedquality.View, group int64, model string, acc *Account, request selectionRequest, now, snapshotAt time.Time) (newPickAccount, bool) {
 	state := selectionState(view, group, acc, model)
 	override, _ := state.EffectiveOverride(now)
-	if acc.Concurrency <= 0 || override.Mode == schedquality.OverrideExempt || state.Placement(true, now) != schedquality.PlaceFront {
+	if acc.Concurrency <= 0 || view.ResetAt(acc.ID).After(snapshotAt) || override.Mode == schedquality.OverrideExempt || state.Placement(true, now) != schedquality.PlaceFront {
 		return newPickAccount{}, false
 	}
 	key := buildSelectionKey(view, group, model, acc, request, now)
@@ -94,11 +113,11 @@ func (l *newPickLimit) advance(window time.Time) {
 }
 
 // The short critical section uses only already materialized values.
-func (l *newPickLimit) reserve(candidates []newPickCandidate, baseScore int64, window time.Time) (*newPickCandidate, int, bool) {
+func (l *newPickLimit) reserve(opportunity *atomic.Bool, candidates []newPickCandidate, baseScore int64, window time.Time) (*newPickCandidate, int, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.advance(window)
-	if window.Before(l.window) {
+	if opportunity == nil || !opportunity.Load() || window.Before(l.window) {
 		return nil, 0, false
 	}
 	c, capped := chooseNewPick(candidates, baseScore, l.counts)
@@ -107,6 +126,9 @@ func (l *newPickLimit) reserve(candidates []newPickCandidate, baseScore int64, w
 	}
 	id := c.target.account.ID
 	count := l.counts[id]
+	if !opportunity.CompareAndSwap(true, false) {
+		return nil, 0, false
+	}
 	if capped {
 		return c, count.picked + count.pending, true
 	}
@@ -117,7 +139,7 @@ func (l *newPickLimit) reserve(candidates []newPickCandidate, baseScore int64, w
 
 // Finish in the actual decision window. A delayed release cannot refund a
 // newer window, and a successful attempt crossing a boundary needs room there.
-func (l *newPickLimit) finish(id int64, first15 int, reserved, current time.Time, picked bool) (int, bool) {
+func (l *newPickLimit) finish(ctx context.Context, id int64, first15 int, reserved, current time.Time, picked bool) (int, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.advance(current)
@@ -125,7 +147,7 @@ func (l *newPickLimit) finish(id int64, first15 int, reserved, current time.Time
 	if reserved.Equal(l.window) {
 		count.pending--
 	}
-	if picked && current.Equal(l.window) && count.pending+count.picked < first15/4 {
+	if picked && ctx.Err() == nil && current.Equal(l.window) && count.pending+count.picked < first15/4 {
 		count.picked++
 	} else {
 		picked = false
@@ -144,7 +166,7 @@ func (change *openAIStickyChange) readyForNewPick(req OpenAIAccountScheduleReque
 		!change.ownerReleased && change.target == 0 && !change.done
 }
 
-func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAccountScheduleRequest, base *Account, remaining []*Account, loads map[int64]*AccountLoadInfo) *AccountSelectionResult {
+func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAccountScheduleRequest, base *Account, remaining []*Account, loads map[int64]*AccountLoadInfo) (selected *AccountSelectionResult) {
 	board, state := s.selectionBoard, resilience.StateFrom(ctx)
 	if board == nil || board.performance == nil || len(remaining) == 0 || s.concurrencyService == nil ||
 		req.Platform != PlatformOpenAI || req.NoWait || req.RequireCompact || req.RequiredImageCapability != "" || len(req.ExcludedIDs) != 0 ||
@@ -171,7 +193,7 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 		return nil
 	}
 	request := s.selectionRequest(ctx, req, loads)
-	b, ok := newPickFront(view, group, req.RequestedModel, base, request, now)
+	b, ok := newPickFront(view, group, req.RequestedModel, base, request, now, at)
 	if !ok || request.Borrow {
 		return nil
 	}
@@ -181,7 +203,7 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 	}
 	candidates := make([]newPickCandidate, 0, len(remaining))
 	for _, a := range remaining {
-		t, front := newPickFront(view, group, req.RequestedModel, a, request, now)
+		t, front := newPickFront(view, group, req.RequestedModel, a, request, now, at)
 		if !front || !b.permits(t) || s.selectionFullMarks.Recently(a.ID, now) {
 			continue
 		}
@@ -196,32 +218,55 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 		return nil
 	}
 	window := now.UTC().Truncate(15 * time.Minute)
-	c, used, capped := board.newPickLimit.reserve(candidates, fromScore, window)
+	c, used, capped := board.newPickLimit.reserve(newPickOpportunity(ctx), candidates, fromScore, window)
 	if c == nil {
 		return nil
 	}
 	outcome := "capped"
-	var selected *AccountSelectionResult
-	if !capped {
-		selected, outcome = s.tryNewPick(ctx, req, &b, &c.target, request, snap)
-		end := s.selectionNow().UTC().Truncate(15 * time.Minute)
-		finalUsed, committed := board.newPickLimit.finish(c.target.account.ID, c.first15, window, end, selected != nil)
-		if selected != nil && !committed {
-			selected.ReleaseFunc()
-			selected, outcome = nil, "target_vetoed"
+	var target *AccountSelectionResult
+	defer func() {
+		if target != nil && selected == nil {
+			target.ReleaseFunc()
 		}
-		if selected != nil && !end.Equal(window) {
+	}()
+	if !capped {
+		// Unwind the reservation even if an account, cache, policy or clock read panics.
+		limit := &board.newPickLimit
+		pending := true
+		defer func() {
+			if pending {
+				limit.finish(ctx, c.target.account.ID, c.first15, window, window, false)
+			}
+		}()
+		target, outcome = s.tryNewPick(ctx, req, c.target)
+		eligible := false
+		if target != nil {
+			bNow, tNow, ok := s.validateNewPick(ctx, req, b, target.Account, request, snap, at)
+			eligible = ok
+			if ok {
+				b, c.target = bNow, tNow
+			}
+		}
+		end := s.selectionNow().UTC().Truncate(15 * time.Minute)
+		finalUsed, committed := limit.finish(ctx, c.target.account.ID, c.first15, window, end, eligible)
+		pending = false
+		if target != nil && !committed {
+			outcome = "target_vetoed"
+		} else if committed && !end.Equal(window) {
 			window, used = end, finalUsed
 		}
 	}
-	if outcome != "capped" || state.ClaimNewPickCappedLog() {
-		slog.InfoContext(ctx, "sched_quality.new_pick", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
-			"group_id", group, "model", b.model, "from", b.account.ID, "to", c.target.account.ID,
-			"from_score", fromScore, "to_score", c.score, "snapshot_at", at, "first15", c.first15, "used", used,
-			"window", window, "first10", c.recent.First10, "first30", c.recent.First30, "from_priority", b.key.Priority, "to_priority", c.target.key.Priority,
-			"from_rate_known", b.key.RateKnown, "from_rate", newPickRate(b.key), "to_rate_known", c.target.key.RateKnown, "to_rate", newPickRate(c.target.key), "result", outcome)
+
+	slog.InfoContext(ctx, "sched_quality.new_pick", "component", "sched_quality", "gateway_request_id", state.GatewayRequestID(),
+		"group_id", group, "model", b.model, "from", b.account.ID, "to", c.target.account.ID,
+		"from_score", fromScore, "to_score", c.score, "snapshot_at", at, "first15", c.first15, "used", used,
+		"window", window, "first10", c.recent.First10, "first30", c.recent.First30, "from_priority", b.key.Priority, "to_priority", c.target.key.Priority,
+		"from_rate_known", b.key.RateKnown, "from_rate", newPickRate(b.key), "to_rate_known", c.target.key.RateKnown, "to_rate", newPickRate(c.target.key), "result", outcome)
+
+	if outcome == "picked" {
+		return target
 	}
-	return selected
+	return nil
 }
 
 func newPickRate(key selectionKey) *float64 {
@@ -231,7 +276,9 @@ func newPickRate(key selectionKey) *float64 {
 	return &key.Rate
 }
 
-func (s *OpenAIGatewayService) tryNewPick(ctx context.Context, req OpenAIAccountScheduleRequest, b, t *newPickAccount, request selectionRequest, snap newPickSnapshot) (*AccountSelectionResult, string) {
+// T takes the ordinary recheck, slot and admission gates. Preserve exactly the
+// admitted row (including a newer profit-cache row) through result construction.
+func (s *OpenAIGatewayService) tryNewPick(ctx context.Context, req OpenAIAccountScheduleRequest, t newPickAccount) (result *AccountSelectionResult, outcome string) {
 	fresh := s.recheckSelectionAccount(ctx, req, t.account)
 	if fresh == nil || fresh.Concurrency <= 0 {
 		return nil, "target_recheck_failed"
@@ -240,45 +287,68 @@ func (s *OpenAIGatewayService) tryNewPick(ctx context.Context, req OpenAIAccount
 	if err != nil || slot == nil || !slot.Acquired {
 		return nil, "target_slot_busy"
 	}
-	latest := s.newPickLatest(ctx, req, fresh)
-	if latest == nil {
-		slot.ReleaseFunc()
+	defer func() {
+		if result == nil {
+			slot.ReleaseFunc()
+		}
+	}()
+	latest, veto, _ := s.SelectionAdmissionVeto(ctx, fresh)
+	if veto || latest == nil || latest.ID != fresh.ID {
 		return nil, "target_vetoed"
 	}
-	selected, err := s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
-	if err != nil { // hydration also releases the acquired slot on error
-		return nil, "target_vetoed"
-	}
-	// A decision can span a DB read and a slot acquisition. Re-read the base
-	// as well: a lower price or changed priority must not be crossed.
-	base := s.newPickLatest(ctx, req, b.account)
-	view, now, group := s.selectionView(), s.selectionNow(), derefGroupID(req.GroupID)
-	if base == nil || !selectionAuto(view, group, now) || !snap.Usable(now) ||
-		s.selectionFullMarks.Recently(t.account.ID, now) || ctx.Err() != nil {
-		selected.ReleaseFunc()
-		return nil, "target_vetoed"
-	}
-	bNow, baseFront := newPickFront(view, group, req.RequestedModel, base, request, now)
-	tNow, targetFront := newPickFront(view, group, req.RequestedModel, selected.Account, request, now)
-	if !baseFront || !targetFront || !bNow.permits(tNow) || bNow.model != b.model ||
-		openAIStickyBindingKept(ctx, req.SessionHash, tNow.account.ID) {
-		selected.ReleaseFunc()
-		return nil, "target_vetoed"
-	}
-	*b, *t = bNow, tNow
-	return selected, "picked"
+	return selectionResultForAccount(ctx, latest, true, slot.ReleaseFunc, nil), "picked"
 }
 
-// Fetch a current row for each end of the comparison, including the same
-// post-slot cache/profit veto as the ordinary selector.
-func (s *OpenAIGatewayService) newPickLatest(ctx context.Context, req OpenAIAccountScheduleRequest, account *Account) *Account {
-	fresh := s.recheckSelectionAccount(ctx, req, account)
-	if fresh == nil {
-		return nil
+func (s *OpenAIGatewayService) validateNewPick(ctx context.Context, req OpenAIAccountScheduleRequest, original newPickAccount, target *Account, request selectionRequest, snap newPickSnapshot, at time.Time) (newPickAccount, newPickAccount, bool) {
+	view, now, group := s.selectionView(), s.selectionNow(), derefGroupID(req.GroupID)
+	var b, t newPickAccount
+	if !selectionAuto(view, group, now) || !snap.Usable(now) || s.selectionFullMarks.Recently(target.ID, now) {
+		return b, t, false
 	}
-	latest, veto, _ := s.SelectionAdmissionVeto(ctx, fresh)
-	if veto {
-		return nil
+	b, baseFront := newPickFront(view, group, req.RequestedModel, original.account, request, now, at)
+	t, targetFront := newPickFront(view, group, req.RequestedModel, target, request, now, at)
+	return b, t, baseFront && targetFront && b.permits(t) && b.model == original.model && !openAIStickyBindingKept(ctx, req.SessionHash, target.ID)
+}
+
+// The acquired slot is owned here until the final result is handed
+// to the caller. A lost trial reservation returns its row to the ordinary sort.
+func (s *OpenAIGatewayService) finishSelectionSlot(ctx context.Context, req OpenAIAccountScheduleRequest, fresh *Account, slot *AcquireResult, trial *selectionTrial, remaining []*Account, loads map[int64]*AccountLoadInfo, canPick bool) (selected *AccountSelectionResult, retryTrial *Account, err error) {
+	releaseBase := sync.OnceFunc(slot.ReleaseFunc)
+	owned := releaseBase
+	defer func() {
+		if owned != nil {
+			owned()
+		}
+	}()
+	latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
+	if vetoed || latest == nil {
+		return nil, nil, nil
 	}
-	return latest
+	if canPick {
+		selected = s.newSessionPick(ctx, req, latest, remaining, loads)
+		if selected != nil {
+			owned = selected.ReleaseFunc
+			releaseBase()
+			latest = selected.Account
+		} else if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
+	if selected == nil {
+		full := buildSelectionKey(s.selectionView(), derefGroupID(req.GroupID), req.RequestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
+		reservation, accepted := trial.reserve(ctx, latest, full)
+		if !accepted {
+			return nil, latest, nil
+		}
+		trial.selected = reservation
+		selected, err = s.newAcquiredSelectionResult(ctx, latest, releaseBase)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if req.SessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
+		_ = s.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, latest.ID)
+	}
+	owned = nil
+	return selected, nil, nil
 }
