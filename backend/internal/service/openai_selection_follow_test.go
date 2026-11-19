@@ -242,7 +242,7 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 				require.Empty(t, f.binding.casKeys)
 				require.Equal(t, f.owner.ID, f.binding.owner)
 			}
-			if scenario == "quality_owned" || scenario == "protocol" {
+			if scenario == "protocol" {
 				require.Zero(t, store.reads)
 			} else {
 				require.Equal(t, 1, store.reads)
@@ -335,9 +335,19 @@ func TestFirstOutputFollowVetoPerRequest(t *testing.T) {
 	ctx := resilience.WithRequestState(t.Context(), st)
 	require.NoError(t, f.session.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
 	logs := captureSchedObsLogs(t)
-	for range 2 {
+	checks := 0
+	f.session.vetoOpportunity = func(string, map[int64]struct{}, map[int64]struct{}, func(*Account) bool) *Account {
+		checks++
+		if checks == 1 {
+			return nil
+		}
+		return f.candidates[0]
+	}
+	// An empty check leaves the claim available. A retry after a logged veto skips the check.
+	for range 3 {
 		require.Nil(t, f.selectNow(ctx))
 	}
+	require.Equal(t, 2, checks)
 	rows := schedObsLogRecords(t, logs)
 	require.Len(t, rows, 1)
 	require.Equal(t, "target_avoided", rows[0]["reason"])
@@ -1114,7 +1124,7 @@ func TestFirstOutputFollowProductionTakeoverReader(t *testing.T) {
 			switch mode {
 			case "quality_owned":
 				require.Nil(t, sel)
-				require.Zero(t, store.reads)
+				require.Equal(t, 1, store.reads)
 			case "ordinary":
 				require.Equal(t, 1, store.reads)
 				require.NotNil(t, sel)

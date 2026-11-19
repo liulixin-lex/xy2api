@@ -74,3 +74,37 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionSwitchLogsOnlyFrozenModels(t *testing.T) {
+	for _, mode := range []string{"no_leases", "release_owner_lease"} {
+		t.Run(mode, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(t.Context(), st)
+			change := &openAIStickyChange{kind: "owner_released", groupID: 7, session: "session", key: f.binding.key, model: "m", target: 1,
+				expected: StickySessionBinding{AccountID: f.owner.ID, Generation: f.binding.generation}, cache: f.binding, ttl: f.session.bindingTTL}
+			leases := newSelectionTrialLeaseFake()
+			if mode == "release_owner_lease" {
+				change.leases = leases
+			}
+			var reads []int64
+			change.ownerLookup = func(_ context.Context, id int64) *Account { reads = append(reads, id); return f.owner }
+			st.SetStickyChange(change)
+			logs := captureSchedObsLogs(t)
+			CompleteOpenAIStickyChange(ctx, 1, true, false)
+			if mode == "release_owner_lease" {
+				require.Equal(t, []int64{f.owner.ID}, reads)
+				require.Equal(t, []string{"release:" + trialTestKey(f.owner.ID, "m", 7, TrialLeaseSessionMember("session"))}, leases.calls)
+			} else {
+				require.Empty(t, reads)
+			}
+			rows := schedObsLogRecords(t, logs)
+			require.Len(t, rows, 1)
+			require.Equal(t, true, rows[0]["committed"])
+			for _, key := range []string{"from_model", "to_model"} {
+				require.Contains(t, rows[0], key)
+				require.Nil(t, rows[0][key])
+			}
+		})
+	}
+}

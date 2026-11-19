@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -319,6 +320,57 @@ func (b *selectionCommitBarrier) CommitSessionBinding(ctx context.Context, g int
 	<-b.finish
 	return b.selectionBindingFake.CommitSessionBinding(ctx, g, key, expected, target, ttl, scopes)
 }
+
+func TestOwnerLeaseLookupAfterSlowCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := selectionNewSessionFixture()
+		barrier := &selectionCommitBarrier{selectionBindingFake: f.binding, entered: make(chan struct{}), finish: make(chan struct{})}
+		go func() {
+			<-barrier.entered
+			time.Sleep(2800 * time.Millisecond)
+			close(barrier.finish)
+		}()
+
+		const session = "session"
+		const oldModel = "owner-model"
+		f.owner.Credentials = map[string]any{"model_mapping": map[string]any{"m": oldModel}}
+		leases := newSelectionTrialLeaseFake()
+		key := trialTestKey(f.owner.ID, oldModel, 7, TrialLeaseSessionMember(session))
+		leases.held[key] = true
+		var lookupBudget time.Duration
+		change := &openAIStickyChange{
+			kind: "owner_released", groupID: 7, session: session, key: f.binding.key, model: "m", target: 1, toModel: "target-model",
+			expected: StickySessionBinding{AccountID: f.owner.ID, Generation: f.binding.generation}, cache: barrier, ttl: f.session.bindingTTL, leases: leases,
+			ownerLookup: func(lookupCtx context.Context, id int64) *Account {
+				require.Equal(t, f.owner.ID, id)
+				deadline, ok := lookupCtx.Deadline()
+				require.True(t, ok)
+				lookupBudget = time.Until(deadline)
+				select {
+				case <-lookupCtx.Done():
+					return nil
+				case <-time.After(2500 * time.Millisecond):
+					return f.owner
+				}
+			},
+		}
+		state := resilience.NewRequestState()
+		state.SetStickyChange(change)
+		logs := captureSchedObsLogs(t)
+		CompleteOpenAIStickyChange(resilience.WithRequestState(t.Context(), state), change.target, true, false)
+
+		require.Equal(t, change.target, f.binding.owner)
+		require.Equal(t, openAIAccountStateUpdateTimeout, lookupBudget)
+		require.NotContains(t, leases.held, key)
+		rows := schedObsLogRecords(t, logs)
+		require.Len(t, rows, 1)
+		require.Equal(t, "committed", rows[0]["commit_result"])
+		require.Contains(t, rows[0], "from_model")
+		require.Nil(t, rows[0]["from_model"])
+		require.Equal(t, change.toModel, rows[0]["to_model"])
+	})
+}
+
 func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	f := selectionNewSessionFixture()
 	f.candidates = f.candidates[:1]
