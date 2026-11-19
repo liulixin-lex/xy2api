@@ -44,10 +44,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	groups := make(map[int64]struct{})
 	var bad []AttemptSample
 	for _, s := range completedAttempts(samples, cut, now.Add(-CacheWindow), now) {
-		if !s.Continuation || s.SessionKey == "" {
-			continue
-		}
-		read, input, ok := cacheTokens(s)
+		read, input, ok := ContinuationTokens(s)
 		if !ok {
 			continue
 		}
@@ -100,6 +97,14 @@ func IsContinuation(current, previous AttemptSample) bool {
 		!previous.ClientCanceled && !previous.FinishedAt.IsZero() &&
 		!previous.FinishedAt.After(current.StartedAt) &&
 		!previous.FinishedAt.Before(current.StartedAt.Add(-ContinuationGap))
+}
+
+// ContinuationTokens returns the cache-line contribution of a resolved session turn.
+func ContinuationTokens(s AttemptSample) (read, input int64, ok bool) {
+	if !s.Continuation || s.SessionKey == "" {
+		return 0, 0, false
+	}
+	return cacheTokens(s)
 }
 
 // InputTokens stores uncached input; both cache reads and writes form the total.

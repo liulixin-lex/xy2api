@@ -17,6 +17,8 @@ import (
 )
 
 type SchedQualityAdmin interface {
+	GroupPerformance(context.Context, int64) (service.SchedAdminPerformance, error)
+	AccountPerformance(context.Context, int64) (service.SchedAdminPerformance, error)
 	Summary(context.Context, []int64) (service.SchedAdminSummary, error)
 	Attention(context.Context) (service.SchedAdminAttention, error)
 	AccountFilter(context.Context, string) (service.SchedQualityFilter, error)
@@ -305,4 +307,22 @@ func (h *SchedQualityHandler) UpdateTTFTRule(c *gin.Context) {
 	}
 	v, err := h.service.UpdateTTFTRule(c.Request.Context(), *r.Version, p, schedQualityOperator(c))
 	schedQualityReply(c, v, err)
+}
+
+func (h *SchedQualityHandler) GroupPerformance(c *gin.Context) {
+	id, ok := schedQualityID(c)
+	if !ok {
+		return
+	}
+	data, err := h.service.GroupPerformance(c.Request.Context(), id)
+	schedQualityReply(c, data, err)
+}
+
+func (h *SchedQualityHandler) AccountPerformance(c *gin.Context) {
+	id, ok := schedQualityID(c)
+	if !ok {
+		return
+	}
+	data, err := h.service.AccountPerformance(c.Request.Context(), id)
+	schedQualityReply(c, data, err)
 }
