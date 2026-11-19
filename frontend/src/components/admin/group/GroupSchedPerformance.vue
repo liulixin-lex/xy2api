@@ -124,14 +124,14 @@
                     <span v-tip="flagTip(view, 'cache')" :class="['gperf__main', view.cacheLow ? 'gperf__red-cell' : '']" :tabindex="view.cacheLow ? 0 : undefined">
                       <span v-if="view.cacheLow" class="sr-only">{{ flagTip(view, 'cache') }}</span>{{ fmtPct(view.cacheRate) }}
                     </span>
-                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }) }}</span>
+                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }, view.row.cont.turns) }}</span>
                   </template>
-                  <span v-else v-tip="cacheShortTip" class="gperf__main sq-text-3" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }) }}</span>
+                  <span v-else v-tip="cacheShortTip" class="gperf__main sq-text-3" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(view.row.cont.turns) }, view.row.cont.turns) }}</span>
                 </td>
                 <td class="sq-r sq-num" data-sq-cell="timeouts">
                   <template v-if="view.timeoutRate !== null">
                     <span class="gperf__main">{{ fmtPct(view.timeoutRate) }}</span>
-                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.times', { n: fmtCount(view.row.attempts.timeouts) }) }}</span>
+                    <span class="gperf__sub">{{ t('admin.schedQuality.perf.times', { n: fmtCount(view.row.attempts.timeouts) }, view.row.attempts.timeouts) }}</span>
                   </template>
                   <span v-else v-tip="timeoutsShortTip" class="gperf__main sq-text-3" tabindex="0">{{ fmtCount(view.row.attempts.timeouts) }} / {{ fmtCount(view.row.attempts.n) }}</span>
                 </td>
@@ -301,7 +301,8 @@ const { width: visible } = useElementSize(scrollRef)
 const windowText = computed(() => {
   const data = perf.value!
   if (!data.at) return t('admin.schedQuality.perf.windowLoading')
-  const requests = fmtCount(ofModel.value.reduce((sum, view) => sum + view.row.requests, 0))
+  const total = ofModel.value.reduce((sum, view) => sum + view.row.requests, 0)
+  const requests = t('admin.schedQuality.perf.total', { n: fmtCount(total) }, total)
   const parts = [
     t('admin.schedQuality.perf.window', { hours: data.window_hours, from: formatShortTime(data.window_from), to: formatShortTime(data.at) })
   ]
@@ -312,7 +313,7 @@ const windowText = computed(() => {
   }
   parts.push(t('admin.schedQuality.perf.updated', { time: formatShortTime(data.at) }))
   if (!loadingStats.value && !gateOff.value) {
-    parts.push(model.value === null ? t('admin.schedQuality.perf.total', { n: requests }) : t('admin.schedQuality.perf.totalModel', { model: modelText.value, n: requests }))
+    parts.push(model.value === null ? requests : t('admin.schedQuality.perf.totalModel', { model: modelText.value, requests }))
   }
   return parts.join(' · ')
 })

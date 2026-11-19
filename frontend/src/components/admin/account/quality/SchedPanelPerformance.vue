@@ -85,7 +85,7 @@
                 :class="{ prow__red: item.view.cacheLow }"
                 :tabindex="item.view.cacheLow ? 0 : undefined"
               ><span v-if="item.view.cacheLow" class="sr-only">{{ cacheTip(item.view) }}</span>{{ fmtPct(item.view.cacheRate) }}</span>
-              <span v-else v-tip="cacheShortTip" class="qp-muted" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(item.view.row.cont.turns) }) }}</span>
+              <span v-else v-tip="cacheShortTip" class="qp-muted" tabindex="0">{{ t('admin.schedQuality.perf.turns', { n: fmtCount(item.view.row.cont.turns) }, item.view.row.cont.turns) }}</span>
             </span>
             <span class="prow__r" role="cell" data-qp-perf-cell="switches">{{ fmtCount(item.view.switchTotal) }}</span>
           </template>
