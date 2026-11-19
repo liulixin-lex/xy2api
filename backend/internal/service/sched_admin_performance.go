@@ -43,17 +43,35 @@ type schedPerfLines struct {
 	Cache schedPerfLine `json:"cache"`
 }
 type schedPerfLine struct {
-	Identity string  `json:"identity"`
-	Until    *string `json:"until"`
-	LastEval any     `json:"last_eval"`
+	q.SampleCounts
+	Identity string              `json:"identity"`
+	Until    *string             `json:"until"`
+	LastEval *SchedAdminLastEval `json:"last_eval"`
 }
 
-func perfLine(v q.LineView) schedPerfLine {
+func perfLine(v q.LineView, counts q.SampleCounts, last *SchedAdminLastEval) schedPerfLine {
 	until := v.Until
 	if v.Trial {
 		until = v.TrialUntil
 	}
-	return schedPerfLine{Identity: schedAdminIdentity(v), Until: schedAdminTime(until)}
+	return schedPerfLine{Identity: schedAdminIdentity(v), Until: schedAdminTime(until), SampleCounts: counts, LastEval: last}
+}
+
+func (s *SchedQualitySnapshot) performanceLines(key schedQualityKey) schedPerfLines {
+	// The short-window publisher orders each account's rows by group and model.
+	rows := s.RowsForAccount(key.account)
+	i, found := slices.BinarySearchFunc(rows, key, func(row SchedGroupRow, key schedQualityKey) int {
+		return cmp.Or(cmp.Compare(row.GroupID, key.group), cmp.Compare(row.Model, key.model))
+	})
+	var row SchedGroupRow
+	if found {
+		row = rows[i]
+	}
+	return schedPerfLines{
+		TTFO:  perfLine(row.View.TTFO, row.TTFTSamples, row.TTFTLastEval),
+		Error: perfLine(row.View.Error, row.ErrorSamples, row.ErrorLastEval),
+		Cache: perfLine(row.View.Cache, row.CacheSamples, row.CacheLastEval),
+	}
 }
 
 func (s *SchedAdminService) GroupPerformance(ctx context.Context, id int64) (SchedAdminPerformance, error) {
@@ -122,11 +140,7 @@ func (s *SchedAdminService) performance(ctx context.Context, group *Group, accou
 		if a := accounts[k.account]; a != nil {
 			r.Name, r.Priority, r.Member = a.Name, a.Priority, schedAdminMember(a, k.group)
 		}
-		var v q.StateView
-		if quality.View != nil {
-			v = quality.View.StateOf(k.group, k.account, k.model)
-		}
-		r.Lines = schedPerfLines{perfLine(v.TTFO), perfLine(v.Error), perfLine(v.Cache)}
+		r.Lines = quality.performanceLines(k)
 		out.Rows = append(out.Rows, r)
 	}
 	for id, g := range groups {

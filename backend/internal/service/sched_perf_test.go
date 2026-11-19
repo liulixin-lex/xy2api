@@ -426,6 +426,71 @@ func TestSchedPerfAdminAndSwitches(t *testing.T) {
 	require.Contains(t, string(raw), `"last_eval":null`)
 }
 
+func TestSchedPerfAdminLineAssessments(t *testing.T) {
+	admin, engine, _ := schedAdminFixture()
+	now := engine.snapshot.At
+	first := now.Add(-q.RegularInterval)
+	state := q.LineState{}
+	state.LastAssessment = q.RecordAssessment(state, first, q.EventRegular, q.VerdictPass, "", q.Basis{})
+	state.EvaluatedAt = first
+	firstEval := SchedAdminLastEvalFromState(state)
+	state.LastAssessment = q.RecordAssessment(state, now, q.EventRegular, q.VerdictFail, q.ActionEnter, q.Basis{})
+	state.EvaluatedAt = now
+	require.Len(t, state.LastAssessment, 2)
+	engine.snapshot.GroupRows[1] = []SchedGroupRow{{
+		GroupID: 1, Model: "text",
+		View:          q.StateView{TTFO: q.LineView{Identity: q.IdentityRear}, Cache: q.LineView{Trial: true, TrialUntil: now.Add(time.Hour)}},
+		TTFTLastEval:  SchedAdminLastEvalFromState(state),
+		CacheLastEval: firstEval,
+		TTFTSamples:   q.NewSampleCounts(0, 8),
+		ErrorSamples:  q.NewSampleCounts(2, 3),
+		CacheSamples:  q.NewSampleCounts(0, 0),
+	}, {
+		GroupID: 1, Model: "text-retired", ErrorLastEval: firstEval,
+	}}
+	current := perfFact(1, 1)
+	historical := current
+	historical.Model = "text-retired"
+	unmatched := current
+	unmatched.Model = "text-unmatched"
+	engine.perf = buildSchedPerf(map[string]SchedPerfFact{"current": current, "retired": historical, "unmatched": unmatched}, nil, perfPolicies(), nil, perfAt)
+
+	detail, err := admin.Detail(t.Context(), 1)
+	require.NoError(t, err)
+	require.Len(t, detail.Groups, 1)
+	require.Len(t, detail.Groups[0].ByModel, 2)
+	want := detail.Groups[0].ByModel[0].Lines
+	group, err := admin.GroupPerformance(t.Context(), 1)
+	require.NoError(t, err)
+	account, err := admin.AccountPerformance(t.Context(), 1)
+	require.NoError(t, err)
+	require.Equal(t, group.Rows, account.Rows)
+	require.Len(t, account.Rows, 3)
+	require.Equal(t, "text", account.Rows[0].Model)
+	got := account.Rows[0].Lines
+	require.NotNil(t, got.TTFO.LastEval)
+	require.Equal(t, schedAdminStamp(now), got.TTFO.LastEval.At)
+	require.Equal(t, q.ActionEnter, got.TTFO.LastEval.Action)
+	require.Equal(t, want.TTFO.Identity, got.TTFO.Identity)
+	require.Equal(t, want.Cache.TrialUntil, got.Cache.Until)
+	require.Equal(t, want.TTFO.SampleCounts, got.TTFO.SampleCounts)
+	require.Equal(t, want.Error.SampleCounts, got.Error.SampleCounts)
+	require.Equal(t, want.Cache.SampleCounts, got.Cache.SampleCounts)
+	require.Nil(t, got.Error.LastEval) // Legacy state still has current sample counts.
+	require.NotNil(t, got.Cache.LastEval)
+	require.Equal(t, schedAdminStamp(first), got.Cache.LastEval.At)
+
+	require.Equal(t, "text-retired", account.Rows[1].Model)
+	require.Equal(t, firstEval, account.Rows[1].Lines.Error.LastEval)
+	require.Equal(t, "text-unmatched", account.Rows[2].Model)
+	unmatchedLines := account.Rows[2].Lines
+	for _, line := range []schedPerfLine{unmatchedLines.TTFO, unmatchedLines.Error, unmatchedLines.Cache} {
+		raw, err := json.Marshal(line)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"identity":"unknown","until":null,"last_eval":null,"samples_local":null,"samples_total":null}`, string(raw))
+	}
+}
+
 func BenchmarkSchedPerfPublish50K(b *testing.B) {
 	var base, loaded runtime.MemStats
 	runtime.GC()
