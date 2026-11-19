@@ -526,6 +526,8 @@ export default {
         empty: '过去 12 小时这个号在统计的分组里没有 GPT 文本请求',
         emptyModel: '过去 12 小时这个号在统计的分组里没有 {model} 的请求',
         gateOff: '这版统计未计入本组',
+        noRequests: '过去 12 小时没有请求',
+        noFiguresYet: '还没有数据',
         gateOffTip: '这版统计没有计入本分组：生成这一版统计时本分组没开质量门槛，或分组是这版统计之后才建的；门槛打开后，下一版统计（最多 5 分钟）会包含它。',
         partialModel: '统计还没补满 12 小时（已覆盖 {hours} 小时），这个号还没有 {model} 的数据',
         none: '过去 12 小时没有这个号的统计数据',

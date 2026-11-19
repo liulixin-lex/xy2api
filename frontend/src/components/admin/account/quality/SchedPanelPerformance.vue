@@ -89,9 +89,11 @@
             </span>
             <span class="prow__r" role="cell" data-qp-perf-cell="switches">{{ fmtCount(item.view.switchTotal) }}</span>
           </template>
-          <template v-else>
-            <span v-for="cell in 5" :key="cell" :class="['prow__r qp-muted', cell === 2 ? 'prow__slow' : '']" role="cell">{{ DASH }}</span>
-          </template>
+          <!-- A counted group without a request of this model in the window: a short note in place of five dashes ("no
+               figures yet" while the window is still filling). -->
+          <span v-else class="prow__off qp-muted" role="cell" data-qp-perf-no-requests>{{
+            perf?.complete ? t('admin.schedQuality.perf.panel.noRequests') : t('admin.schedQuality.perf.panel.noFiguresYet')
+          }}</span>
         </div>
         <div v-if="item.view && expanded.has(item.key)" :id="`${detailIdPrefix}-${item.key}`" class="pdet-row" role="row" :data-qp-perf-detail="item.key">
           <div role="cell">

@@ -525,6 +525,8 @@ export default {
         empty: 'No GPT text requests on this account in the counted groups over the last 12 hours',
         emptyModel: 'No {model} requests on this account in the counted groups over the last 12 hours',
         gateOff: 'Not in this snapshot',
+        noRequests: 'No requests in 12 h',
+        noFiguresYet: 'No figures yet',
         gateOffTip: 'This snapshot did not count the group: its quality gate was off when the snapshot was generated, or the group was created after this snapshot. Once the gate is on, the next snapshot (within 5 minutes) includes it.',
         partialModel: 'The statistics cover {hours} of the 12 hours so far: no {model} figures for this account yet',
         none: 'No figures for this account over the last 12 hours',
