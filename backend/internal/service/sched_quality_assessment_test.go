@@ -68,7 +68,7 @@ func TestSchedAssessmentLastEvalJSON(t *testing.T) {
 	r.LastAssessment = q.RecordAssessment(r, next, q.EventRegular, q.VerdictFail, q.ActionEnter, b)
 	r.EvaluatedAt = next
 	check(`{"at":"2026-01-01T12:05:00Z","acted":true,"action":"enter","reason":"over","causes":[],"have":null,"need":null,"since":"2026-01-01T12:05:00Z","count":1}`)
-	r.EvaluatedAt = next.Add(time.Microsecond)
+	r.EvaluatedAt = next.Add(time.Second)
 	check("null")
 }
 
@@ -111,7 +111,7 @@ func TestSchedAssessmentDTOAcrossRawWatermarkOffsets(t *testing.T) {
 	first, _ := q.Step(q.LineState{LineKey: q.LineKey{Line: q.DimensionCache}}, q.EventRegular, q.VerdictUnknown, b, at)
 	want := SchedAdminLastEvalFromState(first)
 	require.NotNil(t, want)
-	for _, delta := range []time.Duration{-999, -600, -499, 499, 600, 999} {
+	for _, delta := range []time.Duration{-1499, -1000, -999, -600, -499, 499, 600, 999, 1000, 1499} {
 		t.Run(delta.String(), func(t *testing.T) {
 			prev := first
 			prev.EvaluatedAt = at.Add(delta)
@@ -152,7 +152,7 @@ func TestSchedAssessmentClockPreservesRun(t *testing.T) {
 		if missing {
 			stale.LastAssessment[0].Watermark = nil
 		} else {
-			stale.EvaluatedAt = at.Add(time.Microsecond)
+			stale.EvaluatedAt = at.Add(time.Second)
 		}
 		require.Nil(t, SchedAdminLastEvalFromState(stale))
 		cleared, _ := q.Step(stale, q.EventClock, q.VerdictUnknown, q.Basis{}, clock)

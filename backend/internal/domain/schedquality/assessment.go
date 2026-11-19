@@ -1,7 +1,6 @@
 package schedquality
 
 import (
-	"math"
 	"slices"
 	"time"
 )
@@ -111,16 +110,10 @@ func (s AssessmentSegment) CauseNames() []string {
 	return s.Causes.Names()
 }
 
-// PostgreSQL parses the fractional second of a text timestamp as a double,
-// then rounds fractional microseconds to nearest-even (including half ties).
-func assessmentTime(at time.Time) time.Time {
-	fraction := float64(at.Nanosecond()) / 1e9
-	micros := time.Duration(math.RoundToEven(fraction * 1e6))
-	return at.UTC().Truncate(time.Second).Add(micros * time.Microsecond)
-}
-
+// Go and PostgreSQL can round a half-microsecond tie to adjacent microseconds.
 func (s AssessmentSegment) MatchesWatermark(at time.Time) bool {
-	return s.Watermark != nil && !at.IsZero() && at.Sub(time.UnixMicro(*s.Watermark)).Abs() < time.Microsecond
+	return s.Watermark != nil && !at.IsZero() &&
+		at.Round(time.Microsecond).Sub(time.UnixMicro(*s.Watermark)).Abs() <= time.Microsecond
 }
 
 // RecordAssessment folds an accepted Step into a new history without mutating
@@ -129,7 +122,7 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 	if !at.After(prev.EvaluatedAt) {
 		return prev.LastAssessment
 	}
-	at = assessmentTime(at)
+	at = at.UTC().Round(time.Microsecond)
 	history := prev.LastAssessment
 	if kind == EventClock {
 		// A clock can carry a verified assessment forward, but cannot repair a

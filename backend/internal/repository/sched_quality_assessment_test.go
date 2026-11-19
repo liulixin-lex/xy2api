@@ -82,7 +82,7 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 
 	// Older binaries only mention known columns. The stale segment is still
 	// queryable in SQL, but the API must wait for a new real assessment.
-	legacyAt := after.EvaluatedAt.Add(time.Microsecond)
+	legacyAt := after.EvaluatedAt.Add(time.Second)
 	clockAt := legacyAt.Add(95 * time.Second)
 	_, err = db.ExecContext(ctx, `UPDATE sched_line_states SET evaluated_at=$1, admissions=1, last_rear=$2`, legacyAt, clockAt.Add(-q.LevelClearQuiet))
 	require.NoError(t, err)
@@ -130,7 +130,8 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 		require.NoError(t, err)
 		last := service.SchedAdminLastEvalFromState(rows[0])
 		require.NotNil(t, last)
-		require.Equal(t, rows[0].EvaluatedAt.UTC().Format(time.RFC3339Nano), last.At)
+		require.Equal(t, now.UTC().Round(time.Microsecond).Format(time.RFC3339Nano), last.At)
+		require.WithinDuration(t, now.UTC().Round(time.Microsecond), rows[0].EvaluatedAt, time.Microsecond)
 		require.Equal(t, before, last)
 		require.Equal(t, last.At, last.Since)
 		next := eval(rows[0], at.Add(q.RegularInterval), 8)

@@ -348,13 +348,18 @@ func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
 func TestAssessmentWatermarkTolerance(t *testing.T) {
 	b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: 7}}
 	h := RecordAssessment(LineState{}, machineNow, EventRegular, VerdictUnknown, "", b)
-	for _, d := range []time.Duration{-1000, -999, -600, -499, 0, 499, 600, 999, 1000} {
-		t.Run(d.String(), func(t *testing.T) {
-			prev := LineState{LastAssessment: h, EvaluatedAt: machineNow.Add(d)}
-			current := d.Abs() < time.Microsecond
-			require.Equal(t, current, h[0].MatchesWatermark(prev.EvaluatedAt))
+	for _, tc := range []struct {
+		offset time.Duration
+		same   bool
+	}{
+		{-2 * time.Microsecond, false}, {-1501, false}, {-1499, true}, {-1000, true}, {-999, true}, {-600, true}, {-499, true},
+		{0, true}, {499, true}, {600, true}, {999, true}, {1000, true}, {1499, true}, {1501, false}, {2 * time.Microsecond, false},
+	} {
+		t.Run(tc.offset.String(), func(t *testing.T) {
+			prev := LineState{LastAssessment: h, EvaluatedAt: machineNow.Add(tc.offset)}
+			require.Equal(t, tc.same, h[0].MatchesWatermark(prev.EvaluatedAt))
 			next := RecordAssessment(prev, machineNow.Add(RegularInterval), EventRegular, VerdictUnknown, "", b)
-			if current {
+			if tc.same {
 				require.Len(t, next, 1)
 				require.EqualValues(t, 2, next[0].Count)
 				require.Equal(t, machineNow, next[0].FirstAt)
