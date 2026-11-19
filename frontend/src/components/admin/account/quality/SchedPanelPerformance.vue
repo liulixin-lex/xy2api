@@ -50,7 +50,17 @@
             <GroupAliasPill :group="item.info" />
             <span class="prow__name">{{ item.name }}</span>
           </span>
-          <span v-if="item.gateOff" class="prow__off qp-muted" role="cell" data-qp-perf-gate-off>{{ t('admin.schedQuality.perf.panel.gateOff') }}</span>
+          <!-- A short note that fits the figures' width (268px, 196px on a phone); the tip says why, for a gate that was off
+               when the snapshot was made and for a group that joined after it alike. -->
+          <span
+            v-if="item.gateOff"
+            v-tip="t('admin.schedQuality.perf.panel.gateOffTip')"
+            class="prow__off qp-muted"
+            role="cell"
+            tabindex="0"
+            :aria-label="`${t('admin.schedQuality.perf.panel.gateOff')} · ${t('admin.schedQuality.perf.panel.gateOffTip')}`"
+            data-qp-perf-gate-off
+          >{{ t('admin.schedQuality.perf.panel.gateOff') }}</span>
           <template v-else-if="item.view">
             <span class="prow__r" role="cell" data-qp-perf-cell="requests">{{ fmtCount(item.view.row.requests) }}</span>
             <span class="prow__r prow__slow" role="cell" data-qp-perf-cell="slow">

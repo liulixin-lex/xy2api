@@ -998,7 +998,11 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     await openOn(7, { model: 'gpt-b' })
     expect(perfRows()).toEqual(['53:none', '54:none'])
     expect(document.querySelector('[data-qp-perf-empty="model"]')!.textContent).toBe('admin.schedQuality.perf.panel.emptyModel:{"model":"gpt-b"}')
-    expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')).not.toBeNull()
+    // A short note in the cell; why (the gate off when the snapshot was made, or the group joined after it) in its tip.
+    const off = document.querySelector<HTMLElement>('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')!
+    expect(off.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
+    expect((off as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.perf.panel.gateOffTip')
+    expect(off.getAttribute('tabindex')).toBe('0')
     expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-gate-off]')).toBeNull()
   })
 
