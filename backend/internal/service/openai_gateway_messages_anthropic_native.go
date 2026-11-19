@@ -52,8 +52,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	}
 	clientStream := gjson.GetBytes(body, "stream").Bool()
 
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, originalModel, defaultMappedModel)
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
 	if projectionErr != nil {

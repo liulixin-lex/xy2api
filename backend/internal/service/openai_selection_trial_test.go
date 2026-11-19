@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -275,6 +276,8 @@ func TestOpenAISelectionSwitchLogTerminalStates(t *testing.T) {
 			t.Run(kind+"/"+outcome, func(t *testing.T) {
 				output := captureSchedObsLogs(t)
 				old, target := selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1)
+				old.Credentials = map[string]any{"model_mapping": map[string]any{"m": "from-alias"}}
+				target.Credentials = map[string]any{"model_mapping": map[string]any{"m": "to-alias"}}
 				f := newSelectionRuntimeFixture(t, old, target)
 				if kind == "owner_released" {
 					f.cache.sessionBindings["openai:session"] = 10
@@ -293,6 +296,12 @@ func TestOpenAISelectionSwitchLogTerminalStates(t *testing.T) {
 				}
 				require.Len(t, events, 1)
 				require.Equal(t, kind, events[0]["kind"])
+				require.Equal(t, "to-alias", events[0]["to_model"])
+				if kind == "owner_released" {
+					require.Equal(t, "from-alias", events[0]["from_model"])
+				} else {
+					require.Nil(t, events[0]["from_model"])
+				}
 				require.Equal(t, outcome == "success", events[0]["committed"])
 				require.Equal(t, resilience.StateFrom(ctx).GatewayRequestID(), events[0]["gateway_request_id"])
 				require.Equal(t, float64(1), events[0]["to"])
@@ -306,11 +315,62 @@ type selectionCommitBarrier struct {
 	entered, finish chan struct{}
 }
 
-func (b *selectionCommitBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, target int64, ttl time.Duration, scopes ...string) (bool, error) {
+func (b *selectionCommitBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, target int64, ttl time.Duration, scopes BindingCommitOptions) (BindingCommitResult, error) {
 	close(b.entered)
 	<-b.finish
-	return b.selectionBindingFake.CommitSessionBinding(ctx, g, key, expected, target, ttl, scopes...)
+	return b.selectionBindingFake.CommitSessionBinding(ctx, g, key, expected, target, ttl, scopes)
 }
+
+func TestOwnerLeaseLookupAfterSlowCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := selectionNewSessionFixture()
+		barrier := &selectionCommitBarrier{selectionBindingFake: f.binding, entered: make(chan struct{}), finish: make(chan struct{})}
+		go func() {
+			<-barrier.entered
+			time.Sleep(2800 * time.Millisecond)
+			close(barrier.finish)
+		}()
+
+		const session = "session"
+		const oldModel = "owner-model"
+		f.owner.Credentials = map[string]any{"model_mapping": map[string]any{"m": oldModel}}
+		leases := newSelectionTrialLeaseFake()
+		key := trialTestKey(f.owner.ID, oldModel, 7, TrialLeaseSessionMember(session))
+		leases.held[key] = true
+		var lookupBudget time.Duration
+		change := &openAIStickyChange{
+			kind: "owner_released", groupID: 7, session: session, key: f.binding.key, model: "m", target: 1, toModel: "target-model",
+			expected: StickySessionBinding{AccountID: f.owner.ID, Generation: f.binding.generation}, cache: barrier, ttl: f.session.bindingTTL, leases: leases,
+			ownerLookup: func(lookupCtx context.Context, id int64) *Account {
+				require.Equal(t, f.owner.ID, id)
+				deadline, ok := lookupCtx.Deadline()
+				require.True(t, ok)
+				lookupBudget = time.Until(deadline)
+				select {
+				case <-lookupCtx.Done():
+					return nil
+				case <-time.After(2500 * time.Millisecond):
+					return f.owner
+				}
+			},
+		}
+		state := resilience.NewRequestState()
+		state.SetStickyChange(change)
+		logs := captureSchedObsLogs(t)
+		CompleteOpenAIStickyChange(resilience.WithRequestState(t.Context(), state), change.target, true, false)
+
+		require.Equal(t, change.target, f.binding.owner)
+		require.Equal(t, openAIAccountStateUpdateTimeout, lookupBudget)
+		require.NotContains(t, leases.held, key)
+		rows := schedObsLogRecords(t, logs)
+		require.Len(t, rows, 1)
+		require.Equal(t, "committed", rows[0]["commit_result"])
+		require.Contains(t, rows[0], "from_model")
+		require.Nil(t, rows[0]["from_model"])
+		require.Equal(t, change.toModel, rows[0]["to_model"])
+	})
+}
+
 func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	f := selectionNewSessionFixture()
 	f.candidates = f.candidates[:1]

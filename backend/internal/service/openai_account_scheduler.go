@@ -49,6 +49,7 @@ type OpenAIAccountScheduleRequest struct {
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact     bool
 	ExcludedIDs        map[int64]struct{}
+	baseExclusions     map[int64]struct{} // Independent exclusions before first-output and quality routing.
 	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
 }
 
@@ -215,6 +216,35 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx = beginNewPickSelection(ctx)
+	pass := newPickPassFrom(ctx)
+	if pass != nil {
+		defer pass.release()
+	}
+	selection, decision, err = s.scheduleOpenAIAccount(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	if err == nil && pass != nil {
+		if err = pass.deliver(ctx, selection); err != nil {
+			return nil, OpenAIAccountScheduleDecision{}, err
+		}
+	}
+	return selection, decision, err
+}
+
+func (s *OpenAIGatewayService) scheduleOpenAIAccount(
+	ctx context.Context,
+	groupID *int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool,
+	platform string,
+	previousResponseCanMove bool,
+	useUpstreamTokenCost bool,
+) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	// A new selection must not inherit the previous account's rescue pass.
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
@@ -244,7 +274,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	stickyOwner := state.StickyOwner()
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
-		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		var missing bool
+		stickyOwner, missing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
+		if isFirstNewPickSelection(ctx) && !missing {
+			stopNewPick(ctx)
+		}
 		state.NoteStickyOwner(stickyOwner)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]
@@ -316,10 +350,22 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	state.SetAvoided(avoided)
 	// This pass must be able to preserve a versioned owner while borrowing.
 	// Legacy callers without a pending binding would otherwise eagerly rebind.
+	// Retain the independent request restrictions before first-output and
+	// quality routing add their own. Veto attribution uses the full membership.
+	if ordinary && sessionHash != "" {
+		request.baseExclusions = mergeExcluded(origExcluded, avoided)
+		if request.baseExclusions == nil {
+			request.baseExclusions = map[int64]struct{}{}
+		}
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
+	}
 	var firstOutputAvoided map[int64]struct{}
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
 		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
+		if pass := newPickPassFrom(ctx); pass != nil {
+			pass.firstOutputAvoidRead = true
+		}
 		firstOutputAvoided, _ = sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
 		if _, hit := firstOutputAvoided[stickyOwner]; hit {
 			_, hard := origExcluded[stickyOwner]
@@ -490,8 +536,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
-		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
+		baseExclusions: parent.baseExclusions,
+		GroupID:        groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
 	})

@@ -121,6 +121,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 			action = ActionClear
 		}
 	}
+	s.LastAssessment = RecordAssessment(prev, at, kind, v, action, basis)
 	s.EvaluatedAt = at
 	if action != "" || s.Identity != prev.Identity || s.Trial != prev.Trial {
 		s.Basis = &basis

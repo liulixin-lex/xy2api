@@ -3,16 +3,18 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
 import decisionsSource from '../SchedDecisions.vue?raw'
+import panelPerfSource from '../SchedPanelPerformance.vue?raw'
 import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
 
 const { api, backendSummary } = vi.hoisted(() => ({
-  api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
+  api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
   backendSummary: vi.fn()
 }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api, backendSummary }))
@@ -33,6 +35,17 @@ enableAutoUnmount(afterEach)
 
 const policy: BackendPolicy = { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0.5, takeover_idle_seconds: 0 }
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
+/**
+ * Freezes Date alone (timers stay real) at local noon until the test ends: times shown as today's HH:MM stay today when
+ * the run starts near midnight (a run at 23:45 read "now + 20 minutes" as 11-20 00:05).
+ */
+const atLocalNoon = () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 10, 19, 12, 0))
+  onTestFinished(() => {
+    vi.useRealTimers()
+  })
+}
 /** A model row: first output at the rear for 20 more minutes (level 1, a 40-minute stay) when `rear`; cache unknown. */
 const model = (name: string, rear = false): BackendGroupModel => {
   const row = groupModel(name, rear ? { ttfo: 'rear', cache: 'unknown' } : { cache: 'unknown' })
@@ -94,6 +107,7 @@ beforeEach(() => {
   api.accountDetail.mockReset().mockImplementation(async (id: number) => detail(id))
   api.setOverride.mockReset().mockResolvedValue(undefined)
   api.accountDecisions.mockReset().mockResolvedValue([])
+  api.accountPerformance.mockReset().mockResolvedValue(perfAnswer([]))
   backendSummary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] })
 })
 
@@ -452,6 +466,7 @@ describe('SchedQualityPanel', () => {
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {
+    atLocalNoon()
     const value = detail()
     const row = value.groups[0].by_model[1]
     row.lines.error = line('error', 'trial', { trial_until: inMinutes(30) })
@@ -465,7 +480,7 @@ describe('SchedQualityPanel', () => {
     const tips = marks.map((mark) => mark.getAttribute('aria-label'))
     expect(tips[0]).toMatch(/^admin\.schedQuality\.dim\.ttfo · admin\.schedQuality\.identity\.rear · admin\.schedQuality\.identity\.rearUntil:\{"time":"\d\d:\d\d","minutes":40\}$/)
     expect(tips[1]).toMatch(/^admin\.schedQuality\.dim\.error · admin\.schedQuality\.identity\.trial · admin\.schedQuality\.identity\.trialLeft:\{"time":"(29:59|30:00)"\}$/)
-    expect(tips[2]).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
+    expect(tips[2]).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.noAction.none')
     // The place the lines add up to: the rear, as long as the longest rear line.
     expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toMatch(/admin\.schedQuality\.placement\.rear(19:59|20:00)$/)
     // A group without a row for the model: at the front, every line unknown.
@@ -500,10 +515,12 @@ describe('SchedQualityPanel', () => {
 
   // Why a line is unknown besides the evidence (P9): this group's gate is off (not judged at all), or quality scheduling
   // is switched off (judging goes on, selection ignores the layers), or the view is stale.
-  it('says the gate is off instead of 证据不够: in one group (not judged), or switched off for everything (judged as usual)', async () => {
+  it('says the gate is off instead of any other reason: in one group (not judged), or switched off for everything (judged as usual)', async () => {
     const value = detail()
     value.groups[1].policy = { ...policy, enabled: false }
     value.groups[1].by_model[0].lines.ttfo = line('ttfo', 'unknown', { evidence: ttfoEvidence({ causes: ['mass_insufficient'] }) })
+    // An assessment on record does not override the gate switched off.
+    value.groups[1].by_model[0].lines.cache = line('cache', 'unknown', { last_eval: lastEval() })
     api.accountDetail.mockResolvedValue(value)
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-a' })
@@ -513,7 +530,7 @@ describe('SchedQualityPanel', () => {
       await flushPromises()
       return document.querySelector(`[data-qp-group-detail="${groupId}"] [data-qp-line="ttfo"]`)!
     }
-    expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.unknownWhy')
+    expect(unknownTip(53)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.noAction.none')
     expect(unknownTip(54)).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.identity.gateOffGroup')
     // Not judged in that group: the statistical causes are not why; the numbers stay.
     const notJudged = await opened(54)
@@ -558,10 +575,15 @@ describe('SchedQualityPanel', () => {
   it('says the data is stale, not that quality scheduling is off, while the view is stale', async () => {
     const value = detail()
     value.groups[1].by_model = []
+    // An assessment on record does not override a stale view either.
+    value.groups[0].by_model[0].lines.cache = line('cache', 'unknown', { last_eval: lastEval() })
     api.accountDetail.mockResolvedValue({ ...value, stale: true, global_enabled: false, at: '' })
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-a' })
     expect(groupRow(54).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')).toBe(
+      'admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.tip.stale'
+    )
+    expect(groupRow(53).querySelector('[data-qp-mark="cache"]')!.getAttribute('aria-label')).toBe(
       'admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.tip.stale'
     )
     expect(document.querySelector('[data-sq-pause]')!.getAttribute('aria-label')).toBe('admin.schedQuality.tip.stale')
@@ -585,7 +607,7 @@ describe('SchedQualityPanel', () => {
     expect(Array.from(opened.querySelectorAll<HTMLElement>('[data-qp-line]'), (el) => el.dataset.qpLine)).toEqual(['ttfo', 'error', 'cache'])
     const ttfo = opened.querySelector('[data-qp-line="ttfo"]')!
     expect(ttfo.querySelector('.idw')!.textContent).toBe('admin.schedQuality.identity.unknown')
-    expect(ttfo.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.identity.unknownWhy')
+    expect(ttfo.querySelector('.gdet__t')!.textContent).toBe('admin.schedQuality.noAction.none')
     const item = (key: string) => ttfo.querySelector(`[data-qp-evidence-item="${key}"]`)!.textContent!.trim()
     expect(item('limit_s')).toBe('admin.schedQuality.evidence.ttfo.limit_s:{"v":"10"}')
     expect(item('n')).toBe('admin.schedQuality.evidence.ttfo.n:{"v":"4.3"}')
@@ -615,6 +637,57 @@ describe('SchedQualityPanel', () => {
     const heading = style.slice(style.indexOf('.qp-h {'), style.indexOf('}', style.indexOf('.qp-h {')))
     expect(note).not.toMatch(/white-space:\s*nowrap|text-overflow:\s*ellipsis|overflow:\s*hidden/)
     expect(heading).toMatch(/flex-wrap:\s*wrap/)
+  })
+
+  // Round 4 (16-②): on a 320 or 390 drawer Evidence ran out of view, the row being one line nothing in it could narrow.
+  // jsdom lays nothing out: the narrow rule and the row it lays out are checked here, the geometry in a browser.
+  it('lays a decision row out in three columns on a narrow list, Evidence whole and still the same button', async () => {
+    const style = decisionsSource.slice(decisionsSource.indexOf('<style scoped>'))
+    const block = (css: string, selector: string) => {
+      const start = css.indexOf(`${selector} {`)
+      expect(start).toBeGreaterThanOrEqual(0)
+      return css.slice(start, css.indexOf('}', start))
+    }
+    // The list's own width decides, not the viewport's.
+    expect(block(style, '.dlist')).toMatch(/container:\s*sched-decisions\s*\/\s*inline-size/)
+    // The widest list measured to need it (English, another day's trial with Evidence) is 454px.
+    const at = style.indexOf('@container sched-decisions (max-width: 454px) {')
+    expect(at).toBeGreaterThan(0)
+    const narrow = style.slice(at)
+    const main = block(narrow, '.drow__main')
+    expect(main).toMatch(/display:\s*grid/)
+    expect(main).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) max-content/)
+    expect(main).toMatch(/grid-template-areas:\s*'what ev'\s*'where where'/)
+    // The time has its own column; the action's line and the lines under it share the next one (design 6.5).
+    expect(block(style, '.drow')).toMatch(/grid-template-columns:\s*auto minmax\(0, 1fr\)/)
+    expect(block(narrow, '.drow__what')).toMatch(/grid-area:\s*what;\s*overflow-wrap:\s*anywhere/)
+    expect(block(narrow, '.drow__where')).toMatch(/grid-area:\s*where;\s*overflow-wrap:\s*anywhere;\s*white-space:\s*normal/)
+    expect(block(narrow, '.drow__ev')).toMatch(/grid-area:\s*ev/)
+    // An opened evidence wraps anywhere at every width: a long source group name must not widen the list.
+    expect(block(style, '.drow__basis')).toMatch(/min-width:\s*0;\s*overflow-wrap:\s*anywhere/)
+
+    const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+      id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'trial_timeout', level: 0, until: null, basis: basis('ttfo'), ...patch
+    })
+    api.accountDecisions.mockResolvedValueOnce([record(2), record(1, { line: '', action: 'relax', basis: null })])
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    await w.get('[data-qp-decisions-toggle]').trigger('click')
+    await flushPromises()
+    const cells = (selector: string) =>
+      Array.from(w.get(selector).element.children, (cell) => [...cell.classList].find((name) => name.startsWith('drow__')))
+    expect(cells('[data-qp-decision="2"]')).toEqual(['drow__time', 'drow__body'])
+    expect(cells('[data-qp-decision="2"] .drow__body')).toEqual(['drow__main', 'drow__sub'])
+    expect(cells('[data-qp-decision="2"] .drow__main')).toEqual(['drow__what', 'drow__where', 'drow__ev'])
+    // A record of the previous rules has no basis and so no Evidence.
+    expect(cells('[data-qp-decision="1"] .drow__main')).toEqual(['drow__what', 'drow__where'])
+    const button = w.get<HTMLButtonElement>('[data-qp-decision-evidence="2"]').element
+    expect([button.tagName, button.type, button.disabled, button.hasAttribute('tabindex')]).toEqual(['BUTTON', 'button', false, false])
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    button.click()
+    await flushPromises()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(w.find('[data-qp-decision="2"] [data-qp-evidence]').exists()).toBe(true)
   })
 
   // M1: a recovery while the list is collapsed: opening it again shows the new record, not the history loaded before.
@@ -660,6 +733,7 @@ describe('SchedQualityPanel', () => {
   })
 
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
+    atLocalNoon()
     const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),
       basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
@@ -799,5 +873,339 @@ describe('SchedQualityPanel', () => {
     await w.get('[data-qp-decision-evidence="3"]').trigger('click')
     expect(w.get('[data-qp-decision="3"] [data-qp-evidence-samples]').text()).toBe(counts('ttfo', U, null))
     expect(w.get('[data-qp-decision="3"] [data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
+  })
+})
+
+describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
+  const perfOf = (id: number) => {
+    const row = (groupId: number, model: string, patch: Parameters<typeof perfRow>[1] = {}) => perfRow(id, { group_id: groupId, model, ...patch }, { n: 463, slowRate: 0.531 })
+    return perfAnswer(
+      [row(53, 'gpt-b'), row(53, 'gpt-a', { requests: 120 }), row(99, 'gpt-b', { member: false, requests: 30 })],
+      [perfGroup({ group_id: 53, name: '晨星组' }), perfGroup({ group_id: 54, name: '北辰组' }), perfGroup({ group_id: 99, name: '旧组' })]
+    )
+  }
+  const perfRows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-qp-perf-row]'), (row) => row.dataset.qpPerfRow)
+
+  it('lists the account in each group for the model tab, a group without traffic in grey, then a group it left', async () => {
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(api.accountPerformance).toHaveBeenCalledWith(7, expect.anything())
+    expect(perfRows()).toEqual(['53:7:gpt-b', '54:none', '99:7:gpt-b'])
+    expect(document.querySelector('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell="requests"]')!.textContent).toBe('463')
+    // A group the account left: marked beside the name (which a phone cuts), not inside it, and only once.
+    const leftRow = document.querySelector<HTMLElement>('[data-qp-perf-row="99:7:gpt-b"]')!
+    expect(leftRow.querySelector('[data-qp-perf-left]')!.textContent).toBe('admin.schedQuality.perf.left')
+    expect(leftRow.querySelector('.prow__name')!.textContent).not.toContain('notMember')
+    expect(leftRow.textContent!.match(/admin\.schedQuality\.perf\.(left|notMember)/g)).toEqual(['admin.schedQuality.perf.left'])
+    expect(leftRow.getAttribute('title')).toContain('admin.schedQuality.perf.notMember')
+    tab('gpt-a').click()
+    await flushPromises()
+    expect(perfRows()).toEqual(['53:7:gpt-a', '54:none'])
+    document.querySelector<HTMLElement>('[data-qp-perf-expand="53:7:gpt-a"]')!.click()
+    await flushPromises()
+    // The panel has one account's rows: no rank there.
+    const score = document.querySelector('[data-qp-perf-detail="53:7:gpt-a"] [data-sq-perf-detail-item="score"]')!.textContent!
+    expect(score).not.toContain('scoreRank')
+  })
+
+  it('offers a retry when the 12 hours did not load, without failing the rest of the panel', async () => {
+    api.accountPerformance.mockRejectedValue(new Error('down'))
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(document.querySelector('[data-qp-perf-failed]')).not.toBeNull()
+    expect(groupRow(53)).not.toBeNull()
+    api.accountPerformance.mockResolvedValue(perfOf(7))
+    document.querySelector<HTMLElement>('[data-qp-perf-failed] button')!.click()
+    await flushPromises()
+    expect(perfRows()).toContain('53:7:gpt-a')
+  })
+
+  // Review item 3: the main reason of the latest assessment, acted or not; none on record says so (not 证据不够).
+  it('gives an unknown line the main reason of its latest assessment, acted or not, and says when there is none', async () => {
+    const value = detail()
+    const row = value.groups[0].by_model[1]
+    row.lines.error = line('error', 'unknown', { last_eval: lastEval({ acted: true, action: 'trial_timeout', reason: 'peer_short', have: 8, need: 20 }) })
+    row.lines.cache = line('cache', 'unknown', { last_eval: null })
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const tips = Array.from(groupRow(53).querySelectorAll<HTMLElement>('[data-qp-mark]'), (mark) => mark.getAttribute('aria-label'))
+    expect(tips[1]).toMatch(/^admin\.schedQuality\.dim\.error · admin\.schedQuality\.identity\.unknown · admin\.schedQuality\.noAction\.long\.peer_short:.*"have\\":\\"8\\"/)
+    expect(tips[2]).toBe('admin.schedQuality.dim.cache · admin.schedQuality.identity.unknown · admin.schedQuality.noAction.none')
+  })
+
+  it('writes each line\'s latest assessment in the detail as its result and its main reason', async () => {
+    const perf = perfOf(7)
+    perf.rows[0].lines.ttfo = { identity: 'unknown', until: null, last_eval: lastEval({ acted: true, action: 'trial_timeout', reason: 'peer_short' }) }
+    perf.rows[0].lines.error = { identity: 'pass', until: null, last_eval: lastEval({ reason: 'within', have: null, need: null }) }
+    api.accountPerformance.mockResolvedValue(perf)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    document.querySelector<HTMLElement>('[data-qp-perf-expand="53:7:gpt-b"]')!.click()
+    await flushPromises()
+    const lines = Array.from(document.querySelectorAll('[data-qp-perf-detail="53:7:gpt-b"] [data-sq-perf-detail-item="verdict"] .pdet__line'), (el) => el.textContent!)
+    expect(lines[0]).toMatch(/^admin\.schedQuality\.perf\.detail\.evalLine:.*"result":"admin\.schedQuality\.decisions\.action\.trial_timeout","reason":"admin\.schedQuality\.noAction\.long\.peer_short/)
+    expect(lines[1]).toMatch(/^admin\.schedQuality\.perf\.detail\.evalLine:.*"result":"admin\.schedQuality\.perf\.detail\.resultNone:\{\}","reason":"admin\.schedQuality\.noAction\.long\.within/)
+    expect(lines[2]).toBe('admin.schedQuality.perf.detail.evalNone:{"line":"admin.schedQuality.lineName.cache"}')
+  })
+
+  // 裁决 6, review item 9: "各分组" from the account's detail; the 12-hour detail from its own row only (the detail's
+  // counts may be another assessment's).
+  it('says a rear line\'s evidence all came from other groups, each place from its own counts', async () => {
+    const value = detail()
+    Object.assign(value.groups[0].by_model[1].lines.ttfo, { samples_local: 0, samples_total: 14 })
+    api.accountDetail.mockResolvedValue(value)
+    const perf = perfOf(7)
+    perf.rows[0].lines.ttfo = { identity: 'rear', until: null, last_eval: lastEval({ acted: true, action: 'enter', reason: 'over' }), samples_local: null, samples_total: null }
+    api.accountPerformance.mockResolvedValue(perf)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const tip = groupRow(53).querySelector<HTMLElement>('[data-qp-mark="ttfo"]')!.getAttribute('aria-label')!
+    expect(tip).toContain('admin.schedQuality.perf.then:')
+    expect(tip).toContain('admin.schedQuality.perf.elsewhere')
+    document.querySelector<HTMLElement>('[data-qp-perf-expand="53:7:gpt-b"]')!.click()
+    await flushPromises()
+    const verdict = () => document.querySelector('[data-qp-perf-detail="53:7:gpt-b"] [data-sq-perf-detail-item="verdict"]')!.textContent!
+    expect(verdict()).not.toContain('admin.schedQuality.perf.detail.elsewhere')
+    // The row's own counts say it.
+    const own = structuredClone(perf)
+    Object.assign(own.rows[0].lines.ttfo, { samples_local: 0, samples_total: 14 })
+    api.accountPerformance.mockResolvedValue(own)
+    // A rear line with samples of its own in the detail says nothing of the kind in "各分组".
+    Object.assign(value.groups[0].by_model[1].lines.ttfo, { samples_local: 3, samples_total: 14 })
+    api.accountDetail.mockResolvedValue(structuredClone(value))
+    await markSchedChanged()
+    await flushPromises()
+    expect(verdict()).toContain('admin.schedQuality.perf.detail.elsewhere')
+    expect(groupRow(53).querySelector<HTMLElement>('[data-qp-mark="ttfo"]')!.getAttribute('aria-label')).not.toContain('elsewhere')
+  })
+
+  // Review items 5 and 6: still loading is not "no requests"; another model's requests keep the rows; a group with the
+  // gate off is not counted.
+  it('says the statistics are loading, keeps the group rows for a model without requests, and marks a group not counted', async () => {
+    api.accountPerformance.mockResolvedValue(perfAnswer([], [], { complete: false, window_from: '2026-11-19T12:10:00Z' }))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-loading-stats]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-perf-empty]')).toBeNull()
+    expect(perfRows()).toEqual([])
+
+    closeSchedDrawer()
+    await flushPromises()
+    const value = detail()
+    value.groups[1].policy = { ...policy, enabled: false }
+    api.accountDetail.mockResolvedValue(value)
+    const onlyA = perfOf(7)
+    onlyA.rows = onlyA.rows.filter((row) => row.model === 'gpt-a')
+    // A full snapshot lists every group the account is in: one it does not list was not counted in it.
+    onlyA.groups = onlyA.groups.filter((group) => group.group_id !== 54)
+    api.accountPerformance.mockResolvedValue(onlyA)
+    await openOn(7, { model: 'gpt-b' })
+    expect(perfRows()).toEqual(['53:none', '54:none'])
+    expect(document.querySelector('[data-qp-perf-empty="model"]')!.textContent).toBe('admin.schedQuality.perf.panel.emptyModel:{"model":"gpt-b"}')
+    // Acceptance round 2: a counted group without requests says so in one short note, not five dashes; each row carries
+    // its group's id for a phone, where names are cut alike.
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
+    expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-no-requests]')).toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] .prow__gid')!.textContent).toBe('#53')
+    // A short note in the cell; why (the gate off when the snapshot was made, or the account not in the group yet) in its tip.
+    const off = document.querySelector<HTMLElement>('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')!
+    expect(off.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
+    expect((off as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.perf.panel.gateOffTip')
+    expect(off.getAttribute('tabindex')).toBe('0')
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-gate-off]')).toBeNull()
+  })
+
+  // Review item 7: the 12-hour snapshot's own staleness, apart from the account's detail and from a failed refresh.
+  it('marks the section stale from the 12-hour answer itself', async () => {
+    api.accountPerformance.mockResolvedValue({ ...perfOf(7), stale: true })
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-section="groups"] [data-sq-pause]')).toBeNull()
+    expect(document.querySelector('[data-qp-section="perf"] [data-sq-pause]')!.getAttribute('aria-label')).toBe('admin.schedQuality.tip.stale')
+    expect(document.querySelector('[data-qp-perf-refresh-failed]')).toBeNull()
+  })
+
+  // Opus item 2 (M10), review item 10: asked at once on opening (the page's first load is long over), and only once.
+  it('asks for the 12 hours at once on opening the panel, once', async () => {
+    mount(Panel, { attachTo: document.body })
+    await flushPromises()
+    expect(api.accountPerformance).not.toHaveBeenCalled()
+    await openOn(7, { model: 'gpt-b' })
+    expect(api.accountPerformance).toHaveBeenCalledTimes(1)
+  })
+
+  // Opus item 2 (M9): another account's rows never show under the new one while its answer is on its way.
+  it('shows no rows of the previous account while the new one\'s 12 hours are on their way', async () => {
+    const next = deferred<ReturnType<typeof perfOf>>()
+    api.accountPerformance.mockImplementation((id: number) => (id === 7 ? Promise.resolve(perfOf(7)) : next.promise))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(perfRows()).toContain('53:7:gpt-b')
+    await openOn(8, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-loading]')).not.toBeNull()
+    expect(perfRows()).toEqual([])
+    next.resolve(perfOf(8))
+    await flushPromises()
+    expect(perfRows()).toContain('53:8:gpt-b')
+  })
+
+  // Re-review item 2: a group's setting as counted in the snapshot first; groups not counted keep their row; "no
+  // requests" only in the counted groups; nothing at all says so instead of a bare header.
+  it('keeps groups not counted, takes the snapshot\'s own gate first, and scopes "no requests" to the counted groups', async () => {
+    // The detail has both gates on now; the snapshot counted 北辰组 with its gate off.
+    api.accountPerformance.mockResolvedValue(perfAnswer([], [perfGroup({ group_id: 53 }), perfGroup({ group_id: 54, gate_enabled: false })]))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(perfRows()).toEqual(['53:none', '54:none'])
+    expect(document.querySelector('[data-qp-perf-row="54:none"] [data-qp-perf-gate-off]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
+    expect(document.querySelector('[data-qp-perf-empty="account"]')!.textContent).toBe('admin.schedQuality.perf.panel.empty')
+
+    // The gate switched off after the snapshot counted the group: it was counted, so it is no "not counted" row.
+    closeSchedDrawer()
+    await flushPromises()
+    const counted = detail()
+    counted.groups[0].policy = { ...policy, enabled: false }
+    api.accountDetail.mockResolvedValue(counted)
+    const snapshot = perfOf(7)
+    snapshot.rows = snapshot.rows.filter((row) => row.model === 'gpt-a')
+    api.accountPerformance.mockResolvedValue(snapshot)
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-gate-off]')).toBeNull()
+
+    // No group now and no row in the window: one sentence, not a bare header.
+    closeSchedDrawer()
+    await flushPromises()
+    api.accountDetail.mockResolvedValue({ ...detail(), groups: [] })
+    api.accountPerformance.mockResolvedValue(perfAnswer([]))
+    await openOn(7)
+    expect(document.querySelector('[data-qp-perf-none]')).not.toBeNull()
+    expect(document.querySelector('[data-qp-section="perf"] [role="table"]')).toBeNull()
+  })
+
+  // Re-review item 3: a partly covered window keeps its coverage and draws no "no requests" conclusion.
+  it('keeps the coverage and draws no "no requests" conclusion while the window is partly covered', async () => {
+    const partial = perfOf(7)
+    partial.rows = partial.rows.filter((row) => row.model === 'gpt-a')
+    Object.assign(partial, { complete: false, window_from: '2026-11-19T08:40:00Z' })
+    api.accountPerformance.mockResolvedValue(partial)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-note]')!.textContent).toContain('admin.schedQuality.perf.windowPartial:{"hours":"3.5"')
+    expect(document.querySelector('[data-qp-perf-empty]')!.getAttribute('data-qp-perf-empty')).toBe('partial')
+    expect(document.querySelector('[data-qp-perf-empty]')!.textContent).toBe('admin.schedQuality.perf.panel.partialModel:{"hours":"3.5","model":"gpt-b"}')
+  })
+
+  // Re-review item 4: another account asks at once, and the request still on its way for the previous one is cancelled.
+  it('asks for another account at once, cancelling the previous account\'s request on its way', async () => {
+    const signals: AbortSignal[] = []
+    api.accountPerformance.mockImplementation((id: number, options: { signal: AbortSignal }) => {
+      signals.push(options.signal)
+      return id === 7 ? new Promise(() => {}) : Promise.resolve(perfOf(id))
+    })
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    await openOn(8, { model: 'gpt-b' })
+    expect(api.accountPerformance.mock.calls.map((call) => call[0])).toEqual([7, 8])
+    expect(signals[0].aborted).toBe(true)
+    expect(perfRows()).toContain('53:8:gpt-b')
+  })
+
+  // fe-polish review (Astra 1): the account's detail comes every 5 s, the 12-hour snapshot every minute. A group the
+  // newer detail has and the full snapshot does not list was not counted in it: never "no requests" from the detail's
+  // own gate. A snapshot still loading the window lists only some groups: there the detail's gate stands in, as before.
+  it('says a group the full snapshot does not list was not counted, never "no requests", when the detail is newer', async () => {
+    vi.useFakeTimers()
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    const snapshot = perfOf(7)
+    snapshot.rows = snapshot.rows.filter((row) => row.model === 'gpt-a')
+    api.accountPerformance.mockResolvedValue(snapshot)
+    mount(Panel, { attachTo: document.body })
+    openSchedDrawer({ id: 7, name: 'acc-7' }, { model: 'gpt-b' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(perfRows()).toEqual(['53:none', '54:none'])
+
+    const newer = detail()
+    newer.groups.push({ group_id: 98, name: '新组', policy, exemption: null, by_model: [model('gpt-b')] })
+    api.accountDetail.mockResolvedValue(newer)
+    await vi.advanceTimersByTimeAsync(5000)
+    // The detail came again, the snapshot did not.
+    expect(api.accountPerformance).toHaveBeenCalledTimes(1)
+    expect(perfRows()).toEqual(['53:none', '54:none', '98:none'])
+    const added = document.querySelector('[data-qp-perf-row="98:none"]')!
+    expect(added.querySelector('[data-qp-perf-gate-off]')!.textContent).toBe('admin.schedQuality.perf.panel.gateOff')
+    expect(added.querySelector('[data-qp-perf-no-requests]')).toBeNull()
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noRequests')
+
+    closeSchedDrawer()
+    await vi.advanceTimersByTimeAsync(0)
+    api.accountPerformance.mockResolvedValue({ ...snapshot, complete: false, window_from: '2026-11-19T08:40:00Z' })
+    openSchedDrawer({ id: 7, name: 'acc-7' }, { model: 'gpt-b' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(document.querySelector('[data-qp-perf-row="98:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noFiguresYet')
+    expect(document.querySelector('[data-qp-perf-row="98:none"] [data-qp-perf-gate-off]')).toBeNull()
+  })
+
+  // fe-polish review (Astra 3 and its re-check 1–2, Opus 4). jsdom lays nothing out: the rules are checked here, the text
+  // boxes in a browser (第四轮/scratch/perf-fe/rowcheck.mjs). Under 440px the group takes a line of its own across the row
+  // (at 320px the id ran over the requests) and every figure goes under its own heading, placed by hand (left to the
+  // grid, excess, cache and switches slid one heading left). From 440px "left the group" takes a line of its own in the
+  // group's cell: beside a name cut to nothing it ran over the requests.
+  it('puts every figure under its own heading on a phone, and "left the group" clear of the figures at any width', async () => {
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const heads = Array.from(document.querySelectorAll<HTMLElement>('[data-qp-section="perf"] [data-qp-perf-col]'), (el) => el.dataset.qpPerfCol!)
+    expect(heads).toEqual(['group', 'requests', 'slow', 'excess', 'cache', 'switches'])
+    const cells = Array.from(document.querySelectorAll<HTMLElement>('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell]'), (el) => el.dataset.qpPerfCell)
+    expect(cells).toEqual(heads.slice(1))
+
+    const style = panelPerfSource.slice(panelPerfSource.indexOf('<style scoped>'))
+    // The rule whose whole selector is `selector` (".prow__group", not "… > .prow__group").
+    const block = (css: string, selector: string) => {
+      const found = new RegExp(`\\n\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{`).exec(css)
+      expect(found).not.toBeNull()
+      return css.slice(found!.index, css.indexOf('}', found!.index))
+    }
+    const at = style.indexOf('@media (max-width: 439px) {')
+    expect(at).toBeGreaterThan(0)
+    const wide = style.slice(0, at)
+    const narrow = style.slice(at)
+    // A phone: the group on a line of its own, the figures on the next, the slow share gone, each figure in the column of
+    // its heading among those shown.
+    expect(block(narrow, '.prow:not(.prow--head) > .prow__group')).toMatch(/grid-column:\s*1 \/ -1/)
+    expect(block(narrow, '.prow:not(.prow--head) > :not(.prow__group)')).toMatch(/grid-row:\s*2/)
+    expect(block(narrow, '.prow__slow')).toMatch(/display:\s*none/)
+    const shown = heads.filter((key) => key !== 'slow')
+    shown.forEach((key, index) => {
+      if (key !== 'group') expect(narrow).toMatch(new RegExp(`\\[data-qp-perf-cell='${key}'\\][^{]*\\{\\s*grid-column(-start)?:\\s*${index + 1};`))
+    })
+    // The id and "left the group" beside the name there, never shrinking: the name gives way.
+    expect(block(narrow, '.prow__gid')).toMatch(/display:\s*inline/)
+    expect(block(wide, '.prow__gid')).toMatch(/flex:\s*none/)
+    expect(block(narrow, '.prow__left')).toMatch(/flex:\s*none/)
+    expect(block(narrow, '.prow__group')).toMatch(/flex-wrap:\s*nowrap/)
+    // From 440px: "left the group" on a line of its own in the group's cell; the name, its basis 0, never wraps the
+    // first line and is cut there.
+    expect(block(wide, '.prow__group')).toMatch(/flex-wrap:\s*wrap/)
+    expect(block(wide, '.prow__left')).toMatch(/flex:\s*0 0 100%/)
+    expect(block(wide, '.prow__left')).not.toMatch(/nowrap/)
+    expect(block(wide, '.prow__name')).toMatch(/flex:\s*1 1 0;/)
+    expect(block(wide, '.prow__name')).toMatch(/min-width:\s*0/)
+  })
+
+  // Acceptance round 2: a counted group without requests while the window is still filling says "no figures yet".
+  it('says no figures yet for a group without requests while the window is partly covered', async () => {
+    const partial = perfOf(7)
+    partial.rows = partial.rows.filter((row) => row.model === 'gpt-a')
+    Object.assign(partial, { complete: false, window_from: '2026-11-19T08:40:00Z' })
+    api.accountPerformance.mockResolvedValue(partial)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(document.querySelector('[data-qp-perf-row="53:none"] [data-qp-perf-no-requests]')!.textContent).toBe('admin.schedQuality.perf.panel.noFiguresYet')
   })
 })

@@ -112,6 +112,8 @@ func TestFirstOutputFollowHTTPDeliveryWithoutHandoff(t *testing.T) {
 
 // The ingress facts fixture has a read-only versioned binding. Its guard can
 // publish a cutoff, but this store gives no receipt authorizing a handoff.
-func (*ownerFactsCache) RecordSessionBindingFailure(context.Context, int64, string, string, service.StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error) {
-	return false, nil
+func (*ownerFactsCache) RecordSessionBindingFailure(context.Context, int64, string, string, service.StickySessionBinding, int64, time.Duration, ...time.Time) (int64, error) {
+	return 0, nil
 }
+
+var _ service.OpenAIStickyVersionedCache = (*ownerFactsCache)(nil)

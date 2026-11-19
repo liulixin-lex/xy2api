@@ -116,6 +116,8 @@
               />
             </section>
 
+            <SchedPanelPerformance :detail="detail" :model="tab" :target-group-id="targetGroupId" :group-info="groupInfo" />
+
             <SchedDecisions :account-id="detail.account.id" :group-name="groupName" />
 
             <section class="qp-section" data-qp-section="auto">
@@ -224,6 +226,7 @@ import SchedPauseMark from './SchedPauseMark.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedDecisions from './SchedDecisions.vue'
+import SchedPanelPerformance from './SchedPanelPerformance.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'

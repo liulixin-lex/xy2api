@@ -65,21 +65,30 @@ func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ i
 	}
 	return f.owner, f.remaining, nil
 }
-func (f *selectionBindingFake) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, avoidScopes ...string) (bool, error) {
+func (f *selectionBindingFake) CommitSessionBinding(ctx context.Context, group int64, key string, expected StickySessionBinding, target int64, _ time.Duration, avoidScopes BindingCommitOptions) (BindingCommitResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.casKeys = append(f.casKeys, key)
-	f.avoidScopes = append(f.avoidScopes, avoidScopes...)
+	f.avoidScopes = append(f.avoidScopes, avoidScopes.FailureScope)
 	*f.events = append(*f.events, fmt.Sprintf("cas:%d", target))
 	if f.casError {
-		return false, errors.New("cache down")
+		return BindingCommitResult{Status: BindingCommitError}, errors.New("cache down")
 	}
 	if key != f.key || f.casFail || f.owner != expected.AccountID || f.generation != expected.Generation {
-		return false, nil
+		return BindingCommitResult{Status: BindingChanged, ObservedGen: f.generation}, nil
+	}
+	if avoidScopes.RejectScope != "" && f.store != nil {
+		avoid, err := sessionAvoidAfterReset(ctx, f.store, group, avoidScopes.RejectScope, func(int64) time.Time { return avoidScopes.TargetResetAt })
+		if err != nil {
+			return BindingCommitResult{Status: BindingCommitError}, err
+		}
+		if _, hit := avoid[target]; hit {
+			return BindingCommitResult{Status: BindingTargetAvoided, ObservedGen: f.generation}, nil
+		}
 	}
 	f.owner = target
 	f.generation += "-next"
-	return true, nil
+	return BindingCommitResult{Status: BindingCommitted, ObservedGen: expected.Generation, NewGen: f.generation}, nil
 }
 
 func (f *selectionBindingFake) GetSessionBinding(_ context.Context, _ int64, key string) (StickySessionBinding, error) {
@@ -362,17 +371,20 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	require.Zero(t, f.slots.held)
 }
 
-func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
+func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.avoidDelay > 0 {
 		time.Sleep(f.avoidDelay)
 	}
 	if f.avoidErr != nil {
-		return true, f.avoidErr // Ambiguous reply: the error must win over the write flag.
+		return 1, f.avoidErr // Ambiguous reply: the error must win over the write flag.
 	}
 	if f.avoidRejected || key != f.key || f.owner != expected.AccountID || f.generation != expected.Generation {
-		return false, nil
+		return 0, nil
 	}
-	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
+	if err := f.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...); err != nil {
+		return 0, err
+	}
+	return time.Now().Add(ttl).UnixMilli(), nil
 }

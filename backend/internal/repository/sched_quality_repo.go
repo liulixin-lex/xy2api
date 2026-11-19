@@ -161,7 +161,7 @@ func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.L
 func loadSchedQualityStates(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]schedquality.LineState, error) {
-	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis FROM sched_line_states ORDER BY account_id,model,group_id,line`)
+	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis,last_assessment FROM sched_line_states ORDER BY account_id,model,group_id,line`)
 	if err != nil {
 		return nil, err
 	}
@@ -170,9 +170,14 @@ func loadSchedQualityStates(ctx context.Context, q interface {
 	for rows.Next() {
 		var r schedquality.LineState
 		var pending, epoch, entry, until, trial, good, rear, evaluated sql.NullTime
-		var raw []byte
-		if err := rows.Scan(&r.AccountID, &r.Model, &r.GroupID, &r.Line, &r.Identity, &r.Trial, &r.Level, &r.Admissions, &pending, &epoch, &entry, &until, &trial, &good, &rear, &evaluated, &raw); err != nil {
+		var raw, assessment []byte
+		if err := rows.Scan(&r.AccountID, &r.Model, &r.GroupID, &r.Line, &r.Identity, &r.Trial, &r.Level, &r.Admissions, &pending, &epoch, &entry, &until, &trial, &good, &rear, &evaluated, &raw, &assessment); err != nil {
 			return nil, err
+		}
+		if len(assessment) > 0 {
+			if err := json.Unmarshal(assessment, &r.LastAssessment); err != nil {
+				return nil, err
+			}
 		}
 		r.PendingAt, r.Epoch, r.Entry, r.Until = pending.Time, epoch.Time, entry.Time, until.Time
 		r.TrialUntil, r.GoodSince, r.LastRear, r.EvaluatedAt = trial.Time, good.Time, rear.Time, evaluated.Time
@@ -307,10 +312,18 @@ func (t *schedQualityTx) Upsert(rows []schedquality.LineState) error {
 		if err != nil {
 			return err
 		}
-		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
- ON CONFLICT(account_id,model,group_id,line) DO UPDATE SET identity=EXCLUDED.identity,trial=EXCLUDED.trial,level=EXCLUDED.level,admissions=EXCLUDED.admissions,pending_at=EXCLUDED.pending_at,epoch=EXCLUDED.epoch,entry=EXCLUDED.entry,until=EXCLUDED.until,trial_until=EXCLUDED.trial_until,good_since=EXCLUDED.good_since,last_rear=EXCLUDED.last_rear,evaluated_at=EXCLUDED.evaluated_at,basis=EXCLUDED.basis,updated_at=NOW()`,
-			r.AccountID, r.Model, r.GroupID, r.Line, r.Identity, r.Trial, r.Level, r.Admissions, nullableQualityTime(r.PendingAt), nullableQualityTime(r.Epoch), nullableQualityTime(r.Entry), nullableQualityTime(r.Until), nullableQualityTime(r.TrialUntil), nullableQualityTime(r.GoodSince), nullableQualityTime(r.LastRear), nullableQualityTime(r.EvaluatedAt), string(raw))
+		var assessment *string
+		if len(r.LastAssessment) > 0 {
+			data, err := json.Marshal(r.LastAssessment)
+			if err != nil {
+				return err
+			}
+			assessment = new(string(data))
+		}
+		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_line_states(account_id,model,group_id,line,identity,trial,level,admissions,pending_at,epoch,entry,until,trial_until,good_since,last_rear,evaluated_at,basis,last_assessment)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+ ON CONFLICT(account_id,model,group_id,line) DO UPDATE SET identity=EXCLUDED.identity,trial=EXCLUDED.trial,level=EXCLUDED.level,admissions=EXCLUDED.admissions,pending_at=EXCLUDED.pending_at,epoch=EXCLUDED.epoch,entry=EXCLUDED.entry,until=EXCLUDED.until,trial_until=EXCLUDED.trial_until,good_since=EXCLUDED.good_since,last_rear=EXCLUDED.last_rear,evaluated_at=EXCLUDED.evaluated_at,basis=EXCLUDED.basis,last_assessment=EXCLUDED.last_assessment,updated_at=NOW()`,
+			r.AccountID, r.Model, r.GroupID, r.Line, r.Identity, r.Trial, r.Level, r.Admissions, nullableQualityTime(r.PendingAt), nullableQualityTime(r.Epoch), nullableQualityTime(r.Entry), nullableQualityTime(r.Until), nullableQualityTime(r.TrialUntil), nullableQualityTime(r.GoodSince), nullableQualityTime(r.LastRear), nullableQualityTime(r.EvaluatedAt), string(raw), assessment)
 		if err != nil {
 			return err
 		}

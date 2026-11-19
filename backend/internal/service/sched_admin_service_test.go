@@ -21,6 +21,7 @@ import (
 
 type schedAdminEngine struct {
 	SchedQualityEngine
+	perf         *SchedPerfSnapshot
 	snapshot     *SchedQualitySnapshot
 	reads        int
 	resetAt      time.Time
@@ -34,7 +35,8 @@ type schedAdminEngine struct {
 	previewCalls []schedquality.Policy
 }
 
-func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
+func (e *schedAdminEngine) PerformanceSnapshot() *SchedPerfSnapshot { return e.perf }
+func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot         { e.reads++; return e.snapshot }
 func (e *schedAdminEngine) Reset(_ context.Context, id int64) (time.Time, error) {
 	if e.resetErr != nil {
 		return time.Time{}, e.resetErr

@@ -45,8 +45,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, fmt.Errorf("missing model in request")
 	}
 
-	billingModel := resolveOpenAIForwardModel(account, originalModel, "")
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, originalModel, "")
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "responses", PreOutputProtocolResponses)
 	if projectionErr != nil {

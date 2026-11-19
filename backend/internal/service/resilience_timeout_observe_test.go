@@ -5,6 +5,7 @@ package service
 import (
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
@@ -51,7 +52,7 @@ func TestTimeoutPlanMetricModelCardinality(t *testing.T) {
 		model := fmt.Sprintf("unknown-client-model-%d", i)
 		st.SetAttemptProfile(resilience.AttemptProfile{AccountID: accountID, Model: model, AttemptStart: now})
 		plan := st.PlanAttemptTimeout(20*time.Second, false, now)
-		noteTimeoutPlan(ctx, &Account{ID: accountID}, plan)
+		noteTimeoutPlan(ctx, &Account{ID: accountID}, plan, timeoutIdentityAt(ctx, nil))
 		require.Equal(t, model, plan.Model(), "metric normalization must not change the frozen request model")
 	}
 	require.Equal(t, int64(attempts), countOther()-before)
@@ -83,4 +84,41 @@ func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestTimeoutPlanRequestAttemptIdentity(t *testing.T) {
+	withResilienceSettings(t, nil)
+	synctest.Test(t, func(t *testing.T) {
+		output := captureOpenAIObservationLogs(t)
+		now := time.Now()
+		const account = int64(31)
+		ids := make([]string, 0, 2)
+		for retry := range 2 {
+			st := resilience.NewRequestState()
+			st.SetGroup(7)
+			ctx := resilience.WithRequestState(t.Context(), st)
+			st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, now))
+			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account, Model: "model-a", AttemptStart: now})
+			plan := st.PlanAttemptTimeout(time.Minute, false, now)
+			if retry == 1 {
+				RecordOpsUpstreamSendBoundary(ctx, account)
+			}
+			handle := &schedAttemptCapture{accountID: account}
+			RecordOpsUpstreamSendBoundary(handle.withHTTPDispatchTrace(ctx), account)
+			noteTimeoutPlan(ctx, &Account{ID: account}, plan, timeoutIdentityAt(ctx, handle.sentSequence()))
+			ids = append(ids, st.GatewayRequestID())
+		}
+		require.NotEqual(t, ids[0], ids[1])
+		rows := schedObsLogRecords(t, output)
+		require.Len(t, rows, 2)
+		require.Equal(t, now, time.Now())
+		for i, row := range rows {
+			require.Equal(t, "resilience.budget_timeout_plan", row["msg"])
+			require.Equal(t, ids[i], row["gateway_request_id"])
+			require.EqualValues(t, i+1, row["attempt_seq"])
+			require.EqualValues(t, 7, row["group_id"])
+			require.EqualValues(t, account, row["account_id"])
+			require.Equal(t, "model-a", row["model"])
+		}
+	})
 }

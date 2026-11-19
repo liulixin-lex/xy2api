@@ -364,6 +364,7 @@
     "316_ops_status_origin.sql": "866e930c56080874293f34f118bfc07863f1016d40a909ab1ee9ac39a24633ea",
     "318_group_ratefloor_auth_cache_invalidation.sql": "c76a4e3a7ee5e31e4c8d23258d4b3fcc9454c8a0c1bbeb4c76bb7c7ad976c979",
     "319_sched_attempt_full_tier_timeout.sql": "d2a7aa1b9988b87f749dfbea5da210a5c321614145834bffac5ae74cf2044f78",
-    "320_ops_metrics_e2e_first_output.sql": "21a53f79046ec61ea69b70559c5eb9863a27873e4024406d510cb7e32a35ad1d"
+    "320_ops_metrics_e2e_first_output.sql": "21a53f79046ec61ea69b70559c5eb9863a27873e4024406d510cb7e32a35ad1d",
+    "321_sched_line_last_assessment.sql": "cf3d4a36968330b9c88783316f0fdc07e51e5e07eb96b9e10ec5a9075bcaa343"
   }
 }

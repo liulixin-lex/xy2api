@@ -60,7 +60,10 @@ func TestOpsSystemLogSinkSchedObsEventsPersistThroughSlog(t *testing.T) {
 		{"cycles": float64(1), "cycles_failed": float64(1), "cycle_ms_max": float64(123),
 			"cooled": float64(2), "released": float64(4), "trial": float64(3), "clear": float64(5)},
 		{"kind": "takeover", "gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
-			"model": "m", "from": float64(10), "to": float64(1), "reason": "priority_takeover", "committed": true},
+			"model": "m", "from_model": "m", "to_model": "m", "from": float64(10), "to": float64(1), "reason": "priority_takeover", "committed": true,
+			"commit_attempted": true, "commit_result": "committed", "attempt_seq": nil, "expected_gen": "g1", "observed_gen": "g1", "new_gen": "g1-next",
+			"from_priority": float64(5), "to_priority": float64(1), "takeover_idle_setting": float64(0), "takeover_idle_observed": nil,
+			"avoid_seen_at_select": false, "session_on": resilience.Current().SessionOn(), "transfer_allowed": true, "quality_owned": nil},
 	}
 	for i, row := range saved {
 		require.Equal(t, "info", row.Level)

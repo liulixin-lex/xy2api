@@ -172,11 +172,14 @@ func resilienceFirstEventPlanAt(ctx context.Context, accountID int64, platform s
 // firstEventGuard cancels an upstream attempt that produced no first event
 // before its deadline. The stream handler disarms it on the first line.
 type firstEventGuard struct {
-	timer   *time.Timer
-	cancel  context.CancelFunc
-	fired   atomic.Bool
-	timeout time.Duration
-	plan    resilience.TimeoutPlan
+	identity  timeoutIdentity // published by fired.Store before cancellation
+	sendSeq   atomic.Uint64
+	published chan struct{}
+	timer     *time.Timer
+	cancel    context.CancelFunc
+	fired     atomic.Bool
+	timeout   time.Duration
+	plan      resilience.TimeoutPlan
 }
 
 type firstEventGuardKey struct{}
@@ -189,16 +192,18 @@ func newFirstEventGuard(ctx context.Context, timeout time.Duration, plans ...res
 		return ctx, nil
 	}
 	guarded, cancel := context.WithCancel(ctx)
-	g := &firstEventGuard{cancel: cancel, timeout: timeout}
+	g := &firstEventGuard{cancel: cancel, timeout: timeout, published: make(chan struct{})}
 	if len(plans) > 0 {
 		g.plan = plans[0]
 		timeout = timeoutUntilPlanDeadline(timeout, g.plan.Start(), time.Now())
 	}
 	g.timer = time.AfterFunc(timeout, func() {
+		g.identity = timeoutIdentityAt(ctx, logKnown(g.sendSeq.Load()))
 		if resilience.BudgetTraceEnabledForTest {
 			g.plan.ObserveFiredForTest("first_event_guard")
 		}
 		g.fired.Store(true)
+		close(g.published)
 		cancel()
 	})
 	return context.WithValue(guarded, firstEventGuardKey{}, g), g
@@ -224,8 +229,8 @@ func firstEventGuardFrom(ctx context.Context) *firstEventGuard {
 
 // Disarm stops the deadline once the first upstream event arrived.
 func (g *firstEventGuard) Disarm() {
-	if g != nil {
-		g.timer.Stop()
+	if g != nil && g.timer.Stop() {
+		close(g.published)
 	}
 }
 
@@ -235,7 +240,7 @@ func (g *firstEventGuard) Fired() bool { return g != nil && g.fired.Load() }
 // Release frees the guard at the end of the attempt.
 func (g *firstEventGuard) Release() {
 	if g != nil {
-		g.timer.Stop()
+		g.Disarm()
 		g.cancel()
 	}
 }
@@ -248,7 +253,10 @@ func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase 
 	}
 	if account != nil {
 		if c != nil && c.Request != nil {
-			noteTimeoutPlan(c.Request.Context(), account, g.plan)
+			if g.published != nil {
+				<-g.published
+			}
+			noteTimeoutPlan(c.Request.Context(), account, g.plan, g.identity)
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			TimeoutDiagnostics: g.plan.Diagnostics(),

@@ -22,6 +22,7 @@ func (a *schedAttemptCapture) withHTTPDispatchTrace(ctx context.Context) context
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if a.requestedHTTPConn {
+			a.sendSeq.Store(0) // The next hop has not yet written a request.
 			a.invalidateRepeatedSendLocked()
 		}
 		a.requestedHTTPConn = true
@@ -33,6 +34,14 @@ func (a *schedAttemptCapture) invalidateRepeatedSendLocked() {
 	a.ownerHit, a.fullTierFirstOutputTimeout = false, false
 }
 
+func (a *schedAttemptCapture) sentSequence() *uint64 {
+	if a == nil {
+		return nil
+	}
+	return logKnown(a.sendSeq.Load())
+}
+
+// Owner cutoff starts at transport entry, including connection and TLS wait.
 func (a *schedAttemptCapture) markHTTPDispatch(seq uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

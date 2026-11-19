@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"os"
 	"testing"
 	"time"
@@ -48,18 +49,18 @@ func testStickyBindingSuccessClearsEarlierFailure(t *testing.T, addr string) {
 			for _, target := range []int64{101, 102} {
 				recorded, err := one.RecordSessionBindingFailure(ctx, group, primary, avoid, expected, target, 2*time.Minute)
 				require.NoError(t, err)
-				require.True(t, recorded)
+				require.Positive(t, recorded)
 			}
 			require.NoError(t, NewResilienceStore(first).AddSessionAvoid(ctx, group, soft, 101, 10*time.Minute))
 			stale := expected
 			stale.Generation += "-stale"
-			changed, err := two.CommitSessionBinding(ctx, group, primary, stale, 101, time.Hour, avoid)
+			changed, err := two.CommitSessionBinding(ctx, group, primary, stale, 101, time.Hour, service.BindingCommitOptions{FailureScope: avoid})
 			require.NoError(t, err)
-			require.False(t, changed)
+			require.Equal(t, service.BindingChanged, changed.Status)
 			require.True(t, first.HExists(ctx, writtenKey, "101").Val(), "failed CAS must not clear failure memory")
-			changed, err = two.CommitSessionBinding(ctx, group, primary, expected, 101, time.Hour, avoid)
+			changed, err = two.CommitSessionBinding(ctx, group, primary, expected, 101, time.Hour, service.BindingCommitOptions{FailureScope: avoid})
 			require.NoError(t, err)
-			require.True(t, changed)
+			require.Equal(t, service.BindingCommitted, changed.Status)
 			avoided, err := NewResilienceStore(first).SessionAvoid(ctx, group, avoid)
 			require.NoError(t, err)
 			require.NotContains(t, avoided, int64(101), "a concurrent success supersedes the earlier failure for its target")
@@ -82,7 +83,7 @@ func testStickyBindingSuccessClearsEarlierFailure(t *testing.T, addr string) {
 			}
 			recorded, err := one.RecordSessionBindingFailure(ctx, group, primary, avoid, expected, 101, 2*time.Minute)
 			require.NoError(t, err)
-			require.False(t, recorded, "a late old-generation failure cannot restore the removed avoidance")
+			require.Zero(t, recorded, "a late old-generation failure cannot restore the removed avoidance")
 		})
 	}
 }

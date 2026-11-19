@@ -53,8 +53,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	clientStream := anthropicReq.Stream
 
-	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, anthropicReq.Model, defaultMappedModel)
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
 	if projectionErr != nil {

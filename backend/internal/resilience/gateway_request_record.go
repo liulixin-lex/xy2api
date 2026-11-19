@@ -132,12 +132,13 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	s.mu.Lock()
 	s.requestID = uuid.NewString()
 	s.stickyChange = nil
+	s.voluntarySwitchVetoLogged = false
 	// A WebSocket turn remains pinned to the account selected for its
 	// connection. Its fallback standing is recalculated by the handler for each
 	// admitted turn; takeover is a one-time binding change and must not leak.
 	s.selectionFlags.takeover = false
 	s.currentAttempt = nil
-	s.turnStartHTTPSeq = s.httpSendSeq
+	s.turnStartSendSeq = s.upstreamSendSeq
 	s.ownerCutoff = OwnerFirstOutputCutoff{}
 	s.ownerAvoidConfirmed = false
 	s.schedSelection.HTTPStreamText = false

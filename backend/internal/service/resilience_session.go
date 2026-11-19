@@ -773,6 +773,7 @@ func (r *ResilienceService) sessionAvoid(ctx context.Context, groupID *int64, se
 func sessionAvoidAfterReset(ctx context.Context, store ResilienceStore, groupID int64, session string, resetAt func(int64) time.Time) (map[int64]struct{}, error) {
 	records, err := store.SessionAvoidWrittenAt(ctx, groupID, session)
 	if err != nil {
+		stopNewPick(ctx)
 		return nil, err
 	}
 	out := make(map[int64]struct{}, len(records))

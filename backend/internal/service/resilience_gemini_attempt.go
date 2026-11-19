@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,8 @@ type geminiAttemptKey struct{}
 type geminiAttempt struct {
 	mu        sync.Mutex
 	ctx       context.Context
+	sendSeq   atomic.Uint64
+	identity  timeoutIdentity
 	parent    context.Context
 	cancel    context.CancelCauseFunc
 	timer     *time.Timer
@@ -136,6 +139,9 @@ func (g *geminiAttempt) resetTimer(d time.Duration, cause error) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if g.timer == timer {
+			if _, deadline := cause.(*geminiAttemptDeadlineError); deadline {
+				g.identity = timeoutIdentityAt(g.ctx, logKnown(g.sendSeq.Load()))
+			}
 			if resilience.BudgetTraceEnabledForTest {
 				if _, deadline := cause.(*geminiAttemptDeadlineError); deadline {
 					g.plan.ObserveFiredForTest("gemini_attempt_" + g.phase)
@@ -383,7 +389,7 @@ func (g *geminiAttempt) finish(c *gin.Context, rl *RateLimitService, account *Ac
 	var stall *geminiStreamStallError
 	switch cause := context.Cause(g.ctx); {
 	case errors.As(cause, &deadline) && !g.outputStarted() && OpenAICompactKeepaliveAdjustedWrittenSize(c) <= 0:
-		fe := (&firstEventGuard{timeout: g.timeout, plan: g.plan}).failoverError(c, account, g.phase)
+		fe := (&firstEventGuard{timeout: g.timeout, plan: g.plan, identity: g.identity}).failoverError(c, account, g.phase)
 		fe.cause = cause
 		rl.ApplyResilienceOutcome(g.parent, account, resilience.Result{Category: resilience.CategoryFirstOutputTimeout}, "Gemini attempt deadline")
 		return fe

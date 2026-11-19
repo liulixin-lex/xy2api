@@ -32,7 +32,7 @@ func TestTakeoverFailureSharedForTwoMinutes(t *testing.T) {
 	require.NoError(t, err)
 	recorded, err := one.RecordSessionBindingFailure(ctx, group, bindingKey, session, expected, 101, 2*time.Minute)
 	require.NoError(t, err)
-	require.True(t, recorded)
+	require.Positive(t, recorded)
 	avoid, err := two.SessionAvoid(ctx, group, session)
 	require.NoError(t, err)
 	require.Contains(t, avoid, int64(101))

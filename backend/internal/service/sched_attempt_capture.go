@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -35,6 +36,7 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
 	firstOutputCancel                   context.CancelFunc // nonblocking cancellation of this guarded HTTP request
+	sendSeq                             atomic.Uint64      // Latest confirmed upstream send on this handle.
 	factsOnly                           bool
 	requestedHTTPConn, repeatedHTTPSend bool
 	mu                                  sync.Mutex
@@ -631,6 +633,8 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 			a.dispatch.Model = model
 		}
 		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
+	} else if a != nil {
+		req = req.WithContext(context.WithValue(req.Context(), schedHTTPAttemptKey{}, a))
 	}
 	if guard != nil && *owner != nil {
 		guard.capture.Store(*owner)
@@ -757,7 +761,7 @@ type schedWSTurnCapture struct {
 	active *schedAttemptCapture
 }
 
-func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte, dial ...*schedWSDialObservation) {
+func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte, dial ...*schedWSDialObservation) *schedAttemptCapture {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
@@ -770,7 +774,17 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 	if t.active != nil {
 		t.active.learnCapability = s.capabilityWSFailureLearner(ctx, account, payload)
 	}
+	return t.active
 }
+
+// The writer keeps the handle for this frame even if the relay changes turns.
+func (a *schedAttemptCapture) confirmNativeWSWrite(ctx context.Context) {
+	seq := resilience.StateFrom(ctx).ConfirmNativeWSSend()
+	if a != nil {
+		a.sendSeq.Store(seq)
+	}
+}
+
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

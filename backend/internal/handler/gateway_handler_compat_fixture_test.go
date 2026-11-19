@@ -143,12 +143,16 @@ func newHandlerCompatFixture(t *testing.T, channels ...*service.ChannelService) 
 	return f
 }
 func (f *handlerCompatFixture) call(entry, body string, writer http.ResponseWriter) *gin.Context {
+	return f.callWithContext(context.Background(), entry, body, writer)
+}
+
+func (f *handlerCompatFixture) callWithContext(ctx context.Context, entry, body string, writer http.ResponseWriter) *gin.Context {
 	c, _ := gin.CreateTestContext(writer)
 	path := map[string]string{"messages": "/v1/messages", "responses": "/v1/responses", "chat": "/v1/chat/completions", "count_tokens": "/v1/messages/count_tokens"}[entry]
 	c.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", "ordinary-sdk/1.0")
-	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, f.group))
+	c.Request = c.Request.WithContext(context.WithValue(ctx, ctxkey.Group, f.group))
 	c.Set(string(middleware.ContextKeyAPIKey), f.key)
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: f.key.UserID, Concurrency: 10})
 	switch entry {

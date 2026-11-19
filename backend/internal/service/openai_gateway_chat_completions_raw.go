@@ -74,8 +74,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	clientStream := gjson.GetBytes(body, "stream").Bool()
 
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, originalModel, defaultMappedModel)
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "chat", PreOutputProtocolChat)
 	if projectionErr != nil {

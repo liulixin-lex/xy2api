@@ -73,8 +73,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 
 	// 3. Convert Responses → Anthropic
 	// Resolve the mapped model before choosing its thinking/tool protocol.
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, originalModel, defaultMappedModel)
 	var projectionErr error
 	adaptedBody, projectionErr = applyM7FinalReasoning(ctx, c, account, adaptedBody, upstreamModel, "responses", PreOutputProtocolResponses)
 	if projectionErr != nil {

@@ -114,8 +114,7 @@ func (s *OpenAIGatewayService) openAICompatFirstEventTimeout(ctx context.Context
 	if fe.guard != nil {
 		select {
 		case <-fe.guard.fired:
-			a := fe.guard.capture.Load()
-			ctx = context.WithValue(ctx, schedHTTPAttemptKey{}, a)
+			ctx = context.WithValue(ctx, firedOpenAITimeoutKey{}, fe.guard.outcome)
 		default:
 		}
 	}

@@ -59,7 +59,7 @@ func TestReadTrialRoundFromCommittedRows(t *testing.T) {
 	execSQL(`CREATE TABLE accounts(id bigint primary key, extra jsonb, deleted_at timestamptz);
  CREATE TABLE groups(id bigint primary key, platform text, deleted_at timestamptz);
  CREATE TABLE account_groups(account_id bigint,group_id bigint);
- CREATE TABLE sched_line_states(account_id bigint, model text,group_id bigint,line text,identity smallint,trial boolean,trial_until timestamptz);
+ CREATE TABLE sched_line_states(account_id bigint, model text,group_id bigint,line text,identity smallint,trial boolean,trial_until timestamptz,last_assessment jsonb);
  CREATE TABLE account_quality_overrides(account_id bigint,group_id bigint,mode smallint,expires_at timestamptz);
  CREATE TABLE settings(key text primary key,value text);
  INSERT INTO accounts VALUES(1,'{"group_quality_reset_at":"2026-01-10T01:00:00Z"}',NULL);
@@ -96,7 +96,7 @@ func TestRunResetReturnsGroupsDeletedUnderCycleLock(t *testing.T) {
 	db := newTrialPostgres(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `CREATE TABLE accounts(id bigint primary key,extra jsonb);
- CREATE TABLE sched_line_states(account_id bigint,model text,group_id bigint,line text,identity smallint,trial boolean,basis jsonb);
+ CREATE TABLE sched_line_states(account_id bigint,model text,group_id bigint,line text,identity smallint,trial boolean,basis jsonb,last_assessment jsonb);
  CREATE TABLE sched_decisions(at timestamptz,rule_version text,account_id bigint,model text,group_id bigint,line text,action text,dims text[],level int,until timestamptz,basis jsonb,attempt_ids text[]);
  INSERT INTO accounts VALUES(1,'{}');
  INSERT INTO sched_line_states VALUES (2,'other',10,'ttfo',0,false,'{}')`)

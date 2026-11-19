@@ -58,8 +58,8 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	httpSendSeq          uint64 // never reused by another turn on this connection
-	turnStartHTTPSeq     uint64
+	upstreamSendSeq      uint64 // never reused by another turn on this connection
+	turnStartSendSeq     uint64
 	ownerCutoff          OwnerFirstOutputCutoff
 	ownerAvoidConfirmed  bool
 	currentAttempt       any
@@ -77,6 +77,7 @@ type RequestState struct {
 	keptSticky                 int64
 	stickyBypassReason         string
 	stickyBypassLogged         bool
+	voluntarySwitchVetoLogged  bool
 	stickyBypassChangesBinding bool
 	// stateRepairAvoidedAccount is diagnostic-only evidence from this request's
 	// M3 switch. Unlike avoided, it never imports historical session avoidance.
@@ -143,6 +144,8 @@ type RequestState struct {
 	opsUpstreamEventSequence  uint64
 	opsUpstreamSendBoundaries map[int64]uint64
 	postOutputFailureFacts    []PostOutputFailureFact
+	// Only the first selection can consider performance-based placement.
+	newPickSelectionStarted bool
 }
 
 // AllowStateSwitch grants one request-scoped state-repair account switch,
@@ -385,10 +388,25 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) uint64 {
 	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
 	s.noteGatewaySendLocked(accountID)
-	s.httpSendSeq++
-	seq := s.httpSendSeq
+	seq := s.nextUpstreamSendSeqLocked()
 	s.mu.Unlock()
 	return seq
+}
+
+// ConfirmNativeWSSend assigns the physical sequence after an application frame
+// was written. Gateway request accounting already started before that write.
+func (s *RequestState) ConfirmNativeWSSend() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextUpstreamSendSeqLocked()
+}
+
+func (s *RequestState) nextUpstreamSendSeqLocked() uint64 {
+	s.upstreamSendSeq++
+	return s.upstreamSendSeq
 }
 
 // OpsUpstreamSendBoundary returns the latest send boundary for accountID.
@@ -1018,4 +1036,16 @@ func (s *RequestState) LastResortSessionLimited() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastResortSessionLimited
+}
+
+// BeginNewPickSelection identifies the first selection of this logical request.
+func (s *RequestState) BeginNewPickSelection() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first := !s.newPickSelectionStarted && !s.turnFailed && len(s.failedAccounts) == 0 && s.upstreamSendSeq == s.turnStartSendSeq
+	s.newPickSelectionStarted = true
+	return first
 }

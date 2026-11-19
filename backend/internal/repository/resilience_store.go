@@ -89,24 +89,28 @@ var resilienceClearPriorFailuresScript = redis.NewScript(`
 // sessionFailureEndField names the window end of an account's count.
 const sessionFailureEndField = "e:"
 
-const resilienceAvoidAddLua = `
-	local existing = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]) or '0')
-	local written = tonumber(redis.call('HGET', KEYS[#KEYS], ARGV[1]) or '0')
-	local reset = tonumber(ARGV[#ARGV])
-	if reset > 0 and written < reset then existing = 0 end
-	local deadline = math.max(existing, tonumber(ARGV[2]))
-	redis.call('ZADD', KEYS[1], deadline, ARGV[1])
-	redis.call('HSET', KEYS[#KEYS], ARGV[1], ARGV[3])
-	redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+const resilienceAvoidArgsLua = `
+ local stamp = tonumber(ARGV[3])
+ local written = tonumber(redis.call('HGET', KEYS[#KEYS], ARGV[1]) or '0')
+ local reset = tonumber(ARGV[#ARGV])
+`
+
+const resilienceAvoidStoreLua = `
+ local existing = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]) or '0')
+ if reset > 0 and written < reset then existing = 0 end
+ local deadline = math.max(existing, tonumber(ARGV[2]))
+ redis.call('ZADD', KEYS[1], deadline, ARGV[1])
+	redis.call('HSET', KEYS[#KEYS], ARGV[1], stamp)
+	redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. ARGV[3])
 	local latest = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
 	if #latest > 0 then
 		redis.call('PEXPIREAT', KEYS[1], latest[2])
 		redis.call('PEXPIREAT', KEYS[#KEYS], latest[2])
 	end
-	return 1
+	return deadline
 `
 
-var resilienceAvoidAddScript = redis.NewScript(resilienceAvoidAddLua)
+var resilienceAvoidAddScript = redis.NewScript(resilienceAvoidArgsLua + resilienceAvoidStoreLua)
 
 var resilienceIncrExpireScript = redis.NewScript(`
 	local v = redis.call('INCR', KEYS[1])
