@@ -1350,8 +1350,9 @@ function handleToolbarRefresh() {
         </div>
 
         <!-- Card 5: user wait (end-to-end first output); the last attempt's first token keeps the threshold colour -->
-        <!-- The card can be narrow (1024): the header wraps rather than folding the title, the number row wraps "ms (P99)"
-             under the number and the number shrinks below xl, so nothing is cut. -->
+        <!-- The card can be narrow (1024, about 81 px of content): the header wraps rather than folding the title, the number
+             row wraps "ms (P99)" under the number, and the number and the unknown word shrink below xl so they stay on one
+             line (never broken inside a word or a number, which would misread). -->
         <div class="min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;" data-testid="ops-e2e-card">
           <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <div class="flex items-center gap-1">
@@ -1369,7 +1370,7 @@ function handleToolbarRefresh() {
           </div>
           <template v-if="e2eSampleCount > 0">
             <div class="mt-2 flex flex-wrap items-baseline gap-x-2">
-              <div class="min-w-0 break-all text-2xl font-black text-gray-900 dark:text-white xl:text-3xl" data-testid="ops-e2e-p99">
+              <div class="min-w-0 text-xl font-black text-gray-900 dark:text-white xl:text-3xl" data-testid="ops-e2e-p99">
                 {{ e2eP99Ms ?? '-' }}
               </div>
               <span class="whitespace-nowrap text-xs font-bold text-gray-400">ms (P99)</span>
@@ -1383,7 +1384,7 @@ function handleToolbarRefresh() {
             </div>
           </template>
           <template v-else>
-            <div class="mt-2 break-words text-lg font-black text-gray-400 dark:text-gray-500 xl:text-2xl" data-testid="ops-e2e-p99">{{ t('admin.ops.e2eFirstOutput.unknown') }}</div>
+            <div class="mt-2 text-base font-black text-gray-400 dark:text-gray-500 xl:text-2xl" data-testid="ops-e2e-p99">{{ t('admin.ops.e2eFirstOutput.unknown') }}</div>
             <p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-testid="ops-e2e-none">{{ e2eUnknownWhy }}</p>
           </template>
           <div class="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700" data-testid="ops-e2e-last-attempt">

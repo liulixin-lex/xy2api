@@ -65,3 +65,12 @@ describe('groups locale key completeness', () => {
     })
   }
 })
+
+// The user-wait tip names the line below it by its own label, in each language (final-fe review: the English tip
+// still said "Last attempt" after the line became "Last first token").
+describe.each([['zh', zh, '“', '”'], ['en', en, '"', '"']] as const)('%s user-wait tip', (_, messages, open, close) => {
+  it('names the last-attempt line as the card labels it', () => {
+    const ops = (messages as any).admin.ops
+    expect(ops.tooltips.e2eFirstOutput).toContain(`${open}${ops.e2eFirstOutput.lastAttempt}${close}`)
+  })
+})

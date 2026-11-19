@@ -89,12 +89,16 @@ describe('OpsDashboardHeader user wait layout', () => {
     expect(card.classes()).toContain('min-w-0')
     expect(card.get(':scope > div').classes()).toEqual(expect.arrayContaining(['flex-wrap']))
     const number = card.get('[data-testid="ops-e2e-p99"]')
-    expect(number.classes()).toEqual(expect.arrayContaining(['text-2xl', 'xl:text-3xl', 'break-all']))
+    // Shrinks to stay on one line; never broken inside the number (118500 must not read 11850).
+    expect(number.classes()).toEqual(expect.arrayContaining(['min-w-0', 'text-xl', 'xl:text-3xl']))
+    expect(number.classes()).not.toEqual(expect.arrayContaining(['break-all']))
     expect(number.element.parentElement!.className).toContain('flex-wrap')
 
     const empty = mountWait({ e2e_first_output_sample_count: 0 })
     await flushPromises()
-    expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).toEqual(expect.arrayContaining(['text-lg', 'break-words']))
+    // The unknown word too: smaller below xl, never split ("Unknow / n").
+    expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).toEqual(expect.arrayContaining(['text-base', 'xl:text-2xl']))
+    expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).not.toEqual(expect.arrayContaining(['break-words']))
     expect(empty.get('[data-testid="ops-e2e-p99"]').classes()).not.toContain('text-3xl')
   })
 })
