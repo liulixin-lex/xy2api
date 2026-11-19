@@ -461,7 +461,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				_ = resp.Body.Close()
 			}
 			headerGuard.close()
-			return nil, s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, headerGuard.capture.Load()), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+			return nil, s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, firedOpenAITimeoutKey{}, headerGuard.outcome), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				attemptStart, reqModel, reasoningEffortValue, firstOutputTimeout, "response_headers", nil, headerGuard.plan)
 		}
 		if err != nil && headerGuard != nil {
@@ -3277,6 +3277,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
 		contentSeen: func() bool { return firstOutputSeen || clientOutputStarted },
 		onDeadline: func() (*openaiStreamingResultPassthrough, error) {
+			fired := freezeOpenAITimeout(ctx, schedCapture)
 			firedAt := time.Now()
 			if resilience.BudgetTraceEnabledForTest {
 				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")
@@ -3295,7 +3296,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				return finish(nil)
 			}
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
-			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, schedHTTPAttemptKey{}, schedCapture), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(context.WithValue(ctx, firedOpenAITimeoutKey{}, fired), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan)
 		},
 		onStall: func(lastRead time.Time, deadlineArmed bool) (*openaiStreamingResultPassthrough, error, bool) {

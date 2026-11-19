@@ -222,7 +222,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		client = httpClientWithGrokAccessDeniedFallback(client)
 	}
 	if req != nil {
-		service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
+		req = req.WithContext(service.TraceUpstreamSends(req.Context(), accountID))
 	}
 	resp, err := doUpstreamRequest(client, req)
 	service.RecordGatewayHTTPAttemptResult(req.Context(), resp, err)
@@ -285,7 +285,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		client = httpClientWithGrokAccessDeniedFallback(client)
 	}
 	if req != nil {
-		service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
+		req = req.WithContext(service.TraceUpstreamSends(req.Context(), accountID))
 	}
 	resp, err := doUpstreamRequest(client, req)
 	service.RecordGatewayHTTPAttemptResult(req.Context(), resp, err)

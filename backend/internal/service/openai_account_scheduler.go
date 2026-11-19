@@ -49,6 +49,7 @@ type OpenAIAccountScheduleRequest struct {
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact     bool
 	ExcludedIDs        map[int64]struct{}
+	baseExclusions     map[int64]struct{} // Independent exclusions before first-output and quality routing.
 	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
 }
 
@@ -316,6 +317,15 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	state.SetAvoided(avoided)
 	// This pass must be able to preserve a versioned owner while borrowing.
 	// Legacy callers without a pending binding would otherwise eagerly rebind.
+	// Retain the independent request restrictions before first-output and
+	// quality routing add their own. Veto attribution uses the full membership.
+	if ordinary && sessionHash != "" {
+		request.baseExclusions = mergeExcluded(origExcluded, avoided)
+		if request.baseExclusions == nil {
+			request.baseExclusions = map[int64]struct{}{}
+		}
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
+	}
 	var firstOutputAvoided map[int64]struct{}
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
@@ -490,8 +500,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
-		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
+		baseExclusions: parent.baseExclusions,
+		GroupID:        groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
 	})

@@ -149,7 +149,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	// xy2api resilience (W1.2): the first-event deadline of a guarded stream.
 	attemptStart := time.Now()
-	upstreamCtx, firstEvent := s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream, attemptStart)
+	profile := resilience.AttemptProfile{AccountID: account.ID, Model: mappedModel, AttemptStart: attemptStart}
+	upstreamCtx, firstEvent := s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream, profile)
 	defer firstEvent.Release()
 	upstreamReq, forwardedBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
@@ -161,7 +162,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 
 	// 11. Send request
-	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})
+	resilience.StateFrom(ctx).SetAttemptProfile(profile)
 	resilience.StateFrom(ctx).ObserveAttemptStart()
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {

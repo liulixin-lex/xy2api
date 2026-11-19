@@ -1230,7 +1230,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	cfg := s.schedulingConfig()
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
-	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	req := OpenAIAccountScheduleRequest{baseExclusions: parent.baseExclusions, GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
 	req.NoWait = openAISelectionNoWait(ctx)
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
@@ -1698,7 +1699,9 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	}
 	if change := pendingOpenAIStickyChange(ctx); change != nil && change.expected.AccountID == account.ID {
 		if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+			change.mu.Lock()
 			change.fromModel = OpenAIAttemptModel(account, req.RequestedModel)
+			change.mu.Unlock()
 		}
 	}
 	state := resilience.StateFrom(ctx)

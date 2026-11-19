@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -580,10 +582,52 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) *OpsUpstre
 // RecordOpsUpstreamSendBoundary records the current upstream-event sequence
 // before one real HTTP send for accountID.
 func RecordOpsUpstreamSendBoundary(ctx context.Context, accountID int64) {
+	seq := markUpstreamTransportEntry(ctx, accountID)
+	publishUpstreamSend(ctx, accountID, seq)
+}
+
+func markUpstreamTransportEntry(ctx context.Context, accountID int64) uint64 {
 	seq := resilience.StateFrom(ctx).MarkOpsUpstreamSendBoundary(accountID)
 	if ctx != nil {
 		if a, _ := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture); a != nil && a.accountID == accountID {
 			a.markHTTPDispatch(seq)
+		}
+	}
+	return seq
+}
+
+// TraceUpstreamSends keeps the attempt-start accounting for failed dials,
+// while binding timeout evidence to observable request writes. Redirects and
+// transport retries inherit the same trace across the entire Client.Do.
+func TraceUpstreamSends(ctx context.Context, accountID int64) context.Context {
+	first := markUpstreamTransportEntry(ctx, accountID)
+	if first == 0 {
+		return ctx
+	}
+	publishUpstreamSend(ctx, accountID, 0)
+	var writes atomic.Uint64
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { publishUpstreamSend(ctx, accountID, 0) },
+		WroteHeaders: func() {
+			if writes.Add(1) == 1 {
+				publishUpstreamSend(ctx, accountID, first)
+				return
+			}
+			RecordOpsUpstreamSendBoundary(ctx, accountID)
+		},
+	})
+}
+
+func publishUpstreamSend(ctx context.Context, accountID int64, seq uint64) {
+	if g := firstEventGuardFrom(ctx); g != nil {
+		g.sendSeq.Store(seq)
+	}
+	if ctx != nil {
+		if g, _ := ctx.Value(geminiAttemptKey{}).(*geminiAttempt); g != nil {
+			g.sendSeq.Store(seq)
+		}
+		if a, _ := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture); a != nil && a.accountID == accountID {
+			a.sendSeq.Store(seq)
 		}
 	}
 }

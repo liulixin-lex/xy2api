@@ -286,8 +286,14 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		plan = plans[0]
 	}
 	attempt, bound := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
-	if !bound {
-		attempt = currentSchedAttempt(ctx)
+	fired, frozen := ctx.Value(firedOpenAITimeoutKey{}).(firedOpenAITimeout)
+	if frozen {
+		attempt = fired.capture
+	} else {
+		if !bound {
+			attempt = currentSchedAttempt(ctx)
+		}
+		fired = freezeOpenAITimeout(ctx, attempt)
 	}
 	elapsedStart := startTime
 	if attempt != nil && !attempt.factsOnly {
@@ -296,7 +302,7 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		elapsedStart = attempt.started
 	}
 	attempt.timeout(plan)
-	noteTimeoutPlan(ctx, account, plan)
+	noteTimeoutPlan(ctx, account, plan, fired.identity)
 	elapsed := time.Since(elapsedStart)
 	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)
 	logger.LegacyPrintf(
@@ -354,7 +360,8 @@ type openAIHeaderGuardKey struct{}
 type openAIFirstOutputHeaderGuard struct {
 	capture  atomic.Pointer[schedAttemptCapture]
 	expiring atomic.Bool
-	firedAt  time.Time // published by closing fired
+	outcome  firedOpenAITimeout // published before closing fired
+	firedAt  time.Time          // published by closing fired
 	cancel   context.CancelFunc
 	release  context.CancelFunc
 	timer    *time.Timer
@@ -380,8 +387,9 @@ func newOpenAIFirstOutputHeaderGuard(
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
 		guard.firedAt = time.Now()
+		guard.outcome = freezeOpenAITimeout(ctx, guard.capture.Load())
 		guard.expiring.Store(true)
-		if a := guard.capture.Load(); a != nil {
+		if a := guard.outcome.capture; a != nil {
 			claimOpenAIFirstOutputCutoff(a, guard.plan, guard.firedAt, cancel)
 		}
 		if resilience.BudgetTraceEnabledForTest {

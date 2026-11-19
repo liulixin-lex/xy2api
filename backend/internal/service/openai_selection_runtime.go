@@ -184,6 +184,53 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 	return available
 }
 
+// Inspect the counterfactual candidate through normal admission and current
+// capacity without acquiring a slot, changing full marks or selection evidence.
+func (s *OpenAIGatewayService) switchVetoOpportunity(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members []Account, reason string, soft, strict map[int64]struct{}, allowed func(*Account) bool) *Account {
+	if req.baseExclusions != nil {
+		req.ExcludedIDs = req.baseExclusions
+	}
+	ctx = context.WithValue(withSelectionFailureEvidence(ctx), openAISelectionRequestKey{}, req)
+	candidates, _ := s.selectionCandidates(ctx, req, members)
+	eligible := candidates[:0]
+	for _, a := range candidates {
+		if a.ID == owner.ID || !allowed(a) {
+			continue
+		}
+		if _, skip := strict[a.ID]; skip {
+			continue
+		}
+		if _, hit := soft[a.ID]; reason == "target_avoided" && !hit {
+			continue
+		}
+		fresh := s.recheckSelectionAccount(ctx, req, a)
+		if fresh == nil || !allowed(fresh) {
+			continue
+		}
+		if latest, veto, _ := s.SelectionAdmissionVeto(ctx, fresh); !veto && allowed(latest) {
+			eligible = append(eligible, latest)
+		}
+	}
+	if len(eligible) == 0 {
+		return nil
+	}
+	var loads map[int64]*AccountLoadInfo
+	if s.concurrencyService != nil {
+		var err error
+		loads, err = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(eligible))
+		if err != nil {
+			return nil
+		}
+	}
+	for _, a := range eligible {
+		load := loads[a.ID]
+		if load == nil || load.LoadRate < 100 && (a.Concurrency <= 0 || load.CurrentConcurrency < a.Concurrency) {
+			return a
+		}
+	}
+	return nil
+}
+
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
 	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
@@ -201,7 +248,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key
 	}
-	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now) {
+	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now, nil) {
 		return nil
 	}
 	accounts, err := members()
@@ -222,6 +269,9 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	}
 	if !possible {
 		return nil
+	}
+	session.vetoOpportunity = func(reason string, soft, strict map[int64]struct{}, allowed func(*Account) bool) *Account {
+		return s.switchVetoOpportunity(ctx, req, owner, accounts, reason, soft, strict, allowed)
 	}
 	candidates, _ := s.selectionCandidates(ctx, req, accounts)
 	var loads map[int64]*AccountLoadInfo

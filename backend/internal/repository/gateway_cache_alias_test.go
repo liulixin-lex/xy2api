@@ -63,21 +63,21 @@ func testStickyBindingAliases(t *testing.T, addr string) {
 	require.NoError(t, err)
 	require.EqualValues(t, 10, owner)
 	require.NoError(t, two.SyncSessionBindingAlias(ctx, group, primary, legacy, 10, 10*time.Minute, false))
-	var changed [2]bool
+	var changed [2]service.BindingCommitResult
 	start = make(chan struct{})
 	for i, cache := range []*gatewayCache{one, two} {
 		wg.Add(1)
 		go func(i int, cache *gatewayCache) {
 			defer wg.Done()
 			<-start
-			changed[i], errs[i] = cache.CommitSessionBinding(ctx, group, primary, snapshots[i], int64(i+1), time.Hour)
+			changed[i], errs[i] = cache.CommitSessionBinding(ctx, group, primary, snapshots[i], int64(i+1), time.Hour, service.BindingCommitOptions{})
 		}(i, cache)
 	}
 	close(start)
 	wg.Wait()
 	require.NoError(t, errs[0])
 	require.NoError(t, errs[1])
-	require.NotEqual(t, changed[0], changed[1])
+	require.ElementsMatch(t, []service.BindingCommitStatus{service.BindingCommitted, service.BindingChanged}, []service.BindingCommitStatus{changed[0].Status, changed[1].Status})
 	current, err := one.GetSessionBinding(ctx, group, primary)
 	require.NoError(t, err)
 	alias, err := two.GetSessionBinding(ctx, group, legacy)
@@ -94,7 +94,7 @@ func testStickyBindingAliases(t *testing.T, addr string) {
 	require.Equal(t, current, alias)
 	recorded, err := two.RecordSessionBindingFailure(ctx, group, primary, avoid, snapshots[1], current.AccountID, 2*time.Minute)
 	require.NoError(t, err)
-	require.False(t, recorded)
+	require.Zero(t, recorded)
 	deleted, err := two.DeleteSessionBindingAliases(ctx, group, primary, legacy, 10)
 	require.NoError(t, err)
 	require.False(t, deleted)
@@ -106,9 +106,9 @@ func testStickyBindingAliases(t *testing.T, addr string) {
 	require.NoError(t, one.SetSessionAccountID(ctx, group, legacy, 10, time.Minute))
 	_, err = one.ResolveSessionBinding(ctx, group, primary, legacy, true)
 	require.NoError(t, err)
-	ok, err := two.CommitSessionBinding(ctx, group, primary, snapshots[0], 3, time.Hour)
+	ok, err := two.CommitSessionBinding(ctx, group, primary, snapshots[0], 3, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.False(t, ok, "legacy re-adoption fences the earlier generation")
+	require.Equal(t, service.BindingChanged, ok.Status, "legacy re-adoption fences the earlier generation")
 }
 
 func TestStickyBindingAliasesPreserveIdleAndExpireTogether(t *testing.T) {
@@ -124,9 +124,9 @@ func TestStickyBindingAliasesPreserveIdleAndExpireTogether(t *testing.T) {
 	before, err := cache.ResolveSessionBinding(ctx, 7, primary, legacy, true)
 	require.NoError(t, err)
 	require.Equal(t, 50*time.Second, client.PTTL(ctx, buildSessionKey(7, primary)).Val(), "adoption does not reset idle time")
-	ok, err := cache.CommitSessionBinding(ctx, 7, primary, before, 1, 30*time.Second)
+	ok, err := cache.CommitSessionBinding(ctx, 7, primary, before, 1, 30*time.Second, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.True(t, ok)
+	require.Equal(t, service.BindingCommitted, ok.Status)
 	require.NoError(t, cache.SyncSessionBindingAlias(ctx, 7, primary, legacy, 1, time.Hour, true))
 	require.Equal(t, 30*time.Second, client.PTTL(ctx, buildSessionKey(7, legacy)).Val(), "alias cannot outlive the authoritative binding")
 	fixture.FastForward(31 * time.Second)

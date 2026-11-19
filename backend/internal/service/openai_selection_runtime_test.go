@@ -44,16 +44,16 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, c.remaining, err
 }
-func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration, _ ...string) (bool, error) {
+func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
 	c.casKeys = append(c.casKeys, key)
 	if c.sessionBindings[key] != expected.AccountID {
-		return false, nil
+		return BindingCommitResult{Status: BindingChanged, ObservedGen: expected.Generation}, nil
 	}
 	c.sessionBindings[key] = next
 	if expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
 		c.sessionBindings[expected.LegacyKey] = next
 	}
-	return true, nil
+	return BindingCommitResult{Status: BindingCommitted, ObservedGen: expected.Generation, NewGen: expected.Generation + "-next"}, nil
 }
 
 func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group int64, primary, legacy string, fallback bool) (StickySessionBinding, error) {
@@ -294,9 +294,9 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 	}
 }
 
-func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
+func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (int64, error) {
 	if c.sessionBindings[key] != expected.AccountID {
-		return false, nil
+		return 0, nil
 	}
-	return true, c.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
+	return time.Now().Add(ttl).UnixMilli(), c.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
 }

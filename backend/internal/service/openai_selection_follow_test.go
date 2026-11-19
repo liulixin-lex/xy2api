@@ -194,16 +194,26 @@ func (r *followScopeReader) SessionAvoidWrittenAt(ctx context.Context, group int
 }
 
 func TestFirstOutputFollowTakeoverScope(t *testing.T) {
-	for _, scenario := range []string{"ordinary_empty", "ordinary_avoided", "quality_owned", "not_injected", "read_error", "migrate_avoided", "session_disabled"} {
+	for _, scenario := range []string{"ordinary_empty", "ordinary_avoided", "quality_owned", "not_injected", "read_error", "migrate_avoided", "session_disabled", "protocol", "gate_off", "expired", "reset"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := selectionNewSessionFixture()
+			f.owner.Priority = 2
+			f.candidates = f.candidates[:1]
 			store := &followScopeReader{ResilienceStore: f.session.store}
 			f.session.store = store
 			if scenario != "not_injected" {
 				f.session.qualityOwnsSticky = func(context.Context, *int64, string) bool { return scenario == "quality_owned" }
 			}
 			if scenario != "ordinary_empty" {
-				require.NoError(t, store.AddSessionAvoid(context.Background(), 7, firstOutputAvoidSession("session"), 1, time.Minute))
+				ttl := time.Minute
+				if scenario == "expired" {
+					ttl = -time.Second
+				}
+				require.NoError(t, store.AddSessionAvoid(context.Background(), 7, firstOutputAvoidSession("session"), 1, ttl))
+				if scenario == "reset" {
+					reset := time.Now().Add(time.Millisecond)
+					f.session.resetAt = func(int64) time.Time { return reset }
+				}
 			}
 			if scenario == "session_disabled" {
 				withResilienceSettings(t, func(s *resilience.Settings) { s.Session.Enabled = false })
@@ -214,26 +224,137 @@ func TestFirstOutputFollowTakeoverScope(t *testing.T) {
 			if scenario == "migrate_avoided" {
 				f.state(f.owner.ID, schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}})
 			}
-			sel := f.selectNow(context.Background())
-			if scenario == "read_error" {
-				require.Nil(t, sel)
-				require.Empty(t, f.binding.casKeys)
-				return
+			ctx := context.Background()
+			if scenario == "protocol" {
+				ctx = withOpenAINoStickyMigration(ctx)
 			}
-			require.NotNil(t, sel)
-			sel.ReleaseFunc()
-			if scenario == "ordinary_avoided" || scenario == "migrate_avoided" {
-				require.EqualValues(t, 2, f.binding.owner)
-			} else {
+			if scenario == "gate_off" {
+				f.session.view = func() schedquality.View { return &selectionPolicyView{View: f.view, disabled: true} }
+			}
+			sel := f.selectNow(ctx)
+			if scenario == "ordinary_empty" || scenario == "expired" || scenario == "reset" {
+				require.NotNil(t, sel)
+				sel.ReleaseFunc()
 				require.EqualValues(t, 1, f.binding.owner)
+			} else {
+				require.Nil(t, sel)
+				require.Empty(t, f.slots.attempts)
+				require.Empty(t, f.binding.casKeys)
+				require.Equal(t, f.owner.ID, f.binding.owner)
 			}
-			if scenario == "quality_owned" || scenario == "not_injected" || scenario == "session_disabled" {
+			if scenario == "protocol" {
 				require.Zero(t, store.reads)
 			} else {
 				require.Equal(t, 1, store.reads)
 			}
 		})
 	}
+}
+
+func TestFirstOutputFollowLateTakeoverAvoid(t *testing.T) {
+	f := selectionNewSessionFixture()
+	f.owner.Priority, f.candidates = 2, f.candidates[:1]
+	ctx := resilience.WithRequestState(t.Context(), resilience.NewRequestState())
+	logs := captureSchedObsLogs(t)
+	selected := f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{})
+	require.NotNil(t, selected)
+	defer selected.ReleaseFunc()
+	require.NoError(t, f.session.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), selected.Account.ID, time.Minute))
+	result := &OpenAIForwardResult{}
+	followDelivery(&OpenAIGatewayService{}, ctx, selected.Account, time.Millisecond, result)
+	require.True(t, result.CompletedForDelivery())
+	require.Equal(t, f.owner.ID, f.binding.owner)
+	require.Equal(t, "g1", f.binding.generation)
+	failed, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
+	require.NoError(t, err)
+	require.Empty(t, failed)
+	var switches []map[string]any
+	for _, row := range schedObsLogRecords(t, logs) {
+		if row["msg"] == "sched_quality.session_switch" {
+			switches = append(switches, row)
+		}
+	}
+	require.Len(t, switches, 1)
+	row := switches[0]
+	require.Equal(t, "target_avoided", row["commit_result"])
+	require.Equal(t, true, row["commit_attempted"])
+	require.Equal(t, false, row["committed"])
+	require.Equal(t, false, row["avoid_seen_at_select"])
+	require.Equal(t, "g1", row["observed_gen"])
+	require.Nil(t, row["new_gen"])
+	require.EqualValues(t, 1, row["attempt_seq"])
+}
+
+func TestFirstOutputFollowSchedulerVeto(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, mode := range []string{"avoided", "scope_unavailable", "protected", "already_excluded"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(2, 2), selectionFixtureAccount(1, 1))
+			f.cache.sessionBindings["openai:session"] = 2
+			ctx := resilience.WithRequestState(t.Context(), resilience.NewRequestState())
+			store := &followScopeReader{ResilienceStore: f.cache.store}
+			f.svc.resilience.store = store
+			if mode == "scope_unavailable" {
+				store.err = errors.New("offline")
+			}
+			if mode == "protected" {
+				ctx = withOpenAINoStickyMigration(ctx)
+			}
+			require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
+			output := captureSchedObsLogs(t)
+			var excluded map[int64]struct{}
+			if mode == "already_excluded" {
+				excluded = map[int64]struct{}{1: {}}
+			}
+			selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+			require.NoError(t, err)
+			require.NotNil(t, selected)
+			defer selected.ReleaseFunc()
+			require.EqualValues(t, 2, selected.Account.ID)
+			followDelivery(f.svc, ctx, selected.Account, time.Millisecond, &OpenAIForwardResult{})
+			require.Empty(t, f.cache.casKeys)
+			var reasons []any
+			for _, row := range schedObsLogRecords(t, output) {
+				if row["msg"] == "sched_quality.session_switch" {
+					reasons = append(reasons, row["reason"])
+				}
+			}
+			if mode == "already_excluded" || mode == "protected" {
+				require.Empty(t, reasons)
+				return
+			}
+			require.Equal(t, []any{map[string]string{"avoided": "target_avoided", "scope_unavailable": "avoid_read_error"}[mode]}, reasons)
+		})
+	}
+}
+
+func TestFirstOutputFollowVetoPerRequest(t *testing.T) {
+	f := selectionNewSessionFixture()
+	f.owner.Priority, f.candidates = 2, f.candidates[:1]
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(t.Context(), st)
+	require.NoError(t, f.session.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 1, time.Minute))
+	logs := captureSchedObsLogs(t)
+	checks := 0
+	f.session.vetoOpportunity = func(string, map[int64]struct{}, map[int64]struct{}, func(*Account) bool) *Account {
+		checks++
+		if checks == 1 {
+			return nil
+		}
+		return f.candidates[0]
+	}
+	// An empty check leaves the claim available. A retry after a logged veto skips the check.
+	for range 3 {
+		require.Nil(t, f.selectNow(ctx))
+	}
+	require.Equal(t, 2, checks)
+	rows := schedObsLogRecords(t, logs)
+	require.Len(t, rows, 1)
+	require.Equal(t, "target_avoided", rows[0]["reason"])
+	require.Equal(t, true, rows[0]["avoid_seen_at_select"])
+	require.Equal(t, false, rows[0]["commit_attempted"])
+	require.Nil(t, rows[0]["commit_result"])
+	require.Nil(t, rows[0]["attempt_seq"])
 }
 
 func TestFirstOutputFollowGuardAndConcurrentSelection(t *testing.T) {
@@ -844,13 +965,13 @@ type followWriteBarrier struct {
 	resume chan struct{}
 }
 
-func (b *followWriteBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, id int64, ttl time.Duration, scopes ...string) (bool, error) {
+func (b *followWriteBarrier) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, id int64, ttl time.Duration, scopes BindingCommitOptions) (BindingCommitResult, error) {
 	b.enter <- "commit"
 	<-b.resume
-	return b.OpenAIStickyVersionedCache.CommitSessionBinding(ctx, g, key, expected, id, ttl, scopes...)
+	return b.OpenAIStickyVersionedCache.CommitSessionBinding(ctx, g, key, expected, id, ttl, scopes)
 }
 
-func (b *followWriteBarrier) RecordSessionBindingFailure(ctx context.Context, g int64, key, scope string, expected StickySessionBinding, id int64, ttl time.Duration, reset ...time.Time) (bool, error) {
+func (b *followWriteBarrier) RecordSessionBindingFailure(ctx context.Context, g int64, key, scope string, expected StickySessionBinding, id int64, ttl time.Duration, reset ...time.Time) (int64, error) {
 	b.enter <- scope
 	<-b.resume
 	return b.OpenAIStickyVersionedCache.RecordSessionBindingFailure(ctx, g, key, scope, expected, id, ttl, reset...)
@@ -1002,7 +1123,8 @@ func TestFirstOutputFollowProductionTakeoverReader(t *testing.T) {
 			}
 			switch mode {
 			case "quality_owned":
-				require.Zero(t, store.reads)
+				require.Nil(t, sel)
+				require.Equal(t, 1, store.reads)
 			case "ordinary":
 				require.Equal(t, 1, store.reads)
 				require.NotNil(t, sel)
@@ -1020,8 +1142,8 @@ func TestFirstOutputFollowLastResortAvoidSource(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, source := range []string{"session", "first_output", "both"} {
 		t.Run(source, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1))
-			f.cache.sessionBindings["openai:session"] = 10
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(2, 2))
+			f.cache.sessionBindings["openai:session"] = 2
 			store := &followScopeReader{ResilienceStore: f.svc.resilience.store}
 			f.svc.resilience.store = store
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
@@ -1032,10 +1154,15 @@ func TestFirstOutputFollowLastResortAvoidSource(t *testing.T) {
 				require.NoError(t, store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession("session"), 10, time.Minute))
 			}
 			logs := captureOpenAIObservationLogs(t)
-			sel := selectTrialRuntime(t, f, ctx, "session")
+			sel, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "session", "m", map[int64]struct{}{2: {}}, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
+			require.NoError(t, err)
+			require.NotNil(t, sel)
 			defer sel.ReleaseFunc()
 			require.EqualValues(t, 10, sel.Account.ID)
 			require.EqualValues(t, 10, resilience.StateFrom(ctx).LastResort())
+			followDelivery(f.svc, ctx, sel.Account, time.Millisecond, &OpenAIForwardResult{})
+			require.Empty(t, f.cache.casKeys)
+			require.EqualValues(t, 2, f.cache.sessionBindings["openai:session"])
 			require.Equal(t, 1, store.reads, "attribution uses the normal pass's read")
 			var sources []any
 			for _, row := range schedObsLogRecords(t, logs) {
