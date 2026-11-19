@@ -34,7 +34,7 @@ func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 		PriorMu: result.Prior, PeerNu: result.PeerPrior, PAbs: result.AbsoluteProbability,
 		Causes: append([]RuleBUnknownReason{}, result.UnknownReasons...),
 	}
-	if result.PeerCounts.N-result.PeerCounts.X >= 20 {
+	if result.PeerCounts.N-result.PeerCounts.X >= ruleBMinMass {
 		copyValue := func(v *float64) *float64 {
 			if v == nil {
 				return nil
@@ -59,6 +59,7 @@ func NewSampleCounts(local, total int) SampleCounts {
 
 type Basis struct {
 	SampleCounts
+	PeerKnown    float64          `json:"-"` // Weighted peer mass for the real assessment summary only.
 	TrialSeats   *string          `json:"trial_seats"`
 	RuleVersion  string           `json:"rule_version"`
 	Line         Dimension        `json:"line"`

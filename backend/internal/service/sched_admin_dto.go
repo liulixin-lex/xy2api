@@ -109,7 +109,37 @@ type SchedAdminCacheEvidence struct {
 	Sessions    int     `json:"sessions"`
 	LowSessions int     `json:"low_sessions"`
 }
+type SchedAdminLastEval struct {
+	At     string                        `json:"at"`
+	Acted  bool                          `json:"acted"`
+	Action schedquality.Action           `json:"action"`
+	Reason schedquality.AssessmentReason `json:"reason"`
+	Causes []string                      `json:"causes"`
+	Have   *float64                      `json:"have"`
+	Need   *int                          `json:"need"`
+	Since  string                        `json:"since"`
+	Count  int64                         `json:"count"`
+}
+
+// SchedAdminLastEvalFromState returns only the last committed assessment at the
+// line's current watermark. Old rows and mixed-version writes can lack one.
+func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
+	if len(r.LastAssessment) == 0 {
+		return nil
+	}
+	last := r.LastAssessment[len(r.LastAssessment)-1]
+	if !last.LastAt.Equal(r.EvaluatedAt) {
+		return nil
+	}
+	return &SchedAdminLastEval{
+		At: schedAdminStamp(last.LastAt), Since: schedAdminStamp(last.FirstAt), Count: last.Count,
+		Acted: last.Action != "", Action: last.Action, Reason: last.Reason,
+		Causes: last.Causes.Names(), Have: last.Have, Need: last.Need,
+	}
+}
+
 type SchedAdminLine[E any] struct {
+	LastEval *SchedAdminLastEval `json:"last_eval"`
 	schedquality.SampleCounts
 	Identity     string  `json:"identity"`
 	Level        int     `json:"level"`

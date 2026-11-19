@@ -7,8 +7,11 @@ import (
 )
 
 const (
-	RuleBHalfLife      = 30 * time.Minute
-	RuleBPriorStrength = 5.0
+	ruleBMinMass         = 20
+	ruleBMinSessions     = 3
+	ruleBMinSlowSessions = 2
+	RuleBHalfLife        = 30 * time.Minute
+	RuleBPriorStrength   = 5.0
 )
 
 // RuleBParams uses proportions, not percentages. Half-life and prior strength
@@ -275,7 +278,7 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 	// Compare the CDF itself, not the rounded/reconstructed tail probability.
 	r.Absolute = absoluteCDF <= 1-p.Confidence
 	r.WorstMean = (own.K + own.X + r.Prior*RuleBPriorStrength) / (own.N + RuleBPriorStrength)
-	r.GoodBase = own.N >= 20-1e-8 && own.S >= 3 && r.WorstMean <= p.Tolerance
+	r.GoodBase = own.N >= ruleBMinMass-1e-8 && own.S >= ruleBMinSessions && r.WorstMean <= p.Tolerance
 	eligible := 0
 	for _, peer := range in.Peers {
 		if peer.Scope.AccountID == in.Scope.AccountID || peer.Scope.GroupID != in.Scope.GroupID || peer.Scope.Model != in.Scope.Model {
@@ -291,7 +294,7 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 		r.PeerCounts.K += counts.K
 		r.PeerCounts.X += counts.X
 	}
-	if r.PeerCounts.N-r.PeerCounts.X < 20 {
+	if r.PeerCounts.N-r.PeerCounts.X < ruleBMinMass {
 		switch {
 		case eligible == 0:
 			r.UnknownReasons = append(r.UnknownReasons, RuleBNoPeers)
@@ -318,7 +321,7 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 		r.RelativeThreshold, r.RelativeProbability = &z, &probability
 		r.Relative = cdf <= 1-p.Confidence
 		switch {
-		case r.Absolute && r.Relative && own.D >= 2:
+		case r.Absolute && r.Relative && own.D >= ruleBMinSlowSessions:
 			r.State = RuleBBad
 		case r.GoodBase && !r.Relative:
 			r.State = RuleBGood
@@ -344,9 +347,9 @@ func (r *RuleBResult) addUnknownReasons(p RuleBParams) {
 		reason  RuleBUnknownReason
 	}{
 		{r.Counts.N == 0, RuleBNoSamples},
-		{r.Counts.N < 20-1e-8, RuleBMassInsufficient},
-		{r.Counts.S < 3, RuleBSessionsInsufficient},
-		{r.Counts.D < 2, RuleBSlowSessionsInsufficient},
+		{r.Counts.N < ruleBMinMass-1e-8, RuleBMassInsufficient},
+		{r.Counts.S < ruleBMinSessions, RuleBSessionsInsufficient},
+		{r.Counts.D < ruleBMinSlowSessions, RuleBSlowSessionsInsufficient},
 		{!r.Absolute, RuleBAbsoluteUnconfirmed},
 		{r.U != nil && !r.Relative, RuleBRelativeUnconfirmed},
 		{r.WorstMean > p.Tolerance, RuleBWorstMeanAboveTolerance},
