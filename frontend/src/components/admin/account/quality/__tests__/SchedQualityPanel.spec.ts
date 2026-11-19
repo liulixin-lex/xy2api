@@ -33,6 +33,17 @@ enableAutoUnmount(afterEach)
 
 const policy: BackendPolicy = { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0.5, takeover_idle_seconds: 0 }
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
+/**
+ * Freezes Date alone (timers stay real) at local noon until the test ends: times shown as today's HH:MM stay today when
+ * the run starts near midnight (a run at 23:45 read "now + 20 minutes" as 11-20 00:05).
+ */
+const atLocalNoon = () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 10, 19, 12, 0))
+  onTestFinished(() => {
+    vi.useRealTimers()
+  })
+}
 /** A model row: first output at the rear for 20 more minutes (level 1, a 40-minute stay) when `rear`; cache unknown. */
 const model = (name: string, rear = false): BackendGroupModel => {
   const row = groupModel(name, rear ? { ttfo: 'rear', cache: 'unknown' } : { cache: 'unknown' })
@@ -452,6 +463,7 @@ describe('SchedQualityPanel', () => {
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {
+    atLocalNoon()
     const value = detail()
     const row = value.groups[0].by_model[1]
     row.lines.error = line('error', 'trial', { trial_until: inMinutes(30) })
@@ -704,7 +716,8 @@ describe('SchedQualityPanel', () => {
   })
 
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
-    const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+    atLocalNoon()
+    const record =(id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),
       basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
       ...patch
