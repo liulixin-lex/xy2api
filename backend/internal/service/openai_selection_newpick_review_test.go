@@ -414,10 +414,11 @@ func TestNewPickCrossWindowReleasesTarget(t *testing.T) {
 func TestNewPickRetryWithoutPriorTarget(t *testing.T) {
 	f, _ := newPickFixture(t)
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
-	// The first candidate pool read fails before a selection can plan a target.
+	// A no-wait pass can fail before planning a target. It also avoids
+	// publishing group-wide negative cache evidence from this synthetic empty pool.
 	members := f.repo.accounts
 	f.repo.accounts = nil
-	first, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "retry", "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+	first, _, err := f.svc.SelectAccountWithSchedulerForCapability(WithOpenAISelectionNoWait(ctx), ptrInt64Selection(7), "", "retry", "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
 	require.Error(t, err)
 	require.Nil(t, first)
 	plan := pendingOpenAIStickyChange(ctx)

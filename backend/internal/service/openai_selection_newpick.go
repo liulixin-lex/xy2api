@@ -269,11 +269,11 @@ func (s *OpenAIGatewayService) newSessionPick(ctx context.Context, req OpenAIAcc
 	return nil
 }
 
-func newPickRate(key selectionKey) *float64 {
+func newPickRate(key selectionKey) any {
 	if !key.RateKnown {
 		return nil
 	}
-	return &key.Rate
+	return key.Rate
 }
 
 // T takes the ordinary recheck, slot and admission gates. Preserve exactly the
