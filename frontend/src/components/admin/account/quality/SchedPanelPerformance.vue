@@ -18,12 +18,12 @@
     <p v-else-if="!rows.length" class="qp-note" data-qp-perf-none>{{ t('admin.schedQuality.perf.panel.none') }}</p>
     <div v-else class="prows" role="table" :aria-label="t('admin.schedQuality.perf.panel.title')">
       <div class="prow prow--head" role="row">
-        <span role="columnheader">{{ t('admin.schedQuality.perf.col.group') }}</span>
-        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.requests')">{{ t('admin.schedQuality.perf.col.requestsShort') }}</span>
-        <span role="columnheader" class="prow__r prow__slow">{{ t('admin.schedQuality.perf.col.slowShort') }}</span>
-        <span role="columnheader" class="prow__r">{{ t('admin.schedQuality.perf.col.excess') }}</span>
-        <span role="columnheader" class="prow__r">{{ t('admin.schedQuality.perf.col.cacheShort') }}</span>
-        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.switches')">{{ t('admin.schedQuality.perf.col.switchesShort') }}</span>
+        <span role="columnheader" data-qp-perf-col="group">{{ t('admin.schedQuality.perf.col.group') }}</span>
+        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.requests')" data-qp-perf-col="requests">{{ t('admin.schedQuality.perf.col.requestsShort') }}</span>
+        <span role="columnheader" class="prow__r prow__slow" data-qp-perf-col="slow">{{ t('admin.schedQuality.perf.col.slowShort') }}</span>
+        <span role="columnheader" class="prow__r" data-qp-perf-col="excess">{{ t('admin.schedQuality.perf.col.excess') }}</span>
+        <span role="columnheader" class="prow__r" data-qp-perf-col="cache">{{ t('admin.schedQuality.perf.col.cacheShort') }}</span>
+        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.switches')" data-qp-perf-col="switches">{{ t('admin.schedQuality.perf.col.switchesShort') }}</span>
       </div>
       <template v-for="item in rows" :key="item.key">
         <div
@@ -49,7 +49,8 @@
             <span v-else class="prow__toggle" aria-hidden="true" />
             <GroupAliasPill :group="item.info" />
             <span class="prow__name">{{ item.name }}</span>
-            <!-- A group the account left says so beside the name, never cut with it (as on the board). -->
+            <!-- A group the account left says so apart from the name, never cut with it (as on the board): on a line of its
+                 own in the group's cell, beside the name on a phone, where the group has the row's whole width. -->
             <span v-if="item.left" class="prow__left" data-qp-perf-left>{{ t('admin.schedQuality.perf.left') }}</span>
             <!-- On a phone names cut alike read the same: the id tells them apart. -->
             <span class="prow__gid" aria-hidden="true">#{{ item.groupId }}</span>
@@ -337,10 +338,13 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 .prow__group {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 0 8px;
 }
+/* The name takes what is left of the first line and is cut there (its basis is 0, so a long name never wraps the line). */
 .prow__name {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--color-text-secondary);
@@ -348,11 +352,13 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "Left the group" on a line of its own under the pill and the name: beside a name cut to nothing it ran over the
+   requests (440px). It wraps rather than leave its cell. */
 .prow__left {
-  flex: none;
+  flex: 0 0 100%;
+  padding-left: 24px;
   color: var(--color-text-muted);
   font-size: var(--font-size-small);
-  white-space: nowrap;
 }
 .prow__gid {
   display: none;
@@ -432,9 +438,32 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
   .prow:not(.prow--head) > :not(.prow__group) {
     grid-row: 2;
   }
+  /* Every figure under its own heading (the slow share's column is gone), each placed by hand: left to the grid, the
+     figures after the requests filled the line's empty first column and slid one heading to the left. */
   .prow [data-qp-perf-cell='requests'],
   .prow > .prow__off {
     grid-column-start: 2;
+  }
+  .prow [data-qp-perf-cell='excess'] {
+    grid-column: 3;
+  }
+  .prow [data-qp-perf-cell='cache'] {
+    grid-column: 4;
+  }
+  .prow [data-qp-perf-cell='switches'] {
+    grid-column: 5;
+  }
+  /* The group has the row's width: the name, "left the group" and the id on one line. */
+  .prow__group {
+    flex-wrap: nowrap;
+  }
+  .prow__name {
+    flex: 0 1 auto;
+  }
+  .prow__left {
+    flex: none;
+    padding-left: 0;
+    white-space: nowrap;
   }
   .prow__slow {
     display: none;
