@@ -633,7 +633,11 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	if change.leases != nil && change.expected.AccountID > 0 && change.expected.AccountID != change.target {
 		model := change.fromModel
 		if model == "" && change.model != "" && change.ownerLookup != nil {
-			if owner := change.ownerLookup(stateCtx, change.expected.AccountID); owner != nil && owner.ID == change.expected.AccountID {
+			// A slow successful commit can consume most of its timeout before cleanup starts.
+			lookupCtx, cancelLookup := resilienceStateContext(ctx)
+			owner := change.ownerLookup(lookupCtx, change.expected.AccountID)
+			cancelLookup()
+			if owner != nil && owner.ID == change.expected.AccountID {
 				model = OpenAIAttemptModel(owner, change.model)
 			}
 		}
