@@ -105,6 +105,14 @@ func (s *SchedAdminService) performance(ctx context.Context, group *Group, accou
 	}
 	if account != nil {
 		accounts[account.ID] = account
+		if p.complete {
+			// A member group can have a publication policy even when it has no counted rows.
+			for _, g := range account.Groups {
+				if g != nil && g.Platform == PlatformOpenAI {
+					groups[g.ID] = g
+				}
+			}
+		}
 	}
 	for k := range p.rows {
 		if group != nil && group.ID != k.group || account != nil && account.ID != k.account {
