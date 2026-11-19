@@ -105,6 +105,26 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	require.Equal(t, relaxAt.Format(time.RFC3339Nano), last.Since)
 }
 
+func TestSchedAssessmentDTOAcrossRawWatermarkOffsets(t *testing.T) {
+	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: 7}}
+	first, _ := q.Step(q.LineState{LineKey: q.LineKey{Line: q.DimensionCache}}, q.EventRegular, q.VerdictUnknown, b, at)
+	want := SchedAdminLastEvalFromState(first)
+	require.NotNil(t, want)
+	for _, delta := range []time.Duration{-999, -600, -499, 499, 600, 999} {
+		t.Run(delta.String(), func(t *testing.T) {
+			prev := first
+			prev.EvaluatedAt = at.Add(delta)
+			require.Equal(t, want, SchedAdminLastEvalFromState(prev))
+			next, _ := q.Step(prev, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
+			got := SchedAdminLastEvalFromState(next)
+			require.NotNil(t, got)
+			require.EqualValues(t, 2, got.Count)
+			require.Equal(t, want.Since, got.Since)
+		})
+	}
+}
+
 func TestSchedAssessmentClockPreservesRun(t *testing.T) {
 	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	clock := at.Add(95 * time.Second)

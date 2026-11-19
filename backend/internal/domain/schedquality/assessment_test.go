@@ -13,6 +13,7 @@ import (
 	"go/token"
 	"go/types"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +87,32 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, declared, tested)
+	require.LessOrEqual(t, len(assessmentCauses), 32)
+	var registered []string
+	for _, def := range assessmentCauses {
+		if def.ruleB != nil {
+			registered = append(registered, string(def.name))
+		}
+	}
+	require.ElementsMatch(t, registered, tested)
+}
+
+func TestAssessmentRuleBOutputWithoutPeers(t *testing.T) {
+	in := ruleBTestInput(40, 0, false)
+	in.Peers = nil
+	result := evaluateRuleBTest(t, in, DefaultRuleBParams())
+	require.Equal(t, RuleBUnknown, result.State)
+	require.Contains(t, result.UnknownReasons, RuleBNoPeers)
+	b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds)}
+	seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
+	var names []string
+	for _, name := range result.UnknownReasons {
+		names = append(names, string(name))
+	}
+	require.ElementsMatch(t, names, seg.CauseNames())
+	require.Equal(t, ReasonPeerShort, seg.Reason)
+	require.Equal(t, new(0.0), seg.Have)
+	require.Equal(t, new(20), seg.Need)
 }
 
 func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
@@ -256,35 +283,85 @@ func TestAssessmentEightSegmentSize(t *testing.T) {
 	}
 	typical, err := json.Marshal(state.LastAssessment[:1])
 	require.NoError(t, err)
-	// Combine maximal field widths, including values wider than any real gated count.
-	for i := range state.LastAssessment {
-		s := &state.LastAssessment[i]
-		s.FirstAt = machineNow.Add(123456789 * time.Nanosecond)
-		s.LastAt = s.FirstAt
-		s.Watermark = new(int64(math.MaxInt64))
-		s.Count = math.MaxInt64
-		s.Kind = EventReview
-		s.Action = ActionTrialTimeout
-		s.Reason = ReasonTrialOpen
-		s.Causes = math.MaxUint32
-		s.Have = new(1.2345678901234567e-100)
-		s.Need = new(math.MaxInt)
+	// Bound every combination of enum fields, with all optional fields present.
+	// Any mixed eight-segment history is at most eight copies of the widest
+	// segment. 17 significant digits at 10^-6 maximize a positive JSON float.
+	wide := AssessmentSegment{
+		FirstAt: machineNow.Add(123456789 * time.Nanosecond), LastAt: machineNow.Add(123456789 * time.Nanosecond),
+		Watermark: new(int64(math.MinInt64)), Count: math.MaxInt64, Causes: math.MaxUint32,
+		Have: new(0.0000012345678901234567), Need: new(math.MaxInt),
 	}
-	worst, err := json.Marshal(state.LastAssessment)
-	require.NoError(t, err)
-	require.LessOrEqual(t, len(worst), 2048)
-	t.Logf("compact JSON bytes: one own_short=%d, eight maximal-width segments=%d", len(typical), len(worst))
+	actions := []Action{"", ActionEnter, ActionRenew, ActionRelease, ActionTrial, ActionTrialPass, ActionTrialFail, ActionTrialTimeout, ActionReset, ActionRelax, ActionClear}
+	reasons := []AssessmentReason{ReasonPeerShort, ReasonOwnShort, ReasonWithin, ReasonPending, ReasonTrialOpen, ReasonOver, ReasonOther}
+	var largest int
+	for _, kind := range []EventKind{EventRegular, EventTrial, EventReview} {
+		for _, action := range actions {
+			for _, reason := range reasons {
+				wide.Kind, wide.Action, wide.Reason = kind, action, reason
+				for i := range state.LastAssessment {
+					state.LastAssessment[i] = wide
+				}
+				data, err := json.Marshal(state.LastAssessment)
+				require.NoError(t, err)
+				largest = max(largest, len(data))
+			}
+		}
+	}
+	require.LessOrEqual(t, largest, 2048)
+	t.Logf("compact JSON bytes: one own_short=%d, eight maximal-width segments=%d", len(typical), largest)
 }
 
 func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
-	b := Basis{Line: DimensionTTFO, TTFT: &TTFTEvidence{Causes: []RuleBUnknownReason{RuleBPeerKnownInsufficient, "new_reason", "another_reason"}}}
+	unknown := RuleBUnknownReason(strings.Repeat("unregistered", 300))
+	for _, tc := range []struct {
+		name   string
+		raw    []RuleBUnknownReason
+		reason AssessmentReason
+		names  []string
+	}{
+		{"only unknown", []RuleBUnknownReason{unknown, "second_unknown"}, ReasonOther, []string{"other"}},
+		{"known and unknown", []RuleBUnknownReason{RuleBNoPeers, unknown}, ReasonPeerShort, []string{"no_peers", "other"}},
+		{"unknown and known", []RuleBUnknownReason{unknown, RuleBNoPeers}, ReasonPeerShort, []string{"no_peers", "other"}},
+		{"unknown and within", []RuleBUnknownReason{unknown, RuleBAbsoluteUnconfirmed}, ReasonWithin, []string{"absolute_unconfirmed", "other"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := Basis{Line: DimensionTTFO, TTFT: &TTFTEvidence{Causes: tc.raw}}
+			h := RecordAssessment(LineState{}, machineNow, EventRegular, VerdictUnknown, "", b)
+			data, err := json.Marshal(h)
+			require.NoError(t, err)
+			require.NotContains(t, string(data), "unregistered")
+			var after []AssessmentSegment
+			require.NoError(t, json.Unmarshal(data, &after))
+			require.Equal(t, tc.reason, after[0].Reason)
+			require.Equal(t, tc.names, after[0].CauseNames())
+			if tc.reason == ReasonPeerShort {
+				require.Equal(t, new(0.0), after[0].Have)
+				require.Equal(t, new(20), after[0].Need)
+			} else {
+				require.Nil(t, after[0].Have)
+				require.Nil(t, after[0].Need)
+			}
+		})
+	}
+}
+
+func TestAssessmentWatermarkTolerance(t *testing.T) {
+	b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: 7}}
 	h := RecordAssessment(LineState{}, machineNow, EventRegular, VerdictUnknown, "", b)
-	data, err := json.Marshal(h)
-	require.NoError(t, err)
-	var after []AssessmentSegment
-	require.NoError(t, json.Unmarshal(data, &after))
-	require.Equal(t, ReasonOther, after[0].Reason)
-	require.Nil(t, after[0].Have)
-	require.Nil(t, after[0].Need)
-	require.Equal(t, []string{"peer_known_insufficient", "new_reason", "another_reason"}, after[0].CauseNames())
+	for _, d := range []time.Duration{-1000, -999, -600, -499, 0, 499, 600, 999, 1000} {
+		t.Run(d.String(), func(t *testing.T) {
+			prev := LineState{LastAssessment: h, EvaluatedAt: machineNow.Add(d)}
+			current := d.Abs() < time.Microsecond
+			require.Equal(t, current, h[0].MatchesWatermark(prev.EvaluatedAt))
+			next := RecordAssessment(prev, machineNow.Add(RegularInterval), EventRegular, VerdictUnknown, "", b)
+			if current {
+				require.Len(t, next, 1)
+				require.EqualValues(t, 2, next[0].Count)
+				require.Equal(t, machineNow, next[0].FirstAt)
+			} else {
+				require.Len(t, next, 2)
+				require.EqualValues(t, 1, next[1].Count)
+			}
+		})
+	}
 }

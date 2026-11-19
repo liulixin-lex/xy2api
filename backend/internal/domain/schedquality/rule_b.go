@@ -294,16 +294,7 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 		r.PeerCounts.K += counts.K
 		r.PeerCounts.X += counts.X
 	}
-	if r.PeerCounts.N-r.PeerCounts.X < ruleBMinMass {
-		switch {
-		case eligible == 0:
-			r.UnknownReasons = append(r.UnknownReasons, RuleBNoPeers)
-		case r.PeerCount == 0:
-			r.UnknownReasons = append(r.UnknownReasons, RuleBAllPeersRear)
-		default:
-			r.UnknownReasons = append(r.UnknownReasons, RuleBPeerKnownInsufficient)
-		}
-	} else {
+	if r.PeerCounts.N-r.PeerCounts.X >= ruleBMinMass {
 		peers := r.PeerCounts
 		a := peers.K + peers.X + r.PeerPrior*RuleBPriorStrength
 		b := math.Max(0, peers.N-peers.K-peers.X) + (1-r.PeerPrior)*RuleBPriorStrength
@@ -328,7 +319,12 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 		}
 	}
 	if r.State == RuleBUnknown {
-		r.addUnknownReasons(p)
+		gates := ruleBReasonInput{RuleBResult: &r, eligiblePeers: eligible, tolerance: p.Tolerance}
+		for _, cause := range assessmentCauses {
+			if cause.ruleB != nil && cause.ruleB(gates) {
+				r.UnknownReasons = append(r.UnknownReasons, cause.name)
+			}
+		}
 	}
 	return r, nil
 }
@@ -339,24 +335,4 @@ func ruleBPrior(slow, known float64) float64 {
 		prior = slow / known
 	}
 	return math.Min(.999, math.Max(.001, prior))
-}
-
-func (r *RuleBResult) addUnknownReasons(p RuleBParams) {
-	for _, cause := range []struct {
-		applies bool
-		reason  RuleBUnknownReason
-	}{
-		{r.Counts.N == 0, RuleBNoSamples},
-		{r.Counts.N < ruleBMinMass-1e-8, RuleBMassInsufficient},
-		{r.Counts.S < ruleBMinSessions, RuleBSessionsInsufficient},
-		{r.Counts.D < ruleBMinSlowSessions, RuleBSlowSessionsInsufficient},
-		{!r.Absolute, RuleBAbsoluteUnconfirmed},
-		{r.U != nil && !r.Relative, RuleBRelativeUnconfirmed},
-		{r.WorstMean > p.Tolerance, RuleBWorstMeanAboveTolerance},
-		{r.GoodBase && r.Relative, RuleBRelativeVeto},
-	} {
-		if cause.applies {
-			r.UnknownReasons = append(r.UnknownReasons, cause.reason)
-		}
-	}
 }

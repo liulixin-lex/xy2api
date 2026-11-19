@@ -21,19 +21,18 @@ const (
 const maxAssessmentSegments = 8
 
 // AssessmentSegment uses short JSON keys for the bounded last_assessment column.
-// Times are UTC. Cause bits have permanent positions in assessmentCauseNames.
+// Times are UTC. Cause bits have permanent positions in assessmentCauses.
 type AssessmentSegment struct {
-	Watermark   *int64           `json:"w,omitempty"` // UTC epoch microseconds at the last verified state advance.
-	ExtraCauses []string         `json:"u,omitempty"` // Raw causes without an assigned bit.
-	FirstAt     time.Time        `json:"f"`
-	LastAt      time.Time        `json:"l"`
-	Count       int64            `json:"n"`
-	Kind        EventKind        `json:"k"`
-	Action      Action           `json:"a,omitempty"`
-	Reason      AssessmentReason `json:"r"`
-	Causes      AssessmentCauses `json:"c,omitempty"`
-	Have        *float64         `json:"h,omitempty"`
-	Need        *int             `json:"t,omitempty"`
+	Watermark *int64           `json:"w,omitempty"` // UTC epoch microseconds at the last verified state advance.
+	FirstAt   time.Time        `json:"f"`
+	LastAt    time.Time        `json:"l"`
+	Count     int64            `json:"n"`
+	Kind      EventKind        `json:"k"`
+	Action    Action           `json:"a,omitempty"`
+	Reason    AssessmentReason `json:"r"`
+	Causes    AssessmentCauses `json:"c,omitempty"`
+	Have      *float64         `json:"h,omitempty"`
+	Need      *int             `json:"t,omitempty"`
 }
 
 type AssessmentCauses uint32
@@ -46,36 +45,70 @@ const (
 	errorRecoveryOverLimit = "recovery_over_limit"
 )
 
-// Append only: indexes are persisted bit positions, never gate priorities.
-// Bit 0 is no_peers. SQL readers can test c & (1 << index).
-var assessmentCauseNames = [...]string{
-	string(RuleBNoPeers), string(RuleBAllPeersRear), string(RuleBPeerKnownInsufficient),
-	string(RuleBNoSamples), string(RuleBMassInsufficient), string(RuleBSessionsInsufficient),
-	string(RuleBSlowSessionsInsufficient), string(RuleBAbsoluteUnconfirmed), string(RuleBRelativeUnconfirmed),
-	string(RuleBWorstMeanAboveTolerance), string(RuleBRelativeVeto),
-	cacheTurnsShort, cacheLowSessionsShort, errorClearShort, errorBoundsUnconfirmed, errorRecoveryOverLimit,
+type ruleBReasonInput struct {
+	*RuleBResult
+	eligiblePeers int
+	tolerance     float64
 }
 
-func (s *AssessmentSegment) addCause(name string) {
-	if i := slices.Index(assessmentCauseNames[:], name); i >= 0 && i < 32 {
-		s.Causes |= 1 << i
-		return
+type assessmentCause struct {
+	name   RuleBUnknownReason
+	reason AssessmentReason
+	// Rule B emits this cause when the predicate holds on an unknown verdict.
+	ruleB func(ruleBReasonInput) bool
+}
+
+const otherCauseIndex = 16
+
+// Append only: indexes are persisted bit positions, not gate priorities.
+// Rule B and the assessment summary use the same names and classifications.
+var assessmentCauses = [...]assessmentCause{
+	{RuleBNoPeers, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers == 0 }},
+	{RuleBAllPeersRear, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers > 0 && g.PeerCount == 0 }},
+	{RuleBPeerKnownInsufficient, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.PeerCount > 0 && g.PeerCounts.N-g.PeerCounts.X < ruleBMinMass }},
+	{RuleBNoSamples, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
+	{RuleBMassInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-1e-8 }},
+	{RuleBSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
+	{RuleBSlowSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
+	{RuleBAbsoluteUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return !g.Absolute }},
+	{RuleBRelativeUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return g.U != nil && !g.Relative }},
+	{RuleBWorstMeanAboveTolerance, ReasonWithin, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
+	{RuleBRelativeVeto, ReasonWithin, func(g ruleBReasonInput) bool { return g.GoodBase && g.Relative }},
+	{cacheTurnsShort, ReasonOwnShort, nil},
+	{cacheLowSessionsShort, ReasonOwnShort, nil},
+	{errorClearShort, ReasonOwnShort, nil},
+	{errorBoundsUnconfirmed, ReasonWithin, nil},
+	{errorRecoveryOverLimit, ReasonPending, nil},
+	otherCauseIndex: {"other", ReasonOther, nil},
+}
+
+func assessmentCauseIndex(name RuleBUnknownReason) int {
+	for i, def := range assessmentCauses {
+		if def.name == name {
+			return i
+		}
 	}
-	s.ExtraCauses = append(s.ExtraCauses, name)
+	return otherCauseIndex
+}
+
+func (s *AssessmentSegment) addCause(name RuleBUnknownReason, have float64, need int) {
+	i := assessmentCauseIndex(name)
+	s.Causes |= 1 << i
+	s.consider(assessmentCauses[i].reason, have, need)
 }
 
 func (c AssessmentCauses) Names() []string {
 	names := []string{}
-	for i, name := range assessmentCauseNames {
+	for i, def := range assessmentCauses {
 		if c&(1<<i) != 0 {
-			names = append(names, name)
+			names = append(names, string(def.name))
 		}
 	}
 	return names
 }
 
 func (s AssessmentSegment) CauseNames() []string {
-	return append(s.Causes.Names(), s.ExtraCauses...)
+	return s.Causes.Names()
 }
 
 // PostgreSQL parses the fractional second of a text timestamp as a double,
@@ -87,7 +120,7 @@ func assessmentTime(at time.Time) time.Time {
 }
 
 func (s AssessmentSegment) MatchesWatermark(at time.Time) bool {
-	return s.Watermark != nil && !at.IsZero() && *s.Watermark == assessmentTime(at).UnixMicro()
+	return s.Watermark != nil && !at.IsZero() && at.Sub(time.UnixMicro(*s.Watermark)).Abs() < time.Microsecond
 }
 
 // RecordAssessment folds an accepted Step into a new history without mutating
@@ -139,26 +172,21 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		case b.Cache != nil:
 			cache := b.Cache
 			if cache.Turns < CacheMinTurns {
-				s.addCause(cacheTurnsShort)
-				s.consider(ReasonOwnShort, float64(cache.Turns), CacheMinTurns)
+				s.addCause(cacheTurnsShort, float64(cache.Turns), CacheMinTurns)
 			}
 			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
-				s.addCause(cacheLowSessionsShort)
-				s.consider(ReasonOwnShort, float64(cache.LowSessions), cacheMinLowSessions)
+				s.addCause(cacheLowSessionsShort, float64(cache.LowSessions), cacheMinLowSessions)
 			}
 		case b.Error != nil:
 			errLine := b.Error
 			if errLine.LowerPass > errLine.Limit {
-				s.addCause(errorBoundsUnconfirmed)
-				s.consider(ReasonWithin, 0, 0)
+				s.addCause(errorBoundsUnconfirmed, 0, 0)
 			}
 			if errLine.RecoveryOverLimit {
-				s.addCause(errorRecoveryOverLimit)
-				s.consider(ReasonPending, 0, 0)
+				s.addCause(errorRecoveryOverLimit, 0, 0)
 			}
 			if errLine.Clear < ErrorMinClear {
-				s.addCause(errorClearShort)
-				s.consider(ReasonOwnShort, float64(errLine.Clear), ErrorMinClear)
+				s.addCause(errorClearShort, float64(errLine.Clear), ErrorMinClear)
 			}
 		}
 		if s.Kind == EventTrial && s.Action == "" {
@@ -187,28 +215,31 @@ func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need
 }
 
 func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
-	unclassified := false
-	for _, cause := range e.Causes {
-		s.addCause(string(cause))
-		switch cause {
-		case RuleBNoPeers, RuleBAllPeersRear, RuleBPeerKnownInsufficient:
-			s.consider(ReasonPeerShort, peerKnown, ruleBMinMass)
-		case RuleBNoSamples, RuleBMassInsufficient:
-			s.consider(ReasonOwnShort, e.N, ruleBMinMass)
-		case RuleBSessionsInsufficient:
-			s.consider(ReasonOwnShort, float64(e.S), ruleBMinSessions)
-		case RuleBSlowSessionsInsufficient:
-			// D gates a bad verdict only after both probability tests confirm it.
-			if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) && !slices.Contains(e.Causes, RuleBRelativeUnconfirmed) {
-				s.consider(ReasonOwnShort, float64(e.D), ruleBMinSlowSessions)
-			}
-		case RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance, RuleBRelativeVeto:
-			s.consider(ReasonWithin, 0, 0)
-		default:
-			unclassified = true
+	for _, name := range e.Causes {
+		i := assessmentCauseIndex(name)
+		def := assessmentCauses[i]
+		if def.ruleB == nil {
+			s.Causes |= 1 << otherCauseIndex
+			continue
 		}
-	}
-	if unclassified {
-		s.Reason, s.Have, s.Need = ReasonOther, nil, nil
+		s.Causes |= 1 << i
+		switch def.reason {
+		case ReasonPeerShort:
+			s.consider(def.reason, peerKnown, ruleBMinMass)
+		case ReasonOwnShort:
+			switch name {
+			case RuleBSessionsInsufficient:
+				s.consider(def.reason, float64(e.S), ruleBMinSessions)
+			case RuleBSlowSessionsInsufficient:
+				// D gates a bad verdict only after both probability tests confirm it.
+				if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) && !slices.Contains(e.Causes, RuleBRelativeUnconfirmed) {
+					s.consider(def.reason, float64(e.D), ruleBMinSlowSessions)
+				}
+			default:
+				s.consider(def.reason, e.N, ruleBMinMass)
+			}
+		default:
+			s.consider(def.reason, 0, 0)
+		}
 	}
 }
