@@ -9,7 +9,9 @@ import {
   fmtSigned,
   nextSort,
   noAction,
-  noActionLong,
+  fmtShortfall,
+  modelLabel,
+  reasonLong,
   noActionShort,
   perfView,
   perfViews,
@@ -32,6 +34,21 @@ describe('performance figures', () => {
     expect([busy.slowMark, busy.red, fmtPoints(busy.excess!)]).toEqual([null, false, '+7.3'])
     const fast = view(285, {}, { n: 5139, slowRate: 0.097, expectedRate: 0.225 })
     expect([fast.slowMark, fast.red, fmtPoints(fast.excess!)]).toEqual(['fast', false, '−12.8'])
+  })
+
+  // Review item 1: worked out on the counts, so a gap of exactly 10 points is 10 points, and half a request rounds up.
+  it('marks exactly 10 points over or under, from the counts, not from a float gap', () => {
+    const exact = (slow: number, expected: number, n = 100) => view(1, { first: { slow, expected_slow: expected, expected_n: n, n } }, { n })
+    const slow = exact(30, 20)
+    expect([slow.excessTenths, fmtPoints(slow.excess!), slow.extra, slow.slowMark]).toEqual([100, '+10.0', 10, 'slow'])
+    const fast = exact(20, 30)
+    expect([fast.excessTenths, fmtPoints(fast.excess!), fast.extra, fast.slowMark]).toEqual([-100, '−10.0', -10, 'fast'])
+    expect(exact(3, 2.5, 20).extra).toBe(1)
+    expect(exact(3, 2.4999999999999996, 20).extra).toBe(1)
+    // 12 points over, but 8 of 20 has a lower bound of 27.26%, under the 28% expected: not marked.
+    const small = exact(8, 5.6, 20)
+    expect(wilson(8, 20).lower).toBeCloseTo(0.2726, 4)
+    expect([fmtPoints(small.excess!), small.slowMark]).toEqual(['+12.0', null])
   })
 
   it('does not mark 6 slow of 20 against 20% expected: 10 points over, but the lower bound is under expected', () => {
@@ -67,6 +84,13 @@ describe('performance figures', () => {
     expect(perfViews(rows, [group], { byModel: false }).map((item) => item.share)).toEqual([0.3, 0.1, 0.6])
     expect(perfViews(rows, [group], { byModel: true }).map((item) => item.share)).toEqual([0.75, 0.25, 1])
     expect(perfViews(rows, [group], { byModel: true, whole: false }).map((item) => item.share)).toEqual([null, null, null])
+  })
+
+  // Review item 11: another group's member of the same model and priority is not a peer.
+  it('ranks within one group: the same model and priority in another group ranks on its own', () => {
+    const scored = (id: number, groupId: number, value: number) => perfRow(id, { group_id: groupId, score: { value, n: 40, sessions: 4, excess: 3 } })
+    const views = perfViews([scored(1, 18, 0.2), scored(2, 18, 0.1), scored(3, 50, 0.05)], [group, perfGroup({ group_id: 50 })], { byModel: false })
+    expect(views.map((item) => [item.row.account_id, item.rank])).toEqual([[1, { place: 2, of: 2 }], [2, { place: 1, of: 2 }], [3, { place: 1, of: 1 }]])
   })
 
   it('ranks by score only among scored members of the same group, model and priority; equal scores share a place', () => {
@@ -105,6 +129,17 @@ describe('performance order', () => {
     expect(order(sortViews(views, { key: 'slow', dir: 'asc' }))).toEqual([3, 2, 1, 5, 4])
   })
 
+  // Review item 2: a row short of everything never comes first, whatever the column (requests and switches have no
+  // minimum of their own).
+  it('puts rows short of every minimum last by requests and switches too, in either direction', () => {
+    const full = perfView(perfRow(1, { requests: 100 }, { n: 100 }), group)
+    const short = perfView(perfRow(2, { requests: 7, first: { sessions: 1 }, cont: { turns: 2 }, attempts: { n: 7 }, switches: { handoff: 2 } }, { n: 7 }), group)
+    expect(short.allShort).toBe(true)
+    for (const sort of [{ key: 'requests', dir: 'asc' }, { key: 'switches', dir: 'desc' }, { key: 'requests', dir: 'desc' }] as const) {
+      expect(order(sortViews([short, full], sort))).toEqual([1, 2])
+    }
+  })
+
   it('shows each column\'s bad end first: the lowest cache, the highest of the rest; a second click turns it', () => {
     expect(nextSort(DEFAULT_SORT, 'cache')).toEqual({ key: 'cache', dir: 'asc' })
     expect(nextSort(DEFAULT_SORT, 'score')).toEqual({ key: 'score', dir: 'desc' })
@@ -141,19 +176,34 @@ describe('why not acted', () => {
   })
 
   it('writes the long reason with what held it up and how long, and other for a code it does not know', () => {
-    expect(noActionLong(lastEval(), t, te)).toBe(
+    expect(reasonLong(lastEval(), t, te)).toBe(
       'admin.schedQuality.noAction.long.peer_short:{"counts":"admin.schedQuality.noAction.counts:{\\"have\\":\\"8\\",\\"need\\":\\"20\\"}"}' +
       'admin.schedQuality.noAction.since:{"duration":"admin.schedQuality.duration.hoursMinutes:{\\"h\\":2,\\"m\\":50}"}'
     )
     // Weighted evidence reads with one decimal; nothing sent, nothing written.
-    expect(noActionLong(lastEval({ have: 9.25, since: '2026-11-19T12:05:00Z' }), t, te)).toBe(
+    expect(reasonLong(lastEval({ have: 9.25, since: '2026-11-19T12:05:00Z' }), t, te)).toBe(
       'admin.schedQuality.noAction.long.peer_short:{"counts":"admin.schedQuality.noAction.counts:{\\"have\\":\\"9.3\\",\\"need\\":\\"20\\"}"}'
     )
-    expect(noActionLong(lastEval({ have: null, need: null, since: '2026-11-19T11:30:00Z' }), t, te)).toBe(
+    expect(reasonLong(lastEval({ have: null, need: null, since: '2026-11-19T11:30:00Z' }), t, te)).toBe(
       'admin.schedQuality.noAction.long.peer_short:{"counts":""}admin.schedQuality.noAction.since:{"duration":"admin.schedQuality.duration.minutes:{\\"m\\":35}"}'
     )
-    expect(noActionLong(lastEval({ reason: 'brand_new', since: '2026-11-19T12:05:00Z' }), t, te)).toBe('admin.schedQuality.noAction.long.other')
+    expect(reasonLong(lastEval({ reason: 'brand_new', since: '2026-11-19T12:05:00Z' }), t, te)).toBe('admin.schedQuality.noAction.long.other')
     expect(noActionShort(lastEval({ reason: 'brand_new' }), t, te)).toBe('admin.schedQuality.noAction.short.other')
+  })
+
+  // Review item 4: a weighted shortfall that rounds to the need still reads as short.
+  it('writes a shortfall that rounds to the need as under it', () => {
+    expect(fmtShortfall(19.96, 20)).toEqual({ have: '<20', need: '20' })
+    expect(fmtShortfall(9.25, 20)).toEqual({ have: '9.3', need: '20' })
+    expect(fmtShortfall(20, 20)).toEqual({ have: '20', need: '20' })
+    expect(reasonLong(lastEval({ have: 19.96, since: '2026-11-19T12:05:00Z' }), t, te)).toBe(
+      'admin.schedQuality.noAction.long.peer_short:{"counts":"admin.schedQuality.noAction.counts:{\\"have\\":\\"<20\\",\\"need\\":\\"20\\"}"}'
+    )
+  })
+
+  // Review item 8: the empty model of older switch records has a name of its own.
+  it('names the empty model as unknown', () => {
+    expect([modelLabel('', t), modelLabel('gpt-x', t)]).toEqual(['admin.schedQuality.perf.unknownModel', 'gpt-x'])
   })
 
   // 裁决 6: a line held at the rear on other groups' evidence alone says so.

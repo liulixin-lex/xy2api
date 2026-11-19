@@ -18,7 +18,7 @@
       <!-- The 12-hour view: every model, or one of those with traffic in the window. -->
       <Select
         v-if="board.view === 'perf'"
-        :model-value="board.model ?? ALL_MODELS"
+        :model-value="board.model === null ? ALL_MODELS : board.model || UNKNOWN_MODEL"
         :options="perfModelOptions"
         :search-placeholder="t('admin.schedQuality.board.modelSearch')"
         :aria-label="t('admin.schedQuality.aria.model')"
@@ -244,19 +244,24 @@ function pickModel(value: unknown) {
 }
 
 // ---- The 12-hour view's model: every model first, then those with traffic in the window, busiest first (and the one
-// asked for, should it have none). ----
+// asked for, should it have none). The empty model (older switches the backend could not tie to one) is a model of its
+// own, "unknown", not every model. ----
 const ALL_MODELS = '\u0000all'
+const UNKNOWN_MODEL = '\u0000unknown'
 const perf = computed(() => (boardPerf.id !== null && boardPerf.id === board.groupId ? boardPerf.data : null))
 const perfModelOptions = computed(() => {
   const totals = new Map<string, number>()
   for (const row of perf.value?.rows ?? []) totals.set(row.model, (totals.get(row.model) ?? 0) + row.requests)
-  if (board.model && !totals.has(board.model)) totals.set(board.model, 0)
+  if (board.model !== null && !totals.has(board.model)) totals.set(board.model, 0)
   const models = [...totals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model]) => model)
-  return [{ value: ALL_MODELS, label: t('admin.schedQuality.perf.allModels') }, ...models.map((m) => ({ value: m, label: m }))]
+  return [
+    { value: ALL_MODELS, label: t('admin.schedQuality.perf.allModels') },
+    ...models.map((m) => (m ? { value: m, label: m } : { value: UNKNOWN_MODEL, label: t('admin.schedQuality.perf.unknownModel') }))
+  ]
 })
 function pickPerfModel(value: unknown) {
   const model = String(value ?? '')
-  setSchedBoardModel(model === ALL_MODELS || !model ? null : model)
+  setSchedBoardModel(model === UNKNOWN_MODEL ? '' : model === ALL_MODELS || !model ? null : model)
 }
 
 // The picked model's supply now; every count unknown when the backend could not read it, or when the board's latest

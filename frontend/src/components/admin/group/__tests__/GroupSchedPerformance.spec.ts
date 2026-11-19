@@ -5,6 +5,7 @@ import type { BackendOrder } from '@/api/admin/schedQualityTypes'
 import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
 import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import GroupSchedBoard from '../GroupSchedBoard.vue'
+import perfSource from '../GroupSchedPerformance.vue?raw'
 import { closeSchedBoard, markSchedChanged, openSchedBoard, setSchedBoardModel, setSchedBoardView, useSchedLayers } from '@/composables/useSchedLayers'
 import { withSchedHost } from '@/components/admin/account/quality/__tests__/schedLayerHost'
 
@@ -75,7 +76,7 @@ describe('GroupSchedBoard 12-hour view', () => {
     expect(document.querySelector('[data-sq-board-table]')).not.toBeNull()
 
     await click('[data-sq-board-view="perf"]')
-    expect(api.groupPerformance).toHaveBeenCalledWith(18, expect.anything())
+    expect(api.groupPerformance).toHaveBeenCalledWith(18)
     expect(document.querySelector('[data-sq-board-table]')).toBeNull()
     expect(document.querySelector('[data-sq-board-view="perf"]')!.getAttribute('aria-selected')).toBe('true')
     // The order rests in this view: another model asks nothing of it.
@@ -121,7 +122,7 @@ describe('GroupSchedBoard 12-hour view', () => {
     await openPerf()
     expect(rows()).toEqual([483, 615, 510, 285, 620])
     expect(cell(483, 'excess').querySelector('.gperf__red-cell')!.textContent).toContain('+33.4')
-    expect(cell(483, 'extra').querySelector('.gperf__red-cell')!.textContent).toBe('+155')
+    expect(cell(483, 'extra').querySelector('.gperf__red-cell')!.lastChild!.textContent).toBe('+155')
     expect(cell(615, 'excess').querySelector('.gperf__red-cell')).toBeNull()
     expect(cell(285, 'excess').querySelector('.sq-pass-word')).not.toBeNull()
     expect(cell(620, 'slow').textContent!.trim()).toBe('admin.schedQuality.perf.slowCount:{"slow":"3","n":"7"}')
@@ -238,5 +239,113 @@ describe('GroupSchedBoard 12-hour view', () => {
     const mark = row(483).querySelector<HTMLElement>('[data-sq-perf-line="ttfo"]')!
     expect(mark.getAttribute('aria-label')).toMatch(/^admin\.schedQuality\.dim\.ttfo · admin\.schedQuality\.identity\.unknown · admin\.schedQuality\.noAction\.long\.peer_short/)
     expect(row(615).querySelector('[data-sq-perf-why]')).toBeNull()
+  })
+
+  // Review item 10: the page's first load and the opening run the same task at once; one request goes out. A quality
+  // change asks again.
+  it('asks for the 12 hours once on opening while the page\'s first load ends, and again after a quality change', async () => {
+    mount(Board, { attachTo: document.body })
+    setSchedBoardView('perf')
+    openSchedBoard({ id: 18, name: '晨星组' })
+    await flushPromises()
+    expect(api.groupPerformance).toHaveBeenCalledTimes(1)
+    await markSchedChanged()
+    await flushPromises()
+    expect(api.groupPerformance).toHaveBeenCalledTimes(2)
+  })
+
+  // Opus suggestion: the group summary is only shown in the order view.
+  it('asks for no group summary in the 12-hour view, and for one on switching back', async () => {
+    mount(Board, { attachTo: document.body })
+    setSchedBoardView('perf')
+    openSchedBoard({ id: 18, name: '晨星组' })
+    await flushPromises()
+    expect(api.groupsSummary).not.toHaveBeenCalled()
+    await click('[data-sq-board-view="order"]')
+    expect(api.groupsSummary).toHaveBeenCalledTimes(1)
+  })
+
+  // Opus item 2 (M6): the sort, the priority, red only and the open rows survive a trip to the order view.
+  it('keeps its sort, priority, red only and open rows across a switch to the order view and back', async () => {
+    await openPerf()
+    await click('[data-sq-perf-sort="score"]')
+    await click('[data-sq-perf-priority="5"]')
+    await click('[data-sq-perf-red]')
+    await click('[data-sq-perf-expand="18:483:gpt-x"]')
+    await click('[data-sq-board-view="order"]')
+    await click('[data-sq-board-view="perf"]')
+    expect(document.querySelector('[data-sq-perf-col="score"]')!.getAttribute('aria-sort')).toBe('descending')
+    expect(document.querySelector('[data-sq-perf-priority="5"]')!.getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector('[data-sq-perf-red]')!.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[data-sq-perf-detail="18:483:gpt-x"]')).not.toBeNull()
+    expect(rows()).toEqual([510, 483])
+  })
+
+  // Review item 5: a snapshot still loading, or a group with the gate off, is not "no requests"; a partly covered
+  // window says what it covers.
+  it.each([
+    ['no snapshot yet', perfAnswer([], [], { at: '', window_from: '', complete: false, stale: true }), 'loading-stats'],
+    ['a snapshot loading', perfAnswer([], [perfGroup()], { complete: false, window_from: '2026-11-19T12:10:00Z' }), 'loading-stats'],
+    ['the gate off', perfAnswer([], [perfGroup({ gate_enabled: false })]), 'gate-off']
+  ])('says why there are no rows: %s', async (_, value, shown) => {
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    expect(document.querySelector(`[data-sq-perf-${shown}]`)).not.toBeNull()
+    expect(document.querySelector('[data-sq-perf-empty]')).toBeNull()
+    expect(document.querySelector('[data-sq-perf-window]')!.textContent).not.toContain('admin.schedQuality.perf.total')
+  })
+
+  it('says a partly covered window had no requests of the model only for the hours it covers', async () => {
+    api.groupPerformance.mockResolvedValue({ ...answer(), complete: false, window_from: '2026-11-19T08:40:00Z' })
+    await openPerf()
+    expect(document.querySelector('[data-sq-perf-window]')!.textContent).toContain('admin.schedQuality.perf.windowPartial:{"hours":"3.5"')
+    setSchedBoardModel('gpt-y')
+    await flushPromises()
+    expect(document.querySelector('[data-sq-perf-empty]')!.textContent!.trim()).toBe('admin.schedQuality.perf.emptyPartial:{"hours":"3.5"}')
+  })
+
+  // Review item 8: older switches without a model are a model of their own, not every model.
+  it('names the empty model as unknown and filters to it on its own', async () => {
+    const value = answer()
+    value.rows.push(perfRow(777, { model: '', requests: 0, first: { n: 0, slow: 0, sessions: 0, expected_n: 0, expected_slow: null }, switches: { profit_floor: 1 } }, { n: 0 }))
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    expect(document.querySelector('[data-sq-perf-row="18:777:"]')!.textContent).toContain('admin.schedQuality.perf.unknownModel')
+    setSchedBoardModel('')
+    await flushPromises()
+    expect(rows()).toEqual([777])
+    expect(document.querySelector('[data-sq-perf-window]')!.textContent).toContain('admin.schedQuality.perf.totalModel:{"model":"admin.schedQuality.perf.unknownModel"')
+    setSchedBoardModel(null)
+    await flushPromises()
+    expect(rows()).toHaveLength(6)
+  })
+
+  // Review item 3: the detail gives the result and the main reason apart, for an assessment that acted too.
+  it('gives each line\'s result and main reason in the detail', async () => {
+    const value = answer()
+    value.rows[0].lines = { ttfo: unknown(lastEval({ acted: true, action: 'trial_timeout', reason: 'peer_short' })), error: pass, cache: pass }
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    await click('[data-sq-perf-expand="18:483:gpt-x"]')
+    const first = document.querySelector('[data-sq-perf-detail="18:483:gpt-x"] [data-sq-perf-detail-item="verdict"] .pdet__line')!.textContent!
+    expect(first).toMatch(/"result":"admin\.schedQuality\.decisions\.action\.trial_timeout","reason":"admin\.schedQuality\.noAction\.long\.peer_short/)
+    // An assessment that acted gives no "not judged" line in the table.
+    expect(row(483).querySelector('[data-sq-perf-why]')).toBeNull()
+  })
+
+  // Opus suggestion: the red extra-slow cell says why, as the excess cell does.
+  it('says why on both red cells of a slow row, for a screen reader too', async () => {
+    await openPerf()
+    for (const name of ['excess', 'extra']) {
+      expect(cell(483, name).querySelector('.sr-only')!.textContent).toMatch(/^admin\.schedQuality\.perf\.flag\.slow:/)
+    }
+  })
+
+  // Opus item 1: a scoped `:global(.dark) .x` compiles to a bare `.dark` rule that lands on <html>.
+  it('keeps its dark-theme rules out of the scoped styles, on its own classes', () => {
+    const scoped = perfSource.slice(perfSource.indexOf('<style scoped>'), perfSource.indexOf('</style>', perfSource.indexOf('<style scoped>')))
+    expect(scoped).not.toMatch(/:global\(\.dark\)\s*[.#[\w]/)
+    const plain = perfSource.slice(perfSource.indexOf('<style>'))
+    expect(plain).toMatch(/\.dark \.gperf__acct \{\s*background:/)
   })
 })

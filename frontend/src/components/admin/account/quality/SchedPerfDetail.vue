@@ -12,13 +12,13 @@
 <script setup lang="ts">
 /**
  * One 12-hour performance row opened (the board's 12-hour view and the panel's "过去 12 小时"): every figure of the row
- * in plain sentences, then each line's latest assessment. A figure short of its minimum is told as counts; what the
- * backend did not send is left out, not written as unknown. A rear line whose counted units are all from other groups
- * says so: from the row's own counts, else `samples` (the panel has them, from the account's detail).
+ * in plain sentences, then each line's latest assessment, its result (no action, or the action) and its main reason. A
+ * figure short of its minimum is told as counts; what the backend did not send is left out, not written as unknown. A
+ * rear line whose counted units are all from other groups says so, from the row's own counts only (another source may
+ * be another assessment's).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { BackendDim, BackendSampleCounts } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { SCHED_DIMS, schedWord } from '@/utils/schedQualityFormat'
 import {
@@ -33,15 +33,12 @@ import {
   MIN_FIRST_SESSIONS,
   MIN_TURNS,
   MIN_TURN_SESSIONS,
-  noActionLong,
+  reasonLong,
   SWITCH_REASONS,
   type PerfView
 } from './performance'
 
-const props = defineProps<{
-  view: PerfView
-  samples?: Partial<Record<BackendDim, BackendSampleCounts>>
-}>()
+const props = defineProps<{ view: PerfView }>()
 const { t, te } = useI18n()
 const T = (key: string, values?: Record<string, unknown>) => t(`admin.schedQuality.perf.detail.${key}`, values ?? {})
 
@@ -98,12 +95,6 @@ function scoreLines(): string[] {
   return lines
 }
 
-/** The counted units of a line: the row's own when sent, else the panel's (from the account's detail). */
-function samplesOf(dim: BackendDim): BackendSampleCounts | undefined {
-  const line = props.view.row.lines[dim]
-  return line && (line.samples_local != null || line.samples_total != null) ? line : props.samples?.[dim]
-}
-
 function verdictLines(): string[] {
   const { row, group } = props.view
   if (!row.member) return [T('notMember')]
@@ -114,14 +105,12 @@ function verdictLines(): string[] {
     const latest = line?.last_eval ?? null
     const lines: string[] = []
     if (!latest) lines.push(T('evalNone', { line: name }))
-    else if (latest.acted) {
-      const action = schedWord('decisions.action', latest.action, t, te)
-      lines.push(T(latest.reason === 'over' ? 'evalOver' : 'evalActed', { line: name, time: formatShortTime(latest.at), action }))
-    } else {
-      const reason = noActionLong(latest, t, te, { trialEnd: line?.identity === 'trial' ? line.until : null, formatTime: formatShortTime })
-      lines.push(T('evalNoAction', { line: name, time: formatShortTime(latest.at), reason }))
+    else {
+      const result = latest.acted ? schedWord('decisions.action', latest.action, t, te) : T('resultNone')
+      const reason = reasonLong(latest, t, te, { trialEnd: line?.identity === 'trial' ? line.until : null, formatTime: formatShortTime })
+      lines.push(T('evalLine', { line: name, time: formatShortTime(latest.at), result, reason }))
     }
-    if (line && evidenceElsewhere(line.identity, samplesOf(dim))) lines.push(T('elsewhere', { line: name }))
+    if (line && evidenceElsewhere(line.identity, line)) lines.push(T('elsewhere', { line: name }))
     return lines
   })
 }

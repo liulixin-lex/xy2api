@@ -12,7 +12,9 @@
         <span>{{ windowText }}</span>
         <span v-if="failed" class="sq-fail-word" data-sq-perf-refresh-failed>{{ t('admin.schedQuality.perf.refreshFailed') }}</span>
       </p>
-      <p v-if="group && !group.gate_enabled" class="gperf__line sq-text-3" data-sq-perf-gate-off>{{ t('admin.schedQuality.perf.gateOff') }}</p>
+      <!-- A group with the gate off is not counted; a snapshot still loading has nothing yet: neither is "no requests". -->
+      <p v-if="gateOff" class="sq-text-3 text-sm" data-sq-perf-gate-off>{{ t('admin.schedQuality.perf.gateOff') }}</p>
+      <p v-else-if="loadingStats" class="sq-text-3 text-sm" data-sq-perf-loading-stats>{{ t('admin.schedQuality.perf.loadingStats') }}</p>
       <div v-if="priorities.length > 1 || redCount > 0" class="gperf__filters">
         <div v-if="priorities.length > 1" class="gperf__prio">
           <span class="sq-text-3" aria-hidden="true">{{ t('admin.schedQuality.perf.priority') }}</span>
@@ -39,10 +41,8 @@
           @click="redOnly = !redOnly"
         >{{ t('admin.schedQuality.perf.redOnly', { n: redCount }) }}</button>
       </div>
-      <p v-if="!shown.length" class="sq-text-3 text-sm" data-sq-perf-empty>
-        {{ model ? t('admin.schedQuality.perf.emptyModel', { model }) : t('admin.schedQuality.perf.empty') }}
-      </p>
-      <div v-else ref="scrollRef" class="-mx-3 overflow-x-auto" :style="{ '--gperf-visible': `${visible}px` }" data-sq-perf-scroll>
+      <p v-if="!shown.length && !gateOff && !loadingStats" class="sq-text-3 text-sm" data-sq-perf-empty>{{ emptyText }}</p>
+      <div v-if="shown.length" ref="scrollRef" class="-mx-3 overflow-x-auto" :style="{ '--gperf-visible': `${visible}px` }" data-sq-perf-scroll>
         <table class="sq-table gperf__table" data-sq-perf-table>
           <thead>
             <tr>
@@ -108,7 +108,12 @@
                   <span v-else v-tip="missingTip(view)" class="gperf__main sq-text-3" tabindex="0">{{ DASH }}</span>
                 </td>
                 <td class="sq-r sq-num" data-sq-cell="extra">
-                  <span v-if="view.extra !== null" :class="['gperf__main', view.slowMark === 'slow' ? 'gperf__red-cell' : '']">{{ fmtSigned(view.extra) }}</span>
+                  <span
+                    v-if="view.extra !== null"
+                    v-tip="view.slowMark === 'slow' ? flagTip(view, 'excess') : ''"
+                    :class="['gperf__main', view.slowMark === 'slow' ? 'gperf__red-cell' : '']"
+                    :tabindex="view.slowMark === 'slow' ? 0 : undefined"
+                  ><span v-if="view.slowMark === 'slow'" class="sr-only">{{ flagTip(view, 'excess') }}</span>{{ fmtSigned(view.extra) }}</span>
                   <span v-else class="gperf__main sq-text-3">{{ DASH }}</span>
                 </td>
                 <td class="sq-r sq-num" data-sq-cell="cache">
@@ -211,12 +216,13 @@ import {
   MIN_FIRST_SESSIONS,
   MIN_TURNS,
   MIN_TURN_SESSIONS,
+  modelLabel,
   nextSort,
   noAction,
-  noActionLong,
   noActionShort,
   PERF_SORT_KEYS,
   perfViews,
+  reasonLong,
   sortViews,
   wilson,
   type PerfSort,
@@ -231,6 +237,8 @@ const { canView: canViewAccounts } = useAdminPermission('accounts')
 const detailIdPrefix = `sq-perf-${useId()}`
 
 const perf = computed(() => (boardPerf.id !== null && boardPerf.id === board.groupId ? boardPerf.data : null))
+/** The board's model filter in words: every model, a model, or the empty one (older switches). */
+const modelText = computed(() => (model.value === null ? '' : modelLabel(model.value, t)))
 const failed = computed(() => boardPerf.failedId !== null && boardPerf.failedId === board.groupId)
 const model = computed(() => board.model)
 const group = computed(() => perf.value?.groups.find((item) => item.group_id === board.groupId))
@@ -243,6 +251,17 @@ watch(() => board.groupId, () => {
   priority.value = null
   redOnly.value = false
   expanded.clear()
+})
+
+/** The backend counts no group with the gate off: nothing here is "no requests". */
+const gateOff = computed(() => group.value?.gate_enabled === false)
+/** No snapshot yet, or one still loading the window with nothing for the group yet. */
+const loadingStats = computed(() => !perf.value?.at || (!perf.value.complete && views.value.length === 0))
+const coveredHours = computed(() => (perf.value?.at ? Math.max(0, (Date.parse(perf.value.at) - Date.parse(perf.value.window_from)) / 3_600_000) : 0))
+/** "No requests" only for a window fully covered; a partly covered one says what it covers. */
+const emptyText = computed(() => {
+  if (!perf.value?.complete) return t('admin.schedQuality.perf.emptyPartial', { hours: coveredHours.value.toFixed(1) })
+  return model.value === null ? t('admin.schedQuality.perf.empty') : t('admin.schedQuality.perf.emptyModel', { model: modelText.value })
 })
 
 const views = computed(() => {
@@ -275,16 +294,20 @@ const { width: visible } = useElementSize(scrollRef)
 
 const windowText = computed(() => {
   const data = perf.value!
+  if (!data.at) return t('admin.schedQuality.perf.windowLoading')
   const requests = fmtCount(ofModel.value.reduce((sum, view) => sum + view.row.requests, 0))
   const parts = [
     t('admin.schedQuality.perf.window', { hours: data.window_hours, from: formatShortTime(data.window_from), to: formatShortTime(data.at) })
   ]
   if (!data.complete) {
-    const hours = Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000)
-    parts.push(t('admin.schedQuality.perf.windowPartial', { hours: hours.toFixed(1), from: formatShortTime(data.window_from) }))
+    parts.push(coveredHours.value < 0.05
+      ? t('admin.schedQuality.perf.windowLoading')
+      : t('admin.schedQuality.perf.windowPartial', { hours: coveredHours.value.toFixed(1), from: formatShortTime(data.window_from) }))
   }
   parts.push(t('admin.schedQuality.perf.updated', { time: formatShortTime(data.at) }))
-  parts.push(model.value === null ? t('admin.schedQuality.perf.total', { n: requests }) : t('admin.schedQuality.perf.totalModel', { model: model.value, n: requests }))
+  if (!loadingStats.value && !gateOff.value) {
+    parts.push(model.value === null ? t('admin.schedQuality.perf.total', { n: requests }) : t('admin.schedQuality.perf.totalModel', { model: modelText.value, n: requests }))
+  }
   return parts.join(' · ')
 })
 
@@ -311,7 +334,7 @@ function colTip(col: PerfSortKey): string {
 }
 
 const subOf = (view: PerfView) => model.value === null
-  ? t('admin.schedQuality.perf.subModel', { priority: view.row.priority, model: view.row.model })
+  ? t('admin.schedQuality.perf.subModel', { priority: view.row.priority, model: modelLabel(view.row.model, t) })
   : t('admin.schedQuality.perf.sub', { priority: view.row.priority })
 
 const shortTip = computed(() => t('admin.schedQuality.perf.shortTip', { min: MIN_FIRST, sessions: MIN_FIRST_SESSIONS }))
@@ -352,9 +375,9 @@ function markTip(view: PerfView, dim: BackendDim): string {
   const line = view.row.lines[dim]
   const parts = [t(`admin.schedQuality.dim.${dim}`), schedWord('identity', line.identity, t, te)]
   const latest = line.last_eval
-  if (latest && !latest.acted) parts.push(noActionLong(latest, t, te, { trialEnd: line.identity === 'trial' ? line.until : null, formatTime: formatShortTime }))
-  else if (line.until && line.identity === 'rear') parts.push(t('admin.schedQuality.perf.rearUntil', { time: formatShortTime(line.until) }))
-  else if (line.until && line.identity === 'trial') parts.push(t('admin.schedQuality.perf.trialUntil', { time: formatShortTime(line.until) }))
+  if (latest) parts.push(reasonLong(latest, t, te, { trialEnd: line.identity === 'trial' ? line.until : null, formatTime: formatShortTime }))
+  if (line.until && line.identity === 'rear') parts.push(t('admin.schedQuality.perf.rearUntil', { time: formatShortTime(line.until) }))
+  else if (line.until && line.identity === 'trial' && latest?.reason !== 'trial_open') parts.push(t('admin.schedQuality.perf.trialUntil', { time: formatShortTime(line.until) }))
   return parts.join(' · ')
 }
 function whyOf(view: PerfView): string {
@@ -410,11 +433,6 @@ function whyOf(view: PerfView): string {
   background: theme('colors.primary.100');
   color: theme('colors.primary.700');
 }
-:global(.dark) .gperf__tab[aria-selected='true'],
-:global(.dark) .gperf__red[aria-pressed='true'] {
-  background: rgb(19 78 74 / 0.3);
-  color: theme('colors.primary.300');
-}
 .gperf__tab:focus-visible,
 .gperf__red:focus-visible,
 .gperf__sort:focus-visible {
@@ -464,9 +482,6 @@ function whyOf(view: PerfView): string {
   left: 0;
   z-index: 1;
   background: theme('colors.white');
-}
-:global(.dark) .gperf__acct {
-  background: theme('colors.dark.800');
 }
 .gperf__who {
   display: flex;
@@ -523,8 +538,10 @@ function whyOf(view: PerfView): string {
   gap: 10px;
   height: 20px;
 }
-/* Why not acted: under the marks, wrapping in a narrow column instead of widening the table. */
+/* Why not acted: under the marks, wrapping in a narrow column instead of widening the table, yet never squeezed to a
+   few characters a line on a phone. */
 .gperf__why {
+  min-width: 8em;
   max-width: 11em;
   white-space: normal;
 }
@@ -538,5 +555,18 @@ function whyOf(view: PerfView): string {
   left: 8px;
   max-width: calc(var(--gperf-visible, 100vw) - 16px);
   padding: 8px 0 4px 20px;
+}
+</style>
+
+<!-- Dark theme: not scoped (a scoped `:global(.dark) .x` compiles to a bare `.dark` rule on <html>); every class here
+     carries the gperf__ prefix. The held account column takes the dialog's own dark background. -->
+<style>
+.dark .gperf__acct {
+  background: theme('colors.dark.800');
+}
+.dark .gperf__tab[aria-selected='true'],
+.dark .gperf__red[aria-pressed='true'] {
+  background: rgb(19 78 74 / 0.3);
+  color: theme('colors.primary.300');
 }
 </style>

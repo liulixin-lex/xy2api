@@ -119,7 +119,7 @@ import { fmtCountdown, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 import SchedEvidence from './SchedEvidence.vue'
 import { gateOff, groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
-import { evidenceElsewhere, noActionLong } from './performance'
+import { evidenceElsewhere, reasonLong } from './performance'
 
 const props = defineProps<{
   detail: BackendAccountDetail
@@ -158,16 +158,17 @@ function toggle(groupId: number) {
 const groupName = (id: number) => props.groupInfo(id)?.name ?? props.detail.groups.find((group) => group.group_id === id)?.name
 
 /**
- * What follows the identity word: why it is unknown (a stale view or the gate switched off first; else the reason of
- * the latest assessment that took no action, with what held it up and for how long; else not enough evidence), the
+ * What follows the identity word: why it is unknown (a stale view or the gate switched off first; else the main reason
+ * of its latest assessment, acted or not, with what held it up and for how long; else that none is on record), the
  * trial's time left, the rear stay and its end, and for a rear line without a sample of this group that its evidence
  * all came from other groups.
  */
 function lineStatus(line: BackendLine | undefined, left: number | null, unknownWhy: string, off: boolean): string {
   const identity = line?.identity ?? 'unknown'
   if (identity === 'unknown') {
+    if (off) return unknownWhy
     const latest = line?.last_eval
-    return !off && latest && !latest.acted ? noActionLong(latest, t, te) : unknownWhy
+    return latest ? reasonLong(latest, t, te) : t('admin.schedQuality.noAction.none')
   }
   if (identity === 'trial') return left === null ? '' : t('admin.schedQuality.identity.trialLeft', { time: fmtCountdown(left) })
   if (identity === 'rear' && line) {

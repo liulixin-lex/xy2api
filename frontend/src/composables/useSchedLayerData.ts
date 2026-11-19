@@ -63,6 +63,15 @@ const board = shallowReactive({
   failedKey: null as string | null
 })
 /**
+ * The latest request of each 12-hour state, by what it asks: the id and the quality change it follows. Opening a layer
+ * can run the same task twice within a moment (the host's first load runs every task, the opening asks again, and the
+ * table aborts the run on its way): a run takes the answer of the same request when it is still on its way or came in
+ * less than PERF_REUSE_MS ago, instead of asking again. A quality change asks anew; so do the next beat and a retry
+ * after a failure (a failed request is not kept).
+ */
+const PERF_REUSE_MS = 2000
+const perfRequests = new Map<object, { key: string; answer: Promise<BackendPerformance>; settledAt: number | null }>()
+/**
  * The 12-hour performance of the panel's account (`id` = account id) and of the board's group (`id` = group id): kept
  * through a failed refresh (`failedId` says so); a failure does not fail the page, the view offers its own retry.
  */
@@ -70,25 +79,41 @@ const perfState = () => ({ id: null as number | null, data: null as BackendPerfo
 const panelPerf = shallowReactive(perfState())
 const boardPerf = shallowReactive(perfState())
 let refreshTask: ((name: string) => Promise<void>) | null = null
+// Closing a layer forgets its 12-hour request too: the next opening asks again.
 const forgetPanel = () => {
   Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
   Object.assign(panelPerf, perfState())
+  perfRequests.delete(panelPerf)
 }
 const forgetBoard = () => {
   Object.assign(board, { key: null, data: null, summary: null, summaryFailedGroup: null, failedKey: null })
   Object.assign(boardPerf, perfState())
+  perfRequests.delete(boardPerf)
 }
 
 const { drawer, board: boardRequest, changed } = useSchedLayers()
 const boardKey = () => (boardRequest.groupId === null ? null : `${boardRequest.groupId}:${boardRequest.model ?? ''}`)
 const boardPerfOn = () => boardRequest.groupId !== null && boardRequest.view === 'perf'
 
+
 /** Fetches one 12-hour performance into `state` while `id()` stays the one asked for. */
-async function loadPerf(state: typeof panelPerf, id: () => number | null, fetch: (id: number, signal: AbortSignal) => Promise<BackendPerformance>, signal: AbortSignal) {
+async function loadPerf(state: typeof panelPerf, id: () => number | null, fetch: (id: number) => Promise<BackendPerformance>, signal: AbortSignal) {
   const asked = id()
   if (asked === null) return
+  const key = `${asked}:${changed.value}`
+  let request = perfRequests.get(state)
+  const reusable = request?.key === key && (request.settledAt === null || Date.now() - request.settledAt < PERF_REUSE_MS)
+  if (!request || !reusable) {
+    const current = { key, answer: fetch(asked), settledAt: null as number | null }
+    request = current
+    perfRequests.set(state, current)
+    current.answer.then(
+      () => { current.settledAt = Date.now() },
+      () => { if (perfRequests.get(state) === current) perfRequests.delete(state) }
+    )
+  }
   try {
-    const data = await fetch(asked, signal)
+    const data = await request.answer
     if (signal.aborted || id() !== asked) return
     Object.assign(state, { id: asked, data, failedId: null })
   } catch {
@@ -147,7 +172,8 @@ export function useSchedLayerTasks() {
       // Never fails the page: without a summary the board's line reads "—".
       run: async (signal) => {
         const groupId = boardRequest.groupId
-        if (groupId === null) return
+        // Only the order view shows it: it rests in the 12-hour view and is asked again on switching back.
+        if (groupId === null || boardRequest.view !== 'order') return
         let summary: BackendGroupSummary | null = null
         let failed = false
         try {
@@ -164,12 +190,12 @@ export function useSchedLayerTasks() {
     {
       name: SCHED_PANEL_PERF_TASK,
       intervalMs: SUMMARY_MS,
-      run: (signal) => loadPerf(panelPerf, () => drawer.accountId, (id, s) => schedQualityAPI.accountPerformance(id, { signal: s }), signal)
+      run: (signal) => loadPerf(panelPerf, () => drawer.accountId, (id) => schedQualityAPI.accountPerformance(id), signal)
     },
     {
       name: SCHED_BOARD_PERF_TASK,
       intervalMs: SUMMARY_MS,
-      run: (signal) => loadPerf(boardPerf, () => (boardPerfOn() ? boardRequest.groupId : null), (id, s) => schedQualityAPI.groupPerformance(id, { signal: s }), signal)
+      run: (signal) => loadPerf(boardPerf, () => (boardPerfOn() ? boardRequest.groupId : null), (id) => schedQualityAPI.groupPerformance(id), signal)
     }
   ]
 
@@ -187,6 +213,9 @@ export function useSchedLayerTasks() {
     watch(() => [boardKey(), boardRequest.raise, boardRequest.view] as const, ([key]) => {
       if (key === null) forgetBoard()
       else void refresh(SCHED_BOARD_TASK)
+    })
+    watch(() => boardRequest.view, (view) => {
+      if (view === 'order' && boardRequest.groupId !== null) void refresh(SCHED_BOARD_SUMMARY_TASK)
     })
     // The 12-hour view covers every model: another model is only another filter, so it asks again only on opening it,
     // another group or another opening.

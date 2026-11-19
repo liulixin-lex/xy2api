@@ -1,7 +1,8 @@
 <template>
   <section class="qp-section" data-qp-section="perf">
     <h3 class="qp-h">
-      <span>{{ t('admin.schedQuality.perf.panel.title') }}</span>
+      <!-- The 12-hour snapshot's own freshness: it is refreshed apart from the account's detail. -->
+      <span class="inline-flex items-center gap-1.5">{{ t('admin.schedQuality.perf.panel.title') }}<SchedPauseMark v-if="perf" :global-enabled="perf.global_enabled" :stale="perf.stale" /></span>
       <span class="qp-h-note" data-qp-perf-note>
         {{ note }}<template v-if="failed && perf"> · <span class="qp-fail" data-qp-perf-refresh-failed>{{ t('admin.schedQuality.perf.refreshFailed') }}</span></template>
       </span>
@@ -13,24 +14,22 @@
       <span class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
       <button type="button" class="qp-text-btn" @click="retry(SCHED_PANEL_PERF_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
     </div>
-    <p v-else-if="!rows.length" class="qp-note" data-qp-perf-empty>{{ t('admin.schedQuality.perf.panel.empty') }}</p>
+    <p v-else-if="loadingStats" class="qp-note" data-qp-perf-loading-stats>{{ t('admin.schedQuality.perf.loadingStats') }}</p>
+    <p v-else-if="accountEmpty" class="qp-note" data-qp-perf-empty>{{ t('admin.schedQuality.perf.panel.empty') }}</p>
     <div v-else class="prows" role="table" :aria-label="t('admin.schedQuality.perf.panel.title')">
       <div class="prow prow--head" role="row">
         <span role="columnheader">{{ t('admin.schedQuality.perf.col.group') }}</span>
-        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.requests')">
-          <span class="prow__wide">{{ t('admin.schedQuality.perf.col.requests') }}</span><span class="prow__narrow">{{ t('admin.schedQuality.perf.col.requestsShort') }}</span>
-        </span>
+        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.requests')">{{ t('admin.schedQuality.perf.col.requestsShort') }}</span>
         <span role="columnheader" class="prow__r prow__slow">{{ t('admin.schedQuality.perf.col.slowShort') }}</span>
         <span role="columnheader" class="prow__r">{{ t('admin.schedQuality.perf.col.excess') }}</span>
         <span role="columnheader" class="prow__r">{{ t('admin.schedQuality.perf.col.cacheShort') }}</span>
-        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.switches')">
-          <span class="prow__wide">{{ t('admin.schedQuality.perf.col.switches') }}</span><span class="prow__narrow">{{ t('admin.schedQuality.perf.col.switchesShort') }}</span>
-        </span>
+        <span role="columnheader" class="prow__r" :title="t('admin.schedQuality.perf.col.switches')">{{ t('admin.schedQuality.perf.col.switchesShort') }}</span>
       </div>
       <template v-for="item in rows" :key="item.key">
         <div
           class="prow"
           :class="{ 'is-target': item.groupId === targetGroupId, 'prow--none': !item.view }"
+          :title="item.title"
           role="row"
           :data-qp-perf-row="item.key"
         >
@@ -49,9 +48,10 @@
             </button>
             <span v-else class="prow__toggle" aria-hidden="true" />
             <GroupAliasPill :group="item.info" />
-            <span class="prow__name" :title="item.title">{{ item.name }}</span>
+            <span class="prow__name">{{ item.name }}</span>
           </span>
-          <template v-if="item.view">
+          <span v-if="item.gateOff" class="prow__off qp-muted" role="cell" data-qp-perf-gate-off>{{ t('admin.schedQuality.perf.panel.gateOff') }}</span>
+          <template v-else-if="item.view">
             <span class="prow__r" role="cell" data-qp-perf-cell="requests">{{ fmtCount(item.view.row.requests) }}</span>
             <span class="prow__r prow__slow" role="cell" data-qp-perf-cell="slow">
               <template v-if="item.view.slowRate !== null">{{ fmtPct(item.view.slowRate) }}</template>
@@ -83,10 +83,11 @@
         </div>
         <div v-if="item.view && expanded.has(item.key)" :id="`${detailIdPrefix}-${item.key}`" class="pdet-row" role="row" :data-qp-perf-detail="item.key">
           <div role="cell">
-            <SchedPerfDetail :view="item.view" :samples="item.samples" />
+            <SchedPerfDetail :view="item.view" />
           </div>
         </div>
       </template>
+      <p v-if="modelEmpty" class="qp-note prows__note" data-qp-perf-model-empty>{{ modelEmpty }}</p>
     </div>
   </section>
 </template>
@@ -99,19 +100,22 @@
  * have traffic in the window. Marks as on the board (performance.ts), each group against its own settings; a row opens
  * to SchedPerfDetail. Ranks need the whole group: the board has them, this section does not. Under 440px the slow
  * share goes (it is in the detail).
+ *
+ * A group with the gate off is not counted (its row says so); a snapshot still loading says so instead of "no
+ * requests"; an account with requests on other models only keeps its group rows and says this model had none.
  */
 import { computed, reactive, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
-import type { BackendAccountDetail, BackendDim, BackendSampleCounts } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountDetail } from '@/api/admin/schedQualityTypes'
 import { SCHED_PANEL_PERF_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
-import { DASH, SCHED_DIMS } from '@/utils/schedQualityFormat'
+import { DASH } from '@/utils/schedQualityFormat'
+import SchedPauseMark from './SchedPauseMark.vue'
 import { vTip } from '@/utils/tip'
 import SchedPerfDetail from './SchedPerfDetail.vue'
-import { fmtCount, fmtPct, fmtPoints, MIN_FIRST, MIN_FIRST_SESSIONS, MIN_TURNS, MIN_TURN_SESSIONS, perfViews, wilson, type PerfView } from './performance'
-import { modelRow } from './qualityPanel'
+import { fmtCount, fmtPct, fmtPoints, MIN_FIRST, MIN_FIRST_SESSIONS, MIN_TURNS, MIN_TURN_SESSIONS, modelLabel, perfViews, wilson, type PerfView } from './performance'
 
 const props = defineProps<{
   detail: BackendAccountDetail
@@ -139,8 +143,10 @@ const note = computed(() => {
   const time = formatShortTime(data.at)
   const parts = [props.model ? t('admin.schedQuality.perf.panel.note', { model: props.model, time }) : t('admin.schedQuality.perf.panel.noteAll', { time })]
   if (!data.complete) {
-    const hours = Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000)
-    parts.push(t('admin.schedQuality.perf.windowPartial', { hours: hours.toFixed(1), from: formatShortTime(data.window_from) }))
+    const hours = data.at ? Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000) : 0
+    parts.push(hours < 0.05
+      ? t('admin.schedQuality.perf.windowLoading')
+      : t('admin.schedQuality.perf.windowPartial', { hours: hours.toFixed(1), from: formatShortTime(data.window_from) }))
   }
   return parts.join(' · ')
 })
@@ -152,20 +158,31 @@ interface PanelPerfRow {
   title: string
   info: { name: string; alias?: string | null }
   view: PerfView | null
-  samples?: Partial<Record<BackendDim, BackendSampleCounts>>
+  /** The group's gate is off: the backend counts nothing there. */
+  gateOff: boolean
 }
+
+/** The account's rows over every model (the answer's own). */
+const accountRows = computed(() => perf.value?.rows.filter((row) => row.account_id === props.detail.account.id) ?? [])
+/** No snapshot yet, or one still loading the window with nothing for the account yet. */
+const loadingStats = computed(() => !!perf.value && (!perf.value.at || (!perf.value.complete && accountRows.value.length === 0)))
+const gateOn = (groupId: number) => props.detail.groups.find((g) => g.group_id === groupId)?.policy.enabled !== false
+/** A fully covered window without any request of the account in a group that is counted. */
+const accountEmpty = computed(() => !!perf.value?.complete && accountRows.value.length === 0 && props.detail.groups.some((g) => gateOn(g.group_id)))
+/** The account has requests, none on this model: the rows stay, and say so. */
+const modelEmpty = computed(() => (props.model !== null && accountRows.value.length > 0 && !accountRows.value.some((row) => row.model === props.model)
+  ? t('admin.schedQuality.perf.panel.emptyModel', { model: modelLabel(props.model, t) })
+  : ''))
 
 const rows = computed<PanelPerfRow[]>(() => {
   const data = perf.value
   if (!data) return []
-  const ofModel = data.rows.filter((row) => row.account_id === props.detail.account.id && (props.model === null || row.model === props.model))
+  const ofModel = accountRows.value.filter((row) => props.model === null || row.model === props.model)
   const views = perfViews(ofModel, data.groups, { byModel: true, whole: false })
   const nameOf = (id: number) => props.groupInfo(id)?.name ?? data.groups.find((g) => g.group_id === id)?.name ?? props.detail.groups.find((g) => g.group_id === id)?.name ?? `#${id}`
   const item = (groupId: number, view: PerfView | null): PanelPerfRow => {
-    const group = props.detail.groups.find((g) => g.group_id === groupId)
-    const lines = group && view ? modelRow(group, view.row.model)?.lines : undefined
     const name = nameOf(groupId)
-    const label = [name, props.model === null && view ? view.row.model : '', view && !view.row.member ? t('admin.schedQuality.perf.notMember').trim() : ''].filter(Boolean).join(' · ')
+    const label = [name, props.model === null && view ? modelLabel(view.row.model, t) : '', view && !view.row.member ? t('admin.schedQuality.perf.notMember').trim() : ''].filter(Boolean).join(' · ')
     return {
       key: view ? view.key : `${groupId}:none`,
       groupId,
@@ -173,7 +190,7 @@ const rows = computed<PanelPerfRow[]>(() => {
       title: label,
       info: props.groupInfo(groupId) ?? { name },
       view,
-      samples: lines ? Object.fromEntries(SCHED_DIMS.map((dim) => [dim, lines[dim]])) : undefined
+      gateOff: !view && !gateOn(groupId)
     }
   }
   const list: PanelPerfRow[] = []
@@ -188,7 +205,7 @@ const rows = computed<PanelPerfRow[]>(() => {
   }
   // Groups the account has left that still have traffic in the window.
   for (const view of views) if (!seen.has(view.key)) list.push(item(view.row.group_id, view))
-  return list.some((entry) => entry.view) ? list : []
+  return list
 })
 
 const shortTip = computed(() => t('admin.schedQuality.perf.shortTip', { min: MIN_FIRST, sessions: MIN_FIRST_SESSIONS }))
@@ -239,8 +256,9 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 }
 .prow {
   display: grid;
-  /* Group, requests, slow, excess, cache, switches ("Switches" needs 51px in English). */
-  grid-template-columns: minmax(0, 1fr) 52px 48px 52px 56px 56px;
+  /* Group, requests, slow, excess, cache, switches; two headings are short words (English "Reqs", "Sw."; the whole word
+     is their title), so the group name keeps its room. */
+  grid-template-columns: minmax(0, 1fr) 52px 48px 52px 56px 44px;
   align-items: center;
   column-gap: 4px;
   min-height: 36px;
@@ -325,25 +343,28 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 .prow__fast {
   color: var(--color-mark-pass);
 }
+/* A group not counted: one note across the figures. */
+.prow__off {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prows__note {
+  padding-top: 8px;
+}
 .pdet-row {
   margin: 0 -8px;
   padding: 4px 8px 12px 32px;
 }
-.prow__narrow {
-  display: none;
-}
-/* A phone (prototype, panel under 440px): the slow share goes to the detail; five columns fit 288px, two of them
-   under a shorter heading (the whole word is its title). */
+/* A phone (prototype, panel under 440px): the slow share goes to the detail; five columns fit 288px. */
 @media (max-width: 439px) {
   .prow {
     grid-template-columns: minmax(0, 1fr) 44px 48px 52px 40px;
   }
-  .prow__slow,
-  .prow__wide {
+  .prow__slow {
     display: none;
-  }
-  .prow__narrow {
-    display: inline;
   }
 }
 </style>

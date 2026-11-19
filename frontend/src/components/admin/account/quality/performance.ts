@@ -49,7 +49,9 @@ export interface PerfView {
   expectedRate: number | null
   /** The expected share rests on enough comparable first sends to set it against. */
   expectedEnough: boolean
-  /** Slow share minus expected, as a share (0.335 is 33.5 points). */
+  /** Slow share minus expected, in tenths of a point (334 is +33.4 points), worked out on the counts. */
+  excessTenths: number | null
+  /** The same as a share (0.334). */
   excess: number | null
   /** Slow requests above expected (first sends × excess), rounded. */
   extra: number | null
@@ -83,6 +85,10 @@ export function wilson(k: number, n: number, z = WILSON_Z): { lower: number; upp
 
 export const rowKey = (row: Pick<BackendPerfRow, 'group_id' | 'account_id' | 'model'>) => `${row.group_id}:${row.account_id}:${row.model}`
 
+/** Float noise off (a sum of shares read 2.4999999999999996), then rounded half away from zero. */
+const tidy = (value: number) => Math.round(value * 1e9) / 1e9
+const roundHalfAway = (value: number) => Math.sign(value) * Math.round(Math.abs(tidy(value)))
+
 /** One row's figures; `share` and `rank` are filled in by perfViews. */
 export function perfView(row: BackendPerfRow, group: BackendPerfGroup | undefined): PerfView {
   const { first, cont, attempts } = row
@@ -90,16 +96,26 @@ export function perfView(row: BackendPerfRow, group: BackendPerfGroup | undefine
   const slowRate = firstEnough ? first.slow / first.n : null
   const expectedRate = first.expected_slow != null && first.expected_n > 0 ? first.expected_slow / first.expected_n : null
   const expectedEnough = expectedRate !== null && first.expected_n >= MIN_FIRST
-  const excess = slowRate !== null && expectedEnough ? slowRate - expectedRate! : null
-  const extra = excess === null ? null : Math.round(first.n * excess)
+  // Slow minus expected on the counts first (the expected count taken to all the known first sends; they are the
+  // same when every one is comparable), then points, the mark and the rounding from that, never from a float gap:
+  // 30 slow against 20 expected of 100 is +10.0 and marked; 3 against 2.5 of 20 is one extra slow request.
+  let excessTenths: number | null = null
+  let extra: number | null = null
+  if (slowRate !== null && expectedEnough) {
+    const over = first.slow * first.expected_n - first.expected_slow! * first.n
+    excessTenths = roundHalfAway((over * 1000) / (first.n * first.expected_n))
+    extra = roundHalfAway(over / first.expected_n)
+  }
+  const excess = excessTenths === null ? null : excessTenths / 1000
   const cacheEnough = cont.turns >= MIN_TURNS && cont.sessions >= MIN_TURN_SESSIONS && cont.input_tokens > 0
   const cacheRate = cacheEnough ? cont.read_tokens / cont.input_tokens : null
   const timeoutRate = attempts.n >= MIN_ATTEMPTS ? attempts.timeouts / attempts.n : null
   let slowMark: PerfView['slowMark'] = null
-  if (excess !== null) {
+  if (excessTenths !== null) {
     const bounds = wilson(first.slow, first.n)
-    if (excess >= FLAG_EXCESS && bounds.lower > expectedRate!) slowMark = 'slow'
-    else if (excess <= -FLAG_EXCESS && bounds.upper < expectedRate!) slowMark = 'fast'
+    const flag = Math.round(FLAG_EXCESS * 1000)
+    if (excessTenths >= flag && bounds.lower > expectedRate!) slowMark = 'slow'
+    else if (excessTenths <= -flag && bounds.upper < expectedRate!) slowMark = 'fast'
   }
   const cacheLow = cacheRate !== null && group !== undefined && cacheRate < group.min_cache_ratio
   return {
@@ -110,6 +126,7 @@ export function perfView(row: BackendPerfRow, group: BackendPerfGroup | undefine
     slowRate,
     expectedRate,
     expectedEnough,
+    excessTenths,
     excess,
     extra,
     cacheRate,
@@ -167,7 +184,7 @@ function sortValue(view: PerfView, key: PerfSortKey): number | null {
     case 'slow':
       return view.slowRate
     case 'excess':
-      return view.excess
+      return view.excessTenths
     case 'extra':
       return view.extra
     case 'cache':
@@ -184,12 +201,14 @@ function sortValue(view: PerfView, key: PerfSortKey): number | null {
 const byRequests = (a: PerfView, b: PerfView) => b.row.requests - a.row.requests || a.row.account_id - b.row.account_id || a.row.model.localeCompare(b.row.model)
 
 /**
- * Sorted by one column. Rows short of that column's minimum always come after the others, whichever the direction,
- * by requests among themselves; ties go by requests (most first), then account id.
+ * Sorted by one column. Rows short of every minimum come last whatever the column and direction; then, within each
+ * part, rows short of that column's minimum come after the others, by requests among themselves; ties go by requests
+ * (most first), then account id.
  */
 export function sortViews(views: PerfView[], sort: PerfSort): PerfView[] {
   const sign = sort.dir === 'asc' ? 1 : -1
   return [...views].sort((a, b) => {
+    if (a.allShort !== b.allShort) return a.allShort ? 1 : -1
     const x = sortValue(a, sort.key)
     const y = sortValue(b, sort.key)
     if (x === null || y === null) return x === y ? byRequests(a, b) : x === null ? 1 : -1
@@ -248,22 +267,30 @@ export const fmtAmount = (value: number) => String(Math.round(value * 10) / 10)
 type Translate = (key: string, values?: Record<string, unknown>) => string
 type HasKey = (key: string) => boolean
 
+/** A model's name, or "模型未知" for the empty one (older switch records the backend could not tie to a model). */
+export const modelLabel = (model: string, t: Translate) => model || t('admin.schedQuality.perf.unknownModel')
+
 /** The short reason of an assessment that took no action ("没判：同伴样本不够"); an unknown code reads as other. */
 export function noActionShort(latest: BackendLastEval, t: Translate, te: HasKey): string {
   const key = `admin.schedQuality.noAction.short.${latest.reason}`
   return t(te(key) ? key : 'admin.schedQuality.noAction.short.other')
 }
 
+/** What held it up against what is needed; "<20" when rounding would make a shortfall read as enough (19.96 of 20). */
+export function fmtShortfall(have: number, need: number): { have: string; need: string } {
+  const needText = fmtAmount(need)
+  const haveText = fmtAmount(have)
+  return { have: have < need && haveText === needText ? `<${needText}` : haveText, need: needText }
+}
+
 /**
- * The long reason with what held it up and for how long ("判不了：同组同模型其他号的样本不够（8 / 20），已持续 2 小时
- * 50 分"); the counts and the duration only when the backend sent them, the trial's end only when known.
+ * The main reason of an assessment, long ("判不了：同组同模型其他号的样本不够（8 / 20），已持续 2 小时 50 分"), whether
+ * it acted or not; the counts and the duration only when the backend sent them, the trial's end only when known.
  */
-export function noActionLong(latest: BackendLastEval, t: Translate, te: HasKey, options: { trialEnd?: string | null; formatTime?: (at: string) => string } = {}): string {
+export function reasonLong(latest: BackendLastEval, t: Translate, te: HasKey, options: { trialEnd?: string | null; formatTime?: (at: string) => string } = {}): string {
   const key = `admin.schedQuality.noAction.long.${latest.reason}`
   const known = te(key)
-  const counts = latest.have != null && latest.need != null
-    ? t('admin.schedQuality.noAction.counts', { have: fmtAmount(latest.have), need: fmtAmount(latest.need) })
-    : ''
+  const counts = latest.have != null && latest.need != null ? t('admin.schedQuality.noAction.counts', fmtShortfall(latest.have, latest.need)) : ''
   let text = known ? t(key, { counts }) : t('admin.schedQuality.noAction.long.other')
   if (latest.reason === 'trial_open' && options.trialEnd && options.formatTime) {
     text += t('admin.schedQuality.noAction.trialEnds', { time: options.formatTime(options.trialEnd) })
