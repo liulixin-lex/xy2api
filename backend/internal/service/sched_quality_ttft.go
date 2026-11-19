@@ -157,6 +157,7 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		}
 		if err == nil {
 			basis.TTFT = q.NewTTFTEvidence(result, p.TTFTSeconds)
+			basis.PeerKnown = result.PeerCounts.N - result.PeerCounts.X
 			basis.SampleCounts = q.NewSampleCounts(result.SamplesLocal, result.SamplesTotal)
 			switch result.State {
 			case q.RuleBGood:

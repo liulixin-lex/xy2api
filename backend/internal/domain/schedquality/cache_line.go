@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	CacheWindow     = 30 * time.Minute
-	CacheMinTurns   = 20
-	ContinuationGap = 5 * time.Minute
+	CacheWindow         = 30 * time.Minute
+	cacheMinLowSessions = 2
+	CacheMinTurns       = 20
+	ContinuationGap     = 5 * time.Minute
 )
 
 type CacheAssessment struct {
@@ -77,7 +78,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	if out.Turns >= CacheMinTurns {
 		if out.Ratio >= minRatio {
 			out.Verdict = VerdictPass
-		} else if out.LowSessions >= 2 {
+		} else if out.LowSessions >= cacheMinLowSessions {
 			out.Verdict = VerdictFail
 		}
 	}

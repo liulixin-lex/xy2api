@@ -148,16 +148,17 @@ type SchedPolicyChange struct {
 	Lines     map[schedquality.Dimension]schedquality.Verdict
 }
 type SchedGroupRow struct {
-	TTFTSamples, ErrorSamples, CacheSamples schedquality.SampleCounts
-	GroupID                                 int64
-	Model                                   string
-	View                                    schedquality.StateView
-	TTFT                                    schedquality.TTFTEvidence
-	TTFTVerdict                             schedquality.Verdict
-	TTFTSourceGroups                        []int64
-	Error                                   schedquality.ErrorAssessment
-	Cache                                   schedquality.CacheAssessment
-	SourceGroups                            []int64
+	TTFTLastEval, ErrorLastEval, CacheLastEval *SchedAdminLastEval
+	TTFTSamples, ErrorSamples, CacheSamples    schedquality.SampleCounts
+	GroupID                                    int64
+	Model                                      string
+	View                                       schedquality.StateView
+	TTFT                                       schedquality.TTFTEvidence
+	TTFTVerdict                                schedquality.Verdict
+	TTFTSourceGroups                           []int64
+	Error                                      schedquality.ErrorAssessment
+	Cache                                      schedquality.CacheAssessment
+	SourceGroups                               []int64
 }
 type SchedQualityEngine interface {
 	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)

@@ -133,6 +133,7 @@ func TestRuleBVectors(t *testing.T) {
 				!slices.Contains(got.UnknownReasons, RuleBRelativeVeto) {
 				t.Errorf("good base with relative confirmation must report relative veto: %v", got.UnknownReasons)
 			}
+			requireRegisteredRuleBReasons(t, got.UnknownReasons)
 			for _, reason := range got.UnknownReasons {
 				coverage[string(reason)] = true
 			}
@@ -423,12 +424,23 @@ func ruleBTestInput(ownCount, peerCount int, slow bool) RuleBInput {
 	return in
 }
 
+func requireRegisteredRuleBReasons(t *testing.T, reasons []RuleBUnknownReason) {
+	t.Helper()
+	for _, name := range reasons {
+		def := assessmentCauses[assessmentCauseIndex(name)]
+		if def.ruleB == nil || def.name != name {
+			t.Fatalf("rule B emitted unregistered cause %q", name)
+		}
+	}
+}
+
 func evaluateRuleBTest(t *testing.T, in RuleBInput, p RuleBParams) RuleBResult {
 	t.Helper()
 	r, err := EvaluateRuleB(in, p)
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireRegisteredRuleBReasons(t, r.UnknownReasons)
 	return r
 }
 

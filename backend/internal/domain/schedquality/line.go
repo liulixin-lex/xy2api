@@ -32,15 +32,16 @@ type LineState struct {
 	LineKey
 	Identity                     Identity
 	Trial                        bool
-	Level                        int       // 0..4，对应 CooldownLadder
-	Admissions                   int       // 进后排次数；大于 0 即“有过失败记录”
-	PendingAt                    time.Time `json:",omitzero"` // 报错线和缓存线：上一次普通评估不达标的时刻
-	Epoch                        time.Time `json:",omitzero"` // 取证起点（常规评估和试用）；零值表示不截
-	Entry                        time.Time `json:",omitzero"` // 本轮进后排的时刻，到期复核从这里截
-	Until, TrialUntil, GoodSince time.Time `json:",omitzero"`
-	LastRear                     time.Time `json:",omitzero"` // 最近一次进后排、续期或试用判回后排
-	EvaluatedAt                  time.Time `json:",omitzero"`
-	Basis                        *Basis    // 最近一次身份变化时的证据
+	Level                        int                 // 0..4，对应 CooldownLadder
+	Admissions                   int                 // 进后排次数；大于 0 即“有过失败记录”
+	PendingAt                    time.Time           `json:",omitzero"` // 报错线和缓存线：上一次普通评估不达标的时刻
+	Epoch                        time.Time           `json:",omitzero"` // 取证起点（常规评估和试用）；零值表示不截
+	Entry                        time.Time           `json:",omitzero"` // 本轮进后排的时刻，到期复核从这里截
+	Until, TrialUntil, GoodSince time.Time           `json:",omitzero"`
+	LastRear                     time.Time           `json:",omitzero"` // 最近一次进后排、续期或试用判回后排
+	EvaluatedAt                  time.Time           `json:",omitzero"`
+	LastAssessment               []AssessmentSegment `json:",omitempty"`
+	Basis                        *Basis              // 最近一次身份变化时的证据
 }
 type EventKind uint8
 

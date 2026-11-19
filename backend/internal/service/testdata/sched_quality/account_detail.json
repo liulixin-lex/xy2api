@@ -31,6 +31,17 @@
           "exempt": false,
           "lines": {
             "ttfo": {
+              "last_eval": {
+                "at": "2026-11-01T12:00:00Z",
+                "acted": true,
+                "action": "enter",
+                "reason": "over",
+                "causes": [],
+                "have": null,
+                "need": null,
+                "since": "2026-11-01T12:00:00Z",
+                "count": 1
+              },
               "identity": "rear",
               "level": 0,
               "until": "2026-11-01T12:20:00Z",
@@ -61,6 +72,17 @@
               "samples_total": 30
             },
             "error": {
+              "last_eval": {
+                "at": "2026-11-01T12:00:00Z",
+                "acted": false,
+                "action": "",
+                "reason": "within",
+                "causes": [],
+                "have": null,
+                "need": null,
+                "since": "2026-11-01T11:55:00Z",
+                "count": 2
+              },
               "identity": "pass",
               "level": 0,
               "until": null,
@@ -82,6 +104,7 @@
               "samples_total": 50
             },
             "cache": {
+              "last_eval": null,
               "identity": "pass",
               "level": 0,
               "until": null,
