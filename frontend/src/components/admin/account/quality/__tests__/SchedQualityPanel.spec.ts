@@ -1150,27 +1150,52 @@ describe('SchedQualityPanel 12 hours and why not judged (round 4)', () => {
     expect(document.querySelector('[data-qp-perf-row="98:none"] [data-qp-perf-gate-off]')).toBeNull()
   })
 
-  // fe-polish review (Astra 3, Opus 4): at 320px the group's cell kept 80px, the pill took 50 and the id ran over the
-  // requests. jsdom lays nothing out, so the rule is checked here (the text boxes in a browser): under 440px the group
-  // takes a line of its own across the row, every figure (or note) the line under it, so the id and "left the group"
-  // never share a line with a figure.
-  it('gives the group a line of its own on a phone, the figures under it, so the id never runs over a figure', () => {
+  // fe-polish review (Astra 3 and its re-check 1–2, Opus 4). jsdom lays nothing out: the rules are checked here, the text
+  // boxes in a browser (第四轮/scratch/perf-fe/rowcheck.mjs). Under 440px the group takes a line of its own across the row
+  // (at 320px the id ran over the requests) and every figure goes under its own heading, placed by hand (left to the
+  // grid, excess, cache and switches slid one heading left). From 440px "left the group" takes a line of its own in the
+  // group's cell: beside a name cut to nothing it ran over the requests.
+  it('puts every figure under its own heading on a phone, and "left the group" clear of the figures at any width', async () => {
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    const heads = Array.from(document.querySelectorAll<HTMLElement>('[data-qp-section="perf"] [data-qp-perf-col]'), (el) => el.dataset.qpPerfCol!)
+    expect(heads).toEqual(['group', 'requests', 'slow', 'excess', 'cache', 'switches'])
+    const cells = Array.from(document.querySelectorAll<HTMLElement>('[data-qp-perf-row="53:7:gpt-b"] [data-qp-perf-cell]'), (el) => el.dataset.qpPerfCell)
+    expect(cells).toEqual(heads.slice(1))
+
     const style = panelPerfSource.slice(panelPerfSource.indexOf('<style scoped>'))
+    // The rule whose whole selector is `selector` (".prow__group", not "… > .prow__group").
     const block = (css: string, selector: string) => {
-      const start = css.indexOf(`${selector} {`)
-      expect(start).toBeGreaterThanOrEqual(0)
-      return css.slice(start, css.indexOf('}', start))
+      const found = new RegExp(`\\n\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{`).exec(css)
+      expect(found).not.toBeNull()
+      return css.slice(found!.index, css.indexOf('}', found!.index))
     }
     const at = style.indexOf('@media (max-width: 439px) {')
     expect(at).toBeGreaterThan(0)
+    const wide = style.slice(0, at)
     const narrow = style.slice(at)
+    // A phone: the group on a line of its own, the figures on the next, the slow share gone, each figure in the column of
+    // its heading among those shown.
     expect(block(narrow, '.prow:not(.prow--head) > .prow__group')).toMatch(/grid-column:\s*1 \/ -1/)
     expect(block(narrow, '.prow:not(.prow--head) > :not(.prow__group)')).toMatch(/grid-row:\s*2/)
+    expect(block(narrow, '.prow__slow')).toMatch(/display:\s*none/)
+    const shown = heads.filter((key) => key !== 'slow')
+    shown.forEach((key, index) => {
+      if (key !== 'group') expect(narrow).toMatch(new RegExp(`\\[data-qp-perf-cell='${key}'\\][^{]*\\{\\s*grid-column(-start)?:\\s*${index + 1};`))
+    })
+    // The id and "left the group" beside the name there, never shrinking: the name gives way.
     expect(block(narrow, '.prow__gid')).toMatch(/display:\s*inline/)
-    // The id and the "left" mark never shrink: on its own line the name is what gives way.
-    expect(block(style, '.prow__gid')).toMatch(/flex:\s*none/)
-    expect(block(style, '.prow__left')).toMatch(/flex:\s*none/)
-    expect(block(style, '.prow__name')).toMatch(/min-width:\s*0/)
+    expect(block(wide, '.prow__gid')).toMatch(/flex:\s*none/)
+    expect(block(narrow, '.prow__left')).toMatch(/flex:\s*none/)
+    expect(block(narrow, '.prow__group')).toMatch(/flex-wrap:\s*nowrap/)
+    // From 440px: "left the group" on a line of its own in the group's cell; the name, its basis 0, never wraps the
+    // first line and is cut there.
+    expect(block(wide, '.prow__group')).toMatch(/flex-wrap:\s*wrap/)
+    expect(block(wide, '.prow__left')).toMatch(/flex:\s*0 0 100%/)
+    expect(block(wide, '.prow__left')).not.toMatch(/nowrap/)
+    expect(block(wide, '.prow__name')).toMatch(/flex:\s*1 1 0;/)
+    expect(block(wide, '.prow__name')).toMatch(/min-width:\s*0/)
   })
 
   // Acceptance round 2: a counted group without requests while the window is still filling says "no figures yet".
