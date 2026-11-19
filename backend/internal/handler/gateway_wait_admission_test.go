@@ -22,10 +22,14 @@ type waitAdmissionAccounts struct {
 	*handlerCompatAccounts
 	current map[int64]*service.Account
 	reads   int
+	onRead  func(int64)
 }
 
 func (r *waitAdmissionAccounts) GetByID(_ context.Context, id int64) (*service.Account, error) {
 	r.reads++
+	if r.onRead != nil {
+		r.onRead(id)
+	}
 	return r.current[id], nil
 }
 
@@ -282,4 +286,36 @@ func TestGatewayWaitMessagesProfitVetoAcrossRequestExits(t *testing.T) {
 			require.Equal(t, expectedReleases, slots.released)
 		})
 	}
+}
+
+func TestGatewayWaitMessagesProfitVetoReleasesNextSlotOnPanic(t *testing.T) {
+	f := newProfitVetoWaitFixture(t)
+	sessions := &waitedSessions{}
+	repo, slots := installWaitAdmissionGateway(f, sessions)
+	second := *f.account
+	second.ID++
+	second.Priority++
+	f.snapshot.accounts = append(f.snapshot.accounts, &second)
+	current := second
+	repo.current[second.ID] = &current
+	slots.afterWait = vetoProfitAfterWait
+	repo.onRead = func(id int64) {
+		if id == second.ID {
+			panic(http.ErrAbortHandler)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		f.callWithContext(ctx, "messages", profitVetoMessagesBody, httptest.NewRecorder())
+	})
+
+	require.NoError(t, ctx.Err(), "the panic unwind must release the slot before cancellation")
+	require.Equal(t, 2, repo.reads)
+	require.Equal(t, []int64{f.account.ID, second.ID}, sessions.added)
+	require.Equal(t, []int64{f.account.ID, second.ID}, slots.released)
+	require.Empty(t, slots.held)
+	require.Empty(t, sessions.removed)
+	require.Empty(t, f.wire)
 }
