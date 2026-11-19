@@ -79,15 +79,13 @@ func (s *SchedQualityEngineService) Start(ctx context.Context) {
 		return
 	}
 	s.stop, s.done = make(chan struct{}), make(chan struct{})
-	at := s.now().UTC().Truncate(schedPerfTick)
-	s.performance.Store(&SchedPerfSnapshot{at: at, from: at})
-	perfCtx, cancel := context.WithCancel(ctx)
-	perfDone := make(chan struct{})
-	go func() { defer close(perfDone); s.runPerformance(perfCtx) }()
 	// Recover synchronously so the first reader after Start sees restored state.
 	if err := s.cycle(ctx); err != nil {
 		slog.ErrorContext(ctx, "sched_quality.cycle", "error", err)
 	}
+	perfCtx, cancel := context.WithCancel(ctx)
+	perfDone := make(chan struct{})
+	go func() { defer close(perfDone); s.runPerformance(perfCtx) }()
 	go func() {
 		defer close(s.done)
 		defer func() { cancel(); <-perfDone }()

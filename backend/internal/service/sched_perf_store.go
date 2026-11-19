@@ -10,17 +10,18 @@ import (
 )
 
 type SchedPerfLedger interface {
+	PerfDatabaseTime(context.Context) (time.Time, error)
 	LoadPerfConfig(context.Context) (map[int64]SchedPolicyRecord, map[int64]time.Time, error)
-	LoadPerfPage(ctx context.Context, from, at time.Time, after SchedAttemptCursor, inserted bool, limit int) ([]SchedPerfFact, SchedAttemptCursor, bool, error)
+	LoadPerfPage(ctx context.Context, from, at time.Time, after SchedAttemptCursor, incremental bool, limit int) ([]SchedPerfFact, SchedAttemptCursor, bool, error)
 	LoadPerfSwitches(ctx context.Context, from, at time.Time, afterID int64, limit int) ([]SchedPerfSwitch, error)
 }
 
 type schedPerfStore struct {
-	facts                    map[string]SchedPerfFact
-	switches                 map[int64]SchedPerfSwitch
-	boot, inserted, switched time.Time
-	finishedCursor           SchedAttemptCursor
-	loaded                   bool
+	facts                map[string]SchedPerfFact
+	switches             map[int64]SchedPerfSwitch
+	boot, visibleThrough time.Time
+	finishedCursor       SchedAttemptCursor
+	loaded               bool
 }
 
 func (s *SchedQualityEngineService) PerformanceSnapshot() *SchedPerfSnapshot {
@@ -28,9 +29,10 @@ func (s *SchedQualityEngineService) PerformanceSnapshot() *SchedPerfSnapshot {
 }
 
 // The store belongs to one background worker. No short-window lock or route
-// reader touches the mutable ledger or either of its independent watermarks.
+// reader touches its mutable facts or publication watermark.
 func (s *SchedQualityEngineService) runPerformance(ctx context.Context) {
-	w := schedPerfStore{facts: make(map[string]SchedPerfFact), switches: make(map[int64]SchedPerfSwitch)}
+	defer s.performance.Store(nil) // A subsequent Start must recover before serving scores.
+	w := schedPerfStore{facts: make(map[string]SchedPerfFact)}
 	for ctx.Err() == nil {
 		at := s.now().UTC().Truncate(schedPerfTick)
 		if p := s.PerformanceSnapshot(); p == nil || !p.complete && !p.at.Equal(at) {
@@ -64,21 +66,25 @@ func (s *SchedQualityEngineService) publishPerformance(ctx context.Context, w *s
 }
 
 func (w *schedPerfStore) load(ctx context.Context, ledger SchedPerfLedger, at time.Time) error {
+	// inserted_at is assigned by PostgreSQL. When its clock lags, a batch
+	// committed just after this read can carry two timestamps before our tick.
+	dbNow, err := ledger.PerfDatabaseTime(ctx)
+	if err != nil {
+		return err
+	}
+	through := at
+	if dbNow.Before(through) {
+		through = dbNow
+	}
 	cut := at.Add(-schedPerfWindow)
 	for id, f := range w.facts {
 		if f.Finish < cut.UnixMicro() {
 			delete(w.facts, id)
 		}
 	}
-	for id, e := range w.switches {
-		if e.At.Before(cut) {
-			delete(w.switches, id)
-		}
-	}
 	if w.boot.IsZero() {
 		w.boot = at
-		w.inserted = at
-		w.switched = at.Add(-schedPerfWindow)
+		w.visibleThrough = through
 	}
 	if !w.loaded {
 		if err := w.pages(ctx, ledger, w.boot.Add(-schedPerfWindow), w.boot, &w.finishedCursor, false); err != nil {
@@ -86,16 +92,16 @@ func (w *schedPerfStore) load(ctx context.Context, ledger SchedPerfLedger, at ti
 		}
 		w.loaded = true
 	}
-	from := w.inserted.Add(-q.LedgerReloadOverlap)
+	from := w.visibleThrough.Add(-q.LedgerReloadOverlap)
 	var cursor SchedAttemptCursor
 	if err := w.pages(ctx, ledger, from, at, &cursor, true); err != nil {
 		return err
 	}
-	w.inserted = at
-	from = w.switched.Add(-q.LedgerReloadOverlap)
-	if from.Before(cut) {
-		from = cut
-	}
+	w.visibleThrough = through
+	// created_at is event time. A delayed log write, or a new ledger model
+	// for an existing event, can affect any part of the current window.
+	from = cut
+	switches := make(map[int64]SchedPerfSwitch)
 	var id int64
 	for {
 		events, err := ledger.LoadPerfSwitches(ctx, from, at, id, schedQualityLedgerPageSize)
@@ -103,7 +109,7 @@ func (w *schedPerfStore) load(ctx context.Context, ledger SchedPerfLedger, at ti
 			return err
 		}
 		for _, e := range events {
-			w.switches[e.ID] = e
+			switches[e.ID] = e
 		}
 		if len(events) < schedQualityLedgerPageSize {
 			break
@@ -114,13 +120,13 @@ func (w *schedPerfStore) load(ctx context.Context, ledger SchedPerfLedger, at ti
 		}
 		from, id = last.At, last.ID
 	}
-	w.switched = at
+	w.switches = switches
 	return nil
 }
 
-func (w *schedPerfStore) pages(ctx context.Context, ledger SchedPerfLedger, from, at time.Time, cursor *SchedAttemptCursor, inserted bool) error {
+func (w *schedPerfStore) pages(ctx context.Context, ledger SchedPerfLedger, from, at time.Time, cursor *SchedAttemptCursor, incremental bool) error {
 	for {
-		facts, next, done, err := ledger.LoadPerfPage(ctx, from, at, *cursor, inserted, schedQualityLedgerPageSize)
+		facts, next, done, err := ledger.LoadPerfPage(ctx, from, at, *cursor, incremental, schedQualityLedgerPageSize)
 		if err != nil {
 			return err
 		}

@@ -68,8 +68,14 @@ func TestSchedPerfLedgerPagingAndAdjacency(t *testing.T) {
 			cursor = next
 		}
 	}
+	// The earlier dispatch is already in the database at T but its application
+	// completion clock is ahead. At T only the later dispatch is visible.
+	add(10, 1, "skew", "skew-session", start, at.Add(time.Second), at.Add(-11*time.Second), q.OutcomeTimeout)
+	add(11, 2, "skew", "skew-session", start.Add(time.Second), start.Add(2*time.Second), start.Add(3*time.Second), q.OutcomeOK)
 	before := load(false, cut, at)
-	require.Len(t, before, 6)
+	require.NotContains(t, before, id(10))
+	require.True(t, before[id(11)].First)
+	require.Len(t, before, 7)
 	require.False(t, before[id(2)].First)
 	require.True(t, before[id(2)].Delivered)
 	require.True(t, before[id(3)].First)
@@ -95,6 +101,10 @@ func TestSchedPerfLedgerPagingAndAdjacency(t *testing.T) {
 	add(9, 1, "again", "other", start.Add(-time.Second), start, late, q.OutcomeTimeout)
 	end := at.Add(5 * time.Minute)
 	inc := load(true, at.Add(-10*time.Second), end)
+	require.Contains(t, inc, id(10))
+	require.True(t, inc[id(10)].First)
+	require.Contains(t, inc, id(11))
+	require.False(t, inc[id(11)].First)
 	require.Zero(t, inc[id(5)].Input)
 	require.False(t, inc[id(6)].First)
 	for key, f := range inc {
@@ -119,4 +129,63 @@ func TestSchedPerfLedgerPagingAndAdjacency(t *testing.T) {
 	require.Len(t, page, 1)
 	require.Empty(t, page[0].Model)
 	require.Equal(t, "profit_floor", page[0].Reason)
+}
+
+func TestSchedPerfLateSwitchAndSourceModel(t *testing.T) {
+	db := newTrialPostgres(t)
+	for _, name := range []string{"294_sched_quality.sql", "054_ops_system_logs.sql"} {
+		migration, err := migrations.FS.ReadFile(name)
+		require.NoError(t, err)
+		_, err = db.Exec(string(migration))
+		require.NoError(t, err)
+	}
+	r := &schedAttemptRepository{db: db}
+	at := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	eventTime := at.Add(-30 * time.Second)
+	addSwitch := func(req, kind, reason, source string) {
+		_, err := db.Exec(`INSERT INTO ops_system_logs(created_at,level,component,message,extra)
+  VALUES($1,'INFO','sched_quality','sched_quality.session_switch',
+  jsonb_build_object('gateway_request_id',$2::text,'group_id',1,'from',1,'to',2,'kind',$3::text,'reason',$4::text,'committed',true) || jsonb_strip_nulls(jsonb_build_object('from_model',NULLIF($5::text,''))))`, eventTime, req, kind, reason, source)
+		require.NoError(t, err)
+	}
+	read := func(tick time.Time) []service.SchedPerfSwitch {
+		events, err := r.LoadPerfSwitches(t.Context(), tick.Add(-12*time.Hour), tick, 0, 10)
+		require.NoError(t, err)
+		return events
+	}
+	addSwitch("first", "first_output_follow", "", "")
+	original := read(at)
+	require.Len(t, original, 1)
+	require.Empty(t, original[0].Model)
+	addSwitch("late", "first_output_follow", "", "")
+	_, err := db.Exec(`INSERT INTO account_attempt_samples(attempt_id,started_at,finished_at,inserted_at,request_id,account_id,group_id,model,request_class,stream,warm,outcome)
+ VALUES('00000000-0000-0000-0000-000000000001',$1,$2,$3,'first',1,1,'text',1,true,false,2)`, at.Add(-time.Minute), eventTime, at.Add(time.Second))
+	require.NoError(t, err)
+	next := read(at.Add(5 * time.Minute))
+	require.Len(t, next, 2)
+	require.Equal(t, original[0].ID, next[0].ID)
+	require.Equal(t, "text", next[0].Model)
+	require.Equal(t, "late", next[1].Request)
+	require.Empty(t, next[1].Model)
+
+	// Only the target actually sends on these three old-format switches.
+	insertTarget := func(req, model string) {
+		_, err := db.Exec(`INSERT INTO account_attempt_samples(attempt_id,started_at,finished_at,inserted_at,request_id,account_id,group_id,model,request_class,stream,warm,outcome)
+  VALUES(md5($1::text || $2::text)::uuid,$3,$4,$4,$1,2,1,$2,1,true,false,1)`, req, model, eventTime, eventTime.Add(time.Second))
+		require.NoError(t, err)
+	}
+	for _, tc := range []struct{ kind, reason string }{{"takeover", "priority_takeover"}, {"migrate", "quality_migration_ttfo"}, {"owner_released", "profit_floor"}} {
+		addSwitch(tc.kind, tc.kind, tc.reason, "")
+		insertTarget(tc.kind, "target-text")
+	}
+	addSwitch("new-format", "takeover", "", "source-text")
+	insertTarget("new-format", "target-text")
+	addSwitch("ambiguous", "migrate", "", "")
+	insertTarget("ambiguous", "one")
+	insertTarget("ambiguous", "two")
+	models := map[string]string{}
+	for _, event := range read(at.Add(5 * time.Minute)) {
+		models[event.Request] = event.Model
+	}
+	require.Equal(t, map[string]string{"first": "text", "late": "", "takeover": "target-text", "migrate": "target-text", "owner_released": "target-text", "new-format": "source-text", "ambiguous": ""}, models)
 }

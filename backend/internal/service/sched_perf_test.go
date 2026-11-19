@@ -12,9 +12,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,7 +89,7 @@ func TestSchedPerfPooledScore(t *testing.T) {
 
 func TestSchedPerfClocksAndRecent(t *testing.T) {
 	facts := map[string]SchedPerfFact{}
-	for _, minute := range []int{10, 15, 30, 60} {
+	for _, minute := range []int{10, 15, 30} {
 		for j := range 2 {
 			f := perfFact(1, 1)
 			f.Start = perfAt.Add(-time.Duration(minute)*time.Minute + time.Duration(j)*time.Microsecond).UnixMicro()
@@ -95,7 +97,7 @@ func TestSchedPerfClocksAndRecent(t *testing.T) {
 		}
 	}
 	p := buildSchedPerf(facts, nil, perfPolicies(), nil, perfAt)
-	require.Equal(t, SchedPerfRecent{1, 5, 7, 0}, p.Recent(1, 1, "text"))
+	require.Equal(t, SchedPerfRecent{First10: 1, First30: 5}, p.Recent(1, 1, "text"))
 	require.Equal(t, 3, p.First15(1))
 	for _, tc := range []struct {
 		clock, lower int
@@ -120,15 +122,24 @@ func TestSchedPerfClocksAndRecent(t *testing.T) {
 	policies := perfPolicies()
 	policies[1] = SchedPolicyRecord{Policy: q.Policy{Enabled: true, TTFTSeconds: .5}}
 	p = buildSchedPerf(facts, nil, policies, nil, perfAt)
-	require.Equal(t, 7, p.Recent(1, 1, "text").Slow60)
+	require.Equal(t, 6, p.rows[schedQualityKey{1, "text", 1}].First.Slow)
 	delete(policies, 1)
 	p = buildSchedPerf(facts, nil, policies, nil, perfAt)
 	require.Empty(t, p.rows)
 }
 
 type perfReadStub struct {
+	dbNow time.Time
 	SchedAttemptStore
-	page func(time.Time, time.Time, SchedAttemptCursor, bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error)
+	switches func(time.Time, time.Time) []SchedPerfSwitch
+	page     func(time.Time, time.Time, SchedAttemptCursor, bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error)
+}
+
+func (p perfReadStub) PerfDatabaseTime(context.Context) (time.Time, error) {
+	if p.dbNow.IsZero() {
+		return perfAt, nil
+	}
+	return p.dbNow, nil
 }
 
 func (p perfReadStub) LoadPerfPage(_ context.Context, from, at time.Time, after SchedAttemptCursor, inc bool, _ int) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
@@ -137,7 +148,10 @@ func (p perfReadStub) LoadPerfPage(_ context.Context, from, at time.Time, after 
 func (perfReadStub) LoadPerfConfig(context.Context) (map[int64]SchedPolicyRecord, map[int64]time.Time, error) {
 	return perfPolicies(), nil, nil
 }
-func (perfReadStub) LoadPerfSwitches(context.Context, time.Time, time.Time, int64, int) ([]SchedPerfSwitch, error) {
+func (p perfReadStub) LoadPerfSwitches(_ context.Context, from, at time.Time, _ int64, _ int) ([]SchedPerfSwitch, error) {
+	if p.switches != nil {
+		return p.switches(from, at), nil
+	}
 	return nil, nil
 }
 
@@ -188,6 +202,157 @@ func TestSchedPerfResumeAndAtomicRead(t *testing.T) {
 	group.Wait()
 }
 
+type perfStartupLedger struct {
+	*fakeSchedAttemptStore
+	shortRecovery chan struct{}
+}
+
+func (l perfStartupLedger) LoadFinishedPage(ctx context.Context, from, at time.Time, c SchedAttemptCursor, n int) ([]q.AttemptSample, error) {
+	<-l.shortRecovery
+	return l.fakeSchedAttemptStore.LoadFinishedPage(ctx, from, at, c, n)
+}
+func TestSchedPerfStartsAfterShortRecovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newQualityFixture(t)
+		ledger := perfStartupLedger{f.ledger, make(chan struct{})}
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		ledger.SchedPerfLedger = perfReadStub{page: func(_, _ time.Time, c SchedAttemptCursor, incremental bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+			if !incremental {
+				close(entered)
+				<-release
+			}
+			return nil, c, true, nil
+		}}
+		f.e.attempts = ledger
+		started := make(chan struct{})
+		go func() { f.e.Start(t.Context()); close(started) }()
+		synctest.Wait()
+		select {
+		case <-entered:
+			t.Error("long-window load started before short-window recovery")
+		default:
+		}
+		close(ledger.shortRecovery)
+		<-started
+		<-entered
+		require.Positive(t, f.e.Snapshot().Version)
+		require.False(t, f.e.PerformanceSnapshot().Usable(f.now))
+		close(release)
+		f.e.Stop()
+	})
+}
+
+func TestSchedPerfDatabaseWatermark(t *testing.T) {
+	// A collector finishes before T; a lagging database commits it after T.
+	// Both timestamps predate the ordinary ten-second overlap on the app clock.
+	next := perfAt.Add(schedPerfTick)
+	f := perfFact(1, 1)
+	f.ID = "late"
+	f.Finish = perfAt.Add(-30 * time.Second).UnixMicro()
+	inserted := perfAt.Add(-45 * time.Second)
+	ledger := perfReadStub{dbNow: perfAt.Add(-time.Minute)}
+	ledger.page = func(from, at time.Time, c SchedAttemptCursor, inc bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+		if at.Equal(next) && inc && !from.After(inserted) {
+			return []SchedPerfFact{f}, c, true, nil
+		}
+		return nil, c, true, nil
+	}
+	engine := NewSchedQualityEngineService(nil, ledger, nil, func() time.Time { return perfAt }, nil)
+	w := schedPerfStore{facts: map[string]SchedPerfFact{}}
+	require.NoError(t, engine.publishPerformance(t.Context(), &w, perfAt))
+	require.NoError(t, engine.publishPerformance(t.Context(), &w, next))
+	require.Equal(t, 1, engine.PerformanceSnapshot().First15(1))
+}
+
+func TestSchedPerfSwitchReconciliation(t *testing.T) {
+	event := SchedPerfSwitch{ID: 1, Group: 1, Account: 1, Target: 2, Kind: stickyFollow, Request: "first", At: perfAt.Add(-30 * time.Second)}
+	ledger := perfReadStub{
+		page: func(_, _ time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+			return nil, c, true, nil
+		},
+		switches: func(from, at time.Time) []SchedPerfSwitch {
+			if from.After(event.At) {
+				return nil
+			}
+			first := event
+			if at.Equal(perfAt) {
+				return []SchedPerfSwitch{first}
+			}
+			first.Model = "text"
+			duplicate := first
+			duplicate.ID = 2
+			late := event
+			late.ID = 3
+			late.Request = "late"
+			late.Kind = "takeover"
+			return []SchedPerfSwitch{first, duplicate, late}
+		},
+	}
+	engine := NewSchedQualityEngineService(nil, ledger, nil, func() time.Time { return perfAt }, nil)
+	w := schedPerfStore{facts: map[string]SchedPerfFact{}, switches: map[int64]SchedPerfSwitch{}}
+	require.NoError(t, engine.publishPerformance(t.Context(), &w, perfAt))
+	unknown := schedQualityKey{account: 1, group: 1}
+	require.Equal(t, 1, engine.PerformanceSnapshot().rows[unknown].Switches.Handoff)
+	next := perfAt.Add(5 * time.Minute)
+	require.NoError(t, engine.publishPerformance(t.Context(), &w, next))
+	warm := engine.PerformanceSnapshot()
+	coldStore := schedPerfStore{facts: map[string]SchedPerfFact{}, switches: map[int64]SchedPerfSwitch{}}
+	require.NoError(t, engine.publishPerformance(t.Context(), &coldStore, next))
+	require.Equal(t, engine.PerformanceSnapshot(), warm)
+	require.Equal(t, schedPerfSwitches{Takeover: 1}, warm.rows[unknown].Switches)
+	require.Equal(t, schedPerfSwitches{Handoff: 1}, warm.rows[schedQualityKey{account: 1, group: 1, model: "text"}].Switches)
+}
+
+func TestSchedPerfHalfMicroScores(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		ownSlow, ownN, peerSlow, peerN int
+		want                           int64
+	}{
+		{"positive", 6, 20, 11, 64, 64063}, {"negative", 0, 44, 7, 40, -120313},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := map[string]SchedPerfFact{}
+			add := func(account int64, slow, n int) {
+				for i := range n {
+					f := perfFact(account, 1)
+					f.Session = strconv.Itoa(i % 2)
+					if i < slow {
+						f.TTFO = 3000
+					}
+					facts[strconv.Itoa(len(facts))] = f
+				}
+			}
+			add(1, tc.ownSlow, tc.ownN)
+			add(2, tc.peerSlow, tc.peerN)
+			snap := buildSchedPerf(facts, nil, perfPolicies(), nil, perfAt)
+			micros, ok := snap.ScoreMicros(1, "text")
+			require.True(t, ok)
+			require.Equal(t, tc.want, micros)
+			require.Equal(t, float64(tc.want)/1e6, *snap.scores[SchedAccountModel{1, "text"}].Value)
+		})
+	}
+}
+
+func TestSchedPerfMilliseconds(t *testing.T) {
+	for _, tc := range []struct {
+		sec          float64
+		clock, lower int
+		slow, known  int
+	}{
+		{1.001, 1001, 0, 0, 1}, {1.001, 1002, 0, 1, 1}, {2.007, 0, 2007, 1, 1}, {2.007, 0, 2006, 0, 0},
+		{1.0016, 1002, 0, 0, 1}, {2.0074, 0, 2007, 1, 1}, {1.0015, 1002, 0, 0, 1},
+	} {
+		f := perfFact(1, 1)
+		f.TTFO, f.Censored = tc.clock, tc.lower
+		f.FullTier, f.Outcome = true, q.OutcomeTimeout
+		slow, known := perfSlow(f, tc.sec)
+		require.Equal(t, tc.slow, slow)
+		require.Equal(t, tc.known == 1, known)
+	}
+}
+
 func TestSchedPerfAdminAndSwitches(t *testing.T) {
 	admin, engine, accounts := schedAdminFixture()
 	admin.d.Groups.(schedAdminGroups)[2] = &Group{ID: 2, Name: "previous", Platform: PlatformOpenAI}
@@ -198,7 +363,31 @@ func TestSchedPerfAdminAndSwitches(t *testing.T) {
 		id := int64(i + 1)
 		events[id] = SchedPerfSwitch{ID: id, At: perfAt.Add(-time.Minute), Account: 1, Group: 2, Target: 2, Model: "text", Kind: kind, Reason: "profit_floor", Request: "r"}
 	}
-	p := buildSchedPerf(map[string]SchedPerfFact{"1": f, "2": f2}, events, perfPolicies(), nil, perfAt)
+	full, short, cancel := f2, f2, f2
+	full.Outcome, full.FullTier = q.OutcomeTimeout, true
+	short.Outcome, cancel.Outcome = q.OutcomeTimeout, q.OutcomeCanceled
+	// The repository resolves the two successes of a single request before aggregation.
+	firstSuccess, lastSuccess := f2, f2
+	lastSuccess.First, lastSuccess.Delivered = false, true
+	contA, contB := f2, f2
+	contA.Session, contA.Read, contA.Input, contA.Delivered = "A", 20, 80, true
+	contB.Session, contB.Read, contB.Input, contB.Delivered = "B", 30, 50, true
+	left := f2
+	left.Finish = perfAt.Add(-schedPerfWindow).UnixMicro()
+	left.Start = left.Finish - 1
+	left.Delivered = true
+	expired := left
+	expired.Start--
+	expired.Finish--
+	facts := map[string]SchedPerfFact{"other-group": f, "full": full, "short": short, "cancel": cancel,
+		"first-success": firstSuccess, "last-success": lastSuccess, "cont-a": contA, "cont-b": contB, "left": left, "expired": expired}
+	reset := perfAt.Add(-5 * time.Minute)
+	for i, ts := range []time.Time{reset, reset.Add(-time.Microsecond)} {
+		id := int64(100 + i)
+		events[id] = SchedPerfSwitch{ID: id, At: ts, Account: 3, Group: 2, Target: 2, Model: "text", Kind: "takeover"}
+	}
+	events[102] = SchedPerfSwitch{ID: 102, At: perfAt.Add(-time.Minute), Account: 1, Group: 3, Target: 2, Model: "text", Kind: "migrate"}
+	p := buildSchedPerf(facts, events, perfPolicies(), map[int64]time.Time{3: reset}, perfAt)
 	engine.perf = p
 	res, err := admin.AccountPerformance(t.Context(), 1)
 	require.NoError(t, err)
@@ -209,6 +398,10 @@ func TestSchedPerfAdminAndSwitches(t *testing.T) {
 	require.True(t, res.Rows[0].Member)
 	require.False(t, res.Rows[1].Member)
 	require.Equal(t, 4, res.Rows[1].Priority)
+	assert.Equal(t, schedPerfAttempts{N: 8, Timeouts: 1, Failures: 1}, res.Rows[1].Attempts)
+	assert.Equal(t, 4, res.Rows[1].Requests)
+	assert.Equal(t, schedPerfCont{Turns: 2, Sessions: 2, ReadTokens: 50, InputTokens: 130}, res.Rows[1].Cont)
+
 	require.Equal(t, schedPerfSwitches{1, 1, 1, 1, 1}, res.Rows[1].Switches)
 	group, err := admin.GroupPerformance(t.Context(), 2)
 	require.NoError(t, err)
