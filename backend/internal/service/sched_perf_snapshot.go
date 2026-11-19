@@ -3,6 +3,7 @@ package service
 import (
 	"cmp"
 	"math"
+	"math/big"
 	"slices"
 	"time"
 
@@ -20,7 +21,7 @@ type SchedPerfFact struct {
 	Model                                    string
 	Start, Finish                            int64 // Unix microseconds, the precision of the ledger
 	Read, Input                              int64
-	TTFO, Censored                           int
+	TTFO, Censored                           int // milliseconds; Censored is -1 when the ledger has no lower bound
 	Outcome                                  q.Outcome
 	First, Delivered, Stream, Warm, FullTier bool
 }
@@ -31,7 +32,7 @@ type SchedPerfSwitch struct {
 	Request, Model, Kind, Reason, Generation string
 }
 
-type SchedPerfRecent struct{ First10, First30, Known60, Slow60 int }
+type SchedPerfRecent struct{ First10, First30 int }
 type schedPerfFirst struct {
 	N            int      `json:"n"`
 	Slow         int      `json:"slow"`
@@ -148,7 +149,7 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		r.Attempts.N++
 		if f.Outcome == q.OutcomeTimeout && f.FullTier {
 			r.Attempts.Timeouts++
-		} else if f.Outcome != q.OutcomeOK {
+		} else if f.Outcome != q.OutcomeOK && f.Outcome != q.OutcomeCanceled {
 			r.Attempts.Failures++
 		}
 		if f.Delivered {
@@ -188,10 +189,6 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		if f.Session != "" {
 			t.sessions[f.Session] = struct{}{}
 		}
-		if age < time.Hour.Microseconds() {
-			r.recent.Known60++
-			r.recent.Slow60 += slow
-		}
 		layer := 0
 		if f.Warm {
 			layer = 1
@@ -204,14 +201,9 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		counts[layer].slow += slow
 		peers[gm] = counts
 	}
-	// Pool group residuals in a fixed order before rounding at the half-micro boundary.
-	keys := make([]schedQualityKey, 0, len(training))
-	for k := range training {
-		keys = append(keys, k)
-	}
-	slices.SortFunc(keys, perfKeyOrder)
-	for _, k := range keys {
-		t, r := training[k], s.rows[k]
+	excesses := make(map[SchedAccountModel]*big.Rat)
+	for k, t := range training {
+		r := s.rows[k]
 		r.First.Sessions = len(t.sessions)
 		r.Cont.Sessions = len(t.cont)
 		total := peers[schedGroupModel{k.group, k.model}]
@@ -219,39 +211,79 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		if n < 10 || r.First.N == 0 {
 			continue
 		}
-		p := float64(total[0].slow+total[1].slow-r.First.Slow) / float64(n)
-		expected := 0.0
-		for i, own := range t.strata {
-			expected += float64(own.n) * (float64(total[i].slow-own.slow) + 10*p) / float64(total[i].n-own.n+10)
-		}
-		r.First.ExpectedSlow = &expected
+		expected := perfExpectedSlow(t.strata, total, n, total[0].slow+total[1].slow-r.First.Slow)
+		displayExpected, _ := expected.Float64()
+		r.First.ExpectedSlow = &displayExpected
 		r.First.ExpectedN = r.First.N
 		am := SchedAccountModel{k.account, k.model}
+		if excesses[am] == nil {
+			excesses[am] = new(big.Rat)
+		}
+		residual := new(big.Rat).SetInt64(int64(r.First.Slow))
+		residual.Sub(residual, expected)
+		excesses[am].Add(excesses[am], residual)
 		score := s.scores[am]
 		score.N += r.First.N
 		score.Sessions += r.First.Sessions // sessions are group scoped
-		score.Excess += float64(r.First.Slow) - expected
 		s.scores[am] = score
 	}
-	for k, score := range s.scores {
+	for k, excess := range excesses {
+		score := s.scores[k]
+		score.Excess, _ = excess.Float64()
 		if score.N >= 20 && score.Sessions >= 2 {
-			score.micros = int64(math.Round(score.Excess / float64(score.N+20) * 1e6))
+			score.micros = perfScoreMicros(excess, score.N)
 			value := float64(score.micros) / 1e6
 			score.Value = &value
-			s.scores[k] = score
 		}
+		s.scores[k] = score
 	}
 	s.countSwitches(switches, resets)
 	return s
 }
+
+// Each stratum contributes own.n * (peerSlowInStratum + 10*p) / (peerNInStratum + 10).
+// Keep the fractions exact across strata and groups, including at half-micro ties.
+func perfExpectedSlow(own, total perfStrata, peerN, peerSlow int) *big.Rat {
+	prior := big.NewRat(int64(peerSlow), int64(peerN))
+	prior.Mul(prior, big.NewRat(10, 1))
+	expected := new(big.Rat)
+	for i, cell := range own {
+		if cell.n == 0 {
+			continue
+		}
+		term := new(big.Rat).SetInt64(int64(total[i].slow - cell.slow))
+		term.Add(term, prior)
+		term.Mul(term, big.NewRat(int64(cell.n), int64(total[i].n-cell.n+10)))
+		expected.Add(expected, term)
+	}
+	return expected
+}
+
+func perfScoreMicros(excess *big.Rat, n int) int64 {
+	scaled := new(big.Rat).Mul(excess, big.NewRat(1_000_000, int64(n)+20))
+	var whole, rem big.Int
+	whole.QuoRem(scaled.Num(), scaled.Denom(), &rem)
+	rem.Abs(&rem)
+	if rem.Lsh(&rem, 1).Cmp(scaled.Denom()) >= 0 {
+		whole.Add(&whole, big.NewInt(int64(scaled.Sign())))
+	}
+	return whole.Int64()
+}
+
 func perfSlow(f SchedPerfFact, seconds float64) (int, bool) {
+	ms := math.Round(seconds * 1000)
+	// A policy can exceed the range of an integer clock; every observed TTFO then passes.
+	if ms >= 1<<63 {
+		return 0, f.TTFO > 0
+	}
+	limit := int64(ms)
 	if f.TTFO > 0 {
-		if float64(f.TTFO)/1000 > seconds {
+		if int64(f.TTFO) > limit {
 			return 1, true
 		}
 		return 0, true
 	}
-	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored > 0 && float64(f.Censored)/1000 >= seconds {
+	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored >= 0 && int64(f.Censored) >= limit {
 		return 1, true
 	}
 	return 0, false
@@ -270,7 +302,7 @@ func (s *SchedPerfSnapshot) countSwitches(events map[int64]SchedPerfSwitch, rese
 	slices.Sort(ids)
 	for _, id := range ids {
 		e := events[id]
-		if e.Account <= 0 || e.Account == e.Target || e.Kind == "create" || !s.policies[e.Group].Policy.Enabled || e.At.Before(s.from) || !e.At.Before(s.at) || e.At.Before(resets[e.Account]) {
+		if e.Account <= 0 || e.Account == e.Target || e.Kind == "create" || !s.policies[e.Group].Policy.Enabled || e.At.Before(s.from) || !e.At.Before(s.at) || !e.At.After(resets[e.Account]) {
 			continue
 		}
 		k := commit{e.Group, e.Account, e.Target, e.Request, e.Kind, e.Generation}

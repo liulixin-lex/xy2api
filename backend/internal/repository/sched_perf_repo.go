@@ -10,6 +10,16 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
+// Sample the insertion clock before reading pages, so advancing a watermark
+// never assumes the application and PostgreSQL clocks are synchronized.
+func (r *schedAttemptRepository) PerfDatabaseTime(ctx context.Context) (time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, q.LedgerReadTimeout)
+	defer cancel()
+	var at time.Time
+	err := r.db.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&at)
+	return at, err
+}
+
 func (r *schedAttemptRepository) LoadPerfConfig(ctx context.Context) (map[int64]service.SchedPolicyRecord, map[int64]time.Time, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.LedgerReadTimeout)
 	defer cancel()
@@ -29,22 +39,32 @@ func (r *schedAttemptRepository) LoadPerfConfig(ctx context.Context) (map[int64]
 	return policies, resets, tx.Commit()
 }
 
-// Both paging clocks have existing indexes. Only the IDs of a bounded page cross
-// into the enrichment query; a failure there leaves the caller's cursor intact.
-func (r *schedAttemptRepository) LoadPerfPage(ctx context.Context, from, at time.Time, after service.SchedAttemptCursor, inserted bool, limit int) ([]service.SchedPerfFact, service.SchedAttemptCursor, bool, error) {
+const perfFinishedPage = `SELECT attempt_id, finished_at FROM account_attempt_samples
+ WHERE capture_version>=2 AND finished_at >= $1 AND finished_at < $2 AND inserted_at < $2
+ AND (finished_at,attempt_id) > ($3,$4::uuid) ORDER BY finished_at,attempt_id LIMIT $5`
+
+// An attempt becomes visible when both clocks pass. Partition by the later
+// clock so each branch can use its own index, with no duplicate at equality.
+const perfVisiblePage = `SELECT attempt_id, visible_at FROM (
+ SELECT attempt_id, finished_at AS visible_at FROM account_attempt_samples
+ WHERE capture_version>=2 AND finished_at >= $1 AND finished_at < $2 AND inserted_at <= finished_at
+ AND (finished_at,attempt_id) > ($3,$4::uuid)
+ UNION ALL
+ SELECT attempt_id, inserted_at AS visible_at FROM account_attempt_samples
+ WHERE capture_version>=2 AND inserted_at >= $1 AND inserted_at < $2 AND finished_at < inserted_at
+ AND (inserted_at,attempt_id) > ($3,$4::uuid)
+ ) newly_visible ORDER BY visible_at,attempt_id LIMIT $5`
+
+func (r *schedAttemptRepository) LoadPerfPage(ctx context.Context, from, at time.Time, after service.SchedAttemptCursor, incremental bool, limit int) ([]service.SchedPerfFact, service.SchedAttemptCursor, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.LedgerReadTimeout)
 	defer cancel()
-	clock := "finished_at"
-	if inserted {
-		clock = "inserted_at"
+	query := perfFinishedPage
+	if incremental {
+		query = perfVisiblePage
 	}
 	if after.At.IsZero() {
 		after = service.SchedAttemptCursor{At: from.Add(-time.Microsecond), AttemptID: "00000000-0000-0000-0000-000000000000"}
 	}
-	query := `SELECT attempt_id,` + clock + ` FROM account_attempt_samples
- WHERE capture_version>=2 AND ` + clock + ` >= $1 AND ` + clock + ` < $2
- AND ( ` + clock + `, attempt_id) > ($3,$4::uuid) AND inserted_at < $2
- ORDER BY ` + clock + `,attempt_id LIMIT $5`
 	rows, err := r.db.QueryContext(ctx, query, from, at, after.At, after.AttemptID, limit)
 	if err != nil {
 		return nil, after, false, err
@@ -67,7 +87,7 @@ func (r *schedAttemptRepository) LoadPerfPage(ctx context.Context, from, at time
 	if len(ids) == 0 {
 		return nil, after, true, nil
 	}
-	facts, err := r.perfFacts(ctx, ids, at, inserted)
+	facts, err := r.perfFacts(ctx, ids, at, incremental)
 	if err != nil {
 		return nil, after, false, err
 	}
@@ -96,7 +116,7 @@ func (r *schedAttemptRepository) perfFacts(ctx context.Context, ids []string, at
  FROM account_attempt_samples WHERE attempt_id=ANY($1::uuid[])),
  affected AS (SELECT attempt_id FROM page ` + affected + `)
  SELECT s.attempt_id,s.started_at,s.finished_at,s.account_id,s.group_id,s.model,s.session_key,
- s.stream,s.warm,s.full_tier_first_output_timeout,s.outcome,coalesce(s.ttfo_ms,0),coalesce(s.censored_ms,0),
+ s.stream,s.warm,s.full_tier_first_output_timeout,s.outcome,coalesce(s.ttfo_ms,0),coalesce(s.censored_ms,-1),
  s.input_tokens,s.cache_read_tokens,s.cache_creation_tokens,
  s.request_id<>'' AND NOT EXISTS (SELECT 1 FROM account_attempt_samples x WHERE x.request_id=s.request_id
   AND (x.started_at,x.attempt_id)<(s.started_at,s.attempt_id) AND x.finished_at<$2 AND x.inserted_at<$2),
@@ -156,7 +176,7 @@ func (r *schedAttemptRepository) LoadPerfSwitches(ctx context.Context, from, at 
   ORDER BY created_at,id LIMIT $4
  ) SELECT id,created_at,coalesce(req,''),grp,owner,target,kind,reason,gen,
  coalesce(source_model,(SELECT min(model) FROM account_attempt_samples s
- WHERE req<>'' AND s.request_id=page.req AND s.group_id=grp AND s.account_id=owner AND s.inserted_at<$2
+ WHERE req<>'' AND s.request_id=page.req AND s.group_id=grp AND s.inserted_at<$2 AND s.finished_at<$2
  HAVING min(model)=max(model)),'')
  FROM page ORDER BY created_at,id`, from, at, afterID, limit)
 	if err != nil {
