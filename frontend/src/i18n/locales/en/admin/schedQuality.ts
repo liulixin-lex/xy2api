@@ -230,6 +230,11 @@ export default {
         ttfo: 'Samples: this group {local} / all {total}',
         error: 'Clear outcomes: this group {local} / all {total}',
         cache: 'Continuation turns: this group {local} / all {total}',
+        total: {
+          ttfo: '{n}',
+          error: '{n}',
+          cache: '{n}',
+        },
         weight: 'Weight: this group {local} / all {total}',
         unknownValue: 'unknown',
         unknownWhy: 'Figures marked unknown: the record was written before they were kept',

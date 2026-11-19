@@ -599,6 +599,14 @@ describe('SchedQualityPanel', () => {
     expect(document.querySelector('[data-qp-group-detail="53"]')).toBeNull()
   })
 
+  // Browser check #10: the heading's title and note ran together in English ("DecisionsOne record …").
+  it('keeps the decisions title and its note apart', () => {
+    const w = mount(SchedDecisions, { props: { accountId: 7, groupName: () => '晨星组' } })
+    const heading = w.get('h3').text()
+    expect(heading).toMatch(/admin\.schedQuality\.decisions\.title\s+admin\.schedQuality\.decisions\.note$/)
+    expect(w.get('[data-qp-decisions-note]').classes()).toContain('qp-h-note')
+  })
+
   // M1: a recovery while the list is collapsed: opening it again shows the new record, not the history loaded before.
   it('reloads a collapsed decision list on its next opening after a recovery or an exemption', async () => {
     const record = (id: number, action: string): BackendDecision =>
@@ -686,6 +694,9 @@ describe('SchedQualityPanel', () => {
   })
 
   const U = 'admin.schedQuality.evidence.samples.unknownValue'
+  /** The counts line as the stub renders it: a known total carries its unit template, an unknown one is just unknown. */
+  const counts = (dim: string, local: string, total: string | null) =>
+    `admin.schedQuality.evidence.samples.${dim}:${JSON.stringify({ local, total: total === null ? U : `admin.schedQuality.evidence.samples.total.${dim}:${JSON.stringify({ n: total })}` })}`
   // Round 3 (plan item 9): each line says how much of its counted evidence is this group's; older records say unknown.
   it('shows this group\'s and all the counted units of each line, the first output\'s weight, and why an error line did not recover', async () => {
     const value = detail()
@@ -701,12 +712,12 @@ describe('SchedQualityPanel', () => {
     await flushPromises()
     const lineOf = (dim: string) => document.querySelector<HTMLElement>(`[data-qp-group-detail="54"] [data-qp-line="${dim}"]`)!
     const text = (el: Element | null) => el?.textContent?.trim()
-    expect(text(lineOf('ttfo').querySelector('[data-qp-evidence-samples]'))).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"11","total":"30"}')
+    expect(text(lineOf('ttfo').querySelector('[data-qp-evidence-samples]'))).toBe(counts('ttfo', '11', '30'))
     expect(text(lineOf('ttfo').querySelector('[data-qp-evidence-weight]'))).toBe('admin.schedQuality.evidence.samples.weight:{"local":"9.5","total":"24.5"}')
-    expect(text(lineOf('error').querySelector('[data-qp-evidence-samples]'))).toBe('admin.schedQuality.evidence.samples.error:{"local":"40","total":"80"}')
+    expect(text(lineOf('error').querySelector('[data-qp-evidence-samples]'))).toBe(counts('error', '40', '80'))
     expect(text(lineOf('error').querySelector('[data-qp-evidence-over-limit]'))).toBe('admin.schedQuality.evidence.recoveryOverLimit')
     // A record from before the counts were kept: unknown with why, not worked out from the source groups.
-    expect(text(lineOf('cache').querySelector('[data-qp-evidence-samples]'))).toBe(`admin.schedQuality.evidence.samples.cache:${JSON.stringify({ local: U, total: U })}`)
+    expect(text(lineOf('cache').querySelector('[data-qp-evidence-samples]'))).toBe(counts('cache', U, null))
     expect(lineOf('cache').querySelector('[data-qp-evidence-samples-why]')).not.toBeNull()
     expect(lineOf('ttfo').querySelector('[data-qp-evidence-samples-why]')).toBeNull()
     expect(lineOf('ttfo').querySelector('[data-qp-evidence-over-limit]')).toBeNull()
@@ -716,7 +727,7 @@ describe('SchedQualityPanel', () => {
   it('reads an older first-output record field by field: unknown counts and local weight, the recorded total weight', () => {
     const ttfo = legacyLine('ttfo', 'pass')
     const w = mount(SchedEvidence, { props: { dim: 'ttfo', evidence: ttfo.evidence, samples: ttfo, sourceGroups: [53] } })
-    expect(w.get('[data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.ttfo:${JSON.stringify({ local: U, total: U })}`)
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(counts('ttfo', U, null))
     expect(w.get('[data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
     expect(w.get('[data-qp-evidence-samples-why]').text()).toBe('admin.schedQuality.evidence.samples.unknownWhy')
     const error = legacyLine('error', 'unknown')
@@ -727,17 +738,17 @@ describe('SchedQualityPanel', () => {
 
   // Second review item 5: one side missing never hides the other; a recorded 0 is 0, not unknown.
   it.each([
-    ['this group 0, all missing', { samples_local: 0, samples_total: null }, { local: '0', total: U }],
-    ['this group missing, all 12', { samples_local: null, samples_total: 12 }, { local: U, total: '12' }]
+    ['this group 0, all missing', { samples_local: 0, samples_total: null }, counts('error', '0', null)],
+    ['this group missing, all 12', { samples_local: null, samples_total: 12 }, counts('error', U, '12')]
   ])('shows each side of the counts on its own: %s', (_, samples, expected) => {
     const w = mount(SchedEvidence, { props: { dim: 'error', evidence: errorEvidence(), samples } })
-    expect(w.get('[data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.error:${JSON.stringify(expected)}`)
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(expected)
     expect(w.get('[data-qp-evidence-samples-why]').text()).toBe('admin.schedQuality.evidence.samples.unknownWhy')
   })
 
   it('shows a basis\'s own counts when its nested evidence is missing', () => {
     const w = mount(SchedEvidence, { props: { dim: 'ttfo', evidence: undefined, samples: { samples_local: 4, samples_total: 12 } } })
-    expect(w.get('[data-qp-evidence-samples]').text()).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"4","total":"12"}')
+    expect(w.get('[data-qp-evidence-samples]').text()).toBe(counts('ttfo', '4', '12'))
     expect(w.text()).toContain('admin.schedQuality.evidence.none')
     expect(w.find('[data-qp-evidence-weight]').exists()).toBe(false)
     expect(w.find('[data-qp-evidence-samples-why]').exists()).toBe(false)
@@ -774,9 +785,9 @@ describe('SchedQualityPanel', () => {
     expect(reason(7).text()).toBe(line(`admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seatsLegacy`))
     // The basis opens to the same counts the line shows.
     await w.get('[data-qp-decision-evidence="5"]').trigger('click')
-    expect(w.get('[data-qp-decision="5"] [data-qp-evidence-samples]').text()).toBe('admin.schedQuality.evidence.samples.ttfo:{"local":"6","total":"30"}')
+    expect(w.get('[data-qp-decision="5"] [data-qp-evidence-samples]').text()).toBe(counts('ttfo', '6', '30'))
     await w.get('[data-qp-decision-evidence="3"]').trigger('click')
-    expect(w.get('[data-qp-decision="3"] [data-qp-evidence-samples]').text()).toBe(`admin.schedQuality.evidence.samples.ttfo:${JSON.stringify({ local: U, total: U })}`)
+    expect(w.get('[data-qp-decision="3"] [data-qp-evidence-samples]').text()).toBe(counts('ttfo', U, null))
     expect(w.get('[data-qp-decision="3"] [data-qp-evidence-weight]').text()).toBe(`admin.schedQuality.evidence.samples.weight:${JSON.stringify({ local: U, total: '24.5' })}`)
   })
 })
