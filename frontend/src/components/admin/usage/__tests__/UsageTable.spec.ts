@@ -1036,7 +1036,18 @@ describe('admin usage latency: the user wait first', () => {
       expect(last.text()).toBe('usage.latencyUnknown')
       expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
     }
-    expect(wrapper.text()).toContain('usage.latencyDuration1m 10s')
+    expect(wrapper.text()).toContain('usage.latencyLastAttemptDuration1m 10s')
+  })
+
+  // Browser check #5: duration_ms is the last attempt's; on the admin page, under the user wait, it is named so.
+  it('names the duration "last attempt" with why on the admin page, and keeps "total" without a tip on the user page', () => {
+    const label = (w: ReturnType<typeof mountLatency>, key: string) => w.findAll('span').find((el) => el.text() === key)
+    const admin = mountLatency({ showEndToEnd: true })
+    expect(label(admin, 'usage.latencyLastAttemptDuration')?.attributes('title')).toBe('usage.latencyLastAttemptDurationHint')
+    expect(label(admin, 'usage.latencyDuration')).toBeUndefined()
+    const user = mountLatency()
+    expect(label(user, 'usage.latencyDuration')?.attributes('title')).toBeUndefined()
+    expect(label(user, 'usage.latencyLastAttemptDuration')).toBeUndefined()
   })
 
   it('keeps the first token on the shared user page, whose answer has no end-to-end value', () => {

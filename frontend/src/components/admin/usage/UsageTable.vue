@@ -287,7 +287,7 @@
                 <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
                 <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               </template>
-              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
+              <span class="text-gray-400 dark:text-gray-500" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.latencyLastAttemptDuration') : t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
                 <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
@@ -706,6 +706,8 @@ const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
  */
 const crossGroup = (row: AdminUsageLog) =>
   props.showFallbackOrigin && row.origin_group_id != null && row.group_id != null && row.origin_group_id !== row.group_id
+// duration_ms is the last attempt's: on the admin page, under the user wait (which includes earlier attempts), the
+// latency cell names it "last attempt" with why (browser check #5); the user page keeps "total" with no tip.
 /** The wait the colour bar's top follows: the end-to-end first output on the admin page, the first token otherwise. */
 const leadLatency = (row: AdminUsageLog) => (props.showEndToEnd ? row.end_to_end_first_output_ms : row.first_token_ms) ?? null
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`

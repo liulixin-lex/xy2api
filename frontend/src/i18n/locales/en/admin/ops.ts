@@ -116,8 +116,8 @@ export default {
         unknown: 'Unknown',
         none: 'No end-to-end records in this period. Full-hour summaries created before the upgrade lack this data.',
         notProvided: 'The data returned carries no end-to-end figures',
-        samples: 'Based on {n} requests. Full-hour summaries created before the upgrade lack this data.',
-        lastAttempt: 'Last attempt'
+        samples: 'Based on {n} request. Full-hour summaries created before the upgrade lack this data. | Based on {n} requests. Full-hour summaries created before the upgrade lack this data.',
+        lastAttempt: 'Last first token'
       },
       p50: 'p50:',
       p90: 'p90:',
