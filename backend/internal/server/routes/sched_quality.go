@@ -10,6 +10,8 @@ func registerSchedQualityRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	q := h.Admin.SchedQuality
 	g.POST("/accounts/summary", q.Summary)
 	g.GET("/accounts/attention", q.Attention)
+	g.GET("/groups/:id/performance", q.GroupPerformance)
+	g.GET("/accounts/:id/performance", q.AccountPerformance)
 	g.GET("/accounts/:id", q.Detail)
 	g.GET("/accounts/:id/decisions", q.Decisions)
 	g.GET("/ttft-rule", q.TTFTRule)
