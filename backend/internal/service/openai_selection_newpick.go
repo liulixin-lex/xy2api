@@ -97,8 +97,12 @@ func (s *OpenAIGatewayService) newPickFront(ctx context.Context, view schedquali
 	if acc.Concurrency <= 0 || view.ResetAt(acc.ID).After(snapshotAt) || override.Mode == schedquality.OverrideExempt || state.Placement(true, now) != schedquality.PlaceFront {
 		return newPickAccount{}, false
 	}
-	key := buildSelectionKey(view, group, model, acc, request, now)
 	attemptModel := OpenAIAttemptModel(acc, model)
+	// Native Responses can move an image model into a tool and use a text model for the request.
+	if isOpenAIImageGenerationModel(attemptModel) {
+		return newPickAccount{}, false
+	}
+	key := buildSelectionKey(view, group, model, acc, request, now)
 	return newPickAccount{acc, key, attemptModel}, key.Tier == 0 && s.newPickForwardModel(ctx, acc, model) == attemptModel
 }
 
