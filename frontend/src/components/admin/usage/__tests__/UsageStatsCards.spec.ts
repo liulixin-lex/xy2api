@@ -120,3 +120,43 @@ describe('UsageStatsCards user wait (admin)', () => {
     expect(mountCards({ e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 }).find('[data-testid="usage-e2e-card"]').exists()).toBe(false)
   })
 })
+
+// Browser check #1 and #7: the admin page's five cards fit at 1024 and 1440, and never show another filter's totals.
+describe('UsageStatsCards admin layout and unread totals', () => {
+  const big = { ...stats, total_requests: 12002, total_tokens: 652_440_000, total_actual_cost: 30750.12, total_cost: 30750.12, average_duration_ms: 1850 }
+  const mountCards = (e2eState?: 'loading' | 'failed' | 'loaded' | 'blocked') => mount(UsageStatsCards, {
+    props: { stats: { ...big, e2e_first_output_p50_ms: 1850, e2e_first_output_samples: 1 } as never, e2eState },
+    global: { stubs: { Icon: true } },
+  })
+  // The four totals by position: the shared markup carries no test ids, so the user page's DOM stays as it was.
+  const totals = (w: ReturnType<typeof mountCards>) => w.findAll('.card').slice(0, 4).map((card) => card.get('p.text-xl').text())
+
+  it('lays the admin cards out in three columns until 2xl, with text that wraps instead of being cut; the user page keeps four', () => {
+    const admin = mountCards('loaded')
+    expect(admin.get('div').classes()).toEqual(expect.arrayContaining(['grid', 'grid-cols-2', 'lg:grid-cols-3', '2xl:grid-cols-5']))
+    expect(admin.get('div').classes()).not.toContain('lg:grid-cols-5')
+    for (const card of admin.findAll('.card')) expect(card.get('div:nth-child(2)').classes()).toEqual(expect.arrayContaining(['min-w-0', '[overflow-wrap:anywhere]']))
+
+    const user = mountCards()
+    expect(user.get('div').classes()).toEqual(['grid', 'grid-cols-2', 'gap-4', 'lg:grid-cols-4'])
+    expect(user.findAll('.card')).toHaveLength(4)
+    expect(user.findAll('.card > div:nth-child(2)').map((el) => el.attributes('class') ?? '')).toEqual(['', '', 'min-w-0 flex-1', ''])
+  })
+
+  it.each([
+    ['loading', ['…', '…', '…', '…']],
+    ['failed', Array(4).fill('usage.latencyUnknown')],
+    ['blocked', Array(4).fill('usage.latencyUnknown')]
+  ] as const)('shows no totals on the admin page while its stats are %s', (state, expected) => {
+    const w = mountCards(state)
+    expect(totals(w)).toEqual(expected)
+    expect(w.text()).not.toContain('12,002')
+    expect(w.text()).not.toContain('30750')
+    expect(w.text()).not.toContain('usage.in')
+  })
+
+  it('shows the totals on the admin page once loaded, and always on the user page', () => {
+    expect(totals(mountCards('loaded'))).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+    expect(totals(mountCards())).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+  })
+})
