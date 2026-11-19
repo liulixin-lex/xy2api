@@ -539,11 +539,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
-	if openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID) {
-		raw := openai.CodexGPT61SolMetadata
-		if openai.IsGPT61TerraModelSpelling(modelID) {
-			raw = openai.CodexGPT61TerraMetadata
-		}
+	if raw := openai.CodexOfficialModelMetadata(modelID); raw != nil {
 		if err := json.Unmarshal(raw, &descriptor); err != nil {
 			panic(err)
 		}
@@ -2104,12 +2100,33 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.2-sol":   {},
+	"gpt-6.2-astra": {},
 	"gpt-6.1-terra": {},
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
 	"gpt-5.6-sol":   {},
 	"gpt-5.6-terra": {},
 	"gpt-5.6-luna":  {},
+}
+
+// apiKeyCodexResponsesLiteTarget canonicalizes model spellings to the keys of
+// apiKeyCodexModelsWithoutResponsesLite. Other models are returned unchanged.
+func apiKeyCodexResponsesLiteTarget(model string) string {
+	switch {
+	case isOpenAIGPT6AstraModel(model):
+		return "gpt-6-astra"
+	case openai.IsGPT61TerraModelSpelling(model):
+		return "gpt-6.1-terra"
+	case openai.IsGPT61SolModelSpelling(model):
+		return "gpt-6.1-sol"
+	case openai.IsGPT62SolModelSpelling(model):
+		return "gpt-6.2-sol"
+	case openai.IsGPT62AstraModelSpelling(model):
+		return "gpt-6.2-astra"
+	default:
+		return model
+	}
 }
 
 // adjustAPIKeyCodexModelsManifest prevents Codex from selecting Responses
@@ -2140,13 +2157,7 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if account != nil {
 			target = account.GetMappedModel(slug)
 		}
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
-		} else if openai.IsGPT61TerraModelSpelling(target) {
-			target = "gpt-6.1-terra"
-		} else if openai.IsGPT61SolModelSpelling(target) {
-			target = "gpt-6.1-sol"
-		}
+		target = apiKeyCodexResponsesLiteTarget(target)
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue
 		}

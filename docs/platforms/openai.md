@@ -208,6 +208,13 @@ goals = true
 - **Codex**：离线目录采用官方描述符，默认 `low`，context window 为 500000、max context window 为 872000。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
 - **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
 
+## 模型支持：GPT-6.2 Sol 与 GPT-6.2 Astra
+
+- **名称**：`gpt-6.2-sol`、`gpt-6.2-astra`，供应商前缀、大小写与下划线精确归一；带推理或 compact 后缀的写法（如 `gpt-6.2-sol-high`）不会匹配。
+- **Codex**：模型目录采用 openai/codex 官方描述符，推理档位 `low`–`ultra`，默认 `low`；context window 分别为 500000（Sol）与 272000（Astra），max context window 均为 872000；支持图片输入与 Fast（`priority`）档。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
+- **请求**：网关不对这两个模型做本地推理档位校验或映射，请求中的推理档位（包括 `none`）原样发往上游，由上游决定是否接受；工具调用不强制走 Responses 接口。
+- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
+
 ## 相关功能
 
 - [OpenAI 智商检测](../guides/iq-check.md)：按“账号 × 模型”检测降智并暂停调度。
