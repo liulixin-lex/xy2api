@@ -292,9 +292,9 @@ func TestSchedTrialLeasePromotionConcurrentCandidates(t *testing.T) {
 				require.NoError(t, <-released)
 			}
 			bindings := NewGatewayCache(rdb).(service.OpenAIStickyVersionedCache)
-			changed, commitErr := bindings.CommitSessionBinding(ctx, 7, "openai:session", service.StickySessionBinding{}, 1, time.Hour)
+			changed, commitErr := bindings.CommitSessionBinding(ctx, 7, "openai:session", service.StickySessionBinding{}, 1, time.Hour, service.BindingCommitOptions{})
 			require.NoError(t, commitErr)
-			require.True(t, changed)
+			require.Equal(t, service.BindingCommitted, changed.Status)
 			mr.advanceTo(now.Add(time.Second))
 			require.NoError(t, leases.Promote(ctx, 1, "model-a", 7, second, session, generation, now.Add(time.Second)))
 			if order == "release_after_commit" {

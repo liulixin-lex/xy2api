@@ -21,15 +21,15 @@ type selectionRebindCache struct {
 func (c *selectionRebindCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
 	return nil
 }
-func (c *selectionRebindCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ ...string) (bool, error) {
+func (c *selectionRebindCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
 	c.calls++
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.err != nil || c.fail || c.bindings[key] != expected.AccountID {
-		return false, c.err
+		return BindingCommitResult{Status: BindingChanged}, c.err
 	}
 	c.bindings[key] = target
-	return true, nil
+	return BindingCommitResult{Status: BindingCommitted, ObservedGen: expected.Generation, NewGen: expected.Generation + "-next"}, nil
 }
 
 func (c *selectionRebindCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
@@ -37,6 +37,6 @@ func (c *selectionRebindCache) GetSessionBinding(ctx context.Context, group int6
 	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }
 
-func (c *selectionRebindCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error) {
-	return false, nil
+func (c *selectionRebindCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (int64, error) {
+	return 0, nil
 }

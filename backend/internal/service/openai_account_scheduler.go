@@ -328,6 +328,19 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 				ctx = context.WithValue(ctx, firstOutputOnlyOwnerKey{}, stickyOwner)
 			}
 		}
+		// A later voluntary selection sees only the merged exclusions. Preserve
+		// this pass's sole reason for excluding a member for its veto event.
+		if len(firstOutputAvoided) > 0 {
+			only := make(map[int64]struct{})
+			for id := range firstOutputAvoided {
+				_, hard := origExcluded[id]
+				_, other := avoided[id]
+				if !hard && !other {
+					only[id] = struct{}{}
+				}
+			}
+			ctx = context.WithValue(ctx, firstOutputExcludedKey{}, only)
+		}
 		avoided = mergeExcluded(avoided, firstOutputAvoided)
 	}
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
@@ -403,6 +416,7 @@ type openAIGroupPrivacyRequirementContextKey struct{}
 
 // This marker lives for one selection. Keep the owner excluded from the pool,
 // but check its existing sticky release rules before borrowing another account.
+type firstOutputExcludedKey struct{}
 type firstOutputOnlyOwnerKey struct{}
 
 // A strict failure may be recorded after the outer scheduler classified the

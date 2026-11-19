@@ -172,6 +172,7 @@ func resilienceFirstEventPlanAt(ctx context.Context, accountID int64, platform s
 // firstEventGuard cancels an upstream attempt that produced no first event
 // before its deadline. The stream handler disarms it on the first line.
 type firstEventGuard struct {
+	sendSeq atomic.Uint64
 	timer   *time.Timer
 	cancel  context.CancelFunc
 	fired   atomic.Bool
@@ -248,7 +249,7 @@ func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase 
 	}
 	if account != nil {
 		if c != nil && c.Request != nil {
-			noteTimeoutPlan(c.Request.Context(), account, g.plan)
+			noteTimeoutPlan(c.Request.Context(), account, g.plan, logKnown(g.sendSeq.Load()))
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			TimeoutDiagnostics: g.plan.Diagnostics(),

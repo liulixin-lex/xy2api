@@ -30,16 +30,60 @@ type selectionSession struct {
 	recheck           func(context.Context, *Account) *Account
 	resetAt           func(int64) time.Time
 	leases            SchedTrialLeases
+	excludedMembers   []*Account // Membership before admission, only for attributing upstream avoid exclusions.
 	qualityOwnsSticky func(context.Context, *int64, string) bool
 }
 
-func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
+// Reuse this evidence when planning any voluntary switch. Keeping it on the
+// pending change also requests the atomic target check at commit.
+type voluntarySwitchEvidence struct {
+	idleSetting, idleObserved  *int64
+	avoidSeen, qualityOwned    *bool
+	sessionOn, transferAllowed bool
+}
+
+func (s *selectionSession) voluntaryAvoid(ctx context.Context, group int64, session string, v *voluntarySwitchEvidence) (map[int64]struct{}, string) {
+	v.sessionOn = resilience.Current().SessionOn()
+	v.transferAllowed = firstOutputMigrationAllowed(ctx, session)
+	if !v.transferAllowed {
+		return nil, "protocol_ineligible"
+	}
+	if s.qualityOwnsSticky != nil {
+		owned := s.qualityOwnsSticky(ctx, &group, session)
+		v.qualityOwned = &owned
+		if owned {
+			return nil, "quality_owned"
+		}
+	}
+	avoided, err := sessionAvoidAfterReset(ctx, s.store, group, firstOutputAvoidSession(session), s.resetAt)
+	if err != nil {
+		return nil, "avoid_read_error"
+	}
+	v.avoidSeen = new(len(avoided) != 0)
+	return avoided, ""
+}
+
+func (change *openAIStickyChange) logVeto(ctx context.Context, target *Account, reason string) {
+	if !resilience.StateFrom(ctx).ClaimVoluntarySwitchVeto() {
+		return
+	}
+	if target != nil {
+		change.target, change.toPriority = target.ID, new(target.Priority)
+	}
+	change.logSwitch(ctx, reason, BindingCommitResult{})
+}
+
+func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time, evidence *voluntarySwitchEvidence) bool {
 	if !selectionLive(view, now) {
 		return false
 	}
 	idle, enabled := view.TakeoverIdle(groupID)
 	if !enabled || idle < 0 {
 		return false
+	}
+	if evidence != nil {
+		evidence.idleObserved = nil
+		evidence.idleSetting = new(int64(idle / time.Second))
 	}
 	if idle == 0 {
 		return true
@@ -48,7 +92,14 @@ func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.
 		return false
 	}
 	id, remaining, err := s.bindings.GetSessionAccountIDWithTTL(ctx, groupID, key)
-	return err == nil && id == owner && remaining > 0 && s.bindingTTL-remaining >= idle
+	if err != nil || id != owner || remaining <= 0 {
+		return false
+	}
+	observed := s.bindingTTL - remaining
+	if evidence != nil {
+		evidence.idleObserved = new(int64(observed / time.Second))
+	}
+	return observed >= idle
 }
 
 func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int64, model string, owner, target *Account, migrate bool, req selectionRequest, now time.Time) bool {
@@ -64,7 +115,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
+	if owner == nil || s.cache == nil || s.store == nil || s.cacheKey == nil || resilience.StateFrom(ctx) == nil || openAISelectionExempt(ctx) || req.ManualOnly {
 		return nil
 	}
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil {
@@ -86,7 +137,8 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	req.Session = sessionHash
 	req.Borrow = false // This path plans an actual migration or takeover.
 	migrate := selectionMigrateOwner(view, groupID, owner, model, sessionHash, now)
-	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
+	facts := &voluntarySwitchEvidence{}
+	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now, facts) {
 		return nil
 	}
 	expected, err := s.cache.GetSessionBinding(ctx, groupID, key)
@@ -95,6 +147,22 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	}
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.key == key {
 		expected.LegacyKey = pending.expected.LegacyKey
+	}
+	kind := "takeover"
+	if migrate {
+		kind = "migrate"
+	}
+	change := &openAIStickyChange{groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model, expected: expected,
+		fromPriority: new(owner.Priority), kind: kind, voluntary: facts, ttl: s.bindingTTL, cache: s.cache, resetAt: s.resetAt, leases: s.leases, trialSession: sessionHash}
+	soft, veto := s.voluntaryAvoid(ctx, groupID, sessionHash, facts)
+	if veto != "" {
+		for _, target := range candidates {
+			if target != nil && target.ID != owner.ID && s.candidateAllowed(view, groupID, model, owner, target, migrate, req, now) {
+				change.logVeto(ctx, target, veto)
+				break
+			}
+		}
+		return nil
 	}
 	avoided, err := sessionAvoidAfterReset(ctx, s.store, groupID, strings.TrimSpace(sessionHash), s.resetAt)
 	if err != nil {
@@ -105,13 +173,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	avoided = mergeExcluded(avoided, failedTargets)
-	if resilience.Current().SessionOn() && s.qualityOwnsSticky != nil && firstOutputMigrationAllowed(ctx, sessionHash) && !s.qualityOwnsSticky(ctx, &groupID, sessionHash) {
-		soft, err := sessionAvoidAfterReset(ctx, s.store, groupID, firstOutputAvoidSession(sessionHash), s.resetAt)
-		if err != nil {
-			return nil
-		}
-		avoided = mergeExcluded(avoided, soft)
-	}
+	var denied *Account
 	s.marks.observe(candidates, req.Loads, now)
 	type candidate struct {
 		account *Account
@@ -125,7 +187,24 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		if _, blocked := avoided[account.ID]; blocked {
 			continue
 		}
+		if _, blocked := soft[account.ID]; blocked {
+			denied = account
+			continue
+		}
 		ordered = append(ordered, candidate{account, buildSelectionKey(view, groupID, model, account, req, now)})
+	}
+	if denied == nil && len(soft) != 0 {
+		// The ordinary pass may already have excluded an avoided member before
+		// selectOwner received its admitted candidates. Never re-admit it here.
+		for _, a := range s.excludedMembers {
+			if _, independentlyAvoided := avoided[a.ID]; independentlyAvoided {
+				continue
+			}
+			if _, blocked := soft[a.ID]; blocked && a.ID != owner.ID && s.candidateAllowed(view, groupID, model, owner, a, migrate, req, now) {
+				denied = a
+				break
+			}
+		}
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		// Compact capability routing predates quality ranking and applies only
@@ -168,7 +247,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		now, view = s.now(), s.view()
 		allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, req, now)
 		if !migrate {
-			allowed = allowed && s.takeoverReady(ctx, view, groupID, key, owner.ID, now)
+			allowed = allowed && s.takeoverReady(ctx, view, groupID, key, owner.ID, now, facts)
 		}
 		if !allowed || ctx.Err() != nil {
 			slot.ReleaseFunc()
@@ -193,21 +272,22 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), session: TrialLeaseSessionMember(sessionHash), now: s.now}
 			reservation.rememberRound(view, generation)
 		}
-		kind, reason := "takeover", "priority_takeover"
+		reason := "priority_takeover"
 		if migrate {
-			kind, reason = "migrate", "quality_migration_ttfo"
+			reason = "quality_migration_ttfo"
 			if selectionState(view, groupID, owner, model).Error.Identity == schedquality.IdentityRear {
 				reason = "quality_migration_error"
 			}
 		}
 		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-		change := &openAIStickyChange{
-			groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model,
-			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache,
-			resetAt: s.resetAt, reason: reason, leases: s.leases, trial: reservation, fromModel: OpenAIAttemptModel(owner, model), trialSession: sessionHash,
-		}
+		change.reason, change.target, change.trial = reason, latest.ID, reservation
+		change.fromPriority, change.toPriority = new(latestOwner.Priority), new(latest.Priority)
+		change.fromModel = OpenAIAttemptModel(owner, model)
 		resilience.StateFrom(ctx).SetStickyChange(change)
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: releaseSelectionTrialWithSlot(ctx, change, reservation, slot.ReleaseFunc)})
+	}
+	if denied != nil {
+		change.logVeto(ctx, denied, "target_avoided")
 	}
 	return nil
 }

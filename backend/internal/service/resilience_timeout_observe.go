@@ -14,7 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-func noteTimeoutPlan(ctx context.Context, account *Account, plan resilience.TimeoutPlan) {
+func noteTimeoutPlan(ctx context.Context, account *Account, plan resilience.TimeoutPlan, seq *uint64) {
 	d := plan.Diagnostics()
 	if d.TimeoutSource == "" {
 		return
@@ -36,7 +36,8 @@ func noteTimeoutPlan(ctx context.Context, account *Account, plan resilience.Time
 		bucket = "10_30"
 	}
 	resilience.Count("ttfo_lower_bound", st.GroupID(), id, timeoutMetricModel(plan.Model())+":"+bucket)
-	slog.Info("resilience.budget_timeout_plan", "account_id", id, "timeout_source", d.TimeoutSource, "tier_ms", d.TierMs, "planned_timeout_ms", d.PlannedTimeoutMs, "effective_timeout_ms", d.EffectiveTimeoutMs, "budget_remaining_ms_at_start", d.BudgetRemainingMsAtStart, "would_budget_cut", d.WouldBudgetCut, "budget_cut_applied", d.BudgetCutApplied, "budget_cut_after_full_tier", d.CutAfterFullTier, "anchor_offset_ms", d.AnchorOffsetMs, "attempt_start_offset_ms", d.AttemptStartOffsetMs, "committed_at_start", d.CommittedAtStart, "shadow_eof_remaining_ms", d.ShadowEOFRemainingMs)
+	slog.InfoContext(ctx, "resilience.budget_timeout_plan", "gateway_request_id", logKnown(st.GatewayRequestID()), "attempt_seq", seq,
+		"group_id", st.GroupID(), "model", logKnown(plan.Model()), "account_id", id, "timeout_source", d.TimeoutSource, "tier_ms", d.TierMs, "planned_timeout_ms", d.PlannedTimeoutMs, "effective_timeout_ms", d.EffectiveTimeoutMs, "budget_remaining_ms_at_start", d.BudgetRemainingMsAtStart, "would_budget_cut", d.WouldBudgetCut, "budget_cut_applied", d.BudgetCutApplied, "budget_cut_after_full_tier", d.CutAfterFullTier, "anchor_offset_ms", d.AnchorOffsetMs, "attempt_start_offset_ms", d.AttemptStartOffsetMs, "committed_at_start", d.CommittedAtStart, "shadow_eof_remaining_ms", d.ShadowEOFRemainingMs)
 }
 
 // Snapshot the built-in catalogs: client names never add metric label values.
