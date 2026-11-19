@@ -1238,8 +1238,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
+	var bindingMissing bool
 	if sessionHash != "" && s.cache != nil {
-		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		stickyAccountID, bindingMissing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 	}
 	trial := s.newSelectionTrial(ctx, req, stickyAccountID)
 	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
@@ -1366,13 +1367,21 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	loadRequests := selectionLoadRequests(candidates)
 	checked := make(map[int64]*Account)
+	var triedForPick map[int64]bool
+	if bindingMissing && isFirstNewPickSelection(ctx) {
+		triedForPick = make(map[int64]bool)
+	}
 	tryAcquire := func(loads map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
 		available := s.selectionAvailable(ctx, candidates, loads)
 		s.sortSelectionAccounts(ctx, available, req, loads)
+		original := available
 		attempted := len(available) > 0
 		for len(available) > 0 {
 			a := available[0]
 			available = available[1:]
+			if triedForPick != nil {
+				triedForPick[a.ID] = true
+			}
 			if ctx.Err() != nil {
 				return nil, true, ctx.Err()
 			}
@@ -1381,31 +1390,29 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			checked[fresh.ID] = fresh
-			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			slotConcurrency := fresh.Concurrency
+			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, slotConcurrency)
 			if err != nil || slot == nil || !slot.Acquired {
 				continue
 			}
-			latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
-			if vetoed || latest == nil {
-				delete(checked, fresh.ID) // a changed cached rate cannot reuse its earlier wait-plan row
-				slot.ReleaseFunc()
-				continue
+			realBaseSlot := s.concurrencyService != nil && slotConcurrency > 0
+			var suffix []*Account
+			if realBaseSlot && triedForPick != nil && isFirstNewPickSelection(ctx) {
+				suffix = newPickSuffix(original, fresh.ID, triedForPick)
 			}
-			full := buildSelectionKey(s.selectionView(), derefGroupID(groupID), requestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
-			reservation, accepted := trial.reserve(ctx, latest, full)
-			if !accepted {
-				slot.ReleaseFunc()
-				available = append(available, latest)
-				s.sortSelectionAccounts(ctx, available, req, loads)
-				continue
-			}
-			trial.selected = reservation
-			selected, err := s.newAcquiredSelectionResult(ctx, latest, slot.ReleaseFunc)
+			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, suffix, loads, len(suffix) > 0)
 			if err != nil {
 				return nil, true, err
 			}
-			if sessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
-				_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, latest.ID)
+			if selected == nil {
+				if retryTrial == nil {
+					delete(checked, fresh.ID) // a vetoed row cannot be reused for a wait plan
+				} else {
+					// The ordinary trial requeue must not reorder the original suffix.
+					available = append(available[:len(available):len(available)], retryTrial)
+					s.sortSelectionAccounts(ctx, available, req, loads)
+				}
+				continue
 			}
 			return selected, true, nil
 		}
@@ -1778,12 +1785,18 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 		}
 		return nil, err
 	}
+	return selectionResultForAccount(ctx, hydrated, acquired, release, waitPlan), nil
+}
+
+// Selection on a fully admitted account can construct the result without a
+// second hydration that could replace the admitted row.
+func selectionResultForAccount(ctx context.Context, account *Account, acquired bool, release func(), waitPlan *AccountWaitPlan) *AccountSelectionResult {
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-		Account:     hydrated,
+		Account:     account,
 		Acquired:    acquired,
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
-	}), nil
+	})
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {
