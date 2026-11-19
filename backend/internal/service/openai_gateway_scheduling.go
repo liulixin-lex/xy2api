@@ -1698,7 +1698,9 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	}
 	if change := pendingOpenAIStickyChange(ctx); change != nil && change.expected.AccountID == account.ID {
 		if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+			change.mu.Lock()
 			change.fromModel = OpenAIAttemptModel(account, req.RequestedModel)
+			change.mu.Unlock()
 		}
 	}
 	state := resilience.StateFrom(ctx)

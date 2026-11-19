@@ -52,7 +52,7 @@ func TestTimeoutPlanMetricModelCardinality(t *testing.T) {
 		model := fmt.Sprintf("unknown-client-model-%d", i)
 		st.SetAttemptProfile(resilience.AttemptProfile{AccountID: accountID, Model: model, AttemptStart: now})
 		plan := st.PlanAttemptTimeout(20*time.Second, false, now)
-		noteTimeoutPlan(ctx, &Account{ID: accountID}, plan, nil)
+		noteTimeoutPlan(ctx, &Account{ID: accountID}, plan, timeoutIdentityAt(ctx, nil))
 		require.Equal(t, model, plan.Model(), "metric normalization must not change the frozen request model")
 	}
 	require.Equal(t, int64(attempts), countOther()-before)
@@ -105,7 +105,7 @@ func TestTimeoutPlanRequestAttemptIdentity(t *testing.T) {
 			}
 			handle := &schedAttemptCapture{accountID: account}
 			RecordOpsUpstreamSendBoundary(handle.withHTTPDispatchTrace(ctx), account)
-			noteTimeoutPlan(ctx, &Account{ID: account}, plan, handle.sentSequence())
+			noteTimeoutPlan(ctx, &Account{ID: account}, plan, timeoutIdentityAt(ctx, handle.sentSequence()))
 			ids = append(ids, st.GatewayRequestID())
 		}
 		require.NotEqual(t, ids[0], ids[1])

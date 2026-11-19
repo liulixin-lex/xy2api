@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,9 +104,21 @@ var _ service.OpenAIStickyVersionedCache = (*gatewayCache)(nil)
 
 // The failure and the binding check share one Redis operation, so a late
 // failure cannot resurrect avoidance after a newer binding generation.
-var recordSessionBindingFailureScript = redis.NewScript(`
+const checkFailureBindingLua = `
 if redis.call('GET', KEYS[2]) ~= ARGV[4] or redis.call('GET', KEYS[3]) ~= ARGV[5] then return 0 end
-` + resilienceAvoidAddLua)
+`
+
+var recordSessionBindingFailureScript = redis.NewScript(checkFailureBindingLua + resilienceAvoidArgsLua + resilienceAvoidStoreLua)
+
+// Store the reset cutoff alongside this account's first-output metadata. A
+// delayed writer may still carry the reset snapshot from the preceding window.
+var recordFirstOutputAvoidScript = redis.NewScript(checkFailureBindingLua + resilienceAvoidArgsLua + `
+ local resetField = 'r:' .. ARGV[1]
+ reset = math.max(tonumber(redis.call('HGET', KEYS[#KEYS], resetField) or '0'), reset)
+ if stamp < reset then return 0 end
+ stamp = math.max(written, stamp)
+ if reset > 0 then redis.call('HSET', KEYS[#KEYS], resetField, reset) end
+` + resilienceAvoidStoreLua)
 
 func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID int64, bindingKey, avoidSession string, expected service.StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (int64, error) {
 	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || bindingKey == "" || avoidSession == "" || ttl <= 0 {
@@ -114,5 +127,9 @@ func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID 
 	keys := append([]string{sessionKey(resilienceSessionAvoidPrefix, groupID, avoidSession)}, sessionBindingKeys(groupID, bindingKey)...)
 	keys = append(keys, sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, avoidSession))
 	now := time.Now()
-	return recordSessionBindingFailureScript.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation, avoidResetMillis(resetAt)).Int64()
+	script := recordSessionBindingFailureScript
+	if strings.HasPrefix(avoidSession, "first_output:") {
+		script = recordFirstOutputAvoidScript
+	}
+	return script.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation, avoidResetMillis(resetAt)).Int64()
 }

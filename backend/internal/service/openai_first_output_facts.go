@@ -22,6 +22,7 @@ func (a *schedAttemptCapture) withHTTPDispatchTrace(ctx context.Context) context
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if a.requestedHTTPConn {
+			a.sendSeq.Store(0) // The next hop has not yet written a request.
 			a.invalidateRepeatedSendLocked()
 		}
 		a.requestedHTTPConn = true

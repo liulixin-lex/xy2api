@@ -18,6 +18,12 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 			t.Run(kind+"/"+outcome, func(t *testing.T) {
 				output := captureSchedObsLogs(t)
 				f := selectionNewSessionFixture()
+				fromModel, toModel := "m", "m"
+				if kind == "takeover" {
+					fromModel, toModel = "owner-model", "next-model"
+					f.owner.Credentials = map[string]any{"model_mapping": map[string]any{"m": fromModel}}
+					f.candidates[0].Credentials = map[string]any{"model_mapping": map[string]any{"m": toModel}}
+				}
 				if kind == "migrate" {
 					f.state(f.owner.ID, schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}})
 				}
@@ -42,7 +48,7 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 					"level": "INFO", "msg": "sched_quality.session_switch", "component": "sched_quality",
 					"kind": kind, "reason": reason, "committed": outcome == "success",
 					"gateway_request_id": state.GatewayRequestID(), "group_id": float64(7),
-					"model": "m", "from": float64(10), "to": float64(1),
+					"model": "m", "from_model": fromModel, "to_model": toModel, "from": float64(10), "to": float64(1),
 					"commit_attempted": true, "attempt_seq": nil, "from_priority": float64(5), "to_priority": float64(1),
 					"expected_gen": "g1", "observed_gen": "g1", "new_gen": nil, "commit_result": "binding_changed",
 				}
