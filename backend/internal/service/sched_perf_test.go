@@ -336,20 +336,33 @@ func TestSchedPerfHalfMicroScores(t *testing.T) {
 }
 
 func TestSchedPerfMilliseconds(t *testing.T) {
-	for _, tc := range []struct {
+	cases := []struct {
 		sec          float64
 		clock, lower int
 		slow, known  int
 	}{
 		{1.001, 1001, 0, 0, 1}, {1.001, 1002, 0, 1, 1}, {2.007, 0, 2007, 1, 1}, {2.007, 0, 2006, 0, 0},
 		{1.0016, 1002, 0, 0, 1}, {2.0074, 0, 2007, 1, 1}, {1.0015, 1002, 0, 0, 1},
-	} {
-		f := perfFact(1, 1)
+		{2.0035, 2004, 0, 0, 1}, {2.0035, 2005, 0, 1, 1},
+		{0.0004, 0, 0, 1, 1}, {0.0004, 0, -1, 0, 0},
+		{1e300, 2004, 0, 0, 1}, {1e300, 0, 2007, 0, 0},
+	}
+	facts := make(map[string]SchedPerfFact)
+	policies := make(map[int64]SchedPolicyRecord)
+	for i, tc := range cases {
+		group := int64(i + 1)
+		f := perfFact(1, group)
 		f.TTFO, f.Censored = tc.clock, tc.lower
 		f.FullTier, f.Outcome = true, q.OutcomeTimeout
-		slow, known := perfSlow(f, tc.sec)
-		require.Equal(t, tc.slow, slow)
-		require.Equal(t, tc.known == 1, known)
+		facts[strconv.Itoa(i)] = f
+		policies[group] = SchedPolicyRecord{Policy: q.Policy{Enabled: true, TTFTSeconds: tc.sec}}
+	}
+	snapshot := buildSchedPerf(facts, nil, policies, nil, perfAt)
+	for i, tc := range cases {
+		first := snapshot.rows[schedQualityKey{account: 1, group: int64(i + 1), model: "text"}].First
+		require.Equal(t, tc.known, first.N, "known: %+v", tc)
+		require.Equal(t, tc.slow, first.Slow, "slow: %+v", tc)
+		require.Equal(t, 1-tc.known, first.Unknown, "unknown: %+v", tc)
 	}
 }
 
