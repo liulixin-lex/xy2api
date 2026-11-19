@@ -188,3 +188,28 @@ func TestNewPickDeliveryAfterDecisionWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestAstraIncrementCanceledWithoutTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rowCount int
+	}{{"empty_suffix", 1}, {"nonempty_suffix", 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newPickFixture(t)
+			f.repo.accounts = f.repo.accounts[:tc.rowCount]
+			ctx, cancel := context.WithCancel(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))
+			defer cancel()
+			f.loads.after = func(id int64) {
+				if id == 1 {
+					cancel()
+				}
+			}
+			r, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "cancel-base", "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, r)
+			require.Contains(t, f.attempts, int64(1))
+			require.ElementsMatch(t, f.attempts, f.releases)
+			require.Equal(t, newPickCount{}, f.svc.selectionBoard.newPickLimit.counts[2])
+		})
+	}
+}

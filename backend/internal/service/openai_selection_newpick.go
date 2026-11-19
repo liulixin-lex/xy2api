@@ -426,11 +426,12 @@ func (s *OpenAIGatewayService) finishSelectionSlot(ctx context.Context, req Open
 			owned = selected.ReleaseFunc
 			releaseBase()
 			latest = selected.Account
-		} else if err := ctx.Err(); err != nil {
-			return nil, nil, err
 		}
 	}
 	if selected == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		full := buildSelectionKey(s.selectionView(), derefGroupID(req.GroupID), req.RequestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
 		reservation, accepted := trial.reserve(ctx, latest, full)
 		if !accepted {
