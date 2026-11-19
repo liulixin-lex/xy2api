@@ -640,7 +640,8 @@ describe('SchedQualityPanel', () => {
     }
     // The list's own width decides, not the viewport's.
     expect(block(style, '.dlist')).toMatch(/container:\s*sched-decisions\s*\/\s*inline-size/)
-    const at = style.indexOf('@container sched-decisions (max-width: 420px) {')
+    // The widest list measured to need it (English, another day's trial with Evidence) is 454px.
+    const at = style.indexOf('@container sched-decisions (max-width: 454px) {')
     expect(at).toBeGreaterThan(0)
     const narrow = style.slice(at)
     const main = block(narrow, '.drow__main')
@@ -650,6 +651,8 @@ describe('SchedQualityPanel', () => {
     expect(block(narrow, '.drow__what')).toMatch(/grid-area:\s*what;\s*overflow-wrap:\s*anywhere/)
     expect(block(narrow, '.drow__where')).toMatch(/grid-area:\s*where;\s*overflow-wrap:\s*anywhere;\s*white-space:\s*normal/)
     expect(block(narrow, '.drow__ev')).toMatch(/grid-area:\s*ev/)
+    // An opened evidence wraps anywhere at every width: a long source group name must not widen the list.
+    expect(block(style, '.drow__basis')).toMatch(/min-width:\s*0;\s*overflow-wrap:\s*anywhere/)
 
     const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'trial_timeout', level: 0, until: null, basis: basis('ttfo'), ...patch
@@ -717,7 +720,7 @@ describe('SchedQualityPanel', () => {
 
   it('loads the decision records on first opening, opens one to its evidence, and pages back from the last one', async () => {
     atLocalNoon()
-    const record =(id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+    const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
       id, at: inMinutes(-id), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20),
       basis: { rule_version: '3.0', line: 'ttfo', kind: 'regular', threshold: 10, source_groups: [53], ttft: ttfoEvidence() },
       ...patch

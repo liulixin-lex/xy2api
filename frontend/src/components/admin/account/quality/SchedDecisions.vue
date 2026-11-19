@@ -304,8 +304,12 @@ function timeoutReason(item: BackendDecision): string {
   font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
 }
+/* The action gives way last (after the group text) and wraps when even then the line is too short: a classic vertical
+   scrollbar makes the list 8–15px narrower than measured, and an older record's English action is the longest text. */
 .drow__what {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: var(--font-weight-medium);
 }
 .drow__what--rear {
@@ -332,10 +336,12 @@ function timeoutReason(item: BackendDecision): string {
 .drow__ev {
   flex: none;
 }
-/* A narrow list: one line cannot hold the time, the longest action (English trial_timeout) and Evidence, and nothing
-   in it gave way, so Evidence ended up out of view. Here the time, the action (wrapping, long words too) and Evidence
-   share the first line, Evidence keeping its whole width; the group, model and line go under the action. */
-@container sched-decisions (max-width: 420px) {
+/* A narrow list: one line cannot hold the time, the longest action and Evidence, and nothing in it gave way, so
+   Evidence ended up out of view. Here the time, the action (wrapping, long words too) and Evidence share the first
+   line, Evidence keeping its whole width; the group, model and line go under the action. 454px is the widest list
+   measured to need it (English, a record of another day: "11-18 06:55 Not enough evidence at the review, trial
+   started", Evidence); the 500px drawer from 1280px (a 459px list) keeps the one-line row. */
+@container sched-decisions (max-width: 454px) {
   .drow__main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) max-content;
@@ -359,6 +365,12 @@ function timeoutReason(item: BackendDecision): string {
   .drow__ev {
     grid-area: ev;
   }
+}
+/* An opened evidence wraps anywhere: one long word in it (a source group's name) would otherwise widen the list's
+   column and take every row's Evidence out of view. */
+.drow__basis {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .drow__sub {
   color: var(--color-text-secondary);
