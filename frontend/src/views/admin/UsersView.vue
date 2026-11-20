@@ -2267,6 +2267,15 @@ onUnmounted(() => {
     min-width: 40px;
     min-height: 40px;
   }
+  /* The usage columns' own sort (today / 30 days) and its menu. */
+  .usage-sort-trigger > button {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .usage-sort-trigger [data-test^="usage-sort-usage"] {
+    min-height: 40px;
+  }
 }
 /* A phone's filter sheet: one field per filter, its name above it. */
 .users-sheet__field {
