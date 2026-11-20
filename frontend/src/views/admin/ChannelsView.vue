@@ -102,9 +102,10 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">
+            <span v-if="formatDate(value)" class="text-sm text-gray-600 dark:text-gray-400">
               {{ formatDate(value) }}
             </span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-actions="{ row }">
@@ -666,6 +667,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
+import { formatListDateTime } from '@/utils/format'
 import { usePhoneViewport } from '@/composables/useTableViewport'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -799,9 +801,9 @@ const platformOrder = computed<GroupPlatform[]>(() => listPlatformIds())
 const compositePlatforms = platformOrder
 
 // ── Helpers ──
+/** The list's date (item 18): this year's without the year ("11-20"), an earlier one with it ("2025-03-04"); no time. */
 function formatDate(value: string): string {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString()
+  return formatListDateTime(value).split(' ')[0]
 }
 
 // ── Platform section helpers ──
