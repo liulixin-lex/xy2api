@@ -228,6 +228,37 @@ describe('UsageFilters keeps the focus across 1024px', () => {
     w.unmount()
   })
 
+  // Shared layer's focusOrigin: focus in the search box of a list opened from a sheet field (the real Select, its list
+  // in the body) counts as on that field.
+  it.each([
+    ['the field focused by the tap (Chrome)', true],
+    ['the field not focused by the tap (Safari)', false],
+  ])('moves focus from the search box of a list opened in the sheet to the same field in the row: %s', async (_, focusFirst) => {
+    media.install(1023)
+    const w = mount(UsageFilters, {
+      props: { modelValue: filtersWith(), exporting: false, startDate: '2026-11-19', endDate: '2026-11-20', modelOptions: ['gpt-6.1', 'gpt-6.1-sol'] },
+      slots: { info: '<span data-test="count">12 rows</span>' },
+      global: { stubs: { Teleport: false } },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    await w.get('[data-test="toolbar-filter-button"]').trigger('click')
+    await flushPromises()
+    const trigger = document.querySelector<HTMLButtonElement>('[data-test="filter-sheet"] [data-filter="model"] button[aria-haspopup]')!
+    if (focusFirst) trigger.focus()
+    trigger.click()
+    await flushPromises()
+    const search = document.querySelector<HTMLInputElement>('.select-dropdown-portal .select-search-input')!
+    search.focus()
+    expect(document.activeElement).toBe(search)
+    await media.set(1024)
+    const active = document.activeElement as HTMLElement
+    expect(active.closest('[data-filter]')?.getAttribute('data-filter')).toBe('model')
+    expect(active.getAttribute('aria-haspopup')).toBe('true')
+    expect(w.element.contains(active)).toBe(true)
+    w.unmount()
+  })
+
   it('leaves focus elsewhere on the page alone', async () => {
     media.install(1100)
     const outside = document.createElement('button')
