@@ -28,6 +28,29 @@
 
 需要恢复提交时机时，可在**系统设置 → 网关服务 → 网关韧性**的流式开场设置或“高级（完整 JSON）”中关闭对应开关并保存，无需重新发版：`stream.prelude_staging` 管 Chat Completions、Messages 的兼容转换，以及 Anthropic 上游的直通与协议转换；`stream.native_prelude_whitelist` 管原生 Responses（含透传）。关闭开关只恢复对应路径原有的提交方式；WebSocket 直通保持原有守卫。细节见 [流式开场与终止](../guides/gateway-resilience.md#流式开场与终止-stream)与[设置参考](../guides/gateway-resilience-settings.md#流式开场与终止-stream)。
 
+## OpenAI 档位策略蓝绿发布
+
+迁移 322 增加分组的档位配置、渠道的 Ultrafast 倍率及用量档位证据列。已有 OpenAI 与组合分组回填为策略版本 1，保留旧强制 Fast 与原赠免。渠道和组卡的 Fast 倍率原样保留。新增 Ultra 倍率初始为空。迁移完成后可比较升级前后的 Fast 价卡统计。[分组管理接口](../guides/groups.md#旧套餐与管理接口)
+
+1. **离线影子验证。** 在隔离环境创建两套实例与各自的 PostgreSQL、Redis，连接同一个可记录出站请求的模拟上游。基线实例运行旧版本，候选实例运行新版本。将同一份脱敏的 HTTP 请求、WebSocket 轮次和模拟终态各重放一遍，比较策略版本 1 的实际上游档位、拒绝状态、账单原额与实扣。候选实例再创建显式策略测试组，验证强开、强关、赠免、降档回报、价格快照和用量证据。影子验证使用隔离测试账本，不把生产请求同时转发给两个计费实例。
+2. **蓝绿交叠。** 升级时先保持生产组为策略版本 1。暂停写入版本 2 和 Ultra 倍率，包括 OpenAI 分组模型价卡及渠道整表更新。新实例通过 `/ready` 后再接流量，保持旧进程的在途请求可完成。记录当前 Fast 价卡和待处理账单数量。
+3. **启用。** 停止旧实例接入并排空 HTTP、WebSocket 和后台任务。确认没有旧进程仍连接生产数据库、领取计费恢复或导出任务，再为少量组显式启用版本 2 或设置 Ultra 倍率。用新请求核对出站、终态和使用记录中的 `service_tier_details` 后逐批启用。
+
+本地冒烟用新构建的二进制启动临时 PG、Redis 与 HTTP 模拟上游，通过实际管理接口保存两项赠免和 Fast/Ultrafast 价卡，验证上游收到 Ultrafast、账单原额与实扣及已结算的计费意图。
+
+```sh
+(cd backend && go build -o /tmp/xy2api-tier-smoke ./cmd/server)
+python3 tools/openai_tier_smoke.py /tmp/xy2api-tier-smoke
+```
+
+迁移后的数据库可用现有只读连接运行检查。输出只有计数，无密钥、用户记录或请求正文。 [只读检查 SQL](../../tools/billing-integrity/openai-tier-preflight.sql)
+
+```sh
+psql "$AUDIT_DATABASE_URL" -X -f tools/billing-integrity/openai-tier-preflight.sql
+```
+
+**回滚。** 如果尚未启用版本 2、未设置 Ultra 倍率且没有新版本的在途结算，旧程序可以使用 322 迁移后的扩展表结构，数据库保留新增列。启用过显式策略后，优先回滚到仍懂新版策略的构建；原版本不能执行显式强关、强开 Ultra 或赠免 Ultra，也不能完整恢复新档位证据。必须使用旧程序时，先隔离相关流量并用新程序排空待结算账单，核对这些组和价卡已经恢复为可由旧程序表达的配置。管理 API 禁止将已启用版本 2 的组就地降为版本 1；通过重新绑定到兼容分组，或按经过测试的备份恢复方案回退。启用后产生的账单保留已结算金额与证据。
+
 ## Docker Compose
 
 生产环境建议在 Compose 文件里固定版本号，而不是使用 `latest`：

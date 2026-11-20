@@ -789,7 +789,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e != nil && e.PreDispatchSelectionInvalidated {
+	if e != nil && (e.PreDispatchSelectionInvalidated || e.Reason == openAITierUnavailable) {
 		return false
 	}
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.

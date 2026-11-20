@@ -21,6 +21,11 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
+	defer func() {
+		tierAttempt.finish(result)
+		upstreamResponseModelObserverFromContext(c).attachTierEvidence(result)
+	}()
 	var schedCapture *schedAttemptCapture
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
@@ -60,6 +65,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// explicit effort. Use the same final account/compact model as forwarding.
 	requestedValidationModel := gjson.GetBytes(body, "model").String()
 	compactValidation := isOpenAIResponsesCompactPath(c)
+	if compactValidation {
+		ctx = context.WithValue(ctx, openAITierEndpointKey{}, "compact")
+	}
 	_, validationModel := resolveOpenAIForwardMappedModels(account, requestedValidationModel, compactValidation)
 	if compactValidation && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		if mapped := s.resolveOpenAICompactFallbackModel(account, requestedValidationModel); mapped != "" {
@@ -705,39 +713,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	rawTier := requestView.ServiceTier
-	if openAIGroupForcesFast(ctx, account) {
-		rawTier = OpenAIFastTierPriority
-		if requestView.ServiceTier != OpenAIFastTierPriority {
-			markPatchSet("service_tier", OpenAIFastTierPriority)
+	decision, tierErr := s.resolveOpenAITier(ctx, account, upstreamModel, body)
+	if tierErr != nil {
+		if blocked, ok := tierErr.(*OpenAIFastBlockedError); ok {
+			writeOpenAIFastPolicyBlockedResponse(c, blocked)
 		}
+		return nil, tierErr
 	}
-	if rawTier != "" {
-		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" {
-			action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, upstreamModel, normTier)
-			switch action {
-			case BetaPolicyActionBlock:
-				msg := errMsg
-				if msg == "" {
-					msg = fmt.Sprintf("openai service_tier=%s is not allowed for model %s", normTier, upstreamModel)
-				}
-				blocked := &OpenAIFastBlockedError{Message: msg}
-				writeOpenAIFastPolicyBlockedResponse(c, blocked)
-				return nil, blocked
-			case BetaPolicyActionFilter:
-				markPatchDelete("service_tier")
-			case OpenAIFastPolicyActionForcePriority:
-				if rawTier != OpenAIFastTierPriority {
-					markPatchSet("service_tier", OpenAIFastTierPriority)
-				}
-			default:
-				if normTier != rawTier {
-					markPatchSet("service_tier", normTier)
-				}
-			}
-		}
-	} else if s.shouldForceOpenAIFastPriorityForMissingTier(ctx, account, upstreamModel) {
-		markPatchSet("service_tier", OpenAIFastTierPriority)
+	field := gjson.GetBytes(body, "service_tier")
+	if decision.OutboundTier != "" && (field.Type != gjson.String || field.String() != decision.OutboundTier) {
+		markPatchSet("service_tier", decision.OutboundTier)
+	} else if decision.OutboundTier == "" && field.Exists() && field.Type != gjson.Null {
+		markPatchDelete("service_tier")
 	}
 
 	if account.UsesOpenAICodexProtocol() {

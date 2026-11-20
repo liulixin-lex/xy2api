@@ -40,3 +40,23 @@ func TestProjectionCompatibility(t *testing.T) {
 	require.Equal(t, "Max", row[9])
 	require.Equal(t, "0.150000", row[26])
 }
+
+func TestProjectServiceTierEvidenceVisibility(t *testing.T) {
+	var r Record
+	require.NoError(t, json.Unmarshal([]byte(`{"created_at":"2026-09-22T00:00:00Z","service_tier":"default","service_tier_details":{"version":1,"settled_tier":"default","cap_reason":"outbound_price","serving_group_id":12,"reason":"group_rule"}}`), &r))
+	o := options()
+	o.Version = ServiceTierFormatVersion
+	row, err := Project(r, o)
+	require.NoError(t, err)
+	require.Len(t, row, len(Headers(o)))
+	require.Equal(t, "default", row[17])
+	require.JSONEq(t, `{"version":1,"settled_tier":"default","cap_reason":"outbound_price"}`, row[18])
+	o.Format = "xlsx"
+	row, err = Project(r, o)
+	require.NoError(t, err)
+	require.NotContains(t, row[34], "serving_group_id")
+	o.IncludeInternalTierDetails = true
+	row, err = Project(r, o)
+	require.NoError(t, err)
+	require.Contains(t, row[34], "serving_group_id")
+}

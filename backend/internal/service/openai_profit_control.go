@@ -142,6 +142,7 @@ type openAIProfitControlGate struct {
 func (s *OpenAIGatewayService) WithOpenAIRequestPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
+	ctx = context.WithValue(ctx, openAITierPriceStoreKey{}, &openAITierPriceStore{})
 	return s.withOpenAIProfitControlGate(ctx, groupID), pricingAt
 }
 
@@ -160,6 +161,7 @@ func WithOpenAIProfitControlSuppressed(ctx context.Context) context.Context {
 func (s *OpenAIGatewayService) WithOpenAITurnPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
+	ctx = context.WithValue(ctx, openAITierPriceStoreKey{}, &openAITierPriceStore{})
 	if existing, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext); existing != nil {
 		gid := existing.groupID
 		ctx = s.withOpenAISelectionContext(ctx, &gid)
@@ -337,6 +339,14 @@ func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool,
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || account == nil {
 		return false, ""
+	}
+	if state, _ := ctx.Value(openAITierProfitKey{}).(*openAITierProfitInput); state != nil {
+		if quote, found := state.quotes.Load(openAITierProfitCandidate{gate, account.ID}); found {
+			if cached, ok := quote.(openAITierProfitQuote); ok {
+				reason := openAITierProfitVerdict(ctx, gate, account, cached)
+				return reason != "", reason
+			}
+		}
 	}
 	upstream, source, ok := openAIProfitGateCostSource(account, gate.pricingAt)
 	var ceiling *float64

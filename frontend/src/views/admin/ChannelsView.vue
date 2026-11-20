@@ -268,7 +268,7 @@
                   </p>
                 </div>
                 <Toggle
-                  :disabled="accountStatsPricingLocked"
+                  :disabled="pricingLocked"
                   :modelValue="form.apply_pricing_to_account_stats"
                   @update:modelValue="form.apply_pricing_to_account_stats = $event"
                 />
@@ -423,7 +423,7 @@
             </div>
 
             <!-- Model Pricing -->
-            <div>
+            <fieldset :disabled="pricingLocked" :inert="pricingLocked">
               <div class="mb-1 flex items-center justify-between">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
                 <div class="flex items-center gap-2">
@@ -459,10 +459,10 @@
                   @remove="removePricingEntry(sIdx, idx)"
                 />
               </div>
-            </div>
+            </fieldset>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <fieldset :disabled="accountStatsPricingLocked" :inert="accountStatsPricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <fieldset :disabled="pricingLocked" :inert="pricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -636,11 +636,11 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
-import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formReasoningEffortMultipliersToAPI, formTimePricingToAPI, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok, validateIntervals, validateReasoningEffortMultipliers, validateTimePricing } from '@/components/admin/channel/types'
+import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formReasoningEffortMultipliersToAPI, formTimePricingToAPI, tierMultipliersToAPI, tierMultiplierError, mTokToPerToken, perTokenToMTok, validateIntervals, validateReasoningEffortMultipliers, validateTimePricing } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass, platformLabel as catalogPlatformLabel } from '@/utils/platformColors'
@@ -1151,8 +1151,8 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
         cache_write_price: mTokToPerToken(entry.cache_write_price),
         cache_write_1h_price: mTokToPerToken(entry.cache_write_1h_price),
         cache_read_price: mTokToPerToken(entry.cache_read_price),
-        fast_multiplier: entry.fast_multiplier != null && entry.fast_multiplier !== '' ? Number(entry.fast_multiplier) : null,
-        flex_multiplier: entry.flex_multiplier != null && entry.flex_multiplier !== '' ? Number(entry.flex_multiplier) : null,
+        id: entry.id,
+        ...tierMultipliersToAPI(entry),
         reasoning_effort_multipliers: formReasoningEffortMultipliersToAPI(entry.reasoning_effort_multipliers),
         image_input_price: mTokToPerToken(entry.image_input_price),
         image_output_price: mTokToPerToken(entry.image_output_price),
@@ -1254,8 +1254,8 @@ function apiToForm(channel: Channel): PlatformSection[] {
         cache_write_price: perTokenToMTok(p.cache_write_price),
         cache_write_1h_price: perTokenToMTok(p.cache_write_1h_price),
         cache_read_price: perTokenToMTok(p.cache_read_price),
-        fast_multiplier: p.fast_multiplier,
-        flex_multiplier: p.flex_multiplier,
+        id: p.id,
+        ...tierMultipliersToAPI(p),
         reasoning_effort_multipliers: p.reasoning_effort_multipliers ? { ...p.reasoning_effort_multipliers } : null,
         image_input_price: perTokenToMTok(p.image_input_price),
         image_output_price: perTokenToMTok(p.image_output_price),
@@ -1368,7 +1368,7 @@ function handleSort(key: string, order: 'asc' | 'desc') {
 }
 
 // A grouped channel uses these rules for billing too (R8-5).
-const accountStatsPricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
+const pricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
 let originalAccountStatsPricing = ''
 
 // ── Dialog ──
@@ -1574,7 +1574,7 @@ async function handleSubmit() {
       ...section.account_stats_pricing_rules.flatMap(rule => rule.pricing),
     ]
     for (const entry of entries) {
-      const error = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t)
+      const error = tierMultiplierError(entry, section.platform, t) ?? validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t)
       if (!error) continue
       const platformLabel = t('admin.groups.platforms.' + section.platform, catalogPlatformLabel(section.platform))
       const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')
@@ -1587,14 +1587,6 @@ async function handleSubmit() {
   // 校验区间合法性（范围、重叠等）
   for (const section of form.platforms.filter(s => s.enabled)) {
     for (const entry of section.model_pricing) {
-      if (!isValidPositiveMultiplier(entry.fast_multiplier) ||
-          !isValidPositiveMultiplier(entry.flex_multiplier)) {
-        const platformLabel = t('admin.groups.platforms.' + section.platform, catalogPlatformLabel(section.platform))
-        const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')
-        appStore.showError(`${platformLabel} - ${modelLabel}: ${t('admin.channels.form.multiplierPositive')}`)
-        activeTab.value = section.platform
-        return
-      }
       if (!entry.intervals || entry.intervals.length === 0) continue
       const intervalErr = validateIntervals(entry.intervals, entry.billing_mode, t)
       if (intervalErr) {
@@ -1627,6 +1619,7 @@ async function handleSubmit() {
   try {
     if (editingChannel.value) {
       const req: UpdateChannelRequest = {
+        revision: editingChannel.value.revision ?? editingChannel.value.updated_at,
         name: form.name.trim(),
         description: form.description.trim() || undefined,
         status: form.status,
@@ -1641,10 +1634,11 @@ async function handleSubmit() {
       }
       // Omit unchanged projections: distributing rules into platform sections can normalize them.
       if (!has('users.balance_adjust')) {
-        if (accountStatsPricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
+        if (pricingLocked.value) delete req.model_pricing
+        if (pricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
           delete req.apply_pricing_to_account_stats
         }
-        if (accountStatsPricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
+        if (pricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
           delete req.account_stats_pricing_rules
         }
       }
@@ -1669,6 +1663,11 @@ async function handleSubmit() {
     closeDialog()
     loadChannels()
   } catch (error: unknown) {
+    if (extractApiErrorCode(error) === 'CONFIGURATION_REVISION_CONFLICT') {
+      appStore.showError(t('admin.channels.form.revisionConflict'))
+      void loadChannels()
+      return
+    }
     appStore.showError(extractApiErrorMessage(error, editingChannel.value
       ? t('admin.channels.updateError', 'Failed to update channel')
       : t('admin.channels.createError', 'Failed to create channel')))

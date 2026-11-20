@@ -27,17 +27,18 @@ func TestUsageLog_SessionIDPersistence(t *testing.T) {
 	sessionID := "sess-" + uuid.NewString()
 
 	withSession := &service.UsageLog{
-		UserID:       user.ID,
-		APIKeyID:     apiKey.ID,
-		AccountID:    account.ID,
-		RequestID:    uuid.NewString(),
-		Model:        "claude-3",
-		InputTokens:  10,
-		OutputTokens: 5,
-		TotalCost:    1.0,
-		ActualCost:   1.0,
-		SessionID:    &sessionID,
-		CreatedAt:    time.Now().UTC(),
+		UserID:             user.ID,
+		APIKeyID:           apiKey.ID,
+		AccountID:          account.ID,
+		RequestID:          uuid.NewString(),
+		Model:              "claude-3",
+		InputTokens:        10,
+		OutputTokens:       5,
+		TotalCost:          1.0,
+		ActualCost:         1.0,
+		SessionID:          &sessionID,
+		ServiceTierDetails: []byte(`{"version":1,"settled_tier":"ultrafast"}`),
+		CreatedAt:          time.Now().UTC(),
 	}
 	_, err := repo.Create(ctx, withSession)
 	require.NoError(t, err)
@@ -63,9 +64,11 @@ func TestUsageLog_SessionIDPersistence(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.SessionID)
 	require.Equal(t, sessionID, *got.SessionID)
+	require.JSONEq(t, string(withSession.ServiceTierDetails), string(got.ServiceTierDetails))
 
 	// Omission: absent session id reads back as nil (NULL), not empty string.
 	gotNone, err := repo.GetByID(ctx, withoutSession.ID)
 	require.NoError(t, err)
 	require.Nil(t, gotNone.SessionID)
+	require.Nil(t, gotNone.ServiceTierDetails)
 }

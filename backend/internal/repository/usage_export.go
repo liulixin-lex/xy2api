@@ -64,6 +64,9 @@ func usageExportSnapshot(ctx context.Context, tx *sql.Tx, o usageexport.Options,
 	where, args := usageExportWhere(o.Filters)
 	// Explicit projection: no prompt, credentials or non-export payload enters the spool.
 	fields := strings.Fields("id created_at model requested_model reasoning_effort requested_reasoning_effort inbound_endpoint ip_address request_type stream openai_ws_mode billing_mode image_count input_tokens output_tokens cache_read_tokens cache_creation_tokens rate_multiplier actual_cost total_cost first_token_ms duration_ms api_key_id")
+	if o.Version >= usageexport.ServiceTierFormatVersion {
+		fields = append(fields, "service_tier", "service_tier_details")
+	}
 	if o.Format == "xlsx" {
 		fields = append(fields, strings.Fields("user_id account_id group_id upstream_model upstream_response_model upstream_model_mismatch upstream_endpoint input_cost output_cost cache_read_cost cache_creation_cost account_rate_multiplier account_stats_cost request_id upstream_request_id user_agent")...)
 	}

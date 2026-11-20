@@ -227,10 +227,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	acquireCtx, schedDial := withSchedWSDialObservation(acquireCtx, ctx, s, account, reqStream)
 	schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(payload))
 
+	tierAttempt, _ := ctx.Value(openAITierAttemptKey{}).(*openAITierAttempt)
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		BindRoutingHint: tierAttempt.bindsRoutingHint(),
+		Account:         account,
+		WSURL:           wsURL,
+		Headers:         wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -472,6 +474,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			UpstreamResponseModel:         responseModelObserver.Model(),
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
+			ResponseTierEvidence:          append([]string(nil), responseModelObserver.tierEvidence...),
+			ResponseTierConflict:          responseModelObserver.terminalTierConflict || responseModelObserver.terminalTier == "" && responseModelObserver.firstTierConflict,
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTier(reqBody)),
 			ReasoningEffort:               extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel),
 			Stream:                        reqStream,

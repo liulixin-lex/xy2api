@@ -14,7 +14,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 )
 
-const apiKeyAuthSnapshotVersion = 28 // v28: group minimum upstream rate
+const apiKeyAuthSnapshotVersion = 29 // v29: OpenAI group tier policy
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -426,6 +426,10 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AllowLive:                       apiKey.Group.AllowLive,
 			ForceOpenAIFast:                 apiKey.Group.ForceOpenAIFast,
 			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
+			OpenAIFastMode:                  apiKey.Group.OpenAIFastMode,
+			OpenAIUltrafastMode:             apiKey.Group.OpenAIUltrafastMode,
+			OpenAITierPolicyVersion:         apiKey.Group.OpenAITierPolicyVersion,
+			FreeOpenAIUltrafast:             apiKey.Group.FreeOpenAIUltrafast,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
@@ -535,6 +539,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AllowLive:                       snapshot.Group.AllowLive,
 			ForceOpenAIFast:                 snapshot.Group.ForceOpenAIFast,
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
+			OpenAIFastMode:                  snapshot.Group.OpenAIFastMode,
+			OpenAIUltrafastMode:             snapshot.Group.OpenAIUltrafastMode,
+			OpenAITierPolicyVersion:         snapshot.Group.OpenAITierPolicyVersion,
+			FreeOpenAIUltrafast:             snapshot.Group.FreeOpenAIUltrafast,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  snapshot.Group.ModelAllowlist,

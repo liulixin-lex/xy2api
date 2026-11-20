@@ -136,6 +136,7 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 }
 
 type openAIWSPassthroughUsageMeta struct {
+	tierDecision             atomic.Pointer[OpenAITierDecision]
 	cacheDiagnostic          atomic.Pointer[OpenAICacheDiagnostic]
 	serviceTier              atomic.Pointer[string]
 	reasoningEffort          atomic.Pointer[string]
@@ -876,7 +877,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = accountScopedFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
-	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
+	firstCtx, firstTier := openAIWSTierTurnContext(ctx, hooks, 1, originalFirstClientMessage)
+	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(firstCtx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
 	}
@@ -897,6 +899,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
+	usageMeta.tierDecision.Store(firstTier.decision)
 	firstClientMessage = updatedFirst
 	var qualityObserver atomic.Pointer[upstreamResponseModelObserver]
 	var qualityTurnBody atomic.Pointer[[]byte]
@@ -1034,9 +1037,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		return s.mapOpenAIWSPassthroughDialError(err, statusCode, handshakeHeaders)
 	}
-	defer func() {
-		_ = upstreamConn.Close()
-	}()
+
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",
 		account.ID,
@@ -1046,7 +1047,43 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {
+		_ = upstreamConn.Close()
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
+	}
+	route := &openAIWSTierRoute{conn: upstreamFrameConn}
+	defer route.Close()
+	upstreamFrameConn = route
+	activeRoutingHint := headers.Get(openAICodexRoutingHintHeader)
+	rebindRoute := func(turnCtx context.Context, next []byte, required bool) error {
+		if !required || !account.IsOpenAIOAuthLike() {
+			return nil
+		}
+		nextHeaders := headers.Clone()
+		setOpenAICodexRoutingHintFromBody(nextHeaders, account, next)
+		hint := nextHeaders.Get(openAICodexRoutingHintHeader)
+		if hint == activeRoutingHint {
+			return nil
+		}
+		nextHeaders, err := s.refreshOpenAIAgentIdentityHeaders(turnCtx, account, nextHeaders)
+		if err != nil {
+			return err
+		}
+		dialCtx, cancel := context.WithTimeout(turnCtx, s.openAIWSDialTimeout())
+		defer cancel()
+		conn, status, reply, dialErr := dialOpenAIWSWithSchedCapture(dialCtx, dialer, wsURL, nextHeaders, proxyURL)
+		if dialErr != nil {
+			return s.mapOpenAIWSPassthroughDialError(dialErr, status, reply)
+		}
+		frames, ok := conn.(openaiwsv2.FrameConn)
+		if !ok {
+			_ = conn.Close()
+			return errors.New("new websocket route lacks frame support")
+		}
+		if err := route.replace(frames); err != nil {
+			return err
+		}
+		activeRoutingHint = hint
+		return nil
 	}
 	var schedBeforeSend func([]byte) *schedAttemptCapture
 	if s.schedAttemptRecorder != nil || resilience.StateFrom(ctx).GatewayRequestEnabled() || pendingOpenAIStickyChange(ctx) != nil {
@@ -1249,7 +1286,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
 			}
-			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			policyCtx := ctx
+			var turnTier *openAITierAttempt
+			if isResponseCreate {
+				policyCtx, turnTier = openAIWSTierTurnContext(ctx, hooks, turnNo, originalPayload)
+			}
+			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(policyCtx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义
@@ -1270,6 +1312,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if promptErr != nil {
 					return nil, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 				}
+				if err := rebindRoute(policyCtx, out, turnTier.bindsRoutingHint()); err != nil {
+					return nil, nil, err
+				}
+				usageMeta.tierDecision.Store(turnTier.decision)
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				qualityObserver.Store(s.qualityObserver(ctx, account, gjson.GetBytes(out, "model").String()))
 				if qualityRequest(ctx) != nil {
@@ -1410,6 +1456,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					UpstreamResponseModel:         turn.ResponseModel,
 					UpstreamResponseModelConflict: turn.ResponseModelConflict,
 					UpstreamResponseServiceTier:   normalizeObservedOpenAIServiceTier(turn.ResponseServiceTier),
+					ResponseTierEvidence:          openAIWSRawTierEvidence(turn.ResponseServiceTier),
+					TierDecision:                  usageMeta.tierDecision.Load(),
 					ServiceTier:                   usageMeta.serviceTier.Load(),
 					ReasoningEffort:               usageMeta.reasoningEffort.Load(),
 					RequestedReasoningEffort:      usageMeta.requestedReasoningEffort.Load(),
@@ -1631,6 +1679,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		UpstreamResponseModel:         relayResult.ResponseModel,
 		UpstreamResponseModelConflict: relayResult.ResponseModelConflict,
 		UpstreamResponseServiceTier:   normalizeObservedOpenAIServiceTier(relayResult.ResponseServiceTier),
+		ResponseTierEvidence:          openAIWSRawTierEvidence(relayResult.ResponseServiceTier),
+		TierDecision:                  usageMeta.tierDecision.Load(),
 		ServiceTier:                   usageMeta.serviceTier.Load(),
 		ReasoningEffort:               usageMeta.reasoningEffort.Load(),
 		RequestedReasoningEffort:      usageMeta.requestedReasoningEffort.Load(),

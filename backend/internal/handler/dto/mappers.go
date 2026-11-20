@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -153,6 +154,11 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		SystemPromptConfig:          g.SystemPromptConfig.Clone(),
 		ForceOpenAIFast:             g.ForceOpenAIFast,
 		FreeOpenAIFast:              g.FreeOpenAIFast,
+		OpenAIFastMode:              g.OpenAIFastMode,
+		OpenAIUltrafastMode:         g.OpenAIUltrafastMode,
+		OpenAITierPolicyVersion:     g.OpenAITierPolicyVersion,
+		FreeOpenAIUltrafast:         g.FreeOpenAIUltrafast,
+		Revision:                    service.ConfigurationRevision(g.UpdatedAt),
 		AvailabilityFallbackGroupID: g.AvailabilityFallbackGroupID,
 		ProfitControlEnabled:        g.ProfitControlEnabled,
 		MinUpstreamRate:             g.MinUpstreamRate,
@@ -717,6 +723,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		RequestID:                 l.RequestID,
 		Model:                     requestedModel,
 		ServiceTier:               l.ServiceTier,
+		ServiceTierDetails:        usagestats.PublicServiceTierDetails(l.ServiceTierDetails),
 		ReasoningEffort:           userFacingReasoningEffort(l),
 		InboundEndpoint:           l.InboundEndpoint,
 		GroupID:                   l.GroupID,
@@ -797,6 +804,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
+	usageLog.ServiceTierDetails = l.ServiceTierDetails
 	return &AdminUsageLog{
 		UsageLog:                usageLog,
 		UpstreamModel:           l.UpstreamModel,

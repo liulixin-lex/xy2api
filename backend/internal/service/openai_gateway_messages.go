@@ -34,6 +34,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
+	defer func() {
+		tierAttempt.finish(forwardResult)
+		upstreamResponseModelObserverFromContext(c).attachTierEvidence(forwardResult)
+	}()
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() {
@@ -347,7 +352,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(context.WithValue(ctx, openAITierEndpointKey{}, APIProtocolResponses), account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
@@ -736,7 +741,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.Observe(finalResponse.Model, true)
-	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
+	observer.observeOpenAITier(finalResponse.ServiceTier, true)
 
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload := outcome.payload

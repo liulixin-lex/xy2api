@@ -670,6 +670,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamResponseModel:         responseModelObserver.Model(),
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
+			ResponseTierEvidence:          append([]string(nil), responseModelObserver.tierEvidence...),
+			ResponseTierConflict:          responseModelObserver.terminalTierConflict || responseModelObserver.terminalTier == "" && responseModelObserver.firstTierConflict,
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(body)),
 			ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, mappedModel, originalModel), body, mappedModel),
 			RequestedReasoningEffort:      CanonicalRequestedReasoningEffort(body, originalModel, mappedModel),
