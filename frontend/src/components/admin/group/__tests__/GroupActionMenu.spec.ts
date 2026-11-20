@@ -46,3 +46,33 @@ describe('GroupActionMenu', () => {
     expect(item.text()).toBe('admin.groups.duplicating')
   })
 })
+
+// Astra review 4: opened from the keyboard the menu is the place to work: focus on its first item, arrows between the
+// items, Tab closes it.
+describe('GroupActionMenu keys', () => {
+  it('focuses the first item, moves with the arrows, closes on Tab', async () => {
+    const wrapper = mount(GroupActionMenu, {
+      props: { show: true, group: { id: 7, name: 'g' }, anchorRect: new DOMRect(300, 100, 40, 40), actions: groupRowActions({ platform: 'openai' }, { simpleMode: false, manage: true, adjustBalance: true }), duplicating: true },
+      global: { stubs: { Teleport: true, Icon: true } },
+      attachTo: document.body,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const at = () => (document.activeElement as HTMLElement).getAttribute('data-test')
+    expect(at()).toBe('menu-board')
+    const menu = wrapper.get('[data-test="group-action-menu"]')
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(at()).toBe('menu-edit')
+    // The disabled "copy" (copying) is skipped.
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(at()).toBe('menu-rate-multipliers')
+    await menu.trigger('keydown', { key: 'End' })
+    expect(at()).toBe('menu-delete')
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(at()).toBe('menu-board')
+    await menu.trigger('keydown', { key: 'ArrowUp' })
+    expect(at()).toBe('menu-delete')
+    await menu.trigger('keydown', { key: 'Tab' })
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})

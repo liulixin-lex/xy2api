@@ -10,6 +10,7 @@
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         data-test="group-action-menu"
         @click.stop
+        @keydown="onKeydown"
       >
         <button v-if="actions.board" type="button" role="menuitem" :class="ITEM" data-test="menu-board" @click="pick('board')">
           <Icon name="chart" size="sm" :class="ICON" />{{ t('admin.schedQuality.action.board') }}
@@ -106,6 +107,27 @@ const place = () => {
 }
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], place, { flush: 'post' })
 useResizeObserver(menuRef, place)
+
+/**
+ * Keys (Astra review 4): the menu takes focus on its first item when it opens; ↑ ↓ Home End move between the items;
+ * Tab and Escape close it, and the page gives focus back to the row's "⋯".
+ */
+const items = () => [...(menuRef.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? [])]
+watch(menuRef, (el) => { if (el) items()[0]?.focus() }, { flush: 'post' })
+function onKeydown(event: KeyboardEvent) {
+  const list = items()
+  if (!list.length) return
+  const at = list.indexOf(document.activeElement as HTMLButtonElement)
+  const to = (index: number) => { event.preventDefault(); list[(index + list.length) % list.length].focus() }
+  if (event.key === 'ArrowDown') to(at + 1)
+  else if (event.key === 'ArrowUp') to(at < 0 ? -1 : at - 1)
+  else if (event.key === 'Home') to(0)
+  else if (event.key === 'End') to(-1)
+  else if (event.key === 'Tab') {
+    event.preventDefault()
+    emit('close')
+  }
+}
 
 const layer = useOverlayLayer(() => props.show && !!props.group && !!props.anchorRect, {
   root: rootRef,

@@ -6064,14 +6064,20 @@ const sortHint = computed(() => {
 const NO_ROW_ACTIONS: GroupRowActions = { board: false, edit: false, duplicate: false, composite: false, rate: false, rpm: false, delete: false };
 const rowActions = (group: { platform: string }) =>
   groupRowActions(group, { simpleMode: authStore.isSimpleMode, manage: canManage.value, adjustBalance: canAdjustBalance.value });
-const rowMenu = reactive<{ group: LiveGroup | null; anchorRect: DOMRect | null }>({ group: null, anchorRect: null });
+const rowMenu = reactive<{ group: LiveGroup | null; anchorRect: DOMRect | null; opener: HTMLElement | null }>({ group: null, anchorRect: null, opener: null });
 const openRowMenu = (group: LiveGroup, event: MouseEvent) => {
   rowMenu.group = group;
-  rowMenu.anchorRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  rowMenu.opener = event.currentTarget as HTMLElement;
+  rowMenu.anchorRect = rowMenu.opener.getBoundingClientRect();
 };
+/** Closing gives focus back to the row's "⋯" when it was in the menu (or nowhere); a dialog an item opened keeps it. */
 const closeRowMenu = () => {
+  const opener = rowMenu.opener;
+  const active = document.activeElement;
   rowMenu.group = null;
   rowMenu.anchorRect = null;
+  rowMenu.opener = null;
+  if (opener?.isConnected && (!active || active === document.body || active.closest('[data-test="group-action-menu"]'))) opener.focus();
 };
 watch(desktop, (on) => { if (on) closeRowMenu(); });
 const onRowAction = (action: GroupRowAction) => {
