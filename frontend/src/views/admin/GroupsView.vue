@@ -188,11 +188,12 @@
         >
           <!-- The frozen identity column: the alias pill, then the name cut with "…", whole in its tip or on a tap; at most
                240px wide on tablets and computers too (the column's own width on a phone). -->
+          <!-- The pill inside the cell, so the whole name area opens the full name; on touch 40px high (Astra review 2), its
+               negative margins keeping the row's height. -->
           <template #cell-name="{ row, value }">
-            <div class="flex min-w-0 max-w-[240px] items-center gap-2">
-              <GroupAliasPill :group="row" />
-              <TableIdentityCell class="min-w-0 flex-1" :primary="value" />
-            </div>
+            <TableIdentityCell class="max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
+              <template #primary><GroupAliasPill :group="row" class="mr-2 align-middle" />{{ value }}</template>
+            </TableIdentityCell>
           </template>
 
           <template #cell-id="{ value }">
@@ -384,7 +385,7 @@
                 v-if="!authStore.isSimpleMode && row.platform === 'openai'"
                 type="button"
                 data-testid="group-sched-board"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
                 :data-sq-trigger="`group-board:${row.id}`"
                 @click="openSchedBoard({ id: row.id, name: row.name })"
               >
@@ -394,7 +395,7 @@
               <button
                 v-if="canManage"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t("common.edit") }}</span>
@@ -409,7 +410,7 @@
                 "
                 :disabled="duplicatingGroupIds.has(row.id)"
                 @click="handleDuplicate(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="copy" size="sm" />
                 <span class="text-xs">
@@ -424,7 +425,7 @@
                 v-if="!authStore.isSimpleMode && canManage && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
               >
                 <Icon name="swap" size="sm" />
                 <span class="text-xs">{{
@@ -435,7 +436,7 @@
                 v-if="!authStore.isSimpleMode && canManage && canAdjustBalance"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
               >
                 <Icon name="dollar" size="sm" />
                 <span class="text-xs">{{
@@ -446,7 +447,7 @@
                 v-if="!authStore.isSimpleMode && canManage"
                 data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
               >
                 <Icon name="bolt" size="sm" />
                 <span class="text-xs">{{
@@ -456,7 +457,7 @@
               <button
                 v-if="canManage"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t("common.delete") }}</span>

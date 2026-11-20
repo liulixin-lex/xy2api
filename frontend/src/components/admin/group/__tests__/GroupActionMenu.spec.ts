@@ -76,3 +76,14 @@ describe('GroupActionMenu keys', () => {
     wrapper.unmount()
   })
 })
+
+// Astra review 2: on touch the menu's 40px items are 8px apart.
+describe('GroupActionMenu on touch', () => {
+  it('spaces its items 8px apart on a coarse pointer', () => {
+    const wrapper = mount(GroupActionMenu, {
+      props: { show: true, group: { id: 7, name: 'g' }, anchorRect: new DOMRect(300, 100, 40, 40), actions: groupRowActions({ platform: 'openai' }, full) },
+      global: { stubs: { Teleport: true, Icon: true } },
+    })
+    expect(wrapper.get('[data-test="group-action-menu"]').classes()).toEqual(expect.arrayContaining(['flex', 'flex-col', '[@media(pointer:coarse)]:gap-2']))
+  })
+})

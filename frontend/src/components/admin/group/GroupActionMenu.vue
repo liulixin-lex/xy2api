@@ -6,7 +6,7 @@
         ref="menuRef"
         role="menu"
         :aria-label="group.name"
-        class="fixed w-52 overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+        class="fixed flex w-52 flex-col overflow-y-auto overscroll-contain rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown [@media(pointer:coarse)]:gap-2"
         :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         data-test="group-action-menu"
         @click.stop
@@ -138,7 +138,7 @@ const layer = useOverlayLayer(() => props.show && !!props.group && !!props.ancho
 </script>
 
 <style scoped>
-/* Touch: every item 40px high; stacked without gaps they cannot reach out unseen. */
+/* Touch: every item 40px high, 8px apart (the menu's gap, Astra review 2). */
 @media (pointer: coarse) {
   .gmenu-item {
     min-height: 40px;

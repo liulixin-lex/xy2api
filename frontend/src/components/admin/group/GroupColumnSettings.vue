@@ -1,5 +1,5 @@
 <template>
-  <div role="group" :aria-label="t('common.table.columnsTitle')" data-test="group-column-settings">
+  <div role="group" :aria-label="t('common.table.columnsTitle')" class="flex flex-col [@media(pointer:coarse)]:gap-2" data-test="group-column-settings">
     <!-- A multi-select list: a shown column is told by its brand check alone (12.6-5). -->
     <button
       v-for="col in columns"
