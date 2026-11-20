@@ -325,6 +325,29 @@ describe('user UsageView', () => {
     }
   })
 
+  // Browser acceptance (step 1), item 3: on a tablet (768–1023px) the filters are in the sheet too, while the columns
+  // follow the wide memory (no frozen API key there).
+  it('uses the sheet toolbar up to 1024px, the columns switching at 768px', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => {
+      const min = /min-width:\s*(\d+)px/.exec(q)
+      const max = /max-width:\s*(\d+)px/.exec(q)
+      return {
+        matches: min ? 834 >= Number(min[1]) : max ? 834 <= Number(max[1]) : true, media: q, onchange: null,
+        addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+      } as unknown as MediaQueryList
+    })
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="usage-filters-phone"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="toolbar-first-row"]').exists()).toBe(false)
+      expect((wrapper.vm as any).alwaysVisible).toEqual(['created_at'])
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()

@@ -45,13 +45,40 @@ function mountFilters(props: Record<string, unknown> = {}, modelValue = filtersW
 beforeEach(() => { document.body.innerHTML = '' })
 afterEach(() => { vi.restoreAllMocks() })
 
+/** A width: the min-width queries (768px, 1024px) answer for it. */
+function setWidth(width: number) {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+    const min = /min-width:\s*(\d+)px/.exec(query)
+    const max = /max-width:\s*(\d+)px/.exec(query)
+    return {
+      matches: min ? width >= Number(min[1]) : max ? width <= Number(max[1]) : true,
+      media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList
+  })
+}
+
 describe('UsageFilters below 768px', () => {
-  it('keeps the filter row from 768px', () => {
-    setPhone(false)
+  it('keeps the filter row from 1024px', () => {
+    setWidth(1024)
     const w = mountFilters()
     expect(w.find('[data-testid="usage-filters-phone"]').exists()).toBe(false)
     expect(w.find('input[placeholder="admin.usage.searchUserPlaceholder"]').exists()).toBe(true)
     expect(w.text()).toContain('common.refresh')
+  })
+
+  // Browser acceptance (step 1), items 3 and 4: on a tablet the long form was four rows above the table; below 1024px
+  // it is in the sheet, and with no search "Filters" joins the info row (no row of its own).
+  it.each([834, 768, 390])('at %ipx uses the sheet, "Filters" leading the info row', async (width) => {
+    setWidth(width)
+    const w = mountFilters()
+    await flushPromises()
+    expect(w.find('[data-testid="usage-filters-phone"]').exists()).toBe(true)
+    expect(w.find('input[placeholder="admin.usage.searchUserPlaceholder"]').exists()).toBe(false)
+    expect(w.find('[data-test="toolbar-first-row"]').exists()).toBe(false)
+    const actions = w.get('.table-toolbar__info-row .table-toolbar__actions')
+    expect(actions.element.firstElementChild!.getAttribute('data-test')).toBe('toolbar-filter-button')
+    expect(w.get('.table-toolbar__info-row').find('[data-test="count"]').exists()).toBe(true)
   })
 
   it('shows the phone toolbar with the fields only in the sheet, and the page\'s count and tools on the info row', async () => {

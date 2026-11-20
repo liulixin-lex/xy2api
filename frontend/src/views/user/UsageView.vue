@@ -67,7 +67,7 @@
       </UsageOverview>
 
       <div class="card p-4 sm:p-6">
-        <!-- The tab's fields, defined once: in the row from 768px, in the phone toolbar's bottom sheet below it. -->
+        <!-- The tab's fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. -->
         <DefineFields>
           <template v-if="activeTab === 'errors'">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
@@ -127,9 +127,10 @@
           </template>
         </DefineFields>
 
-        <!-- Below 768px (mobile list plan): "Filters n" opens the fields in a bottom sheet (applied at once), the chosen
-             ones as removable tags; the count, refresh, columns and "more" (reset, export) on a row. -->
-        <TableToolbar v-if="phone" filter-sheet :filter-count="filterTags.length" data-testid="usage-filters-phone" @clear-filters="clearAllFilters">
+        <!-- Below 1024px (mobile list plan; the fields are a long form): "Filters n" opens them in a bottom sheet (applied
+             at once), the chosen ones as removable tags; the count, "Filters" (no search here, so it joins this row),
+             refresh, columns and "more" (reset, export) on one row. -->
+        <TableToolbar v-if="toolbarSheet" filter-sheet sheet-below="desktop" :filter-count="filterTags.length" data-testid="usage-filters-phone" @clear-filters="clearAllFilters">
           <template #sheet>
             <div class="grid gap-4"><ReuseFields /></div>
           </template>
@@ -174,7 +175,7 @@
             </button>
           </template>
         </TableToolbar>
-        <BottomSheet v-if="phone" :show="moreOpen" :title="t('common.more')" test-id="usage-more-sheet" @close="moreOpen = false">
+        <BottomSheet v-if="toolbarSheet" :show="moreOpen" :title="t('common.more')" test-id="usage-more-sheet" @close="moreOpen = false">
           <div class="grid gap-3">
             <button type="button" class="btn btn-secondary w-full" @click="moreOpen = false; resetFilters()">{{ t('common.reset') }}</button>
             <button v-if="activeTab !== 'errors'" type="button" class="btn btn-primary w-full" :disabled="exporting" @click="moreOpen = false; exportToCSV()">
@@ -183,7 +184,7 @@
           </div>
         </BottomSheet>
 
-        <div v-if="!phone" class="flex flex-wrap items-end justify-between gap-4">
+        <div v-if="!toolbarSheet" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-1 flex-wrap items-end gap-4 max-lg:basis-full">
             <ReuseFields />
           </div>
@@ -285,7 +286,7 @@ import UsageFilterTags, { type UsageFilterTag } from '@/components/admin/usage/U
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import TableSortHint from '@/components/common/TableSortHint.vue'
-import { usePhoneViewport } from '@/composables/useTableViewport'
+import { usePhoneViewport, useTableViewport } from '@/composables/useTableViewport'
 import { createReusableTemplate } from '@vueuse/core'
 import { useColumnVisibility } from '@/composables/useColumnVisibility'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
@@ -773,8 +774,11 @@ const hiddenSort = computed(() => {
 
 // ---- Phone toolbar (mobile list plan): the fields in a bottom sheet, the chosen ones as tags ----
 const [DefineFields, ReuseFields] = createReusableTemplate()
+/** Below 1024px the toolbar with the bottom sheet (TableToolbar's sheetBelow 'desktop'); the columns still switch at 768px. */
+const { desktop } = useTableViewport()
+const toolbarSheet = computed(() => !desktop.value)
 const moreOpen = ref(false)
-watch(phone, (on) => { if (!on) moreOpen.value = false })
+watch(toolbarSheet, (on) => { if (!on) moreOpen.value = false })
 
 const chosen = (value: unknown) => value !== null && value !== undefined && value !== ''
 const optionLabel = (options: SelectOption[], value: unknown) =>
