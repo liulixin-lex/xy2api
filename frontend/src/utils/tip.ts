@@ -2,13 +2,12 @@ import type { Directive } from 'vue'
 import { anyOverlayOpen } from './overlayStack'
 
 /**
- * v-tip="text": short tip (design spec E): shown after 400ms hover or at once on keyboard focus, hidden on
- * leave, blur, scroll or Escape; a scroll while its target keeps keyboard focus (the browser bringing the focused
- * element into view, or the user scrolling on) moves the tip with the target instead. With no layer open Escape only closes the tip; while a popover, panel or dialog is
- * open the key goes on to it as well, so one press closes both (7m-2). One shared element with
- * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
- * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
- * The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
+ * v-tip="text": short tip (design spec E): shown after 400ms hover, or on keyboard focus once the focus has
+ * scrolled its element into view; hidden on leave, blur, scroll or Escape. With no layer open Escape only closes the
+ * tip; while a popover, panel or dialog is open the key goes on to it as well, so one press closes both (7m-2). One
+ * shared element with role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's
+ * own description stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus:
+ * keyboard focus only. The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
  * Instead of text the value may be a card (12.7): a title, a state at the top right, column heads and rows of data,
  * built node by node (text only, never markup) in the same element, with the same timing and placement.
  */
@@ -81,6 +80,10 @@ function tip() {
 function place(target: HTMLElement, el: HTMLElement) {
   el.style.setProperty('--tip-room-w', `${window.innerWidth - EDGE * 2}px`)
   el.style.setProperty('--tip-room-h', `${window.innerHeight - EDGE * 2}px`)
+  // Measured where nothing squeezes it (a fixed box at its last left has only the room right of it): the same size and
+  // line breaks however the tip sat before.
+  el.style.left = '0px'
+  el.style.top = '0px'
   const rect = target.getBoundingClientRect()
   const width = el.offsetWidth
   const height = el.offsetHeight
@@ -166,7 +169,7 @@ function show(target: TipTarget) {
   current = target
   setDescribedBy(target, [...describedBy(target), TIP_ID])
   document.addEventListener('keydown', onKeydown, true)
-  window.addEventListener('scroll', onScroll, true)
+  window.addEventListener('scroll', hide, true)
 }
 
 function hide() {
@@ -178,16 +181,41 @@ function hide() {
   if (current) setDescribedBy(current, describedBy(current))
   current = null
   document.removeEventListener('keydown', onKeydown, true)
-  window.removeEventListener('scroll', onScroll, true)
+  window.removeEventListener('scroll', hide, true)
 }
 
 /**
- * A scroll hides the tip, but for one whose target has keyboard focus: that one follows its target, off screen with
- * it and back, until blur or Escape. Tabbing to an element below the fold scrolls it into view after the tip shows.
+ * Keyboard focus scrolls an element below the fold into view (smoothly: html has scroll-behavior: smooth), and a
+ * scroll hides the tip. So a keyboard-focused element's tip shows once two frames have gone by without a scroll, if
+ * the element still has keyboard focus; a scroll after that hides it as any other.
  */
-function onScroll() {
-  if (current && tipEl && document.activeElement === current && keyboardFocus(current)) place(current, tipEl)
-  else hide()
+let settling: { target: TipTarget; stop: () => void } | null = null
+function showWhenSettled(target: TipTarget) {
+  settling?.stop()
+  let quiet = 0
+  let frame = 0
+  const onScrolling = () => { quiet = 0 }
+  const state = {
+    target,
+    stop: () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', onScrolling, true)
+      if (settling === state) settling = null
+    }
+  }
+  const tick = () => {
+    if (document.activeElement !== target) return state.stop()
+    quiet += 1
+    if (quiet < 2) {
+      frame = requestAnimationFrame(tick)
+      return
+    }
+    state.stop()
+    if (keyboardFocus(target)) show(target)
+  }
+  settling = state
+  window.addEventListener('scroll', onScrolling, true)
+  frame = requestAnimationFrame(tick)
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -231,8 +259,11 @@ export const vTip: Directive<TipTarget, TipText> = {
   mounted(el, binding) {
     el.__tipText = binding.value ?? ''
     const handlers: Record<string, (event: Event) => void> = {
-      focus: () => { if (keyboardFocus(el)) show(el) },
-      blur: () => { if (current === el) hide() }
+      focus: () => { if (keyboardFocus(el)) showWhenSettled(el) },
+      blur: () => {
+        if (settling?.target === el) settling.stop()
+        if (current === el) hide()
+      }
     }
     if (!binding.modifiers.focus) {
       handlers.mouseenter = () => {
@@ -259,6 +290,7 @@ export const vTip: Directive<TipTarget, TipText> = {
     }
   },
   beforeUnmount(el) {
+    if (settling?.target === el) settling.stop()
     if (current === el) hide()
     for (const [name, handler] of Object.entries(el.__tipHandlers ?? {})) el.removeEventListener(name, handler)
     delete el.__tipHandlers

@@ -128,45 +128,106 @@ describe('v-tip cards', () => {
   })
 })
 
-// A scroll hides a tip (spec E), but for one whose target has keyboard focus: tabbing to an element below the fold
-// scrolls it into view after its tip shows, and that tip must stay, moved with its target.
-describe('v-tip on scroll', () => {
-  const at = (el: Element, top: number) =>
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top, bottom: top + 20, left: 100, width: 24, height: 20 } as DOMRect)
+// A scroll hides any tip (spec E). Tabbing to an element below the fold scrolls it into view (smoothly: html has
+// scroll-behavior: smooth), so a keyboard-focused element's tip waits until no scroll has come for two frames.
+describe('v-tip on keyboard focus and scroll', () => {
+  const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   const scroll = () => document.dispatchEvent(new Event('scroll'))
-
-  it('keeps a keyboard-focused tip through a scroll, moved with its target and still describing it', () => {
-    content.value = 'tip text'
+  const shown = () => !(document.getElementById('sq-tip')?.hidden ?? true)
+  const focusHost = () => {
     const el = mount(Host, { attachTo: document.body }).element as HTMLElement
-    at(el, 600)
     el.focus()
-    expect([tip().hidden, tip().style.top, el.getAttribute('aria-describedby')]).toEqual([false, '594px', 'sq-tip'])
-    at(el, 200)
+    return el
+  }
+
+  it('shows a keyboard-focused tip once the focus has scrolled its element into view; a later scroll hides it', async () => {
+    content.value = 'tip text'
+    const el = focusHost()
+    // The focus scroll, one scroll event a frame: no tip yet.
+    for (let i = 0; i < 3; i++) {
+      scroll()
+      await frame()
+    }
+    expect(shown()).toBe(false)
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([true, 'sq-tip'])
+    // The user's own scroll hides it as any other.
     scroll()
-    expect([tip().hidden, tip().style.top, el.getAttribute('aria-describedby')]).toEqual([false, '194px', 'sq-tip'])
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    // Nothing to scroll: two frames.
+    el.blur()
+    el.focus()
+    await frame()
+    expect(shown()).toBe(false)
+    await frame()
+    expect(shown()).toBe(true)
   })
 
-  it('still closes a hover tip on scroll, and a keyboard-focused one on Escape or blur', () => {
+  it('closes a hover tip on scroll, also one hovered open again on a keyboard-focused element after Escape', async () => {
     content.value = 'tip text'
     const hovered = mount(Host, { attachTo: document.body }).element as HTMLElement
     hover(hovered)
-    expect(tip().hidden).toBe(false)
-    scroll()
-    expect([tip().hidden, hovered.getAttribute('aria-describedby')]).toEqual([true, null])
     vi.useRealTimers()
-
-    const focused = mount(Host, { attachTo: document.body }).element as HTMLElement
-    focused.focus()
-    expect(tip().hidden).toBe(false)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    expect([tip().hidden, focused.getAttribute('aria-describedby')]).toEqual([true, null])
-    focused.blur()
-    focused.focus()
-    expect(tip().hidden).toBe(false)
-    focused.blur()
-    expect([tip().hidden, focused.getAttribute('aria-describedby')]).toEqual([true, null])
-    // Once focus has gone, a scroll hides as before (nothing left to follow).
+    expect(shown()).toBe(true)
     scroll()
-    expect(tip().hidden).toBe(true)
+    expect([shown(), hovered.getAttribute('aria-describedby')]).toEqual([false, null])
+
+    const focused = focusHost()
+    await frame()
+    await frame()
+    expect(shown()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(shown()).toBe(false)
+    hover(focused)
+    vi.useRealTimers()
+    expect([shown(), document.activeElement === focused]).toEqual([true, true])
+    scroll()
+    expect([shown(), focused.getAttribute('aria-describedby')]).toEqual([false, null])
+  })
+
+  it('closes a keyboard-focused tip on Escape and on blur, and shows none when the focus leaves before it settles', async () => {
+    content.value = 'tip text'
+    const el = focusHost()
+    await frame()
+    await frame()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    el.blur()
+    el.focus()
+    await frame()
+    await frame()
+    expect(shown()).toBe(true)
+    el.blur()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    el.focus()
+    el.blur()
+    await frame()
+    await frame()
+    expect(shown()).toBe(false)
+  })
+
+  // A fixed box is as wide as its text but no wider than the room right of its left: measured at its last left, a tip
+  // after one further right came out narrower and moved on the next showing (320px screen).
+  it('measures where nothing squeezes it: the same place on a narrow screen whichever tip showed before', () => {
+    vi.stubGlobal('innerWidth', 320)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return Math.min((this.textContent?.length ?? 0) * 10, 320 - (Number.parseFloat(this.style.left) || 0))
+    })
+    const tipOn = (text: string, left: number) => {
+      const el = mount(defineComponent({ setup: () => () => withDirectives(h('button', { type: 'button' }, 'x'), [[vTip, text]]) }), { attachTo: document.body }).element as HTMLElement
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300, bottom: 320, left, width: 24, height: 20 } as DOMRect)
+      return el
+    }
+    const right = tipOn('ok', 290)
+    const wide = tipOn('x'.repeat(30), 150)
+    const showOn = (el: HTMLElement) => {
+      hover(el)
+      const at = [tip().style.left, tip().style.top]
+      el.dispatchEvent(new Event('mouseleave'))
+      return at
+    }
+    expect(showOn(right)).toEqual(['292px', '294px'])
+    expect(showOn(wide)).toEqual(['12px', '294px'])
+    expect(showOn(wide)).toEqual(['12px', '294px'])
   })
 })

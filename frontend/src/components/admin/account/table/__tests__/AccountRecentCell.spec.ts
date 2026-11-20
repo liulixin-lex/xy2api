@@ -139,11 +139,13 @@ describe('AccountRecentCell', () => {
   })
 
   // The tip opens from the keyboard too: the cell takes focus when it has a tip, and the tip describes it (v-tip).
-  it('takes keyboard focus when it has a tip, shows the card and is described by it; nothing to focus without quality data', () => {
+  it('takes keyboard focus when it has a tip, shows the card and is described by it; nothing to focus without quality data', async () => {
     const cell = mountCell(quality())
     expect(cell.attributes('tabindex')).toBe('0')
     expect(cell.classes()).toContain('sq-focus')
     ;(cell.element as HTMLElement).focus()
+    // v-tip shows a keyboard-focused tip once the focus scroll has settled (two quiet frames).
+    for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     const tip = document.getElementById('sq-tip')!
     expect(tip.hidden).toBe(false)
     expect(tip.querySelectorAll('.sq-tip__c')).toHaveLength(12)
