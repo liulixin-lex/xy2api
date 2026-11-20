@@ -30,4 +30,13 @@ describe('AppHeader page title on narrow screens', () => {
     expect(source).toMatch(/<div class="hidden min-w-0 max-w-\[10rem\] text-left xl:block">\s*<div class="truncate/)
     expect(source).toMatch(/v-if="frozenBalance > 0"\s*class="hidden [^"]*min-\[1440px\]:inline"/)
   })
+
+  // Astra second re-review #4: a link folded to its icon keeps its name; the folded frozen amount stays readable and,
+  // in the user menu, reachable by a tap.
+  it('names the folded links and keeps the folded frozen amount reachable', () => {
+    expect(source).toMatch(/v-if="docUrl"[\s\S]*?:title="t\('nav\.docs'\)"\s*:aria-label="t\('nav\.docs'\)"/)
+    expect(source).toMatch(/:title="t\('nav\.modelPlaza'\)"\s*:aria-label="t\('nav\.modelPlaza'\)"/)
+    expect(source).toContain('<span v-if="frozenBalance > 0" class="sr-only min-[1440px]:hidden">{{ balanceFrozenLabel }}</span>')
+    expect(source).toContain('<div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 min-[1440px]:hidden">')
+  })
 })
