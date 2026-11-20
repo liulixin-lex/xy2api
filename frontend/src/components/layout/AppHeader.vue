@@ -39,7 +39,7 @@
           @click="openPalette"
         >
           <Icon name="search" size="sm" />
-          <kbd class="hidden rounded border border-gray-200 px-1.5 text-[11px] font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
+          <kbd class="hidden rounded border border-gray-200 px-1.5 text-xs font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
         </button>
 
         <!-- Announcement Bell -->
