@@ -216,7 +216,8 @@ const px = (value: string) => Number.parseFloat(value) || 0
 
 /**
  * Wholly inside the viewport and the visible box of its nearest scrolling ancestor, as the browser decides it: the
- * element with its scroll-margin, the box less its scroll-padding (a table's sticky header, DataTable).
+ * element with its scroll-margin, the box less its scroll-padding (a table's sticky header, DataTable). An element in
+ * that sticky header itself (a column's mark) is not covered by it: no top padding for it.
  */
 function wholeInView(el: HTMLElement) {
   const rect = el.getBoundingClientRect()
@@ -230,8 +231,10 @@ function wholeInView(el: HTMLElement) {
     const style = getComputedStyle(node)
     if (!/auto|scroll|overlay/.test(`${style.overflowX} ${style.overflowY}`)) continue
     const r = node.getBoundingClientRect()
+    const head = el.closest('thead')
+    const inHead = !!head && node.contains(head)
     box = {
-      top: Math.max(box.top, r.top + px(style.scrollPaddingTop)),
+      top: Math.max(box.top, r.top + (inHead ? 0 : px(style.scrollPaddingTop))),
       left: Math.max(box.left, r.left + px(style.scrollPaddingLeft)),
       bottom: Math.min(box.bottom, r.bottom - px(style.scrollPaddingBottom)),
       right: Math.min(box.right, r.right - px(style.scrollPaddingRight))

@@ -284,6 +284,30 @@ describe('v-tip on keyboard focus and scroll', () => {
     expect(jump).toHaveBeenCalledTimes(2)
   })
 
+  // A tip target in the sticky header itself (a grouped column's mark) is not covered by the header: Tab onto it
+  // scrolls nothing, while a body element at the same place is under the header and is scrolled.
+  it('does not count the sticky header as covering an element inside it', () => {
+    content.value = 'tip text'
+    const box = document.createElement('div')
+    box.style.overflow = 'auto'
+    box.style.scrollPaddingTop = '105.5px'
+    box.innerHTML = '<table><thead><tr><th></th></tr></thead><tbody><tr><td></td></tr></tbody></table>'
+    document.body.appendChild(box)
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 700, left: 0, right: 1000 } as DOMRect)
+    const place = (el: HTMLElement) => {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 130, bottom: 150, left: 100, right: 124, width: 24, height: 20 } as DOMRect)
+      el.scrollIntoView = vi.fn()
+      return el
+    }
+    const inHead = place(mount(Host, { attachTo: box.querySelector('th')! }).element as HTMLElement)
+    tabTo(inHead)
+    expect(inHead.scrollIntoView).not.toHaveBeenCalled()
+    inHead.blur()
+    const inBody = place(mount(Host, { attachTo: box.querySelector('td')! }).element as HTMLElement)
+    tabTo(inBody)
+    expect(inBody.scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+
   // The root's own declaration goes back with its priority: smooth !important stays important.
   it('puts the root\'s scroll-behavior back with its priority, or removes it when there was none', () => {
     content.value = 'tip text'
