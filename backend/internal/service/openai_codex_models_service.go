@@ -160,6 +160,10 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
 	}
+	body, err = restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, nil, true)
+	if err != nil {
+		return nil, false, err
+	}
 	manifest := &OpenAIModelsResponse{
 		Body: body,
 		ETag: codexModelsManifestBodyETag(body),
@@ -189,14 +193,19 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	}
 
 	var configuredModels []string
+	var catalog []Account
 	var metadataModels map[string]string
 	modelMetadata := make(map[string]codexModelMetadataOverride)
-	if !group.CodexModelsManifestConfig.Enabled {
-		visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	if !group.CodexModelsManifestConfig.Enabled || group.OpenAITierPolicyVersion >= OpenAITierPolicyExplicit {
+		var visible []Account
+		var err error
+		visible, catalog, err = loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 		if err != nil {
 			return fmt.Errorf("load group configured Codex models: %w", err)
 		}
-		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		if !group.CodexModelsManifestConfig.Enabled {
+			configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		}
 		metadataModels = codexCatalogMetadataModels(PlatformOpenAI, configuredModels, catalog, nil, true)
 		for _, modelID := range configuredModels {
 			if metadata, ok := groupCodexModelMetadata(PlatformOpenAI, modelID, catalog, group, nil, true); ok {
@@ -218,6 +227,13 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
 		if err != nil {
 			return fmt.Errorf("order pinned Codex models: %w", err)
+		}
+		changed = true
+	}
+	if group.OpenAITierPolicyVersion >= OpenAITierPolicyExplicit {
+		body, err = restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, nil, true)
+		if err != nil {
+			return err
 		}
 		changed = true
 	}
@@ -886,7 +902,7 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 			compositeRoutesAvailable = false
 		}
 	}
-	return buildCodexModelsManifestForAccounts(
+	body, err := buildCodexModelsManifestForAccounts(
 		effectivePlatform,
 		modelIDs,
 		catalog,
@@ -894,6 +910,10 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		compositeRoutes,
 		compositeRoutesAvailable,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, compositeRoutes, compositeRoutesAvailable)
 }
 
 func buildCodexModelsManifestForAccounts(

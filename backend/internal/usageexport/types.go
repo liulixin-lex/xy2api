@@ -49,13 +49,14 @@ func Defaults() Config {
 }
 
 type Options struct {
-	Filters   usagestats.UsageLogFilters `json:"filters"`
-	SortBy    string                     `json:"sort_by"`
-	SortOrder string                     `json:"sort_order"`
-	Timezone  string                     `json:"timezone"`
-	Language  string                     `json:"language"`
-	Format    string                     `json:"format"`
-	Version   int                        `json:"version"`
+	Filters                    usagestats.UsageLogFilters `json:"filters"`
+	SortBy                     string                     `json:"sort_by"`
+	SortOrder                  string                     `json:"sort_order"`
+	Timezone                   string                     `json:"timezone"`
+	Language                   string                     `json:"language"`
+	Format                     string                     `json:"format"`
+	Version                    int                        `json:"version"`
+	IncludeInternalTierDetails bool                       `json:"include_internal_tier_details,omitempty"`
 }
 type Task struct {
 	ID         string     `json:"id"`

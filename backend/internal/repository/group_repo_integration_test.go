@@ -70,6 +70,40 @@ func (s *GroupRepoSuite) TestCreate() {
 	s.Require().Equal("test-create", got.Name)
 }
 
+func (s *GroupRepoSuite) TestOpenAITierPolicyAtomicRevision() {
+	ctx := s.ctx
+	input := &service.Group{
+		Name: "tier-revision", Platform: service.PlatformOpenAI, Status: service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 1, ForceOpenAIFast: true,
+	}
+	s.Require().NoError(s.repo.Create(ctx, input))
+	first, err := s.repo.GetByIDLite(ctx, input.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.OpenAITierPolicyLegacy, first.OpenAITierPolicyVersion)
+	s.Require().Equal(service.OpenAITierModeForceOn, first.OpenAIFastMode)
+
+	oldTime := first.UpdatedAt
+	stale := *first
+	first.ExpectedUpdatedAt = &oldTime
+	first.OpenAITierPolicyVersion = service.OpenAITierPolicyExplicit
+	first.OpenAIFastMode = service.OpenAITierModeForceOff
+	first.OpenAIUltrafastMode = service.OpenAITierModeForceOn
+	first.FreeOpenAIUltrafast = true
+	s.Require().NoError(s.repo.Update(ctx, first))
+	s.Require().True(first.UpdatedAt.After(oldTime))
+
+	stale.ExpectedUpdatedAt = &oldTime
+	stale.Name = "stale edit"
+	s.Require().ErrorIs(s.repo.Update(ctx, &stale), service.ErrConfigurationRevision)
+	current, err := s.repo.GetByIDLite(ctx, input.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(input.Name, current.Name)
+	s.Require().Equal(service.OpenAITierModeForceOff, current.OpenAIFastMode)
+	s.Require().Equal(service.OpenAITierModeForceOn, current.OpenAIUltrafastMode)
+	s.Require().False(current.ForceOpenAIFast)
+	s.Require().True(current.FreeOpenAIUltrafast)
+}
+
 func (s *GroupRepoSuite) TestCreateFromSourceUsesDefaultPriorityAndFiltersIneligibleAccounts() {
 	source := &service.Group{
 		Name:             "duplicate-source",

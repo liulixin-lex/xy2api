@@ -58,6 +58,8 @@ type UsageLog struct {
 	Degradations jsontext.Value `json:"degradations,omitempty"`
 	// PricingSource holds the value of the "pricing_source" field.
 	PricingSource jsontext.Value `json:"pricing_source,omitempty"`
+	// ServiceTierDetails holds the value of the "service_tier_details" field.
+	ServiceTierDetails jsontext.Value `json:"service_tier_details,omitempty"`
 	// ProfitBasis holds the value of the "profit_basis" field.
 	ProfitBasis jsontext.Value `json:"profit_basis,omitempty"`
 	// DispatchPhases holds the value of the "dispatch_phases" field.
@@ -275,7 +277,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldServiceTierDetails, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
 		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUsageObserved, usagelog.FieldTerminalEventSeen, usagelog.FieldTerminalEventValid, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
@@ -423,6 +425,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.PricingSource); err != nil {
 					return fmt.Errorf("unmarshal field pricing_source: %w", err)
+				}
+			}
+		case usagelog.FieldServiceTierDetails:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field service_tier_details", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.ServiceTierDetails); err != nil {
+					return fmt.Errorf("unmarshal field service_tier_details: %w", err)
 				}
 			}
 		case usagelog.FieldProfitBasis:
@@ -1009,6 +1019,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("pricing_source=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PricingSource))
+	builder.WriteString(", ")
+	builder.WriteString("service_tier_details=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ServiceTierDetails))
 	builder.WriteString(", ")
 	builder.WriteString("profit_basis=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ProfitBasis))

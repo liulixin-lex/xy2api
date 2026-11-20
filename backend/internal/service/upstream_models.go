@@ -28,17 +28,20 @@ const (
 )
 
 type UpstreamModelMetadata struct {
-	ID                       string                     `json:"id"`
-	DisplayName              string                     `json:"display_name,omitempty"`
-	Description              string                     `json:"description,omitempty"`
-	Reasoning                *bool                      `json:"reasoning,omitempty"`
-	DefaultReasoningLevel    string                     `json:"default_reasoning_level,omitempty"`
-	SupportedReasoningLevels []string                   `json:"supported_reasoning_levels,omitempty"`
-	InputModalities          []string                   `json:"input_modalities,omitempty"`
-	ContextWindow            int64                      `json:"context_window,omitempty"`
-	MaxContextWindow         int64                      `json:"max_context_window,omitempty"`
-	MaxOutputTokens          int64                      `json:"max_output_tokens,omitempty"`
-	CodexToolCapabilities    map[string]json.RawMessage `json:"codex_tool_capabilities,omitempty"`
+	ServiceTiersByEndpoint    map[string]json.RawMessage `json:"service_tiers_by_endpoint,omitempty"`
+	ServiceTiersSyncedAt      string                     `json:"service_tiers_synced_at,omitempty"`
+	TierCredentialFingerprint string                     `json:"tier_credential_fingerprint,omitempty"`
+	ID                        string                     `json:"id"`
+	DisplayName               string                     `json:"display_name,omitempty"`
+	Description               string                     `json:"description,omitempty"`
+	Reasoning                 *bool                      `json:"reasoning,omitempty"`
+	DefaultReasoningLevel     string                     `json:"default_reasoning_level,omitempty"`
+	SupportedReasoningLevels  []string                   `json:"supported_reasoning_levels,omitempty"`
+	InputModalities           []string                   `json:"input_modalities,omitempty"`
+	ContextWindow             int64                      `json:"context_window,omitempty"`
+	MaxContextWindow          int64                      `json:"max_context_window,omitempty"`
+	MaxOutputTokens           int64                      `json:"max_output_tokens,omitempty"`
+	CodexToolCapabilities     map[string]json.RawMessage `json:"codex_tool_capabilities,omitempty"`
 }
 
 type UpstreamModelMetadataSnapshot struct {
@@ -229,6 +232,20 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
 		if parseErr == nil {
 			catalog.Metadata = directMetadata
+			if account != nil && account.IsOpenAI() {
+				at := time.Now().UTC().Format(time.RFC3339)
+				credential, resolveErr := resolveCredentialAccount(ctx, s.accountRepo, account)
+				if resolveErr != nil {
+					return nil, resolveErr
+				}
+				fingerprint := capabilityFingerprint(credential)
+				for id, entry := range directMetadata {
+					if entry.hasServiceTiers() {
+						entry.ServiceTiersSyncedAt, entry.TierCredentialFingerprint = at, fingerprint
+						catalog.Metadata[id] = entry
+					}
+				}
+			}
 		}
 	}
 
@@ -278,15 +295,32 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 				if !exists {
 					continue
 				}
-				if entry, ok := completeMetadata[modelID]; ok {
-					if entry.CodexToolCapabilities == nil {
-						entry.CodexToolCapabilities = make(map[string]json.RawMessage)
-					}
-					applyCodexToolCapabilities(entry.CodexToolCapabilities, old.CodexToolCapabilities, false)
-					completeMetadata[modelID] = entry
-				} else {
-					completeMetadata[modelID] = old
+				// Freeze a legacy manifest's observation time before advancing the
+				// surrounding snapshot. Copying an entry is not a new observation.
+				if old.hasServiceTiers() && old.ServiceTiersSyncedAt == "" {
+					old.ServiceTiersSyncedAt = previous.SyncedAt
 				}
+				entry, ok := completeMetadata[modelID]
+				if !ok {
+					completeMetadata[modelID] = old
+					continue
+				}
+				if !upstreamModelMetadataIsComplete(entry) {
+					entry, _ = mergeUpstreamModelMetadata(entry, old)
+				}
+				if entry.CodexToolCapabilities == nil {
+					entry.CodexToolCapabilities = make(map[string]json.RawMessage)
+				}
+				if !entry.hasServiceTiers() {
+					entry.ServiceTiersSyncedAt = old.ServiceTiersSyncedAt
+					entry.ServiceTiersByEndpoint = old.ServiceTiersByEndpoint
+					entry.TierCredentialFingerprint = old.TierCredentialFingerprint
+				} else if _, general := entry.CodexToolCapabilities["service_tiers"]; !general {
+					// An endpoint-specific refresh cannot extend the old general list.
+					delete(old.CodexToolCapabilities, "service_tiers")
+				}
+				applyCodexToolCapabilities(entry.CodexToolCapabilities, old.CodexToolCapabilities, false)
+				completeMetadata[modelID] = entry
 			}
 		}
 		snapshot := UpstreamModelMetadataSnapshot{
@@ -382,13 +416,17 @@ func upstreamCatalogNeedsRegistry(models []string, metadata map[string]UpstreamM
 	return false
 }
 
+func (m UpstreamModelMetadata) hasServiceTiers() bool {
+	return len(m.CodexToolCapabilities["service_tiers"]) > 0 || len(m.ServiceTiersByEndpoint) > 0
+}
+
 func upstreamModelMetadataIsUseful(metadata UpstreamModelMetadata) bool {
 	return strings.TrimSpace(metadata.DisplayName) != "" ||
 		strings.TrimSpace(metadata.Description) != "" ||
 		metadata.Reasoning != nil ||
 		len(metadata.SupportedReasoningLevels) > 0 ||
 		len(metadata.InputModalities) > 0 ||
-		len(metadata.CodexToolCapabilities) > 0 ||
+		len(metadata.CodexToolCapabilities) > 0 || len(metadata.ServiceTiersByEndpoint) > 0 ||
 		metadata.ContextWindow > 0 ||
 		metadata.MaxContextWindow > 0 ||
 		metadata.MaxOutputTokens > 0
@@ -426,7 +464,7 @@ func completeUpstreamModelMetadataSubset(
 			continue
 		}
 		entry, ok := metadata[modelID]
-		if !ok || !upstreamModelMetadataIsComplete(entry) {
+		if !ok || (!upstreamModelMetadataIsComplete(entry) && !entry.hasServiceTiers()) {
 			continue
 		}
 		if strings.TrimSpace(entry.ID) == "" {
@@ -1000,7 +1038,7 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 }
 
 func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
-	if account.IsOpenAIOAuth() {
+	if account.IsOpenAIOAuthLike() {
 		return s.buildOpenAIOAuthUpstreamModelsRequest(ctx, account)
 	}
 	return buildOpenAIAPIKeyModelsRequest(ctx, account, s.validateUpstreamBaseURL)
@@ -1049,7 +1087,7 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to resolve OpenAI account credentials", err)
 	}
-	if !credentialAccount.IsOpenAIOAuth() {
+	if !credentialAccount.IsOpenAIOAuthLike() {
 		return nil, newUpstreamModelSyncUnsupportedError(
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", credentialAccount.Type), nil,
 		)
@@ -1292,6 +1330,7 @@ func extractUpstreamModelCatalog(body []byte, grok bool) ([]string, map[string]U
 		if err := json.Unmarshal(raw, &fields); err == nil {
 			entry.CodexToolCapabilities = make(map[string]json.RawMessage)
 			applyCodexToolCapabilities(entry.CodexToolCapabilities, fields, true)
+			_ = json.Unmarshal(fields["service_tiers_by_endpoint"], &entry.ServiceTiersByEndpoint)
 		}
 		if upstreamModelMetadataIsUseful(entry) {
 			metadata[modelID] = entry

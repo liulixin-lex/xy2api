@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"net/http"
 	"strings"
 	"time"
@@ -87,7 +89,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
 	}
 
-	serviceTier := extractOpenAIServiceTierFromBody(body)
+	if containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
+		chatReq.ServiceTier = OpenAIFastTierPriority
+	}
 
 	chatBody, err := json.Marshal(chatReq)
 	if err != nil {
@@ -116,10 +120,16 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	// Provider normalization and policy caps can both change the converted effort.
 	// Use the final outbound value for usage logs and billing.
 	var reasoningEffort *string
-	// Unlike forwardResponsesViaRawChatCompletions, applyOpenAIFastPolicyToBody
-	// is intentionally skipped: Anthropic Messages bodies carry no service_tier,
-	// so the converted Chat Completions body never contains one and the policy
-	// would always be a no-op on this path.
+	chatBody, err = s.applyOpenAIFastPolicyToBody(context.WithValue(ctx, openAITierEndpointKey{}, APIProtocolChatCompletions), account, upstreamModel, chatBody)
+	if err != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(err, &blocked) {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+		}
+		return nil, err
+	}
+	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai messages: forwarding via raw chat completions",
 		zap.Int64("account_id", account.ID),

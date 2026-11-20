@@ -21,6 +21,8 @@ export interface IntervalFormEntry {
 }
 
 export interface PricingFormEntry {
+  id?: number
+  platform?: string
   models: string[]
   billing_mode: BillingMode
   input_price: number | string | null
@@ -29,6 +31,7 @@ export interface PricingFormEntry {
   cache_write_1h_price?: number | string | null
   cache_read_price: number | string | null
   fast_multiplier?: number | string | null
+  ultrafast_multiplier?: number | string | null
   flex_multiplier?: number | string | null
   reasoning_effort_multipliers?: Record<string, number | string> | null
   image_input_price: number | string | null
@@ -181,6 +184,31 @@ export function isValidPositiveMultiplier(val: number | string | null | undefine
   if (val === null || val === undefined || val === '') return true
   const multiplier = Number(val)
   return Number.isFinite(multiplier) && multiplier > 0
+}
+
+type TierMultipliers = Pick<PricingFormEntry, 'billing_mode' | 'fast_multiplier' | 'ultrafast_multiplier' | 'flex_multiplier'>
+
+export function tierMultipliersToAPI(entry: TierMultipliers) {
+  return {
+    fast_multiplier: toNullableNumber(entry.fast_multiplier),
+    ultrafast_multiplier: entry.billing_mode === 'token' ? toNullableNumber(entry.ultrafast_multiplier) : null,
+    flex_multiplier: toNullableNumber(entry.flex_multiplier),
+  }
+}
+
+export function tierMultiplierError(entry: TierMultipliers, platform: string, t: TranslateFn): string | null {
+  if (entry.billing_mode === 'token' && (platform === 'openai' || platform === 'composite')) {
+    for (const [field, label] of [['fast_multiplier', 'Fast'], ['ultrafast_multiplier', 'Ultrafast']] as const) {
+      const raw = entry[field]
+      if (raw == null || raw === '') continue
+      const value = Number(raw)
+      if (!Number.isFinite(value) || value <= 0 || value > 999999.999999 || value !== Number(value.toFixed(6))) {
+        return t('admin.channels.form.tierMultiplierRange', { tier: label })
+      }
+    }
+  }
+  return [entry.fast_multiplier, entry.flex_multiplier].every(isValidPositiveMultiplier)
+    ? null : t('admin.channels.form.multiplierPositive')
 }
 
 export function formReasoningEffortMultipliersToAPI(

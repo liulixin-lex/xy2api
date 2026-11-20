@@ -10,6 +10,26 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
+func enableTierBillingProtocol(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, "SET LOCAL xy2api.billing_worker_protocol = '2'")
+	return err
+}
+
+func (r *usageBillingRepository) withTierBillingProtocol(ctx context.Context, run func(*sql.Tx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := enableTierBillingProtocol(ctx, tx); err != nil {
+		return err
+	}
+	if err := run(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // prepareBillingIntent commits separately from monetary effects. If the money
 // transaction rolls back, the exact original price/usage remains recoverable.
 func (r *usageBillingRepository) prepareBillingIntent(ctx context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingCommand, error) {
@@ -92,46 +112,61 @@ func (r *usageBillingRepository) recordBillingIntentFailure(ctx context.Context,
 	case errors.Is(cause, service.ErrUsageBillingInvalidAmount):
 		state, code = "review", "invalid_amount"
 	}
-	_, _ = r.db.ExecContext(ctx, `UPDATE usage_billing_intents SET state = $3, last_error_code = $4,
-		next_attempt_at = NOW() + INTERVAL '10 seconds', updated_at = NOW()
-		WHERE request_id = $1 AND api_key_id = $2 AND state = 'pending'`, cmd.RequestID, cmd.APIKeyID, state, code)
+	_ = r.withTierBillingProtocol(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE usage_billing_intents SET state = $3, last_error_code = $4,
+			next_attempt_at = NOW() + INTERVAL '10 seconds', updated_at = NOW()
+			WHERE request_id = $1 AND api_key_id = $2 AND state = 'pending'`, cmd.RequestID, cmd.APIKeyID, state, code)
+		return err
+	})
 }
 
 func (r *usageBillingRepository) ClaimBillingRecovery(ctx context.Context, limit int) ([]service.UsageBillingCommand, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	rows, err := r.db.QueryContext(ctx, `WITH candidates AS (
-		SELECT request_id, api_key_id FROM usage_billing_intents
-		WHERE (state = 'pending' OR (state = 'settled' AND cache_pending)) AND next_attempt_at <= NOW()
-		ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED
-	) UPDATE usage_billing_intents i SET attempts = attempts + 1,
-		next_attempt_at = NOW() + INTERVAL '60 seconds', updated_at = NOW()
-	FROM candidates c WHERE i.request_id = c.request_id AND i.api_key_id = c.api_key_id
-	RETURNING i.command`, limit)
+	var payloads [][]byte
+	err := r.withTierBillingProtocol(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `WITH candidates AS (
+			SELECT request_id, api_key_id FROM usage_billing_intents
+			WHERE (state = 'pending' OR (state = 'settled' AND cache_pending)) AND next_attempt_at <= NOW()
+			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED
+		) UPDATE usage_billing_intents i SET attempts = attempts + 1,
+			next_attempt_at = NOW() + INTERVAL '60 seconds', updated_at = NOW()
+		FROM candidates c WHERE i.request_id = c.request_id AND i.api_key_id = c.api_key_id
+		RETURNING i.command`, limit)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			payloads = append(payloads, raw)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var commands []service.UsageBillingCommand
-	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
+	commands := make([]service.UsageBillingCommand, 0, len(payloads))
+	for _, raw := range payloads {
 		var cmd service.UsageBillingCommand
 		if err := json.Unmarshal(raw, &cmd); err != nil {
 			return nil, err
 		}
 		commands = append(commands, cmd)
 	}
-	return commands, rows.Err()
+	return commands, nil
 }
 
 func (r *usageBillingRepository) CompleteBillingCacheInvalidation(ctx context.Context, cmd *service.UsageBillingCommand) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE usage_billing_intents SET cache_pending = FALSE, updated_at = NOW()
-		WHERE request_id = $1 AND api_key_id = $2 AND state = 'settled'`, cmd.RequestID, cmd.APIKeyID)
-	return err
+	return r.withTierBillingProtocol(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE usage_billing_intents SET cache_pending = FALSE, updated_at = NOW()
+			WHERE request_id = $1 AND api_key_id = $2 AND state = 'settled'`, cmd.RequestID, cmd.APIKeyID)
+		return err
+	})
 }
 
 func (r *usageBillingRepository) BillingRecoveryHealth(ctx context.Context) (pending, review int64, oldestSeconds float64, err error) {

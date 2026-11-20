@@ -15,9 +15,9 @@ describe('usageServiceTier utils', () => {
     expect(normalizeUsageServiceTier('ultrafast')).toBe('ultrafast')
   })
 
-  it('formats empty values as standard', () => {
-    expect(formatUsageServiceTier()).toBe('standard')
-    expect(formatUsageServiceTier('')).toBe('standard')
+  it('preserves missing historical tiers', () => {
+    expect(formatUsageServiceTier()).toBe('')
+    expect(formatUsageServiceTier('')).toBe('')
   })
 
   it('passes through unknown non-empty tiers for display fallback', () => {
@@ -31,12 +31,13 @@ describe('usageServiceTier utils', () => {
       'usage.serviceTierUltrafast': 'Ultrafast',
       'usage.serviceTierFlex': 'Flex',
       'usage.serviceTierStandard': 'Standard',
+      'usage.tierDetails.notRecorded': 'Not recorded',
     })[key] ?? key
 
     expect(getUsageServiceTierLabel('fast', translate)).toBe('Fast')
     expect(getUsageServiceTierLabel('ultrafast', translate)).toBe('Ultrafast')
     expect(getUsageServiceTierLabel('flex', translate)).toBe('Flex')
-    expect(getUsageServiceTierLabel(undefined, translate)).toBe('Standard')
+    expect(getUsageServiceTierLabel(undefined, translate)).toBe('Not recorded')
     expect(getUsageServiceTierLabel('custom-tier', translate)).toBe('custom-tier')
   })
 })

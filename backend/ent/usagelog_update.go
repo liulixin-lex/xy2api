@@ -360,6 +360,24 @@ func (_u *UsageLogUpdate) ClearPricingSource() *UsageLogUpdate {
 	return _u
 }
 
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (_u *UsageLogUpdate) SetServiceTierDetails(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetServiceTierDetails(v)
+	return _u
+}
+
+// AppendServiceTierDetails appends value to the "service_tier_details" field.
+func (_u *UsageLogUpdate) AppendServiceTierDetails(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendServiceTierDetails(v)
+	return _u
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (_u *UsageLogUpdate) ClearServiceTierDetails() *UsageLogUpdate {
+	_u.mutation.ClearServiceTierDetails()
+	return _u
+}
+
 // SetProfitBasis sets the "profit_basis" field.
 func (_u *UsageLogUpdate) SetProfitBasis(v jsontext.Value) *UsageLogUpdate {
 	_u.mutation.SetProfitBasis(v)
@@ -2083,6 +2101,17 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.ServiceTierDetails(); ok {
+		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedServiceTierDetails(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldServiceTierDetails, value)
+		})
+	}
+	if _u.mutation.ServiceTierDetailsCleared() {
+		_spec.ClearField(usagelog.FieldServiceTierDetails, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.ProfitBasis(); ok {
 		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
 	}
@@ -3010,6 +3039,24 @@ func (_u *UsageLogUpdateOne) AppendPricingSource(v jsontext.Value) *UsageLogUpda
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (_u *UsageLogUpdateOne) ClearPricingSource() *UsageLogUpdateOne {
 	_u.mutation.ClearPricingSource()
+	return _u
+}
+
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (_u *UsageLogUpdateOne) SetServiceTierDetails(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetServiceTierDetails(v)
+	return _u
+}
+
+// AppendServiceTierDetails appends value to the "service_tier_details" field.
+func (_u *UsageLogUpdateOne) AppendServiceTierDetails(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendServiceTierDetails(v)
+	return _u
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (_u *UsageLogUpdateOne) ClearServiceTierDetails() *UsageLogUpdateOne {
+	_u.mutation.ClearServiceTierDetails()
 	return _u
 }
 
@@ -4765,6 +4812,17 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ServiceTierDetails(); ok {
+		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedServiceTierDetails(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldServiceTierDetails, value)
+		})
+	}
+	if _u.mutation.ServiceTierDetailsCleared() {
+		_spec.ClearField(usagelog.FieldServiceTierDetails, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ProfitBasis(); ok {
 		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)

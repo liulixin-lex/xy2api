@@ -176,19 +176,38 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// key remains separate for authorization, limits and settlement ownership.
 	servedKey := input.APIKey
 	apiKey := ServingPricingKey(ctx, servedKey)
+	var prices *openAITierPrices
+	if d := result.TierDecision; d != nil && d.prices != nil {
+		prices = d.prices
+		ctx = context.WithValue(ctx, openAITierPricesKey{}, prices)
+		ctx = WithResolvedTargetPlatform(ctx, PlatformOpenAI)
+		if prices.group != nil {
+			apiKey = CloneAPIKeyWithGroup(apiKey, prices.group)
+		}
+	}
 	billingKey := BillingAPIKey(ctx, servedKey)
 	billingFields := input.ChannelUsageFields
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
-	billingAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
-	if err != nil {
-		return err
+	var billingAccount *Account
+	var err error
+	if prices != nil && prices.credential != nil {
+		billingAccount = prices.credential
+	} else {
+		billingAccount, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return err
+		}
+	}
+	if prices == nil {
+		ctx = context.WithValue(ctx, openAITierTextPricingKey{}, openAITierTextRoute(billingAccount, firstNonEmpty(result.UpstreamModel, result.Model)))
 	}
 	if !isGrokVideoUsageResult(result, nil) {
 		ApplyOpenAIImageBillingResolution(result)
 	}
-	logServiceTierBillingDowngrade("service.openai_gateway", account, result.RequestID, ApplyOpenAIServiceTierBillingResolution(billingAccount, apiKey.Group, result))
+	tierResolution := ApplyOpenAIServiceTierBillingResolution(billingAccount, apiKey.Group, result)
+	logServiceTierBillingDowngrade("service.openai_gateway", account, result.RequestID, tierResolution)
 
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
@@ -218,7 +237,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if s.cfg != nil {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
-	if apiKey.GroupID != nil && apiKey.Group != nil {
+	if prices != nil && prices.rate != nil {
+		multiplier = *prices.rate
+	} else if apiKey.GroupID != nil && apiKey.Group != nil {
 		multiplier = s.ResolveUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。
@@ -227,6 +248,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Resolve，以免污染 user:group 倍率缓存。
 	baseMultiplier := multiplier
 	pricingAt := openAIUsagePricingAt(input)
+	if prices != nil {
+		pricingAt = prices.at
+	}
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
@@ -255,20 +279,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
 	longContextBillingGate := openAILongContextBillingGate(billingAccount)
-	cost, err = s.calculateOpenAIRecordUsageCost(
-		ctx,
-		result,
-		apiKey,
-		billingModels,
-		multiplier,
-		imageMultiplier,
-		videoMultiplier,
-		baseMultiplier,
-		tokens,
-		serviceTier,
-		longContextBillingGate,
-		pricingAt,
-	)
+	quote := func(models []string, tier string) (*CostBreakdown, error) {
+		return s.calculateOpenAIRecordUsageCost(ctx, result, apiKey, models, multiplier,
+			imageMultiplier, videoMultiplier, baseMultiplier, tokens, tier, longContextBillingGate, pricingAt)
+	}
+	cost, err = quote(billingModels, serviceTier)
 	if err != nil {
 		if !isUsagePricingUnavailableError(err) {
 			return err
@@ -298,10 +313,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	); responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
 		if identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey); identified {
 			responseModels := s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, usageBillingModelCandidates(responseModel))
-			responseCost, responseErr := s.calculateOpenAIRecordUsageCost(
-				ctx, result, apiKey, responseModels, multiplier, imageMultiplier,
-				videoMultiplier, baseMultiplier, tokens, serviceTier, longContextBillingGate, pricingAt,
-			)
+			responseCost, responseErr := quote(responseModels, serviceTier)
 			// 基线定价源以 baselineBillingModel 为准：它正是 calculateOpenAIRecordUsageCost
 			// 内部做渠道定价判断时使用的模型，且"首候选有渠道价"必然意味着首候选就是实际
 			// 定价基准（有渠道价就一定能算出价，循环不会落到后续候选）。
@@ -315,32 +327,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
-	// The serving group's Free Fast policy changes only the customer charge.
-	// Keep priority TotalCost and service_tier for upstream accounting, but
-	// evaluate ActualCost at the Standard tier with the same pricing snapshot.
-	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
-		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
-			ctx,
-			result,
-			apiKey,
-			billingModels,
-			multiplier,
-			imageMultiplier,
-			videoMultiplier,
-			baseMultiplier,
-			tokens,
-			"",
-			longContextBillingGate,
-			pricingAt,
-		)
-		if standardErr != nil && !isUsagePricingUnavailableError(standardErr) {
-			return standardErr
-		}
-		// Missing pricing already fell back to a zero-cost log above; keep that
-		// usage row instead of dropping it on the Standard re-evaluation.
-		if standardErr == nil && cost != nil && standardCost != nil {
-			cost.ActualCost = standardCost.ActualCost
-		}
+	details, err := settleOpenAITierCharge(result, billingAccount, apiKey, tierResolution, cost, func(tier string) (*CostBreakdown, error) {
+		return quote(billingModels, tier)
+	})
+	if err != nil {
+		return err
 	}
 
 	// Determine billing type
@@ -514,11 +505,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if servedKey.GroupID != nil {
-		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *servedKey.GroupID, result.UpstreamModel, result.Model,
+	if apiKey.GroupID != nil {
+		applyAccountStatsCost(ctx, usageLog, s.channelService, s.tierBillingService(ctx),
+			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost, pricingAt,
-			accountStatsLongContextPricingEnabled(longContextBillingGate),
+			accountStatsLongContextPricingEnabled(longContextBillingGate), openAITierProcurementAccount(result, details, billingAccount),
 		)
 	}
 
@@ -527,6 +518,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	resilienceAnnotateUsage(ctx, usageLog)
 	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
+	}
+	if details != nil {
+		details.ActualCost = QuantizeUsageBillingAmount(cost.ActualCost)
+		usageLog.ServiceTierDetails, err = json.Marshal(details)
+		if err != nil {
+			return err
+		}
 	}
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, billingKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
@@ -582,7 +580,7 @@ func (s *OpenAIGatewayService) hasIdentifiedOpenAIResponsePricing(ctx context.Co
 	if s.resolveOpenAIChannelPricing(ctx, model, apiKey) != nil {
 		return true, true
 	}
-	return s.billingService.HasIdentifiedTokenPricing(model), false
+	return s.tierBillingService(ctx).HasIdentifiedTokenPricing(model), false
 }
 
 // openAILongContextBillingGate returns the per-account long-context opt-in.
@@ -677,6 +675,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 				zeroObservedImages,
 			)
 			if err == nil {
+				cost.billingModel = candidate
 				tokenCost = cost
 				break
 			}
@@ -779,7 +778,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 			if resolved != nil && resolved.Mode != BillingModeToken {
 				tokenPricing := *resolved
 				tokenPricing.Mode = BillingModeToken
-				base, provenance, err := s.billingService.getModelPricingAtWithSource(billingModel, pricingAt)
+				base, provenance, err := s.tierBillingService(ctx).getModelPricingAtWithSource(billingModel, pricingAt)
 				if err != nil && !errors.Is(err, ErrModelPricingUnavailable) {
 					return nil, err
 				}

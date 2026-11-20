@@ -141,6 +141,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // pricing_source
 			sqlmock.AnyArg(), // profit_basis
 			sqlmock.AnyArg(), // dispatch_phases
+			sqlmock.AnyArg(), // service_tier_details
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -274,6 +275,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // pricing_source
 			sqlmock.AnyArg(), // profit_basis
 			sqlmock.AnyArg(), // dispatch_phases
+			sqlmock.AnyArg(), // service_tier_details
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -1076,6 +1078,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),      // pricing_source
 			[]byte(nil),      // profit_basis
 			[]byte(nil),      // dispatch_phases
+			[]byte(nil),      // service_tier_details
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1194,6 +1197,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),      // pricing_source
 			[]byte(nil),      // profit_basis
 			[]byte(nil),      // dispatch_phases
+			[]byte(nil),      // service_tier_details
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1295,6 +1299,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),      // pricing_source
 			[]byte(nil),      // profit_basis
 			[]byte(nil),      // dispatch_phases
+			[]byte(nil),      // service_tier_details
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1398,6 +1403,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),                              // pricing_source
 			[]byte(nil),                              // profit_basis
 			[]byte(nil),                              // dispatch_phases
+			[]byte(nil),                              // service_tier_details
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

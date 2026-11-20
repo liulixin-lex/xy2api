@@ -233,16 +233,17 @@
             <span v-if="showAccountBilling && row.account_rate_multiplier != null" data-testid="usage-account-billed" class="text-xs tabular-nums text-orange-500 dark:text-orange-400">
               A {{ formatUsd(accountBilled(row), 6) }}
             </span>
-            <!-- Cost Detail Tooltip -->
-            <div
-              class="group relative [@media(hover:none)]:hidden"
+            <button
+              type="button"
+              class="group relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 hover:bg-blue-100 focus-visible:ring-2 dark:bg-gray-700 [@media(any-pointer:coarse)]:h-10 [@media(any-pointer:coarse)]:w-10"
+              :aria-label="t('usage.tierDetails.title')"
+              data-testid="usage-tier-details"
               @mouseenter="showTooltip($event, row)"
               @mouseleave="hideTooltip"
+              @click="hideTooltip(); tierDetailRow = row"
             >
-              <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
-                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
-              </div>
-            </div>
+              <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-400" />
+            </button>
           </div>
         </template>
 
@@ -389,6 +390,8 @@
     </div>
   </div>
 
+  <UsageTierDetailsDialog v-if="tierDetailRow" :row="tierDetailRow" :admin="showFallbackOrigin" @close="tierDetailRow = null" />
+
   <!-- Token Tooltip Portal -->
   <Teleport to="body">
     <div
@@ -483,6 +486,7 @@ import UsageLatencyBreakdown from './UsageLatencyBreakdown.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import UsageRequestDetailDialog from './UsageRequestDetailDialog.vue'
+import UsageTierDetailsDialog from './UsageTierDetailsDialog.vue'
 import {
   accountBilled,
   crossGroup,
@@ -674,6 +678,7 @@ const placeTip = async (anchor: DOMRect, place: { value: TipPlace }, el: { value
 }
 
 // Tooltip state - cost
+const tierDetailRow = ref<AdminUsageLog | null>(null)
 const tooltipVisible = ref(false)
 const costTip = ref<TipPlace>({ x: 0, y: 0, side: 'right' })
 const costTipEl = ref<HTMLElement | null>(null)
