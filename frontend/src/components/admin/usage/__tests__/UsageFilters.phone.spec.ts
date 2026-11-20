@@ -170,3 +170,73 @@ describe('UsageFilters below 768px', () => {
     expect(w.emitted('reset')).toHaveLength(1)
   })
 })
+
+// Shared layer's review fix (data-filter): crossing 1024px keeps the focus. These filters swap the shared toolbar for
+// their own row, so the page hands it over itself: from the sheet to the row's field with the same key, from the row
+// to "Filters"; focus elsewhere stays.
+describe('UsageFilters keeps the focus across 1024px', () => {
+  // A matchMedia whose answers follow the width and tell their listeners.
+  const media = (() => {
+    let width = 834
+    const lists: { query: string; listeners: Set<(e: { matches: boolean }) => void> }[] = []
+    const matches = (q: string) => {
+      const min = /min-width:\s*(\d+)px/.exec(q)
+      const max = /max-width:\s*(\d+)px/.exec(q)
+      return min ? width >= Number(min[1]) : max ? width <= Number(max[1]) : true
+    }
+    return {
+      install(start: number) {
+        width = start
+        lists.length = 0
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+          const entry = { query, listeners: new Set<(e: { matches: boolean }) => void>() }
+          lists.push(entry)
+          return {
+            get matches() { return matches(query) }, media: query, onchange: null,
+            addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => entry.listeners.add(fn),
+            removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => entry.listeners.delete(fn),
+            addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+          } as unknown as MediaQueryList
+        })
+      },
+      async set(next: number) {
+        width = next
+        for (const entry of lists) for (const fn of entry.listeners) fn({ matches: matches(entry.query) })
+        await flushPromises()
+        await nextTick()
+      },
+    }
+  })()
+
+  it('moves focus from a sheet field to the same field in the row, and from the row to "Filters"', async () => {
+    media.install(834)
+    const w = mountFilters()
+    await flushPromises()
+    await w.get('[data-test="toolbar-filter-button"]').trigger('click')
+    await flushPromises()
+    const inSheet = document.querySelector<HTMLInputElement>('[data-test="filter-sheet"] [data-filter="account_id"] input')!
+    inSheet.focus()
+    expect(document.activeElement).toBe(inSheet)
+    await media.set(1100)
+    expect(w.find('[data-testid="usage-filters-phone"]').exists()).toBe(false)
+    const active = document.activeElement as HTMLElement
+    expect(active.tagName).toBe('INPUT')
+    expect(active.closest('[data-filter]')?.getAttribute('data-filter')).toBe('account_id')
+    expect(w.element.contains(active)).toBe(true)
+    await media.set(834)
+    expect((document.activeElement as HTMLElement).getAttribute('data-test')).toBe('toolbar-filter-button')
+    w.unmount()
+  })
+
+  it('leaves focus elsewhere on the page alone', async () => {
+    media.install(1100)
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    const w = mountFilters()
+    await flushPromises()
+    outside.focus()
+    await media.set(834)
+    expect(document.activeElement).toBe(outside)
+    w.unmount()
+  })
+})

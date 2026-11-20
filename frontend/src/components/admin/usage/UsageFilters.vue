@@ -1,9 +1,10 @@
 <template>
-  <div :class="flat ? 'p-4 sm:p-6' : 'card p-6'">
-    <!-- The fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. -->
+  <div ref="rootRef" :class="flat ? 'p-4 sm:p-6' : 'card p-6'">
+    <!-- The fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. Each carries
+         its filter's key (data-filter), so focus can move to the same field when the form changes. -->
     <DefineFields>
       <!-- User Search -->
-      <div ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+      <div data-filter="user_id" ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
         <label class="input-label">{{ t('admin.usage.userFilter') }}</label>
         <input
           v-model="userKeyword"
@@ -40,7 +41,7 @@
       </div>
 
       <!-- API Key Search -->
-      <div ref="apiKeySearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+      <div data-filter="api_key_id" ref="apiKeySearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
         <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
         <input
           v-model="apiKeyKeyword"
@@ -77,13 +78,13 @@
       </div>
 
       <!-- Model Filter -->
-      <div class="w-full sm:w-auto sm:min-w-[220px]">
+      <div data-filter="model" class="w-full sm:w-auto sm:min-w-[220px]">
         <label class="input-label">{{ t('usage.model') }}</label>
         <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
       </div>
 
       <!-- Account Filter -->
-      <div ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
+      <div data-filter="account_id" ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
         <label class="input-label">{{ t('admin.usage.account') }}</label>
         <input
           v-model="accountKeyword"
@@ -120,60 +121,60 @@
       </div>
 
       <!-- Request Type Filter (usage only) -->
-      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="request_type" v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('usage.type') }}</label>
         <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
       </div>
 
       <!-- Native compaction is independent of the transport request type. -->
-      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="native_compaction_v2" v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('usage.compactionFilter') }}</label>
         <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="emitChange" />
       </div>
 
       <!-- Billing Type Filter (usage only) -->
-      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
+      <div data-filter="billing_type" v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
         <label class="input-label">{{ t('admin.usage.billingType') }}</label>
         <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
       </div>
 
       <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
-      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
+      <div data-filter="billing_mode" v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
         <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
         <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
       </div>
 
       <!-- Request result filter (usage only; backend 0.6.5 request ledger: list and stats) -->
-      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="result" v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('admin.usage.result') }}</label>
         <Select v-model="filters.result" :options="resultOptions" @change="emitChange" />
       </div>
 
-      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
+      <div data-filter="upstream_model_mismatch" v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
         <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
         <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
       </div>
 
       <!-- Error Phase Filter (errors only) -->
-      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="error_phase" v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
         <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
       </div>
 
       <!-- Error Category Filter (errors only) -->
-      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="error_category" v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('usage.errors.category') }}</label>
         <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
       </div>
 
       <!-- Status Code Filter (errors only) -->
-      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+      <div data-filter="status_code" v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
         <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
         <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
       </div>
 
       <!-- Group Filter -->
-      <div class="w-full sm:w-auto sm:min-w-[200px]">
+      <div data-filter="group_id" class="w-full sm:w-auto sm:min-w-[200px]">
         <label class="input-label">{{ t('admin.usage.group') }}</label>
         <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
       </div>
@@ -232,7 +233,7 @@
     </BottomSheet>
 
     <!-- Toolbar: left filters (multi-line) + right actions -->
-    <div v-if="!sheet" class="flex flex-wrap items-end justify-between gap-4">
+    <div v-if="!sheet" ref="rowRef" class="flex flex-wrap items-end justify-between gap-4">
       <!-- Left: filters (allowed to wrap to multiple rows); below 1024px they take the whole row and the actions wrap under them -->
       <div class="flex flex-1 flex-wrap items-end gap-4 max-lg:basis-full">
         <ReuseFields />
@@ -268,6 +269,7 @@ import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createReusableTemplate } from '@vueuse/core'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
+import { useFilterFocusHandoff } from './useFilterFocusHandoff'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UsageFilterTags, { type UsageFilterTag } from './UsageFilterTags.vue'
@@ -430,6 +432,9 @@ const { desktop } = useTableViewport()
 const sheet = computed(() => !desktop.value)
 const moreOpen = ref(false)
 watch(sheet, (on) => { if (!on) moreOpen.value = false })
+const rootRef = ref<HTMLElement | null>(null)
+const rowRef = ref<HTMLElement | null>(null)
+useFilterFocusHandoff(sheet, rootRef, rowRef)
 
 /** A select's label for the chosen value; nothing for "all" (null, undefined or an empty string). */
 const chosen = (value: unknown) => value !== null && value !== undefined && value !== ''

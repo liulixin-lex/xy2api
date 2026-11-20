@@ -348,6 +348,20 @@ describe('user UsageView', () => {
     }
   })
 
+  // Shared layer's review fix (data-filter): every field carries its filter's key, in the sheet and the row alike, so
+  // crossing 1024px moves the focus to the same field (useFilterFocusHandoff, tested with the admin filters).
+  it('marks each row field with its filter key', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findAll('[data-filter]').map((el) => el.attributes('data-filter')))
+      .toEqual(['api_key_id', 'model', 'group_id', 'request_type', 'native_compaction_v2', 'billing_type', 'billing_mode'])
+    ;(wrapper.vm as any).activeTab = 'errors'
+    await flushPromises()
+    expect(wrapper.findAll('[data-filter]').map((el) => el.attributes('data-filter')))
+      .toEqual(['error_api_key_id', 'error_model', 'error_category', 'error_status_code'])
+    wrapper.unmount()
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()

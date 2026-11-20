@@ -66,15 +66,16 @@
         </template>
       </UsageOverview>
 
-      <div class="card p-4 sm:p-6">
-        <!-- The tab's fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. -->
+      <div ref="filtersRootRef" class="card p-4 sm:p-6">
+        <!-- The tab's fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. Each
+             carries its filter's key (data-filter), so focus can move to the same field when the form changes. -->
         <DefineFields>
           <template v-if="activeTab === 'errors'">
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="error_api_key_id" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
               <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="error_model" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.model') }}</label>
               <Select
                 v-model="errorFilter.model"
@@ -86,41 +87,41 @@
                 @change="applyErrorFilters"
               />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="error_category" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('usage.errors.category') }}</label>
               <Select v-model="errorFilter.category" :options="errorCategoryOptions" @change="applyErrorFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="error_status_code" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.errors.status') }}</label>
               <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
             </div>
           </template>
           <template v-else>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="api_key_id" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="model" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.model') }}</label>
               <Select v-model="filters.model" :options="modelOptions" searchable @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="group_id" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.group') }}</label>
               <Select v-model="filters.group_id" :options="groupOptions" searchable @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="request_type" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.type') }}</label>
               <Select v-model="filters.request_type" :options="requestTypeOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="native_compaction_v2" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.compactionFilter') }}</label>
               <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="applyFilters" />
             </div>
-            <div v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="billing_type" v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.billingType') }}</label>
               <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="billing_mode" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
               <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
             </div>
@@ -184,7 +185,7 @@
           </div>
         </BottomSheet>
 
-        <div v-if="!toolbarSheet" class="flex flex-wrap items-end justify-between gap-4">
+        <div v-if="!toolbarSheet" ref="filtersRowRef" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-1 flex-wrap items-end gap-4 max-lg:basis-full">
             <ReuseFields />
           </div>
@@ -284,6 +285,7 @@ import UsageOverview from '@/components/admin/usage/UsageOverview.vue'
 import UsageColumnSettings from '@/components/admin/usage/UsageColumnSettings.vue'
 import UsageFilterTags, { type UsageFilterTag } from '@/components/admin/usage/UsageFilterTags.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
+import { useFilterFocusHandoff } from '@/components/admin/usage/useFilterFocusHandoff'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import TableSortHint from '@/components/common/TableSortHint.vue'
 import { usePhoneViewport, useTableViewport } from '@/composables/useTableViewport'
@@ -779,6 +781,9 @@ const { desktop } = useTableViewport()
 const toolbarSheet = computed(() => !desktop.value)
 const moreOpen = ref(false)
 watch(toolbarSheet, (on) => { if (!on) moreOpen.value = false })
+const filtersRootRef = ref<HTMLElement | null>(null)
+const filtersRowRef = ref<HTMLElement | null>(null)
+useFilterFocusHandoff(toolbarSheet, filtersRootRef, filtersRowRef)
 
 const chosen = (value: unknown) => value !== null && value !== undefined && value !== ''
 const optionLabel = (options: SelectOption[], value: unknown) =>
