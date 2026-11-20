@@ -6,7 +6,7 @@
         <div class="flex flex-wrap items-center gap-3">
           <Select v-model="currentFilter" :options="statusFilters" class="w-36" @change="handlePageChange(1)" />
           <div class="flex flex-1 items-center justify-end gap-2">
-            <button @click="fetchOrders" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
+            <button @click="fetchOrders" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')" :aria-label="t('common.refresh')">
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
             <button class="btn btn-primary" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
@@ -15,18 +15,20 @@
       </div>
 
       <!-- Table -->
-      <OrderTable :orders="orders" :loading="loading">
+      <OrderTable :orders="orders" :loading="loading" :scroll-label="t('nav.myOrders')">
         <template #actions="{ row }">
-          <div class="flex items-center gap-2">
-            <button v-if="row.payment_type === 'stripe_hosted'" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="router.push({ path: '/payment/result', query: { order_id: row.id, out_trade_no: row.out_trade_no } })">
+          <!-- A phone: the buttons wrap within the screen width less the ID, the page's 16px margins and 24px of cell padding, so
+               with the table scrolled all the way none sits under the frozen columns. -->
+          <div class="flex items-center gap-2 [@media(pointer:coarse)]:-my-1.5 max-md:flex-wrap max-md:max-w-[calc(100vw_-_58px_-_var(--table-identity-width))]">
+            <button v-if="row.payment_type === 'stripe_hosted'" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium [@media(pointer:coarse)]:min-h-10 text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="router.push({ path: '/payment/result', query: { order_id: row.id, out_trade_no: row.out_trade_no } })">
               <Icon name="arrowRight" size="sm" />
               <span>{{ t('common.view') }}</span>
             </button>
-            <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
+            <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium [@media(pointer:coarse)]:min-h-10 text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
               <Icon name="x" size="sm" />
               <span>{{ t('payment.orders.cancel') }}</span>
             </button>
-            <button v-if="canRequestRefund(row)" @click="openRefundDialog(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/20">
+            <button v-if="canRequestRefund(row)" @click="openRefundDialog(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium [@media(pointer:coarse)]:min-h-10 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/20">
               <Icon name="dollar" size="sm" />
               <span>{{ t('payment.orders.requestRefund') }}</span>
             </button>

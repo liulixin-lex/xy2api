@@ -14,7 +14,7 @@
 | 能力 | 设置段 | 默认 | 摘要 |
 |---|---|---|---|
 | 失败分类与冷却 | `failure` | 开 | 每次上游失败归类，决定是否换号、是否罚号、罚多久 |
-| 会话失败改绑 | `session` | 开 | 同一会话在同一账号上连续失败后改绑并暂避该账号 |
+| 会话失败改绑 | `session` | 开 | 连续失败后改绑并暂避原账号，也控制 OpenAI 首输出避让与救场交接 |
 | Claude 判慢让位 | `anthropic_latency_hold` | 开 | 首个输出持续偏慢的 Claude 账号在同优先级内后排，可迁出会话 |
 | 同站断流暂停 | `same_site_hold` | 开 | 同一上游站点的多个 OpenAI 账号接连断流时暂停这些账号 |
 | 末位兜底 | `last_resort` | 开 | 组内没有无罚账号时，用软罚账号继续服务 |
@@ -84,10 +84,11 @@
 ### 会话失败改绑 `session`
 
 - **做什么**：同一会话在同一账号上 10 分钟内连续失败 2 次后改绑，并在 10 分钟内避开该账号。OpenAI 账号另有“输出后首次失败即改绑”（`post_output_rebind`）：已开始输出后的流内失败、读流出错或缺终态第一次发生就改绑。客户端错误（包括工具历史 400 与原生 HTTP 续接的四类错误）、内容安全拒绝、客户端断开与计划内的首输出截止不计入。
-- **主要字段**：`streak_threshold` 2、`streak_window_seconds` 600、`avoid_seconds` 600、`post_output_rebind` true。
-- **何时关闭**：只想观察失败、不想让会话离开原账号时关闭。关闭 `session.enabled` 会同时停用输出后首次失败改绑与 Claude 判慢迁出；OpenAI 分组的质量迁移与接管不受它影响（见 [调度](scheduling.md#openai-会话的去留)）。
+- **首输出避让与交接**。普通 OpenAI HTTP 流式文本会话的原归属号等够本档时限后，优先避开它。避让确认后，合格前排号更快且完整救回同一请求时可接手会话。见 [调度](scheduling.md#openai-会话的去留)。
+- **主要字段**：`streak_threshold` 2、`streak_window_seconds` 600、`avoid_seconds` 600（也是首输出避让的时长）、`post_output_rebind` true。
+- **何时关闭**：只想观察失败时可关闭 `session.enabled`。它同时停用输出后首次失败改绑、Claude 判慢迁出、OpenAI 首输出避让与救场交接。OpenAI 分组的质量迁移和接管仍按各自条件运行。
 - **计费与客户端**：不影响计费。改绑会让会话换到新账号，上游提示缓存需要重新建立。
-- **观测**：计数 `session_rebind`；日志 `resilience.session_rebind`（原因 `resil_failure_streak`、`post_output_first_failure`、`terminal_rejection_streak`）。
+- **观测**：计数 `session_rebind`；日志 `resilience.session_rebind`（原因 `resil_failure_streak`、`post_output_first_failure`、`terminal_rejection_streak`）。首输出避让和救场交接看 `sched_quality.first_output_avoid` 与 `sched_quality.session_switch`，见 [质量状态日志](gateway-resilience-observability.md#质量状态)。
 
 细则（软罚期间保留绑定、带密文片段的请求如何处理）见 [罚则与选号](gateway-resilience-routing.md#会话失败改绑)。
 

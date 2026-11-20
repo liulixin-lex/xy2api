@@ -32,20 +32,22 @@ func (s *OpenAIGatewayService) isAccountTransportCompatible(account *Account, re
 	return s.isOpenAIAccountTransportCompatible(account, requiredTransport)
 }
 
-func (s *OpenAIGatewayService) lookupShadowParentAccount(ctx context.Context, id int64) *Account {
+func (s *OpenAIGatewayService) lookupShadowParentAccount(ctx context.Context, id int64) (*Account, error) {
 	if s == nil {
-		return nil
+		return nil, nil
 	}
+	var snapshotErr error
 	if s.schedulerSnapshot != nil {
-		if account, err := s.schedulerSnapshot.GetAccount(ctx, id); err == nil && account != nil {
-			return account
+		var account *Account
+		account, snapshotErr = s.schedulerSnapshot.GetAccount(ctx, id)
+		if snapshotErr == nil && account != nil {
+			return account, nil
 		}
 	}
 	if s.accountRepo == nil {
-		return nil
+		return nil, snapshotErr
 	}
-	account, _ := s.accountRepo.GetByID(ctx, id)
-	return account
+	return s.accountRepo.GetByID(ctx, id)
 }
 
 func (s *OpenAIGatewayService) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
@@ -57,7 +59,14 @@ func (s *OpenAIGatewayService) isAccountRequestCompatible(ctx context.Context, a
 // request, and when it cannot, names the veto point. The reason feeds
 // openAISelectionFilterStats so that "no available accounts" errors state why
 // each candidate was dropped instead of failing silently (#4599).
-func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (compatible bool, reason string) {
+func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
+	return s.accountRequestCompatibleWithParent(ctx, account, req, func(id int64) *Account {
+		parent, _ := s.lookupShadowParentAccount(ctx, id)
+		return parent
+	})
+}
+
+func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, lookupParent func(int64) *Account) (compatible bool, reason string) {
 	defer func() {
 		if account != nil && !compatible {
 			observeSelectionFailure(ctx, account.ID, reason, nil)
@@ -106,13 +115,14 @@ func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Cont
 	// 母账号健康联动：影子账号的凭据来自母账号，母账号不可调度时影子也不应被选中。
 	// Parent-health gate: shadow borrows the parent's credentials; an unschedulable
 	// parent must block the shadow across all scheduler paths.
-	if !parentHealthyForShadow(account, func(id int64) *Account {
-		return s.lookupShadowParentAccount(ctx, id)
-	}) {
+	if !parentHealthyForShadow(account, lookupParent) {
 		return false, "shadow_parent_unhealthy"
 	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return false, "model_not_supported"
+	}
+	if reason := s.openAITierSelectionReason(ctx, account, req.RequestedModel, req.RequireCompact); reason != "" {
+		return false, reason
 	}
 	compactOutboundModel := ""
 	if req.RequireCompact && s != nil {

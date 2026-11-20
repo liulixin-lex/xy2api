@@ -22,11 +22,35 @@ type OpenAIStickyAliasCache interface {
 	DeleteSessionBindingAliases(context.Context, int64, string, string, int64) (bool, error)
 }
 
+// FailureScope is cleared on success. RejectScope, when set, fences a target
+// against live avoidances written at or after its most recent account reset.
+type BindingCommitOptions struct {
+	FailureScope  string
+	RejectScope   string
+	TargetResetAt time.Time
+}
+
+type BindingCommitStatus string
+
+const (
+	BindingCommitted     BindingCommitStatus = "committed"
+	BindingChanged       BindingCommitStatus = "binding_changed"
+	BindingTargetAvoided BindingCommitStatus = "target_avoided"
+	BindingCommitError   BindingCommitStatus = "error"
+)
+
+type BindingCommitResult struct {
+	Status      BindingCommitStatus
+	ObservedGen string
+	NewGen      string
+}
+
 type OpenAIStickyVersionedCache interface {
 	GetSessionBinding(context.Context, int64, string) (StickySessionBinding, error)
 	// A successful commit also clears the target from the supplied failure-avoidance scope.
-	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration, ...string) (bool, error)
-	RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error)
+	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration, BindingCommitOptions) (BindingCommitResult, error)
+	// Returns the stored expiry in Unix milliseconds, or zero if the binding changed.
+	RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (int64, error)
 }
 
 // gatewaySessionBindingReader reads a binding and its remaining lifetime in

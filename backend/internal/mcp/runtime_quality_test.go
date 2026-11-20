@@ -93,7 +93,16 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	amount := 12.5
 	median := 120
 	ratio := .9
-	snapshot := &service.SchedQualitySnapshot{At: now, Accounts: map[int64]schedquality.AccountSummary{1: {FirstOutputP50Ms: &median, ErrorN: 50, ErrorBad: 5, CacheTurns: 40, CacheRatio: &ratio}}}
+	reset := now.Add(-time.Minute)
+	snapshot := &service.SchedQualitySnapshot{
+		At: now, ResetAt: map[int64]time.Time{1: reset},
+		Accounts: map[int64]schedquality.AccountSummary{1: {
+			From: reset, To: now,
+			FirstOutput: schedquality.FirstOutputSummary{P50Ms: &median, N: 7, Timeouts: 2},
+			Slow10s:     schedquality.Slow10sSummary{N: 6, Slow: 2, Timeouts: 1},
+			ErrorN:      50, ErrorBad: 5, CacheTurns: 40, CacheRatio: &ratio,
+		}},
+	}
 
 	engine := &qualitySnapshotStub{snapshot: snapshot}
 	balance := &service.UpstreamBalanceEntries{Records: map[int64]*service.UpstreamBalanceRecord{1: {AmountUSD: &amount, ObservedAt: now, Fingerprint: "must-not-be-returned"}}}
@@ -104,7 +113,10 @@ func TestRuntimeHealthUsesQualitySummaryAndKeepsBalance(t *testing.T) {
 	require.Equal(t, 1, engine.reads)
 	row := q.result.Items[0]
 	require.NotContains(t, row, "model")
-	require.Equal(t, 120, *row["first_output"].(service.SchedAdminAccountSummaryTTFO).FirstOutputP50Ms)
+	require.Equal(t, snapshot.Account(1).FirstOutput, row["first_output"])
+	require.Equal(t, snapshot.Account(1).Slow10s, row["slow_10s"])
+	require.Equal(t, reset.Format(time.RFC3339Nano), *row["recent_since"].(*string))
+	require.Equal(t, 5, row["failure"].(service.SchedAdminAccountSummaryError).Failed)
 	require.Equal(t, 0.1, *row["failure"].(service.SchedAdminAccountSummaryError).Rate)
 	require.Equal(t, 0.9, *row["cache"].(service.SchedAdminAccountSummaryCache).Ratio)
 	require.Equal(t, &amount, row["balance"].(map[string]any)["amount_usd"])

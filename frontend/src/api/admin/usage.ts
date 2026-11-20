@@ -28,7 +28,10 @@ export interface AdminUsageStatsResponse {
   success?: number
   rescued?: number
   failed?: number
-  ttfo_p50_ms?: number | null
+  /** 筛选范围内有端到端首输出的请求，其端到端首输出的中位数；没有样本为 null。 */
+  e2e_first_output_p50_ms?: number | null
+  /** 参与上面中位数的请求数。 */
+  e2e_first_output_samples?: number
   cache_ratio?: number | null
 }
 

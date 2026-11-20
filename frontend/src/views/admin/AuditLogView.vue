@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <!-- Filters -->
       <!-- From 1024px the page's own look (7p-1): the framed filter area, a label over each field, the fields flowing
            beside the search. Below 1024px the shared narrow toolbar: labels hidden, the placeholders and accessible
@@ -134,15 +134,23 @@
 
       <!-- Table -->
       <template #table>
-        <DataTable :columns="columns" :data="logs" :loading="loading" row-key="id">
+        <DataTable
+          :scroll-label="t('admin.audit.title')"
+          :columns="columns"
+          :data="logs"
+          :loading="loading"
+          row-key="id"
+        >
+          <!-- The frozen identity column: the time, the year left out within this year (the detail keeps it whole). -->
           <template #cell-created_at="{ value }">
-            <span class="whitespace-nowrap text-gray-600 dark:text-gray-300">{{ formatTime(value) }}</span>
+            <span class="whitespace-nowrap tabular-nums text-gray-600 dark:text-gray-300">{{ formatListDateTime(value) }}</span>
           </template>
 
           <template #cell-actor="{ row }">
             <div class="min-w-0 max-w-[220px]">
               <div class="truncate font-medium text-gray-900 dark:text-white" :title="row.actor_email">
-                {{ row.actor_email || '—' }}
+                <template v-if="row.actor_email">{{ row.actor_email }}</template>
+                <CellEmpty v-else />
               </div>
               <div class="mt-0.5 truncate text-xs text-gray-400">
                 {{ row.actor_role }}<span v-if="row.auth_method"> · {{ authMethodLabel(row.auth_method) }}</span>
@@ -173,18 +181,31 @@
           </template>
 
           <template #cell-client_ip="{ value }">
-            <span class="whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">{{ value || '—' }}</span>
+            <span v-if="value" class="whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">{{ value }}</span>
+            <CellEmpty v-else />
           </template>
 
+          <!-- One button, frozen at the right. On a phone the 44px column holds its icon alone in a 40px square (named by
+               aria-label), the header its icon; from 768px icon and text as before. Touch: 40px high either way. -->
+          <template #header-actions>
+            <span v-if="phone" role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('common.actions')">
+              <Icon name="eye" size="sm" aria-hidden="true" />
+            </span>
+            <span v-else>{{ t('common.actions') }}</span>
+          </template>
           <template #cell-actions="{ row }">
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 font-medium text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              @click="openDetail(row.id)"
-            >
-              <Icon name="eye" size="sm" />
-              {{ t('admin.audit.columns.detail') }}
-            </button>
+            <div :class="phone ? 'flex justify-center' : ''">
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1 font-medium text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:min-h-10"
+                :class="{ 'h-10 w-10 rounded-lg': phone }"
+                :aria-label="phone ? t('admin.audit.columns.detail') : undefined"
+                @click="openDetail(row.id)"
+              >
+                <Icon name="eye" size="sm" />
+                <span v-if="!phone">{{ t('admin.audit.columns.detail') }}</span>
+              </button>
+            </div>
           </template>
 
           <template #empty>
@@ -238,7 +259,7 @@
           </div>
 
           <div class="mt-3 flex items-center gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-gray-200 dark:bg-dark-800 dark:ring-dark-600">
-            <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-gray-700 dark:bg-dark-700 dark:text-gray-200">
+            <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs font-bold text-gray-700 dark:bg-dark-700 dark:text-gray-200">
               {{ detail.method }}
             </span>
             <span class="break-all font-mono text-xs text-gray-600 dark:text-gray-300">{{ detail.path }}</span>
@@ -416,11 +437,15 @@ import Select from '@/components/common/Select.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
+import { formatListDateTime } from '@/utils/format'
 import { vTip } from '@/utils/tip'
 import { useAppStore } from '@/stores'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { isSuperAdmin } = useAdminPermission('audit_logs')
 

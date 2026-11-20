@@ -7900,6 +7900,22 @@
  },
  {
   "method": "GET",
+  "path": "/sched-quality/accounts/:id/performance",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": "accounts",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "account"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
   "path": "/sched-quality/accounts/attention",
   "group": "admin",
   "reg": "registerSchedQualityRoutes",
@@ -7917,6 +7933,20 @@
  {
   "method": "GET",
   "path": "/sched-quality/groups/:id/order",
+  "group": "admin",
+  "reg": "registerSchedQualityRoutes",
+  "module": "groups",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/sched-quality/groups/:id/performance",
   "group": "admin",
   "reg": "registerSchedQualityRoutes",
   "module": "groups",

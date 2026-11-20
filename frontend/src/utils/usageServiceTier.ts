@@ -8,9 +8,7 @@ export function normalizeUsageServiceTier(serviceTier?: string | null): string |
 }
 
 export function formatUsageServiceTier(serviceTier?: string | null): string {
-  const normalized = normalizeUsageServiceTier(serviceTier)
-  if (!normalized) return 'standard'
-  return normalized
+  return normalizeUsageServiceTier(serviceTier) ?? ''
 }
 
 export function getUsageServiceTierLabel(
@@ -18,6 +16,7 @@ export function getUsageServiceTierLabel(
   translate: (key: string) => string,
 ): string {
   const tier = formatUsageServiceTier(serviceTier)
+  if (!tier) return translate('usage.tierDetails.notRecorded')
   if (tier === 'priority') return translate('usage.serviceTierPriority')
   if (tier === 'ultrafast') return translate('usage.serviceTierUltrafast')
   if (tier === 'flex') return translate('usage.serviceTierFlex')

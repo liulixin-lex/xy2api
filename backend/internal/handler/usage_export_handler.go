@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/handler/admin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -137,7 +138,7 @@ func (h *UsageExportHandler) Create(c *gin.Context) {
 	}
 	q.Set("timezone", zone)
 	c.Request.URL.RawQuery = q.Encode()
-	o := usageexport.Options{SortBy: sortBy, SortOrder: order, Timezone: zone, Language: lang, Version: 1, Format: "csv"}
+	o := usageexport.Options{SortBy: sortBy, SortOrder: order, Timezone: zone, Language: lang, Version: usageexport.ServiceTierFormatVersion, Format: "csv"}
 	if scope == "admin" {
 		_, filters, ok := h.admin.ParseExportFilters(c)
 		if !ok {
@@ -146,6 +147,7 @@ func (h *UsageExportHandler) Create(c *gin.Context) {
 		filters.ExactTotal = false
 		o.Filters = filters
 		o.Format = "xlsx"
+		o.IncludeInternalTierDetails = operatoraccess.ScopeFrom(c.Request.Context()) == nil
 	} else {
 		parsed, ok := h.user.parseUserUsageFilters(c, false)
 		if !ok {

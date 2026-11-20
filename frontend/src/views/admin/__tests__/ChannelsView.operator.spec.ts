@@ -137,7 +137,33 @@ it.each([false, true, 'admin'] as const)('locks grouped account-stats pricing an
   await wrapper.get('#channel-form').trigger('submit')
   await flushPromises()
   const payload = updateChannel.mock.calls.at(-1)![1]
+  expect(Object.hasOwn(payload, 'model_pricing')).toBe(!!flag)
   expect(Object.hasOwn(payload, 'apply_pricing_to_account_stats')).toBe(!!flag)
   expect(Object.hasOwn(payload, 'account_stats_pricing_rules')).toBe(!!flag)
+  wrapper.unmount()
+})
+
+it('round trips the independent OpenAI tier prices and sends the original revision', async () => {
+  seedOperator('manage', ['users.balance_adjust'])
+  getGroups.mockResolvedValue([{ id: 3, name: 'OpenAI', platform: 'openai' }])
+  const revision = '2026-11-19T10:05:32.000123Z'
+  listChannels.mockResolvedValue({ items: [{
+    id: 1, name: 'GPT prices', status: 'active', revision, group_ids: [3],
+    model_pricing: [{ id: 8, platform: 'openai', models: ['gpt-6'], billing_mode: 'token',
+      input_price: 0, fast_multiplier: 2.5, ultrafast_multiplier: 4.5, flex_multiplier: 0.5 }],
+    account_stats_pricing_rules: [], apply_pricing_to_account_stats: false,
+  }], total: 1 })
+  const wrapper = mountView()
+  await flushPromises()
+  await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+  await flushPromises()
+  const ultra = wrapper.get<HTMLInputElement>('[data-testid="ultrafast_multiplier"]')
+  expect(ultra.element.value).toBe('4.5')
+  await ultra.setValue('')
+  await wrapper.get('#channel-form').trigger('submit')
+  await flushPromises()
+  expect(updateChannel.mock.calls.at(-1)![1]).toMatchObject({
+    revision, model_pricing: [{ id: 8, input_price: 0, fast_multiplier: 2.5, ultrafast_multiplier: null, flex_multiplier: 0.5 }],
+  })
   wrapper.unmount()
 })

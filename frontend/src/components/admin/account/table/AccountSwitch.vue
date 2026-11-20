@@ -20,6 +20,8 @@ const emit = defineEmits<{ toggle: [next: boolean] }>()
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .account-switch {
   position: relative;
   flex: none;
@@ -37,6 +39,12 @@ const emit = defineEmits<{ toggle: [next: boolean] }>()
   content: '';
   position: absolute;
   inset: -8px -6px;
+}
+/* Touch: 40 x 40 to hit (mobile list plan, item 17), its look unchanged. */
+@media (pointer: coarse) {
+  .account-switch::after {
+    inset: -12px -6px;
+  }
 }
 .account-switch__thumb {
   position: absolute;

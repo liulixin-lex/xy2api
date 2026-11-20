@@ -50,7 +50,9 @@ func (r *runtimeReader) health(ctx context.Context, q *readerQuery, accounts []m
 		}
 		health := byID[id]
 		a["failure"] = health.Error
-		a["first_output"] = health.TTFO
+		a["first_output"] = health.FirstOutput
+		a["slow_10s"] = health.Slow10s
+		a["recent_since"] = health.RecentSince
 		a["cache"] = health.Cache
 		a["group_status"] = health.GroupStatus
 		a["stop"] = health.Stop

@@ -606,6 +606,12 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 				c.Abort()
 				return
 			}
+			routeCtx, tierErr := service.OpenAITierCompositeFallback(c.Request.Context(), resolver, apiKey, decision)
+			if tierErr != nil {
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "code": "OPENAI_TIER_ROUTE_CONFLICT", "message": "No eligible fallback route satisfies the origin group service tier"}})
+				return
+			}
+			c.Request = c.Request.WithContext(routeCtx)
 			if decision.Matched {
 				c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), decision))
 				if upstreamModel := strings.TrimSpace(decision.UpstreamModel); upstreamModel != "" && upstreamModel != model && gjson.ValidBytes(body) {

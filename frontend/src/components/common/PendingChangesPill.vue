@@ -57,6 +57,8 @@ export const formatPendingCount = (count: number, more = false) => `${count}${mo
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .pending-changes {
   position: fixed;
   z-index: 30;

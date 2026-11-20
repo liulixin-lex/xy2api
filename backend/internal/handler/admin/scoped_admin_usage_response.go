@@ -3,6 +3,7 @@ package admin
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -24,6 +25,7 @@ func scopedAdminUsageLogResponse(record *service.UsageLog) gin.H {
 		"request_id":                   usage.RequestID,
 		"model":                        usage.Model,
 		"service_tier":                 usage.ServiceTier,
+		"service_tier_details":         usagestats.PublicServiceTierDetails(usage.ServiceTierDetails),
 		"reasoning_effort":             usage.ReasoningEffort,
 		"inbound_endpoint":             usage.InboundEndpoint,
 		"upstream_endpoint":            usage.UpstreamEndpoint,

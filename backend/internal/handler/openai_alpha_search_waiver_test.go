@@ -225,10 +225,50 @@ func TestN12AlphaLateWaiverResult(t *testing.T) {
 	t.Log("N12_LATE_WAIVER first_claim=Failed tail=Canceled usage=0 unbilled=1 apply=0")
 }
 
-// This is a recorded legacy gap, intentionally outside the Search-only rollout.
-// The waiver marker proves RecordUsage was reached, rather than treating an
-// unrelated early rejection as evidence that billing consumed the trace.
-func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
+func TestOpenAIImageWaiverDoesNotWriteTextRow(t *testing.T) {
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/chat/completions", `{"model":"gpt-5.1","stream":true,"input":"draw","tools":[{"type":"image_generation"}]}`},
+		{"/v1/messages", `{"model":"gpt-image-1","stream":true,"max_tokens":32,"messages":[{"role":"user","content":"draw"}]}`},
+	} {
+		t.Run(strings.TrimPrefix(tc.path, "/v1/"), func(t *testing.T) {
+			withHandlerResilience(t, nil)
+			resilience.SetUndeliveredAbuseCheck(nil)
+			repo := &requestRecordRepo{}
+			var st *resilience.RequestState
+			var wireImage bool
+			up := &captureUpstream{reply: func(_ int, req *http.Request, body []byte) (*http.Response, error) {
+				st = resilience.StateFrom(req.Context())
+				wireImage = service.IsExplicitImageGenerationIntent(req.URL.Path, "", body)
+				return captureResponse(http.StatusOK, captureSSE(), true), nil
+			}}
+			account := service.Account{Extra: map[string]any{"openai_responses_mode": "force_responses"}}
+			_, _, router := captureFixture(t, account, up, captureOptions{usage: repo})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writer := &n12ZeroWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(writer, req)
+
+			require.Equal(t, 1, up.calls)
+			require.True(t, wireImage, "the converted upstream request retains image generation intent")
+			require.Positive(t, writer.calls)
+			require.Zero(t, writer.Body.Len())
+			require.NotNil(t, st)
+			usage, _, billed := st.UndeliveredUsage()
+			require.NotEmpty(t, usage, "billing explicitly waived the undelivered usage")
+			require.False(t, billed)
+			require.Empty(t, repo.bills)
+			scope, ok := st.GatewayRequestScope()
+			require.True(t, ok)
+			require.Equal(t, resilience.GatewayRequestScopeImage, scope)
+			require.Empty(t, repo.unbilled)
+		})
+	}
+}
+
+// The waiver marker proves RecordUsage was reached despite the disconnect.
+func TestN12TextWaiverWritesOneCanceledUnbilledRow(t *testing.T) {
 	for _, entry := range []string{"responses", "chat/completions", "messages"} {
 		t.Run(entry, func(t *testing.T) {
 			withHandlerResilience(t, nil)
@@ -257,8 +297,12 @@ func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
 			require.NotEmpty(t, usage, "real billing must reach the waiver exit")
 			require.False(t, billed)
 			require.Empty(t, repo.bills)
-			require.Empty(t, repo.unbilled)
-			t.Logf("N12_TEXT_BASELINE %s usage=0 unbilled=0 explicit_waiver=true", entry)
+			require.Len(t, repo.unbilled, 1)
+			row := repo.unbilled[0]
+			require.Equal(t, resilience.GatewayRequestScopeText, row.RequestScope)
+			require.EqualValues(t, resilience.RequestCanceled, row.Result)
+			require.NotEmpty(t, row.RequestID)
+			require.Equal(t, st.GatewayRequestID(), row.RequestID)
 		})
 	}
 	for _, entry := range []string{"responses", "chat", "messages"} {
@@ -291,8 +335,12 @@ func TestN12TextWaiverBaselineUnchanged(t *testing.T) {
 			require.Positive(t, writer.calls)
 			require.Zero(t, writer.Body.Len())
 			require.Empty(t, f.usage.logs)
-			require.Empty(t, f.usage.unbilled)
-			t.Logf("N12_TEXT_BASELINE generic_%s usage=0 unbilled=0 explicit_waiver=true", entry)
+			require.Len(t, f.usage.unbilled, 1)
+			row := f.usage.unbilled[0]
+			require.Equal(t, resilience.GatewayRequestScopeText, row.RequestScope)
+			require.EqualValues(t, resilience.RequestCanceled, row.Result)
+			require.NotEmpty(t, row.RequestID)
+			require.Equal(t, st.GatewayRequestID(), row.RequestID)
 		})
 	}
 }

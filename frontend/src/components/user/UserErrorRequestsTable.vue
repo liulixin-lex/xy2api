@@ -9,6 +9,8 @@
         :loading="loading"
         clickable-rows
         server-side-sort
+        :sort="pageSort"
+        :scroll-label="scrollLabel"
         default-sort-key="created_at"
         default-sort-order="desc"
         @sort="onSort"
@@ -20,11 +22,13 @@
         </template>
 
         <template #cell-key_name="{ row }">
-          <div class="text-sm">
-            <span class="text-gray-900 dark:text-white">{{ row.key_name || '-' }}</span>
+          <!-- At most 240px (the frozen first column on tablets and phones): the name cut with "…", whole in its tip and
+               in the error's detail (the row opens it). -->
+          <div class="flex max-w-[240px] items-center text-sm" data-testid="error-key-cell">
+            <span class="min-w-0 truncate text-gray-900 dark:text-white" :title="row.key_name || undefined">{{ row.key_name || '-' }}</span>
             <span
               v-if="row.key_deleted"
-              class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
+              class="ml-1 inline-flex flex-none items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
             >{{ t('usage.errors.keyDeleted') }}</span>
           </div>
         </template>
@@ -101,6 +105,30 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <!-- The details column, frozen on the right, 44px at every width: a row is one tap from its detail without
+             scrolling (a click anywhere on the row still opens it). Its header is the buttons' icon, named by aria-label. -->
+        <template #header-actions>
+          <span role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('usage.errors.detail.button')" data-testid="error-detail-header">
+            <Icon name="document" size="sm" aria-hidden="true" />
+          </span>
+        </template>
+        <template #cell-actions="{ row }">
+          <!-- A 40px button in a block whose negative margins give back 20px: the row keeps its height. -->
+          <div class="-my-2.5 flex justify-center">
+            <button
+              type="button"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              :title="t('usage.errors.detail.button')"
+              :aria-label="t('usage.errors.detail.open', { time: formatDateTime(row.created_at) })"
+              aria-haspopup="dialog"
+              data-testid="error-detail-open"
+              @click.stop="openDetail(row.id)"
+            >
+              <Icon name="document" size="sm" />
+            </button>
+          </div>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.errors.empty')" /></template>
       </DataTable>
     </div>
@@ -124,6 +152,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import UserErrorDetailModal from '@/components/user/UserErrorDetailModal.vue'
@@ -148,7 +177,20 @@ const props = defineProps<{
   pageSize: number
   /** 列设置:仅显示这些 key 的列;不传则全显(key 须与 allColumns 一致) */
   visibleColumnKeys?: string[]
+  /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  /** Names the table's scroll area. */
+  scrollLabel?: string
 }>()
+
+/**
+ * The page's sort for the headers (the API's status_code is the status column). A page that gives none (the ops modal)
+ * leaves the sort to the table, time newest first.
+ */
+const pageSort = computed(() =>
+  props.sortBy ? { key: props.sortBy === 'status_code' ? 'status' : props.sortBy, order: props.sortOrder ?? 'desc' } : undefined
+)
 
 const emit = defineEmits<{
   (e: 'update:page', v: number): void
@@ -180,11 +222,13 @@ const allColumns = computed<Column[]>(() => [
   { key: 'user_agent', label: t('usage.userAgent') },
 ])
 
-const columns = computed<Column[]>(() =>
-  props.visibleColumnKeys
+/** The chosen columns, then the details column (always shown, not in the column settings). */
+const columns = computed<Column[]>(() => [
+  ...(props.visibleColumnKeys
     ? allColumns.value.filter((c) => props.visibleColumnKeys!.includes(c.key))
-    : allColumns.value
-)
+    : allColumns.value),
+  { key: 'actions', label: t('usage.errors.detail.button'), class: 'w-11 min-w-11 !px-0 text-center' },
+])
 
 function requestTypeBadge(row: UserErrorRequest): { label: string; className: string } | null {
   const kind = numericRequestTypeKind(row.request_type, row.stream)

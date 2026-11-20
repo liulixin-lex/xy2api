@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 	dbent "github.com/liulixin-lex/xy2api/ent"
@@ -90,6 +91,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 	if groupIn == nil {
 		return errors.New("group is nil")
 	}
+	service.NormalizeGroupOpenAITierPolicy(groupIn)
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -144,6 +146,10 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetAllowLive(groupIn.AllowLive).
 		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
 		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetOpenaiFastMode(groupIn.OpenAIFastMode).
+		SetOpenaiUltrafastMode(groupIn.OpenAIUltrafastMode).
+		SetOpenaiTierPolicyVersion(groupIn.OpenAITierPolicyVersion).
+		SetFreeOpenaiUltrafast(groupIn.FreeOpenAIUltrafast).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
@@ -292,6 +298,7 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	service.NormalizeGroupOpenAITierPolicy(groupIn)
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -337,6 +344,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetAllowLive(groupIn.AllowLive).
 		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
 		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetOpenaiFastMode(groupIn.OpenAIFastMode).
+		SetOpenaiUltrafastMode(groupIn.OpenAIUltrafastMode).
+		SetOpenaiTierPolicyVersion(groupIn.OpenAITierPolicyVersion).
+		SetFreeOpenaiUltrafast(groupIn.FreeOpenAIUltrafast).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
@@ -461,11 +472,23 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	// 处理 SupportedModelScopes（始终设置，空数组表示不限制）
 	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
 
+	if groupIn.ExpectedUpdatedAt != nil {
+		expected := *groupIn.ExpectedUpdatedAt
+		next := time.Now().Truncate(time.Microsecond)
+		if !next.After(expected) {
+			next = expected.Add(time.Microsecond)
+		}
+		builder.Where(group.UpdatedAtEQ(expected)).SetUpdatedAt(next)
+	}
 	updated, err := builder.Save(ctx)
 	if err != nil {
+		if groupIn.ExpectedUpdatedAt != nil && dbent.IsNotFound(err) {
+			return service.ErrConfigurationRevision
+		}
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
+	groupIn.ExpectedUpdatedAt = nil
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
 	}

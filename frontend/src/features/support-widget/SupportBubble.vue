@@ -53,6 +53,8 @@ function onClick(event: MouseEvent) {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* 收起时外圈的细光环：一段渐亮的弧绕按钮转，3.2 秒一圈。
    只转 transform，由合成层完成、不逐帧重绘；开启“减少动画”时不渲染（见 docs/development/frontend.md）。 */
 .support-bubble-halo {

@@ -1,7 +1,8 @@
 <template>
   <button
+    v-if="!buttonHidden"
     type="button"
-    class="table-toolbar__btn table-toolbar__btn--secondary"
+    class="table-toolbar__btn table-toolbar__btn--secondary [@media(pointer:coarse)]:min-w-10"
     data-test="group-category-manage"
     :aria-label="t('admin.groupCategories.manage')"
     v-tip="t('admin.groupCategories.manage')"
@@ -191,6 +192,10 @@ const deleteConfirmMessage = computed(() => {
 const clearErrors = () => {
   draftError.value = null
 }
+
+/** The phone's groups toolbar opens it from its "more" sheet, its own button hidden. */
+withDefaults(defineProps<{ buttonHidden?: boolean }>(), { buttonHidden: false })
+defineExpose({ open: () => openManager() })
 
 async function openManager() {
   open.value = true

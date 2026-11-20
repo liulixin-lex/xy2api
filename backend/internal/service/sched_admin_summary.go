@@ -64,6 +64,14 @@ func (s *SchedAdminService) Summary(ctx context.Context, ids []int64) (SchedAdmi
 }
 func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualitySnapshot, a *Account, now time.Time) (SchedAdminAccountSummary, error) {
 	out := SchedAdminAccountSummary{AccountID: a.ID, GroupStatus: map[string]string{}, ResetAt: schedAdminTime(p.ResetAt[a.ID]), Rear: []SchedAdminRear{}, Trial: []SchedAdminTrial{}, Exemptions: s.exemptions(ctx, p, a, now)}
+	v := p.Account(a.ID)
+	windowEnd := v.To
+	if windowEnd.IsZero() { // Accounts without samples or group membership can lack a summary.
+		windowEnd = p.summaryWindowEnd
+	}
+	if p.ResetAt[a.ID].After(windowEnd.Add(-time.Hour)) {
+		out.RecentSince = out.ResetAt
+	}
 	out.Error.Short = true
 	if a.Platform == PlatformOpenAI {
 		known := map[int64]bool{}
@@ -90,13 +98,14 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 				out.GroupStatus[strconv.FormatInt(id, 10)] = "unknown"
 			}
 		}
-		v := p.Account(a.ID)
-		out.TTFO = SchedAdminAccountSummaryTTFO{FirstEventP50Ms: v.FirstEventP50Ms, FirstOutputP50Ms: v.FirstOutputP50Ms, GapP50Ms: v.GapP50Ms, N: v.FirstOutputN}
+		out.FirstOutput = v.FirstOutput
+		out.Slow10s = v.Slow10s
+		out.Error.Failed = v.ErrorBad
 		out.Error.SchedAdminMark = SchedAdminMark{N: v.ErrorN, Short: v.ErrorN < schedquality.ErrorMinClear}
 		if v.ErrorN > 0 {
 			out.Error.Rate = schedAdminFloat(float64(v.ErrorBad) / float64(v.ErrorN))
 		}
-		out.Cache = SchedAdminAccountSummaryCache{Ratio: v.CacheRatio, Turns: v.CacheTurns, AllRatio: v.CacheAllRatio, AllRequests: v.CacheAllRequests}
+		out.Cache = SchedAdminAccountSummaryCache{Ratio: v.CacheRatio, Turns: v.CacheTurns}
 		for _, r := range p.RowsForAccount(a.ID) {
 			key := strconv.FormatInt(r.GroupID, 10)
 			if _, ok := out.GroupStatus[key]; !ok {
@@ -331,11 +340,11 @@ func schedAdminIdentity(v schedquality.LineView) string {
 	}
 	return "unknown"
 }
-func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64) SchedAdminLine[E] {
-	return SchedAdminLine[E]{Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
+func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64, counts schedquality.SampleCounts, last *SchedAdminLastEval) SchedAdminLine[E] {
+	return SchedAdminLine[E]{LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
 }
 func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvidence {
-	return SchedAdminErrorEvidence{Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
+	return SchedAdminErrorEvidence{RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
 }
 func schedAdminCacheEvidence(e schedquality.CacheAssessment) SchedAdminCacheEvidence {
 	return SchedAdminCacheEvidence{MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}
@@ -357,9 +366,9 @@ func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailG
 	ttft := r.TTFT
 	ttft.Causes = append([]schedquality.RuleBUnknownReason{}, ttft.Causes...)
 	return SchedAdminAccountDetailGroupsByModel{Model: r.Model, Placement: placement, Exempt: exempt, Lines: SchedAdminLines{
-		TTFO:  schedAdminLine(r.View.TTFO, r.TTFTVerdict, ttft, r.TTFTSourceGroups),
-		Error: schedAdminLine(r.View.Error, r.Error.Verdict, schedAdminErrorEvidence(r.Error), r.Error.SourceGroups),
-		Cache: schedAdminLine(r.View.Cache, r.Cache.Verdict, schedAdminCacheEvidence(r.Cache), r.Cache.SourceGroups)}}
+		TTFO:  schedAdminLine(r.View.TTFO, r.TTFTVerdict, ttft, r.TTFTSourceGroups, r.TTFTSamples, r.TTFTLastEval),
+		Error: schedAdminLine(r.View.Error, r.Error.Verdict, schedAdminErrorEvidence(r.Error), r.Error.SourceGroups, r.ErrorSamples, r.ErrorLastEval),
+		Cache: schedAdminLine(r.View.Cache, r.Cache.Verdict, schedAdminCacheEvidence(r.Cache), r.Cache.SourceGroups, r.CacheSamples, r.CacheLastEval)}}
 }
 
 // Composite rear ends when the last rear line expires; a concurrent trial does not extend it.

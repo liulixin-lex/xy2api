@@ -4,28 +4,26 @@ package schedquality
 
 import (
 	"encoding/json"
-	"math"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestSummaryPairedLatenciesAndRequestCounts(t *testing.T) {
+func TestSummaryAcrossModelsAndRequestCounts(t *testing.T) {
 	rows := machineSamples(120)
-	// All models contribute; only paired streaming times enter all three medians.
+	// All models and groups for this account contribute to the same display window.
 	for i := range rows {
 		if i%2 == 0 {
 			rows[i].Model = "another-model"
+			rows[i].GroupID = 20
 		}
 	}
-	for i, pair := range [][2]int{{1, 101}, {50, 51}, {60, 200}} {
-		rows[i].FirstEventMs = machineInt(pair[0])
-		rows[i].TTFOMs = machineInt(pair[1])
+	for i, ms := range []int{101, 51, 200} {
+		rows[i].TTFOMs = machineInt(ms)
 	}
-	rows[3].FirstEventMs = machineInt(999) // missing matching output
-	rows[4].Stream = false
-	rows[4].FirstEventMs = machineInt(0)
-	rows[4].TTFOMs = machineInt(0)
+	rows = append(rows, rows[0]) // Duplicate completion for the same attempt.
 	failSamples(rows[5:], 1)
 	rows[6].Outcome = OutcomeOther
 	rows[6].Class = ClassUnknown
@@ -46,18 +44,13 @@ func TestSummaryPairedLatenciesAndRequestCounts(t *testing.T) {
 	if out.ErrorN != 118 || out.ErrorBad != 0 {
 		t.Fatalf("request counts, cap or retry: %+v", out)
 	}
-	if out.FirstEventP50Ms == nil || *out.FirstEventP50Ms != 50 || *out.FirstOutputP50Ms != 101 || *out.GapP50Ms != 100 {
-		t.Fatalf("paired median or difference of medians: %+v", out)
-	}
-	if out.FirstOutputN != 3 {
-		t.Fatalf("paired streaming sample count = %d, want 3", out.FirstOutputN)
-	}
-	if out.CacheAllRequests != 118 || out.CacheTurns != 118 || out.CacheRatio == nil || *out.CacheRatio != .8 {
+	require.Equal(t, FirstOutputSummary{N: 3, P50Ms: machineInt(101)}, out.FirstOutput)
+	if out.CacheTurns != 118 || out.CacheRatio == nil || *out.CacheRatio != .8 {
 		t.Fatalf("cache totals %+v", out)
 	}
 }
 
-func TestSummaryCacheDenominatorsAndReset(t *testing.T) {
+func TestSummaryContinuationCacheAndReset(t *testing.T) {
 	rows := machineSamples(2)
 	rows[0].InputTokens = machineInt(10)
 	rows[0].CacheReadTokens = machineInt(90)
@@ -72,8 +65,8 @@ func TestSummaryCacheDenominatorsAndReset(t *testing.T) {
 	rows[1].CacheReadTokens = machineInt(0)
 	rows = append(rows, retry)
 	out := SummarizeAccount(rows, 1, time.Time{}, machineNow)
-	if out.CacheTurns != 2 || out.CacheAllRequests != 2 || *out.CacheRatio != .5 || math.Abs(*out.CacheAllRatio-.05) > 1e-12 {
-		t.Fatalf("attempt vs request cache: %+v", out)
+	if out.CacheTurns != 2 || out.CacheRatio == nil || *out.CacheRatio != .5 {
+		t.Fatalf("continuation cache: %+v", out)
 	}
 	// Continuations older than 30m remain in the one-hour display window.
 	for i := range rows {
@@ -86,11 +79,11 @@ func TestSummaryCacheDenominatorsAndReset(t *testing.T) {
 	}
 	reset := rows[1].StartedAt
 	out = SummarizeAccount(rows, 1, reset, machineNow)
-	if !out.From.Equal(reset) || out.ErrorN != 0 || out.CacheRatio != nil || out.FirstOutputP50Ms != nil {
+	if !out.From.Equal(reset) || out.ErrorN != 0 || out.CacheRatio != nil || out.FirstOutput.P50Ms != nil {
 		t.Fatalf("reset boundary %+v", out)
 	}
 	out = SummarizeAccount(nil, 1, time.Time{}, machineNow)
-	if out.ErrorN != 0 || out.CacheAllRatio != nil || out.GapP50Ms != nil || out.FirstOutputN != 0 {
+	if out.ErrorN != 0 || out.CacheRatio != nil || out.FirstOutput != (FirstOutputSummary{}) || out.Slow10s != (Slow10sSummary{}) {
 		t.Fatal("unknown metrics must stay absent")
 	}
 }
@@ -141,33 +134,64 @@ func TestDomainFunctionsPreserveInputs(t *testing.T) {
 	}
 }
 
-func TestSummaryGapClampsEachPairedSample(t *testing.T) {
+func TestSummaryFirstOutputMedian(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		pairs [][2]int
-		want  int
+		name              string
+		outputs, timeouts int
+		want              *int
 	}{
-		{"mixed", [][2]int{{200, 100}, {10, 40}, {0, 50}}, 30},
-		{"mostly earlier output", [][2]int{{200, 100}, {300, 100}, {0, 50}}, 0},
+		{"only outputs", 80, 0, machineInt(40)},
+		{"one fifth timeouts", 80, 20, machineInt(50)},
+		{"half timeouts", 2, 2, machineInt(2)},
+		{"majority timeouts", 2, 3, nil},
+		{"only timeouts", 0, 3, nil},
+		{"empty", 0, 0, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rows := machineSamples(5)
-			for i, pair := range tc.pairs {
-				rows[i].FirstEventMs = machineInt(pair[0])
-				rows[i].TTFOMs = machineInt(pair[1])
+			rows := machineSamples(tc.outputs + tc.timeouts)
+			for i := range rows {
+				if i < tc.outputs {
+					rows[i].TTFOMs = machineInt(tc.outputs - i)
+				} else {
+					rows[i].Outcome = OutcomeTimeout
+				}
 			}
-			rows[3].FirstEventMs = nil
-			rows[3].TTFOMs = machineInt(9999)
-			rows[4].FirstEventMs = machineInt(9999)
-			rows[4].TTFOMs = nil
 			out := SummarizeAccount(rows, 1, time.Time{}, machineNow)
-			if out.GapP50Ms == nil || *out.GapP50Ms != tc.want || out.FirstOutputN != len(tc.pairs) {
-				t.Fatalf("gap=%v count=%d want=%d/%d", out.GapP50Ms, out.FirstOutputN, tc.want, len(tc.pairs))
-			}
-			out = SummarizeAccount(rows[3:], 1, time.Time{}, machineNow)
-			if out.GapP50Ms != nil || out.FirstOutputN != 0 {
-				t.Fatalf("unpaired times entered median: %+v", out)
-			}
+			require.Equal(t, FirstOutputSummary{N: len(rows), Timeouts: tc.timeouts, P50Ms: tc.want}, out.FirstOutput)
+		})
+	}
+}
+
+func TestSummaryStreamingAttemptClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stream       bool
+		outcome      Outcome
+		output, wait *int
+		first        FirstOutputSummary
+		slow         Slow10sSummary
+	}{
+		{"error before output", true, OutcomeAccountFault, nil, nil, FirstOutputSummary{}, Slow10sSummary{}},
+		{"canceled before output", true, OutcomeCanceled, nil, nil, FirstOutputSummary{}, Slow10sSummary{}},
+		{"success without output", true, OutcomeOK, nil, nil, FirstOutputSummary{}, Slow10sSummary{}},
+		{"error after output at line", true, OutcomeAccountFault, machineInt(10000), nil, FirstOutputSummary{N: 1, P50Ms: machineInt(10000)}, Slow10sSummary{N: 1}},
+		{"canceled after slow output", true, OutcomeCanceled, machineInt(10001), nil, FirstOutputSummary{N: 1, P50Ms: machineInt(10001)}, Slow10sSummary{N: 1, Slow: 1}},
+		{"timeout after immediate output", true, OutcomeTimeout, machineInt(0), machineInt(15000), FirstOutputSummary{N: 1, P50Ms: machineInt(0)}, Slow10sSummary{N: 1}},
+		{"timeout at line", true, OutcomeTimeout, machineInt(-1), machineInt(10000), FirstOutputSummary{N: 1, Timeouts: 1}, Slow10sSummary{N: 1, Slow: 1, Timeouts: 1}},
+		{"timeout above line", true, OutcomeTimeout, nil, machineInt(10001), FirstOutputSummary{N: 1, Timeouts: 1}, Slow10sSummary{N: 1, Slow: 1, Timeouts: 1}},
+		{"timeout below line", true, OutcomeTimeout, nil, machineInt(9999), FirstOutputSummary{N: 1, Timeouts: 1}, Slow10sSummary{}},
+		{"timeout without wait", true, OutcomeTimeout, nil, nil, FirstOutputSummary{N: 1, Timeouts: 1}, Slow10sSummary{}},
+		{"nonstream output", false, OutcomeOK, machineInt(10001), nil, FirstOutputSummary{}, Slow10sSummary{}},
+		{"nonstream timeout", false, OutcomeTimeout, nil, machineInt(10000), FirstOutputSummary{}, Slow10sSummary{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := machineSamples(1)
+			s := &rows[0]
+			s.Stream, s.Outcome, s.TTFOMs, s.CensoredMs = tc.stream, tc.outcome, tc.output, tc.wait
+			s.ClientCanceled = s.Outcome == OutcomeCanceled
+			out := SummarizeAccount(rows, 1, time.Time{}, machineNow)
+			require.Equal(t, tc.first, out.FirstOutput)
+			require.Equal(t, tc.slow, out.Slow10s)
 		})
 	}
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -153,7 +153,20 @@ async function fetchErrorLogs() {
   }
 }
 
+// Opening (and Reset) set several filters and load once: the watchers below would load again for each value it
+// changes (the upstream list's phase, a page or a search left from before), so they stand aside until this flush ends.
+let resetting = false
+let searchTimeout: number | null = null
+function holdFilterWatchers() {
+  resetting = true
+  if (searchTimeout) window.clearTimeout(searchTimeout)
+  void nextTick(() => {
+    resetting = false
+  })
+}
+
   function resetFilters() {
+    holdFilterWatchers()
     q.value = ''
     statusCode.value = null
     phase.value = props.errorType === 'upstream' ? 'upstream' : ''
@@ -164,15 +177,19 @@ async function fetchErrorLogs() {
   }
 
 
+// Immediate: a deep link (?open_error_details=1) opens the list before the dialog mounts, so `show` is already true
+// and would never change to load it.
 watch(
   () => props.show,
   (open) => {
     if (!open) return
     if (props.resumeState) return
+    holdFilterWatchers()
     page.value = 1
     pageSize.value = 10
     resetFilters()
-  }
+  },
+  { immediate: true }
 )
 
 watch(
@@ -187,16 +204,15 @@ watch(
 watch(
   () => [page.value, pageSize.value] as const,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     fetchErrorLogs()
   }
 )
 
-let searchTimeout: number | null = null
 watch(
   () => q.value,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     if (searchTimeout) window.clearTimeout(searchTimeout)
     searchTimeout = window.setTimeout(() => {
       page.value = 1
@@ -208,7 +224,7 @@ watch(
 watch(
   () => [statusCode.value, phase.value, errorOwner.value, viewMode.value] as const,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     page.value = 1
     fetchErrorLogs()
   }
@@ -236,7 +252,7 @@ watch(
               <input
                 v-model="q"
                 type="text"
-                class="w-full rounded-lg border-gray-200 bg-gray-50/50 py-1.5 pl-9 pr-3 text-xs font-medium text-gray-700 transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/10 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-300 dark:focus:bg-dark-800"
+                class="w-full rounded-lg border-gray-200 bg-gray-50/50 py-1.5 pl-9 pr-3 text-xs font-medium text-gray-700 transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/10 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-300 dark:focus:bg-dark-800 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:text-base"
                 :placeholder="t('admin.ops.errorDetails.searchPlaceholder')"
               />
             </div>
@@ -261,7 +277,7 @@ watch(
           </div>
 
           <div class="flex items-center justify-end">
-            <button type="button" class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600" @click="resetFilters">
+            <button type="button" class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600 [@media(pointer:coarse)]:min-h-10" @click="resetFilters">
               {{ t('common.reset') }}
             </button>
           </div>
@@ -276,6 +292,7 @@ watch(
 
           <OpsErrorLogTable
             class="min-h-0 flex-1"
+            :scroll-label="modalTitle"
             summary-first
             :rows="rows"
             :total="total"
@@ -295,7 +312,12 @@ watch(
 </template>
 
 <style>
-.compact-select .select-trigger {
-  @apply py-1.5 px-3 text-xs rounded-lg;
+@reference "../../../../style.css";
+
+/* The compact filters are for a mouse; on touch the selects keep their own 40px size (mobile list plan). */
+@media (pointer: fine) {
+  .compact-select .select-trigger {
+    @apply py-1.5 px-3 text-xs rounded-lg;
+  }
 }
 </style>

@@ -71,6 +71,17 @@ func TestGroupSystemPromptPersistenceAndCrossInstanceInvalidation(t *testing.T) 
 		got, err := instances[1].GetByKey(ctx, key.Key)
 		return err == nil && got.Group.SystemPromptConfig.Resolve("alias") == ""
 	}, 8*time.Second, 20*time.Millisecond)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE groups SET openai_tier_policy_version=2, openai_fast_mode='force_off', openai_ultrafast_mode='force_on', free_openai_ultrafast=true WHERE id=$1`, group.ID)
+	require.NoError(t, err)
+	for _, instance := range instances {
+		require.Eventually(t, func() bool {
+			got, err := instance.GetByKey(ctx, key.Key)
+			return err == nil && got.Group.OpenAITierPolicyVersion == service.OpenAITierPolicyExplicit &&
+				got.Group.OpenAIFastMode == service.OpenAITierModeForceOff &&
+				got.Group.OpenAIUltrafastMode == service.OpenAITierModeForceOn &&
+				got.Group.FreeOpenAIUltrafast
+		}, 8*time.Second, 20*time.Millisecond)
+	}
 	var defaults bool
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT column_default='true' FROM information_schema.columns WHERE table_name='groups' AND column_name='show_exclusive_badge'`).Scan(&defaults))
 	require.True(t, defaults)

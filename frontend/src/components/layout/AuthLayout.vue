@@ -82,6 +82,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .text-gradient {
   @apply bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent;
 }

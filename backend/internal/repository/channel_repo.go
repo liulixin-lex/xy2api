@@ -130,9 +130,9 @@ func (r *channelRepository) Update(ctx context.Context, channel *service.Channel
 			return err
 		}
 		result, err := tx.ExecContext(ctx,
-			`UPDATE channels SET name = $1, description = $2, status = $3, model_mapping = $4, billing_model_source = $5, restrict_models = $6, features = $7, features_config = $8, apply_pricing_to_account_stats = $9, updated_at = NOW()
-			 WHERE id = $10`,
-			channel.Name, channel.Description, channel.Status, modelMappingJSON, channel.BillingModelSource, channel.RestrictModels, channel.Features, featuresConfigJSON, channel.ApplyPricingToAccountStats, channel.ID,
+			`UPDATE channels SET name = $1, description = $2, status = $3, model_mapping = $4, billing_model_source = $5, restrict_models = $6, features = $7, features_config = $8, apply_pricing_to_account_stats = $9, updated_at = GREATEST(clock_timestamp(), updated_at + INTERVAL '1 microsecond')
+			 WHERE id = $10 AND ($11::timestamptz IS NULL OR updated_at = $11)`,
+			channel.Name, channel.Description, channel.Status, modelMappingJSON, channel.BillingModelSource, channel.RestrictModels, channel.Features, featuresConfigJSON, channel.ApplyPricingToAccountStats, channel.ID, channel.ExpectedUpdatedAt,
 		)
 		if err != nil {
 			if isUniqueViolation(err) {
@@ -142,6 +142,9 @@ func (r *channelRepository) Update(ctx context.Context, channel *service.Channel
 		}
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
+			if channel.ExpectedUpdatedAt != nil {
+				return service.ErrConfigurationRevision
+			}
 			return service.ErrChannelNotFound
 		}
 

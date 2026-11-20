@@ -16,15 +16,23 @@ export interface DrawerRequest {
   raise: number
 }
 
+/** The board's two views: the selection order now, and the accounts over the last 12 hours. */
+export type BoardView = 'order' | 'perf'
+
 export interface BoardRequest {
   groupId: number | null
   groupName: string
+  /** The order view asks for this model (null: the group's busiest); the 12-hour view shows it (null: every model). */
   model: string | null
+  /** Kept while the page lives: the board opens again on the view it was left on. */
+  view: BoardView
+  /** Bumped each time the 12-hour view is entered: each entry asks for the figures anew. */
+  perfEntry: number
   raise: number
 }
 
 const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, raise: 0 })
-const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, raise: 0 })
+const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, view: 'order', perfEntry: 0, raise: 0 })
 /** Bumped after any action that changes an account's quality state, so lists and the open layers reload. */
 const changed = ref(0)
 /** Reloads the open layers started for a change; markSchedChanged() waits for them. */
@@ -55,9 +63,14 @@ export function openSchedBoard(group: { id: number; name: string }, model?: stri
   if (reopening) board.raise++
 }
 
-/** Another model picked on the open board. */
-export function setSchedBoardModel(model: string) {
+/** Another model picked on the open board; null is every model (the 12-hour view) or the group's busiest (the order). */
+export function setSchedBoardModel(model: string | null) {
   board.model = model
+}
+
+export function setSchedBoardView(view: BoardView) {
+  if (view === 'perf' && board.view !== 'perf') board.perfEntry++
+  board.view = view
 }
 
 export function closeSchedBoard() {

@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <!-- Left: Search + Filters -->
@@ -36,6 +36,7 @@
               :disabled="loading"
               class="btn btn-secondary"
               :title="t('common.refresh', 'Refresh')"
+              :aria-label="t('common.refresh', 'Refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -49,29 +50,36 @@
 
       <template #table>
         <DataTable
+          :scroll-label="t('admin.channels.title')"
           :columns="columns"
           :data="channels"
           :loading="loading"
           :server-side-sort="true"
+          :sticky-actions-column="!phone"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <!-- The frozen identity column: at most 240px, the name cut with "…" and whole on a tap. -->
+            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-description="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{ value || '-' }}</span>
+            <span v-if="value" class="text-sm text-gray-600 dark:text-gray-400">{{ value }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-status="{ row }">
-            <Toggle
-              :modelValue="row.status === 'active'"
-              :disabled="!canToggleStatus(row)"
-              class="disabled:cursor-not-allowed disabled:opacity-50"
-              @update:modelValue="toggleChannelStatus(row)"
-            />
+            <!-- The label is the switch's 40px touch area (a click on it clicks the switch). -->
+            <label class="inline-flex cursor-pointer items-center [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-10">
+              <Toggle
+                :modelValue="row.status === 'active'"
+                :disabled="!canToggleStatus(row)"
+                class="disabled:cursor-not-allowed disabled:opacity-50"
+                @update:modelValue="toggleChannelStatus(row)"
+              />
+            </label>
           </template>
 
           <template #cell-group_count="{ row }">
@@ -93,17 +101,19 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">
+            <span v-if="formatDate(value)" class="text-sm text-gray-600 dark:text-gray-400">
               {{ formatDate(value) }}
             </span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (two do not fit its 44px). -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="canManage"
                 @click="openEditDialog(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
@@ -111,7 +121,7 @@
               <button
                 v-if="canManage && has('users.balance_adjust')"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t('common.delete', 'Delete') }}</span>
@@ -268,7 +278,7 @@
                   </p>
                 </div>
                 <Toggle
-                  :disabled="accountStatsPricingLocked"
+                  :disabled="pricingLocked"
                   :modelValue="form.apply_pricing_to_account_stats"
                   @update:modelValue="form.apply_pricing_to_account_stats = $event"
                 />
@@ -317,12 +327,12 @@
                     />
                     <span :class="['font-medium', platformTextClass(group.platform)]">{{ group.name }}</span>
                     <span
-                      :class="['rounded-full px-1 py-0 text-[10px]', platformBadgeLightClass(group.platform)]"
+                      :class="['rounded-full px-1 py-0 text-xs', platformBadgeLightClass(group.platform)]"
                     >{{ group.rate_multiplier }}x</span>
-                    <span class="text-[10px] text-gray-400">{{ group.account_count || 0 }}</span>
+                    <span class="text-xs text-gray-400">{{ group.account_count || 0 }}</span>
                     <span
                       v-if="isGroupInOtherChannel(group.id, section.platform)"
-                      class="text-[10px] text-gray-400"
+                      class="text-xs text-gray-400"
                     >{{ getGroupInOtherChannelLabel(group.id) }}</span>
                   </label>
                 </div>
@@ -336,7 +346,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.webSearchEmulation') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-red-500 dark:text-red-400">
+                  <p class="mt-0.5 text-xs text-red-500 dark:text-red-400">
                     {{ t('admin.channels.form.webSearchEmulationHint') }}
                   </p>
                 </div>
@@ -351,7 +361,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.codexImageGenerationBridge') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                  <p class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
                     {{ t('admin.channels.form.codexImageGenerationBridgeHint') }}
                   </p>
                 </div>
@@ -366,7 +376,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.bedrockCCCompat') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                  <p class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
                     {{ t('admin.channels.form.bedrockCCCompatHint') }}
                   </p>
                 </div>
@@ -423,7 +433,7 @@
             </div>
 
             <!-- Model Pricing -->
-            <div>
+            <fieldset :disabled="pricingLocked" :inert="pricingLocked">
               <div class="mb-1 flex items-center justify-between">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
                 <div class="flex items-center gap-2">
@@ -459,10 +469,10 @@
                   @remove="removePricingEntry(sIdx, idx)"
                 />
               </div>
-            </div>
+            </fieldset>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <fieldset :disabled="accountStatsPricingLocked" :inert="accountStatsPricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <fieldset :disabled="pricingLocked" :inert="pricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -636,11 +646,11 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
-import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formReasoningEffortMultipliersToAPI, formTimePricingToAPI, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok, validateIntervals, validateReasoningEffortMultipliers, validateTimePricing } from '@/components/admin/channel/types'
+import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formReasoningEffortMultipliersToAPI, formTimePricingToAPI, tierMultipliersToAPI, tierMultiplierError, mTokToPerToken, perTokenToMTok, validateIntervals, validateReasoningEffortMultipliers, validateTimePricing } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass, platformLabel as catalogPlatformLabel } from '@/utils/platformColors'
@@ -654,6 +664,10 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import { formatListDateTime } from '@/utils/format'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
@@ -663,6 +677,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage, has } = useAdminPermission('channels')
 const adminAccess = useAdminAccessStore()
@@ -785,9 +800,9 @@ const platformOrder = computed<GroupPlatform[]>(() => listPlatformIds())
 const compositePlatforms = platformOrder
 
 // ── Helpers ──
+/** The list's date (item 18): this year's without the year ("11-20"), an earlier one with it ("2025-03-04"); no time. */
 function formatDate(value: string): string {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString()
+  return formatListDateTime(value).split(' ')[0]
 }
 
 // ── Platform section helpers ──
@@ -1151,8 +1166,8 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
         cache_write_price: mTokToPerToken(entry.cache_write_price),
         cache_write_1h_price: mTokToPerToken(entry.cache_write_1h_price),
         cache_read_price: mTokToPerToken(entry.cache_read_price),
-        fast_multiplier: entry.fast_multiplier != null && entry.fast_multiplier !== '' ? Number(entry.fast_multiplier) : null,
-        flex_multiplier: entry.flex_multiplier != null && entry.flex_multiplier !== '' ? Number(entry.flex_multiplier) : null,
+        id: entry.id,
+        ...tierMultipliersToAPI(entry),
         reasoning_effort_multipliers: formReasoningEffortMultipliersToAPI(entry.reasoning_effort_multipliers),
         image_input_price: mTokToPerToken(entry.image_input_price),
         image_output_price: mTokToPerToken(entry.image_output_price),
@@ -1254,8 +1269,8 @@ function apiToForm(channel: Channel): PlatformSection[] {
         cache_write_price: perTokenToMTok(p.cache_write_price),
         cache_write_1h_price: perTokenToMTok(p.cache_write_1h_price),
         cache_read_price: perTokenToMTok(p.cache_read_price),
-        fast_multiplier: p.fast_multiplier,
-        flex_multiplier: p.flex_multiplier,
+        id: p.id,
+        ...tierMultipliersToAPI(p),
         reasoning_effort_multipliers: p.reasoning_effort_multipliers ? { ...p.reasoning_effort_multipliers } : null,
         image_input_price: perTokenToMTok(p.image_input_price),
         image_output_price: perTokenToMTok(p.image_output_price),
@@ -1368,7 +1383,7 @@ function handleSort(key: string, order: 'asc' | 'desc') {
 }
 
 // A grouped channel uses these rules for billing too (R8-5).
-const accountStatsPricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
+const pricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
 let originalAccountStatsPricing = ''
 
 // ── Dialog ──
@@ -1574,7 +1589,7 @@ async function handleSubmit() {
       ...section.account_stats_pricing_rules.flatMap(rule => rule.pricing),
     ]
     for (const entry of entries) {
-      const error = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t)
+      const error = tierMultiplierError(entry, section.platform, t) ?? validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t)
       if (!error) continue
       const platformLabel = t('admin.groups.platforms.' + section.platform, catalogPlatformLabel(section.platform))
       const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')
@@ -1587,14 +1602,6 @@ async function handleSubmit() {
   // 校验区间合法性（范围、重叠等）
   for (const section of form.platforms.filter(s => s.enabled)) {
     for (const entry of section.model_pricing) {
-      if (!isValidPositiveMultiplier(entry.fast_multiplier) ||
-          !isValidPositiveMultiplier(entry.flex_multiplier)) {
-        const platformLabel = t('admin.groups.platforms.' + section.platform, catalogPlatformLabel(section.platform))
-        const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')
-        appStore.showError(`${platformLabel} - ${modelLabel}: ${t('admin.channels.form.multiplierPositive')}`)
-        activeTab.value = section.platform
-        return
-      }
       if (!entry.intervals || entry.intervals.length === 0) continue
       const intervalErr = validateIntervals(entry.intervals, entry.billing_mode, t)
       if (intervalErr) {
@@ -1627,6 +1634,7 @@ async function handleSubmit() {
   try {
     if (editingChannel.value) {
       const req: UpdateChannelRequest = {
+        revision: editingChannel.value.revision ?? editingChannel.value.updated_at,
         name: form.name.trim(),
         description: form.description.trim() || undefined,
         status: form.status,
@@ -1641,10 +1649,11 @@ async function handleSubmit() {
       }
       // Omit unchanged projections: distributing rules into platform sections can normalize them.
       if (!has('users.balance_adjust')) {
-        if (accountStatsPricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
+        if (pricingLocked.value) delete req.model_pricing
+        if (pricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
           delete req.apply_pricing_to_account_stats
         }
-        if (accountStatsPricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
+        if (pricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
           delete req.account_stats_pricing_rules
         }
       }
@@ -1669,6 +1678,11 @@ async function handleSubmit() {
     closeDialog()
     loadChannels()
   } catch (error: unknown) {
+    if (extractApiErrorCode(error) === 'CONFIGURATION_REVISION_CONFLICT') {
+      appStore.showError(t('admin.channels.form.revisionConflict'))
+      void loadChannels()
+      return
+    }
     appStore.showError(extractApiErrorMessage(error, editingChannel.value
       ? t('admin.channels.updateError', 'Failed to update channel')
       : t('admin.channels.createError', 'Failed to create channel')))
@@ -1738,6 +1752,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .channel-dialog-body {
   display: flex;
   flex-direction: column;

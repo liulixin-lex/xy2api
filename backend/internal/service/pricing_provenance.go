@@ -81,7 +81,7 @@ func configuredPricingSource(raw json.RawMessage, config *ChannelModelPricing, s
 		base.Overrides = map[string]string{}
 	}
 	origin := source + ":" + pricingContentRevision(config)
-	for name, value := range map[string]*float64{"input": config.InputPrice, "output": config.OutputPrice, "cache_write": config.CacheWritePrice, "cache_write_1h": config.CacheWrite1hPrice, "cache_read": config.CacheReadPrice, "image_input": config.ImageInputPrice, "image_output": config.ImageOutputPrice, "per_request": config.PerRequestPrice, "fast_multiplier": config.FastMultiplier, "flex_multiplier": config.FlexMultiplier} {
+	for name, value := range map[string]*float64{"input": config.InputPrice, "output": config.OutputPrice, "cache_write": config.CacheWritePrice, "cache_write_1h": config.CacheWrite1hPrice, "cache_read": config.CacheReadPrice, "image_input": config.ImageInputPrice, "image_output": config.ImageOutputPrice, "per_request": config.PerRequestPrice, "fast_multiplier": config.FastMultiplier, "ultrafast_multiplier": config.UltrafastMultiplier, "flex_multiplier": config.FlexMultiplier} {
 		if value != nil {
 			base.Overrides[name] = origin
 		}

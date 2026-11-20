@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -121,44 +122,46 @@ func (s *OpenAIGatewayService) openAIStickyLegacyTTL(ttl time.Duration) time.Dur
 }
 
 func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	id, _, err := s.lookupStickySessionAccount(ctx, groupID, sessionHash)
+	return id, err
+}
+
+// The extra result preserves absence evidence for new-session placement. Legacy
+// callers keep their original ID and error even when a fallback read fails.
+func (s *OpenAIGatewayService) lookupStickySessionAccount(ctx context.Context, groupID *int64, sessionHash string) (int64, bool, error) {
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
-		return id, nil
+		return id, false, nil
 	}
 	if s == nil || s.cache == nil {
-		return 0, nil
+		return 0, false, nil
 	}
-
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
-		return 0, nil
+		return 0, false, nil
 	}
-	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok && s.openAISessionHashReadOldFallbackEnabled() {
-		if legacy := s.openAILegacySessionCacheKey(ctx, sessionHash); legacy != "" {
-			binding, err := aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), primaryKey, legacy, true)
-			return binding.AccountID, err
-		}
+	fallback := s.openAISessionHashReadOldFallbackEnabled()
+	legacy := s.openAILegacySessionCacheKey(ctx, sessionHash)
+	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok && fallback && legacy != "" {
+		binding, err := aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), primaryKey, legacy, true)
+		return binding.AccountID, stickyLookupMissing(binding.AccountID, err), err
 	}
 
 	accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), primaryKey)
-	if err == nil && accountID > 0 {
-		return accountID, nil
+	missing := stickyLookupMissing(accountID, err)
+	if err == nil && accountID > 0 || !fallback || legacy == "" {
+		return accountID, missing, err
 	}
-	if !s.openAISessionHashReadOldFallbackEnabled() {
-		return accountID, err
-	}
-
-	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
-	if legacyKey == "" {
-		return accountID, err
-	}
-
 	openAIStickyLegacyReadFallbackTotal.Add(1)
-	legacyAccountID, legacyErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacyKey)
+	legacyAccountID, legacyErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
 	if legacyErr == nil && legacyAccountID > 0 {
 		openAIStickyLegacyReadFallbackHit.Add(1)
-		return legacyAccountID, nil
+		return legacyAccountID, false, nil
 	}
-	return accountID, err
+	return accountID, missing && stickyLookupMissing(legacyAccountID, legacyErr), err
+}
+
+func stickyLookupMissing(id int64, err error) bool {
+	return id == 0 && errors.Is(err, ErrStickySessionNotFound)
 }
 
 func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {

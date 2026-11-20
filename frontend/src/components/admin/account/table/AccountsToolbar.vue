@@ -1,6 +1,6 @@
 <template>
   <div ref="rootRef" class="tb-root" data-test="accounts-toolbar">
-    <TableToolbar class="tb" compact>
+    <TableToolbar class="tb" compact filter-sheet :filter-count="tags.length" @clear-filters="clearAll">
       <template #search>
       <label class="table-toolbar__search-box">
         <span class="sr-only">{{ t('admin.accounts.table.searchPlaceholder') }}</span>
@@ -17,7 +17,7 @@
         />
       </label>
       </template>
-      <template #filters>
+      <template v-if="!phone" #filters>
       <div ref="filtersRef" class="tb-filters">
         <!-- The shared Select's sm (12.6): the filter's name until a value is chosen, "all" first in its panel. -->
         <template v-for="key in DIRECT" :key="key">
@@ -61,7 +61,41 @@
       </div>
       </template>
 
+      <!-- A phone (mobile list plan): every filter in the bottom sheet, applied at once; the chosen ones as tags under
+           the search; the count, the sort when its column is hidden, the live state and the tools on one row. -->
+      <template v-if="phone" #sheet>
+        <div v-for="key in sheetKeys" :key="key" class="tb-sheet__field">
+          <span :id="`tb-sheet-${key}`" class="tb-sheet__k">{{ label(key) }}</span>
+          <Select
+            class="tb-sel--full"
+            :model-value="filters[FIELD[key]] ?? ''"
+            :options="selectOptions(key)"
+            :aria-label="label(key)"
+            :data-filter="key"
+            @update:model-value="setFilter(key, String($event ?? ''))"
+          />
+        </div>
+      </template>
+      <template v-if="phone" #tags>
+        <span v-for="tag in tags" :key="tag.key" class="tb-tag" :data-key="tag.key">
+          <span class="tb-tag__k">{{ label(tag.key) }}：</span>
+          <StatusDot v-if="tag.key === 'quality'" :tone="QUALITY_TONES[tag.value] ?? 'ok'" class="tb-tag__dot" />
+          <span class="tb-tag__v">{{ tag.text }}</span>
+          <button type="button" class="tb-tag__x" :aria-label="t('admin.accounts.table.removeFilter', { label: label(tag.key) })" @click="setFilter(tag.key, '')">
+            <Icon name="x" size="xs" />
+          </button>
+        </span>
+      </template>
+      <template v-if="phone" #info>
+        <span data-test="accounts-count">{{ t('common.table.count', { n: (total ?? 0).toLocaleString() }) }}</span>
+        <template v-if="sortHint">
+          <span class="table-toolbar__sep" aria-hidden="true">·</span>
+          <TableSortHint :label="sortHint.label" :order="sortHint.order" />
+        </template>
+      </template>
+
       <template #status>
+      <TableSortHint v-if="!phone && sortHint" class="tb-sort" :label="sortHint.label" :order="sortHint.order" />
       <LiveStatusIndicator :status="liveStatus" :pause="pause" :resume="resume" :detail="t('admin.accounts.table.liveDetail')" />
       </template>
       <template #actions>
@@ -75,14 +109,27 @@
       >
         <Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />
       </button>
+      <button
+        v-if="phone"
+        type="button"
+        class="table-toolbar__icon-btn table-toolbar__icon"
+        aria-haspopup="dialog"
+        :aria-label="t('common.table.columnsTitle')"
+        data-test="accounts-columns"
+        @click="emit('columns')"
+      >
+        <Icon name="grid" size="sm" />
+      </button>
       <slot name="more-actions" />
-      <button v-if="canCreate" type="button" class="table-toolbar__btn table-toolbar__btn--primary" data-test="accounts-create" @click="emit('create')">
-        <Icon name="plus" size="sm" />{{ t('admin.accounts.createAccount') }}
+      </template>
+      <template v-if="canCreate" #create>
+      <button type="button" class="table-toolbar__btn table-toolbar__btn--primary" :aria-label="t('admin.accounts.createAccount')" data-test="accounts-create" @click="emit('create')">
+        <Icon name="plus" size="sm" /><span>{{ phone ? t('admin.accounts.table.createShort') : t('admin.accounts.createAccount') }}</span>
       </button>
       </template>
     </TableToolbar>
 
-    <div v-if="menuOpen" ref="menuRef" class="tb-menu" :style="{ left: `${menuLeft}px`, top: menuTop === null ? undefined : `${menuTop}px` }" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
+    <div v-if="menuOpen && !phone" ref="menuRef" class="tb-menu" :style="{ left: `${menuLeft}px`, top: menuTop === null ? undefined : `${menuTop}px` }" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
       <div v-if="folded.length" class="tb-menu__folded">
         <span class="tb-menu__k">{{ t('admin.accounts.table.foldedTitle') }}</span>
         <div class="tb-menu__tags">
@@ -115,16 +162,18 @@
 <script setup lang="ts">
 /**
  * The accounts toolbar (spec 4.2, prototype) on the shared TableToolbar in its compact form (12.9), whose 32px search
- * box and buttons it uses. From 1024px one row, never wrapping (this
+ * box and buttons it uses. From 768px (a tablet too, mobile list plan) one row, measured; from 1024px it never wraps,
+ * at 768–1023 the actions may take a row of their own (this
  * component's own rules below): search, four filters shown directly (platform, status, group, quality), "more filters"
  * (type, privacy, IQ, category) and the active filters as removable tags. Tags that do not fit fold from the right into
  * the "more filters" count, where they can still be seen and removed; if the row still overflows, the direct filters
  * fold into the menu too (quality first, then group, status, platform). All of it is measured on the rendered widths,
- * so any width from 1024px up, with or without a classic scrollbar, keeps one row. On the right: the live indicator,
+ * so any width from 768px up, with or without a classic scrollbar, keeps one row. On the right: the live indicator,
  * refresh, more actions (slot) and add.
  *
- * Below 1024px it takes TableToolbar's narrow layout: search on its own row, the filters on one row that scrolls
- * sideways, the active filters as tags wrapping on a row under it (7l-3), the live indicator and the actions last.
+ * Below 768px it is TableToolbar's phone toolbar (filterSheet): the search, "Filters n" and "Add"; the chosen filters
+ * as removable tags; the count (and the sort while its column is hidden), live state, refresh, "Columns" and "more
+ * actions" on the info row. Every filter is in the bottom sheet, applied at once.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
@@ -134,6 +183,8 @@ import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
 import Select from '@/components/common/Select.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
+import TableSortHint from '@/components/common/TableSortHint.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { LiveStatus } from '@/composables/useLiveTable'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
@@ -155,6 +206,10 @@ const props = defineProps<{
   resume: () => void
   refreshing?: boolean
   canCreate?: boolean
+  /** All results under the filters (the phone's info row). */
+  total?: number
+  /** The sort, while its column is hidden (no header shows it). */
+  sortHint?: { label: string; order: 'asc' | 'desc' } | null
 }>()
 const emit = defineEmits<{
   'update:search': [value: string]
@@ -162,6 +217,8 @@ const emit = defineEmits<{
   change: [filters: ToolbarFilters]
   refresh: []
   create: []
+  /** The phone's "Columns" button. */
+  columns: []
 }>()
 
 const { t } = useI18n()
@@ -284,7 +341,7 @@ function foldTags(): ToolbarFilterKey[] {
  */
 async function foldTagsUntilStable(): Promise<ToolbarFilterKey[]> {
   let next = foldTags()
-  // Measuring only means anything from 1024px; the width can cross it between two rounds (7l-7).
+  // Measuring only means anything from 768px; the width can cross it between two rounds (7l-7).
   while (wide.value) {
     folded.value = next
     await nextTick()
@@ -301,10 +358,13 @@ const filtersOverflow = () => {
   return !!filters && !!row && filters.right + 8 > row.right + 0.5
 }
 /**
- * Below 1024px the filter row scrolls sideways and the tags wrap on a row of their own under it (prototype at 390,
- * 7l-3): nothing is measured or folded, so "more filters" counts nothing.
+ * The one-row layout and its measuring hold from 768px (mobile list plan: a tablet takes the desktop toolbar). Below
+ * 768px the filters are in the phone's bottom sheet: nothing is measured or folded, so "more filters" counts nothing.
  */
-const wide = useMediaQuery('(min-width: 1024px)')
+const wide = useMediaQuery('(min-width: 768px)')
+const phone = usePhoneViewport()
+/** The phone's sheet lists every filter: the four direct ones, then the rest. */
+const sheetKeys = computed(() => [...DIRECT, ...moreKeys.value])
 watch(wide, () => {
   void fit()
 })
@@ -345,7 +405,7 @@ async function fit() {
   } finally {
     fitting = false
   }
-  // The width crossed 1024px while measuring: nothing stays folded (7l-7).
+  // The width crossed 768px while measuring: nothing stays folded (7l-7).
   if (!wide.value) {
     folded.value = []
     foldedSelects.value = []
@@ -373,7 +433,7 @@ const menuOpen = ref(false)
 const menuLeft = ref(0)
 /** Null until placed: the stylesheet's spot under the toolbar meanwhile. */
 const menuTop = ref<number | null>(null)
-/** Under its button: on one row from 1024px, in the scrolling filter row below it. */
+/** Under its button, on the one row (from 768px). */
 function placeMenu() {
   const root = rootRef.value?.getBoundingClientRect()
   const button = moreRef.value?.getBoundingClientRect()
@@ -382,6 +442,8 @@ function placeMenu() {
   menuLeft.value = Math.max(0, Math.min(button.left - root.left, root.width - width))
   menuTop.value = button.bottom - root.top + 6
 }
+// The "more filters" menu belongs to the row layout.
+watch(phone, (on) => { if (on) menuOpen.value = false })
 watch(menuOpen, async (open) => {
   if (!open) return
   await nextTick()
@@ -415,18 +477,17 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 /* The menu is placed against the whole toolbar. */
 .tb-root {
   position: relative;
   min-width: 0;
 }
-/* From 1024px the page's own one-row toolbar, on TableToolbar's compact parts (8px apart, the 220px search box): no
-   wrapping, the tags taking the room left; below 1024px TableToolbar's narrow layout applies as it is. */
-@media (min-width: 1024px) {
-  .tb {
-    flex-wrap: nowrap;
-    align-items: center;
-  }
+/* From 768px the page's own one-row toolbar, on TableToolbar's compact parts (8px apart, the 220px search box): the
+   tags taking the room left. From 1024px the actions keep to that row; at 768–1023 they may take a row of their own
+   (TableToolbar's rule), the search, filters and tags still on one measured row. */
+@media (min-width: 768px) {
   /* Its basis stays the search box's, not the shared one (its content, 7r-5): one row whatever the tags, the actions
      at their size and the tags folding into the room they leave. */
   .tb :deep(.table-toolbar__main) {
@@ -443,7 +504,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb :deep(.table-toolbar__actions) {
     flex-wrap: nowrap;
   }
-  /* Its own fixed search box, 220px (160px at 1024–1279, below), not the shared flexible one (12.12-10): this row
+  /* Its own fixed search box, 220px (176px at 768–1279, below), not the shared flexible one (12.12-10): this row
      folds its filters into "more filters" instead. */
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
     flex: none;
@@ -456,6 +517,12 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb-filters .tb-sel :deep(.select-trigger--sm) {
     gap: 2px;
     padding: 0 4px 0 8px;
+  }
+}
+@media (min-width: 1024px) {
+  .tb {
+    flex-wrap: nowrap;
+    align-items: center;
   }
 }
 .tb-filters {
@@ -472,65 +539,26 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   min-width: 0;
   overflow: hidden;
 }
-/* Below 1024px (prototype at 390, 7l-3): the shared filter box steps aside, so the selects scroll sideways on their own
-   row, reaching out to the screen's edges as TableToolbar's row does, and the tags wrap on a row under it. */
-@media (max-width: 1023px) {
-  .tb :deep(.table-toolbar__filters) {
-    display: contents;
-  }
-  .tb-filters {
-    min-width: 0;
-    margin-inline: -16px;
-    padding-inline: 16px;
-    overflow-x: auto;
-    scroll-padding-inline: 16px;
-    scrollbar-width: none;
-  }
-  .tb-filters::-webkit-scrollbar {
-    display: none;
-  }
-  .tb-tags {
-    flex-wrap: wrap;
-    overflow: visible;
-  }
-  .tb-tags:empty {
-    display: none;
-  }
-  /* The row scrolls on its own, so the direct filters take their content's width (96–160px): a name such as "质量状态"
-     shows whole, a long chosen value ends in an ellipsis at 160px. */
-  .tb-filters .tb-sel {
-    width: auto;
-    min-width: 96px;
-    max-width: 160px;
-  }
-}
-@media (min-width: 768px) and (max-width: 1023px) {
-  .tb-filters {
-    margin-inline: -24px;
-    padding-inline: 24px;
-    scroll-padding-inline: 24px;
-  }
-}
-@media (max-width: 1023px) and (pointer: fine) {
-  .tb-filters {
-    scrollbar-color: var(--color-line-control) transparent;
-    scrollbar-width: thin;
-  }
-  .tb-filters::-webkit-scrollbar {
-    display: block;
-    height: 6px;
-  }
-  .tb-filters::-webkit-scrollbar-thumb {
-    border-radius: 3px;
-    background: var(--color-line-control);
-  }
-}
 .tb-sel {
   width: 96px;
   flex: none;
 }
 .tb-sel--full {
   width: 100%;
+}
+/* The phone's sheet: one field per line, its name above the full-width select. */
+.tb-sheet__field {
+  display: grid;
+  gap: 6px;
+}
+.tb-sheet__k {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-small);
+}
+.tb-sort {
+  margin-right: 8px;
 }
 .tb-tag__x:focus-visible,
 .tb-menu__clear:focus-visible {
@@ -544,7 +572,8 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   border-radius: var(--radius-full);
   background: var(--color-bg-pill-hover);
   color: var(--color-text-primary);
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-align: center;
 }
@@ -645,7 +674,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   }
 }
 /* Touch (7n-3): a tag's remove button reaches 40 x 40 with an invisible area, more of it over its own tag than towards
-   the next one (6px, the gap). From 1024px the tag row clips, so it lends the area 8px above and below. */
+   the next one (6px, the gap). From 768px the tag row clips, so it lends the area 8px above and below. */
 @media (pointer: coarse) {
   .tb-tag__x {
     position: relative;
@@ -656,16 +685,17 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     content: '';
   }
 }
-@media (min-width: 1024px) and (pointer: coarse) {
+@media (min-width: 768px) and (pointer: coarse) {
   .tb-tags {
     margin-block: -8px;
     padding-block: 8px;
   }
 }
-/* 1024–1279: still one row; the search box and filters narrow (two classes: over the shared compact 220px) */
-@media (min-width: 1024px) and (max-width: 1279px) {
+/* 768–1279: the search box and filters narrow (two classes: over the shared compact 220px). 176px holds the whole hint
+   "名称、备注或 ID" (160px cut it). */
+@media (min-width: 768px) and (max-width: 1279px) {
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
-    width: 160px;
+    width: 176px;
   }
   /* The direct filters on the toolbar only: the fields in "more filters" keep filling their column (12.12-4). */
   .tb-filters .tb-sel {

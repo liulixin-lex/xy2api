@@ -488,7 +488,9 @@ func (st *gatewayConvertStream) stopFirstEvent() bool {
 		return st.guardFired
 	}
 	st.guardDone = true
-	st.guardFired = !st.firstEvent.timer.Stop() || st.firstEvent.Fired()
+	st.firstEvent.Disarm()
+	<-st.firstEvent.published
+	st.guardFired = st.firstEvent.Fired()
 	return st.guardFired
 }
 
@@ -734,12 +736,12 @@ func gatewayChatFailureFrames(source []byte) []string {
 // armGatewayConvertFirstEvent derives the attempt context of a guarded
 // streaming conversion with the Anthropic first-event deadline; the guard
 // is nil (inert) otherwise. The caller releases it when the attempt ends.
-func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Context, account *Account, clientStream bool, started time.Time) (context.Context, *firstEventGuard) {
+func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Context, account *Account, clientStream bool, profile resilience.AttemptProfile) (context.Context, *firstEventGuard) {
 	if !clientStream || account == nil || !gatewayConvertGuarded() {
 		return upstreamCtx, nil
 	}
-	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: started})
-	timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, started)
+	resilience.StateFrom(ctx).SetAttemptProfile(profile)
+	timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, profile.AttemptStart)
 	return newFirstEventGuard(upstreamCtx, timeout, plan)
 }
 

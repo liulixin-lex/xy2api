@@ -285,15 +285,24 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if len(plans) > 0 {
 		plan = plans[0]
 	}
-	attempt := currentSchedAttempt(ctx)
+	attempt, bound := ctx.Value(schedHTTPAttemptKey{}).(*schedAttemptCapture)
+	fired, frozen := ctx.Value(firedOpenAITimeoutKey{}).(firedOpenAITimeout)
+	if frozen {
+		attempt = fired.capture
+	} else {
+		if !bound {
+			attempt = currentSchedAttempt(ctx)
+		}
+		fired = freezeOpenAITimeout(ctx, attempt)
+	}
 	elapsedStart := startTime
-	if attempt != nil {
+	if attempt != nil && !attempt.factsOnly {
 		// A handler/response stage can start earlier than this account's send.
 		// Censored wait and diagnostic elapsed must use the attempt's clock.
 		elapsedStart = attempt.started
 	}
 	attempt.timeout(plan)
-	noteTimeoutPlan(ctx, account, plan)
+	noteTimeoutPlan(ctx, account, plan, fired.identity)
 	elapsed := time.Since(elapsedStart)
 	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)
 	logger.LegacyPrintf(
@@ -346,13 +355,19 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	return fe
 }
 
+type openAIHeaderGuardKey struct{}
+
 type openAIFirstOutputHeaderGuard struct {
-	cancel  context.CancelFunc
-	release context.CancelFunc
-	timer   *time.Timer
-	fired   chan struct{}
-	once    sync.Once
-	plan    resilience.TimeoutPlan
+	capture  atomic.Pointer[schedAttemptCapture]
+	expiring atomic.Bool
+	outcome  firedOpenAITimeout // published before closing fired
+	firedAt  time.Time          // published by closing fired
+	cancel   context.CancelFunc
+	release  context.CancelFunc
+	timer    *time.Timer
+	fired    chan struct{}
+	once     sync.Once
+	plan     resilience.TimeoutPlan
 }
 
 func newOpenAIFirstOutputHeaderGuard(
@@ -371,13 +386,19 @@ func newOpenAIFirstOutputHeaderGuard(
 		remaining = time.Nanosecond
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
+		guard.firedAt = time.Now()
+		guard.outcome = freezeOpenAITimeout(ctx, guard.capture.Load())
+		guard.expiring.Store(true)
+		if a := guard.outcome.capture; a != nil {
+			claimOpenAIFirstOutputCutoff(a, guard.plan, guard.firedAt, cancel)
+		}
 		if resilience.BudgetTraceEnabledForTest {
 			guard.plan.ObserveFiredForTest("openai_header")
 		}
 		close(guard.fired)
 		cancel()
 	})
-	return guardedCtx, guard
+	return context.WithValue(guardedCtx, openAIHeaderGuardKey{}, guard), guard
 }
 
 func (g *openAIFirstOutputHeaderGuard) stopHeaderWait() bool {

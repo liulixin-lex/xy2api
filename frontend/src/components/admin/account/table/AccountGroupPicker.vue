@@ -362,6 +362,8 @@ defineExpose({ requestClose })
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .gp {
   position: fixed;
   display: grid;

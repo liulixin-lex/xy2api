@@ -89,6 +89,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithOpenAITierInput(c.Request.Context(), body, service.APIProtocolChatCompletions, ""))
 	if _, err := service.ValidateOpenAIServiceTierField(body); err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -102,9 +103,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body)
+	// Responses-shaped Chat requests can forward the original continuation ID.
+	if imageIntent || strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()) != "" &&
+		!gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+		c.Request = c.Request.WithContext(service.WithOpenAITransferProtected(c.Request.Context()))
+	}
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
-	if !service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body) {
+	if !imageIntent {
 		c.Request = c.Request.WithContext(resilience.WithCapabilityRequest(c.Request.Context(), resilience.CapabilityProtocolChat, reqStream))
 	}
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -187,7 +194,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
-	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, openAIResponsesRequestScope(imageIntent))()
 
 	for {
 		if failoverClientGone(c) {
@@ -276,7 +283,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
-			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
+			st.SetSchedSelection(resilience.SchedSelection{
+				AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel),
+				HTTPStreamText: reqStream && !imageIntent,
+				StickyWarm:     !c.GetBool(ginKeyOpenAIQueueReselected) && service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0),
+			})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, forwardModel),

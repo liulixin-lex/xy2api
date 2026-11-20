@@ -11,6 +11,14 @@
       >
         <div class="py-1">
           <template v-if="account">
+            <!-- A phone has only "⋯" in the row: editing comes first here (mobile list plan). -->
+            <template v-if="withEdit && canManage">
+              <button :class="ITEM" data-test="menu-edit" @click="$emit('edit', account); $emit('close')">
+                <Icon name="edit" size="sm" :class="ICON" />
+                {{ t('common.edit') }}
+              </button>
+              <div :class="DIVIDER"></div>
+            </template>
             <!-- 恢复状态只在恢复解得了某个状态时出现，排第一；其后检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色 -->
             <template v-if="canManage && recoverable">
               <button
@@ -113,8 +121,10 @@ const props = defineProps<{
   recoverable?: boolean
   /** Its recovery is still running; the item stays first but does nothing. */
   recovering?: boolean
+  /** The row shows only "⋯" (a phone): the menu starts with "edit". */
+  withEdit?: boolean
 }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'edit-groups', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
+const emit = defineEmits(['edit', 'iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'edit-groups', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')

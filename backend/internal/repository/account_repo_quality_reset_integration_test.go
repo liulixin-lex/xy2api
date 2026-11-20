@@ -30,7 +30,7 @@ func TestAccountUpdatePreservesQualityResetAfterRead(t *testing.T) {
 			}
 
 			// Reset after the caller's read, before its stale copy is written back.
-			resetAt, err := quality.RunReset(ctx, accountID)
+			resetAt, _, err := quality.RunReset(ctx, accountID)
 			require.NoError(t, err)
 			require.NoError(t, repo.Update(ctx, stale))
 			stored, err := repo.GetByID(ctx, accountID)

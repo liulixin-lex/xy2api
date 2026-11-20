@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -34,15 +36,25 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
-	mu                                         sync.Mutex
-	state                                      *resilience.RequestState
-	ctx                                        context.Context
-	accountID                                  int64
-	allowModel401                              bool
-	attempt                                    SchedAttempt
-	sendErr                                    error
-	networkErr                                 error
-	started                                    time.Time
+	firstOutputCancel                   context.CancelFunc // nonblocking cancellation of this guarded HTTP request
+	sendSeq                             atomic.Uint64      // Latest confirmed upstream send on this handle.
+	factsOnly                           bool
+	requestedHTTPConn, repeatedHTTPSend bool
+	mu                                  sync.Mutex
+	state                               *resilience.RequestState
+	ctx                                 context.Context
+	accountID                           int64
+	allowModel401                       bool
+	attempt                             SchedAttempt
+	sendErr                             error
+	networkErr                          error
+	started                             time.Time
+	upstreamFirstValidAt                time.Time
+	httpSelection                       resilience.SchedSelection
+	dispatch                            resilience.OwnerFirstOutputCutoff
+	// Begin precedes dispatch. Only the conjunction on the final timeout row
+	// proves the original owner received a full tier for this send.
+	ownerHit, fullTierFirstOutputTimeout       bool
 	first, done, client                        bool
 	stream                                     bool
 	expectTerminal, terminal, benignIncomplete bool
@@ -62,11 +74,20 @@ type schedAttemptCapture struct {
 	learnCapability                            func(int, []byte)
 }
 
-func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
-	return s.beginSchedAttemptAt(ctx, account, body, bodyBytes, stream, time.Time{})
+// HTTP sampling and handoff share the capture origin, before hashing the payload.
+func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool, guards ...*openAIFirstOutputHeaderGuard) *schedAttemptCapture {
+	var guard *openAIFirstOutputHeaderGuard
+	if len(guards) > 0 {
+		guard = guards[0]
+	}
+	return s.newSchedAttemptCapture(ctx, account, body, stream, time.Now(), guard)
 }
 
 func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool, started time.Time) *schedAttemptCapture {
+	return s.newSchedAttemptCapture(ctx, account, body, stream, started, nil)
+}
+
+func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, account *Account, body []byte, stream bool, started time.Time, guard *openAIFirstOutputHeaderGuard) *schedAttemptCapture {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -74,16 +95,35 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 	selection, ok := st.SchedSelection()
 	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
 	change := pendingOpenAIStickyChange(ctx)
-	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
+	factsOnly := !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled()
+	if factsOnly && (guard == nil || !stream || !st.OwnerHTTPDispatchPending(account.ID) || resilienceTextBudget(ctx) == nil) {
 		return nil
 	}
-	a := &schedAttemptCapture{allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: time.Now(), stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), bodyHash: sha256.Sum256(body), requestID: st.GatewayRequestID()}
-	if !started.IsZero() {
-		a.started = started
+	captureStart := started
+	if captureStart.IsZero() {
+		captureStart = time.Now()
+	}
+	a := &schedAttemptCapture{factsOnly: factsOnly, allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: captureStart, stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), requestID: st.GatewayRequestID()}
+	if guard != nil {
+		a.firstOutputCancel = guard.cancel
+	}
+	if !factsOnly {
+		a.bodyHash = sha256.Sum256(body)
+	}
+	if stream && selection.HTTPStreamText && selection.AccountID == account.ID {
+		a.httpSelection = selection
+		group, session := st.SessionIdentity()
+		a.dispatch = resilience.OwnerFirstOutputCutoff{AccountID: account.ID, GroupID: group, Session: session, Model: selection.Model}
+		if change != nil && change.groupID == group && change.session == session && change.expected.AccountID == account.ID {
+			change.mu.Lock()
+			a.dispatch.BindingKey, a.dispatch.Generation, a.dispatch.CanTransfer = change.key, change.expected.Generation, change.canTransfer
+			change.mu.Unlock()
+		}
 	}
 	if change != nil && change.target == account.ID {
 		change.mu.Lock()
 		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
+		change.targetUpstreamFirstValidDelay, change.targetUpstreamFirstValidKnown = 0, false
 		change.mu.Unlock()
 	}
 	if !record {
@@ -108,6 +148,9 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 }
 
 func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
+	if a.factsOnly {
+		return
+	}
 	if a.repairStep {
 		in.Class = schedquality.ClassRepairStep
 	}
@@ -128,6 +171,7 @@ func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
 		written = 0
 	}
 	in.OutputBytes = int(written)
+	in.Warm, in.FullTierFirstOutputTimeout = a.ownerHit, a.fullTierFirstOutputTimeout
 	logFinish := logger.FromContext(a.ctx).Info
 	if in.Outcome == schedquality.OutcomeOK {
 		logFinish = logger.FromContext(a.ctx).Debug
@@ -166,6 +210,9 @@ func (a *schedAttemptCapture) MarkOutput(kind SchedOutputKind, at time.Time) {
 	}
 	if kind == OutputValid {
 		a.first = true
+		if !a.fullTierFirstOutputTimeout {
+			a.upstreamFirstValidAt = at
+		}
 	}
 	a.attempt.MarkOutput(kind, at)
 }
@@ -237,6 +284,16 @@ func (a *schedAttemptCapture) observe(data []byte, eventType ...string) {
 		typHint = eventType[0]
 	}
 	a.observeOutput(data, time.Now(), typHint)
+	if a.factsOnly {
+		event := typHint
+		if event == "" {
+			event = gjson.GetBytes(data, "type").String()
+		}
+		if isOpenAIWSTerminalEvent(event) || event == "error" || strings.TrimSpace(string(data)) == "[DONE]" {
+			a.markTerminal()
+		}
+		return
+	}
 	if typHint != "" {
 		data = []byte(openAICompatPayloadWithEventType(string(data), typHint))
 	}
@@ -365,7 +422,13 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		}
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: class, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: detail, Usage: a.usage})
 	} else {
-		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Class: schedquality.ClassFirstOutputTimeout, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
+		// Only the wait up to the guard firing is evidence about upstream output.
+		// Completing avoidance or closing the body can delay finalization.
+		end := time.Now()
+		if a.fullTierFirstOutputTimeout {
+			end = a.dispatch.FiredAt
+		}
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Class: schedquality.ClassFirstOutputTimeout, HTTPStatus: http.StatusGatewayTimeout, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: end.Sub(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
@@ -375,6 +438,11 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.factsOnly {
+		a.done = true
+		a.state.ClearCurrentAttemptIf(a)
+		return
+	}
 	if result != nil {
 		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
 		if result.UpstreamTerminalEvent == "" {
@@ -471,6 +539,10 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 	if a == nil {
 		return
 	}
+	if a.factsOnly {
+		a.finish(nil, nil)
+		return
+	}
 	if resilience.StateFrom(ctx).ClientCanceled() {
 		a.cancel()
 		CompleteOpenAIStickyChange(ctx, a.accountID, false, true)
@@ -546,17 +618,27 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	// resend. Freeze its refusal before the next attempt replaces the handle.
 	if previous := currentSchedAttempt(ctx); previous != nil {
 		previous.mu.Lock()
-		previous.repairStep = previous.accountID == account.ID && !previous.first && (previous.repairPrepared || previous.failure != nil && previous.failure.StatusCode == http.StatusBadRequest && previous.bodyHash != sha256.Sum256(body))
+		previous.repairStep = !previous.factsOnly && previous.accountID == account.ID && !previous.first && (previous.repairPrepared || previous.failure != nil && previous.failure.StatusCode == http.StatusBadRequest && previous.bodyHash != sha256.Sum256(body))
 		previous.mu.Unlock()
 		previous.finish(nil, nil)
 	}
-	// Builders may add group prompts or normalize cache fields after the caller's
-	// payload is prepared; ContentLength is the final wire length without a reread.
-	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
-	if *owner != nil {
+	guard, _ := req.Context().Value(openAIHeaderGuardKey{}).(*openAIFirstOutputHeaderGuard)
+	*owner = s.beginSchedAttempt(ctx, account, body, len(body), stream, guard)
+	if *owner != nil && !(*owner).factsOnly {
 		if target := schedHTTPAttemptTarget(account, req); target != nil && !strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/responses/compact") {
 			(*owner).learnCapability = s.capabilityFailureLearner(ctx, account, body, target.Protocol)
 		}
+	}
+	if a := *owner; a != nil && a.httpSelection.HTTPStreamText {
+		if model := gjson.GetBytes(body, "model").String(); model != "" {
+			a.dispatch.Model = model
+		}
+		req = req.WithContext(a.withHTTPDispatchTrace(req.Context()))
+	} else if a != nil {
+		req = req.WithContext(context.WithValue(req.Context(), schedHTTPAttemptKey{}, a))
+	}
+	if guard != nil && *owner != nil {
+		guard.capture.Store(*owner)
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
@@ -567,6 +649,26 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 			(*owner).httpStatus = resp.StatusCode
 			(*owner).expectTerminal = isEventStreamResponse(resp.Header)
 			(*owner).mu.Unlock()
+		}
+	}
+	if resp != nil && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) && account.IsOpenAI() {
+		tier := normalizedOpenAIServiceTierValue(gjson.GetBytes(body, "service_tier").String())
+		if tier == OpenAIFastTierPriority || tier == OpenAIFastTierUltrafast || tier == "default" {
+			model := gjson.GetBytes(body, "model").String()
+			protocol := openAITierHTTPProtocol(req.URL.Path)
+			if protocol == "" {
+				return resp, err
+			}
+			refusal := s.readUpstreamErrorBody(resp)
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(refusal))
+			if s.learnOpenAITierRefusal(ctx, account, model, tier, protocol, resp.StatusCode, refusal) {
+				(*owner).finishHTTP(resp, refusal)
+				_ = resp.Body.Close()
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, Reason: openAITierUnavailable, ClientStatusCode: http.StatusServiceUnavailable, ClientMessage: openAITierUnavailable, NextAccountAction: NextAccountRetry, ResponseBody: refusal}
+			}
 		}
 	}
 	if err != nil {
@@ -680,7 +782,7 @@ type schedWSTurnCapture struct {
 	active *schedAttemptCapture
 }
 
-func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte, dial ...*schedWSDialObservation) {
+func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte, dial ...*schedWSDialObservation) *schedAttemptCapture {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
@@ -688,12 +790,22 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 	if len(dial) > 0 && dial[0] != nil {
 		t.active = dial[0].beginSend(payload, true)
 	} else {
-		t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
+		t.active = s.beginSchedAttemptAt(ctx, account, payload, len(payload), true, time.Time{})
 	}
 	if t.active != nil {
 		t.active.learnCapability = s.capabilityWSFailureLearner(ctx, account, payload)
 	}
+	return t.active
 }
+
+// The writer keeps the handle for this frame even if the relay changes turns.
+func (a *schedAttemptCapture) confirmNativeWSWrite(ctx context.Context) {
+	seq := resilience.StateFrom(ctx).ConfirmNativeWSSend()
+	if a != nil {
+		a.sendSeq.Store(seq)
+	}
+}
+
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

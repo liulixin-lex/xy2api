@@ -587,6 +587,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	// 分组利润控制：与 quota auto-pause 同语义——利润不合格是暂时
 	// 状态（上游倍率/高峰随时间变化），只跳过本次复用、落回普通调度，不删除
 	// 绑定（倍率恢复后可继续按 previous_response_id 粘连）。
+	if reason := s.openAITierSelectionReason(ctx, account, requestedModel, requireCompact); reason != "" {
+		return 0, nil, "", nil
+	}
 	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return 0, nil, "", nil
 	}
@@ -622,6 +625,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			return 0, nil, "", nil
 		}
 		// 利润门对最新账号状态复检一次，语义同上：跳过复用、不删绑定。
+		if reason := s.openAITierSelectionReason(ctx, latest, requestedModel, requireCompact); reason != "" {
+			return 0, nil, "", nil
+		}
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, latest); vetoed {
 			return 0, nil, "", nil
 		}

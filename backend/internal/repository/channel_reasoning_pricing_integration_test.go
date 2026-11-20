@@ -45,10 +45,11 @@ func TestChannelReasoningPricingCreateUpdateReplace(t *testing.T) {
 	ctx := context.Background()
 	channel := &service.Channel{}
 	repo := newReasoningPricingIntegrationChannel(t, channel)
+	ultrafast := 4.5
 	allLevels := map[string]float64{"none": 0.5, "minimal": 0.75, "low": 0.9, "medium": 1.25, "high": 1.5, "xhigh": 2, "max": 3}
 	pricing := service.ChannelModelPricing{
 		ChannelID: channel.ID, Platform: service.PlatformOpenAI, Models: []string{"custom-reasoning-model"},
-		ReasoningEffortMultipliers: allLevels,
+		ReasoningEffortMultipliers: allLevels, UltrafastMultiplier: &ultrafast,
 	}
 	require.NoError(t, repo.CreateModelPricing(ctx, &pricing))
 	require.NotZero(t, pricing.ID)
@@ -63,6 +64,15 @@ func TestChannelReasoningPricingCreateUpdateReplace(t *testing.T) {
 		requireReasoningPricingIntegrationMaps(t, batch[channel.ID], expected)
 	}
 	assertStored(map[string]map[string]float64{"custom-reasoning-model": allLevels})
+	rows, err := repo.ListModelPricing(ctx, channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, &ultrafast, rows[0].UltrafastMultiplier)
+	batch, err := repo.batchLoadModelPricing(ctx, []int64{channel.ID})
+	require.NoError(t, err)
+	require.Equal(t, &ultrafast, batch[channel.ID][0].UltrafastMultiplier)
+
+	// The older partial update omits the multiplier. It is still stored afterwards.
+	pricing.UltrafastMultiplier = nil
 
 	pricing.ReasoningEffortMultipliers = map[string]float64{"high": 2.25}
 	require.NoError(t, repo.UpdateModelPricing(ctx, &pricing))
@@ -75,6 +85,14 @@ func TestChannelReasoningPricingCreateUpdateReplace(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx,
 		`SELECT reasoning_effort_multipliers::text FROM channel_model_pricing WHERE id = $1`, pricing.ID).Scan(&stored))
 	require.JSONEq(t, `{}`, stored)
+	rows, err = repo.ListModelPricing(ctx, channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, &ultrafast, rows[0].UltrafastMultiplier)
+	pricing.UltrafastMultiplierSet = true
+	require.NoError(t, repo.UpdateModelPricing(ctx, &pricing))
+	rows, err = repo.ListModelPricing(ctx, channel.ID)
+	require.NoError(t, err)
+	require.Nil(t, rows[0].UltrafastMultiplier)
 
 	replacement := []service.ChannelModelPricing{
 		{Platform: service.PlatformOpenAI, Models: []string{"custom-reasoning-model"}, ReasoningEffortMultipliers: map[string]float64{"low": 0.8, "max": 4}},

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -23,23 +24,30 @@ type SchedTrialLeases interface {
 	// It does not reserve or renew a lease. On error it returns false and the error.
 	Room(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error)
 	// Acquire atomically reserves a slot, or renews an existing member even when
-	// full. It returns false, nil when full, and false plus the error on failure.
-	Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (bool, error)
+	// full. The observation time is when selection decided to reserve. An expired
+	// decision cannot acquire. Only a successful reservation carries its generation.
+	Acquire(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) (acquired bool, generation string, err error)
 	// Promote atomically replaces this request reservation with its committed
 	// session member. An existing session is renewed without consuming another slot.
 	// A missing/expired request still creates the session, even when capacity is
-	// full: committed bindings must be counted; this quota is not a hard limit.
+	// full within the reserved generation: committed bindings must be counted; this quota is not a hard limit.
 	// Binding CAS and Promote are separate operations, not one atomic transaction.
-	Promote(ctx context.Context, accountID int64, model string, groupID int64, request, session string, now time.Time) error
+	Promote(ctx context.Context, accountID int64, model string, groupID int64, request, session, generation string, now time.Time) error
 	// Touch renews only an existing, unexpired member. Missing members are a
 	// successful no-op; storage failures are returned as errors.
 	Touch(ctx context.Context, accountID int64, model string, groupID int64, session string, now time.Time) error
 	// Release removes this member, using storage time for idle cleanup. Missing
 	// members are a successful no-op; storage failures are returned as errors.
 	Release(ctx context.Context, accountID int64, model string, groupID int64, session string) error
-	// ReleaseGroup removes all session and request members for this group, using
+	// ReleaseGroup fences outstanding promotions and removes this group's members using
 	// storage time for idle cleanup. Missing groups succeed; failures return errors.
 	ReleaseGroup(ctx context.Context, accountID int64, model string, groupID int64) error
+	// PeekRoom reports capacity for a new session without refreshing TTLs or
+	// recording an observation. It is used only for the admin preview.
+	PeekRoom(ctx context.Context, accountID int64, model string) (bool, error)
+	// LastFull returns the latest dispatch-time observation for this group.
+	// A zero time means there is no observation; storage failures return an error.
+	LastFull(ctx context.Context, accountID int64, model string, groupID int64) (time.Time, error)
 }
 
 // TrialLeaseSessionMember namespaces the sessionHash shared by sampling and
@@ -52,3 +60,6 @@ func TrialLeaseSessionMember(session string) string { return "s:" + session }
 // Release it in each selection's release callback (including switches), rather
 // than waiting for the whole request to finish. Idle expiry reclaims leaked slots.
 func TrialLeaseRequestMember(requestID string) string { return "r:" + requestID }
+
+// ErrTrialGenerationChanged means the reservation belongs to a retired trial.
+var ErrTrialGenerationChanged = errors.New("trial reservation generation changed")

@@ -23,18 +23,18 @@ func (c selectionVersionedCache) GetSessionBinding(ctx context.Context, group in
 	return StickySessionBinding{AccountID: id, Generation: "g1"}, nil
 }
 
-func (c selectionVersionedCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ ...string) (bool, error) {
+func (c selectionVersionedCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sessionBindings[key] != expected.AccountID {
-		return false, nil
+		return BindingCommitResult{Status: BindingChanged, ObservedGen: expected.Generation}, nil
 	}
 	c.sessionBindings[key] = target
-	return true, nil
+	return BindingCommitResult{Status: BindingCommitted, ObservedGen: expected.Generation, NewGen: expected.Generation + "-next"}, nil
 }
 
-func (c selectionVersionedCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error) {
-	return false, nil
+func (c selectionVersionedCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (int64, error) {
+	return 0, nil
 }
 
 func (e *openAISelectionTestEnv) useVersionedBindings() {

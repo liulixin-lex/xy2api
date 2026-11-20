@@ -160,6 +160,24 @@ export function formatDateOnly(date: string | Date | null | undefined): string {
 }
 
 /**
+ * A date and time in a list (mobile list plan, copy): "11-20 06:54:11" within the current year, "2025-11-20 06:54:11"
+ * before it, the same digits in every language; `seconds: false` leaves the seconds out. Empty for no or a bad date.
+ */
+export function formatListDateTime(
+  date: string | number | Date | null | undefined,
+  options: { seconds?: boolean } = {},
+  now: Date = new Date()
+): string {
+  if (date === null || date === undefined || date === '') return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}${options.seconds === false ? '' : `:${pad(d.getSeconds())}`}`
+  const day = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return d.getFullYear() === now.getFullYear() ? `${day} ${time}` : `${d.getFullYear()}-${day} ${time}`
+}
+
+/**
  * 格式化日期时间（完整格式）
  * @param date 日期字符串或 Date 对象
  * @param options Intl.DateTimeFormatOptions
@@ -172,6 +190,18 @@ export function formatDateTime(
   localeOverride?: string
 ): string {
   return formatDate(date, options, localeOverride)
+}
+
+/**
+ * A time with its year always, for a detail view: "2026-11-20 06:54:11" (the list writes this year's without it,
+ * formatListDateTime).
+ */
+export function formatFullLogTime(date: string | Date | null | undefined): string {
+  if (!date) return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  // A "now" in another year: the list's rule then always writes the year.
+  return formatListDateTime(d, {}, new Date(d.getFullYear() + 1, 0, 1))
 }
 
 /**
@@ -376,6 +406,21 @@ export function formatNumberLocaleString(num: number): string {
  */
 export function formatCostFixed(amount: number, fractionDigits: number = 4): string {
   return amount.toFixed(fractionDigits)
+}
+
+/** A dollar amount with thousands separators and fixed decimals, the same in every language: "$1,234.567890". */
+export function formatUsd(amount: number | null | undefined, fractionDigits: number): string {
+  const value = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0
+  return `$${getNumberFormat('en-US', { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(value)}`
+}
+
+/**
+ * A total in dollars: two decimals with thousands separators ("$30,750.20"). A total that is not zero but would show as
+ * "$0.00" keeps six decimals, as one request's cost does, so a small spend never reads as none.
+ */
+export function formatUsdTotal(amount: number | null | undefined): string {
+  const value = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0
+  return formatUsd(value, value !== 0 && Math.abs(value) < 0.005 ? 6 : 2)
 }
 
 /**

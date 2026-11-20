@@ -36,6 +36,9 @@ func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedqual
 func (r *schedAdminAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error) {
 	return []SchedAdminDecision{}, nil
 }
+func (r *schedAdminAccounts) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error) {
+	return nil, nil
+}
 func (r *schedAdminAccounts) SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error) {
 	return map[int64]SchedAdminGroupLast60{}, nil
 }
@@ -65,7 +68,7 @@ func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
 	require.Equal(t, "fail", ttfo["verdict"])
 	require.EqualValues(t, 2, ttfo["level"])
 	evidence := ttfo["evidence"].(map[string]any)
-	require.ElementsMatch(t, []string{"limit_s", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
+	require.ElementsMatch(t, []string{"limit_s", "n_local", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
 	for _, key := range []string{"p_rel", "u", "z"} {
 		require.Nil(t, evidence[key])
 	}
@@ -101,14 +104,26 @@ func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
 	p.GroupRows[3] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Cache: schedquality.LineView{Trial: true, TrialUntil: now.Add(time.Minute)}}}}
 	p.Overrides = []SchedOverride{{AccountID: 5, Mode: schedquality.OverrideExempt}}
 	r.rows[6].Schedulable = false
-	p.Accounts[1] = schedquality.AccountSummary{FirstEventP50Ms: schedAdminInt(100), FirstOutputP50Ms: schedAdminInt(120), GapP50Ms: schedAdminInt(20), FirstOutputN: 7, CacheTurns: 21, CacheRatio: schedAdminFloat(.8), CacheAllRequests: 25, CacheAllRatio: schedAdminFloat(.9)}
+	p.Accounts[1] = schedquality.AccountSummary{
+		FirstOutput: schedquality.FirstOutputSummary{N: 7, Timeouts: 2, P50Ms: schedAdminInt(120)},
+		Slow10s:     schedquality.Slow10sSummary{N: 6, Slow: 2, Timeouts: 1},
+		ErrorN:      50, ErrorBad: 2, CacheTurns: 21, CacheRatio: schedAdminFloat(.8),
+	}
 	out, err := s.Summary(context.Background(), []int64{1, 2, 3, 4, 5, 6})
 	require.NoError(t, err)
 	item := schedAdminJSON(t, out.Accounts[0])
 	require.NotContains(t, item, "status")
 	require.NotContains(t, item, "substandard")
-	require.Equal(t, map[string]any{"first_event_p50_ms": float64(100), "first_output_p50_ms": float64(120), "gap_p50_ms": float64(20), "n": float64(7)}, item["ttfo"])
-	require.Equal(t, map[string]any{"ratio": .8, "turns": float64(21), "all_ratio": .9, "all_requests": float64(25)}, item["cache"])
+	require.NotContains(t, item, "ttfo")
+	require.Equal(t, map[string]any{"n": float64(7), "timeouts": float64(2), "p50_ms": float64(120)}, item["first_output"])
+	require.Equal(t, map[string]any{"n": float64(6), "slow": float64(2), "timeouts": float64(1)}, item["slow_10s"])
+	require.Equal(t, map[string]any{"failed": float64(2), "n": float64(50), "rate": .04, "short": false, "red": false}, item["error"])
+	require.Equal(t, map[string]any{"ratio": .8, "turns": float64(21)}, item["cache"])
+	empty := schedAdminJSON(t, out.Accounts[3])
+	require.Equal(t, map[string]any{"n": float64(0), "timeouts": float64(0), "p50_ms": nil}, empty["first_output"])
+	require.Equal(t, map[string]any{"n": float64(0), "slow": float64(0), "timeouts": float64(0)}, empty["slow_10s"])
+	require.Equal(t, map[string]any{"failed": float64(0), "n": float64(0), "rate": nil, "short": true, "red": false}, empty["error"])
+	require.Equal(t, map[string]any{"ratio": nil, "turns": float64(0)}, empty["cache"])
 	require.Equal(t, []any{}, item["rear"])
 	require.Equal(t, []any{}, item["trial"])
 	require.Equal(t, "rear", out.Accounts[1].GroupStatus["1"])
@@ -141,12 +156,84 @@ func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
 	require.False(t, out.Accounts[0].Rear[0].Effective)
 }
 
-type schedAdminStatsAccounts struct {
-	*schedAdminAccounts
-	calls int
-	err   error
+func TestSchedAdminSummaryRecentSince(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	// Even a stale summary describes the window at aggregation time.
+	end := s.d.Now().Add(-2 * time.Hour)
+	e.snapshot.At = end
+	for _, tc := range []struct {
+		name      string
+		reset     time.Time
+		shortened bool
+	}{
+		{"recent", end.Add(-time.Hour + time.Nanosecond), true},
+		{"exactly an hour", end.Add(-time.Hour), false},
+		{"older", end.Add(-2 * time.Hour), false},
+		{"no reset", time.Time{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e.snapshot.ResetAt = map[int64]time.Time{1: tc.reset}
+			e.snapshot.Accounts[1] = schedquality.SummarizeAccount(nil, 1, tc.reset, end)
+			out, err := s.Summary(context.Background(), []int64{1})
+			require.NoError(t, err)
+			item := schedAdminJSON(t, out.Accounts[0])
+			require.Contains(t, item, "recent_since")
+			if tc.shortened {
+				require.Equal(t, tc.reset.UTC().Format(time.RFC3339Nano), item["recent_since"])
+				require.Equal(t, item["reset_at"], item["recent_since"])
+			} else {
+				require.Nil(t, item["recent_since"])
+			}
+		})
+	}
 }
 
+func TestSchedAdminSummaryRecentSinceAfterRebuildWithoutAccountSamplesOrGroups(t *testing.T) {
+	f := newQualityFixture(t)
+	evaluatedAt := f.now
+	ctx := context.Background()
+	admin := NewSchedAdminService(SchedAdminDependencies{
+		Engine:   f.e,
+		Accounts: &schedAdminAccounts{rows: map[int64]*Account{2: {ID: 2, Platform: PlatformOpenAI}}},
+		Now:      func() time.Time { return f.now },
+	})
+
+	f.now = evaluatedAt.Add(-time.Hour + time.Second)
+	reset, err := f.e.Reset(ctx, 2)
+	require.NoError(t, err)
+	f.now = evaluatedAt
+	f.cycle()
+
+	// The reset only expires when the published aggregation window advances.
+	f.now = evaluatedAt.Add(2 * time.Second)
+	before, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, before.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), before.Accounts[0].RecentSince)
+
+	_, err = f.e.Reset(ctx, 1)
+	require.NoError(t, err)
+	snap := f.e.Snapshot()
+	require.NotContains(t, snap.Accounts, int64(2))
+	require.Equal(t, f.now, snap.Account(1).To)
+	require.Equal(t, evaluatedAt, snap.At)
+	after, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, after.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), after.Accounts[0].ResetAt)
+	require.Nil(t, after.Accounts[0].RecentSince)
+}
+
+type schedAdminStatsAccounts struct {
+	*schedAdminAccounts
+	rearErr error
+	calls   int
+	err     error
+}
+
+func (r *schedAdminStatsAccounts) SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error) {
+	return map[int64]SchedAdminRearEntries{}, r.rearErr
+}
 func (r *schedAdminStatsAccounts) SchedAdminGroupLast60(_ context.Context, ids []int64, _ time.Time) (map[int64]SchedAdminGroupLast60, error) {
 	r.calls++
 	return map[int64]SchedAdminGroupLast60{}, r.err
@@ -163,8 +250,10 @@ func TestSchedAdminV2GroupsJSONAndCache(t *testing.T) {
 	out, err := s.GroupsSummary(context.Background(), []int64{1})
 	require.NoError(t, err)
 	group := schedAdminJSON(t, out.Groups[0])
-	require.ElementsMatch(t, []string{"group_id", "accounts", "last60"}, schedAdminJSONKeys(group))
+	require.ElementsMatch(t, []string{"group_id", "accounts", "last60", "rear_entries_24h"}, schedAdminJSONKeys(group))
 	require.Equal(t, map[string]any{"pass": float64(1), "unknown": float64(1), "trial": float64(1), "rear": float64(1)}, group["accounts"])
+	require.Equal(t, &SchedAdminRearEntries{}, out.Groups[0].RearEntries24h)
+	repo.rearErr = fmt.Errorf("unavailable")
 	last := group["last60"].(map[string]any)
 	require.Len(t, last, 6)
 	for _, v := range last {
@@ -182,6 +271,7 @@ func TestSchedAdminV2GroupsJSONAndCache(t *testing.T) {
 	e.snapshot.Policies[1] = policy
 	out, err = s.GroupsSummary(context.Background(), []int64{1})
 	require.NoError(t, err)
+	require.Nil(t, out.Groups[0].RearEntries24h)
 	require.Equal(t, SchedAdminCounts{Pass: 1, Unknown: 3}, out.Groups[0].Accounts)
 }
 func TestSchedAdminV2PreviewJSONAndConflict(t *testing.T) {
@@ -323,7 +413,7 @@ func TestSchedAdminV2PolicySavedJSONAndChangeLog(t *testing.T) {
 	out, err := s.UpdatePolicy(context.Background(), 1, 7, policy, 42)
 	require.NoError(t, err)
 	raw := schedAdminJSON(t, out)
-	require.ElementsMatch(t, []string{"group_id", "version", "policy", "relaxed_lines", "cleared"}, schedAdminJSONKeys(raw))
+	require.ElementsMatch(t, []string{"group_id", "version", "policy", "effective_max_error_rate", "error_trip_examples", "relaxed_lines", "cleared"}, schedAdminJSONKeys(raw))
 	require.Equal(t, []any{"ttfo"}, raw["relaxed_lines"])
 	require.EqualValues(t, 8, raw["version"])
 	var event map[string]any
@@ -425,8 +515,43 @@ func TestSchedAdminBoardSharesEngineTrialLeases(t *testing.T) {
 	out, err = admin.Order(context.Background(), 7, "m")
 	require.NoError(t, err)
 	require.Equal(t, "trial", out.Rows[0].Layer)
-	for _, call := range leases.calls {
-		require.Contains(t, call, "room:", "board must only inspect capacity")
-	}
+	require.Equal(t, []string{"peek_room", "peek_room"}, leases.calls, "board must only inspect capacity")
 	require.Empty(t, leases.held)
+}
+
+func TestObserveGroupSupplyOutsideRecentModels(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	future := now.Add(time.Hour)
+	members := make([]Account, 5)
+	for i := range members {
+		members[i] = *selectionTestAccount(int64(i+1), i)
+		members[i].Credentials = map[string]any{"model_mapping": map[string]any{"other-model": "target"}}
+	}
+	members[0].Status = StatusDisabled
+	members[1].Schedulable = false
+	members[2].RateLimitResetAt = &future
+	members[4].Credentials = map[string]any{"model_mapping": map[string]any{"unrelated": "target"}}
+	repo := &selectionBoardRepo{accounts: members}
+	s, engine, _ := schedAdminFixture()
+	engine.snapshot.GroupModels = map[int64][]SchedModelCount{7: {{Model: "recent"}}}
+	s.d.Groups = schedAdminGroups{7: {ID: 7, Platform: PlatformOpenAI}}
+	board := NewOpenAISelectionBoard(&OpenAIGatewayService{accountRepo: repo}, nil)
+	board.now = func() time.Time { return now }
+	s.d.Board = board
+	out, err := s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, []string{"recent"}, out.Models)
+	require.Equal(t, "other-model", out.Model)
+	require.Equal(t, &SchedAdminSupply{Declared: 4, Enabled: 2, Available: 1, At: schedAdminStamp(now)}, out.Supply)
+
+	repo.accounts = members[:2]
+	out, err = s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, &SchedAdminSupply{Declared: 2, At: schedAdminStamp(now)}, out.Supply)
+	repo.accounts = nil
+	out, err = s.Order(ctx, 7, "other-model")
+	require.NoError(t, err)
+	require.Empty(t, out.Rows)
+	require.Equal(t, &SchedAdminSupply{At: schedAdminStamp(now)}, out.Supply)
 }

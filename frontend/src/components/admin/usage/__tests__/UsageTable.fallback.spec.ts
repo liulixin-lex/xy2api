@@ -80,6 +80,18 @@ describe('UsageTable availability fallback marker', () => {
     expect(wrapper.get('[data-request-id="req-plain"]').text()).toBe('Main')
   })
 
+  // Review item 5: the marker compares the two groups; the origin label stays as the main label.
+  it.each([
+    ['the same group', { group_id: 3, group: { id: 3, name: 'Main' }, origin_group_id: 3, origin_group_name: 'Main', fallback: true }],
+    ['no serving group', { group_id: null, group: undefined, origin_group_id: 3, origin_group_name: 'Main' }]
+  ])('shows no cross-group marker for %s, keeping the original group as the label', (_, patch) => {
+    const wrapper = mountTable({ showFallbackOrigin: true, data: [{ ...baseRow, request_id: 'req-x', ...patch }] })
+    const row = wrapper.get('[data-request-id="req-x"]')
+    expect(row.find('[data-testid="usage-fallback-marker"]').exists()).toBe(false)
+    expect(row.text()).toBe('Main')
+    expect(row.text()).not.toContain('#null')
+  })
+
   it.each([['zh', zh, '按兜底分组计费'], ['en', en, 'billed by the fallback group']])('%s explains fallback pricing', (_, messages, billed) => {
     const title = messages.resilience.usage.fallbackTitle
     expect(title).toContain(billed)

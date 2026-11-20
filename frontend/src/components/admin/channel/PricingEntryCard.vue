@@ -144,17 +144,16 @@
             </div>
           </div>
 
-          <div v-if="enableTierMultipliers" class="mt-3 grid max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
-            <div>
-              <label class="text-xs text-gray-400">{{ t('admin.channels.form.fastMultiplier') }}</label>
-              <input :value="entry.fast_multiplier" @input="emitField('fast_multiplier', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0.000001" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.multiplierPlaceholder')" />
+          <div v-if="enableTierMultipliers" class="mt-3">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label v-for="tier in tierInputs" :key="tier.field" class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t(tier.label) }}
+                <input :value="entry[tier.field]" @input="emitField(tier.field, ($event.target as HTMLInputElement).value)"
+                  type="number" step="any" min="0.000001" class="input mt-0.5 text-sm"
+                  :data-testid="tier.field" :placeholder="t('admin.channels.form.multiplierPlaceholder')" />
+              </label>
             </div>
-            <div>
-              <label class="text-xs text-gray-400">{{ t('admin.channels.form.flexMultiplier') }}</label>
-              <input :value="entry.flex_multiplier" @input="emitField('flex_multiplier', ($event.target as HTMLInputElement).value)"
-                type="number" step="any" min="0.000001" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.multiplierPlaceholder')" />
-            </div>
+            <p v-if="supportsUltrafast" class="input-hint">{{ t('admin.channels.form.tierMultiplierHint') }}</p>
           </div>
 
           <!-- Channel token intervals; the group long-context toggle controls whether tiers apply. -->
@@ -333,6 +332,13 @@ const emit = defineEmits<{
 
 // Collapse state: entries with existing models default to collapsed
 const collapsed = ref(props.entry.models.length > 0)
+
+const supportsUltrafast = computed(() => props.platform === 'openai' || props.platform === 'composite')
+const tierInputs = computed(() => [
+  { field: 'fast_multiplier', label: 'admin.channels.form.fastMultiplier' },
+  ...(supportsUltrafast.value ? [{ field: 'ultrafast_multiplier', label: 'admin.channels.form.ultrafastMultiplier' } as const] : []),
+  { field: 'flex_multiplier', label: 'admin.channels.form.flexMultiplier' },
+] as const)
 
 const billingModeOptions = computed(() => [
   { value: 'token', label: t('admin.channels.billingMode.token') },

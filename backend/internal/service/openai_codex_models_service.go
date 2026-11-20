@@ -160,6 +160,10 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 	if err != nil {
 		return nil, false, fmt.Errorf("build group configured Codex models: %w", err)
 	}
+	body, err = restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, nil, true)
+	if err != nil {
+		return nil, false, err
+	}
 	manifest := &OpenAIModelsResponse{
 		Body: body,
 		ETag: codexModelsManifestBodyETag(body),
@@ -189,14 +193,19 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	}
 
 	var configuredModels []string
+	var catalog []Account
 	var metadataModels map[string]string
 	modelMetadata := make(map[string]codexModelMetadataOverride)
-	if !group.CodexModelsManifestConfig.Enabled {
-		visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	if !group.CodexModelsManifestConfig.Enabled || group.OpenAITierPolicyVersion >= OpenAITierPolicyExplicit {
+		var visible []Account
+		var err error
+		visible, catalog, err = loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 		if err != nil {
 			return fmt.Errorf("load group configured Codex models: %w", err)
 		}
-		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		if !group.CodexModelsManifestConfig.Enabled {
+			configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		}
 		metadataModels = codexCatalogMetadataModels(PlatformOpenAI, configuredModels, catalog, nil, true)
 		for _, modelID := range configuredModels {
 			if metadata, ok := groupCodexModelMetadata(PlatformOpenAI, modelID, catalog, group, nil, true); ok {
@@ -218,6 +227,13 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		body, err = orderPinnedCodexModelsBySelection(body, group.ModelAllowlist)
 		if err != nil {
 			return fmt.Errorf("order pinned Codex models: %w", err)
+		}
+		changed = true
+	}
+	if group.OpenAITierPolicyVersion >= OpenAITierPolicyExplicit {
+		body, err = restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, nil, true)
+		if err != nil {
+			return err
 		}
 		changed = true
 	}
@@ -539,11 +555,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
-	if openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID) {
-		raw := openai.CodexGPT61SolMetadata
-		if openai.IsGPT61TerraModelSpelling(modelID) {
-			raw = openai.CodexGPT61TerraMetadata
-		}
+	if raw := openai.CodexOfficialModelMetadata(modelID); raw != nil {
 		if err := json.Unmarshal(raw, &descriptor); err != nil {
 			panic(err)
 		}
@@ -890,7 +902,7 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 			compositeRoutesAvailable = false
 		}
 	}
-	return buildCodexModelsManifestForAccounts(
+	body, err := buildCodexModelsManifestForAccounts(
 		effectivePlatform,
 		modelIDs,
 		catalog,
@@ -898,6 +910,10 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		compositeRoutes,
 		compositeRoutesAvailable,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return restrictCodexTierCatalog(ctx, s.accountRepo, body, group, catalog, compositeRoutes, compositeRoutesAvailable)
 }
 
 func buildCodexModelsManifestForAccounts(
@@ -2104,12 +2120,33 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.2-sol":   {},
+	"gpt-6.2-astra": {},
 	"gpt-6.1-terra": {},
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
 	"gpt-5.6-sol":   {},
 	"gpt-5.6-terra": {},
 	"gpt-5.6-luna":  {},
+}
+
+// apiKeyCodexResponsesLiteTarget canonicalizes model spellings to the keys of
+// apiKeyCodexModelsWithoutResponsesLite. Other models are returned unchanged.
+func apiKeyCodexResponsesLiteTarget(model string) string {
+	switch {
+	case isOpenAIGPT6AstraModel(model):
+		return "gpt-6-astra"
+	case openai.IsGPT61TerraModelSpelling(model):
+		return "gpt-6.1-terra"
+	case openai.IsGPT61SolModelSpelling(model):
+		return "gpt-6.1-sol"
+	case openai.IsGPT62SolModelSpelling(model):
+		return "gpt-6.2-sol"
+	case openai.IsGPT62AstraModelSpelling(model):
+		return "gpt-6.2-astra"
+	default:
+		return model
+	}
 }
 
 // adjustAPIKeyCodexModelsManifest prevents Codex from selecting Responses
@@ -2140,13 +2177,7 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if account != nil {
 			target = account.GetMappedModel(slug)
 		}
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
-		} else if openai.IsGPT61TerraModelSpelling(target) {
-			target = "gpt-6.1-terra"
-		} else if openai.IsGPT61SolModelSpelling(target) {
-			target = "gpt-6.1-sol"
-		}
+		target = apiKeyCodexResponsesLiteTarget(target)
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue
 		}

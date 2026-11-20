@@ -9,6 +9,8 @@
         :loading="loading"
         clickable-rows
         server-side-sort
+        :sort="pageSort"
+        :scroll-label="scrollLabel"
         default-sort-key="created_at"
         default-sort-order="desc"
         @sort="onSort"
@@ -65,17 +67,20 @@
         </template>
 
         <template #cell-user="{ row }">
-          <div v-if="row.user_id" class="text-sm">
+          <!-- At most 240px (it is the frozen first column on tablets and phones): the email cut with "…", whole in its tip
+               and in the error's detail; a click on it still opens the balance history. -->
+          <div v-if="row.user_id" class="flex max-w-[240px] items-center text-sm" data-testid="error-user-cell">
             <button
               v-if="userClickable && row.user_email"
-              class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              :title="t('admin.usage.clickToViewBalance')"
+              type="button"
+              class="relative min-w-0 text-left font-medium text-primary-600 transition-colors before:absolute before:inset-x-0 before:-inset-y-3 before:content-[''] hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              :title="`${row.user_email}\n${t('admin.usage.clickToViewBalance')}`"
               @click.stop="emit('userClick', row.user_id, row.user_email)"
             >
-              {{ row.user_email }}
+              <span class="block truncate underline decoration-dashed underline-offset-2">{{ row.user_email }}</span>
             </button>
-            <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.user_email || '-' }}</span>
-            <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span v-else class="min-w-0 truncate font-medium text-gray-900 dark:text-white" :title="row.user_email || undefined">{{ row.user_email || '-' }}</span>
+            <span class="ml-1 flex-none text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
@@ -85,7 +90,7 @@
             <span class="text-gray-900 dark:text-white">{{ row.api_key_name || '#' + row.api_key_id }}</span>
             <span
               v-if="row.api_key_deleted"
-              class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
+              class="ml-1 inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
             >{{ t('admin.ops.errorLog.keyDeletedBadge') }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
@@ -113,7 +118,7 @@
             </span>
             <span
               v-if="row.severity"
-              :class="['rounded px-1.5 py-0.5 text-[10px] font-medium', getSeverityClass(row.severity)]"
+              :class="['rounded px-1.5 py-0.5 text-xs font-medium', getSeverityClass(row.severity)]"
             >{{ row.severity }}</span>
             <span
               v-if="row.request_type != null && row.request_type > 0"
@@ -150,15 +155,27 @@
           </div>
         </template>
 
+        <!-- The details column is 44px at every width: its header the buttons' icon, named by aria-label. -->
+        <template #header-actions>
+          <span role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('admin.ops.errorLog.details')" data-testid="error-detail-header">
+            <Icon name="document" size="sm" aria-hidden="true" />
+          </span>
+        </template>
         <template #cell-actions="{ row }">
-          <button
-            type="button"
-            class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-600 dark:hover:text-primary-400"
-            :title="t('admin.ops.errorLog.details')"
-            @click.stop="emit('openErrorDetail', row.id)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          </button>
+          <!-- A 40px button; in the table its block's negative margins give back 20px, so the row keeps its height. -->
+          <div class="-my-2.5 flex justify-center">
+            <button
+              type="button"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-600 dark:hover:text-primary-400"
+              :title="t('admin.ops.errorLog.details')"
+              :aria-label="t('usage.errors.detail.open', { time: formatDateTime(row.created_at) })"
+              aria-haspopup="dialog"
+              data-testid="error-detail-open"
+              @click.stop="emit('openErrorDetail', row.id)"
+            >
+              <Icon name="document" size="sm" />
+            </button>
+          </div>
         </template>
 
         <template #empty><EmptyState :message="t('admin.ops.errorLog.noErrors')" /></template>
@@ -182,6 +199,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
@@ -211,7 +229,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.ops.errorLog.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent') },
   { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
-  { key: 'actions', label: t('admin.ops.errorLog.action') },
+  { key: 'actions', label: t('admin.ops.errorLog.details'), class: 'w-11 min-w-11 !px-0 text-center' },
 ])
 
 // 传入 visibleColumnKeys 时按其过滤(列设置);未传则全量(Ops 弹窗等使用方)
@@ -299,6 +317,11 @@ interface Props {
   summaryFirst?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  /** Names the table's scroll area. */
+  scrollLabel?: string
 }
 
 interface Emits {
@@ -312,6 +335,14 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+
+/**
+ * The page's sort for the headers (the API's status_code is the status column). A page that gives none (the ops modal)
+ * leaves the sort to the table, time newest first.
+ */
+const pageSort = computed(() =>
+  props.sortBy ? { key: props.sortBy === 'status_code' ? 'status' : props.sortBy, order: props.sortOrder ?? 'desc' } : undefined
+)
 
 function onSort(key: string, order: 'asc' | 'desc') {
   emit('sort', mapErrorSortKey(key), order)

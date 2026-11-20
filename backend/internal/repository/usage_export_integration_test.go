@@ -102,9 +102,9 @@ func exportQueryFixture(t *testing.T) (*sql.DB, *sql.Conn, string) {
 	_, err = conn.ExecContext(ctx, `SET search_path TO `+schema)
 	require.NoError(t, err)
 	// Types and field names mirror the export projection; no production data.
-	textFields := strings.Fields("model requested_model reasoning_effort requested_reasoning_effort inbound_endpoint ip_address billing_mode upstream_model upstream_response_model upstream_endpoint request_id upstream_request_id user_agent")
+	textFields := strings.Fields("model requested_model reasoning_effort requested_reasoning_effort inbound_endpoint ip_address billing_mode upstream_model upstream_response_model upstream_endpoint request_id upstream_request_id user_agent service_tier")
 	numberFields := strings.Fields("request_type image_count input_tokens output_tokens cache_read_tokens cache_creation_tokens rate_multiplier actual_cost total_cost first_token_ms duration_ms api_key_id user_id account_id group_id input_cost output_cost cache_read_cost cache_creation_cost account_rate_multiplier account_stats_cost billing_type")
-	cols := []string{"id bigint PRIMARY KEY", "created_at timestamptz NOT NULL", "stream boolean DEFAULT false", "openai_ws_mode boolean DEFAULT false", "native_compaction_v2 boolean DEFAULT false", "upstream_model_mismatch boolean"}
+	cols := []string{"id bigint PRIMARY KEY", "created_at timestamptz NOT NULL", "stream boolean DEFAULT false", "openai_ws_mode boolean DEFAULT false", "native_compaction_v2 boolean DEFAULT false", "upstream_model_mismatch boolean", "service_tier_details jsonb"}
 	for _, v := range textFields {
 		cols = append(cols, v+" text")
 	}

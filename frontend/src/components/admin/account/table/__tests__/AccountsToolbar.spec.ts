@@ -92,19 +92,36 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
-  it('below 1024px shows every tag on its own row, each removable, and "more filters" counts nothing (prototype, 7l-3)', async () => {
+  // Mobile list plan: below 768px the phone toolbar. Every filter is in the bottom sheet, applied at once; the chosen
+  // ones are removable tags under the search, counted on "Filters"; nothing is measured or folded.
+  it('below 768px puts every filter in the bottom sheet, the chosen ones as tags counted on "Filters"', async () => {
     const matchMedia = window.matchMedia
     window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+    onTestFinished(() => { window.matchMedia = matchMedia })
     const wrapper = mountToolbar({ platform: 'openai', type: 'apikey' })
     await flushPromises()
-    expect(shownTags(wrapper)).toEqual(['platform', 'type'])
-    expect(wrapper.find('[data-test="more-filters-count"]').exists()).toBe(false)
-    await wrapper.get('[data-test="more-filters"]').trigger('click')
-    expect(wrapper.findAll('[data-test="more-filters-menu"] .tb-tag')).toHaveLength(0)
-    await wrapper.get('[data-test="filter-tags"] .tb-tag[data-key="type"] .tb-tag__x').trigger('click')
+    expect(wrapper.findAll('[data-test="toolbar-tags"] .tb-tag').map((tag) => tag.attributes('data-key'))).toEqual(['platform', 'type'])
+    expect(wrapper.get('[data-test="toolbar-filter-count"]').text()).toBe('2')
+    expect(wrapper.find('[data-test="more-filters"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="toolbar-filters"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    await flushPromises()
+    const sheet = () => document.querySelector<HTMLElement>('[data-test="filter-sheet"]')
+    expect(Array.from(sheet()!.querySelectorAll<HTMLElement>('[data-filter]')).map((el) => el.dataset.filter)).toEqual(['platform', 'status', 'group', 'quality', 'type', 'privacy', 'iq'])
+    sheet()!.querySelector<HTMLElement>('[data-filter="status"] button')!.click()
+    await flushPromises()
+    Array.from(document.body.querySelectorAll<HTMLElement>('.select-option')).find((option) => option.textContent?.trim() === 'admin.accounts.status.active')!.click()
+    await flushPromises()
+    expect(wrapper.emitted('change')!.at(-1)![0]).toMatchObject({ platform: 'openai', type: 'apikey', status: 'active' })
+    // Applied at once: the sheet stays open for the next filter.
+    expect(sheet()).not.toBeNull()
+    document.querySelector<HTMLElement>('[data-test="filter-sheet-clear"]')!.click()
+    expect(wrapper.emitted('change')!.at(-1)![0]).toMatchObject({ platform: '', type: '', status: '' })
+
+    await wrapper.get('[data-test="toolbar-tags"] .tb-tag[data-key="type"] .tb-tag__x').trigger('click')
     expect(wrapper.emitted('change')!.at(-1)![0]).toMatchObject({ type: '' })
     wrapper.unmount()
-    window.matchMedia = matchMedia
   })
 
   it('emits the filters with the one that changed, as the list request takes them (7d-12)', async () => {

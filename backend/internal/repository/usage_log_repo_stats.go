@@ -749,7 +749,7 @@ func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, a
 
 	for rows.Next() {
 		var (
-			success, rescued, failed                                             int64
+			success, rescued, failed, e2eSamples                                 int64
 			p50, cacheRatio                                                      *float64
 			inboundGrouped, upstreamGrouped                                      int
 			inboundEndpoint, upstreamEndpoint                                    sql.NullString
@@ -772,7 +772,7 @@ func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, a
 			&averageDurationMs,
 		}
 		if requestFacts != nil {
-			targets = append(targets, &success, &rescued, &failed, &p50, &cacheRatio)
+			targets = append(targets, &success, &rescued, &failed, &p50, &e2eSamples, &cacheRatio)
 		}
 		if err := rows.Scan(targets...); err != nil {
 			return nil, err
@@ -788,7 +788,8 @@ func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, a
 		case inboundGrouped == 1 && upstreamGrouped == 1:
 			if requestFacts != nil {
 				requestFacts.Success, requestFacts.Rescued, requestFacts.Failed = success, rescued, failed
-				requestFacts.TTFOP50Ms, requestFacts.CacheRatio = p50, cacheRatio
+				requestFacts.E2EFirstOutputP50Ms, requestFacts.E2EFirstOutputSamples = p50, e2eSamples
+				requestFacts.CacheRatio = cacheRatio
 			}
 			stats.TotalRequests = requests
 			stats.TotalInputTokens = inputTokens

@@ -75,7 +75,7 @@ SUITES = [
             "internal/handler",
         ],
         run=r"^(TestOpenAICache|TestCacheControls|TestOpenAIUsageCanonical|TestOpenAIUsageConversion"
-        r"|TestOpenAISelectAccountWithLoadAwareness_StickyCapacity)",
+        r"|TestOpenAISelectAccountWithLoadAwareness_StickyCapacity|TestOwnerGuardRealRedis$)",
         env=["SCHEDULING_TEST_REDIS_ADDR"],
         flags=["-p", "1"],
     ),

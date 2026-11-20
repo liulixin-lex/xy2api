@@ -1,3 +1,5 @@
+@reference "../style.css";
+
 /* Shared rich-text styles for announcement popup and bell detail content. */
 .markdown-body {
   @apply text-[15px] leading-[1.75];

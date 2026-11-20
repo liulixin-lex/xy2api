@@ -414,12 +414,35 @@ const durationP50Ms = computed(() => overview.value?.duration?.p50_ms ?? null)
 const durationAvgMs = computed(() => overview.value?.duration?.avg_ms ?? null)
 const durationMaxMs = computed(() => overview.value?.duration?.max_ms ?? null)
 
-const ttftP99Ms = computed(() => overview.value?.ttft?.p99_ms ?? null)
-const ttftP95Ms = computed(() => overview.value?.ttft?.p95_ms ?? null)
-const ttftP90Ms = computed(() => overview.value?.ttft?.p90_ms ?? null)
-const ttftP50Ms = computed(() => overview.value?.ttft?.p50_ms ?? null)
-const ttftAvgMs = computed(() => overview.value?.ttft?.avg_ms ?? null)
-const ttftMaxMs = computed(() => overview.value?.ttft?.max_ms ?? null)
+// The last attempt's first token: the health score and the threshold colour use it.
+const lastAttemptStats = computed(() => [
+  { label: 'P99', value: overview.value?.ttft?.p99_ms ?? null },
+  { label: 'P50', value: overview.value?.ttft?.p50_ms ?? null }
+])
+
+// The user's wait (end-to-end first output). Unknown without samples, for one of two reasons kept apart (review item 7):
+// the answer counted none (a range before the upgrade, say; the count does not say which periods lack records), or
+// the answer carries no count at all.
+const e2eCounted = computed(() => typeof overview.value?.e2e_first_output_sample_count === 'number')
+const e2eSampleCount = computed(() => overview.value?.e2e_first_output_sample_count ?? 0)
+const e2eUnknownWhy = computed(() => t(e2eCounted.value ? 'admin.ops.e2eFirstOutput.none' : 'admin.ops.e2eFirstOutput.notProvided'))
+const e2eP99Ms = computed(() => overview.value?.e2e_first_output?.p99_ms ?? null)
+const e2eStats = computed(() => {
+  const e2e = overview.value?.e2e_first_output
+  return [
+    { label: 'P95', value: e2e?.p95_ms ?? null },
+    { label: 'P90', value: e2e?.p90_ms ?? null },
+    { label: 'P50', value: e2e?.p50_ms ?? null },
+    { label: 'Avg', value: e2e?.avg_ms ?? null },
+    { label: 'Max', value: e2e?.max_ms ?? null }
+  ]
+})
+const e2eTooltip = computed(() => {
+  const note = e2eSampleCount.value > 0
+    ? t('admin.ops.e2eFirstOutput.samples', { n: e2eSampleCount.value.toLocaleString() }, e2eSampleCount.value)
+    : e2eUnknownWhy.value
+  return `${t('admin.ops.tooltips.e2eFirstOutput')} ${note}`
+})
 
 // --- Health Score & Diagnosis (primary) ---
 
@@ -1326,54 +1349,56 @@ function handleToolbarRefresh() {
           </div>
         </div>
 
-        <!-- Card 5: TTFT -->
-        <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;">
-          <div class="flex items-center justify-between">
+        <!-- Card 5: user wait (end-to-end first output); the last attempt's first token keeps the threshold colour -->
+        <!-- The card can be narrow (1024, about 81 px of content): the header wraps rather than folding the title, the number
+             row wraps "ms (P99)" under the number, and the number and the unknown word shrink below xl so they stay on one
+             line (never broken inside a word or a number, which would misread). -->
+        <div class="min-w-0 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900" style="order: 5;" data-testid="ops-e2e-card">
+          <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <div class="flex items-center gap-1">
-              <span class="text-[10px] font-bold uppercase text-gray-400">TTFT</span>
-              <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.ttft')" />
+              <span class="whitespace-nowrap text-[10px] font-bold uppercase text-gray-400">{{ t('admin.ops.e2eFirstOutput.title') }}</span>
+              <HelpTooltip v-if="!props.fullscreen" :content="e2eTooltip" />
             </div>
             <button
               v-if="!props.fullscreen"
               class="text-[10px] font-bold text-blue-500 hover:underline"
               type="button"
-              @click="openDetails({ title: t('admin.ops.ttftLabel'), kind: 'success', sort: 'ttft_desc' })"
+              @click="openDetails({ title: t('admin.ops.e2eFirstOutput.detailsTitle'), kind: 'success', sort: 'e2e_first_output_desc' })"
             >
               {{ t('admin.ops.requestDetails.details') }}
             </button>
           </div>
-          <div class="mt-2 flex items-baseline gap-2">
-            <div class="text-3xl font-black" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP99Ms))">
-              {{ ttftP99Ms ?? '-' }}
+          <template v-if="e2eSampleCount > 0">
+            <div class="mt-2 flex flex-wrap items-baseline gap-x-2">
+              <div class="min-w-0 text-xl font-black text-gray-900 dark:text-white xl:text-3xl" data-testid="ops-e2e-p99">
+                {{ e2eP99Ms ?? '-' }}
+              </div>
+              <span class="whitespace-nowrap text-xs font-bold text-gray-400">ms (P99)</span>
             </div>
-            <span class="text-xs font-bold text-gray-400">ms (P99)</span>
-          </div>
-          <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P95:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP95Ms))">{{ ttftP95Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
+            <div class="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs 2xl:grid-cols-2">
+              <div v-for="item in e2eStats" :key="item.label" class="flex flex-wrap items-baseline gap-x-1" :data-testid="`ops-e2e-stat-${item.label}`">
+                <span class="text-gray-500">{{ item.label }}:</span>
+                <span class="font-bold text-gray-900 dark:text-white">{{ item.value ?? '-' }}</span>
+                <span class="text-gray-400">ms</span>
+              </div>
             </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P90:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP90Ms))">{{ ttftP90Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">P50:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftP50Ms))">{{ ttftP50Ms ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Avg:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftAvgMs))">{{ ttftAvgMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
-            <div class="flex items-baseline gap-1 whitespace-nowrap">
-              <span class="text-gray-500">Max:</span>
-              <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(ttftMaxMs))">{{ ttftMaxMs ?? '-' }}</span>
-              <span class="text-gray-400">ms</span>
-            </div>
+          </template>
+          <template v-else>
+            <div class="mt-2 text-base font-black text-gray-400 dark:text-gray-500 xl:text-2xl" data-testid="ops-e2e-p99">{{ t('admin.ops.e2eFirstOutput.unknown') }}</div>
+            <p class="mt-3 text-xs text-gray-500 dark:text-gray-400" data-testid="ops-e2e-none">{{ e2eUnknownWhy }}</p>
+          </template>
+          <div class="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-gray-200 pt-2 text-xs dark:border-dark-700" data-testid="ops-e2e-last-attempt">
+            <span class="text-gray-500">{{ t('admin.ops.e2eFirstOutput.lastAttempt') }}</span>
+            <!-- Laid out like the percentiles above ("P99: 250 ms"); a missing value reads unknown, without a unit. Like
+                 them, the unit may wrap to the next line in a narrow card rather than stick out of it (120000 ms at 1024). -->
+            <span v-for="item in lastAttemptStats" :key="item.label" class="inline-flex flex-wrap items-baseline gap-x-1" :data-testid="`ops-e2e-last-${item.label}`">
+              <span class="text-gray-500">{{ item.label }}:</span>
+              <template v-if="item.value != null">
+                <span class="font-bold" :class="getThresholdColorClass(getTTFTThresholdLevel(item.value))">{{ item.value }}</span>
+                <span class="text-gray-400">ms</span>
+              </template>
+              <span v-else class="text-gray-400">{{ t('admin.ops.e2eFirstOutput.unknown') }}</span>
+            </span>
           </div>
         </div>
 

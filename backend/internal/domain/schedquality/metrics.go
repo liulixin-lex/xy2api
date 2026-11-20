@@ -13,22 +13,32 @@ const (
 	DimensionCache Dimension = "cache"
 )
 
-type AccountSummary struct {
-	From, To                                       time.Time `json:",omitzero"`
-	FirstEventP50Ms, FirstOutputP50Ms, GapP50Ms    *int      // 流式且两种时间都有的样本；Gap 是逐条差值的中位数
-	FirstOutputN                                   int       // Paired streaming samples used by all three latency medians.
-	ErrorN, ErrorBad, CacheTurns, CacheAllRequests int       // 报错按请求单位、口径同报错线（不填补）
-	CacheRatio, CacheAllRatio                      *float64  // 判定口径（续接轮）、全部成功请求口径
+const RecentSlowLineMs = 10_000
+
+type FirstOutputSummary struct {
+	N        int  `json:"n"`
+	Timeouts int  `json:"timeouts"`
+	P50Ms    *int `json:"p50_ms"`
 }
 
-// SummarizeAccount is display-only: all models and requests in the past hour,
-// without the assessment's 100-slot cap or padding. Unknowns are not in ErrorN.
-// CacheAllRatio deduplicates final request results; CacheRatio uses successful
-// continuation attempts, over this hour rather than the line's 30-minute window.
-// Request totals apply reset to the first request start, not to a retry's start;
-// attempt-based continuation and latency totals retain their attempt cutoffs.
-// The three latency medians use the same paired streaming samples; GapP50Ms is
-// the median of nonnegative per-attempt gaps, not a subtraction of the medians.
+type Slow10sSummary struct {
+	N        int `json:"n"`
+	Slow     int `json:"slow"`
+	Timeouts int `json:"timeouts"`
+}
+
+type AccountSummary struct {
+	From, To         time.Time `json:",omitzero"`
+	FirstOutput      FirstOutputSummary
+	Slow10s          Slow10sSummary
+	ErrorN, ErrorBad int // Known final request outcomes, without padding.
+	CacheTurns       int
+	CacheRatio       *float64 // Successful continuation attempts.
+}
+
+// SummarizeAccount is display-only and covers all models over the past hour.
+// Reset applies to the first start of each request for errors, and to each
+// attempt for first output and cache.
 func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.Time) AccountSummary {
 	out := AccountSummary{From: now.Add(-time.Hour), To: now}
 	if reset.After(out.From) {
@@ -40,13 +50,21 @@ func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.
 			account = append(account, s)
 		}
 	}
-	var events, outputs, gaps []int
-	var continuationRead, continuationInput, allRead, allInput int64
+	var outputs []int
+	var continuationRead, continuationInput int64
 	for _, s := range completedAttempts(account, reset, out.From, now) {
-		if s.Stream && s.FirstEventMs != nil && s.TTFOMs != nil && *s.FirstEventMs >= 0 && *s.TTFOMs >= 0 {
-			events = append(events, *s.FirstEventMs)
+		switch {
+		case s.Stream && s.TTFOMs != nil && *s.TTFOMs >= 0:
 			outputs = append(outputs, *s.TTFOMs)
-			gaps = append(gaps, max(0, *s.TTFOMs-*s.FirstEventMs))
+			if *s.TTFOMs > RecentSlowLineMs {
+				out.Slow10s.Slow++
+			}
+		case s.Stream && s.Outcome == OutcomeTimeout:
+			out.FirstOutput.Timeouts++
+			if s.CensoredMs != nil && *s.CensoredMs >= RecentSlowLineMs {
+				out.Slow10s.Timeouts++
+				out.Slow10s.Slow++
+			}
 		}
 		if s.Continuation && s.SessionKey != "" {
 			if read, input, ok := cacheTokens(s); ok {
@@ -67,31 +85,17 @@ func SummarizeAccount(samples []AttemptSample, accountID int64, reset, now time.
 			out.ErrorN++
 			out.ErrorBad++
 		}
-		if read, input, ok := cacheTokens(s); ok {
-			out.CacheAllRequests++
-			allRead += read
-			allInput += input
-		}
 	}
-	out.FirstOutputN = len(outputs)
-	out.FirstEventP50Ms, out.FirstOutputP50Ms, out.GapP50Ms = medianMs(events), medianMs(outputs), medianMs(gaps)
+	out.FirstOutput.N = len(outputs) + out.FirstOutput.Timeouts
+	out.Slow10s.N = len(outputs) + out.Slow10s.Timeouts
+	// Timeouts sort after all observed outputs. A rank in that tail has no duration.
+	if mid := (out.FirstOutput.N - 1) / 2; mid < len(outputs) {
+		sort.Ints(outputs)
+		out.FirstOutput.P50Ms = new(outputs[mid])
+	}
 	if continuationInput > 0 {
 		ratio := float64(continuationRead) / float64(continuationInput)
 		out.CacheRatio = &ratio
 	}
-	if allInput > 0 {
-		ratio := float64(allRead) / float64(allInput)
-		out.CacheAllRatio = &ratio
-	}
 	return out
-}
-
-// Preserve the existing nearest-rank (lower middle) P50 for integer timings.
-func medianMs(values []int) *int {
-	if len(values) == 0 {
-		return nil
-	}
-	sort.Ints(values)
-	value := values[(len(values)-1)/2]
-	return &value
 }

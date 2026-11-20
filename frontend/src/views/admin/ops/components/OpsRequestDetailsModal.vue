@@ -12,7 +12,8 @@ import { parseTimeRangeMinutes, formatDateTime } from '../utils/opsFormatters'
 export interface OpsRequestDetailsPreset {
   title: string
   kind?: OpsRequestDetailsParams['kind']
-  sort?: OpsRequestDetailsParams['sort']
+  /** The sorts the modal has a column for; the API also takes ttft_desc, which nothing here opens. */
+  sort?: Exclude<OpsRequestDetailsParams['sort'], 'ttft_desc'>
   min_duration_ms?: number
   max_duration_ms?: number
 }
@@ -20,6 +21,9 @@ export interface OpsRequestDetailsPreset {
 interface Props {
   modelValue: boolean
   timeRange: string
+  /** The dashboard's own window when timeRange is custom (7 or 30 days, a past period): the details query the same. */
+  customStartTime?: string | null
+  customEndTime?: string | null
   preset: OpsRequestDetailsPreset
   platform?: string
   groupId?: number | null
@@ -47,21 +51,31 @@ const pageSize = ref(10)
 
 const close = () => emit('update:modelValue', false)
 
-const showTTFT = computed(() => props.preset.sort === 'ttft_desc')
-const latencyLabel = computed(() => t(showTTFT.value ? 'admin.ops.ttftLabel' : 'admin.ops.requestDetails.table.duration'))
+// The latency column follows the sort: the user's wait (end-to-end first output) when sorted by it, else the duration.
+const showE2E = computed(() => props.preset.sort === 'e2e_first_output_desc')
+const latencyLabel = computed(() => t(showE2E.value ? 'admin.ops.e2eFirstOutput.detailsTitle' : 'admin.ops.requestDetails.table.duration'))
 
 function formatLatency(row: OpsRequestDetail): string {
-  const value = showTTFT.value ? row.first_token_ms : row.duration_ms
-  return typeof value === 'number' ? `${value} ms` : '-'
+  const value = showE2E.value ? row.end_to_end_first_output_ms : row.duration_ms
+  if (typeof value === 'number') return `${value} ms`
+  return showE2E.value ? t('admin.ops.e2eFirstOutput.unknown') : '-'
 }
 
+const customRange = computed(() =>
+  props.timeRange === 'custom' && props.customStartTime && props.customEndTime
+    ? { start: props.customStartTime, end: props.customEndTime }
+    : null
+)
+
 const rangeLabel = computed(() => {
+  if (customRange.value) return `${formatDateTime(customRange.value.start)} – ${formatDateTime(customRange.value.end)}`
   const minutes = parseTimeRangeMinutes(props.timeRange)
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (customRange.value) return { start_time: customRange.value.start, end_time: customRange.value.end }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -71,8 +85,14 @@ function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_ti
   }
 }
 
+// Each query has a generation: an answer, a failure or the end of loading counts only for the latest query, and closing
+// the modal ends the generation, so a late answer for an earlier window never replaces the current one.
+let fetchSeq = 0
+let cutOff = false
+
 const fetchData = async () => {
   if (!props.modelValue) return
+  const seq = ++fetchSeq
   loading.value = true
   try {
     const params: OpsRequestDetailsParams = {
@@ -91,33 +111,47 @@ const fetchData = async () => {
     if (typeof props.preset.max_duration_ms === 'number') params.max_duration_ms = props.preset.max_duration_ms
 
     const res = await opsAPI.listRequestDetails(params)
+    if (seq !== fetchSeq) return
     items.value = res.items || []
     total.value = res.total || 0
   } catch (e: any) {
+    if (seq !== fetchSeq) return
     console.error('[OpsRequestDetailsModal] Failed to fetch request details', e)
     appStore.showError(e?.message || t('admin.ops.requestDetails.failedToLoad'))
     items.value = []
     total.value = 0
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) {
-      if (props.resumeState) return
-      page.value = 1
-      pageSize.value = 10
-      fetchData()
+    if (!open) {
+      // A query still running when the modal closes is dropped; coming back to the same list asks it again.
+      cutOff = loading.value
+      fetchSeq++
+      loading.value = false
+      return
     }
+    if (props.resumeState) {
+      if (cutOff) fetchData()
+      cutOff = false
+      return
+    }
+    cutOff = false
+    page.value = 1
+    pageSize.value = 10
+    fetchData()
   }
 )
 
 watch(
   () => [
     props.timeRange,
+    props.customStartTime,
+    props.customEndTime,
     props.platform,
     props.groupId,
     props.preset.kind,

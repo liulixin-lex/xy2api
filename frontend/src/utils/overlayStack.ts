@@ -244,6 +244,40 @@ export function insideLayerAbove(token: symbol, el: Element): boolean {
   return index !== -1 && layers.slice(index + 1).some((layer) => !!layer.root()?.contains(el))
 }
 
+/**
+ * Which element of `regions` the focus belongs to, for a caller about to remove them (a toolbar changing form across
+ * a width): the focused element when it lies in one; when it lies in a layer opened from one (a Select's list,
+ * teleported out of a bottom sheet), that layer's opener, followed down through nested layers. A press that does not
+ * focus what it presses (Safari) leaves the opener on whatever held focus, such as the sheet's panel: an opener that
+ * is not itself the open control gives way to the open control inside it (`aria-expanded="true"`). Failing an opener
+ * in the regions, the regions' open control (the first region first). Null when focus is elsewhere on the page.
+ */
+export function focusOrigin(regions: readonly (Element | null | undefined)[], active: Element | null = document.activeElement): HTMLElement | null {
+  const within = regions.filter((region): region is Element => !!region)
+  const inRegion = (el: Element) => within.some((region) => region.contains(el))
+  const OPEN = '[aria-expanded="true"]'
+  let at: Element | null = active
+  for (let depth = 0; at instanceof HTMLElement && depth <= layers.length; depth++) {
+    if (inRegion(at)) {
+      if (at === active || at.matches(OPEN)) return at
+      return at.querySelector<HTMLElement>(OPEN) ?? at
+    }
+    const el: Element = at
+    const layer = [...layers].reverse().find((candidate) => candidate.root()?.contains(el))
+    if (!layer) return null
+    if (layer.opener.el && layer.opener.el !== at) {
+      at = layer.opener.el
+      continue
+    }
+    break
+  }
+  for (const region of within) {
+    const open = region.querySelector<HTMLElement>('[aria-expanded="true"]')
+    if (open) return open
+  }
+  return null
+}
+
 /** Whether any layer is open: a dialog, drawer, popover or menu. */
 export const anyOverlayOpen = () => layers.length > 0
 

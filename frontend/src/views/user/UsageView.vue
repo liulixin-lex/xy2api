@@ -1,79 +1,81 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
-
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
-                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
-              </div>
+      <!-- 统计卡、日期范围与图表；1024 以下收起成日期范围 + 一行摘要（日期也控制下面的列表） -->
+      <UsageOverview :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true">
+        <template #range>
+          <div class="flex items-center gap-2">
+            <span class="sr-only text-sm font-medium text-gray-700 dark:text-gray-300 sm:not-sr-only">{{ t('admin.dashboard.timeRange') }}:</span>
+            <DateRangePicker
+              v-model:start-date="startDate"
+              v-model:end-date="endDate"
+              @change="onDateRangeChange"
+            />
+          </div>
+        </template>
+        <template #granularity>
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+            <div class="w-28">
+              <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
             </div>
           </div>
-        </div>
+        </template>
+        <template #charts>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ModelDistributionChart
+              v-model:metric="modelDistributionMetric"
+              :model-stats="requestedModelStats"
+              :loading="modelStatsLoading"
+              :show-source-toggle="false"
+              :show-metric-toggle="true"
+              :enable-breakdown="false"
+              :show-account-cost="false"
+              :start-date="startDate"
+              :end-date="endDate"
+            />
+            <GroupDistributionChart
+              v-model:metric="groupDistributionMetric"
+              :group-stats="groupStats"
+              :loading="chartsLoading"
+              :show-metric-toggle="true"
+              :enable-breakdown="false"
+              :show-account-cost="false"
+              :start-date="startDate"
+              :end-date="endDate"
+            />
+          </div>
 
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
-            v-model:metric="modelDistributionMetric"
-            :model-stats="requestedModelStats"
-            :loading="modelStatsLoading"
-            :show-source-toggle="false"
-            :show-metric-toggle="true"
-            :enable-breakdown="false"
-            :show-account-cost="false"
-            :start-date="startDate"
-            :end-date="endDate"
-          />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            :enable-breakdown="false"
-            :show-account-cost="false"
-            :start-date="startDate"
-            :end-date="endDate"
-          />
-        </div>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <EndpointDistributionChart
+              v-model:source="endpointDistributionSource"
+              v-model:metric="endpointDistributionMetric"
+              :endpoint-stats="inboundEndpointStats"
+              :upstream-endpoint-stats="upstreamEndpointStats"
+              :endpoint-path-stats="endpointPathStats"
+              :loading="endpointStatsLoading"
+              :show-source-toggle="false"
+              :show-metric-toggle="true"
+              :enable-breakdown="false"
+              :title="t('usage.endpointDistribution')"
+              :start-date="startDate"
+              :end-date="endDate"
+            />
+            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          </div>
+        </template>
+      </UsageOverview>
 
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
-            v-model:source="endpointDistributionSource"
-            v-model:metric="endpointDistributionMetric"
-            :endpoint-stats="inboundEndpointStats"
-            :upstream-endpoint-stats="upstreamEndpointStats"
-            :endpoint-path-stats="endpointPathStats"
-            :loading="endpointStatsLoading"
-            :show-source-toggle="false"
-            :show-metric-toggle="true"
-            :enable-breakdown="false"
-            :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
-          />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-        </div>
-      </div>
-
-      <div class="card p-6">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+      <div ref="filtersRootRef" class="card p-4 sm:p-6">
+        <!-- The tab's fields, defined once: in the row from 1024px, in the phone toolbar's bottom sheet below it. Each
+             carries its filter's key (data-filter), so focus can move to the same field when the form changes. -->
+        <DefineFields>
+          <template v-if="activeTab === 'errors'">
+            <div data-filter="error_api_key_id" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
               <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="error_model" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.model') }}</label>
               <Select
                 v-model="errorFilter.model"
@@ -85,81 +87,124 @@
                 @change="applyErrorFilters"
               />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="error_category" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('usage.errors.category') }}</label>
               <Select v-model="errorFilter.category" :options="errorCategoryOptions" @change="applyErrorFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="error_status_code" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.errors.status') }}</label>
               <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
             </div>
-          </div>
-          <div v-else class="flex flex-1 flex-wrap items-end gap-4">
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+          </template>
+          <template v-else>
+            <div data-filter="api_key_id" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
+            <div data-filter="model" class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.model') }}</label>
               <Select v-model="filters.model" :options="modelOptions" searchable @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="group_id" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.group') }}</label>
               <Select v-model="filters.group_id" :options="groupOptions" searchable @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="request_type" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.type') }}</label>
               <Select v-model="filters.request_type" :options="requestTypeOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
+            <div data-filter="native_compaction_v2" class="w-full sm:w-auto sm:min-w-[180px]">
               <label class="input-label">{{ t('usage.compactionFilter') }}</label>
               <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="applyFilters" />
             </div>
-            <div v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="billing_type" v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.billingType') }}</label>
               <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="applyFilters" />
             </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
+            <div data-filter="billing_mode" class="w-full sm:w-auto sm:min-w-[200px]">
               <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
               <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
             </div>
+          </template>
+        </DefineFields>
+
+        <!-- Below 1024px (mobile list plan; the fields are a long form): "Filters n" opens them in a bottom sheet (applied
+             at once), the chosen ones as removable tags; the count, "Filters" (no search here, so it joins this row),
+             refresh, columns and "more" (reset, export) on one row. -->
+        <TableToolbar v-if="toolbarSheet" filter-sheet sheet-below="desktop" :filter-count="filterTags.length" data-testid="usage-filters-phone" @clear-filters="clearAllFilters">
+          <template #sheet>
+            <div class="grid gap-4"><ReuseFields /></div>
+          </template>
+          <template #tags>
+            <UsageFilterTags :tags="filterTags" @remove="removeFilterTag" />
+          </template>
+          <template #info>
+            <span data-testid="usage-count">{{ t('common.table.count', { n: (activeTab === 'errors' ? errorTotal : pagination.total).toLocaleString() }) }}</span>
+            <template v-if="hiddenSort">
+              <span class="table-toolbar__sep" aria-hidden="true">·</span>
+              <TableSortHint :label="hiddenSort.label" :order="hiddenSort.order" />
+            </template>
+          </template>
+          <template #actions>
+            <button
+              type="button"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              :aria-label="t('common.refresh')"
+              :disabled="activeTab === 'errors' ? errorLoading : loading"
+              data-testid="usage-refresh"
+              @click="refreshData"
+            >
+              <Icon name="refresh" size="sm" />
+            </button>
+            <UsageColumnSettings
+              variant="sheet"
+              :columns="currentToggleableColumns"
+              :is-visible="isCurrentColumnVisible"
+              :at-default="currentColumnsAtDefault"
+              @toggle="toggleCurrentColumn"
+              @reset="resetCurrentColumns"
+            />
+            <button
+              type="button"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              aria-haspopup="dialog"
+              :aria-label="t('common.more')"
+              data-testid="usage-more"
+              @click="moreOpen = true"
+            >
+              <Icon name="more" size="sm" />
+            </button>
+          </template>
+        </TableToolbar>
+        <BottomSheet v-if="toolbarSheet" :show="moreOpen" :title="t('common.more')" test-id="usage-more-sheet" @close="moreOpen = false">
+          <div class="grid gap-3">
+            <button type="button" class="btn btn-secondary w-full" @click="moreOpen = false; resetFilters()">{{ t('common.reset') }}</button>
+            <button v-if="activeTab !== 'errors'" type="button" class="btn btn-primary w-full" :disabled="exporting" @click="moreOpen = false; exportToCSV()">
+              {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
+            </button>
+          </div>
+        </BottomSheet>
+
+        <div v-if="!toolbarSheet" ref="filtersRowRef" class="flex flex-wrap items-end justify-between gap-4">
+          <div class="flex flex-1 flex-wrap items-end gap-4 max-lg:basis-full">
+            <ReuseFields />
           </div>
 
-          <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+          <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:ml-auto sm:w-auto">
+            <TableSortHint v-if="hiddenSort" :label="hiddenSort.label" :order="hiddenSort.order" />
             <button type="button" @click="refreshData" :disabled="activeTab === 'errors' ? errorLoading : loading" class="btn btn-secondary">
               {{ t('common.refresh') }}
             </button>
             <button type="button" @click="resetFilters" class="btn btn-secondary">
               {{ t('common.reset') }}
             </button>
-            <div class="relative" ref="columnDropdownRef">
-              <button
-                type="button"
-                data-testid="usage-column-settings"
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
-              >
-                <Icon name="grid" size="sm" />
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
-              </button>
-              <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-              >
-                <button
-                  v-for="col in currentToggleableColumns"
-                  :key="col.key"
-                  type="button"
-                  :data-testid="`usage-column-toggle-${col.key}`"
-                  @click="toggleCurrentColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon v-if="isCurrentColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                </button>
-              </div>
-            </div>
+            <UsageColumnSettings
+              :columns="currentToggleableColumns"
+              :is-visible="isCurrentColumnVisible"
+              :at-default="currentColumnsAtDefault"
+              @toggle="toggleCurrentColumn"
+              @reset="resetCurrentColumns"
+            />
             <button v-if="activeTab !== 'errors'" type="button" @click="exportToCSV" :disabled="exporting" class="btn btn-primary">
               {{ exporting ? t('usage.exporting') : t('usage.exportCsv') }}
             </button>
@@ -184,12 +229,13 @@
           :loading="loading"
           :columns="visibleColumns"
           :server-side-sort="true"
+          viewer="user"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
           :show-cache-hit-rate="appStore.cachedPublicSettings?.user_usage_cache_hit_rate_enabled === true"
           :show-token-speed="appStore.cachedPublicSettings?.user_usage_token_speed_enabled === true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :sort="tableSort"
+          :scroll-label="t('usage.tabs.usage')"
           @sort="handleSort"
           @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
@@ -212,6 +258,9 @@
         :page="errorPage"
         :page-size="errorPageSize"
         :visible-column-keys="errVisibleColumnKeys"
+        :sort-by="errorSortBy"
+        :sort-order="errorSortOrder"
+        :scroll-label="t('usage.tabs.errors')"
         @sort="onErrorSort"
         @update:page="onErrorPage"
         @update:pageSize="onErrorPageSize"
@@ -232,7 +281,16 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
-import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
+import UsageOverview from '@/components/admin/usage/UsageOverview.vue'
+import UsageColumnSettings from '@/components/admin/usage/UsageColumnSettings.vue'
+import UsageFilterTags, { type UsageFilterTag } from '@/components/admin/usage/UsageFilterTags.vue'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
+import { useFilterFocusHandoff } from '@/components/admin/usage/useFilterFocusHandoff'
+import BottomSheet from '@/components/common/BottomSheet.vue'
+import TableSortHint from '@/components/common/TableSortHint.vue'
+import { usePhoneViewport, useTableViewport } from '@/composables/useTableViewport'
+import { createReusableTemplate } from '@vueuse/core'
+import { useColumnVisibility } from '@/composables/useColumnVisibility'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
@@ -379,6 +437,8 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc',
 })
+/** The sort the list is requested with: the table's headers follow it (DataTable's page-owned sort). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 const granularityOptions = computed<SelectOption[]>(() => [
   { value: 'day', label: t('admin.dashboard.day') },
@@ -616,8 +676,14 @@ const exportToCSV = async () => {
   await exportPanel.value?.create({ ...buildUsageListParams(1, 100) })
 }
 
-const ALWAYS_VISIBLE = ['created_at']
+// Below 768px the first column is frozen as the row's identity: the API key (and the errors tab's key name) cannot be
+// hidden there; from 768px they follow the saved preference as before.
+const phone = usePhoneViewport()
+const ALWAYS_VISIBLE_WIDE = ['created_at']
+const alwaysVisible = computed(() => (phone.value ? ['api_key', ...ALWAYS_VISIBLE_WIDE] : ALWAYS_VISIBLE_WIDE))
 const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+// Below 768px (mobile list plan): API key (frozen), model, tokens, cost, latency and time; the rest in the settings.
+const NARROW_DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'endpoint', 'ip_address', 'group', 'stream', 'billing_mode', 'user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
@@ -629,37 +695,29 @@ const allColumns = computed<Column[]>(() => [
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
-  { key: 'tokens', label: t('usage.tokens'), sortable: false },
-  { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'latency', label: t('usage.latency'), sortable: false },
+  { key: 'tokens', label: t('usage.tokens'), sortable: false, class: 'text-right' },
+  { key: 'cost', label: t('usage.cost'), sortable: false, class: 'text-right' },
+  { key: 'latency', label: t('usage.latency'), sortable: false, class: 'text-right' },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
 ])
 
-const hiddenColumns = reactive<Set<string>>(new Set())
-const toggleableColumns = computed(() => allColumns.value.filter((col) => !ALWAYS_VISIBLE.includes(col.key)))
+const toggleableColumns = computed(() => allColumns.value.filter((col) => !alwaysVisible.value.includes(col.key)))
+const usageColumns = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: `${HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: NARROW_DEFAULT_HIDDEN_COLUMNS },
+})
 const visibleColumns = computed(() =>
-  allColumns.value.filter((col) => ALWAYS_VISIBLE.includes(col.key) || !hiddenColumns.has(col.key))
+  allColumns.value.filter((col) => alwaysVisible.value.includes(col.key) || usageColumns.isVisible(col.key))
 )
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-const toggleColumn = (key: string) => {
-  if (hiddenColumns.has(key)) hiddenColumns.delete(key)
-  else hiddenColumns.add(key)
-  localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-}
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    const values = saved ? JSON.parse(saved) as string[] : DEFAULT_HIDDEN_COLUMNS
-    values.forEach((key) => hiddenColumns.add(key))
-  } catch {
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
-  }
-}
 
 // 错误请求 tab 独立列设置(机制同用量列设置,存储互不影响)
-const ERR_ALWAYS_VISIBLE = ['status', 'created_at']
+const ERR_ALWAYS_VISIBLE_WIDE = ['status', 'created_at']
+const errAlwaysVisible = computed(() => (phone.value ? ['key_name', ...ERR_ALWAYS_VISIBLE_WIDE] : ERR_ALWAYS_VISIBLE_WIDE))
 const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+// Below 768px: key name (frozen), category, status and time, then the details button; the rest in the settings.
+const ERR_NARROW_DEFAULT_HIDDEN_COLUMNS = ['model', 'endpoint', 'client_ip', 'group', 'type', 'platform', 'message', 'user_agent']
 const ERR_HIDDEN_COLUMNS_KEY = 'user-usage-error-hidden-columns'
 
 // key 须与 UserErrorRequestsTable 的 allColumns 一致
@@ -678,48 +736,105 @@ const errAllColumns = computed<Column[]>(() => [
   { key: 'user_agent', label: t('usage.userAgent') },
 ])
 
-const errHiddenColumns = reactive<Set<string>>(new Set())
 const errToggleableColumns = computed(() =>
-  errAllColumns.value.filter((col) => !ERR_ALWAYS_VISIBLE.includes(col.key))
+  errAllColumns.value.filter((col) => !errAlwaysVisible.value.includes(col.key))
 )
+// The errors tab keeps its own two memories; phones start from their own defaults.
+const errorColumns = useColumnVisibility({
+  keys: computed(() => errToggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: ERR_HIDDEN_COLUMNS_KEY, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_NARROW_DEFAULT_HIDDEN_COLUMNS },
+})
 const errVisibleColumnKeys = computed(() =>
   errAllColumns.value
-    .filter((col) => ERR_ALWAYS_VISIBLE.includes(col.key) || !errHiddenColumns.has(col.key))
+    .filter((col) => errAlwaysVisible.value.includes(col.key) || errorColumns.isVisible(col.key))
     .map((col) => col.key)
 )
-const isErrColumnVisible = (key: string) => !errHiddenColumns.has(key)
-const toggleErrColumn = (key: string) => {
-  if (errHiddenColumns.has(key)) errHiddenColumns.delete(key)
-  else errHiddenColumns.add(key)
-  localStorage.setItem(ERR_HIDDEN_COLUMNS_KEY, JSON.stringify([...errHiddenColumns]))
-}
-const loadSavedErrColumns = () => {
-  try {
-    const saved = localStorage.getItem(ERR_HIDDEN_COLUMNS_KEY)
-    const values = saved ? (JSON.parse(saved) as string[]) : ERR_DEFAULT_HIDDEN_COLUMNS
-    values.forEach((key) => errHiddenColumns.add(key))
-  } catch {
-    ERR_DEFAULT_HIDDEN_COLUMNS.forEach((key) => errHiddenColumns.add(key))
-  }
-}
 
-// 列设置下拉按当前 tab 分发
+// 列设置按当前 tab 分发（两类日志各自两份记忆）
+const currentColumns = computed(() => (activeTab.value === 'errors' ? errorColumns : usageColumns))
 const currentToggleableColumns = computed(() =>
   activeTab.value === 'errors' ? errToggleableColumns.value : toggleableColumns.value
 )
-const isCurrentColumnVisible = (key: string) =>
-  activeTab.value === 'errors' ? isErrColumnVisible(key) : isColumnVisible(key)
-const toggleCurrentColumn = (key: string) => {
-  if (activeTab.value === 'errors') toggleErrColumn(key)
-  else toggleColumn(key)
-}
+const isCurrentColumnVisible = (key: string) => currentColumns.value.isVisible(key)
+const toggleCurrentColumn = (key: string) => currentColumns.value.toggle(key)
+const resetCurrentColumns = () => currentColumns.value.reset()
+const currentColumnsAtDefault = computed(() => currentColumns.value.atDefault.value)
+/**
+ * The tab's sort while its column is hidden (only the model column can be), named in the toolbar: the request keeps the
+ * sort, so the headers show no arrow (the usage tab's sort, or the errors tab's in API keys, status_code = status).
+ */
+const hiddenSort = computed(() => {
+  const errors = activeTab.value === 'errors'
+  const key = errors ? (errorSortBy.value === 'status_code' ? 'status' : errorSortBy.value) : sortState.sort_by
+  const columns: { key: string; label: string }[] = errors ? errAllColumns.value : allColumns.value
+  const column = columns.find((col) => col.key === key)
+  const shown = errors ? errVisibleColumnKeys.value.includes(key) : visibleColumns.value.some((col) => col.key === key)
+  if (!column || shown) return null
+  return { label: column.label, order: (errors ? errorSortOrder.value : sortState.sort_order) as 'asc' | 'desc' }
+})
 
-const showColumnDropdown = ref(false)
-const columnDropdownRef = ref<HTMLElement | null>(null)
-const handleColumnClickOutside = (event: MouseEvent) => {
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
-    showColumnDropdown.value = false
+// ---- Phone toolbar (mobile list plan): the fields in a bottom sheet, the chosen ones as tags ----
+const [DefineFields, ReuseFields] = createReusableTemplate()
+/** Below 1024px the toolbar with the bottom sheet (TableToolbar's sheetBelow 'desktop'); the columns still switch at 768px. */
+const { desktop } = useTableViewport()
+const toolbarSheet = computed(() => !desktop.value)
+const moreOpen = ref(false)
+watch(toolbarSheet, (on) => { if (!on) moreOpen.value = false })
+const filtersRootRef = ref<HTMLElement | null>(null)
+const filtersRowRef = ref<HTMLElement | null>(null)
+useFilterFocusHandoff(toolbarSheet, filtersRootRef, filtersRowRef)
+
+const chosen = (value: unknown) => value !== null && value !== undefined && value !== ''
+const optionLabel = (options: SelectOption[], value: unknown) =>
+  options.find((option) => option.value === value)?.label ?? String(value)
+
+/** The current tab's filters that are not "all" ("Filters n" counts them); the date range sits above, outside. */
+const filterTags = computed<UsageFilterTag[]>(() => {
+  const out: UsageFilterTag[] = []
+  const add = (key: string, label: string, text: string) => out.push({ key, label, text })
+  if (activeTab.value === 'errors') {
+    const f = errorFilter.value
+    if (chosen(f.api_key_id)) add('api_key_id', t('usage.errors.keyName'), optionLabel(errorKeyOptions.value, f.api_key_id))
+    if (chosen(f.model)) add('model', t('usage.errors.model'), String(f.model))
+    if (chosen(f.category)) add('category', t('usage.errors.category'), optionLabel(errorCategoryOptions.value, f.category))
+    if (chosen(f.status_code)) add('status_code', t('usage.errors.status'), optionLabel(errorStatusOptions.value, f.status_code))
+    return out
   }
+  const f = filters.value
+  if (chosen(f.api_key_id)) add('api_key_id', t('usage.apiKeyFilter'), optionLabel(apiKeyOptions.value, f.api_key_id))
+  if (chosen(f.model)) add('model', t('usage.model'), String(f.model))
+  if (chosen(f.group_id)) add('group_id', t('admin.usage.group'), optionLabel(groupOptions.value, f.group_id))
+  if (chosen(f.request_type)) add('request_type', t('usage.type'), optionLabel(requestTypeOptions.value, f.request_type))
+  if (chosen(f.native_compaction_v2)) add('native_compaction_v2', t('usage.compactionFilter'), optionLabel(compactionOptions.value, f.native_compaction_v2))
+  if (subscriptionFeatureEnabled.value && chosen(f.billing_type)) add('billing_type', t('admin.usage.billingType'), optionLabel(billingTypeOptions.value, f.billing_type))
+  if (chosen(f.billing_mode)) add('billing_mode', t('admin.usage.billingMode'), optionLabel(billingModeOptions.value, f.billing_mode))
+  return out
+})
+
+/** Each field's "all" value, as the page's reset sets it. */
+const ERROR_FILTER_DEFAULTS = { api_key_id: null, model: '', category: '', status_code: null } as const
+const USAGE_FILTER_DEFAULTS: Record<string, null | undefined> = {
+  api_key_id: undefined, model: undefined, group_id: undefined, request_type: undefined, native_compaction_v2: null,
+  billing_type: null, billing_mode: null,
+}
+const clearFilterTag = (key: string) => {
+  if (activeTab.value === 'errors') {
+    const field = key as keyof typeof ERROR_FILTER_DEFAULTS
+    errorFilter.value = { ...errorFilter.value, [field]: ERROR_FILTER_DEFAULTS[field] }
+  } else {
+    filters.value = { ...filters.value, [key]: USAGE_FILTER_DEFAULTS[key] }
+  }
+}
+const applyCurrentFilters = () => (activeTab.value === 'errors' ? applyErrorFilters() : applyFilters())
+const removeFilterTag = (key: string) => {
+  clearFilterTag(key)
+  applyCurrentFilters()
+}
+/** "Clear all" in the sheet: the tab's chosen filters, applied once; the date range stays. */
+const clearAllFilters = () => {
+  for (const tag of filterTags.value) clearFilterTag(tag.key)
+  applyCurrentFilters()
 }
 
 const loadApiKeys = async () => {
@@ -805,16 +920,12 @@ const switchToErrors = () => {
 }
 
 onMounted(() => {
-  loadSavedColumns()
-  loadSavedErrColumns()
-  document.addEventListener('click', handleColumnClickOutside)
   void loadFilterOptions()
   refreshData()
 })
 
 onUnmounted(() => {
   abortController?.abort()
-  document.removeEventListener('click', handleColumnClickOutside)
 })
 
 watch(endpointDistributionSource, () => {

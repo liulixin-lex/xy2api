@@ -651,10 +651,14 @@ func qualityRotateHeaders(headers http.Header, rotation string) {
 }
 
 func (s *OpenAIGatewayService) prepareQualityHTTP(ctx context.Context, c *gin.Context, account *Account, req *http.Request, body []byte) {
+	model := gjson.GetBytes(body, "model").String()
+	tier := gjson.GetBytes(body, "service_tier").String()
 	if qualityRequest(ctx) == nil || req.GetBody == nil {
+		s.bindOpenAITierRefusal(ctx, upstreamResponseModelObserverFromContext(c), account, model, tier, openAITierHTTPProtocol(req.URL.Path))
 		return
 	}
-	o := s.qualityObserver(ctx, account, gjson.GetBytes(body, "model").String())
+	o := s.qualityObserver(ctx, account, model)
+	s.bindOpenAITierRefusal(ctx, o, account, model, tier, openAITierHTTPProtocol(req.URL.Path))
 	if c != nil {
 		c.Set(upstreamResponseModelObserverContextKey, o)
 	}

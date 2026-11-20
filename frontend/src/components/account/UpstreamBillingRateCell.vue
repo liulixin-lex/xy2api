@@ -1,7 +1,7 @@
 <template>
-  <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed, 'ratio--detailed': detailed }">
-    <!-- Information only, no control in it: the app's plain tip (7c, 7i-6). -->
-    <span class="ratio__v" v-tip="rateTip" data-testid="upstream-billing-rate">{{ primaryValue }}</span>
+  <div v-if="eligible" class="ratio" :class="{ 'ratio--stale': dimmed }">
+    <!-- Information only, no control in it: the app's plain tip (7c, 7i-6), shown at once on a tap (touch has no hover). -->
+    <span class="ratio__v" v-tip="rateTip" data-testid="upstream-billing-rate" @click="showTipNow($event.currentTarget)">{{ primaryValue }}</span>
     <button
       type="button"
       class="ratio__btn"
@@ -14,11 +14,6 @@
     >
       <Icon name="refresh" size="xs" :class="{ 'animate-spin': probing }" />
     </button>
-    <!-- The narrow card's details: what the tip says about a stale or failed probe, in the open (no hover on touch). -->
-    <div v-if="detailed && (stale || failureText)" class="ratio__note" data-testid="upstream-billing-note">
-      <span v-if="stale && Number.isFinite(receivedAt)">{{ t('admin.accounts.upstreamBilling.lastDetectedAt', { value: probeTime(snapshot?.received_at) }) }}</span>
-      <span v-if="failureText">{{ failureText }}</span>
-    </div>
   </div>
   <span v-else class="ratio__none">—</span>
 </template>
@@ -28,7 +23,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 import { probeFailureText, upstreamRateView } from './upstreamBillingRate'
 import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
 
@@ -37,8 +32,6 @@ const props = withDefaults(defineProps<{
   now: number
   probing?: boolean
   globalProbeEnabled?: boolean
-  /** The narrow card's details: the refresh button always shows, a stale or failed probe says so below the value. */
-  detailed?: boolean
 }>(), {
   globalProbeEnabled: true
 })
@@ -115,6 +108,8 @@ function rateTip(): string {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* "9.9999x", the 3px gap and the 18px button fit the column's 74px; a longer value ends in "…", the tip has the rate
    in force whole (12.5). */
 .ratio {
@@ -174,19 +169,5 @@ function rateTip(): string {
   .ratio__btn {
     opacity: 1;
   }
-}
-.ratio--detailed {
-  flex-wrap: wrap;
-}
-.ratio--detailed .ratio__btn {
-  opacity: 1;
-}
-.ratio__note {
-  display: grid;
-  flex-basis: 100%;
-  gap: 2px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-small);
 }
 </style>

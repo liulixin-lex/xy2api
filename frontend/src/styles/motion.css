@@ -1,3 +1,5 @@
+@reference "../style.css";
+
 /*
  * 动效系统
  * - 只对 transform / opacity 做动画，不动布局属性（width/height/top/margin/padding）。

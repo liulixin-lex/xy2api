@@ -190,6 +190,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 
 	type openAIWSClientPayload struct {
+		tier                     *openAITierAttempt
 		payloadRaw               []byte
 		accountIdentitySourceRaw []byte
 		rawForHash               []byte
@@ -450,10 +451,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// follow-up response.create frames may omit it and then reuse
 		// ingressSessionOriginalModel. We always write a concrete upstream model
 		// before evaluating policy, so whitelist / filter behavior remains stable.
-		policyApplied, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, upstreamModel, normalized)
+		turnCtx, tier := openAIWSTierTurnContext(ctx, hooks, turn, trimmed, originalModel)
+		policyApplied, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(turnCtx, account, upstreamModel, normalized)
 		if policyErr != nil {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", policyErr)
+			if failure, ok := policyErr.(*UpstreamFailoverError); ok {
+				return openAIWSClientPayload{}, failure
+			}
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 		}
+
 		if blocked != nil {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
 			// Send a Realtime-style error event to the client first, then
@@ -481,6 +487,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		ingressSessionOriginalModel = originalModel
 
 		return openAIWSClientPayload{
+			tier:                     tier,
 			payloadRaw:               normalized,
 			accountIdentitySourceRaw: accountIdentitySourceRaw,
 			rawForHash:               trimmed,
@@ -712,6 +719,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turn,
 				writeClientMessage,
 			)
+			currentBridgePayload.tier.finish(result)
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
@@ -810,9 +818,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		BindRoutingHint: firstPayload.tier.bindsRoutingHint(),
+		Account:         account,
+		WSURL:           wsURL,
+		Headers:         wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -1007,6 +1016,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}()
 		postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)
 		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
+		s.bindOpenAITierRefusal(ctx, responseModelObserver, account, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "service_tier").String(), APIProtocolResponses)
+		defer responseModelObserver.finishTierRefusal()
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
@@ -1030,6 +1041,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				false,
 			)
 		}
+		schedCapture.confirmNativeWSWrite(ctx)
 		if debugEnabled {
 			logOpenAIWSModeDebug(
 				"ingress_ws_turn_request_sent account_id=%d turn=%d conn_id=%s payload_bytes=%d",
@@ -1317,6 +1329,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					UpstreamResponseModel:         responseModelObserver.Model(),
 					UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 					UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
+					ResponseTierEvidence:          append([]string(nil), responseModelObserver.tierEvidence...),
+					ResponseTierConflict:          responseModelObserver.terminalTierConflict || responseModelObserver.terminalTier == "" && responseModelObserver.firstTierConflict,
 					ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(payload)),
 					ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(payload, mappedModel, originalModel), payload, mappedModel),
 					RequestedReasoningEffort:      requestedReasoningEffort,
@@ -1345,6 +1359,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 
+	currentTier := firstPayload.tier
 	currentPayload := firstPayload.payloadRaw
 	// Admission hooks must see client model candidates before upstream mapping.
 	currentClientPayload := firstPayload.rawForHash
@@ -1360,6 +1375,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		return strings.TrimSpace(openAIWSPayloadStringFromRaw(payload, "previous_response_id")) != ""
 	}
+	rebindTierRoute := false
 	var sessionLease *openAIWSConnLease
 	sessionConnID := ""
 	pinnedSessionConnID := ""
@@ -1748,7 +1764,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
-		forcePreferredConn := isStrictAffinityTurn(currentPayload)
+		forcePreferredConn := isStrictAffinityTurn(currentPayload) && !rebindTierRoute
 		if sessionLease == nil {
 			currentDialPayload = currentPayload
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn, turnRetry > 0)
@@ -1756,6 +1772,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return fmt.Errorf("acquire upstream websocket: %w", acquireErr)
 			}
 			sessionLease = acquiredLease
+			rebindTierRoute = false
 			sessionConnID = strings.TrimSpace(sessionLease.ConnID())
 			if storeDisabled {
 				pinSessionConn(sessionConnID)
@@ -1895,6 +1912,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
+		currentTier.finish(result)
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
@@ -2007,6 +2025,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if parseErr != nil {
 			return parseErr
 		}
+		previousHandshake := baseAcquireReq.handshakeCompatibility()
+		baseAcquireReq.BindRoutingHint = nextPayload.tier.bindsRoutingHint()
 		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
@@ -2065,6 +2085,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
+		if (previousHandshake.requiredRoutingHint != "" || baseAcquireReq.BindRoutingHint) && previousHandshake.requiredRoutingHint != baseAcquireReq.handshakeCompatibility().requiredRoutingHint {
+			resetSessionLease(false)
+			rebindTierRoute = true
+		}
+
+		currentTier = nextPayload.tier
 		currentPayload = nextPayload.payloadRaw
 		currentClientPayload = nextPayload.rawForHash
 		currentOriginalModel = nextPayload.originalModel

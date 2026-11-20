@@ -3,11 +3,14 @@
     v-if="visible"
     :model-value="modelValue"
     :options="options"
-    :aria-label="t('admin.groupCategories.allCategories')"
+    :aria-label="fieldLabel ?? t('admin.groupCategories.allCategories')"
     data-test="group-category-filter"
     @update:model-value="handleUpdate"
     @change="emit('change')"
-  />
+  >
+    <!-- In a toolbar row: the field's name until a category is chosen ("all" stays first in the list). -->
+    <template v-if="fieldLabel" #selected="{ option }">{{ option && option.value !== '' ? option.label : fieldLabel }}</template>
+  </Select>
 </template>
 
 <script setup lang="ts">
@@ -19,6 +22,8 @@ import { useGroupCategoriesStore } from '@/stores/groupCategories'
 
 const props = defineProps<{
   modelValue: string
+  /** Shown while nothing is chosen (a toolbar row names its filters, mobile list plan item 15). */
+  fieldLabel?: string
 }>()
 
 const emit = defineEmits<{

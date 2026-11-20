@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -34,8 +35,49 @@ type selectionTrialReservation struct {
 	session        string
 	now            func() time.Time
 	request        bool
+	generation     string
+	reader         SchedTrialRoundReader
+	lines          [3]time.Time
 	retained       atomic.Bool
 	once           sync.Once
+}
+
+// The selection snapshot identifies the round observed at reservation time;
+// its separate reader checks the authoritative rows only at binding commit.
+type trialCheckingView struct {
+	schedquality.View
+	SchedTrialRoundReader
+}
+
+func trialLineDeadlines(state schedquality.StateView) (deadlines [3]time.Time) {
+	for i, line := range [...]schedquality.LineView{state.TTFO, state.Error, state.Cache} {
+		if line.Trial {
+			deadlines[i] = line.TrialUntil
+		}
+	}
+	return deadlines
+}
+
+func (r *selectionTrialReservation) rememberRound(view schedquality.View, generation string) {
+	r.generation = generation
+	r.reader, _ = view.(SchedTrialRoundReader)
+	r.lines = trialLineDeadlines(view.StateOf(r.group, r.account, r.model))
+}
+
+func (r *selectionTrialReservation) sameTrial(ctx context.Context, now time.Time) (bool, error) {
+	if r.reader == nil {
+		return false, errors.New("trial round reader unavailable")
+	}
+	state, err := r.reader.ReadTrialRound(ctx, r.account, r.model, r.group)
+	if err != nil || state.Placement(true, now) != schedquality.PlaceTrial {
+		return false, err
+	}
+	for i, until := range trialLineDeadlines(state) {
+		if !until.IsZero() && r.lines[i].Equal(until) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *selectionTrialReservation) release(ctx context.Context) {
@@ -96,7 +138,10 @@ func (t *selectionTrial) room(ctx context.Context, account int64, model string) 
 
 func (t *selectionTrial) isTrial(account *Account) bool {
 	gid := derefGroupID(t.request.GroupID)
-	view, now := t.service.selectionView(), t.service.selectionNow()
+	return t.isTrialIn(t.service.selectionView(), gid, account, t.service.selectionNow())
+}
+
+func (t *selectionTrial) isTrialIn(view schedquality.View, gid int64, account *Account, now time.Time) bool {
 	return account.Platform == PlatformOpenAI && !t.manual &&
 		selectionState(view, gid, account, t.request.RequestedModel).Placement(selectionAuto(view, gid, now), now) == schedquality.PlaceTrial
 }
@@ -125,10 +170,11 @@ func (t *selectionTrial) memberFor(ctx context.Context, account int64) string {
 }
 
 func (t *selectionTrial) touch(ctx context.Context, account *Account) {
-	if t.leases == nil || t.request.SessionHash == "" || !t.isTrial(account) {
+	now := t.service.selectionNow()
+	if t.leases == nil || t.request.SessionHash == "" || !t.isTrialIn(t.service.selectionView(), derefGroupID(t.request.GroupID), account, now) {
 		return
 	}
-	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.member, t.service.selectionNow()); err != nil {
+	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.member, now); err != nil {
 		slog.WarnContext(ctx, "sched_quality.trial_touch_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
 	}
 }
@@ -136,7 +182,9 @@ func (t *selectionTrial) touch(ctx context.Context, account *Account) {
 // reserve returns false after a lost race. The caller reorders with room=false
 // and may try this account again in tier 1 after every remaining tier 0 account.
 func (t *selectionTrial) reserve(ctx context.Context, account *Account, full bool) (*selectionTrialReservation, bool) {
-	if !t.isTrial(account) {
+	observedAt := t.service.selectionNow()
+	view := t.service.selectionView()
+	if !t.isTrialIn(view, derefGroupID(t.request.GroupID), account, observedAt) {
 		return nil, true
 	}
 	if t.owner == account.ID && t.request.SessionHash != "" {
@@ -146,9 +194,11 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 	model, gid := OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID)
 	member := t.memberFor(ctx, account.ID)
 	if t.leases != nil {
-		acquired, err := t.leases.Acquire(ctx, account.ID, model, gid, member, t.service.selectionNow())
+		acquired, generation, err := t.leases.Acquire(ctx, account.ID, model, gid, member, observedAt)
 		if err == nil && acquired {
-			return &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}, true
+			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}
+			r.rememberRound(view, generation)
+			return r, true
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
@@ -266,8 +316,20 @@ func (r *selectionTrialReservation) promote(ctx context.Context) {
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	if err := r.leases.Promote(stateCtx, r.account, r.model, r.group, r.member, r.session, now); err != nil {
-		slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+	same, err := r.sameTrial(stateCtx, now)
+	if err != nil || !same {
+		if err != nil {
+			slog.WarnContext(ctx, "sched_quality.trial_verify_failed", "account_id", r.account, "model", r.model, "group_id", r.group, "error", err)
+		}
+		r.release(ctx)
+		return
+	}
+	if err := r.leases.Promote(stateCtx, r.account, r.model, r.group, r.member, r.session, r.generation, now); err != nil {
+		if errors.Is(err, ErrTrialGenerationChanged) {
+			slog.InfoContext(ctx, "sched_quality.trial_generation_changed", "component", "sched_quality", "account_id", r.account, "group_id", r.group, "model", r.model)
+		} else {
+			slog.WarnContext(ctx, "sched_quality.trial_promote_failed", "component", "sched_quality", "account_id", r.account, "error", err)
+		}
 		// The CAS is already committed. Release only our request member: if Redis
 		// executed Promote but lost its reply, the session member remains intact.
 		r.release(ctx)

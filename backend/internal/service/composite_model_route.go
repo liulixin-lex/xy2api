@@ -29,9 +29,10 @@ const (
 // CompositeModelOwnership identifies the concrete provider that exposes a
 // public model through an account-level exact mapping.
 type CompositeModelOwnership struct {
-	TargetPlatform string
-	Matched        bool
-	Ambiguous      bool
+	nonTierRoutesOnly bool
+	TargetPlatform    string
+	Matched           bool
+	Ambiguous         bool
 }
 
 type CompositeModelOwnershipResolver func(context.Context, int64, string) (CompositeModelOwnership, error)
@@ -64,15 +65,16 @@ type CompositeRoutePreviewRequest struct {
 }
 
 type CompositeRouteDecision struct {
-	Matched        bool                 `json:"matched"`
-	Source         string               `json:"source"`
-	GroupID        int64                `json:"group_id"`
-	PublicModel    string               `json:"public_model"`
-	TargetPlatform string               `json:"target_platform"`
-	UpstreamModel  string               `json:"upstream_model"`
-	Endpoint       string               `json:"endpoint"`
-	Route          *CompositeModelRoute `json:"route,omitempty"`
-	Reason         string               `json:"reason,omitempty"`
+	nonTierRoutesOnly bool
+	Matched           bool                 `json:"matched"`
+	Source            string               `json:"source"`
+	GroupID           int64                `json:"group_id"`
+	PublicModel       string               `json:"public_model"`
+	TargetPlatform    string               `json:"target_platform"`
+	UpstreamModel     string               `json:"upstream_model"`
+	Endpoint          string               `json:"endpoint"`
+	Route             *CompositeModelRoute `json:"route,omitempty"`
+	Reason            string               `json:"reason,omitempty"`
 }
 
 type CompositeRouteInput struct {

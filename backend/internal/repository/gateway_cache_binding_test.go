@@ -33,38 +33,46 @@ func TestStickyBindingGenerationConcurrentCommit(t *testing.T) {
 	require.Equal(t, snapshot, other)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	var changed [2]bool
+	var changed [2]service.BindingCommitResult
 	var errs [2]error
 	for i, cache := range []*gatewayCache{first, second} {
 		wg.Add(1)
 		go func(i int, cache *gatewayCache) {
 			defer wg.Done()
 			<-start
-			changed[i], errs[i] = cache.CommitSessionBinding(ctx, group, key, snapshot, int64(i+2), time.Hour)
+			changed[i], errs[i] = cache.CommitSessionBinding(ctx, group, key, snapshot, int64(i+2), time.Hour, service.BindingCommitOptions{})
 		}(i, cache)
 	}
 	close(start)
 	wg.Wait()
 	require.NoError(t, errs[0])
 	require.NoError(t, errs[1])
-	require.NotEqual(t, changed[0], changed[1], "only one completion may commit the captured generation")
+	require.ElementsMatch(t, []service.BindingCommitStatus{service.BindingCommitted, service.BindingChanged}, []service.BindingCommitStatus{changed[0].Status, changed[1].Status}, "only one completion may commit the captured generation")
+	winner, loser := changed[0], changed[1]
+	if loser.Status == service.BindingCommitted {
+		winner, loser = loser, winner
+	}
+	require.Equal(t, snapshot.Generation, winner.ObservedGen)
+	require.NotEmpty(t, winner.NewGen)
+	require.Equal(t, winner.NewGen, loser.ObservedGen)
+	require.Empty(t, loser.NewGen)
 	current, err := first.GetSessionBinding(ctx, group, key)
 	require.NoError(t, err)
 	require.NotEqual(t, snapshot.Generation, current.Generation)
-	ok, err := second.CommitSessionBinding(ctx, group, key, current, 1, time.Hour)
+	ok, err := second.CommitSessionBinding(ctx, group, key, current, 1, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.True(t, ok)
-	ok, err = first.CommitSessionBinding(ctx, group, key, snapshot, 4, time.Hour)
+	require.Equal(t, service.BindingCommitted, ok.Status)
+	ok, err = first.CommitSessionBinding(ctx, group, key, snapshot, 4, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.False(t, ok, "A -> B -> A must reject the old completion")
+	require.Equal(t, service.BindingChanged, ok.Status, "A -> B -> A must reject the old completion")
 	beforeDelete, err := first.GetSessionBinding(ctx, group, key)
 	require.NoError(t, err)
 	require.NoError(t, first.DeleteSessionAccountID(ctx, group, key))
 	_, err = first.ClaimSessionAccountID(ctx, group, key, 1, time.Hour, true)
 	require.NoError(t, err)
-	ok, err = second.CommitSessionBinding(ctx, group, key, beforeDelete, 4, time.Hour)
+	ok, err = second.CommitSessionBinding(ctx, group, key, beforeDelete, 4, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.False(t, ok, "recreation must invalidate outstanding completions")
+	require.Equal(t, service.BindingChanged, ok.Status, "recreation must invalidate outstanding completions")
 }
 
 func TestStickyBindingGenerationExpiresWithBinding(t *testing.T) {
@@ -89,9 +97,9 @@ func TestStickyBindingGenerationExpiresWithBinding(t *testing.T) {
 	created, err := cache.SetSessionAccountIDIfAbsent(ctx, group, key, 1, time.Hour)
 	require.NoError(t, err)
 	require.True(t, created)
-	ok, err := cache.CommitSessionBinding(ctx, group, key, old, 2, time.Hour)
+	ok, err := cache.CommitSessionBinding(ctx, group, key, old, 2, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.False(t, ok)
+	require.Equal(t, service.BindingChanged, ok.Status)
 }
 
 func TestSessionAvoidNeverShortensExistingFailureMemory(t *testing.T) {
@@ -127,9 +135,9 @@ func TestStickyBindingGenerationAdoptsExistingScalar(t *testing.T) {
 	require.EqualValues(t, 101, expected.AccountID)
 	require.NotEmpty(t, expected.Generation)
 	require.Equal(t, "101", client.Get(ctx, buildSessionKey(7, session)).Val(), "scalar owner format remains readable")
-	changed, err := cache.CommitSessionBinding(ctx, 7, session, expected, 102, time.Minute)
+	changed, err := cache.CommitSessionBinding(ctx, 7, session, expected, 102, time.Minute, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.True(t, changed)
+	require.Equal(t, service.BindingCommitted, changed.Status)
 }
 
 func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
@@ -154,18 +162,18 @@ func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
 	require.NoError(t, one.SetSessionAccountID(ctx, group, key, 100, time.Hour))
 	expected, err := one.GetSessionBinding(ctx, group, key)
 	require.NoError(t, err)
-	changed, err := two.CommitSessionBinding(ctx, group, key, expected, 101, time.Hour)
+	changed, err := two.CommitSessionBinding(ctx, group, key, expected, 101, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.True(t, changed)
+	require.Equal(t, service.BindingCommitted, changed.Status)
 	recorded, err := one.RecordSessionBindingFailure(ctx, group, key, session, expected, 101, 2*time.Minute)
 	require.NoError(t, err)
-	require.False(t, recorded, "an older failure cannot avoid a newly successful binding")
+	require.Zero(t, recorded, "an older failure cannot avoid a newly successful binding")
 	require.Zero(t, first.Exists(ctx, avoidKey, writtenKey).Val())
 	latest, err := two.GetSessionBinding(ctx, group, key)
 	require.NoError(t, err)
 	recorded, err = two.RecordSessionBindingFailure(ctx, group, key, session, latest, 102, 2*time.Minute)
 	require.NoError(t, err)
-	require.True(t, recorded)
+	require.Positive(t, recorded)
 	avoided, err := NewResilienceStore(first).SessionAvoid(ctx, group, session)
 	require.NoError(t, err)
 	require.Contains(t, avoided, int64(102))
@@ -184,7 +192,7 @@ func TestStickyFirstBindingCannotOverwriteConcurrentSuccess(t *testing.T) {
 	keys := append(sessionBindingKeys(7, key), sessionBindingKeys(7, legacy)...)
 	t.Cleanup(func() { _ = one.Del(ctx, keys...).Err(); _ = one.Close(); _ = two.Close() })
 	first, second := &gatewayCache{rdb: one}, &gatewayCache{rdb: two}
-	var changed [2]bool
+	var changed [2]service.BindingCommitResult
 	var errs [2]error
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -193,17 +201,17 @@ func TestStickyFirstBindingCannotOverwriteConcurrentSuccess(t *testing.T) {
 		go func(i int, cache *gatewayCache) {
 			defer wg.Done()
 			<-start
-			changed[i], errs[i] = cache.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{}, int64(i+1), time.Hour)
+			changed[i], errs[i] = cache.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{}, int64(i+1), time.Hour, service.BindingCommitOptions{})
 		}(i, cache)
 	}
 	close(start)
 	wg.Wait()
 	require.NoError(t, errs[0])
 	require.NoError(t, errs[1])
-	require.NotEqual(t, changed[0], changed[1], "the first successful delivery establishes one owner")
+	require.ElementsMatch(t, []service.BindingCommitStatus{service.BindingCommitted, service.BindingChanged}, []service.BindingCommitStatus{changed[0].Status, changed[1].Status}, "the first successful delivery establishes one owner")
 	require.NoError(t, first.DeleteSessionAccountID(ctx, 7, key))
 	require.NoError(t, second.SetSessionAccountID(ctx, 7, legacy, 10, time.Hour))
-	ok, err := first.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{LegacyKey: legacy}, 1, time.Hour)
+	ok, err := first.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{LegacyKey: legacy}, 1, time.Hour, service.BindingCommitOptions{})
 	require.NoError(t, err)
-	require.False(t, ok, "a newly discovered legacy owner also prevents first-binding replacement")
+	require.Equal(t, service.BindingChanged, ok.Status, "a newly discovered legacy owner also prevents first-binding replacement")
 }

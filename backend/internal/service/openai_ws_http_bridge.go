@@ -437,7 +437,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	// The ingress loop resolves the encrypted-chain guard before rebuilding the
 	// HTTP payload. Use that turn context rather than reclassifying the replay.
-	responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
@@ -535,7 +534,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		actualModel = canonicalOpenAIAccountSchedulingModel(account, originalModel)
 	}
 	SetOpsUpstreamModel(c, actualModel)
-	responseModelObserver = s.qualityObserver(ctx, account, actualModel)
+	responseModelObserver := s.qualityObserver(ctx, account, actualModel)
+	s.bindOpenAITierRefusal(ctx, responseModelObserver, account, actualModel, gjson.GetBytes(body, "service_tier").String(), APIProtocolResponses)
+	defer responseModelObserver.finishTierRefusal()
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -670,6 +671,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamResponseModel:         responseModelObserver.Model(),
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
+			ResponseTierEvidence:          append([]string(nil), responseModelObserver.tierEvidence...),
+			ResponseTierConflict:          responseModelObserver.terminalTierConflict || responseModelObserver.terminalTier == "" && responseModelObserver.firstTierConflict,
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(body)),
 			ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIWSLegacyReasoningEffort(body, mappedModel, originalModel), body, mappedModel),
 			RequestedReasoningEffort:      CanonicalRequestedReasoningEffort(body, originalModel, mappedModel),

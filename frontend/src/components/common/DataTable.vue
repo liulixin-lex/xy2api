@@ -1,157 +1,17 @@
 <template>
-  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
-    <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
-         column (and the select column before it), and at its right any column marked `cardHeadEnd`; the other columns
-         follow as label-over-value pairs in two columns, the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
-         column's cell, by its key, the way the table does. -->
-    <template v-if="showSkeleton">
-      <div v-for="i in 5" :key="i" class="table-card">
-        <div class="table-card__head">
-          <div class="h-4 w-40 animate-pulse rounded bg-surface-pill"></div>
-        </div>
-        <div class="table-card__fields">
-          <div v-for="column in cardFields" :key="column.key" class="table-card__field">
-            <div class="h-3 w-16 animate-pulse rounded bg-surface-pill"></div>
-            <div class="h-4 w-24 animate-pulse rounded bg-surface-pill"></div>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <template v-else-if="!data || data.length === 0">
-      <div class="table-cards__full rounded-lg border border-line-strong bg-surface p-12 text-center">
-        <slot name="empty">
-          <div class="flex flex-col items-center">
-            <Icon
-              name="inbox"
-              size="xl"
-              class="mb-4 h-12 w-12 text-fg-muted"
-            />
-            <p class="text-lg font-medium text-fg-primary">
-              {{ t('empty.noData') }}
-            </p>
-          </div>
-        </slot>
-      </div>
-    </template>
-
-    <template v-else>
-      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="table-cards__full flex flex-wrap items-center justify-end gap-2 px-1">
-        <!-- 手机端没有表头，排序放到卡片上方 -->
-        <div v-if="mobileSortColumns.length || pageSorts.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
-          <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-fg-secondary">
-            {{ t('common.sortBy') }}
-          </label>
-          <select
-            :id="mobileSortSelectId"
-            class="input h-9 min-w-0 max-w-[11rem] py-1 text-sm"
-            :value="pageSort?.key || sortKey"
-            data-test="mobile-sort-key"
-            @change="onMobileSortChange(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-if="!sortKey && !pageSort" value="" disabled>{{ t('common.sortPlaceholder') }}</option>
-            <option v-for="column in mobileSortColumns" :key="column.key" :value="column.key">{{ column.label }}</option>
-            <option v-for="option in pageSorts" :key="option.key" :value="option.key">{{ option.label }}</option>
-          </select>
-          <button
-            v-if="pageSort || sortKey"
-            type="button"
-            class="table-cards__sort-order btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
-            :aria-label="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
-            :title="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
-            data-test="mobile-sort-order"
-            @click="pageSort ? choosePageSort(pageSort.key) : handleSort(sortKey)"
-          >
-            <Icon :name="mobileSortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
-          </button>
-        </div>
-        <slot name="mobile-sort-extra" />
-        <label v-if="selectable" class="flex items-center gap-2 text-sm font-medium text-fg-secondary">
-          <input
-            type="checkbox"
-            class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-            :checked="allVisibleSelected"
-            :indeterminate="someVisibleSelected"
-            :disabled="visibleRowKeys.length === 0"
-            data-test="select-all-mobile"
-            @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
-          />
-          <span>{{ t('common.selectAll') }}</span>
-        </label>
-      </div>
-      <div
-        v-for="(row, index) in sortedData"
-        :key="resolveRowKey(row, index)"
-        class="table-card"
-        :class="[
-          { 'is-selected': selectable && isRowSelected(row, index), 'cursor-pointer': clickableRows },
-          rowClass?.(row, index)
-        ]"
-        @click="clickableRows && emit('rowClick', row)"
-      >
-        <slot v-if="$slots.card" name="card" :row="row" :index="index" :cell="CardCell" />
-        <template v-else>
-          <div class="table-card__head">
-            <input
-              v-if="selectable"
-              type="checkbox"
-              class="mt-0.5 h-4 w-4 flex-none rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-              :checked="isRowSelected(row, index)"
-              :disabled="!isRowSelectable(row)"
-              :aria-label="getRowSelectionLabel(row, index)"
-              data-test="select-row"
-              @click.stop
-              @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
-            />
-            <div
-              v-for="column in cardHead"
-              :key="column.key"
-              :data-field="column.key"
-              class="table-card__title"
-              :class="{ 'table-card__title--select': column.key === 'select' }"
-            >
-              <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
-                {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
-              </slot>
-            </div>
-            <div v-for="column in cardHeadEnd" :key="column.key" :data-field="column.key" class="table-card__end">
-              <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
-                {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
-              </slot>
-            </div>
-          </div>
-          <dl v-if="cardFields.length" class="table-card__fields">
-            <div v-for="column in cardFields" :key="column.key" :data-field="column.key" class="table-card__field" :class="{ 'col-span-full': column.cardFullRow }">
-              <dt class="table-card__label">{{ column.label }}</dt>
-              <dd class="table-card__value">
-                <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
-                  {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
-                </slot>
-              </dd>
-            </div>
-          </dl>
-          <div v-if="hasActionsColumn" class="table-card__foot">
-            <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
-          </div>
-        </template>
-      </div>
-    </template>
-
-    <!-- Reload with rows on screen: a thin bar on the top edge of the list; it takes no layout space and the cards stay
-         usable. Last in the list, so nothing before the first card changes when it comes and goes. -->
-    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
-      <div class="table-progress__bar"></div>
-    </div>
-  </div>
-
   <div
-    v-else
     ref="tableWrapperRef"
-    class="table-wrapper"
+    class="table-wrapper dt-layout-table"
     :class="{
       'actions-expanded': actionsExpanded,
-      'is-scrollable': isScrollable
+      'is-scrollable': isScrollable,
+      'dt-builtin-select': selectable
     }"
+    :style="freezePadding"
+    :tabindex="scrollLabel && isScrollable ? 0 : undefined"
+    :role="scrollLabel ? 'region' : undefined"
+    :aria-label="scrollLabel || undefined"
+    @focusin="revealFocused"
     :aria-busy="loading ? 'true' : undefined"
   >
     <!-- Reload with rows on screen: a thin bar on the top edge of the table; it takes no layout space. -->
@@ -165,18 +25,20 @@
             v-if="selectable && rowIndex === 0"
             scope="col"
             :rowspan="headerRows.length"
-            class="sticky-header-cell w-11 min-w-11 px-3 py-3 text-center"
+            :class="['dt-select sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
           >
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              :indeterminate="someVisibleSelected"
-              :disabled="visibleRowKeys.length === 0"
-              :aria-label="t('common.selectAll')"
-              data-test="select-all"
-              @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
-            />
+            <label class="dt-check">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
+                :checked="allVisibleSelected"
+                :indeterminate="someVisibleSelected"
+                :disabled="visibleRowKeys.length === 0"
+                :aria-label="t('common.selectAll')"
+                data-test="select-all"
+                @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
+              />
+            </label>
           </th>
           <template v-for="cell in headerRow" :key="cell.key">
             <th
@@ -203,7 +65,15 @@
               ]"
               @click="cell.column.sortable && handleSort(cell.column.key)"
             >
-              <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(cell.column)]">
+              <!-- A sortable header is a button across its whole cell (mobile list plan): a click anywhere on the cell, or
+                   Enter / Space on the focused button, sorts; the th keeps scope and aria-sort. -->
+              <component
+                :is="cell.column.sortable ? 'button' : 'div'"
+                :type="cell.column.sortable ? 'button' : undefined"
+                :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(cell.column), { 'dt-sort': cell.column.sortable }]"
+                :data-test="cell.column.sortable ? `sort-${cell.column.key}` : undefined"
+                @click.stop="cell.column.sortable && handleSort(cell.column.key)"
+              >
                 <slot
                   :name="`header-${cell.column.key}`"
                   :column="cell.column"
@@ -235,7 +105,7 @@
                     <path d="M5 8L1.5 3.5h7L5 8z" />
                   </svg>
                 </span>
-              </div>
+              </component>
             </th>
           </template>
         </tr>
@@ -243,7 +113,7 @@
       <tbody class="table-body bg-surface">
         <!-- Loading skeleton: only while there is nothing to show yet -->
         <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
-          <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
+          <td v-if="selectable" :class="['dt-select w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-surface-pill"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
@@ -291,6 +161,7 @@
             :index="item.index"
             :columns="columns"
             :sticky-classes="stickyColumnClasses"
+            :select-class="builtinSelectStickyClass"
             :padding-class="adaptivePaddingClass"
             :selectable="selectable"
             :selected="selectable && isRowSelected(item.row, item.index)"
@@ -315,32 +186,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, useSlots, type ComponentPublicInstance, type FunctionalComponent } from 'vue'
+import { computed, inject, ref, onMounted, onUnmounted, watch, nextTick, type ComponentPublicInstance } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
 import DataTableRow from './DataTableRow'
+import { TABLE_REGION_KEY } from '@/components/layout/tableRegion'
 
 const { t } = useI18n()
-
-// Cards below 1024px, as the shared page layout and the changes pill switch there too (spec 8.6, prototype).
-const desktopViewportQuery = '(min-width: 1024px)'
-const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
-)
 
 const emit = defineEmits<{
   sort: [key: string, order: 'asc' | 'desc']
   rowClick: [row: any]
   'update:selectedKeys': [keys: Array<string | number>]
   selectionChange: [keys: Array<string | number>]
-  pageSort: [key: string]
 }>()
 
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
-const mobileRootRef = ref<HTMLElement | null>(null)
 const isScrollable = ref(false)
 const actionsColumnNeedsExpanding = ref(false)
 
@@ -365,10 +229,63 @@ const observeElementRectNonZero = (
   if (rect.height > 0) cb(rect)
 })
 
+/**
+ * What the frozen parts cover of the scroll area: the left frozen columns, the right one and the sticky header. The
+ * wrapper's scroll padding keeps them out of the area a focused cell is scrolled into, so keyboard focus never sits
+ * under a frozen column or the header (mobile list plan; Astra review #3).
+ */
+const freezeInsets = ref({ left: 0, right: 0, top: 0 })
+const freezePadding = computed(() => ({
+  scrollPaddingLeft: `${freezeInsets.value.left}px`,
+  scrollPaddingRight: `${freezeInsets.value.right}px`,
+  scrollPaddingTop: `${freezeInsets.value.top}px`
+}))
+const measureFreeze = (wrapper: HTMLElement) => {
+  const firstRow = wrapper.querySelector<HTMLElement>(':scope > table > thead > tr')
+  const width = (el: Element) => el.getBoundingClientRect().width
+  const left = Array.from(firstRow?.querySelectorAll('.sticky-col-left, .sticky-col-left-first, .sticky-col-left-second') ?? []).reduce((sum, th) => sum + width(th), 0)
+  const rightCell = firstRow?.querySelector('.sticky-col-right')
+  // A phone's touch strip on the frozen right column's left (below) covers 8px more.
+  const strip = rightCell ? getComputedStyle(rightCell, '::before') : null
+  const stripWidth = strip && strip.content !== 'none' && strip.position === 'absolute' ? parseFloat(strip.width) || 0 : 0
+  const next = {
+    left: Math.round(left),
+    right: Math.round(rightCell ? width(rightCell) + stripWidth : 0),
+    top: Math.round(wrapper.querySelector<HTMLElement>(':scope > table > thead')?.getBoundingClientRect().height ?? 0)
+  }
+  const now = freezeInsets.value
+  if (now.left !== next.left || now.right !== next.right || now.top !== next.top) freezeInsets.value = next
+}
+
+/**
+ * Keyboard focus on a control in an unfrozen cell: when the browser's own scroll leaves part of it under a frozen
+ * column or the header, the wrapper scrolls by the rest, so the ring and the control are whole in view.
+ */
+const REVEAL_GAP = 4
+function revealFocused(event: FocusEvent) {
+  const wrapper = tableWrapperRef.value
+  const target = event.target
+  if (!wrapper || !(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
+  const cell = target.closest('td, th')
+  if (!cell || cell.classList.contains('sticky-col') || cell.classList.contains('sticky-header-cell')) return
+  const box = wrapper.getBoundingClientRect()
+  const rect = target.getBoundingClientRect()
+  const insets = freezeInsets.value
+  const left = box.left + insets.left
+  const right = box.left + wrapper.clientWidth - insets.right
+  if (rect.left < left) wrapper.scrollLeft -= left - rect.left + REVEAL_GAP
+  else if (rect.right > right) wrapper.scrollLeft += Math.min(rect.right - right + REVEAL_GAP, rect.left - left)
+  const top = box.top + insets.top
+  const bottom = box.top + wrapper.clientHeight
+  if (rect.top < top) wrapper.scrollTop -= top - rect.top + REVEAL_GAP
+  else if (rect.bottom > bottom) wrapper.scrollTop += rect.bottom - bottom + REVEAL_GAP
+}
+
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    measureFreeze(tableWrapperRef.value)
   }
 }
 
@@ -426,10 +343,8 @@ const checkActionsColumnWidth = () => {
 // 监听尺寸变化
 let resizeObserver: ResizeObserver | null = null
 let resizeHandler: (() => void) | null = null
-let desktopViewportMediaQuery: MediaQueryList | null = null
-let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
 
-const detachDesktopTableTracking = () => {
+const detachTableTracking = () => {
   resizeObserver?.disconnect()
   resizeObserver = null
   if (resizeHandler) {
@@ -438,61 +353,58 @@ const detachDesktopTableTracking = () => {
   }
 }
 
-const attachDesktopTableTracking = () => {
+/**
+ * The sticky header's own height (both rows of a grouped header) as --table-head-h on the scroll box, which keeps
+ * that much at its top out of reach of focus scrolling and scrollIntoView (scroll-padding-top). Read when the header
+ * resizes, never per frame.
+ */
+const measureHead = () => {
+  const wrapper = tableWrapperRef.value
+  const head = wrapper?.querySelector<HTMLElement>(':scope > table > thead')
+  if (wrapper && head) wrapper.style.setProperty('--table-head-h', `${head.getBoundingClientRect().height}px`)
+}
+
+const attachTableTracking = () => {
   checkScrollable()
   checkActionsColumnWidth()
+  measureHead()
   if (tableWrapperRef.value && typeof ResizeObserver !== 'undefined') {
     const wrapper = tableWrapperRef.value
+    const head = wrapper.querySelector(':scope > table > thead')
     resizeObserver = new ResizeObserver((entries) => {
       checkScrollable()
       // Only the wrapper's own size changes the room of the actions column; a change of the table alone just
       // re-checks the sideways scroll (spec 7g-4).
       if (entries.some((entry) => entry.target === wrapper)) checkActionsColumnWidth()
+      if (head && entries.some((entry) => entry.target === head)) measureHead()
     })
     resizeObserver.observe(wrapper)
     // The table too: a page may narrow its columns after the wrapper's resize (the accounts page recomputes its column
     // widths from the new width), and only the table's own size change tells that it no longer scrolls sideways.
     const table = wrapper.querySelector(':scope > table')
     if (table) resizeObserver.observe(table)
+    if (head) resizeObserver.observe(head)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {
       checkScrollable()
       checkActionsColumnWidth()
+      measureHead()
     }
     window.addEventListener('resize', resizeHandler)
   }
 }
 
-onMounted(() => {
-  if (typeof window !== 'undefined') {
-    desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
-    isDesktopViewport.value = desktopViewportMediaQuery.matches
-    desktopViewportListener = (event: MediaQueryListEvent) => {
-      isDesktopViewport.value = event.matches
-    }
-    if (typeof desktopViewportMediaQuery.addEventListener === 'function') {
-      desktopViewportMediaQuery.addEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.addListener(desktopViewportListener)
-    }
-  }
-})
-
 onUnmounted(() => {
-  detachDesktopTableTracking()
-  if (desktopViewportMediaQuery && desktopViewportListener) {
-    if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
-      desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.removeListener(desktopViewportListener)
-    }
-    desktopViewportListener = null
-  }
-  desktopViewportMediaQuery = null
+  detachTableTracking()
 })
 
 interface Props {
+  /**
+   * The table's name for a screen reader (mobile list plan): the scroll area is a named region, and while it scrolls
+   * sideways it takes keyboard focus, so the arrow keys can scroll it.
+   */
+  scrollLabel?: string
   columns: Column[]
   data: any[]
   loading?: boolean
@@ -507,6 +419,12 @@ interface Props {
   defaultSortKey?: string
   defaultSortOrder?: 'asc' | 'desc'
   /**
+   * The page's own sort (server-side sorting, mobile list plan): the headers show it and the table keeps no sort of its
+   * own, so hiding the sorted column (another width's columns) changes no request, no stored preference and no other
+   * header; the column shows its arrow again when it is back. A header click still emits `sort` and stores the choice.
+   */
+  sort?: { key: string; order: 'asc' | 'desc' } | null
+  /**
    * Persist sort state (key + order) to localStorage using this key.
    * If provided, DataTable will load the stored sort state on mount.
    */
@@ -516,7 +434,7 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
-  /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
+  /** Emit 'rowClick' on a row click and show pointer cursor (interactive cells should @click.stop) */
   clickableRows?: boolean
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
@@ -534,18 +452,11 @@ interface Props {
   rowSelectable?: (row: any) => boolean
   /** Selected row keys. Keys outside the current data page are preserved. */
   selectedKeys?: Array<string | number>
-  /**
-   * Sorts the parent applies to the current page only. They are offered in the mobile sort bar next to the column
-   * sorts; choosing one emits `pageSort` with its key (the parent cycles the order), choosing a column emits `pageSort`
-   * with '' first.
-   */
-  pageSorts?: Array<{ key: string; label: string }>
-  pageSort?: { key: string; order: 'asc' | 'desc' } | null
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
   /**
-   * Extra classes for a desktop row and a mobile card (for example dimming a row that is transitioning or no longer
-   * matches the filter). A desktop row calls it in its own render, so only rows whose answer changes re-render. Pass a
+   * Extra classes for a row (for example dimming a row that is transitioning or no longer matches the filter). A row
+   * calls it in its own render, so only rows whose answer changes re-render. Pass a
    * stable function defined once in setup: an inline arrow in the template is a new function on every render of the
    * parent and re-renders every row.
    */
@@ -553,6 +464,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  sort: undefined,
   loading: false,
   stickyFirstColumn: true,
   stickyActionsColumn: true,
@@ -560,10 +472,15 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   serverSideSort: false,
   selectable: false,
-  selectedKeys: () => [],
-  pageSorts: () => [],
-  pageSort: null
+  selectedKeys: () => []
 })
+
+/**
+ * Where rows may be windowed: only inside a bounded table region, at every width (TablePageLayout's one decision,
+ * useTableRegion); a table outside it, or while the page scrolls, renders every row.
+ */
+const tableRegion = inject(TABLE_REGION_KEY, null)
+const windowedHere = computed(() => tableRegion?.value === true)
 
 // A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
 // skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
@@ -721,40 +638,6 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
-const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
-const slots = useSlots()
-/**
- * One column's cell for a row as the table draws it (its #cell-<key> slot, else the value), the column named by its
- * key: for a page's own card, `<component :is="cell" column="usage" :row="row" />`.
- */
-const CardCell: FunctionalComponent<{ column: string; row: any }> = ({ column: key, row }) => {
-  const column = props.columns.find((item) => item.key === key)!
-  const slot = slots[`cell-${column.key}`]
-  if (slot) return slot({ row, value: row[column.key], expanded: actionsExpanded.value })
-  return String((column.formatter ? column.formatter(row[column.key], row) : row[column.key]) ?? '')
-}
-CardCell.props = ['column', 'row']
-/** A card's head: the leading column, with the page's own select column before it when it has one. */
-const cardHead = computed(() => dataColumns.value.slice(0, hasSelectColumn.value ? 2 : 1))
-const cardHeadEnd = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => column.cardHeadEnd))
-const cardFields = computed(() => dataColumns.value.slice(cardHead.value.length).filter((column) => !column.cardHeadEnd))
-const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
-const mobileSortSelectId = `data-table-sort-${useId()}`
-// A sort picked here is the table's own sort change: back to the first row (the parent re-orders its page).
-const choosePageSort = (key: string) => {
-  scrollToTop()
-  emit('pageSort', key)
-}
-const onMobileSortChange = (key: string) => {
-  if (props.pageSorts.some((option) => option.key === key)) {
-    choosePageSort(key)
-    return
-  }
-  if (props.pageSort) emit('pageSort', '')
-  if (key && key !== sortKey.value) handleSort(key)
-}
-const mobileSortOrder = computed(() => props.pageSort?.order ?? sortOrder.value)
-
 // Header rows: one row, or two when some columns share a group header (the group cell spans them, other columns
 // span both rows).
 type HeaderCell =
@@ -784,16 +667,8 @@ const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
 
-watch(
-  isDesktopViewport,
-  async (isDesktop) => {
-    detachDesktopTableTracking()
-    if (!isDesktop) return
-    await nextTick()
-    attachDesktopTableTracking()
-  },
-  { immediate: true, flush: 'post' }
-)
+// The table's size tracking (sideways scroll, the actions column's room), from its first render.
+onMounted(attachTableTracking)
 
 // 数据/列变化时重新检查滚动状态
 // 注意：不能监听 actionsExpanded，因为 checkActionsColumnWidth 会临时修改它，会导致无限循环
@@ -820,6 +695,15 @@ const handleSort = (key: string) => {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
   }
 
+  // A page that owns the sort only hears the choice: the arrows and aria-sort follow the sort it passes back, and the
+  // choice is stored once it does (it may wait, or refuse).
+  if (pageOwnsSort.value) {
+    requestedSort = { key, order: newOrder }
+    emit('sort', key, newOrder)
+    return
+  }
+  // A header click is the user's choice: the one place the sort is stored.
+  writePersistedSortState({ key, order: newOrder })
   if (props.serverSideSort) {
     // Server-side sort mode: emit event and update internal state for UI feedback
     sortKey.value = key
@@ -899,10 +783,10 @@ const toggleAllVisible = (checked: boolean) => {
 }
 
 // --- Virtual scrolling ---
-// 是否启用虚拟化:仅桌面端且行数超过阈值时开启。小列表全量渲染,彻底绕开虚拟器的
+// 是否启用虚拟化:仅在有界表格区内且行数超过阈值时开启。小列表全量渲染,彻底绕开虚拟器的
 // 估算/测量/滚动补偿链路,消除可变行高导致的滚动抖动。
 const shouldVirtualize = computed(() =>
-  isDesktopViewport.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
+  windowedHere.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
 )
 
 // 行高只取 ResizeObserver 给出的 borderBoxSize。默认实现在 ref 回调里同步读 offsetHeight,
@@ -1019,7 +903,7 @@ function scrollToTop() {
     if (shouldVirtualize.value) rowVirtualizer.value.scrollToOffset(0)
     wrapper.scrollTop = 0
   }
-  const list = wrapper ?? mobileRootRef.value
+  const list = wrapper
   if (!list) return
   const view = viewOf(list)
   const delta = list.getBoundingClientRect().top - view.top()
@@ -1035,7 +919,7 @@ function scrollToTop() {
 function isAtTop() {
   const wrapper = tableWrapperRef.value
   if (wrapper && wrapper.scrollTop > 0) return false
-  const list = wrapper ?? mobileRootRef.value
+  const list = wrapper
   if (!list) return true
   return list.getBoundingClientRect().top >= viewOf(list).top() - 1 // a scroll that stopped on a fraction still counts
 }
@@ -1074,22 +958,25 @@ const renderRows = computed<Array<{ index: number; row: any; measure: boolean }>
   return data.map((row, index) => ({ index, row, measure: false }))
 })
 
-const hasActionsColumn = computed(() => {
-  return props.columns.some(column => column.key === 'actions')
-})
 
 const hasSelectColumn = computed(() => {
   return props.columns.length > 0 && props.columns[0].key === 'select'
 })
 
 // 生成固定列的 CSS 类
+/** The table layout freezes the built-in check box column with the first column (the explicit select column already is). */
+const freezesBuiltinSelect = computed(() => props.selectable && props.stickyFirstColumn)
+const builtinSelectStickyClass = computed(() => (freezesBuiltinSelect.value ? 'sticky-col sticky-col-left-first' : ''))
+
 const getStickyColumnClass = (column: Column, index: number) => {
   const classes: string[] = []
 
   if (props.stickyFirstColumn) {
     // 如果第一列是勾选列，固定前两列（勾选+名称）
-    if (hasSelectColumn.value) {
-      if (index === 0) {
+    if (hasSelectColumn.value || freezesBuiltinSelect.value) {
+      if (freezesBuiltinSelect.value) {
+        if (index === 0) classes.push('sticky-col sticky-col-left-second')
+      } else if (index === 0) {
         classes.push('sticky-col sticky-col-left-first')
       } else if (index === 1) {
         classes.push('sticky-col sticky-col-left-second')
@@ -1130,18 +1017,36 @@ const getAdaptivePaddingClass = () => {
 const adaptivePaddingClass = computed(() => getAdaptivePaddingClass())
 const stickyColumnClasses = computed(() => props.columns.map((column, index) => getStickyColumnClass(column, index)))
 
-// Init + keep persisted sort state consistent with current columns
-const didInitSort = ref(false)
+// Init + keep the sort consistent with the current columns (a sort the table owns)
+/** The page owns the sort: the headers follow it, whatever columns are shown. */
+const pageOwnsSort = computed(() => props.sort !== undefined)
+/** The header click a page that owns the sort has not answered yet: stored when the page's sort becomes it. */
+let requestedSort: PersistedSortState | null = null
+// Watched by value (key and order): a page that renders again with an equal new object neither changes the headers
+// nor drops a click still waiting for its answer (Astra second re-review #2). No `sort` (the table's own) and `null`
+// (the page's, with no order) are two values, so a page taking over with no order clears the arrow (third re-review).
+watch(
+  () => (props.sort === undefined ? '\u0001' : props.sort ? `${props.sort.key}\u0000${props.sort.order}` : ''),
+  () => {
+    if (!pageOwnsSort.value) return
+    const sort = props.sort
+    sortKey.value = sort?.key ?? ''
+    sortOrder.value = sort?.order ?? 'asc'
+    if (requestedSort && sort?.key === requestedSort.key && sort.order === requestedSort.order) writePersistedSortState(requestedSort)
+    requestedSort = null
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
-  const initial = resolveInitialSortState()
-  applySortState(initial)
-  didInitSort.value = true
+  if (!pageOwnsSort.value) applySortState(resolveInitialSortState())
 })
 
 watch(
   columnsSignature,
   () => {
+    // A column shown or hidden changes nothing in a sort the page owns (only whether its header shows the arrow).
+    if (pageOwnsSort.value) return
     // If current sort key is no longer sortable/visible, fall back to default/persisted.
     const normalized = normalizeSortKey(sortKey.value)
     if (!sortKey.value) {
@@ -1163,18 +1068,6 @@ watch(
   { flush: 'post' }
 )
 
-watch(
-  [sortKey, sortOrder],
-  ([nextKey, nextOrder]) => {
-    if (!didInitSort.value) return
-    if (!props.sortStorageKey) return
-    const key = normalizeSortKey(nextKey)
-    if (!key) return
-    writePersistedSortState({ key, order: normalizeSortOrder(nextOrder) })
-  },
-  { flush: 'post' }
-)
-
 defineExpose({
   scrollToTop,
   isAtTop,
@@ -1187,9 +1080,13 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 表格横向滚动 */
+@reference "../../style.css";
+
+/* 表格横向滚动。scroll-padding-top 让出吸顶表头（--table-head-h：表头实测高度，分组表头为两行之和，未测到前用
+   40px）：聚焦滚动和 scrollIntoView 不把行停在表头下面 */
 .table-wrapper {
   scroll-margin-top: var(--table-sticky-top, 4rem);
+  scroll-padding-top: var(--table-head-h, var(--header-height, 40px));
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
   overflow-x: auto;
@@ -1294,8 +1191,124 @@ defineExpose({
 .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 var(--color-line-strong);
 }
-/* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout
-   space and needs no script; on the cards it sits on the list's top edge and does not follow the page scroll. */
+/* The scroll area itself takes keyboard focus while it scrolls sideways (scrollLabel): its ring is drawn inside. */
+.table-wrapper:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
+/* ---- The table layout (mobile list plan) ---- */
+/* The built-in check box column is exactly 44px, its border box whatever padding the page gives cells (TablePageLayout
+   has 20px): the first column freezes right after it, at --select-col-width, the two meeting without overlap. The
+   check box sits in a label as big as the cell. */
+.table-wrapper.dt-builtin-select {
+  --select-col-width: 44px;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-select) {
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-check) {
+  display: flex;
+  width: 44px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+/* A sortable header is one button across its cell: the button keeps the header's look, its ::after takes the whole
+   cell (the th is sticky, so positioned), and keyboard focus rings the cell. */
+.dt-sort {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.dt-sort::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+.dt-sort:focus {
+  outline: none;
+}
+.dt-sort:focus-visible::after {
+  border-radius: var(--radius-sm);
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
+/* Phones: the cells sit 12px from their edges whatever the column count; the frozen identity column (the first one,
+   after any check box) is clamp(120px, 36vw, 160px) wide and cuts its lines with "…"; the frozen actions column is a
+   44px square for the row's "⋯". */
+@media (max-width: 767px) {
+  .dt-layout-table {
+    --table-identity-width: clamp(120px, 36vw, 160px);
+  }
+  .dt-layout-table :deep(th),
+  .dt-layout-table :deep(td) {
+    padding-inline: 12px;
+  }
+  .dt-layout-table :deep(.sticky-col-left),
+  .dt-layout-table :deep(.sticky-col-left-second) {
+    width: var(--table-identity-width);
+    min-width: var(--table-identity-width);
+    max-width: var(--table-identity-width);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dt-layout-table :deep(.sticky-col-right) {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    padding-inline: 0;
+    text-align: center;
+  }
+}
+/* Touch on a phone: the frozen right column starts with an 8px opaque strip that takes a tap, so a control scrolled
+   half under it (an account's scheduling switch) stays 8px clear of "⋯" and a tap beside "⋯" cannot reach it
+   (step 2 acceptance, plan item 17). The strip carries the column's edge line. */
+@media (max-width: 767px) and (pointer: coarse) {
+  .dt-layout-table :deep(.sticky-col-right)::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -8px;
+    width: 8px;
+    background: inherit;
+    content: '';
+  }
+  .is-scrollable :deep(.sticky-col-right) {
+    box-shadow: none;
+  }
+  .is-scrollable :deep(.sticky-col-right)::before {
+    box-shadow: inset 1px 0 0 var(--color-line-strong);
+  }
+}
+/* Touch (pointer: coarse): rows at least 48px, the header 40px, a check box's hit area 40px (the box itself keeps
+   its size); layout still follows the width. */
+@media (pointer: coarse) {
+  .dt-layout-table :deep(tbody td) {
+    height: 48px;
+  }
+  .dt-layout-table .sticky-header-cell {
+    height: 40px;
+  }
+  /* The built-in check boxes' labels: 48px high in the body, 40px in the header. */
+  .table-wrapper.dt-builtin-select :deep(tbody .dt-check) {
+    min-height: 48px;
+  }
+}
+/* Reload progress: a 2px bar on the top edge of the table in the primary colour. It never takes layout space and
+   needs no script. */
 .table-progress {
   position: absolute;
   top: 0;
@@ -1305,103 +1318,14 @@ defineExpose({
   overflow: hidden;
   height: 2px;
 }
-/* Desktop: the wrapper is the scroll container at 1024px and up; sticky keeps the bar on the visible top edge and
-   across the visible width after scrolling either way. Its negative margin cancels its height. */
+/* Sticky keeps the bar on the visible top edge and across the visible width after scrolling either way. Its negative
+   margin cancels its height. */
 .table-progress--table {
   position: sticky;
   top: 0;
   left: 0;
   margin-bottom: -2px;
   z-index: 230; /* above the sticky header cells */
-}
-/* The page header the document scrolls under (--table-sticky-top, 4rem by default): scrollToTop() stops below it. */
-.table-cards {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-  scroll-margin-top: var(--table-sticky-top, 4rem);
-}
-@media (min-width: 768px) {
-  .table-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-.table-cards__full {
-  grid-column: 1 / -1;
-}
-.table-card {
-  min-width: 0;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-surface);
-}
-.table-card.is-selected {
-  border-color: theme('colors.primary.400');
-  background: var(--color-bg-selected);
-}
-.table-card__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 16px;
-}
-.table-card__title {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--color-text-primary);
-}
-/* A page's own select column takes only its own width, the leading column right after it: the head does not split in
-   two (a utility class would lose to the rule above). */
-.table-card__title--select {
-  flex: none;
-}
-.table-card__end {
-  flex: none;
-  max-width: 50%;
-  min-width: 0;
-  color: var(--color-text-primary);
-}
-/* Label over value, two to a row; long text wraps. A value never clips: menus and tips that open from a cell would be
-   cut at its edge (7j-1). */
-.table-card__fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-  margin: 0;
-  padding: 12px 16px;
-  border-top: 1px solid var(--color-line-row);
-}
-.table-card__field {
-  display: grid;
-  min-width: 0;
-  align-content: start;
-  gap: 2px;
-}
-.table-card__label {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-small);
-}
-.table-card__value {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-body);
-}
-.table-card__foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 8px 12px;
-  border-top: 1px solid var(--color-line-row);
-}
-.table-progress--cards {
-  z-index: 10;
-  margin: 0 !important; /* not part of the card stack's spacing */
-  border-radius: 9999px;
 }
 .table-progress__bar {
   height: 100%;
@@ -1420,25 +1344,6 @@ defineExpose({
   }
   to {
     transform: translateX(100%) scaleX(0.35);
-  }
-}
-/* Touch: the sort direction button (36px, 34px inside its border, which an absolute area does not count) reaches 40px
-   each way with an area sized on 40px, its look unchanged (7n-3, 7q-8). The area grows down and to the sides, never
-   up: the button can sit at the top edge of a clipping container (the accounts table), which would cut 2px off it.
-   From the top of the inside of the border it reaches 40px down, 5px past the button into the 8px gap above the first
-   card; sideways 2px past each edge, into the 8px gaps of its row. */
-@media (pointer: coarse) {
-  .table-cards__sort-order {
-    position: relative;
-  }
-  .table-cards__sort-order::after {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    width: max(100%, 40px);
-    height: max(100%, 40px);
-    transform: translateX(-50%);
-    content: '';
   }
 }
 </style>
@@ -1488,6 +1393,25 @@ defineExpose({
 }
 .dark .table-wrapper::-webkit-scrollbar-thumb:hover {
   background-color: rgba(209, 213, 219, 0.9) !important;
+}
+
+/* The corner where the two scrollbars meet takes the table's surface, not the browser's white (both themes). */
+.table-wrapper::-webkit-scrollbar-corner {
+  background-color: var(--color-bg-surface) !important;
+}
+
+/* Touch (mobile list plan): a finger scrolls the table itself, so the bars are 6px hints, not 12px targets. */
+@media (pointer: coarse) {
+  .table-wrapper {
+    scrollbar-width: thin !important;
+  }
+  .table-wrapper::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+  }
+  .table-wrapper::-webkit-scrollbar-thumb {
+    border-width: 1px !important;
+  }
 }
 
 /* 3. 仅给真正的 Firefox 留的后路 */

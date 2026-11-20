@@ -23,21 +23,14 @@ type SchedAdminMark struct {
 	Short bool `json:"short"`
 	Red   bool `json:"red"`
 }
-type SchedAdminAccountSummaryTTFO struct {
-	FirstEventP50Ms  *int `json:"first_event_p50_ms"`
-	FirstOutputP50Ms *int `json:"first_output_p50_ms"`
-	GapP50Ms         *int `json:"gap_p50_ms"`
-	N                int  `json:"n"`
-}
 type SchedAdminAccountSummaryError struct {
 	SchedAdminMark
-	Rate *float64 `json:"rate"`
+	Failed int      `json:"failed"`
+	Rate   *float64 `json:"rate"`
 }
 type SchedAdminAccountSummaryCache struct {
-	Ratio       *float64 `json:"ratio"`
-	Turns       int      `json:"turns"`
-	AllRatio    *float64 `json:"all_ratio"`
-	AllRequests int      `json:"all_requests"`
+	Ratio *float64 `json:"ratio"`
+	Turns int      `json:"turns"`
 }
 type SchedAdminRear struct {
 	GroupID   int64                    `json:"group_id"`
@@ -53,16 +46,18 @@ type SchedAdminTrial struct {
 	Until   string `json:"until"`
 }
 type SchedAdminAccountSummary struct {
-	AccountID   int64                         `json:"account_id"`
-	GroupStatus map[string]string             `json:"group_status"`
-	ResetAt     *string                       `json:"reset_at"`
-	Stop        *SchedAdminStop               `json:"stop"`
-	TTFO        SchedAdminAccountSummaryTTFO  `json:"ttfo"`
-	Error       SchedAdminAccountSummaryError `json:"error"`
-	Cache       SchedAdminAccountSummaryCache `json:"cache"`
-	Rear        []SchedAdminRear              `json:"rear"`
-	Trial       []SchedAdminTrial             `json:"trial"`
-	Exemptions  []SchedAdminExemption         `json:"exemptions"`
+	AccountID   int64                           `json:"account_id"`
+	GroupStatus map[string]string               `json:"group_status"`
+	ResetAt     *string                         `json:"reset_at"`
+	Stop        *SchedAdminStop                 `json:"stop"`
+	RecentSince *string                         `json:"recent_since"`
+	FirstOutput schedquality.FirstOutputSummary `json:"first_output"`
+	Slow10s     schedquality.Slow10sSummary     `json:"slow_10s"`
+	Error       SchedAdminAccountSummaryError   `json:"error"`
+	Cache       SchedAdminAccountSummaryCache   `json:"cache"`
+	Rear        []SchedAdminRear                `json:"rear"`
+	Trial       []SchedAdminTrial               `json:"trial"`
+	Exemptions  []SchedAdminExemption           `json:"exemptions"`
 }
 type SchedAdminAccountDetail struct {
 	Account       SchedAdminAccountDetailAccount      `json:"account"`
@@ -93,13 +88,14 @@ type SchedAdminAccountDetailGroups struct {
 
 // Evidence DTOs deliberately omit assessment internals (verdict and token totals).
 type SchedAdminErrorEvidence struct {
-	Limit     float64 `json:"limit"`
-	Clear     int     `json:"clear"`
-	Failed    int     `json:"failed"`
-	Unknown   int     `json:"unknown"`
-	Padded    int     `json:"padded"`
-	LowerFail float64 `json:"lower_fail"`
-	LowerPass float64 `json:"lower_pass"`
+	RecoveryOverLimit bool    `json:"recovery_over_limit,omitempty"`
+	Limit             float64 `json:"limit"`
+	Clear             int     `json:"clear"`
+	Failed            int     `json:"failed"`
+	Unknown           int     `json:"unknown"`
+	Padded            int     `json:"padded"`
+	LowerFail         float64 `json:"lower_fail"`
+	LowerPass         float64 `json:"lower_pass"`
 }
 type SchedAdminCacheEvidence struct {
 	MinRatio    float64 `json:"min_ratio"`
@@ -108,7 +104,38 @@ type SchedAdminCacheEvidence struct {
 	Sessions    int     `json:"sessions"`
 	LowSessions int     `json:"low_sessions"`
 }
+type SchedAdminLastEval struct {
+	At     string                        `json:"at"`
+	Acted  bool                          `json:"acted"`
+	Action schedquality.Action           `json:"action"`
+	Reason schedquality.AssessmentReason `json:"reason"`
+	Causes []string                      `json:"causes"`
+	Have   *float64                      `json:"have"`
+	Need   *int                          `json:"need"`
+	Since  string                        `json:"since"`
+	Count  int64                         `json:"count"`
+}
+
+// SchedAdminLastEvalFromState returns only the last committed assessment at the
+// line's current watermark. Old rows and mixed-version writes can lack one.
+func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
+	if len(r.LastAssessment) == 0 {
+		return nil
+	}
+	last := r.LastAssessment[len(r.LastAssessment)-1]
+	if !last.MatchesWatermark(r.EvaluatedAt) {
+		return nil
+	}
+	return &SchedAdminLastEval{
+		At: schedAdminStamp(last.LastAt), Since: schedAdminStamp(last.FirstAt), Count: last.Count,
+		Acted: last.Action != "", Action: last.Action, Reason: last.Reason,
+		Causes: last.CauseNames(), Have: last.Have, Need: last.Need,
+	}
+}
+
 type SchedAdminLine[E any] struct {
+	LastEval *SchedAdminLastEval `json:"last_eval"`
+	schedquality.SampleCounts
 	Identity     string  `json:"identity"`
 	Level        int     `json:"level"`
 	Until        *string `json:"until"`
@@ -162,10 +189,17 @@ type SchedAdminAttention struct {
 	Unknown []int64 `json:"unknown"`
 	Exempt  []int64 `json:"exempt"`
 }
+type SchedAdminErrorTripExample struct {
+	Known  int `json:"known"`
+	Failed int `json:"failed"`
+}
+
 type SchedAdminPolicy struct {
-	GroupID int64                  `json:"group_id"`
-	Version int64                  `json:"version"`
-	Policy  SchedAdminPolicyPolicy `json:"policy"`
+	EffectiveMaxErrorRate float64                      `json:"effective_max_error_rate"`
+	ErrorTripExamples     []SchedAdminErrorTripExample `json:"error_trip_examples"`
+	GroupID               int64                        `json:"group_id"`
+	Version               int64                        `json:"version"`
+	Policy                SchedAdminPolicyPolicy       `json:"policy"`
 }
 type SchedAdminPolicyPolicy struct {
 	Enabled             bool    `json:"enabled"`
@@ -174,7 +208,15 @@ type SchedAdminPolicyPolicy struct {
 	MinCacheRatio       float64 `json:"min_cache_ratio"`
 	TakeoverIdleSeconds int     `json:"takeover_idle_seconds"`
 }
+type SchedAdminSupply struct {
+	Declared  int    `json:"declared"`
+	Enabled   int    `json:"enabled"`
+	Available int    `json:"available"`
+	At        string `json:"at"`
+}
+
 type SchedAdminOrder struct {
+	Supply        *SchedAdminSupply    `json:"supply"`
 	GroupID       int64                `json:"group_id"`
 	Model         string               `json:"model"`
 	Models        []string             `json:"models"`
@@ -214,10 +256,16 @@ type SchedAdminGroupLast60 struct {
 	Requests             *int64   `json:"requests"`
 	Migration400         *int64   `json:"migration_400"`
 }
+type SchedAdminRearEntries struct {
+	Decisions     int64 `json:"decisions"`
+	AccountModels int64 `json:"account_models"`
+}
+
 type SchedAdminGroupSummary struct {
-	GroupID  int64                 `json:"group_id"`
-	Accounts SchedAdminCounts      `json:"accounts"`
-	Last60   SchedAdminGroupLast60 `json:"last60"`
+	RearEntries24h *SchedAdminRearEntries `json:"rear_entries_24h"`
+	GroupID        int64                  `json:"group_id"`
+	Accounts       SchedAdminCounts       `json:"accounts"`
+	Last60         SchedAdminGroupLast60  `json:"last60"`
 }
 type SchedAdminGroupsSummary struct {
 	At     string                   `json:"at"`
@@ -274,6 +322,8 @@ type SchedAdminDecision struct {
 	Basis   *SchedAdminBasis       `json:"basis,omitempty"`
 }
 type SchedAdminBasis struct {
+	schedquality.SampleCounts
+	TrialSeats   *string                    `json:"trial_seats"`
 	RuleVersion  string                     `json:"rule_version"`
 	Line         schedquality.Dimension     `json:"line"`
 	Kind         string                     `json:"kind"`

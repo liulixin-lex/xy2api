@@ -153,22 +153,24 @@ const usageLog = {
   native_compaction_v2: false,
 }
 
-function mountUsageView() {
+function mountUsageView(extraStubs: Record<string, unknown> = {}) {
   return mount(UsageView, {
     global: {
       stubs: {
+
         AppLayout: simpleStub,
         Pagination: true,
         Select: true,
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
-        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed', 'showFallbackOrigin'] },
+        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed', 'showFallbackOrigin', 'viewer'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
         TokenUsageTrend: chartStub,
+        ...extraStubs,
       },
     },
   })
@@ -220,6 +222,146 @@ describe('user UsageView', () => {
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
   })
 
+  // Mobile list plan: below 1024px the cards and charts start collapsed; the date range stays and still filters the list.
+  it('mounts no cards or charts below 1024px until expanded, and the date range still reloads the list', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: false, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    try {
+      const named = (name: string) => ({ name, template: '<div />' })
+      const wrapper = mountUsageView({ UsageStatsCards: named('UsageStatsCards'), ModelDistributionChart: named('ModelDistributionChart'), TokenUsageTrend: named('TokenUsageTrend') })
+      await flushPromises()
+      expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(false)
+      expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(false)
+      query.mockClear()
+      wrapper.findComponent({ name: 'DateRangePicker' }).vm.$emit('change', { startDate: '2026-11-01', endDate: '2026-11-02', preset: null })
+      await flushPromises()
+      expect(query).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-11-01', end_date: '2026-11-02' }), expect.anything())
+      await wrapper.get('[data-testid="usage-overview-toggle"]').trigger('click')
+      expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(true)
+      expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).exists()).toBe(true)
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
+  // Mobile list plan (B): below 768px the phone defaults (API key frozen first) and the phone toolbar, whose tags remove
+  // a filter at once; the wide memory keeps the page's existing key.
+  it('shows the phone defaults and the phone toolbar below 768px, a tag removing its filter at once', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    localStorage.removeItem('user-usage-hidden-columns-narrow')
+    localStorage.setItem('user-usage-hidden-columns', JSON.stringify(['model']))
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(wrapper.findComponent(UsageTable).props('columns').map((c: { key: string }) => c.key))
+        .toEqual(['api_key', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+      expect(wrapper.find('[data-testid="usage-filters-phone"]').exists()).toBe(true)
+      expect(wrapper.find('label.input-label').exists()).toBe(false)
+
+      ;(wrapper.vm as any).filters.model = 'gpt-5.4'
+      await flushPromises()
+      const tag = wrapper.get('[data-testid="usage-filter-tag"]')
+      expect(tag.text()).toBe('Model：gpt-5.4')
+      query.mockClear()
+      await tag.get('button').trigger('click')
+      await flushPromises()
+      expect(query).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }), expect.anything())
+      expect(wrapper.find('[data-testid="usage-filter-tag"]').exists()).toBe(false)
+      expect(JSON.parse(localStorage.getItem('user-usage-hidden-columns')!)).toEqual(['model'])
+      // Review item 9: the frozen API key cannot be hidden on a phone (no toggle; a saved hide is ignored there).
+      localStorage.setItem('user-usage-hidden-columns-narrow', JSON.stringify(['api_key', 'reasoning_effort', 'endpoint', 'ip_address', 'group', 'stream', 'billing_mode', 'user_agent']))
+      wrapper.unmount()
+      const again = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(again.findComponent(UsageTable).props('columns').map((c: { key: string }) => c.key)[0]).toBe('api_key')
+      expect((again.vm as any).currentToggleableColumns.map((c: { key: string }) => c.key)).not.toContain('api_key')
+      again.unmount()
+      localStorage.removeItem('user-usage-hidden-columns-narrow')
+    } finally {
+      media.mockRestore()
+      localStorage.removeItem('user-usage-hidden-columns')
+    }
+  })
+
+  // Browser acceptance (step 1), item 1: the user's own list is always counted (the server narrows it to the user), so
+  // its count stays even when it looks like "this page's end + 1".
+  it('keeps the exact count on the phone info line', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    query.mockResolvedValue({ items: Array.from({ length: 20 }, (_, i) => ({ ...usageLog, id: i + 1 })), total: 21, pages: 2 })
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect((wrapper.vm as any).pagination.total).toBe(21)
+      expect(wrapper.get('[data-testid="usage-count"]').text()).toBe('common.table.count')
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
+  // Browser acceptance (step 1), item 6: the errors tab's phone defaults: key name, category, status and time.
+  it('shows the errors tab\'s phone defaults below 768px', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    localStorage.removeItem('user-usage-error-hidden-columns-narrow')
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect((wrapper.vm as any).errVisibleColumnKeys).toEqual(['key_name', 'category', 'status', 'created_at'])
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
+  // Browser acceptance (step 1), item 3: on a tablet (768–1023px) the filters are in the sheet too, while the columns
+  // follow the wide memory (no frozen API key there).
+  it('uses the sheet toolbar up to 1024px, the columns switching at 768px', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => {
+      const min = /min-width:\s*(\d+)px/.exec(q)
+      const max = /max-width:\s*(\d+)px/.exec(q)
+      return {
+        matches: min ? 834 >= Number(min[1]) : max ? 834 <= Number(max[1]) : true, media: q, onchange: null,
+        addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+      } as unknown as MediaQueryList
+    })
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="usage-filters-phone"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="toolbar-first-row"]').exists()).toBe(false)
+      expect((wrapper.vm as any).alwaysVisible).toEqual(['created_at'])
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
+  // Shared layer's review fix (data-filter): every field carries its filter's key, in the sheet and the row alike, so
+  // crossing 1024px moves the focus to the same field (useFilterFocusHandoff, tested with the admin filters).
+  it('marks each row field with its filter key', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findAll('[data-filter]').map((el) => el.attributes('data-filter')))
+      .toEqual(['api_key_id', 'model', 'group_id', 'request_type', 'native_compaction_v2', 'billing_type', 'billing_mode'])
+    ;(wrapper.vm as any).activeTab = 'errors'
+    await flushPromises()
+    expect(wrapper.findAll('[data-filter]').map((el) => el.attributes('data-filter')))
+      .toEqual(['error_api_key_id', 'error_model', 'error_category', 'error_status_code'])
+    wrapper.unmount()
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()
@@ -234,6 +376,13 @@ describe('user UsageView', () => {
     const wrapper = mountUsageView()
     await flushPromises()
     expect(wrapper.findComponent(UsageTable).props('showFallbackOrigin')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('tells the usage table it is on the user page: the model and effort asked for, no upstream ID', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent(UsageTable).props('viewer')).toBe('user')
     wrapper.unmount()
   })
 

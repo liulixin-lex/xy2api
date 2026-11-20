@@ -132,6 +132,8 @@
         <OpsRequestDetailsModal
           v-model="showRequestDetails"
           :time-range="timeRange"
+          :custom-start-time="customStartTime"
+          :custom-end-time="customEndTime"
           :preset="requestDetailsPreset"
           :platform="platform"
           :group-id="groupId"
@@ -775,8 +777,9 @@ async function fetchData() {
   }
 }
 
+// The custom window too: picking another past window while already on custom (7 days, then 30) loads it.
 watch(
-  () => [timeRange.value, platform.value, groupId.value, queryMode.value] as const,
+  () => [timeRange.value, customStartTime.value, customEndTime.value, platform.value, groupId.value, queryMode.value] as const,
   () => {
     if (isApplyingRouteQuery.value) return
     if (opsEnabled.value) {

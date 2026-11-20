@@ -1,7 +1,15 @@
 <template>
-  <DataTable :columns="columns" :data="orders" :loading="loading">
+  <!-- The table at every width (mobile list plan): the order number freezes as the identity; the actions (one to three
+       buttons with text) scroll with the row on a phone, where they do not fit its 44px frozen column. -->
+  <DataTable
+    :scroll-label="scrollLabel"
+    :columns="columns"
+    :data="orders"
+    :loading="loading"
+    :sticky-actions-column="!phone"
+  >
     <template #cell-id="{ value }">
-      <span class="font-mono text-sm">#{{ value }}</span>
+      <span class="whitespace-nowrap font-mono text-sm">#{{ value }}</span>
     </template>
     <template #cell-out_trade_no="{ value }">
       <span class="text-sm text-gray-900 dark:text-white">{{ value }}</span>
@@ -33,7 +41,7 @@
       <OrderStatusBadge :status="value" />
     </template>
     <template #cell-created_at="{ value }">
-      <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(value) }}</span>
+      <span class="whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ formatListDateTime(value) }}</span>
     </template>
     <template #cell-actions="{ row }">
       <slot name="actions" :row="row" />
@@ -47,6 +55,8 @@ import { useI18n } from 'vue-i18n'
 import type { PaymentOrder } from '@/types/payment'
 import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
+import { formatListDateTime } from '@/utils/format'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import { currencySymbol } from '@/components/payment/currency'
 import { paymentMethodLabelKey } from '@/components/payment/paymentFlow'
@@ -58,9 +68,11 @@ const props = defineProps<{
   loading: boolean
   showUser?: boolean
   showCheckoutMode?: boolean
+  /** Names the table's scroll area (the page's title). */
+  scrollLabel?: string
 }>()
 
-function formatDate(dateStr: string) { return new Date(dateStr).toLocaleString() }
+const phone = usePhoneViewport()
 
 const creditedAmountSymbol = currencySymbol('USD')
 

@@ -357,6 +357,12 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 		}
 		// Normalize the handler's default token mode before comparing, and ignore DB IDs.
 		for i := range *pricing {
+			entry := &(*pricing)[i]
+			entry.ID = 0
+			if !entry.UltrafastMultiplierSet && i < len(old) {
+				entry.UltrafastMultiplier = old[i].UltrafastMultiplier
+			}
+			entry.UltrafastMultiplierSet = false
 			if (*pricing)[i].Platform == "" {
 				(*pricing)[i].Platform = PlatformAnthropic
 			}
@@ -365,6 +371,8 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 			}
 		}
 		for i := range old {
+			old[i].ID = 0
+			old[i].UltrafastMultiplierSet = false
 			if old[i].Platform == "" {
 				old[i].Platform = PlatformAnthropic
 			}
@@ -396,7 +404,8 @@ func normalizeOperatorStatsPricing(rules []operatorAccountStatsPricingRuleReques
 				p.BillingMode = "token"
 			}
 			// The stats handler deliberately ignores channel multipliers.
-			p.FastMultiplier, p.FlexMultiplier = nil, nil
+			p.FastMultiplier, p.FlexMultiplier, p.UltrafastMultiplier = nil, nil, nil
+			p.ID, p.UltrafastMultiplierSet = 0, false
 			p.Intervals = append([]operatorPricingIntervalRequest(nil), p.Intervals...)
 			for k := range p.Intervals {
 				v := &p.Intervals[k]

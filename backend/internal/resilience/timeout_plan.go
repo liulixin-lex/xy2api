@@ -17,9 +17,16 @@ type TimeoutPlan struct {
 	anchorOffset, startOffset, shadowRemaining time.Duration
 }
 
+// FullFirstOutputTier reports whether this frozen timer granted its whole tier.
+func (p TimeoutPlan) FullFirstOutputTier() bool {
+	// An applied budget cut necessarily grants less than the tier.
+	return p.tier > 0 && p.effective >= p.tier
+}
+
 func (p TimeoutPlan) Effective() time.Duration { return p.effective }
 func (p TimeoutPlan) Start() time.Time         { return p.start }
 func (p TimeoutPlan) Applied() bool            { return p.applied }
+func (p TimeoutPlan) AccountID() int64         { return p.accountID }
 func (p TimeoutPlan) Model() string            { return p.model }
 func (p TimeoutPlan) Diagnostics() TimeoutDiagnostics {
 	if p.source == "" {

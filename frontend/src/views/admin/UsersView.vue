@@ -1,11 +1,12 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <!-- The compact toolbar (12.9): live, refresh, filter and column settings, a rule, then attributes, the bulk
              menu and create. -->
-        <TableToolbar compact>
+        <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearAllFilters">
           <template #status>
+            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
           </template>
           <template #search>
@@ -15,8 +16,8 @@
               <input
                 v-model="searchQuery"
                 type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="table-toolbar__input"
+                :placeholder="t('admin.users.searchUsersShort')"
+                class="table-toolbar__input users-search"
                 @input="handleSearch"
               />
             </label>
@@ -24,36 +25,34 @@
 
           <template #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter" data-filter="role">
+              <!-- Nothing chosen: the filter's name (decided, item 15); "all" stays first in its list. -->
               <Select
                 v-model="filters.role"
                 size="sm"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'operator', label: t('admin.users.operator') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
+                :options="roleFilterOptions"
+                :aria-label="t('admin.users.columns.role')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.role ? option?.label ?? filters.role : t('admin.users.columns.role') }}</template>
+              </Select>
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter" data-filter="status">
               <Select
                 v-model="filters.status"
                 size="sm"
-                :options="[
-                  { value: '', label: t('admin.users.allStatus') },
-                  { value: 'active', label: t('common.active') },
-                  { value: 'disabled', label: t('admin.users.disabled') }
-                ]"
+                :options="statusFilterOptions"
+                :aria-label="t('admin.users.columns.status')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.status ? option?.label ?? filters.status : t('admin.users.columns.status') }}</template>
+              </Select>
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter" data-filter="group">
               <Select
                 v-model="filters.group"
                 size="sm"
@@ -62,20 +61,26 @@
                 creatable
                 :creatable-prefix="t('admin.users.fuzzySearch')"
                 :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                :aria-label="t('admin.users.authorizedGroupFilter')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.group ? option?.label ?? filters.group : t('admin.users.authorizedGroupFilter') }}</template>
+              </Select>
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter" data-filter="apiKeyGroup">
               <Select
                 v-model="filters.apiKeyGroup"
                 size="sm"
                 :options="apiKeyGroupFilterOptions"
                 searchable
                 :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                :aria-label="t('admin.users.apiKeyGroupFilter')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.apiKeyGroup !== null ? option?.label : t('admin.users.apiKeyGroupFilter') }}</template>
+              </Select>
             </div>
 
             <!-- Dynamic Attribute Filters -->
@@ -83,6 +88,7 @@
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
                 class="relative table-toolbar__filter"
+                :data-filter="`attr_${attrId}`"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input
@@ -108,6 +114,7 @@
                   <div class="w-full">
                     <Select
                       :model-value="value"
+                      :aria-label="getAttributeDefinitionName(Number(attrId))"
                       size="sm"
                       :options="[
                         { value: '', label: getAttributeDefinitionName(Number(attrId)) },
@@ -130,6 +137,80 @@
             </template>
           </template>
 
+          <!-- A phone (mobile list plan): every filter in the bottom sheet, the attributes' too, applied at once; the chosen
+               ones as removable tags; the count and the sort (when its column is hidden) beside the live state. The
+               toolbar renders these slots in its own phone form only; a condition here on the page's own width would
+               remove a focused field before the toolbar hands its focus over. -->
+          <template #sheet>
+            <div class="users-sheet__field" data-filter="role">
+              <span class="users-sheet__k">{{ t('admin.users.columns.role') }}</span>
+              <Select :model-value="filters.role" :options="roleFilterOptions" :aria-label="t('admin.users.columns.role')" @update:model-value="setSheetFilter('role', $event)" />
+            </div>
+            <div class="users-sheet__field" data-filter="status">
+              <span class="users-sheet__k">{{ t('admin.users.columns.status') }}</span>
+              <Select :model-value="filters.status" :options="statusFilterOptions" :aria-label="t('admin.users.columns.status')" @update:model-value="setSheetFilter('status', $event)" />
+            </div>
+            <div class="users-sheet__field" data-filter="group">
+              <span class="users-sheet__k">{{ t('admin.users.authorizedGroupFilter') }}</span>
+              <Select
+                :model-value="filters.group"
+                :options="groupFilterOptions"
+                searchable
+                creatable
+                :creatable-prefix="t('admin.users.fuzzySearch')"
+                :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                :aria-label="t('admin.users.authorizedGroupFilter')"
+                @update:model-value="setSheetFilter('group', $event)"
+              />
+            </div>
+            <div class="users-sheet__field" data-filter="apiKeyGroup">
+              <span class="users-sheet__k">{{ t('admin.users.apiKeyGroupFilter') }}</span>
+              <Select
+                :model-value="filters.apiKeyGroup"
+                :options="apiKeyGroupFilterOptions"
+                searchable
+                :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                :aria-label="t('admin.users.apiKeyGroupFilter')"
+                @update:model-value="setSheetFilter('apiKeyGroup', $event)"
+              />
+            </div>
+            <label v-for="attr in filterableAttributes" :key="attr.id" class="users-sheet__field" :data-filter="`attr_${attr.id}`">
+              <span class="users-sheet__k">{{ attr.name }}</span>
+              <Select
+                v-if="attr.type === 'select' || attr.type === 'multi_select'"
+                :model-value="activeAttributeFilters[attr.id] ?? ''"
+                :options="[{ value: '', label: attr.name }, ...(attr.options || [])]"
+                :aria-label="attr.name"
+                @update:model-value="setSheetAttribute(attr.id, String($event ?? ''), true)"
+              />
+              <input
+                v-else
+                :value="activeAttributeFilters[attr.id] ?? ''"
+                :type="attr.type === 'number' ? 'number' : 'text'"
+                class="input users-sheet__input"
+                :placeholder="attr.name"
+                @input="typeSheetAttribute(attr.id, ($event.target as HTMLInputElement).value)"
+                @change="setSheetAttribute(attr.id, ($event.target as HTMLInputElement).value, true)"
+              />
+            </label>
+          </template>
+          <template #tags>
+            <span v-for="tag in filterTags" :key="tag.key" class="users-tag" :data-key="tag.key">
+              <span class="users-tag__k">{{ tag.label }}：</span>
+              <span class="users-tag__v">{{ tag.text }}</span>
+              <button type="button" class="users-tag__x" :aria-label="t('common.table.removeFilter', { label: tag.label })" @click="removeFilterTag(tag.key)">
+                <Icon name="x" size="xs" />
+              </button>
+            </span>
+          </template>
+          <template #info>
+            <span data-test="users-count">{{ t('common.table.count', { n: usersTotal.toLocaleString() }) }}</span>
+            <template v-if="sortHint">
+              <span class="table-toolbar__sep" aria-hidden="true">·</span>
+              <TableSortHint :label="sortHint.label" :order="sortHint.order" />
+            </template>
+          </template>
+
           <template #actions>
             <button
               type="button"
@@ -141,8 +222,8 @@
             >
               <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <!-- Filter Settings Dropdown -->
-            <div class="relative" ref="filterDropdownRef">
+            <!-- Filter Settings Dropdown (a phone has every filter in its sheet) -->
+            <div v-if="!phone" class="relative" ref="filterDropdownRef">
               <button
                 type="button"
                 @click="showFilterDropdown = !showFilterDropdown"
@@ -156,7 +237,7 @@
               </button>
               <div
                 v-if="showFilterDropdown"
-                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                class="users-menu absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <!-- Built-in filters -->
                 <button
@@ -201,22 +282,24 @@
             </div>
             <!-- Column Settings Dropdown -->
             <div class="relative" ref="columnDropdownRef">
+              <!-- A phone: this width's columns in a bottom sheet (mobile list plan); wider, the dropdown. -->
               <button
                 type="button"
-                @click="showColumnDropdown = !showColumnDropdown"
+                @click="phone ? (showColumnSheet = true) : (showColumnDropdown = !showColumnDropdown)"
                 class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.users.columnSettings')"
-                aria-haspopup="true"
-                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                :aria-haspopup="phone ? 'dialog' : 'true'"
+                :aria-expanded="(phone ? showColumnSheet : showColumnDropdown) ? 'true' : 'false'"
                 v-tip="t('admin.users.columnSettings')"
+                data-test="users-columns"
               >
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
               </button>
               <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                v-if="showColumnDropdown && !phone"
+                class="users-menu absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <button
                   v-for="col in toggleableColumns"
@@ -241,11 +324,20 @@
                     :stroke-width="2"
                   />
                 </button>
+                <button
+                  v-if="!columnVisibility.atDefault.value"
+                  type="button"
+                  :class="[POPOVER_ITEM, 'border-t border-line-popover text-primary-600 hover:bg-surface-popover-hover dark:text-primary-400']"
+                  data-test="reset-columns"
+                  @click="resetColumns"
+                >
+                  {{ t('common.table.resetColumns') }}
+                </button>
               </div>
             </div>
-            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
+            <span v-if="canManage && !phone" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
-              v-if="canManage"
+              v-if="canManage && !phone"
               type="button"
               @click="showAttributesModal = true"
               class="table-toolbar__btn table-toolbar__btn--secondary"
@@ -257,22 +349,24 @@
             </button>
 
             <!-- The four bulk actions in one menu (12.9-5), disabled until a row is ticked, the count on the button in a
-                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. -->
+                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. On a
+                 phone (mobile list plan, "N 条 · ● 实时 [刷新][列][⋯]") the button is "⋯", always open-able, and its
+                 menu starts with the attributes config; the bulk items stay disabled until a row is ticked. -->
             <div v-if="canManage" ref="bulkRootRef" class="relative">
               <button
                 ref="bulkButtonRef"
                 type="button"
                 class="table-toolbar__btn table-toolbar__btn--secondary users-bulk"
-                data-test="bulk-actions"
-                :disabled="selectedCount === 0"
+                :data-test="phone ? 'users-tools' : 'bulk-actions'"
+                :disabled="!phone && selectedCount === 0"
                 aria-haspopup="menu"
                 :aria-expanded="bulkMenuOpen ? 'true' : 'false'"
-                :aria-label="t('admin.users.bulkActions')"
-                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : t('admin.users.bulkActions')"
+                :aria-label="phone ? t('admin.users.moreActions') : t('admin.users.bulkActions')"
+                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : phone ? t('admin.users.moreActions') : t('admin.users.bulkActions')"
                 @click="bulkMenuOpen = !bulkMenuOpen"
               >
-                <Icon name="users" size="sm" />
-                <span class="table-toolbar__label">{{ t('admin.users.bulkActions') }}</span>
+                <Icon :name="phone ? 'more' : 'users'" size="sm" />
+                <span class="table-toolbar__label">{{ phone ? t('admin.users.moreActions') : t('admin.users.bulkActions') }}</span>
                 <span class="users-bulk__count" :class="{ 'is-empty': selectedCount === 0 }" data-test="bulk-count">{{ selectedCount || '' }}</span>
                 <Icon name="chevronDown" size="xs" class="users-bulk__chevron" />
               </button>
@@ -280,29 +374,40 @@
                 v-if="bulkMenuOpen"
                 ref="bulkMenuRef"
                 role="menu"
-                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                class="users-menu absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
                 :style="{ zIndex: bulkMenuLayer.zIndex.value }"
                 data-test="bulk-menu"
               >
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" @click="bulkMenuOpen = false; showBulkEditModal = true">
+                <template v-if="phone">
+                  <button type="button" role="menuitem" :class="BULK_ITEM" data-test="tools-attributes" @click="bulkMenuOpen = false; showAttributesModal = true">
+                    {{ t('admin.users.attributes.configButton') }}
+                  </button>
+                  <div class="my-1 border-t border-line-popover" role="separator"></div>
+                  <p class="px-4 text-xs text-gray-500 dark:text-gray-400" data-test="tools-bulk-caption">
+                    {{ selectedCount ? t('admin.users.bulkSelected', { count: selectedCount }) : t('admin.users.bulkNoneSelected') }}
+                  </p>
+                </template>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" :disabled="selectedCount === 0" @click="bulkMenuOpen = false; showBulkEditModal = true">
                   {{ t('admin.users.bulkLimits.label') }}
                 </button>
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="selectedCount === 0 || bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
                   {{ t('admin.users.enable') }}
                 </button>
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="selectedCount === 0 || bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
                   {{ t('admin.users.disable') }}
                 </button>
-                <div class="my-1 border-t border-line-popover"></div>
-                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
+                <div class="my-1 border-t border-line-popover" role="separator"></div>
+                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="selectedCount === 0 || bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
                   {{ t('common.delete') }}
                 </button>
               </div>
             </div>
 
-            <button v-if="canManage" type="button" @click="showCreateModal = true" class="table-toolbar__btn table-toolbar__btn--primary">
+          </template>
+          <template v-if="canManage" #create>
+            <button type="button" class="table-toolbar__btn table-toolbar__btn--primary" :aria-label="t('admin.users.createUser')" data-test="users-create" @click="showCreateModal = true">
               <Icon name="plus" size="sm" />
-              {{ t('admin.users.createUser') }}
+              <span>{{ phone ? t('admin.users.createShort') : t('admin.users.createUser') }}</span>
             </button>
           </template>
         </TableToolbar>
@@ -314,6 +419,7 @@
         <DataTable
           ref="usersTableRef"
           class="dense-cells"
+          :scroll-label="t('admin.users.title')"
           :columns="columns"
           :data="users"
           :loading="loading"
@@ -325,29 +431,20 @@
           :row-selectable="canSelectUser"
           :actions-count="7"
           :server-side-sort="true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :sort="tableSort"
           :sort-storage-key="USER_SORT_STORAGE_KEY"
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <!-- One line: a long address ends in "…", in a narrow card's head and past 240px in the wide table, where it would
-               widen the table (7r-7); hovered or tapped, the tip has it whole (7o-5). -->
-          <template #cell-email="{ value }">
-            <div class="flex min-w-0 items-center gap-2">
-              <div
-                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
-              >
-                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
-                  {{ value.charAt(0).toUpperCase() }}
-                </span>
-              </div>
-              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white lg:max-w-60" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
-            </div>
+          <!-- The frozen identity (mobile list plan): the address, the user name under it, each cut with "…" at the column's
+               width (on a phone clamp(120px, 36vw, 160px), from 768px 240px); hovered or tapped, the tip has both whole. -->
+          <template #cell-email="{ value, row }">
+            <TableIdentityCell class="users-identity" :primary="value" :secondary="row.username || undefined" data-test="user-email" />
           </template>
 
           <template #cell-username="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ value || '-' }}</span>
+            <span v-if="value" class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-notes="{ value }">
@@ -359,7 +456,7 @@
               >
                 {{ value.length > 30 ? value.substring(0, 25) + '...' : value }}
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <CellEmpty v-else />
             </div>
           </template>
 
@@ -371,11 +468,13 @@
           >
             <div class="max-w-xs">
               <span
+                v-if="getAttributeValue(row, def.id)"
                 class="block truncate text-sm text-gray-700 dark:text-gray-300"
                 :title="getAttributeValue(row, def.id)"
               >
                 {{ getAttributeValue(row, def.id) }}
               </span>
+              <CellEmpty v-else />
             </div>
           </template>
 
@@ -411,7 +510,7 @@
                   v-if="expandedGroupUserId === row.id"
                   class="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-xl dark:border-dark-600 dark:bg-dark-700"
                 >
-                  <div class="border-b border-gray-100 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
+                  <div class="border-b border-gray-100 px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
                     {{ t('admin.users.clickToReplace') }}
                   </div>
                   <div
@@ -442,12 +541,9 @@
                 </div>
               </span>
               <!-- 都没有 -->
-              <span
-                v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0"
-                class="text-xs text-gray-400 dark:text-dark-500"
-              >-</span>
+              <CellEmpty v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0" />
             </div>
-            <span v-else class="text-xs text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-subscriptions="{ row }">
@@ -479,7 +575,7 @@
             <div class="flex items-center gap-2">
               <div class="group relative">
                 <button
-                  class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
+                  class="users-balance font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   :disabled="!canReadRow(row)"
                   @click="handleBalanceHistory(row)"
                 >
@@ -494,7 +590,7 @@
               <button
                 v-if="canAdjustBalanceOf(row)"
                 @click.stop="handleDeposit(row)"
-                class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                class="users-balance rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
               >
                 {{ t('admin.users.deposit') }}
@@ -537,7 +633,7 @@
                 >
                   <span
                     v-if="usageSort && usageSort.key === usageKey"
-                    class="text-[10px] normal-case font-medium tracking-normal"
+                    class="text-xs normal-case font-medium tracking-normal"
                   >{{ usageSort.metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
                   <svg
                     v-if="usageSort && usageSort.key === usageKey"
@@ -559,7 +655,7 @@
                 <!-- 弹出菜单：今日 / 近30天，点击进行三态循环切换。 -->
                 <div
                   v-if="openUsageSortMenu === usageKey"
-                  class="absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                  class="users-menu absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
                 >
                   <button
                     v-for="metric in (['today', 'total'] as const)"
@@ -587,7 +683,7 @@
                       />
                     </svg>
                   </button>
-                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-[10px] normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
+                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-xs normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
                     {{ t('admin.users.sortCurrentPageOnly') }}
                   </div>
                 </div>
@@ -634,23 +730,37 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+            <span class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
           </template>
 
           <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? formatDateTime(value) : '-' }}
-            </span>
+            <span v-if="value" class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-last_active_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? formatDateTime(value) : '-' }}
-            </span>
+            <span v-if="value" class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- A phone: only "⋯" in the 44px frozen column; editing and enabling lead its menu (mobile list plan). -->
+            <div v-if="phone" class="users-more">
+              <button
+                v-if="canReadRow(row)"
+                type="button"
+                class="action-menu-trigger users-more__btn sq-focus"
+                :class="{ 'is-open': activeMenuId === row.id }"
+                :aria-label="`${t('common.more')} ${row.email}`"
+                aria-haspopup="menu"
+                :aria-expanded="activeMenuId === row.id ? 'true' : 'false'"
+                data-test="row-more"
+                @click="openActionMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+            </div>
+            <div v-else class="users-ops flex items-center gap-1">
               <!-- Edit Button -->
               <button
                 v-if="isSuperAdmin || canActOn(row)"
@@ -719,12 +829,33 @@
       <div
         v-if="activeMenuId !== null && menuPosition"
         class="action-menu-content fixed z-[9999] w-48 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
-        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value }"
+        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value, maxHeight: menuMaxHeight ? menuMaxHeight + 'px' : undefined, overflowY: menuMaxHeight ? 'auto' : undefined }"
         ref="actionMenuRef"
       >
-        <div class="py-1">
+        <div class="users-menu py-1">
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
+              <!-- A phone: the row's direct buttons first (mobile list plan). -->
+              <template v-if="phone && (isSuperAdmin || canActOn(user))">
+                <button
+                  @click="handleEdit(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  data-test="menu-edit"
+                >
+                  <Icon name="edit" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ t('common.edit') }}
+                </button>
+                <button
+                  v-if="canActOn(user)"
+                  @click="handleToggleStatus(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  data-test="menu-toggle-status"
+                >
+                  <Icon :name="user.status === 'active' ? 'ban' : 'checkCircle'" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ user.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}
+                </button>
+                <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+              </template>
               <!-- View API Keys -->
               <button
                 @click="handleViewApiKeys(user); closeActionMenu()"
@@ -845,11 +976,32 @@
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="reloadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
+    <!-- A phone's column settings: this width's own columns and their "restore default columns". -->
+    <BottomSheet :show="showColumnSheet" :title="t('common.table.columnsTitle')" test-id="column-sheet" @close="showColumnSheet = false">
+      <div class="users-colsheet">
+        <button
+          v-for="col in toggleableColumns"
+          :key="col.key"
+          type="button"
+          class="users-colsheet__item"
+          :disabled="isForcedVisibleColumn(col.key)"
+          :aria-pressed="isColumnVisible(col.key) ? 'true' : 'false'"
+          data-test="column-setting"
+          @click="toggleColumn(col.key)"
+        >
+          <span class="truncate">{{ col.label }}</span>
+          <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" :stroke-width="2" />
+        </button>
+        <button v-if="!columnVisibility.atDefault.value" type="button" class="users-colsheet__reset" data-test="reset-columns" @click="resetColumns">
+          {{ t('common.table.resetColumns') }}
+        </button>
+      </div>
+    </BottomSheet>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -857,10 +1009,12 @@ import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
-import { formatDateTime } from '@/utils/format'
+import { useColumnVisibility } from '@/composables/useColumnVisibility'
+import { useTableViewport } from '@/composables/useTableViewport'
+import { formatDateTime, formatListDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
-import { showTipNow, vTip } from '@/utils/tip'
+import { vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -875,6 +1029,9 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableSortHint from '@/components/common/TableSortHint.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
 import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import StatusDot from '@/components/common/StatusDot.vue'
@@ -883,6 +1040,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import Select from '@/components/common/Select.vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
 import { buildApiKeyGroupFilterOptions } from './apiKeyGroupFilterOptions'
 import UserAttributesConfigModal from '@/components/user/UserAttributesConfigModal.vue'
 import UserConcurrencyCell from '@/components/user/UserConcurrencyCell.vue'
@@ -925,11 +1083,12 @@ const attributeColumns = computed<Column[]>(() =>
 )
 
 // Get formatted attribute value for display in table
+/** The attribute's text in a row, '' when it has none (the cell then shows the empty "—"). */
 const getAttributeValue = (row: LiveUser, attrId: number): string => {
   const userAttrs = row.attribute_values
-  if (!userAttrs) return '-'
+  if (!userAttrs) return ''
   const value = userAttrs[attrId]
-  if (!value) return '-'
+  if (!value) return ''
 
   // Find definition for this attribute
   const def = attributeDefinitions.value.find(d => d.id === attrId)
@@ -978,7 +1137,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'usage_gemini', label: t('admin.users.columns.usageGemini'), sortable: false },
   { key: 'usage_antigravity', label: t('admin.users.columns.usageAntigravity'), sortable: false },
   { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
-  { key: 'status', label: t('admin.users.columns.status'), sortable: true, cardHeadEnd: true },
+  { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
@@ -990,23 +1149,24 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'email' && col.key !== 'actions')
 )
 
-// Hidden columns (stored in Set - columns NOT in this set are visible)
-// This way, new columns are visible by default
-const hiddenColumns = reactive<Set<string>>(new Set())
-
-// Default hidden columns (columns hidden by default on first load)
+// Default hidden columns from 768px. The user name is the identity's second line, so its own column starts hidden
+// (a saved setting keeps its own).
 const DEFAULT_HIDDEN_COLUMNS = [
-  'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
+  'username', 'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
   'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity',
   'balance_platform_quota'
 ]
 const REMOVED_COLUMNS = new Set(['last_login_at'])
-// 强制可见列：加载时会被强制移出 hiddenColumns，并在列设置 UI 上 disabled。
+// 强制可见列：加载时会被移出隐藏集，并在列设置 UI 上 disabled。
 // 当前没有列需要强制可见 —— last_active_at 已改为可被用户隐藏。
 const FORCED_VISIBLE_COLUMNS = new Set<string>()
 
-// localStorage keys for column settings
+// localStorage keys for column settings: the page's own key is the preference from 768px (mobile list plan, two
+// memories); a phone has its own key and defaults.
 const HIDDEN_COLUMNS_KEY = 'user-hidden-columns'
+const PHONE_HIDDEN_COLUMNS_KEY = 'user-hidden-columns-phone-v1'
+/** Below 768px only these show until the user changes them; the rest, attribute columns included, in the settings. */
+const PHONE_DEFAULT_COLUMNS = ['balance', 'status', 'last_used_at']
 // 列设置 schema 版本号。每次给 DEFAULT_HIDDEN_COLUMNS 新增列时 bump 一次，
 // 并在 VERSION_NEW_HIDDEN_COLUMNS 中登记该版本新增的 key。
 // 这样老用户升级后这些新列会被自动隐藏一次，而不会影响他们对其它老列的偏好。
@@ -1016,81 +1176,65 @@ const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
   2: ['usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity'],
   3: ['balance_platform_quota']
 }
-
-// Load saved column settings
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as string[]
-      parsed
-        .filter(key => !REMOVED_COLUMNS.has(key) && !FORCED_VISIBLE_COLUMNS.has(key))
-        .forEach(key => hiddenColumns.add(key))
-
-      // 老用户升级：把每个未应用过的版本里新增的默认隐藏列自动追加到 hiddenColumns。
-      const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? '1')
-      if (storedVersion < COLUMN_SETTINGS_VERSION) {
-        let mutated = false
-        for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
-          for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
-            if (REMOVED_COLUMNS.has(key) || FORCED_VISIBLE_COLUMNS.has(key)) continue
-            if (!hiddenColumns.has(key)) {
-              hiddenColumns.add(key)
-              mutated = true
-            }
-          }
-        }
-        if (mutated) saveColumnsToStorage()
-        else localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-      }
-    } else {
-      // Use default hidden columns on first load
-      DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
-      localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+// A first visit has no saved set: the defaults already carry every version.
+try {
+  if (localStorage.getItem(HIDDEN_COLUMNS_KEY) === null) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+} catch {
+  // Storage unavailable: the defaults apply.
+}
+/** The wide memory's version chain, run once on a saved set: 老用户升级时把未应用过的版本新增的默认隐藏列追加进去。 */
+const migrateWideColumns = (hidden: Set<string>) => {
+  let mutated = false
+  for (const key of [...hidden]) {
+    if (REMOVED_COLUMNS.has(key) || FORCED_VISIBLE_COLUMNS.has(key)) {
+      hidden.delete(key)
+      mutated = true
     }
-  } catch (e) {
-    console.error('Failed to load saved columns:', e)
-    DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
   }
+  const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? '1')
+  for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
+    for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
+      if (!hidden.has(key)) {
+        hidden.add(key)
+        mutated = true
+      }
+    }
+  }
+  if (storedVersion < COLUMN_SETTINGS_VERSION) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+  return mutated
 }
 
-// Save column settings to localStorage
-const saveColumnsToStorage = () => {
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-  } catch (e) {
-    console.error('Failed to save columns:', e)
-  }
+const columnVisibility = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateWideColumns },
+  narrow: { storageKey: PHONE_HIDDEN_COLUMNS_KEY, defaultVisible: PHONE_DEFAULT_COLUMNS },
+  onShown: (keys) => loadShownColumns(keys)
+})
+/** A source skips a hidden column; once it shows again (a toggle, a reset, the other width's memory) it runs now. */
+const loadShownColumns = (keys: string[]) => {
+  if (keys.some((key) => key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
+  if (keys.some((key) => key.startsWith('attr_'))) void liveUsers.refresh('attributes')
+  if (keys.includes('balance_platform_quota')) void liveUsers.refresh('quotas')
+  if (keys.includes('subscriptions')) void reloadUsers()
+  if (keys.includes('groups')) loadAllGroups()
 }
 
 // Toggle column visibility
 const isForcedVisibleColumn = (key: string) => FORCED_VISIBLE_COLUMNS.has(key)
 const toggleColumn = (key: string) => {
-  // 强制可见列(如 last_active_at)在加载时会被恢复成可见，
-  // 这里阻止用户在当前会话隐藏它，避免"取消勾选 → 刷新又恢复"的反直觉行为。
+  // 强制可见列在加载时会被恢复成可见，这里阻止用户在当前会话隐藏它。
   if (FORCED_VISIBLE_COLUMNS.has(key)) return
-  const wasHidden = hiddenColumns.has(key)
-  if (hiddenColumns.has(key)) {
-    hiddenColumns.delete(key)
-  } else {
-    hiddenColumns.add(key)
-  }
-  saveColumnsToStorage()
-  // A source skips a hidden column; once it is shown again, that source runs now.
-  if (wasHidden && (key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
-  if (wasHidden && key.startsWith('attr_')) void liveUsers.refresh('attributes')
-  if (wasHidden && key === 'balance_platform_quota') void liveUsers.refresh('quotas')
-  if (key === 'subscriptions') {
-    void reloadUsers()
-  }
-  if (wasHidden && key === 'groups') {
-    loadAllGroups()
-  }
+  columnVisibility.toggle(key)
+  if (key === 'subscriptions' && !isColumnVisible(key)) void reloadUsers()
 }
+/** This width's columns back to its defaults (the other width keeps its own). */
+const resetColumns = () => columnVisibility.reset()
 
-// Check if column is visible (not in hidden set)
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
+const isColumnVisible = columnVisibility.isVisible
+const { phone } = useTableViewport()
+const showColumnSheet = ref(false)
+// The sheet belongs to a phone: crossing 768px closes it.
+watch(phone, (on) => { if (!on) showColumnSheet.value = false })
 // usage 主列或任意 usage_<platform> 子列可见时都需要批量拉取用量数据
 // 列 key → 平台名（'usage' 主列汇总所有平台时为 null）
 // 显式数组取代 Object.keys()：保证迭代顺序（决定列头排序按钮渲染顺序）
@@ -1105,18 +1249,18 @@ const USAGE_COLUMN_PLATFORMS: Record<string, string | null> = {
 }
 const PLATFORM_USAGE_COLUMNS = USAGE_COLUMN_KEYS.filter((k) => k !== 'usage')
 const hasVisibleUsageColumn = computed(
-  () => !hiddenColumns.has('usage') || PLATFORM_USAGE_COLUMNS.some((k) => !hiddenColumns.has(k))
+  () => isColumnVisible('usage') || PLATFORM_USAGE_COLUMNS.some((k) => isColumnVisible(k))
 )
-const hasVisibleGroupsColumn = computed(() => !hiddenColumns.has('groups'))
-const hasVisiblePlatformQuotaColumn = computed(() => !hiddenColumns.has('balance_platform_quota'))
+const hasVisibleGroupsColumn = computed(() => isColumnVisible('groups'))
+const hasVisiblePlatformQuotaColumn = computed(() => isColumnVisible('balance_platform_quota'))
 const hasVisibleAttributeColumns = computed(() =>
-  attributeDefinitions.value.some((def) => def.enabled && !hiddenColumns.has(`attr_${def.id}`))
+  attributeDefinitions.value.some((def) => def.enabled && isColumnVisible(`attr_${def.id}`))
 )
 
 // Filtered columns based on visibility
 const columns = computed<Column[]>(() =>
   allColumns.value.filter(col =>
-    col.key === 'email' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    col.key === 'email' || col.key === 'actions' || isColumnVisible(col.key)
   )
 )
 
@@ -1140,6 +1284,8 @@ const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' }
   }
 }
 const sortState = reactive(loadInitialSortState())
+/** The page's sort, as the table shows it (it owns the sort: the headers follow this). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 // Groups data for the groups column and the existing "authorised group" filter (active only)
 const allGroups = ref<AdminGroup[]>([])
@@ -1179,6 +1325,18 @@ const getUserGroups = (user: AdminUser) => {
   }
   return { exclusive, publicGroups }
 }
+
+const roleFilterOptions = computed(() => [
+  { value: '', label: t('admin.users.allRoles') },
+  { value: 'admin', label: t('admin.users.admin') },
+  { value: 'operator', label: t('admin.users.operator') },
+  { value: 'user', label: t('admin.users.user') }
+])
+const statusFilterOptions = computed(() => [
+  { value: '', label: t('admin.users.allStatus') },
+  { value: 'active', label: t('common.active') },
+  { value: 'disabled', label: t('admin.users.disabled') }
+])
 
 // Group filter options: "All Groups" + active exclusive groups (value = group name for fuzzy match)
 const groupFilterOptions = computed(() => {
@@ -1480,7 +1638,9 @@ const liveUsers = useLiveTable<LiveUser>({
       name: 'usage',
       intervalMs: 30_000,
       fetch: async (ids) => {
-        if (!hasVisibleUsageColumn.value) return []
+        // Needed while a usage column shows, or while the page's own usage sort orders the rows (its column may be
+        // hidden, as on a phone).
+        if (!hasVisibleUsageColumn.value && !usageSort.value) return []
         const userIds = ids.map(Number)
         const { stats } = await adminAPI.dashboard.getBatchUsersUsage(userIds)
         return userIds.map((id) => [id, { usage_stats: userUsageOrDefault(id, stats?.[id]) }] as const)
@@ -1556,8 +1716,10 @@ const bulkMenuLayer = useOverlayLayer(bulkMenuOpen, {
   },
   onCovered: () => { bulkMenuOpen.value = false }
 })
-watch(selectedCount, (count) => {
-  if (count === 0) bulkMenuOpen.value = false
+// The phone's "⋯" menu holds the attributes config too and stays open with nothing ticked, its bulk items disabled.
+// Wider, or on leaving the phone layout, nothing ticked closes it: the wide bulk button is disabled then and could not.
+watch([selectedCount, phone], ([count, isPhone]) => {
+  if (count === 0 && !isPhone) bulkMenuOpen.value = false
 })
 const userRowClass = (row: LiveUser) =>
   liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
@@ -1590,62 +1752,62 @@ const menuPosition = ref<{ top: number; left: number } | null>(null)
 const actionMenuRef = ref<HTMLElement | null>(null)
 const actionMenuLayer = useOverlayLayer(() => activeMenuId.value !== null && !!menuPosition.value, { root: actionMenuRef, modal: false, floor: 9999, onEscape: () => closeActionMenu() })
 
+/** Where the row's menu was opened: its "⋯" (a phone centres the menu on it) or the click (wider screens). */
+let menuAnchor: { rect: DOMRect; x: number; y: number } | null = null
+/** Set when the menu is taller than the room on screen: it scrolls inside itself. */
+const menuMaxHeight = ref<number | null>(null)
+const MENU_PADDING = 8
+/** Places the open menu by its real size (a super admin's has nine items), inside the screen, after it renders. */
+const placeActionMenu = () => {
+  const menu = actionMenuRef.value
+  const anchor = menuAnchor
+  if (!menu || !anchor) return
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const room = viewportHeight - MENU_PADDING * 2
+  const height = Math.min(menu.scrollHeight, room)
+  const width = menu.offsetWidth
+  const clampLeft = (left: number) => Math.max(MENU_PADDING, Math.min(left, viewportWidth - width - MENU_PADDING))
+  let left: number
+  let top: number
+  if (viewportWidth < 768) {
+    // 居中于按钮；优先显示在下方，放不下就在上方，都放不下就贴着视口
+    left = clampLeft(anchor.rect.left + anchor.rect.width / 2 - width / 2)
+    const below = anchor.rect.bottom + 4
+    const above = anchor.rect.top - height - 4
+    top = below + height <= viewportHeight - MENU_PADDING ? below : above >= MENU_PADDING ? above : viewportHeight - MENU_PADDING - height
+  } else {
+    left = clampLeft(anchor.x - width)
+    top = Math.min(anchor.y, viewportHeight - MENU_PADDING - height)
+  }
+  menuPosition.value = { top: Math.max(MENU_PADDING, top), left }
+  menuMaxHeight.value = menu.scrollHeight > room ? room : null
+}
+
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
     closeActionMenu()
-  } else {
-    const target = e.currentTarget as HTMLElement
-    if (!target) {
-      closeActionMenu()
-      return
-    }
-
-    const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    const menuHeight = 240
-    const padding = 8
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-
-    let left, top
-
-    if (viewportWidth < 768) {
-      // 居中显示,水平位置
-      left = Math.max(padding, Math.min(
-        rect.left + rect.width / 2 - menuWidth / 2,
-        viewportWidth - menuWidth - padding
-      ))
-
-      // 优先显示在按钮下方
-      top = rect.bottom + 4
-
-      // 如果下方空间不够,显示在上方
-      if (top + menuHeight > viewportHeight - padding) {
-        top = rect.top - menuHeight - 4
-        // 如果上方也不够,就贴在视口顶部
-        if (top < padding) {
-          top = padding
-        }
-      }
-    } else {
-      left = Math.max(padding, Math.min(
-        e.clientX - menuWidth,
-        viewportWidth - menuWidth - padding
-      ))
-      top = e.clientY
-      if (top + menuHeight > viewportHeight - padding) {
-        top = viewportHeight - menuHeight - padding
-      }
-    }
-
-    menuPosition.value = { top, left }
-    activeMenuId.value = user.id
+    return
   }
+  const target = e.currentTarget as HTMLElement
+  if (!target) {
+    closeActionMenu()
+    return
+  }
+  const rect = target.getBoundingClientRect()
+  menuAnchor = { rect, x: e.clientX || rect.right, y: e.clientY || rect.bottom }
+  // Drawn first where the click was, then placed by its real height once it is there.
+  menuMaxHeight.value = null
+  menuPosition.value = { top: rect.bottom + 4, left: Math.max(MENU_PADDING, rect.left) }
+  activeMenuId.value = user.id
+  void nextTick(placeActionMenu)
 }
 
 const closeActionMenu = () => {
   activeMenuId.value = null
   menuPosition.value = null
+  menuMaxHeight.value = null
+  menuAnchor = null
 }
 
 // Close menu when clicking outside
@@ -1805,6 +1967,92 @@ const applyFilter = () => {
   saveFiltersToStorage()
   void applyUserFilters()
 }
+
+// ---- A phone's filter sheet and tags (mobile list plan) ----
+type SheetFilterKey = 'role' | 'status' | 'group' | 'apiKeyGroup'
+/** A filter set from the sheet also shows from 768px, so a chosen filter is never hidden there. */
+const showFilter = (key: string) => {
+  if (visibleFilters.has(key)) return
+  visibleFilters.add(key)
+  if (key === 'group') loadAllGroups()
+  if (key === 'apiKeyGroup') loadAllGroupsForApiKeyFilter()
+}
+const setSheetFilter = (key: SheetFilterKey, value: string | number | boolean | null) => {
+  if (key === 'apiKeyGroup') filters.apiKeyGroup = value === '' || value === null || typeof value === 'boolean' ? null : Number(value)
+  else filters[key] = value === null || typeof value === 'boolean' ? '' : String(value)
+  showFilter(key)
+  pagination.page = 1
+  applyFilter()
+}
+const setSheetAttribute = (attrId: number, value: string, apply: boolean) => {
+  showFilter(`attr_${attrId}`)
+  updateAttributeFilter(attrId, value)
+  if (!apply) return
+  clearTimeout(attributeTyping)
+  pagination.page = 1
+  applyFilter()
+}
+/** Typing in a sheet's text field keeps the text (the same field from 768px shows it) and applies it shortly after. */
+let attributeTyping: ReturnType<typeof setTimeout> | undefined
+const typeSheetAttribute = (attrId: number, value: string) => {
+  setSheetAttribute(attrId, value, false)
+  clearTimeout(attributeTyping)
+  attributeTyping = setTimeout(() => {
+    pagination.page = 1
+    applyFilter()
+  }, 300)
+}
+const optionLabel = (options: { value: unknown; label: string }[], value: unknown) =>
+  options.find((option) => option.value === value)?.label ?? String(value)
+/** The chosen filters: the "Filters n" count and the phone's removable tags. */
+const filterTags = computed(() => {
+  const tags: { key: string; label: string; text: string }[] = []
+  if (filters.role) tags.push({ key: 'role', label: t('admin.users.columns.role'), text: optionLabel(roleFilterOptions.value, filters.role) })
+  if (filters.status) tags.push({ key: 'status', label: t('admin.users.columns.status'), text: optionLabel(statusFilterOptions.value, filters.status) })
+  if (filters.group) tags.push({ key: 'group', label: t('admin.users.authorizedGroupFilter'), text: filters.group })
+  if (filters.apiKeyGroup !== null) tags.push({ key: 'apiKeyGroup', label: t('admin.users.apiKeyGroupFilter'), text: optionLabel(apiKeyGroupFilterOptions.value, filters.apiKeyGroup) })
+  for (const [id, value] of Object.entries(activeAttributeFilters)) {
+    if (!value) continue
+    const def = getAttributeDefinition(Number(id))
+    tags.push({ key: `attr_${id}`, label: getAttributeDefinitionName(Number(id)), text: def?.options ? optionLabel(def.options, value) : value })
+  }
+  return tags
+})
+const clearFilterValue = (key: string) => {
+  if (key === 'apiKeyGroup') filters.apiKeyGroup = null
+  else if (key === 'role' || key === 'status' || key === 'group') filters[key] = ''
+  else if (key.startsWith('attr_')) activeAttributeFilters[Number(key.slice(5))] = ''
+}
+const removeFilterTag = (key: string) => {
+  clearFilterValue(key)
+  pagination.page = 1
+  applyFilter()
+}
+/** The sheet's "Clear all": every chosen value goes, the filters stay where they are shown. */
+const clearAllFilters = () => {
+  for (const tag of filterTags.value) clearFilterValue(tag.key)
+  pagination.page = 1
+  applyFilter()
+}
+const columnLabel = (key: string) => allColumns.value.find((column) => column.key === key)?.label ?? key
+/**
+ * The sort, in the toolbar while its column is hidden (a phone's defaults hide "created"): the page's own usage sort
+ * when it is on, else the server's.
+ */
+const sortHint = computed(() => {
+  const usage = usageSort.value
+  if (usage) {
+    if (isColumnVisible(usage.key)) return null
+    return { label: `${columnLabel(usage.key)} · ${usage.metric === 'today' ? t('admin.users.today') : t('admin.users.total')}`, order: usage.order }
+  }
+  return columns.value.some((column) => column.key === sortState.sort_by) ? null : { label: columnLabel(sortState.sort_by), order: sortState.sort_order }
+})
+// A phone's sheet offers the group filters: their options load once the phone toolbar shows.
+watch(phone, (on) => {
+  if (!on) return
+  if (!allGroups.value.length) loadAllGroups()
+  if (!allGroupsForApiKeyFilter.value.length) loadAllGroupsForApiKeyFilter()
+}, { immediate: true })
 
 const handleEdit = (user: AdminUser) => {
   editingUser.value = user
@@ -2006,7 +2254,6 @@ const handleScroll = () => {
 onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
-  loadSavedColumns()
   void reloadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
@@ -2019,6 +2266,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearTimeout(attributeTyping)
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('scroll', handleScroll, true)
   clearTimeout(searchTimeout)
@@ -2026,12 +2274,171 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
+/* A phone's "⋯": a 40px square centred in the 44px frozen column. */
+.users-more {
+  display: flex;
+  justify-content: center;
+}
+.users-more__btn {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+}
+.users-more__btn.is-open,
+.users-more__btn:hover {
+  background: var(--color-bg-control-hover);
+  color: var(--color-text-primary);
+}
+/* On touch every menu and popover list of the page (the row's, the usage sort's, the bulk one, the filter and column
+   settings): 40px items, 8px apart. */
+@media (pointer: coarse) {
+  .users-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .users-menu > button {
+    min-height: 40px;
+  }
+  .users-sheet__input {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  .users-ops {
+    gap: 8px;
+  }
+  .users-ops > button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  /* The balance (its history) and "Deposit", 8px apart. */
+  .users-balance {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  /* The usage columns' own sort (today / 30 days) and its menu. */
+  .usage-sort-trigger > button {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+/* A phone's filter sheet: one field per filter, its name above it. */
+.users-sheet__field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.users-sheet__k {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+}
+/* The chosen filters as tags on a phone, removed with their "x". */
+.users-tag {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+  border: 1px solid var(--color-line-control);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-control);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-small);
+}
+.users-tag__k {
+  color: var(--color-text-secondary);
+}
+.users-tag__v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.users-tag__x {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+}
+@media (pointer: coarse) {
+  .users-tag {
+    min-height: 40px;
+  }
+  .users-tag__x {
+    width: 40px;
+    height: 40px;
+  }
+}
+/* A phone's column settings: one row per column, 44px to hit. */
+.users-colsheet {
+  display: grid;
+  gap: 8px;
+  margin: 0 -8px;
+}
+.users-colsheet__item,
+.users-colsheet__reset {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  text-align: left;
+}
+.users-colsheet__item:disabled {
+  color: var(--color-text-muted);
+}
+.users-colsheet__reset {
+  color: theme('colors.primary.600');
+}
+:global(.dark) .users-colsheet__reset {
+  color: theme('colors.primary.400');
+}
+/* The identity column from 768px: 240px at most (a phone has the shared clamp). */
+@media (min-width: 768px) {
+  .users-identity {
+    max-width: 15rem;
+  }
+}
 /* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
    beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
 .dense-cells :deep(thead th),
 .dense-cells :deep(tbody td) {
   padding-right: var(--cell-pad-x);
   padding-left: var(--cell-pad-x);
+}
+/* The search hint is the short one at every width (the full text stays the field's name): the field is at most 220px,
+   178px for text, and the full hint (209px in Chinese at the desktop's 13px, 273px in English) was cut even at 1440.
+   The short one is 159px at the field's 13px; with touch, where the field is 16px, it is 14px (171px), and on a phone,
+   where the field has 151px at 390 beside "筛选" and "添加", 12px (147px; 133px in English). Narrower (an iPad in
+   landscape, whose actions leave the field 176px) it ends in an ellipsis. Only the hint shrinks: typed text stays
+   16px on touch, so the browser does not zoom in. */
+.users-search {
+  text-overflow: ellipsis;
+}
+@media (pointer: coarse) {
+  .users-search::placeholder {
+    font-size: 14px;
+  }
+}
+@media (max-width: 767px) {
+  .users-search::placeholder {
+    font-size: 12px;
+  }
 }
 /* The bulk menu's button (12.9-5): the count in a slot as wide as three digits, empty until a row is ticked, so the
    button keeps its width; below 1024px a badge on the corner of the 40px square, the chevron gone. */
@@ -2045,7 +2452,7 @@ onUnmounted(() => {
   border-radius: var(--radius-full);
   background: var(--color-bg-pill-hover);
   color: var(--color-text-primary);
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-align: center;

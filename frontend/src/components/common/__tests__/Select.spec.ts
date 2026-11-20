@@ -269,3 +269,19 @@ describe('Select remote search', () => {
     expect(labels).toEqual(['Alpha account'])
   })
 })
+
+describe('Select creatable entry', () => {
+  it('offers the typed value unless an option already has exactly that value', async () => {
+    const dropdown = await openSelect({ searchable: true, creatable: true, creatablePrefix: 'Use', options: [{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' }] })
+    const input = dropdown!.querySelector<HTMLInputElement>('input')!
+    const options = () => Array.from(dropdown!.querySelectorAll('[role="option"]'), (el) => el.textContent?.trim())
+    input.value = 'gpt-6.1'
+    input.dispatchEvent(new Event('input'))
+    await nextTick()
+    expect(options()).toEqual(['Use "gpt-6.1"', 'gpt-6.1-sol'])
+    input.value = 'gpt-6.1-sol'
+    input.dispatchEvent(new Event('input'))
+    await nextTick()
+    expect(options()).toEqual(['gpt-6.1-sol'])
+  })
+})

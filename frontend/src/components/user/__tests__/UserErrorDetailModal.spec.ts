@@ -68,3 +68,24 @@ describe('user error detail requests', () => {
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
   })
 })
+
+describe('user error detail key', () => {
+  // Second re-review: the table cuts the key name at 240px; the detail (a tap on the row) has it whole, wrapped.
+  it('shows the whole key name, wrapping, with the deleted mark', async () => {
+    const name = 'production-key-for-the-billing-and-analytics-pipeline-with-a-very-long-name-xyz'
+    getDetail.mockResolvedValueOnce({ ...detail('gpt-6.1-sol'), key_name: name, key_deleted: true })
+    const wrapper = await open(); await flushPromises()
+    const key = wrapper.get('[data-testid="error-detail-key"]')
+    expect(key.classes()).toContain('col-span-2')
+    const text = key.get('p')
+    expect(text.text()).toBe(`${name}usage.errors.keyDeleted`)
+    expect(text.classes()).toContain('[overflow-wrap:anywhere]')
+    expect(text.classes()).not.toContain('truncate')
+  })
+
+  it('shows a dash for an error without a key name', async () => {
+    getDetail.mockResolvedValueOnce({ ...detail('gpt-6.1-sol'), key_name: '', key_deleted: false })
+    const wrapper = await open(); await flushPromises()
+    expect(wrapper.get('[data-testid="error-detail-key"] p').text()).toBe('-')
+  })
+})

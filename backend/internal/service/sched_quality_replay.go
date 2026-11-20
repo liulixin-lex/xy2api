@@ -74,6 +74,8 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		byPair[pair] = append(byPair[pair], k)
 	}
 	keys = enabled
+	// Bound all optional Redis reads together while the evaluation transaction holds its lock.
+	seatReadBudget := 200 * time.Millisecond
 	var queue schedReplayHeap
 	batches := make(map[time.Time]*schedReplayEvent)
 	eventAt := func(at time.Time) *schedReplayEvent {
@@ -211,6 +213,12 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			d.replayStats.assessments++
 			v, basis := s.assessLine(d, prev, kind, e.at, resets)
 			next, action := q.Step(prev, kind, v, basis, e.at)
+			if action == q.ActionTrialTimeout {
+				started := time.Now()
+				basis.TrialSeats = new(s.trialSeats(ctx, prev, seatReadBudget))
+				seatReadBudget -= time.Since(started)
+				next.Basis = &basis
+			}
 			rows[k] = next
 			if action != "" {
 				decisions = append(decisions, q.Decision{At: e.at, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})

@@ -23,6 +23,14 @@ type ErrorAssessment struct {
 	LowerPass    float64  `json:"lower_pass"`
 	AttemptIDs   []string `json:"-"`
 	SourceGroups []int64  `json:"-"` // Actual selected request units, deduplicated and ascending.
+
+	// RecoveryOverLimit explains why an otherwise passing assessment became unknown.
+	RecoveryOverLimit bool `json:"recovery_over_limit,omitempty"`
+}
+
+// EffectiveErrorRate is the failure-rate cap used by assessment and its admin examples.
+func EffectiveErrorRate(configured float64) float64 {
+	return max(configured, ErrorRateFloor)
 }
 
 // 请求单位按 RequestID（为空时用 AttemptID）分组，保留最早开始时间与最终尝试。
@@ -32,7 +40,14 @@ type ErrorAssessment struct {
 // 只取 [now-60m, now] 内、请求起点>cut 的单位中最近 100 个，不从更早的补位。
 // Fail：LowerFail>Limit。Pass：k≥50 且 LowerPass≤Limit。其余 Unknown。
 func AssessError(samples, running []AttemptSample, limit float64, cut, now time.Time) ErrorAssessment {
-	out := ErrorAssessment{Limit: max(limit, ErrorRateFloor)}
+	assessment, _ := AssessErrorForGroup(samples, running, limit, cut, now, 0)
+	return assessment
+}
+
+// AssessErrorForGroup counts the target group's clear outcomes after final-attempt selection and slot truncation.
+func AssessErrorForGroup(samples, running []AttemptSample, limit float64, cut, now time.Time, groupID int64) (ErrorAssessment, int) {
+	out := ErrorAssessment{Limit: EffectiveErrorRate(limit)}
+	local := 0
 	rows := finalRequests(samples, running, now)
 	selected := rows[:0]
 	for _, unit := range rows {
@@ -51,10 +66,14 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 		switch {
 		case s.FinishedAt.IsZero():
 			out.Unknown++
-		case s.Outcome == OutcomeOK:
+		case s.Outcome == OutcomeOK || s.Class.Counted():
 			out.Clear++
-		case s.Class.Counted():
-			out.Clear++
+			if s.GroupID == groupID {
+				local++
+			}
+			if s.Outcome == OutcomeOK {
+				continue
+			}
 			out.Failed++
 			if len(out.AttemptIDs) < 50 {
 				out.AttemptIDs = append(out.AttemptIDs, s.AttemptID)
@@ -73,7 +92,16 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 	case out.Clear >= ErrorMinClear && out.LowerPass <= out.Limit:
 		out.Verdict = VerdictPass
 	}
-	return out
+	return out, local
+}
+
+// ForRecovery requires a passing assessment's observed failure rate to meet the limit.
+func (a ErrorAssessment) ForRecovery() ErrorAssessment {
+	if a.Verdict == VerdictPass && float64(a.Failed)/float64(a.Clear) > a.Limit {
+		a.Verdict = VerdictUnknown
+		a.RecoveryOverLimit = true
+	}
+	return a
 }
 
 func sortedSourceGroups(groups map[int64]struct{}) []int64 {

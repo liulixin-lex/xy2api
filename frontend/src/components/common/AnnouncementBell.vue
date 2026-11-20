@@ -3,7 +3,7 @@
     <!-- 铃铛按钮 -->
     <button
       @click="openModal"
-      class="relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition-all hover:bg-gray-100 hover:scale-105 dark:text-gray-400 dark:hover:bg-dark-800"
+      class="bell-btn relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition-all hover:bg-gray-100 hover:scale-105 dark:text-gray-400 dark:hover:bg-dark-800"
       :class="{ 'text-blue-600 dark:text-blue-400': unreadCount > 0 }"
       :aria-label="t('announcements.title')"
     >
@@ -430,6 +430,14 @@ watch(
 </script>
 
 <style scoped>
+/* Touch (pointer: coarse, mobile list plan): 40px to hit; a mouse keeps 36px. */
+@media (pointer: coarse) {
+  .bell-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 /* Modal Animations */
 .modal-fade-enter-active {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);

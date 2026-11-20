@@ -6,24 +6,28 @@
     {
       "account_id": 1,
       "reset_at": null,
+      "recent_since": null,
       "stop": null,
-      "ttfo": {
-        "first_event_p50_ms": 10000,
-        "first_output_p50_ms": 11600,
-        "gap_p50_ms": 1600,
-        "n": 42
+      "first_output": {
+        "n": 42,
+        "timeouts": 5,
+        "p50_ms": 11600
+      },
+      "slow_10s": {
+        "n": 40,
+        "slow": 23,
+        "timeouts": 3
       },
       "error": {
-        "rate": 0.018,
+        "rate": 0.022727272727272728,
         "n": 88,
         "short": false,
-        "red": false
+        "red": false,
+        "failed": 2
       },
       "cache": {
         "ratio": 0.74,
-        "turns": 12,
-        "all_ratio": 0.8,
-        "all_requests": 20
+        "turns": 12
       },
       "exemptions": [],
       "group_status": {
