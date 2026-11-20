@@ -23,13 +23,9 @@ export function useFilterFocusHandoff(sheet: Ref<boolean>, root: Ref<HTMLElement
   watch(sheet, async (on) => {
     // The sheets (dialogs in the body) before the toolbar: while the filter sheet is open "Filters" is expanded too.
     const sheets = [...document.querySelectorAll(SHEETS)].map((el) => el.closest('[role="dialog"]'))
-    const regions = on ? [row.value] : [...sheets, root.value]
-    const origin = focusOrigin(regions)
+    const origin = focusOrigin(on ? [row.value] : [...sheets, root.value])
     if (!origin) return
-    // A tap does not focus a button in Safari: a list opened from a field may name the sheet itself as its opener. The
-    // field whose list is open (aria-expanded) gives the key then.
-    const expanded = regions.map((region) => region?.querySelector('[data-filter] [aria-expanded="true"]')).find(Boolean)
-    const key = (origin.closest<HTMLElement>('[data-filter]') ?? expanded?.closest<HTMLElement>('[data-filter]'))?.dataset.filter
+    const key = origin.closest<HTMLElement>('[data-filter]')?.dataset.filter
     await nextTick()
     const target = on
       ? root.value?.querySelector<HTMLElement>('[data-test="toolbar-filter-button"]')
