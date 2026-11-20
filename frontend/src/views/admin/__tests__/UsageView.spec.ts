@@ -463,7 +463,8 @@ describe('admin UsageView columns per width', () => {
       await flushPromises()
       expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
       expect(pager(w).props('totalExact')).toBe(false)
-      expect(pager(w).props('total')).toBe(41)
+      // The page asked for, no further: page 2 is the last one an answer showed.
+      expect(pager(w).props('total')).toBe(40)
       next.resolve({ items: rows(7, 21), total: 27, pages: 2 })
       await flushPromises()
       expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
@@ -491,6 +492,65 @@ describe('admin UsageView columns per width', () => {
       expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
       expect(pager(w).props('totalExact')).toBe(false)
       w.unmount()
+    })
+
+    // Review after acceptance (second round), item 1: while a page is slow or failed, "next" goes no further than the
+    // pages an answer showed (the open range let it go on to pages 3 and 4); previous stays. Real Pagination.
+    describe('with the real pagination', () => {
+      const mountWithPager = () => mount(UsageView, {
+        global: { stubs: {
+          AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
+          UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, Select: true,
+          DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
+          EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true, OpsErrorLogTable: true,
+        } },
+      })
+      const button = (w: ReturnType<typeof mountWithPager>, name: 'next' | 'previous') =>
+        w.get(`[data-test="pagination-compact"] button[aria-label="pagination.${name}"]`)
+      const pagesAsked = () => list.mock.calls.map(([params]) => (params as { page: number }).page)
+
+      it('does not go past a page still on its way, however often "next" is pressed', async () => {
+        setPhone(true)
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+        const w = mountWithPager()
+        await flushPromises()
+        const slow = later()
+        list.mockReturnValueOnce(slow.promise)
+        list.mockClear()
+        await button(w, 'next').trigger('click')
+        await flushPromises()
+        // 750 ms of pressing "next" while page 2 is on its way.
+        for (let i = 0; i < 3; i++) {
+          vi.advanceTimersByTime(250)
+          await button(w, 'next').trigger('click')
+          await flushPromises()
+        }
+        expect(pagesAsked()).toEqual([2])
+        expect(button(w, 'next').attributes('disabled')).toBeDefined()
+        expect(button(w, 'previous').attributes('disabled')).toBeUndefined()
+        slow.resolve({ items: rows(20, 21), total: 41, pages: 3 })
+        await flushPromises()
+        expect(button(w, 'next').attributes('disabled')).toBeUndefined()
+        w.unmount()
+      })
+
+      it('does not go on after a failed page, but goes back', async () => {
+        setPhone(true)
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 }).mockRejectedValueOnce(new Error('down'))
+        const w = mountWithPager()
+        await flushPromises()
+        await button(w, 'next').trigger('click')
+        await flushPromises()
+        expect((w.vm as any).pagination.page).toBe(2)
+        expect(button(w, 'next').attributes('disabled')).toBeDefined()
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+        list.mockClear()
+        await button(w, 'previous').trigger('click')
+        await flushPromises()
+        expect(pagesAsked()).toEqual([1])
+        expect(button(w, 'next').attributes('disabled')).toBeUndefined()
+        w.unmount()
+      })
     })
 
     it('goes back from an empty page past the end to the last page with rows', async () => {

@@ -460,10 +460,12 @@ const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 // to it, each with its generation. The other cards keep the last stats answer until a new one arrives, as before.
 const statsCard = useUsageStatsState(() => JSON.stringify(filters.value))
 const usageStatsState = statsCard.phase
-/** The query a list answer is for: filters, page, page size and sort. */
-const usageQuery = () => JSON.stringify([filters.value, pagination.page, pagination.page_size, sortState.sort_by, sortState.sort_order])
+/** The list a page belongs to: filters, page size and sort. */
+const usageList = () => JSON.stringify([filters.value, pagination.page_size, sortState.sort_by, sortState.sort_order])
+/** The query a list answer is for: the list and the page. */
+const usageQuery = () => JSON.stringify([usageList(), pagination.page])
 /** The last list answer the table took, with what it was asked for (an active load's or the 5 s check's). */
-const usageAnswer = ref<{ query: string; filters: AdminUsageQueryParams; page: number; pageSize: number; rows: number; total: number } | null>(null)
+const usageAnswer = ref<{ list: string; query: string; filters: AdminUsageQueryParams; page: number; pageSize: number; rows: number; total: number } | null>(null)
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: async (signal) => {
@@ -471,7 +473,7 @@ const liveUsage = useLiveTable<AdminUsageLog>({
     // asked. The 5 s membership check uses the same request but starts no stats, so its failure says nothing about
     // them (fourth review). The engine sets `loading` before an active load asks, and runs no check during one.
     const list = liveUsage.loading.value ? statsCard.listStarted() : null
-    const asked = { query: usageQuery(), filters: { ...filters.value }, page: pagination.page, pageSize: pagination.page_size }
+    const asked = { list: usageList(), query: usageQuery(), filters: { ...filters.value }, page: pagination.page, pageSize: pagination.page_size }
     try {
       const answer = await adminAPI.usage.list(buildUsageListParams(asked.page, asked.pageSize, false), { signal })
       // The engine aborts what a newer load replaces: an answer that comes back unaborted is the one it takes.
@@ -503,10 +505,18 @@ const usageTotalExact = computed(() => {
   return !!answer && usageTotalIsExact(answer.filters, answer)
 })
 const countShown = computed(() => activeTab.value === 'errors' || usageTotalExact.value)
-/** The pagination's total; while a page is on its way (or failed) an open range for the page asked for. */
-const usagePaginationTotal = computed(() =>
-  currentUsageAnswer.value ? usageTotal.value : Math.max(usageTotal.value, pagination.page * pagination.page_size + 1)
-)
+/**
+ * The pagination's total. While a page is on its way (or failed) it shows the page asked for as an open range, and
+ * "next" goes no further than the last answer for this list showed pages for: never past a page not yet answered
+ * (previous, and the retry, stay).
+ */
+const usagePaginationTotal = computed(() => {
+  if (currentUsageAnswer.value) return usageTotal.value
+  const size = pagination.page_size
+  const answer = usageAnswer.value
+  const known = answer && answer.list === usageList() ? Math.ceil(answer.total / size) : 0
+  return Math.max(pagination.page, known) * size
+})
 // A page past the end (rows went since the pages were counted) comes back empty with only its offset as the total:
 // back to the last page that answer allows, asked again (each step is a lower page, page 1 ends it).
 watch(currentUsageAnswer, (answer) => {
