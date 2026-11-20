@@ -234,6 +234,28 @@ describe('v-tip on keyboard focus and scroll', () => {
     expect(jumps.length).toBe(0)
   })
 
+  // The Tab mark belongs to the focus that Tab lands on, with a v-tip or not: a script's focus elsewhere while the key
+  // is still down (here onto an off-screen recent cell) is not Tab's and scrolls nothing.
+  it('lets only the element Tab lands on scroll: not one a script focuses while Tab is still down', async () => {
+    content.value = 'tip text'
+    const plain = document.createElement('button')
+    document.body.appendChild(plain)
+    const { el, jumps } = offScreen(1500)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    plain.focus()
+    el.focus({ preventScroll: true })
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab' }))
+    await frame()
+    await frame()
+    expect([jumps.length, shown()]).toEqual([0, true])
+    el.blur()
+    // Tab straight onto it: the jump, then the tip.
+    tabTo(el)
+    await frame()
+    await frame()
+    expect([jumps.length, shown(), el.getAttribute('aria-describedby')]).toEqual([1, true, 'sq-tip'])
+  })
+
   // The root's own declaration goes back with its priority: smooth !important stays important.
   it('puts the root\'s scroll-behavior back with its priority, or removes it when there was none', () => {
     content.value = 'tip text'

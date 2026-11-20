@@ -365,8 +365,6 @@ describe('SchedQualityPanel', () => {
   // The dot carries a v-tip: keyboard focus on it may scroll the page only when Tab brought it there, never when the
   // closing panel gives it back (preventScroll), so the table stays where the user scrolled it.
   it('gives focus back to an off-screen dot without scrolling the page, and its tip still shows', async () => {
-    // Real frames for the tip (an earlier test in this block leaves fake timers on).
-    vi.useRealTimers()
     mount(Panel, { attachTo: document.body })
     const dot = mount(defineComponent({
       setup: () => () => withDirectives(h('button', { type: 'button', 'data-quality-opener': '7:53' }, 'dot'), [[vTip, 'dot tip']])
@@ -375,10 +373,16 @@ describe('SchedQualityPanel', () => {
     dot.scrollIntoView = vi.fn()
     await openOn(7, { groupId: 53 })
     tab('gpt-a').focus()
+    // The tip's two frames, driven here rather than left to jsdom's frame clock.
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     await flushPromises()
     expect([panel(), document.activeElement]).toEqual([null, dot])
-    for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    vi.advanceTimersToNextFrame()
+    vi.advanceTimersToNextFrame()
     expect(dot.scrollIntoView).not.toHaveBeenCalled()
     expect(dot.getAttribute('aria-describedby')).toBe('sq-tip')
   })

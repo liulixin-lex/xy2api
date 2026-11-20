@@ -59,18 +59,32 @@ function onPressElsewhere(event: Event) {
 /** The kind of the latest press: a mouse click's tip still goes on mouseleave, as a hover tip does. */
 let pressType = ''
 /**
- * Whether the focus that comes next is Tab's (or Shift+Tab's): only that focus may scroll the page for its tip
- * (showOnFocus). A focus given back by a script (a closing panel's preventScroll), a click or any other key leaves the
- * page where it is. Set by the key, cleared on its keyup, on a press and when a focus reads it.
+ * Only the focus a Tab (or Shift+Tab) lands on may scroll the page for its tip (showOnFocus); a focus given back by a
+ * script (a closing panel's preventScroll), a click or anything else leaves the page where it is. The key sets
+ * `tabbing`; the next focus, whatever it lands on (with a v-tip or not), takes it as `tabLanding` and clears it, so a
+ * script's focus while the key is still down is not Tab's. Cleared too on keyup, on a press, and when read. The focus
+ * is caught in the capture phase, before the element's own focus listener (browsers send focusin after focus).
  */
 let tabbing = false
+let tabLanding: EventTarget | null = null
 if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', (event) => {
     pressType = event.pointerType
     tabbing = false
+    tabLanding = null
   }, true)
-  window.addEventListener('keydown', (event) => { tabbing = event.key === 'Tab' }, true)
-  window.addEventListener('keyup', () => { tabbing = false }, true)
+  window.addEventListener('keydown', (event) => {
+    tabbing = event.key === 'Tab'
+    tabLanding = null
+  }, true)
+  window.addEventListener('keyup', () => {
+    tabbing = false
+    tabLanding = null
+  }, true)
+  window.addEventListener('focus', (event) => {
+    tabLanding = tabbing ? event.target : null
+    tabbing = false
+  }, true)
 }
 
 function tip() {
@@ -312,8 +326,8 @@ export const vTip: Directive<TipTarget, TipText> = {
     el.__tipText = binding.value ?? ''
     const handlers: Record<string, (event: Event) => void> = {
       focus: () => {
-        const byTab = tabbing
-        tabbing = false
+        const byTab = tabLanding === el
+        if (byTab) tabLanding = null
         if (keyboardFocus(el)) showOnFocus(el, byTab)
       },
       blur: () => {
