@@ -153,10 +153,11 @@ const usageLog = {
   native_compaction_v2: false,
 }
 
-function mountUsageView() {
+function mountUsageView(extraStubs: Record<string, unknown> = {}) {
   return mount(UsageView, {
     global: {
       stubs: {
+
         AppLayout: simpleStub,
         Pagination: true,
         Select: true,
@@ -169,6 +170,7 @@ function mountUsageView() {
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
         TokenUsageTrend: chartStub,
+        ...extraStubs,
       },
     },
   })
@@ -218,6 +220,31 @@ describe('user UsageView', () => {
     listMyErrorRequests.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     list.mockResolvedValue({ items: [{ id: 1, name: 'demo-key' }], total: 1, page: 1, page_size: 100, pages: 1 })
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
+  })
+
+  // Mobile list plan: below 1024px the cards and charts start collapsed; the date range stays and still filters the list.
+  it('mounts no cards or charts below 1024px until expanded, and the date range still reloads the list', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: false, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    try {
+      const named = (name: string) => ({ name, template: '<div />' })
+      const wrapper = mountUsageView({ UsageStatsCards: named('UsageStatsCards'), ModelDistributionChart: named('ModelDistributionChart'), TokenUsageTrend: named('TokenUsageTrend') })
+      await flushPromises()
+      expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(false)
+      expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(false)
+      query.mockClear()
+      wrapper.findComponent({ name: 'DateRangePicker' }).vm.$emit('change', { startDate: '2026-11-01', endDate: '2026-11-02', preset: null })
+      await flushPromises()
+      expect(query).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-11-01', end_date: '2026-11-02' }), expect.anything())
+      await wrapper.get('[data-testid="usage-overview-toggle"]').trigger('click')
+      expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(true)
+      expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).exists()).toBe(true)
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
   })
 
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {

@@ -97,6 +97,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/utils/format', () => ({
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
+  formatUsdTotal: (value: number | null | undefined) => `$${value ?? 0}`,
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -305,6 +306,45 @@ describe('admin UsageView route filters', () => {
 
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 42 }), expect.anything())
     expect(wrapper.find('[data-test="user-filter-label"]').text()).toBe('42')
+  })
+})
+
+// Mobile list plan: below 1024px the cards and charts start collapsed, and the date range, still on the page, keeps
+// filtering the list.
+describe('admin UsageView below 1024px', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: false, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_input_tokens: 0, total_output_tokens: 0, total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('mounts no cards or charts until expanded, and the date range still reloads the list', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).exists()).toBe(false)
+
+    list.mockClear()
+    wrapper.findComponent({ name: 'DateRangePicker' }).vm.$emit('change', { startDate: '2026-11-01', endDate: '2026-11-02', preset: null })
+    await flushPromises()
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-11-01', end_date: '2026-11-02' }), expect.anything())
+
+    await wrapper.get('[data-testid="usage-overview-toggle"]').trigger('click')
+    expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('startDate')).toBe('2026-11-01')
+    wrapper.unmount()
   })
 })
 

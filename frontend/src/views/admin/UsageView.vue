@@ -1,69 +1,70 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :e2e-state="usageStatsState" />
-      <!-- Charts Section -->
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
-                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
-              </div>
+      <!-- 统计卡、日期范围与图表；1024 以下收起成日期范围 + 一行摘要（日期也控制下面的列表） -->
+      <UsageOverview :stats="usageStats" :e2e-state="usageStatsState">
+        <template #range>
+          <div class="flex items-center gap-2">
+            <span class="sr-only text-sm font-medium text-gray-700 dark:text-gray-300 sm:not-sr-only">{{ t('admin.dashboard.timeRange') }}:</span>
+            <DateRangePicker
+              v-model:start-date="startDate"
+              v-model:end-date="endDate"
+              @change="onDateRangeChange"
+            />
+          </div>
+        </template>
+        <template #granularity>
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+            <div class="w-28">
+              <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
             </div>
           </div>
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
-            v-model:source="modelDistributionSource"
-            v-model:metric="modelDistributionMetric"
-            :model-stats="requestedModelStats"
-            :upstream-model-stats="upstreamModelStats"
-            :mapping-model-stats="mappingModelStats"
-            :loading="modelStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
-            v-model:source="endpointDistributionSource"
-            v-model:metric="endpointDistributionMetric"
-            :endpoint-stats="inboundEndpointStats"
-            :upstream-endpoint-stats="upstreamEndpointStats"
-            :endpoint-path-stats="endpointPathStats"
-            :loading="endpointStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-        </div>
-      </div>
+        </template>
+        <template #charts>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ModelDistributionChart
+              v-model:source="modelDistributionSource"
+              v-model:metric="modelDistributionMetric"
+              :model-stats="requestedModelStats"
+              :upstream-model-stats="upstreamModelStats"
+              :mapping-model-stats="mappingModelStats"
+              :loading="modelStatsLoading"
+              :show-source-toggle="true"
+              :show-metric-toggle="true"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+            <GroupDistributionChart
+              v-model:metric="groupDistributionMetric"
+              :group-stats="groupStats"
+              :loading="chartsLoading"
+              :show-metric-toggle="true"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+          </div>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <EndpointDistributionChart
+              v-model:source="endpointDistributionSource"
+              v-model:metric="endpointDistributionMetric"
+              :endpoint-stats="inboundEndpointStats"
+              :upstream-endpoint-stats="upstreamEndpointStats"
+              :endpoint-path-stats="endpointPathStats"
+              :loading="endpointStatsLoading"
+              :show-source-toggle="true"
+              :show-metric-toggle="true"
+              :title="t('usage.endpointDistribution')"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          </div>
+        </template>
+      </UsageOverview>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
       <div class="card">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
@@ -215,7 +216,7 @@ import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { useUsageStatsState } from './usageStatsState'
-import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageOverview from '@/components/admin/usage/UsageOverview.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
