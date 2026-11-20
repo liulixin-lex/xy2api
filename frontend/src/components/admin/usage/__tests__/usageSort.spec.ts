@@ -3,6 +3,7 @@
 // claims the sort (the request keeps model); show it again: its arrow is back. Real DataTable, no stub.
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { defineComponent, h, reactive } from 'vue'
 
 import UsageTable from '../UsageTable.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
@@ -72,5 +73,65 @@ describe('usage list headers follow the page sort', () => {
     await wrapper.vm.$nextTick()
     expect(ariaSort(wrapper, 'admin.ops.errorLog.status')).toBe('descending')
     expect(ariaSort(wrapper, 'admin.ops.errorLog.time')).toBe('none')
+  })
+})
+
+// The shared layer's page-owned sort (872f669bb): a header click only asks; the arrows follow the sort the page passes
+// back. Each page answers in its @sort, so a click shows at once, and survives hiding and showing the column.
+describe('a header click asks the page, whose answer the headers show', () => {
+  const stubs = { Icon: true, Teleport: true, EmptyState: true, Pagination: true, 'el-tooltip': true, UserErrorDetailModal: true }
+  const model = { key: 'model', label: 'Model', sortable: true }
+  const time = { key: 'created_at', label: 'Time', sortable: true }
+
+  it('the usage table', async () => {
+    const page = reactive({ sort: { key: 'created_at', order: 'desc' as 'asc' | 'desc' }, columns: [model, time], answers: true })
+    const Host = defineComponent(() => () => h(UsageTable, {
+      data: [], columns: page.columns, serverSideSort: true, sort: page.sort,
+      onSort: (key: string, order: 'asc' | 'desc') => { if (page.answers) page.sort = { key, order } },
+    }))
+    const wrapper = mount(Host, { global: { stubs } })
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, 'Time')).toBe('descending')
+    await wrapper.get('[data-test="sort-model"]').trigger('click')
+    expect(page.sort).toEqual({ key: 'model', order: 'asc' })
+    expect(ariaSort(wrapper, 'Model')).toBe('ascending')
+    expect(ariaSort(wrapper, 'Time')).toBe('none')
+    page.columns = [time]
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, 'Time')).toBe('none')
+    page.columns = [model, time]
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, 'Model')).toBe('ascending')
+    // A page that does not answer (yet): the headers keep what it requests with.
+    page.answers = false
+    await wrapper.get('[data-test="sort-model"]').trigger('click')
+    expect(ariaSort(wrapper, 'Model')).toBe('ascending')
+  })
+
+  it.each([
+    ['admin errors', OpsErrorLogTable, 'admin.ops.errorLog.model', 'admin.ops.errorLog.status', 'admin.ops.errorLog.time'],
+    ['user errors', UserErrorRequestsTable, 'usage.errors.model', 'usage.errors.status', 'usage.errors.time'],
+  ] as const)('the %s table, status sent as status_code', async (_, Table, modelLabel, statusLabel, timeLabel) => {
+    const page = reactive({ sortBy: 'created_at', sortOrder: 'desc' as 'asc' | 'desc', keys: ['model', 'status', 'created_at'] })
+    const Host = defineComponent(() => () => h(Table as never, {
+      rows: [], total: 0, loading: false, page: 1, pageSize: 20, sortBy: page.sortBy, sortOrder: page.sortOrder, visibleColumnKeys: page.keys,
+      onSort: (sortBy: string, sortOrder: 'asc' | 'desc') => { page.sortBy = sortBy; page.sortOrder = sortOrder },
+    }))
+    const wrapper = mount(Host, { global: { stubs } })
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, timeLabel)).toBe('descending')
+    await wrapper.get('[data-test="sort-status"]').trigger('click')
+    expect(page.sortBy).toBe('status_code')
+    expect(ariaSort(wrapper, statusLabel)).toBe('ascending')
+    expect(ariaSort(wrapper, timeLabel)).toBe('none')
+    await wrapper.get('[data-test="sort-model"]').trigger('click')
+    expect([page.sortBy, page.sortOrder]).toEqual(['model', 'asc'])
+    page.keys = ['status', 'created_at']
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, timeLabel)).toBe('none')
+    expect(ariaSort(wrapper, statusLabel)).toBe('none')
+    page.keys = ['model', 'status', 'created_at']
+    await wrapper.vm.$nextTick()
+    expect(ariaSort(wrapper, modelLabel)).toBe('ascending')
   })
 })
