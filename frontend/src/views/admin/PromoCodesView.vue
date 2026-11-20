@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <TableToolbar>
           <template v-if="hasIssue" #search>
@@ -40,26 +40,33 @@
 
       <template #table>
         <DataTable
+          layout="table"
+          :scroll-label="t('admin.promo.title')"
           :columns="columns"
           :data="codes"
           :loading="loading"
           :server-side-sort="true"
+          :sticky-actions-column="!phone"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-code="{ value }">
-            <div class="flex items-center space-x-2">
-              <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
+            <!-- The frozen identity column: at most 240px, the code cut with "…" and whole on a tap; the copy button stays,
+                 a 16px icon with a 40px touch area. -->
+            <div class="flex max-w-[240px] items-center gap-2">
+              <TableIdentityCell class="font-mono" :primary="value" />
               <button
+                type="button"
                 @click="copyToClipboard(value)"
+                class="relative flex flex-none items-center justify-center transition-colors [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-['']"
                 :class="[
-                  'flex items-center transition-colors',
                   copiedCode === value
                     ? 'text-green-500'
                     : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
                 ]"
                 :title="copiedCode === value ? t('admin.promo.copied') : t('keys.copyToClipboard')"
+                :aria-label="copiedCode === value ? t('admin.promo.copied') : t('keys.copyToClipboard')"
               >
                 <Icon v-if="copiedCode !== value" name="copy" size="sm" :stroke-width="2" />
                 <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -99,45 +106,50 @@
 
           <template #cell-expires_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? formatDateTime(value) : t('admin.promo.neverExpires') }}
+              {{ value ? formatListDateTime(value) : t('admin.promo.neverExpires') }}
             </span>
           </template>
 
           <template #cell-created_at="{ value }">
             <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ formatDateTime(value) }}
+              {{ formatListDateTime(value) }}
             </span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center space-x-1">
+            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (four buttons do not fit its 44px). -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 @click="copyRegisterLink(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
                 :title="t('admin.promo.copyRegisterLink')"
+                :aria-label="t('admin.promo.copyRegisterLink')"
               >
                 <Icon name="link" size="sm" />
               </button>
               <button
                 @click="handleViewUsages(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
                 :title="t('admin.promo.viewUsages')"
+                :aria-label="t('admin.promo.viewUsages')"
               >
                 <Icon name="eye" size="sm" />
               </button>
               <button
                 v-if="canIssue"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
                 :title="t('common.edit')"
+                :aria-label="t('common.edit')"
               >
                 <Icon name="edit" size="sm" />
               </button>
               <button
                 v-if="canManage"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :title="t('common.delete')"
+                :aria-label="t('common.delete')"
               >
                 <Icon name="trash" size="sm" />
               </button>
@@ -394,7 +406,7 @@ import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
-import { formatDateTime, formatDateTimeLocalInput } from '@/utils/format'
+import { formatDateTime, formatDateTimeLocalInput, formatListDateTime } from '@/utils/format'
 import type { PromoCode, PromoCodeUsage } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -406,10 +418,13 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage, has } = useAdminPermission('promo_codes')
 // 新建、编辑优惠码和按优惠码搜索需要“生成兑换码”权限
