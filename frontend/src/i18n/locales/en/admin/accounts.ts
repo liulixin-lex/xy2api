@@ -18,10 +18,6 @@ export default {
         cancel: 'Cancel',
         inactive: 'Inactive',
       },
-      card: {
-        expand: 'Show details',
-        collapse: 'Hide details'
-      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },
@@ -77,8 +73,6 @@ export default {
         iqStates: { smart: 'Smart', degraded: 'Degraded', checking: 'Checking', paused: 'Paused' },
         iqMore: '+{n}',
         usageMore: '+{n}',
-        iqRecheckIn: 'rechecks in {time}',
-        iqRecheckPending: 'waiting for a recheck',
         ratioLastProbe: 'Last probe {time}',
         ratioFailure: 'Probe failed: {reason}',
         ratioNotProbed: 'Not probed',

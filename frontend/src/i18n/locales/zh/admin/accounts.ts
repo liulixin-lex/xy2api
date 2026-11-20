@@ -18,10 +18,6 @@ export default {
         cancel: '取消',
         inactive: '已停用',
       },
-      card: {
-        expand: '展开详情',
-        collapse: '收起'
-      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '报错', cache: '缓存' },
@@ -77,8 +73,6 @@ export default {
         iqStates: { smart: '聪明', degraded: '降智', checking: '检测中', paused: '已暂停' },
         iqMore: '+{n}',
         usageMore: '+{n}',
-        iqRecheckIn: '{time} 后复检',
-        iqRecheckPending: '等待复检',
         ratioLastProbe: '上次探测 {time}',
         ratioFailure: '探测失败：{reason}',
         ratioNotProbed: '未探测',
