@@ -26,7 +26,7 @@ XY2API 内置一个只读的 MCP（Model Context Protocol）服务，让外部 A
 | `xy2api.requests.get_attempts` | 读取某条错误记录的逐次上游尝试（分页） | `ops` 或 `usage`；该行属于已恢复的上游记录时另需 `ops` |
 | `xy2api.requests.search_ingress_rejections` | 入口拒绝的分钟级聚合 | `ops` |
 | `xy2api.accounts.search` | 按名称、平台、状态、分组查找上游账号摘要 | `accounts`、`channels`、`groups`、`usage` 任一 |
-| `xy2api.accounts.get_health` | 最多 100 个指定账号的[质量状态](group-quality-gate.md#账号列表)摘要（首个有效输出与首个事件 P50、报错、双口径缓存及各组有效身份）和已存的[上游余额](upstream-balance.md)快照 | `accounts` |
+| `xy2api.accounts.get_health` | 最多 100 个指定账号的各组有效身份、已存[上游余额](upstream-balance.md)快照和[近期状况](group-quality-gate.md#账号列表)，近期字段包括首字 `first_output`（`n`、`timeouts`、`p50_ms`）、报错 `failure`（含失败请求数 `failed`）、续接轮缓存 `cache`（`ratio`、`turns`）、超过 10 秒 `slow_10s`（`n`、`slow`、`timeouts`），以及重置缩短窗口时的起点 `recent_since`（其他情况为 `null`） | `accounts` |
 | `xy2api.groups.search` | 分组 ID、名称、平台、状态与分类 | `groups`、`usage`、`users` 任一 |
 | `xy2api.groups.get_usage_summary` | 指定分组已闭合自然日的费用汇总 | `groups` |
 | `xy2api.channels.search` | 渠道元数据和分组绑定 | `channels` |
