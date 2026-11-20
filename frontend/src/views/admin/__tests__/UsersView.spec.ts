@@ -45,7 +45,8 @@ vi.mock('@/api/admin', () => ({
       batchUpdateStatus
     },
     groups: {
-      getAll: getAllGroups
+      getAll: getAllGroups,
+      getAllIncludingInactive: getAllGroups
     },
     dashboard: {
       getBatchUsersUsage
@@ -816,6 +817,37 @@ describe('admin UsersView', () => {
       window.matchMedia = matchMedia
       localStorage.removeItem('user-visible-filters')
       localStorage.removeItem('user-filter-values')
+    }
+  })
+
+  it('keeps only "⋯" in a phone row, editing and enabling leading its menu', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email: 'phone@example.test' })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      const actions = wrapper.get('[data-test="actions-42"]')
+      expect(actions.findAll('button')).toHaveLength(1)
+      const more = actions.get('[data-test="row-more"]')
+      expect(more.attributes('aria-label')).toBe('common.more phone@example.test')
+      await more.trigger('click')
+      await flushPromises()
+      const items = wrapper.findAll('.action-menu-content button').map((el) => el.attributes('data-test') ?? '')
+      expect(items.slice(0, 2)).toEqual(['menu-edit', 'menu-toggle-status'])
+      await wrapper.get('[data-test="menu-toggle-status"]').trigger('click')
+      await flushPromises()
+      expect(toggleStatus).toHaveBeenCalled()
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
     }
   })
 })

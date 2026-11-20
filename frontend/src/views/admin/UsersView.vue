@@ -717,7 +717,23 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- A phone: only "⋯" in the 44px frozen column; editing and enabling lead its menu (mobile list plan). -->
+            <div v-if="phone" class="users-more">
+              <button
+                v-if="canReadRow(row)"
+                type="button"
+                class="action-menu-trigger users-more__btn sq-focus"
+                :class="{ 'is-open': activeMenuId === row.id }"
+                :aria-label="`${t('common.more')} ${row.email}`"
+                aria-haspopup="menu"
+                :aria-expanded="activeMenuId === row.id ? 'true' : 'false'"
+                data-test="row-more"
+                @click="openActionMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+            </div>
+            <div v-else class="users-ops flex items-center gap-1">
               <!-- Edit Button -->
               <button
                 v-if="isSuperAdmin || canActOn(row)"
@@ -792,6 +808,27 @@
         <div class="py-1">
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
+              <!-- A phone: the row's direct buttons first (mobile list plan). -->
+              <template v-if="phone && (isSuperAdmin || canActOn(user))">
+                <button
+                  @click="handleEdit(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  data-test="menu-edit"
+                >
+                  <Icon name="edit" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ t('common.edit') }}
+                </button>
+                <button
+                  v-if="canActOn(user)"
+                  @click="handleToggleStatus(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  data-test="menu-toggle-status"
+                >
+                  <Icon :name="user.status === 'active' ? 'ban' : 'checkCircle'" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ user.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}
+                </button>
+                <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+              </template>
               <!-- View API Keys -->
               <button
                 @click="handleViewApiKeys(user); closeActionMenu()"
@@ -1695,7 +1732,8 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
 
     const rect = target.getBoundingClientRect()
     const menuWidth = 200
-    const menuHeight = 240
+    // A phone's menu also leads with editing and enabling.
+    const menuHeight = window.innerWidth < 768 ? 320 : 240
     const padding = 8
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
@@ -2193,6 +2231,34 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* A phone's "⋯": a 40px square centred in the 44px frozen column. */
+.users-more {
+  display: flex;
+  justify-content: center;
+}
+.users-more__btn {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+}
+.users-more__btn.is-open,
+.users-more__btn:hover {
+  background: var(--color-bg-control-hover);
+  color: var(--color-text-primary);
+}
+/* The menu's items on touch: 40px to hit. */
+@media (pointer: coarse) {
+  .action-menu-content button {
+    min-height: 40px;
+  }
+  .users-ops > button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
 /* A phone's filter sheet: one field per filter, its name above it. */
 .users-sheet__field {
   display: grid;
