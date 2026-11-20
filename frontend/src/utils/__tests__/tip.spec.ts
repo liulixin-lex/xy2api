@@ -127,3 +127,46 @@ describe('v-tip cards', () => {
     expect(tip().style.left).toBe('8px')
   })
 })
+
+// A scroll hides a tip (spec E), but for one whose target has keyboard focus: tabbing to an element below the fold
+// scrolls it into view after its tip shows, and that tip must stay, moved with its target.
+describe('v-tip on scroll', () => {
+  const at = (el: Element, top: number) =>
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top, bottom: top + 20, left: 100, width: 24, height: 20 } as DOMRect)
+  const scroll = () => document.dispatchEvent(new Event('scroll'))
+
+  it('keeps a keyboard-focused tip through a scroll, moved with its target and still describing it', () => {
+    content.value = 'tip text'
+    const el = mount(Host, { attachTo: document.body }).element as HTMLElement
+    at(el, 600)
+    el.focus()
+    expect([tip().hidden, tip().style.top, el.getAttribute('aria-describedby')]).toEqual([false, '594px', 'sq-tip'])
+    at(el, 200)
+    scroll()
+    expect([tip().hidden, tip().style.top, el.getAttribute('aria-describedby')]).toEqual([false, '194px', 'sq-tip'])
+  })
+
+  it('still closes a hover tip on scroll, and a keyboard-focused one on Escape or blur', () => {
+    content.value = 'tip text'
+    const hovered = mount(Host, { attachTo: document.body }).element as HTMLElement
+    hover(hovered)
+    expect(tip().hidden).toBe(false)
+    scroll()
+    expect([tip().hidden, hovered.getAttribute('aria-describedby')]).toEqual([true, null])
+    vi.useRealTimers()
+
+    const focused = mount(Host, { attachTo: document.body }).element as HTMLElement
+    focused.focus()
+    expect(tip().hidden).toBe(false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect([tip().hidden, focused.getAttribute('aria-describedby')]).toEqual([true, null])
+    focused.blur()
+    focused.focus()
+    expect(tip().hidden).toBe(false)
+    focused.blur()
+    expect([tip().hidden, focused.getAttribute('aria-describedby')]).toEqual([true, null])
+    // Once focus has gone, a scroll hides as before (nothing left to follow).
+    scroll()
+    expect(tip().hidden).toBe(true)
+  })
+})

@@ -68,6 +68,10 @@ function tipCard(): TipCard | '' {
   row-gap: 2px;
   width: 72px;
 }
+/* The table cell (.acell) clips what lies outside its 72px, so the shared ring is drawn inside the cell here. */
+.recent.sq-focus:focus-visible {
+  outline-offset: -2px;
+}
 .recent__k {
   overflow: hidden;
   color: var(--color-text-muted);

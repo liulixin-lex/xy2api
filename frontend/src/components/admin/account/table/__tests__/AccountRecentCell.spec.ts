@@ -152,6 +152,9 @@ describe('AccountRecentCell', () => {
     expect(tip.hidden).toBe(true)
     expect(cell.attributes('aria-describedby')).toBeUndefined()
     expect(mountCell(null).attributes('tabindex')).toBeUndefined()
+    // The table cell clips outside its 72px: the shared focus ring is drawn inside the cell.
+    const file = '../AccountRecentCell.vue'
+    expect(readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')).toMatch(/\.recent\.sq-focus:focus-visible \{\s*outline-offset: -2px;\s*\}/)
   })
 
   it('reads as the contract writes it with the real messages, in Chinese and English', () => {

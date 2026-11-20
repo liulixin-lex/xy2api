@@ -3,7 +3,8 @@ import { anyOverlayOpen } from './overlayStack'
 
 /**
  * v-tip="text": short tip (design spec E): shown after 400ms hover or at once on keyboard focus, hidden on
- * leave, blur, scroll or Escape. With no layer open Escape only closes the tip; while a popover, panel or dialog is
+ * leave, blur, scroll or Escape; a scroll while its target keeps keyboard focus (the browser bringing the focused
+ * element into view, or the user scrolling on) moves the tip with the target instead. With no layer open Escape only closes the tip; while a popover, panel or dialog is
  * open the key goes on to it as well, so one press closes both (7m-2). One shared element with
  * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
  * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
@@ -165,7 +166,7 @@ function show(target: TipTarget) {
   current = target
   setDescribedBy(target, [...describedBy(target), TIP_ID])
   document.addEventListener('keydown', onKeydown, true)
-  window.addEventListener('scroll', hide, true)
+  window.addEventListener('scroll', onScroll, true)
 }
 
 function hide() {
@@ -177,7 +178,16 @@ function hide() {
   if (current) setDescribedBy(current, describedBy(current))
   current = null
   document.removeEventListener('keydown', onKeydown, true)
-  window.removeEventListener('scroll', hide, true)
+  window.removeEventListener('scroll', onScroll, true)
+}
+
+/**
+ * A scroll hides the tip, but for one whose target has keyboard focus: that one follows its target, off screen with
+ * it and back, until blur or Escape. Tabbing to an element below the fold scrolls it into view after the tip shows.
+ */
+function onScroll() {
+  if (current && tipEl && document.activeElement === current && keyboardFocus(current)) place(current, tipEl)
+  else hide()
 }
 
 function onKeydown(event: KeyboardEvent) {
