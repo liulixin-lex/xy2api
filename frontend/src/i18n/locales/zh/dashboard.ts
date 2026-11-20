@@ -1080,12 +1080,14 @@ export default {
   // Pagination
   pagination: {
     range: '第 {from}–{to} 条，共 {total} 条',
+    rangeOpen: '第 {from}–{to} 条',
     showing: '显示',
     to: '至',
     of: '共',
     results: '条结果',
     page: '页',
     pageOf: '第 {page} / {total} 页',
+    pageOnly: '第 {page} 页',
     previous: '上一页',
     next: '下一页',
     perPage: '每页',

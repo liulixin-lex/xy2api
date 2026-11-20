@@ -22,8 +22,8 @@
         >
           <Icon name="chevronLeft" size="md" />
         </button>
-        <span class="whitespace-nowrap px-1 text-sm text-gray-700 dark:text-gray-300">
-          {{ t('pagination.pageOf', { page, total: totalPages }) }}
+        <span class="whitespace-nowrap px-1 text-sm text-gray-700 dark:text-gray-300" data-test="pagination-page">
+          {{ totalExact ? t('pagination.pageOf', { page, total: totalPages }) : t('pagination.pageOnly', { page }) }}
         </span>
         <button
           type="button"
@@ -40,9 +40,13 @@
     <div class="pager-wide hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
       <!-- Desktop pagination info -->
       <div class="flex items-center space-x-3">
-        <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy) -->
+        <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy); "第 1–20 条" when the total is not exact -->
         <p class="text-sm tabular-nums text-gray-700 dark:text-gray-300" data-test="pagination-range">
-          {{ t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) }) }}
+          {{
+            totalExact
+              ? t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) })
+              : t('pagination.rangeOpen', { from: formatCount(fromItem), to: formatCount(toItem) })
+          }}
         </p>
 
         <!-- Page size selector -->
@@ -146,6 +150,12 @@ interface Props {
   pageSizeOptions?: number[]
   showPageSizeSelector?: boolean
   showJump?: boolean
+  /**
+   * Whether `total` is the exact count (default). False for a list that counts only as far as it needs: its total is
+   * "the end of this page, plus one" when there is a next page. Then the range reads "第 1–20 条" / "1–20" and the
+   * narrow line "第 2 页" / "Page 2", with no total; the page buttons and "next" still go by `total`.
+   */
+  totalExact?: boolean
 }
 
 interface Emits {
@@ -156,7 +166,8 @@ interface Emits {
 const props = withDefaults(defineProps<Props>(), {
   pageSizeOptions: () => getConfiguredTablePageSizeOptions(),
   showPageSizeSelector: true,
-  showJump: false
+  showJump: false,
+  totalExact: true
 })
 
 const emit = defineEmits<Emits>()
