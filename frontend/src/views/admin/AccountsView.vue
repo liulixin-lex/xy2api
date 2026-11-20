@@ -1520,6 +1520,18 @@ onUnmounted(() => cancelModalPrefetch?.())
   vertical-align: middle;
   white-space: nowrap;
 }
+/* The recent cell's focus ring goes on its column's cell, in the side padding (24px in the compact widths, 36px in the
+   roomy ones): the 72/84px content has no room for it and .acell clips outside it. Without :has the cell's own ring
+   stays (cut at the sides). */
+@supports selector(:has(*)) {
+  .account-table :deep(td.acol-sq_recent:has(.recent:focus-visible)) {
+    outline: 2px solid var(--sq-ring);
+    outline-offset: -2px;
+  }
+  .account-table :deep(td.acol-sq_recent .recent:focus-visible) {
+    outline: none;
+  }
+}
 /* The recent cell takes its column's size, not the viewport's: an optional column can keep a wide screen in the
    compact size, where 84px would not fit the 72px left (7q-5). */
 .account-table.is-roomy :deep(.recent:not(.recent--card)) {

@@ -1187,9 +1187,10 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 表格横向滚动 */
+/* 表格横向滚动。scroll-padding-top 让出吸顶表头（单行表头的高度）：聚焦滚动和 scrollIntoView 不把行停在表头下面 */
 .table-wrapper {
   scroll-margin-top: var(--table-sticky-top, 4rem);
+  scroll-padding-top: var(--header-height, 40px);
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
   overflow-x: auto;
