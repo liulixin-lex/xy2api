@@ -140,8 +140,11 @@ describe('AccountsView on a phone (mobile list plan)', () => {
     await flushPromises()
     const cell = row(3).querySelector('td.acol-sq_recent')!
     expect(cell.querySelector('[data-test="account-recent"]')).toBeNull()
-    expect(cell.querySelector('[data-test="cell-empty"]')!.getAttribute('aria-label')).toBe('admin.accounts.table.recent.openaiOnly')
-    expect(cell.textContent!.trim()).toBe('—')
+    const empty = cell.querySelector<HTMLElement>('[data-test="cell-empty"]')!
+    expect(empty.querySelector('[aria-hidden="true"]')!.textContent).toBe('—')
+    expect(empty.querySelector('.sr-only')!.textContent).toBe('admin.accounts.table.recent.openaiOnly')
+    // Not a tab stop (Opus review, suggestion 6).
+    expect(empty.hasAttribute('tabindex')).toBe(false)
     expect(row(1).querySelector('td.acol-sq_recent [data-test="account-recent"]')).not.toBeNull()
     wrapper.unmount()
   })
