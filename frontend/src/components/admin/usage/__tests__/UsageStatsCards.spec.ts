@@ -160,19 +160,20 @@ describe('UsageStatsCards admin layout and unread totals', () => {
     const w = mountCards(state)
     expect(totals(w)).toEqual(expected)
     expect(w.text()).not.toContain('12,002')
-    expect(w.text()).not.toContain('30750')
+    expect(w.text()).not.toContain('30,750')
     // No breakdown of another filter's figures either (final-fe review, Astra item 9: the old check looked for a key
     // the copy stub never renders).
     expect(w.text()).not.toContain('423.75M')
     expect(breakdowns(w)).toEqual({ tokens: false, outcomes: false, cost: false })
   })
 
+  // Totals carry two decimals with thousands separators (mobile list plan, typesetting).
   it('shows the totals and their breakdowns on the admin page once loaded, and always on the user page', () => {
     const loaded = mountCards('loaded')
-    expect(totals(loaded)).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+    expect(totals(loaded)).toEqual(['12,002', '652.44M', '$30,750.12', '1.85s'])
     expect(breakdowns(loaded)).toEqual({ tokens: true, outcomes: true, cost: true })
     const user = mountCards()
-    expect(totals(user)).toEqual(['12,002', '652.44M', '$30750.1200', '1.85s'])
+    expect(totals(user)).toEqual(['12,002', '652.44M', '$30,750.12', '1.85s'])
     expect(breakdowns(user)).toEqual({ tokens: true, outcomes: true, cost: true })
   })
 })

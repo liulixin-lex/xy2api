@@ -517,7 +517,7 @@ export default {
       searchAccountPlaceholder: '按名称搜索账号...',
       selectedUser: '已选择',
       user: '用户',
-      account: '账户',
+      account: '账号',
       group: '分组',
       requestId: '请求ID',
       upstreamRequestId: '上游ID',
