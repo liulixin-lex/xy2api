@@ -51,6 +51,15 @@ describe('touch targets', () => {
     expect(px(hit, 'min-height')).toBeGreaterThanOrEqual(40)
   })
 
+  it("header: the user menu's items, the ones moved in from the header among them, are 40px high and 8px apart", () => {
+    const source = read('layout/AppHeader.vue')
+    expect(source.match(/class="user-menu__list /g)).toHaveLength(3) // the main list, the tour, logout
+    const list = touchRule(source, '.user-menu__list')
+    expect(list).toContain('flex-direction: column;')
+    expect(px(list, 'gap')).toBe(8)
+    expect(px(touchRule(source, '.user-menu__list > .dropdown-item'), 'min-height')).toBe(40)
+  })
+
   it('header: the bell, the language and the subscription badge are 40px', () => {
     const bell = read('common/AnnouncementBell.vue')
     expect(bell).toMatch(/@click="openModal"\s*class="bell-btn /)
