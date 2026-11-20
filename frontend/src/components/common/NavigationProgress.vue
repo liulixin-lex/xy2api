@@ -29,6 +29,8 @@ const isVisible = computed(() => isLoading.value)
 </template>
 
 <style scoped>
+@reference "../../style.css";
+
 .navigation-progress {
   position: fixed;
   top: 0;

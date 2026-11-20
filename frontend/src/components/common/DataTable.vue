@@ -1080,6 +1080,8 @@ defineExpose({
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* 表格横向滚动。scroll-padding-top 让出吸顶表头（--table-head-h：表头实测高度，分组表头为两行之和，未测到前用
    40px）：聚焦滚动和 scrollIntoView 不把行停在表头下面 */
 .table-wrapper {

@@ -108,6 +108,8 @@ function rateTip(): string {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* "9.9999x", the 3px gap and the 18px button fit the column's 74px; a longer value ends in "…", the tip has the rate
    in force whole (12.5). */
 .ratio {

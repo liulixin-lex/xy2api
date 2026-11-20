@@ -20,6 +20,8 @@ const emit = defineEmits<{ toggle: [next: boolean] }>()
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .account-switch {
   position: relative;
   flex: none;

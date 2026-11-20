@@ -217,6 +217,8 @@ function timeoutReason(item: BackendDecision): string {
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 /* The panel's heading rule is scoped to the panel and does not reach this component's heading: a heading layout here,
    so the title and the note stand apart (they ran together in English: "DecisionsOne record …"). The note is never
    cut: it wraps, and on a narrow drawer (390 or 320 px) it moves under the title. */

@@ -310,6 +310,8 @@ function moreTip(): TipCard {
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .pills {
   display: grid;
   height: 66px;

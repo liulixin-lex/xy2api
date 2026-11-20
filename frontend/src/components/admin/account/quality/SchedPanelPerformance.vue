@@ -267,6 +267,8 @@ const cacheTip = (view: PerfView) => (view.cacheLow && view.group
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 /* The panel's heading rule is scoped to the panel and does not reach here: the title and its note stand apart and the
    note wraps under the title on a narrow drawer (as in the decisions heading). */
 .qp-h {

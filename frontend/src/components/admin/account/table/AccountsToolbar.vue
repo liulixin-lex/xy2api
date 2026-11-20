@@ -477,6 +477,8 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 /* The menu is placed against the whole toolbar. */
 .tb-root {
   position: relative;

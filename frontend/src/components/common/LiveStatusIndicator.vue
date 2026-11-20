@@ -53,6 +53,8 @@ const toggle = () => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .live-status {
   display: inline-flex;
   flex: none;

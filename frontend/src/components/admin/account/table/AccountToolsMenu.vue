@@ -158,6 +158,8 @@ defineExpose({ close: () => { open.value = false } })
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .tools-btn {
   display: inline-flex;
   height: var(--control-height);

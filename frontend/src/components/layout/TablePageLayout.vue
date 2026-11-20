@@ -58,6 +58,8 @@ provide(TABLE_REGION_KEY, computed(() => (props.tableLayout ? region.value : des
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* 桌面端：Flexbox 布局 */
 .table-page-layout {
   @apply flex flex-col gap-6;

@@ -100,6 +100,8 @@ function tipCard(): TipCard {
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .iq {
   display: flex;
   align-items: center;

@@ -2274,6 +2274,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* A phone's "⋯": a 40px square centred in the 44px frozen column. */
 .users-more {
   display: flex;

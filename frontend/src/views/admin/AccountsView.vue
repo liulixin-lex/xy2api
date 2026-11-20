@@ -1410,6 +1410,8 @@ onUnmounted(() => cancelModalPrefetch?.())
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 /* This page only (7e-15): toolbar, table card and pagination sit closer, so a 1080px-high window shows at least ten
    whole rows. The shared page layout and the other pages keep their spacing. */
 .accounts-layout.table-page-layout {
