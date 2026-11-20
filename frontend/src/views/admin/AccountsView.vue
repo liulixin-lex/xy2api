@@ -1489,6 +1489,15 @@ onUnmounted(() => cancelModalPrefetch?.())
 .account-table :deep(td.acol-rate_multiplier) {
   padding: 0 6px 0 8px;
 }
+/* Today's cell is one tap target as large as the cell, its padding included: the cell's padding moves inside it. */
+.account-table :deep(td.acol-today_stats) {
+  padding: 0;
+}
+.account-table :deep(td.acol-today_stats .today) {
+  flex: 1 1 auto;
+  align-content: center;
+  padding: 0 var(--cell-pad-x);
+}
 .account-table :deep(th.acol-actions),
 .account-table :deep(td.acol-actions) {
   padding-left: 4px;
