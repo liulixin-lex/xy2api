@@ -50,7 +50,8 @@ export function useTableRegion(root: Ref<HTMLElement | null>, enabled: () => boo
     const target = viewport.value.height - HEADER_PX - mainPadding(viewport.value.width)
     const others = el.offsetHeight - wrapper.offsetHeight
     const head = wrapper.querySelector<HTMLElement>('thead')?.offsetHeight ?? 0
-    const row = wrapper.querySelector<HTMLElement>('tbody tr')?.offsetHeight || ROW_FALLBACK_PX
+    // A data row, never a windowed table's spacer row (its height is every row scrolled past; Astra re-review #1).
+    const row = wrapper.querySelector<HTMLElement>('tbody tr[data-row-id]')?.offsetHeight || ROW_FALLBACK_PX
     fits.value = target - others >= head + row
   }
 
