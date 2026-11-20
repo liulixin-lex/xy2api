@@ -23,7 +23,7 @@
             </label>
           </template>
 
-          <template v-if="!phone" #filters>
+          <template #filters>
             <!-- Role Filter (visible when enabled) -->
             <div v-if="visibleFilters.has('role')" class="table-toolbar__filter" data-filter="role">
               <Select
@@ -124,8 +124,10 @@
           </template>
 
           <!-- A phone (mobile list plan): every filter in the bottom sheet, the attributes' too, applied at once; the chosen
-               ones as removable tags; the count and the sort (when its column is hidden) beside the live state. -->
-          <template v-if="phone" #sheet>
+               ones as removable tags; the count and the sort (when its column is hidden) beside the live state. The
+               toolbar renders these slots in its own phone form only; a condition here on the page's own width would
+               remove a focused field before the toolbar hands its focus over. -->
+          <template #sheet>
             <div class="users-sheet__field" data-filter="role">
               <span class="users-sheet__k">{{ t('admin.users.columns.role') }}</span>
               <Select :model-value="filters.role" :options="roleFilterOptions" :aria-label="t('admin.users.columns.role')" @update:model-value="setSheetFilter('role', $event)" />
@@ -173,11 +175,12 @@
                 :type="attr.type === 'number' ? 'number' : 'text'"
                 class="table-toolbar__input table-toolbar__input--plain"
                 :placeholder="attr.name"
+                @input="typeSheetAttribute(attr.id, ($event.target as HTMLInputElement).value)"
                 @change="setSheetAttribute(attr.id, ($event.target as HTMLInputElement).value, true)"
               />
             </label>
           </template>
-          <template v-if="phone" #tags>
+          <template #tags>
             <span v-for="tag in filterTags" :key="tag.key" class="users-tag" :data-key="tag.key">
               <span class="users-tag__k">{{ tag.label }}：</span>
               <span class="users-tag__v">{{ tag.text }}</span>
@@ -186,7 +189,7 @@
               </button>
             </span>
           </template>
-          <template v-if="phone" #info>
+          <template #info>
             <span data-test="users-count">{{ t('common.table.count', { n: usersTotal.toLocaleString() }) }}</span>
             <template v-if="sortHint">
               <span class="table-toolbar__sep" aria-hidden="true">·</span>
@@ -1959,8 +1962,19 @@ const setSheetAttribute = (attrId: number, value: string, apply: boolean) => {
   showFilter(`attr_${attrId}`)
   updateAttributeFilter(attrId, value)
   if (!apply) return
+  clearTimeout(attributeTyping)
   pagination.page = 1
   applyFilter()
+}
+/** Typing in a sheet's text field keeps the text (the same field from 768px shows it) and applies it shortly after. */
+let attributeTyping: ReturnType<typeof setTimeout> | undefined
+const typeSheetAttribute = (attrId: number, value: string) => {
+  setSheetAttribute(attrId, value, false)
+  clearTimeout(attributeTyping)
+  attributeTyping = setTimeout(() => {
+    pagination.page = 1
+    applyFilter()
+  }, 300)
 }
 const optionLabel = (options: { value: unknown; label: string }[], value: unknown) =>
   options.find((option) => option.value === value)?.label ?? String(value)
@@ -2226,6 +2240,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearTimeout(attributeTyping)
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('scroll', handleScroll, true)
   clearTimeout(searchTimeout)

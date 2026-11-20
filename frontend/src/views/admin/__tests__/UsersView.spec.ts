@@ -915,5 +915,40 @@ describe('admin UsersView', () => {
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
     }
   })
+
+  // Astra review: text typed in a phone's attribute field went with the sheet when the width crossed 768px.
+  it('keeps text typed in a sheet attribute and applies it shortly after', async () => {
+    vi.useFakeTimers()
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listEnabledDefinitions.mockResolvedValue([{ id: 7, key: 'code', name: 'Code', type: 'text', enabled: true }])
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      const input = wrapper.get('[data-test="filter-sheet"] [data-filter="attr_7"] input')
+      await input.setValue('xyz')
+      expect(JSON.parse(localStorage.getItem('user-visible-filters')!)).toContain('attr_7')
+      expect(JSON.parse(localStorage.getItem('user-filter-values')!).attributes).toEqual({ 7: 'xyz' })
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ attributes: { 7: 'xyz' } }), expect.any(Object))
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      vi.useRealTimers()
+      localStorage.removeItem('user-visible-filters')
+      localStorage.removeItem('user-filter-values')
+    }
+  })
 })
 
