@@ -2,7 +2,7 @@
   <button
     v-if="!buttonHidden"
     type="button"
-    class="table-toolbar__btn table-toolbar__btn--secondary"
+    class="table-toolbar__btn table-toolbar__btn--secondary [@media(pointer:coarse)]:min-w-10"
     data-test="group-category-manage"
     :aria-label="t('admin.groupCategories.manage')"
     v-tip="t('admin.groupCategories.manage')"

@@ -139,7 +139,7 @@
               v-if="!phone && !authStore.isSimpleMode && canManage"
               type="button"
               @click="openSortModal"
-              class="table-toolbar__btn table-toolbar__btn--secondary"
+              class="table-toolbar__btn table-toolbar__btn--secondary [@media(pointer:coarse)]:min-w-10"
               :aria-label="t('admin.groups.sortOrder')"
               v-tip="t('admin.groups.sortOrder')"
             >
@@ -178,9 +178,10 @@
           :sort="tableSort"
           @sort="handleSort"
         >
-          <!-- The frozen identity column: the alias pill, then the name cut with "…", whole in its tip or on a tap. -->
+          <!-- The frozen identity column: the alias pill, then the name cut with "…", whole in its tip or on a tap; at most
+               240px wide on tablets and computers too (the column's own width on a phone). -->
           <template #cell-name="{ row, value }">
-            <div class="flex min-w-0 items-center gap-2">
+            <div class="flex min-w-0 max-w-[240px] items-center gap-2">
               <GroupAliasPill :group="row" />
               <TableIdentityCell class="min-w-0 flex-1" :primary="value" />
             </div>
@@ -353,7 +354,8 @@
 
           <template #cell-actions="{ row }">
             <!-- Below 1024px only "⋯" (a 40px button), its menu the row's actions in the same order (mobile list plan). -->
-            <div v-if="!desktop" class="flex justify-center">
+            <!-- The block's negative margins give back the button's extra height: the row stays a text line high. -->
+            <div v-if="!desktop" class="-my-2.5 flex justify-center">
               <button
                 v-if="hasRowActions(rowActions(row))"
                 type="button"
