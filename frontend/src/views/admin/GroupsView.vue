@@ -83,24 +83,7 @@
                 v-if="showColumnDropdown"
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
-                <!-- A multi-select list: a shown column is told by its brand check alone, without the selected background
-                     or text colour (12.6-5). -->
-                <button
-                  v-for="col in toggleableColumns"
-                  :key="col.key"
-                  type="button"
-                  @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-500"
-                    :stroke-width="2"
-                  />
-                </button>
+                <GroupColumnSettings :columns="toggleableColumns" :is-visible="isColumnVisible" :at-default="columnVisibility.atDefault.value" @toggle="toggleColumn" @reset="resetColumns" />
               </div>
             </div>
             <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
@@ -4477,6 +4460,8 @@ import TableIdentityCell from "@/components/common/TableIdentityCell.vue";
 import GroupActionMenu from "@/components/admin/group/GroupActionMenu.vue";
 import { groupRowActions, hasRowActions, type GroupRowAction, type GroupRowActions } from "@/components/admin/group/groupRowActions";
 import { useTableViewport } from "@/composables/useTableViewport";
+import { useColumnVisibility } from "@/composables/useColumnVisibility";
+import GroupColumnSettings from "@/components/admin/group/GroupColumnSettings.vue";
 import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
@@ -4769,108 +4754,45 @@ const allColumns = computed<Column[]>(() => {
 const toggleableColumns = computed(() =>
   allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.has(col.key)),
 );
-const hiddenColumns = reactive<Set<string>>(new Set());
 const showColumnDropdown = ref(false);
 const columnDropdownRef = ref<HTMLElement | null>(null);
 
-const getValidHiddenColumnKeys = () =>
-  new Set(toggleableColumns.value.map((col) => col.key));
-
-const loadSavedColumns = () => {
-  hiddenColumns.clear();
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY);
-    const validKeys = getValidHiddenColumnKeys();
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        parsed
-          .filter(
-            (key): key is string =>
-              typeof key === "string" && validKeys.has(key),
-          )
-          .forEach((key) => hiddenColumns.add(key));
-      }
-
-      // Existing admins: auto-hide columns newly added as default-hidden.
-      const storedVersion = Number(
-        localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? "1",
-      );
-      if (storedVersion < COLUMN_SETTINGS_VERSION) {
-        let mutated = false;
-        for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
-          for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
-            if (validKeys.has(key) && !hiddenColumns.has(key)) {
-              hiddenColumns.add(key);
-              mutated = true;
-            }
-          }
-        }
-        if (mutated) {
-          saveColumnsToStorage();
-        } else {
-          localStorage.setItem(
-            COLUMN_SETTINGS_VERSION_KEY,
-            String(COLUMN_SETTINGS_VERSION),
-          );
-        }
-      }
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
-        if (validKeys.has(key)) hiddenColumns.add(key);
-      });
-      saveColumnsToStorage();
-    }
-  } catch (error) {
-    console.error("Failed to load group column settings:", error);
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key));
+/** Below 768px (mobile list plan): name (frozen), platform, accounts and status, then "⋯"; the rest in the settings. */
+const NARROW_HIDDEN_COLUMNS_KEY = "group-hidden-columns-narrow";
+const NARROW_DEFAULT_HIDDEN_COLUMNS = ["id", "billing_type", "rate_multiplier", "is_exclusive", "category", "sched_gate", "capacity", "usage"];
+/** The wide memory is the page's existing key: its version chain hides the columns added since it was saved. */
+const migrateGroupColumns = (hidden: Set<string>) => {
+  const stored = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? "1");
+  if (stored >= COLUMN_SETTINGS_VERSION) return false;
+  for (let v = stored + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
+    for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) hidden.add(key);
   }
+  localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION));
+  return true;
 };
-
-const saveColumnsToStorage = () => {
-  try {
-    const validKeys = getValidHiddenColumnKeys();
-    const keys = [...hiddenColumns].filter((key) => validKeys.has(key));
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(keys));
-    localStorage.setItem(
-      COLUMN_SETTINGS_VERSION_KEY,
-      String(COLUMN_SETTINGS_VERSION),
-    );
-  } catch (error) {
-    console.error("Failed to save group column settings:", error);
-  }
+// Nothing saved yet: the defaults are current, so a set saved later is not run through the chain again.
+try {
+  if (localStorage.getItem(HIDDEN_COLUMNS_KEY) === null) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION));
+} catch { /* storage unavailable: the defaults apply */ }
+/** A source skips a hidden column; once it is shown again (a toggle, a reset, the other width), that source runs now. */
+const refreshShownSources = (keys: string[]) => {
+  if (keys.includes("usage") || keys.includes("billing_type")) void liveGroups.refresh("usage");
+  if (keys.includes("capacity")) void liveGroups.refresh("capacity");
+  if (keys.includes("sched_gate")) void liveGroups.refresh("schedGates");
 };
-
-const isColumnVisible = (key: string) => !hiddenColumns.has(key);
+const columnVisibility = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateGroupColumns },
+  narrow: { storageKey: NARROW_HIDDEN_COLUMNS_KEY, defaultHidden: NARROW_DEFAULT_HIDDEN_COLUMNS },
+  onShown: refreshShownSources,
+});
+const isColumnVisible = (key: string) => columnVisibility.isVisible(key);
 const hasVisibleUsageSummaryConsumer = computed(
   () => !authStore.isSimpleMode && (isColumnVisible("usage") || isColumnVisible("billing_type")),
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
-
-const toggleColumn = (key: string) => {
-  const validKeys = getValidHiddenColumnKeys();
-  if (!validKeys.has(key)) return;
-
-  const wasHidden = hiddenColumns.has(key);
-  if (wasHidden) {
-    hiddenColumns.delete(key);
-  } else {
-    hiddenColumns.add(key);
-  }
-  saveColumnsToStorage();
-
-  // A source skips a hidden column; once it is shown again, that source runs now.
-  if (wasHidden && (key === "usage" || key === "billing_type")) {
-    void liveGroups.refresh("usage");
-  }
-  if (wasHidden && key === "capacity") {
-    void liveGroups.refresh("capacity");
-  }
-  if (wasHidden && key === "sched_gate") {
-    void liveGroups.refresh("schedGates");
-  }
-};
+const toggleColumn = (key: string) => columnVisibility.toggle(key);
+const resetColumns = () => columnVisibility.reset();
 
 // 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。每次加载后逐组读取（并发 4），不参与定时更新。
 const schedGateText = (group: LiveGroup) => {
@@ -4879,14 +4801,8 @@ const schedGateText = (group: LiveGroup) => {
 };
 
 const columns = computed<Column[]>(() =>
-  allColumns.value.filter(
-    (col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key),
-  ),
+  allColumns.value.filter((col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || isColumnVisible(col.key)),
 );
-
-if (typeof window !== "undefined") {
-  loadSavedColumns();
-}
 
 // Filter options
 const statusOptions = computed(() => [

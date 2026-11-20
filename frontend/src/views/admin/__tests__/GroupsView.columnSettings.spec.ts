@@ -319,7 +319,8 @@ describe('admin GroupsView column settings', () => {
       'status',
       'actions',
     ])
-    expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['id']))
+    // The defaults apply without being written (two column memories, mobile list plan); the version is current.
+    expect(localStorage.getItem('group-hidden-columns')).toBeNull()
     expect(localStorage.getItem('group-column-settings-version')).toBe('2')
   })
 
@@ -519,5 +520,32 @@ describe('admin GroupsView column settings', () => {
     const badge = wrapper.getComponent({ name: 'GroupCapacityBadge' })
 
     expect(badge.props()).toMatchObject({ concurrencyUsed: 5, concurrencyMax: 600, concurrencyGroupUsed: 3 })
+  })
+
+  // Mobile list plan, step 2: below 768px the phone's own memory and defaults (name, platform, accounts, status, then
+  // "⋯"); a change there is written to the phone's key only, and "restore defaults" removes that key alone.
+  describe('below 768px', () => {
+    const setPhone = () => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('min-width') ? false : true, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    afterEach(() => { vi.restoreAllMocks() })
+
+    it('shows the phone defaults and keeps a change in the phone memory only', async () => {
+      setPhone()
+      localStorage.setItem('group-hidden-columns', JSON.stringify(['usage']))
+      localStorage.setItem('group-column-settings-version', '2')
+      const wrapper = await mountView()
+      expect(columnKeys(wrapper)).toEqual(['name', 'platform', 'account_count', 'status', 'actions'])
+      await openColumnSettings(wrapper)
+      await clickColumnToggle(wrapper, 'Usage')
+      expect(columnKeys(wrapper)).toContain('usage')
+      expect(JSON.parse(localStorage.getItem('group-hidden-columns-narrow')!)).not.toContain('usage')
+      expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['usage']))
+      await wrapper.get('[data-test="group-columns-reset"]').trigger('click')
+      await flushPromises()
+      expect(columnKeys(wrapper)).toEqual(['name', 'platform', 'account_count', 'status', 'actions'])
+      expect(localStorage.getItem('group-hidden-columns-narrow')).toBeNull()
+    })
   })
 })
