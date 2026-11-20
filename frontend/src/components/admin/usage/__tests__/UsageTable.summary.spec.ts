@@ -37,7 +37,8 @@ const DataTableStub = {
   </div></div>`
 }
 
-const ADMIN = { showEndToEnd: true, showFallbackOrigin: true, showTokenSpeed: true, showCacheHitRate: true }
+// The admin page always lists the user column (it marks the page that may show admin-only detail).
+const ADMIN = { showEndToEnd: true, showFallbackOrigin: true, showTokenSpeed: true, showCacheHitRate: true, columns: [{ key: 'user', label: 'User' }] }
 const USER = { showAccountBilling: false, showUpstreamEndpoint: false, showTokenSpeed: true, showCacheHitRate: true }
 
 function mountTable(props: Record<string, unknown>, data: unknown[] = [row]) {
@@ -141,7 +142,7 @@ describe('UsageTable request detail', () => {
     expect(detail.text()).toContain('1,500')
     expect(detail.get('[data-testid="usage-cache-hit-rate"]').text()).toBe('10.8%')
     expect(detail.text()).toContain('usage.accountBilled')
-    expect(detail.text()).toContain('$0.00023700')
+    expect(detail.text()).toContain('$0.000237')
     expect(detail.get('[data-testid="usage-detail-upstream-endpoint"]').text()).toContain('/v1/responses')
     expect(detail.get('[data-testid="usage-detail-fallback"]').text()).toBe('admin.resilience.usage.fallback:{"group":"Backup"}')
     expect(detail.get('[data-testid="usage-detail-model"]').text()).toBe('gpt-6.1-sol → gpt-6.1')
@@ -251,7 +252,7 @@ describe('UsageTable after review', () => {
   it('names the actions column "Details" below 1024px and adds none from 1024px', () => {
     const ColumnsStub = { props: ['data', 'columns', 'layout'], template: '<div />' }
     const mountWith = () => mount(UsageTable, {
-      props: { data: [row] as never, ...ADMIN, columns: [{ key: 'user', label: 'User' }] },
+      props: { data: [row] as never, ...ADMIN },
       global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } },
     })
     setWidth(834)
@@ -285,6 +286,34 @@ describe('UsageTable after review', () => {
     expect(cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
   })
 
+  it('lists account and rescue marks, API key, IP, copyable request IDs and UA on the admin page', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const wrapper = mountTable(ADMIN, [{ ...row, result: 2, switches: 1, ip_address: '203.0.113.7', upstream_request_id: 'up-9', user_agent: 'curl/8' }])
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    const detail = wrapper.get('[data-testid="usage-request-detail"]')
+    expect(detail.get('[data-testid="usage-detail-account"] dd').findAll('span').map((el) => el.text()))
+      .toEqual(['acc-1', 'admin.usage.resultRescued', 'admin.usage.switches:{"n":1}'])
+    expect(detail.get('[data-testid="usage-detail-api-key"] dd').text()).toBe('prod-key')
+    expect(detail.get('[data-testid="usage-detail-ip"] dd').text()).toBe('203.0.113.7')
+    expect(detail.get('[data-testid="usage-detail-user-agent"] dd').text()).toBe('curl/8')
+    expect(detail.get('[data-testid="usage-detail-request_id"]').text()).toContain('r-1')
+    await detail.get('[data-testid="usage-detail-copy-request_id"]').trigger('click')
+    await detail.get('[data-testid="usage-detail-copy-upstream_request_id"]').trigger('click')
+    expect(writeText.mock.calls).toEqual([['r-1'], ['up-9']])
+  })
+
+  it('shows the user page the model asked for only, and no account or request IDs', async () => {
+    const wrapper = mountTable({ ...USER, columns: [{ key: 'api_key', label: 'Key' }] }, [{ ...row, result: 2, switches: 1, upstream_model_mismatch: true, upstream_response_model: 'gpt-6.1-x' }])
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    const detail = wrapper.get('[data-testid="usage-request-detail"]')
+    expect(detail.get('[data-testid="usage-detail-model"]').text()).toBe('gpt-6.1-sol')
+    expect(detail.text()).not.toContain('gpt-6.1-x')
+    for (const id of ['usage-detail-account', 'usage-detail-request_id', 'usage-detail-upstream_request_id', 'usage-detail-user']) {
+      expect(detail.find(`[data-testid="${id}"]`).exists()).toBe(false)
+    }
+    expect(detail.get('[data-testid="usage-detail-api-key"] dd').text()).toBe('prod-key')
+  })
 
   // Review item 5: buckets that cover part of the cache creation are listed under its known total.
   it('keeps the cache-creation total when only part of it was reported by TTL bucket', async () => {

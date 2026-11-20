@@ -391,20 +391,22 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.069568')
   })
 
-  it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
+  // Review ruling (mobile list plan, typesetting): the breakdown's amounts read as the table's cost, six decimals with
+  // thousands separators (they were eight).
+  it.each(['token', 'image', 'per_request'])('shows six decimals with separators in %s cost details', async (billingMode) => {
     const row = {
       ...baseImageRow,
       billing_mode: billingMode,
       image_count: billingMode === 'image' ? 2 : 0,
-      input_cost: 0.00000001,
-      image_input_cost: 0.00000002,
-      output_cost: 0.00000003,
-      image_output_cost: 0.00000004,
-      cache_creation_cost: 0.00000005,
-      cache_read_cost: 0.00000006,
-      total_cost: 0.00000022,
-      actual_cost: 0.00000042,
-      account_stats_cost: 0.00000012,
+      input_cost: 0.000001,
+      image_input_cost: 0.000002,
+      output_cost: 0.000003,
+      image_output_cost: 0.000004,
+      cache_creation_cost: 0.000005,
+      cache_read_cost: 0.000006,
+      total_cost: 1234.000022,
+      actual_cost: 0.000042,
+      account_stats_cost: 0.000012,
       account_rate_multiplier: 1.5,
     }
     const wrapper = mount(UsageTable, {
@@ -415,14 +417,15 @@ describe('admin UsageTable tooltip', () => {
     await triggers[triggers.length - 1].trigger('mouseenter')
     const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text())
     expect(amounts).toEqual(expect.arrayContaining([
-      '$0.00000001', '$0.00000002', '$0.00000003', '$0.00000004',
-      '$0.00000005', '$0.00000006', '$0.00000022', '$0.00000042', '$0.00000018',
+      '$0.000001', '$0.000002', '$0.000003', '$0.000004',
+      '$0.000005', '$0.000006', '$1,234.000022', '$0.000042', '$0.000018',
     ]))
-    if (billingMode === 'image') expect(amounts).toContain('$0.00000011')
+    expect(amounts.some((text) => /\$\d+\.\d{7,}/.test(text))).toBe(false)
+    if (billingMode === 'image') expect(amounts).toContain('$617.000011')
     wrapper.unmount()
   })
 
-  it('uses eight decimal places for missing cost values', async () => {
+  it('shows six-decimal zeros for missing cost values', async () => {
     const wrapper = mount(UsageTable, {
       props: {
         data: [{ ...baseImageRow, billing_mode: 'per_request', image_count: 0, total_cost: undefined, actual_cost: undefined }],
@@ -434,7 +437,7 @@ describe('admin UsageTable tooltip', () => {
     const triggers = wrapper.findAll('.group.relative')
     await triggers[triggers.length - 1].trigger('mouseenter')
     const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text()).filter(text => text.startsWith('$'))
-    expect(amounts).toEqual(['$0.00000000', '$0.00000000', '$0.00000000', '$0.00000000'])
+    expect(amounts).toEqual(['$0.000000', '$0.000000', '$0.000000', '$0.000000'])
     wrapper.unmount()
   })
 

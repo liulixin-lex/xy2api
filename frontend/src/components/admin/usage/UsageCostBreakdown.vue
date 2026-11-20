@@ -5,19 +5,19 @@
       <div v-if="variant === 'tooltip'" class="mb-1 text-xs font-semibold text-gray-300">{{ t('usage.costDetails') }}</div>
       <div v-if="row.input_cost > 0" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('admin.usage.inputCost') }}</span>
-        <span :class="tone.value">${{ row.input_cost.toFixed(8) }}</span>
+        <span :class="tone.value">{{ formatUsd(row.input_cost, 6) }}</span>
       </div>
       <div v-if="hasImageInputCost(row)" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('usage.imageInputCost') }}</span>
-        <span :class="tone.fuchsia">${{ row.image_input_cost.toFixed(8) }}</span>
+        <span :class="tone.fuchsia">{{ formatUsd(row.image_input_cost, 6) }}</span>
       </div>
       <div v-if="row.output_cost > 0" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('admin.usage.outputCost') }}</span>
-        <span :class="tone.value">${{ row.output_cost.toFixed(8) }}</span>
+        <span :class="tone.value">{{ formatUsd(row.output_cost, 6) }}</span>
       </div>
       <div v-if="hasImageOutputCost(row)" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('usage.imageOutputCost') }}</span>
-        <span :class="tone.pink">${{ row.image_output_cost.toFixed(8) }}</span>
+        <span :class="tone.pink">{{ formatUsd(row.image_output_cost, 6) }}</span>
       </div>
       <!-- Token billing: show unit prices per 1M tokens -->
       <template v-if="!isImageUsage(row) && (!row.billing_mode || row.billing_mode === BILLING_MODE_TOKEN)">
@@ -65,24 +65,24 @@
         </div>
         <div class="flex items-center justify-between gap-4">
           <span :class="tone.label">{{ t('usage.imageUnitPrice') }}</span>
-          <span :class="tone.sky">${{ imageUnitPrice(row).toFixed(8) }}</span>
+          <span :class="tone.sky">{{ formatUsd(imageUnitPrice(row), 6) }}</span>
         </div>
         <div class="flex items-center justify-between gap-4">
           <span :class="tone.label">{{ t('usage.imageTotalPrice') }}</span>
-          <span :class="tone.value">${{ row.total_cost?.toFixed(8) || '0.00000000' }}</span>
+          <span :class="tone.value">{{ formatUsd(row.total_cost, 6) }}</span>
         </div>
       </template>
       <div v-else class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('usage.unitPrice') }}</span>
-        <span :class="tone.sky">${{ row.total_cost?.toFixed(8) || '0.00000000' }}</span>
+        <span :class="tone.sky">{{ formatUsd(row.total_cost, 6) }}</span>
       </div>
       <div v-if="row.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('admin.usage.cacheCreationCost') }}</span>
-        <span :class="tone.value">${{ row.cache_creation_cost.toFixed(8) }}</span>
+        <span :class="tone.value">{{ formatUsd(row.cache_creation_cost, 6) }}</span>
       </div>
       <div v-if="row.cache_read_cost > 0" class="flex items-center justify-between gap-4">
         <span :class="tone.label">{{ t('admin.usage.cacheReadCost') }}</span>
-        <span :class="tone.value">${{ row.cache_read_cost.toFixed(8) }}</span>
+        <span :class="tone.value">{{ formatUsd(row.cache_read_cost, 6) }}</span>
       </div>
     </div>
     <!-- Rate and Summary -->
@@ -96,11 +96,11 @@
     </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.original') }}</span>
-      <span :class="tone.value">${{ row.total_cost?.toFixed(8) || '0.00000000' }}</span>
+      <span :class="tone.value">{{ formatUsd(row.total_cost, 6) }}</span>
     </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.userBilled') }}</span>
-      <span :class="tone.billed">${{ row.actual_cost?.toFixed(8) || '0.00000000' }}</span>
+      <span :class="tone.billed">{{ formatUsd(row.actual_cost, 6) }}</span>
     </div>
     <!-- Account billing (separated from user billing) -->
     <template v-if="showAccountBilling">
@@ -110,7 +110,7 @@
       </div>
       <div class="flex items-center justify-between gap-6">
         <span :class="tone.label">{{ t('usage.accountBilled') }}</span>
-        <span :class="tone.billed">${{ accountBilled(row).toFixed(8) }}</span>
+        <span :class="tone.billed">{{ formatUsd(accountBilled(row), 6) }}</span>
       </div>
     </template>
   </div>
@@ -120,6 +120,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMultiplier } from '@/utils/formatters'
+import { formatUsd } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { BILLING_MODE_TOKEN, imageUnitPrice, isImageUsage } from '@/utils/billingMode'
@@ -141,7 +142,8 @@ import type { AdminUsageLog } from '@/types'
 
 /**
  * A usage row's cost breakdown, the same lines and rules for the table's hover tip (dark tooltip) and the request
- * detail dialog (themed panel). Account billing shows only where the page allows it (not on the user page).
+ * detail dialog (themed panel). Account billing shows only where the page allows it (not on the user page). Amounts
+ * as in the table: six decimals with thousands separators (mobile list plan, typesetting).
  */
 const props = withDefaults(defineProps<{
   row: AdminUsageLog

@@ -429,8 +429,9 @@
     :show-account-billing="showAccountBilling"
     :show-upstream-endpoint="showUpstreamEndpoint"
     :show-fallback-origin="props.showFallbackOrigin"
-    :show-user="showsUsers"
+    :show-admin-fields="showsUsers"
     @close="detailRow = null"
+    @copy="(kind, value) => (kind === 'request_id' ? copyRequestId(value) : copyUpstreamRequestId(value))"
   />
 </template>
 
