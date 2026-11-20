@@ -107,9 +107,9 @@
             <dd class="min-w-0 break-all text-right font-mono text-gray-900 dark:text-gray-100" :class="{ 'font-sans text-gray-400 dark:text-gray-500': !row.ip_address }">{{ row.ip_address || '—' }}</dd>
           </div>
           <template v-if="requestIds.length">
-            <!-- Each ID row is 40px high and its copy button a 40×40 box ending at the row's edge (the icon at its right):
-                 the two buttons' targets never overlap, and nothing reaches past the body's edge. -->
-            <div v-for="id in requestIds" :key="id.key" class="flex min-h-10 items-center justify-between gap-4" :data-testid="`usage-detail-${id.key}`">
+            <!-- Each ID row is 40px high, 8px from the row before, and its copy button a 40×40 box ending at the row's
+                 edge (the icon at its right): the two buttons are 8px apart, and nothing reaches past the body's edge. -->
+            <div v-for="id in requestIds" :key="id.key" class="flex min-h-10 items-center justify-between gap-4 !mt-2" :data-testid="`usage-detail-${id.key}`">
               <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ id.label }}</dt>
               <dd class="flex min-w-0 items-center justify-end">
                 <span class="min-w-0 break-all text-right font-mono text-xs" :class="id.value ? 'text-gray-900 dark:text-gray-100' : 'font-sans text-gray-400 dark:text-gray-500'">{{ id.value || '—' }}</span>
