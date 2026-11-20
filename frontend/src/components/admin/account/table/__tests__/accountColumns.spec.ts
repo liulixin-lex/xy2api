@@ -44,4 +44,17 @@ describe('accountColumnLayout (12.5)', () => {
     expect(widths.usage - 240).toBeCloseTo(widths.status - 140)
     expect(widths.usage).toBeGreaterThan(240)
   })
+
+  // Mobile list plan: a phone's identity column comes from CSS, its "⋯" column is 44px; touch widens the check box.
+  it('on a phone gives the actions 44px and leaves the name to CSS; touch makes the check box 44px', () => {
+    const PHONE = ['select', 'status', 'schedulable', 'groups', 'sq_recent', 'actions']
+    const desk = accountColumnLayout(PHONE, 0)
+    const phone = accountColumnLayout(PHONE, 0, { phone: true, touch: true })
+    expect(phone.widths.actions).toBe(44)
+    expect(phone.widths.select).toBe(44)
+    expect(phone.columns).toBe(desk.columns - 76 + 44 - 36 + 44)
+    expect(phone.min - phone.columns).toBe(176)
+    // A mouse on a phone-sized window keeps the 36px check box.
+    expect(accountColumnLayout(PHONE, 0, { phone: true }).widths.select).toBe(36)
+  })
 })

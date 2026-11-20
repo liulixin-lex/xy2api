@@ -1,5 +1,5 @@
 <template>
-  <div class="pills" :class="{ 'pills--center': groups.length <= 3, 'pills--card': card }" :data-groups-cell="account.id" data-test="group-pills">
+  <div class="pills" :class="{ 'pills--center': groups.length <= 3 }" :data-groups-cell="account.id" data-test="group-pills">
     <button
       v-if="!groups.length"
       type="button"
@@ -122,8 +122,7 @@
  * tip card (12.7): its full name and state, and the state's data. Non-OpenAI accounts have no quality data and no dot.
  *
  * On a touch screen (coarse pointer, whatever the width) the whole pill opens the quality panel on its group, "+N" on
- * the worst folded one; editing goes through the card's and the row menu's "edit groups". In the card's grid each
- * pill's hit area is 40px high, the 8px gaps keeping neighbours' areas apart.
+ * the worst folded one; editing goes through the row menu's "edit groups".
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -150,8 +149,6 @@ const props = defineProps<{
   readonly?: boolean
   /** Quality scheduling is switched off (a fresh summary's global_enabled; a stale one cannot tell): an unknown dot says so. */
   gateOff?: boolean
-  /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
-  card?: boolean
 }>()
 const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
 const { t, te } = useI18n()
@@ -292,22 +289,6 @@ function moreTip(): TipCard {
 .pills--center {
   align-content: center;
 }
-.pills--card {
-  --pill-width: 72px;
-  --pill-height: 32px;
-  --pill-dot-zone: 24px;
-  --pill-gap-x: 8px;
-  --pill-gap-y: 8px;
-  height: auto;
-  align-content: start;
-}
-.pills--card .pill,
-.pills--card .pill__text {
-  font-size: var(--font-size-body);
-}
-.pills--card .pill__text--latin {
-  font-size: var(--font-size-small);
-}
 .pill {
   display: flex;
   width: var(--pill-width);
@@ -355,7 +336,7 @@ function moreTip(): TipCard {
   cursor: default;
 }
 .pill__text--latin {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
 }
 .pill__dot:focus-visible,
 .pill__text:focus-visible {
@@ -393,14 +374,6 @@ function moreTip(): TipCard {
 .pill--whole:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 1px;
-}
-.pills--card .pill--whole {
-  overflow: visible;
-}
-.pills--card .pill--whole::after {
-  position: absolute;
-  inset: -4px 0;
-  content: '';
 }
 .pill--empty {
   display: grid;

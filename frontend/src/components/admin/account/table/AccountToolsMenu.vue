@@ -63,19 +63,24 @@
             <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"><Icon name="lock" size="sm" /></span>
             <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
           </button>
-          <div class="my-2 border-t border-line-row"></div>
-          <div class="flex items-center justify-between gap-3 px-2 py-2">
-            <span class="text-xs font-semibold uppercase tracking-wide text-fg-muted">{{ t('admin.accounts.viewColumns') }}</span>
-            <Icon name="grid" size="sm" class="text-fg-muted" />
-          </div>
-          <AccountColumnSettings
-            :columns="columns"
-            :is-visible="isVisible"
-            :customized="customized"
-            @toggle="emit('toggle-column', $event)"
-            @reorder="emit('reorder-columns', $event)"
-            @reset="emit('reset-columns')"
-          />
+          <!-- A phone has its own "Columns" button in the toolbar's info row. -->
+          <template v-if="showColumns">
+            <div class="my-2 border-t border-line-row"></div>
+            <div class="flex items-center justify-between gap-3 px-2 py-2">
+              <span class="text-xs font-semibold uppercase tracking-wide text-fg-muted">{{ t('admin.accounts.viewColumns') }}</span>
+              <Icon name="grid" size="sm" class="text-fg-muted" />
+            </div>
+            <AccountColumnSettings
+              :columns="columns"
+              :is-visible="isVisible"
+              :columns-customized="columnsCustomized"
+              :order-customized="orderCustomized"
+              @toggle="emit('toggle-column', $event)"
+              @reorder="emit('reorder-columns', $event)"
+              @reset="emit('reset-columns')"
+              @reset-order="emit('reset-column-order')"
+            />
+          </template>
         </div>
       </div>
     </Teleport>
@@ -95,20 +100,24 @@ import { vTip } from '@/utils/tip'
 
 export type AccountToolAction = 'bulk-edit-filtered' | 'sync-crs' | 'import' | 'openai-login' | 'export' | 'error-passthrough' | 'tls-profiles'
 
-defineProps<{
+withDefaults(defineProps<{
   canManage: boolean
   isSuperAdmin: boolean
   isAdmin?: boolean
   selectedCount: number
   columns: Array<{ key: string; label: string }>
   isVisible: (key: string) => boolean
-  customized: boolean
-}>()
+  columnsCustomized: boolean
+  orderCustomized: boolean
+  /** The column settings at the menu's end (false on a phone, which has its own "Columns" button). */
+  showColumns?: boolean
+}>(), { showColumns: true })
 const emit = defineEmits<{
   action: [action: AccountToolAction]
   'toggle-column': [key: string]
   'reorder-columns': [keys: string[]]
   'reset-columns': []
+  'reset-column-order': []
 }>()
 const { t } = useI18n()
 

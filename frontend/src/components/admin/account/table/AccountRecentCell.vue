@@ -1,5 +1,5 @@
 <template>
-  <div class="recent sq-focus" :class="{ 'recent--card': card }" :tabindex="quality ? 0 : undefined" data-test="account-recent" v-tip="tipCard">
+  <div class="recent sq-focus" :tabindex="quality ? 0 : undefined" data-test="account-recent" v-tip="tipCard" @click="showTipNow($event.currentTarget)">
     <template v-for="line in lines" :key="line.dim">
       <span class="recent__k">{{ line.label }}</span>
       <span class="recent__v" :class="{ 'recent__v--na': line.muted }" :data-dim="line.dim">
@@ -16,28 +16,28 @@
  * whole account's values over the last hour, so they are never coloured by a mark that judges one group and model
  * (7k-2): which group, model and line fall short is the group dots' and their tips' to tell. First token is the
  * median first output with timeouts counted last ("超时" when more than half timed out), cache the continuation
- * turns. Too few samples or no data reads muted. In the narrow card (`card`) the three sit side by side, each label
- * over its value. The whole cell has one tip card (12.7): the window, then four rows with their samples, the same as
+ * turns. Too few samples or no data reads muted. The whole cell has one tip card (12.7): the window, then four rows with their samples, the same as
  * the quality panel's recent section. With a tip the cell takes keyboard focus, which shows the card and points
- * aria-describedby at it (v-tip); without quality data there is nothing to focus.
+ * aria-describedby at it (v-tip); a tap shows it too (touch has no hover). Without quality data there is nothing to
+ * focus.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { vTip, type TipCard } from '@/utils/tip'
+import { showTipNow, vTip, type TipCard } from '@/utils/tip'
 import { RECENT_DIMS, type RecentQuality, firstOutputMedian, recentRows, recentTitle } from './accountRecent'
 
-const props = defineProps<{ quality: RecentQuality | null; card?: boolean }>()
+const props = defineProps<{ quality: RecentQuality | null }>()
 const { t } = useI18n()
 
 const lines = computed(() => {
   const q = props.quality
   const rows = recentRows(q, t)
   return RECENT_DIMS.map((dim) => {
-    // The 72px table cell takes the short labels (English "Errors"/"Cache" do not fit); the card has room for the full ones.
-    const label = t(`admin.accounts.table.${props.card ? 'dims' : 'dimsShort'}.${dim}`)
+    // The 72px table cell takes the short labels (English "Errors"/"Cache" do not fit); the tip has the full ones.
+    const label = t(`admin.accounts.table.dimsShort.${dim}`)
     const row = rows.find((item) => item.key === dim)!
     // English "Timeout" does not fit the 72px table cell: it shows "T/O", and a screen reader reads the word.
-    if (!props.card && q && dim === 'ttfo' && firstOutputMedian(q) === 'timeout') {
+    if (q && dim === 'ttfo' && firstOutputMedian(q) === 'timeout') {
       return { dim, label, text: t('admin.accounts.table.recent.timeoutShort'), spoken: row.text, muted: row.muted }
     }
     return { dim, label, text: row.text, spoken: '', muted: row.muted }
@@ -90,15 +90,5 @@ function tipCard(): TipCard | '' {
 }
 .recent__v--na {
   color: var(--color-text-muted);
-}
-.recent--card {
-  grid-template-rows: auto auto;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-flow: column;
-  justify-content: stretch;
-  width: auto;
-}
-.recent--card .recent__v {
-  text-align: left;
 }
 </style>

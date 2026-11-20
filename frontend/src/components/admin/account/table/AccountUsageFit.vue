@@ -1,38 +1,30 @@
 <template>
-  <div class="usage-fit" data-test="usage-fit" v-tip="allTip">
+  <div class="usage-fit" data-test="usage-fit" v-tip="allTip" @click="foldedCount && showTipNow($event.currentTarget)">
     <div class="usage-fit__inner"><slot /></div>
     <span v-if="foldedCount" class="usage-fit__more" data-test="usage-more">{{ t('admin.accounts.table.usageMore', { n: foldedCount }) }}</span>
   </div>
 </template>
 
-<script lang="ts">
-import type { InjectionKey } from 'vue'
-
-/** Provided true by a container with room for every window (the narrow card's details). */
-export const USAGE_UNFOLDED: InjectionKey<boolean> = Symbol('usage-unfolded')
-</script>
-
 <script setup lang="ts">
 /**
  * The usage windows column inside the accounts table's fixed 78px row (7e-6, 7g-3). Each window keeps to a single
  * line (its request / token / cost chips go to the tip), so the count decides: up to four windows all show; with more,
- * the first three show and "+N" counts the rest. Hovering the cell lists every window with its chips.
+ * the first three show and "+N" counts the rest. Hovering the cell lists every window with its chips; with "+N" a tap
+ * does too (touch has no hover).
  *
  * The windows (UsageProgressBar) sign in through USAGE_WINDOW_FOLD as they mount and leave as they unmount; nothing is
  * measured or observed.
  */
-import { computed, inject, provide, shallowReactive, type Ref } from 'vue'
+import { computed, provide, shallowReactive, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { USAGE_WINDOW_FOLD } from '@/components/account/UsageProgressBar.vue'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 
 /** At most this many windows show in full; past it, SHOWN_WHEN_FOLDED show and "+N" stands for the rest. */
 const MAX_SHOWN = 4
 const SHOWN_WHEN_FOLDED = 3
 
 const { t } = useI18n()
-/** In a narrow card's details there is room: every window shows, nothing folds into "+N" (7l-8). */
-const unfolded = inject(USAGE_UNFOLDED, false)
 const roots = shallowReactive(new Set<Ref<HTMLElement | null>>())
 /** The windows in the order they are on screen (one may mount after its neighbours). */
 const windows = computed(() =>
@@ -41,7 +33,7 @@ const windows = computed(() =>
     .filter((el): el is HTMLElement => !!el)
     .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
 )
-const foldedCount = computed(() => (!unfolded && windows.value.length > MAX_SHOWN ? windows.value.length - SHOWN_WHEN_FOLDED : 0))
+const foldedCount = computed(() => (windows.value.length > MAX_SHOWN ? windows.value.length - SHOWN_WHEN_FOLDED : 0))
 
 provide(USAGE_WINDOW_FOLD, {
   add: (root) => roots.add(root),
@@ -97,9 +89,9 @@ const allTip = () => windows.value.map(windowText).filter(Boolean).join('\n')
 }
 .usage-fit__more {
   flex: none;
-  height: 14px;
+  height: 16px;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-micro);
-  line-height: 14px;
+  font-size: var(--font-size-small);
+  line-height: 16px;
 }
 </style>

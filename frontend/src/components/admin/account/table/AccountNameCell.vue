@@ -1,5 +1,5 @@
 <template>
-  <div class="account-name" :title="title">
+  <div class="account-name" v-tip="title" @click="reveal">
     <a
       v-if="homepage"
       :href="homepage"
@@ -14,12 +14,17 @@
 </template>
 
 <script setup lang="ts">
-/** Name column (prototype): the account name, and "platform · type" below it. Email and parent show on hover. */
+/**
+ * Name column (prototype): the account name, and "platform · type" below it, each cut with "…" at the column's width
+ * (on a phone the frozen identity column, mobile list plan). The whole name, email and parent show in the tip on hover,
+ * or at once on a tap outside the name's link (touch has no hover).
+ */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { platformLabel } from '@/utils/platformColors'
 import { sanitizeUrl } from '@/utils/url'
+import { showTipNow, vTip } from '@/utils/tip'
 import { accountTypeLabel } from './accountLabels'
 
 const props = defineProps<{ account: Account }>()
@@ -43,6 +48,11 @@ const email = computed(() => {
 const title = computed(() =>
   [props.account.name, email.value, props.account.parent_chatgpt_account_id, homepage.value].filter(Boolean).join('\n')
 )
+/** A tap or click shows the tip at once; the name's link still opens the site. */
+const reveal = (event: MouseEvent) => {
+  if (event.target instanceof Element && event.target.closest('a')) return
+  showTipNow(event.currentTarget)
+}
 </script>
 
 <style scoped>

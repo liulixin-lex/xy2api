@@ -23,7 +23,7 @@
         </span>
         <button
           type="button"
-          class="flex min-w-0 flex-1 items-center justify-between py-2 pl-1 pr-3 text-sm text-gray-700 dark:text-gray-200"
+          class="column-toggle flex min-w-0 flex-1 items-center justify-between py-2 pl-1 pr-3 text-sm text-gray-700 dark:text-gray-200"
           @click="emit('toggle', col.key)"
         >
           <span class="truncate">{{ col.label }}</span>
@@ -32,13 +32,23 @@
       </div>
     </VueDraggable>
     <button
-      v-if="customized"
+      v-if="columnsCustomized"
       type="button"
       data-test="reset-columns"
-      class="mt-1 w-full rounded-md px-3 py-2 text-left text-xs text-primary-600 transition-colors hover:bg-gray-100 dark:text-primary-400 dark:hover:bg-dark-700"
+      class="column-reset mt-1 w-full rounded-md px-3 py-2 text-left text-xs text-primary-600 transition-colors hover:bg-gray-100 dark:text-primary-400 dark:hover:bg-dark-700"
       @click="emit('reset')"
     >
       {{ t('admin.accounts.resetColumns') }}
+    </button>
+    <button
+      v-if="orderCustomized"
+      type="button"
+      data-test="reset-column-order"
+      class="column-reset w-full rounded-md px-3 py-2 text-left text-xs text-primary-600 transition-colors hover:bg-gray-100 dark:text-primary-400 dark:hover:bg-dark-700"
+      :class="{ 'mt-1': !columnsCustomized }"
+      @click="emit('reset-order')"
+    >
+      {{ t('common.table.resetColumnOrder') }}
     </button>
   </div>
 </template>
@@ -57,14 +67,20 @@ interface ColumnSetting {
 const props = defineProps<{
   columns: ColumnSetting[]
   isVisible: (key: string) => boolean
-  /** Visibility or order differs from the default: offer "restore default columns" (both at once). */
-  customized?: boolean
+  /**
+   * The shown columns differ from this width's defaults (two memories, below and from 768px): offer "restore default
+   * columns", which restores this width's columns only.
+   */
+  columnsCustomized?: boolean
+  /** The order (one for both widths) differs from the default: offer "restore default order". */
+  orderCustomized?: boolean
 }>()
 
 const emit = defineEmits<{
   toggle: [key: string]
   reorder: [keys: string[]]
   reset: []
+  'reset-order': []
 }>()
 
 const { t } = useI18n()
@@ -83,3 +99,14 @@ const onReorder = (columns: ColumnSetting[]) => {
   emit('reorder', columns.map((col) => col.key))
 }
 </script>
+
+<style scoped>
+/* Touch: each line, the drag handle and the resets reach 40px (mobile list plan). */
+@media (pointer: coarse) {
+  .column-toggle,
+  .column-drag-handle,
+  .column-reset {
+    min-height: 40px;
+  }
+}
+</style>

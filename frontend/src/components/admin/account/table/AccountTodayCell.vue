@@ -1,9 +1,8 @@
 <template>
-  <div class="today" :class="{ 'today--full': full }" data-test="account-today">
+  <div class="today" data-test="account-today">
     <template v-for="line in lines" :key="line.key">
       <span class="today__k">{{ line.label }}</span>
-      <span v-if="full" class="today__v" :data-key="line.key">{{ line.exact }}</span>
-      <span v-else class="today__v" :data-key="line.key" v-tip="line.text !== line.exact ? line.exact : ''">{{ line.text }}</span>
+      <span class="today__v" :data-key="line.key" v-tip="line.text !== line.exact ? line.exact : ''" @click="line.text !== line.exact && showTipNow($event.currentTarget)">{{ line.text }}</span>
     </template>
   </div>
 </template>
@@ -12,8 +11,7 @@
 /**
  * Today's stats (spec 7a, 7b): four compact lines (requests, tokens, account cost, user charge), labels left and values
  * right, every number on the same three-significant-digit rule; the full value shows on hover. Before the stats are in,
- * every line reads "—", not 0 (7d-6). The narrow card's details (`full`) show the full values instead: touch screens
- * have no hover.
+ * every line reads "—", not 0 (7d-6). A tap shows a shortened value's full one at once (touch has no hover).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -25,9 +23,9 @@ import {
   formatExactCount,
   formatExactMoney
 } from '@/utils/compactNumber'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 
-const props = defineProps<{ stats: WindowStats | null | undefined; full?: boolean }>()
+const props = defineProps<{ stats: WindowStats | null | undefined }>()
 const { t } = useI18n()
 
 const lines = computed(() => {
@@ -61,16 +59,4 @@ const lines = computed(() => {
   white-space: nowrap;
 }
 /* Full values can be long ("$1,234,567.89"): one pair to a line, the value left after its label. */
-.today--full {
-  column-gap: 12px;
-  row-gap: 4px;
-  font-size: var(--font-size-body);
-  line-height: 18px;
-}
-.today--full .today__k {
-  font-size: var(--font-size-small);
-}
-.today--full .today__v {
-  text-align: left;
-}
 </style>

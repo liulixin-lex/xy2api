@@ -39,14 +39,14 @@ const atLocal = (now: Date) => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(now)
 }
-const mountCell = (q: Quality | null, card = false) => mount(AccountRecentCell, { attachTo: document.body, props: { quality: q, card } })
+const mountCell = (q: Quality | null) => mount(AccountRecentCell, { attachTo: document.body, props: { quality: q } })
 /** What a value shows, and what a screen reader reads instead when it differs (the table's "T/O"). */
 const shown = (el: DOMWrapper<Element>) => {
   const visible = el.find('[aria-hidden="true"]')
   return visible.exists() ? { text: visible.text(), spoken: el.get('.sr-only').text() } : { text: el.text() }
 }
-const cells = (q: Quality | null, card = false) =>
-  mountCell(q, card).findAll('.recent__v').map((el) => ({ dim: el.attributes('data-dim'), ...shown(el), cls: el.classes().filter((cls) => cls !== 'recent__v') }))
+const cells = (q: Quality | null) =>
+  mountCell(q).findAll('.recent__v').map((el) => ({ dim: el.attributes('data-dim'), ...shown(el), cls: el.classes().filter((cls) => cls !== 'recent__v') }))
 const tipOf = (q: Quality | null): TipContent => (mountCell(q).element as HTMLElement & { __tipText?: () => TipContent }).__tipText!()
 const rowsOf = (q: Quality) => (tipOf(q) as TipCard).rows!
 const json = (key: string, params: Record<string, unknown>) => `admin.accounts.table.tip.${key}:${JSON.stringify(params)}`
@@ -64,13 +64,12 @@ describe('AccountRecentCell', () => {
   })
 
   it('writes first token as the median in seconds, "超时" when the median is a timeout, "—" without samples; muted under 20', () => {
-    const ttfo = (first_output: Quality['first_output'], card = false) => cells(quality({ first_output }), card)[0]
+    const ttfo = (first_output: Quality['first_output']) => cells(quality({ first_output }))[0]
     expect(ttfo({ n: 20, timeouts: 10, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: [] })
     expect(ttfo({ n: 19, timeouts: 0, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: ['recent__v--na'] })
-    // The table's short word is hidden from screen readers, which read the full one; the card has room for it.
+    // The table's short word is hidden from screen readers, which read the full one.
     expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }))
       .toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeoutShort', spoken: 'admin.accounts.table.recent.timeout', cls: [] })
-    expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }, true)).toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeout', cls: [] })
     expect(ttfo({ n: 0, timeouts: 0, p50_ms: null })).toEqual({ dim: 'ttfo', text: '—', cls: ['recent__v--na'] })
     // A median of 0 ms is a time, not a timeout.
     const instant = quality({ first_output: { n: 30, timeouts: 0, p50_ms: 0 } })
@@ -161,9 +160,9 @@ describe('AccountRecentCell', () => {
 
   it('reads as the contract writes it with the real messages, in Chinese and English', () => {
     i18nMode.real = true
-    const read = (locale: 'zh' | 'en', q: Quality, card = false) => {
+    const read = (locale: 'zh' | 'en', q: Quality) => {
       const i18n = createI18n({ legacy: false, locale, messages: { en, zh } as never })
-      const wrapper = mount(AccountRecentCell, { attachTo: document.body, props: { quality: q, card }, global: { plugins: [i18n] } })
+      const wrapper = mount(AccountRecentCell, { attachTo: document.body, props: { quality: q }, global: { plugins: [i18n] } })
       const tip = (wrapper.element as HTMLElement & { __tipText?: () => TipCard }).__tipText!()
       return { cell: wrapper.findAll('.recent__k, .recent__v').map((el) => shown(el).text), title: tip.title, rows: tip.rows }
     }
@@ -199,7 +198,6 @@ describe('AccountRecentCell', () => {
     expect(read('en', thin).cell.slice(0, 2)).toEqual(['First', 'T/O'])
     expect(mount(AccountRecentCell, { props: { quality: thin }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en, zh } as never })] } })
       .get('[data-dim="ttfo"] .sr-only').text()).toBe('Timeout')
-    expect(read('en', thin, true).cell.slice(0, 2)).toEqual(['TTFT', 'Timeout'])
   })
 
   // N1: the cell is 72px (label 24 + gap 8 + value ≤ 40): "100ms" (~42px) does not fit, so first token is written in
@@ -220,17 +218,16 @@ describe('AccountRecentCell', () => {
     expect([50, 994, 996, 1000, 59_940, 99_960, 123_400].map(ttfo)).toEqual(['0.05s', '0.99s', '1.0s', '1.0s', '59.9s', '100s', '123s'])
   })
 
-  // English "Errors"/"Cache" (34/36px) leave no room in 72px: the table cell has short labels, the card and tip the full ones.
-  it('labels the table cell with the short names and the card and its tip with the full ones', () => {
-    const labels = (card: boolean) => mountCell(quality(), card).findAll('.recent__k').map((el) => el.text())
-    expect(labels(false)).toEqual(['admin.accounts.table.dimsShort.ttfo', 'admin.accounts.table.dimsShort.error', 'admin.accounts.table.dimsShort.cache'])
-    expect(labels(true)).toEqual(['admin.accounts.table.dims.ttfo', 'admin.accounts.table.dims.error', 'admin.accounts.table.dims.cache'])
+  // English "Errors"/"Cache" (34/36px) leave no room in 72px: the table cell has short labels, the tip the full ones.
+  it('labels the table cell with the short names', () => {
+    const labels = mountCell(quality()).findAll('.recent__k').map((el) => el.text())
+    expect(labels).toEqual(['admin.accounts.table.dimsShort.ttfo', 'admin.accounts.table.dimsShort.error', 'admin.accounts.table.dimsShort.cache'])
   })
 
   it('takes its column\'s size, never the viewport\'s: 72px, 84px only when the table has the roomy widths (7q-5)', () => {
     const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
     // An optional column keeps a 1920px screen in the compact widths: 84px there cut "0.7s" to "0.".
     expect(source('../AccountRecentCell.vue')).not.toContain('@media')
-    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(/\.account-table\.is-roomy :deep\(\.recent:not\(\.recent--card\)\) \{\s*width: 84px;\s*\}/)
+    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(/\.account-table\.is-roomy :deep\(\.recent\) \{\s*width: 84px;\s*\}/)
   })
 })

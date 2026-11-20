@@ -98,11 +98,11 @@ describe('UpstreamBillingRateCell', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('0.60x')
+    expect(wrapper.text()).toContain('0.6x')
     await wrapper.setProps({ now: Date.parse('2026-07-13T01:00:00Z') })
-    expect(wrapper.text()).toContain('0.90x')
+    expect(wrapper.text()).toContain('0.9x')
     await wrapper.setProps({ now: Date.parse('2026-07-13T10:00:00Z') })
-    expect(wrapper.text()).toContain('0.60x')
+    expect(wrapper.text()).toContain('0.6x')
     expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.latest')
     expect(wrapper.get('[data-testid="upstream-billing-probe"]').text()).toBe('')
     expect(wrapper.get('[data-testid="upstream-billing-probe"]').attributes('aria-label')).toBe(
@@ -125,7 +125,7 @@ describe('UpstreamBillingRateCell', () => {
     })
     const wrapper = mount(UpstreamBillingRateCell, { props: { account, now: Date.now() } })
     // Stale (spec 4.5, 7e-10): the value by the same rule as a fresh one (the rate in force now), greyed; no "expired" word.
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
     expect(wrapper.classes()).toContain('ratio--stale')
 
     await wrapper.setProps({
@@ -143,16 +143,16 @@ describe('UpstreamBillingRateCell', () => {
         }
       })
     })
-    expect(wrapper.text()).toContain('0.60x')
+    expect(wrapper.text()).toContain('0.6x')
     expect(wrapper.classes()).not.toContain('ratio--stale')
     expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.failed')
 
     await wrapper.setProps({ now: Date.parse('2026-07-13T01:00:00Z') })
-    expect(wrapper.text()).toContain('0.90x')
+    expect(wrapper.text()).toContain('0.9x')
     expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.stale')
 
     await wrapper.setProps({ now: Date.parse('2026-07-13T01:00:00.001Z') })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.9x')
     expect(wrapper.classes()).toContain('ratio--stale')
 
     await wrapper.setProps({
@@ -171,14 +171,15 @@ describe('UpstreamBillingRateCell', () => {
         }
       })
     })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
     expect(wrapper.classes()).toContain('ratio--stale')
   })
 
-  it('says when a stale probe last succeeded and why it failed, in the card details (spec 4.6)', () => {
+  // Mobile list plan: touch has no hover, so a tap on the value shows the same tip at once (the old card's notes).
+  it('shows the tip at once on a tap: when a stale probe last succeeded and why it failed', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
+      attachTo: document.body,
       props: {
-        detailed: true,
         now: Date.now(),
         account: makeAccount({
           extra: {
@@ -196,9 +197,11 @@ describe('UpstreamBillingRateCell', () => {
         })
       }
     })
-    const note = wrapper.get('[data-testid="upstream-billing-note"]').text()
-    expect(note).toContain('admin.accounts.upstreamBilling.lastDetectedAt:')
-    expect(note).toContain('admin.accounts.table.ratioFailure:')
+    await wrapper.get('[data-testid="upstream-billing-rate"]').trigger('click')
+    const tip = document.querySelector('[role="tooltip"]')!.textContent ?? ''
+    expect(tip).toContain('admin.accounts.upstreamBilling.lastDetectedAt:')
+    expect(tip).toContain('admin.accounts.table.ratioFailure:')
+    wrapper.unmount()
   })
 
   // 7i-6: information only, so the app's plain tip; failures in words; times as the tip cards give them (12.12-13).
@@ -301,11 +304,11 @@ describe('UpstreamBillingRateCell', () => {
       }
     })
     const wrapper = mount(UpstreamBillingRateCell, { props: { account: seeded(true), now: Date.now() } })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.20x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.2x')
     expect(wrapper.classes()).not.toContain('ratio--stale')
 
     await wrapper.setProps({ account: seeded(false) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.20x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('1.2x')
     expect(wrapper.classes()).toContain('ratio--stale')
   })
 
@@ -339,15 +342,15 @@ describe('UpstreamBillingRateCell', () => {
 
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('—')
     await wrapper.setProps({ account: malformedAccount({ billing_scope: 'request' as 'token' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.90x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.9x')
     await wrapper.setProps({ account: malformedAccount({}, { received_at: 'not-a-time' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
     await wrapper.setProps({ account: malformedAccount({}, { received_at: '2026-07-13T00:31:00Z' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
     await wrapper.setProps({ account: malformedAccount({}, { received_at: '2026-07-13T00:36:00Z' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
     await wrapper.setProps({ account: malformedAccount({}, { fresh_until: '2026-07-12T23:59:00Z' }) })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.6x')
 
     await wrapper.setProps({
       account: makeAccount({

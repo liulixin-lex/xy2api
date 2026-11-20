@@ -331,14 +331,14 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
     expect(wrapper.get('[data-account-name="compact row"] button[role="switch"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('[data-account-name="second"] button[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.get('[data-account-name="second"] [data-test="account-rate"]').text()).toBe('0.30x')
+    expect(wrapper.get('[data-account-name="second"] [data-test="account-rate"]').text()).toBe('0.3x')
     wrapper.unmount()
   })
 
   it('updates a rate-only change from the 3-second row refresh', async () => {
     vi.useFakeTimers()
     const wrapper = mountView(); await flushPromises()
-    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.00x')
+    expect(wrapper.get('[data-test="account-rate"]').text()).toBe('1.0x')
     listAccounts.mockResolvedValueOnce({ items: [{ ...listRow, rate_multiplier: 0.035 }], total: 1, page: 1, page_size: 1, pages: 1 })
     await vi.advanceTimersByTimeAsync(3000); await flushPromises()
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.035x')
