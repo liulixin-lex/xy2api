@@ -184,3 +184,17 @@ describe('OpsErrorLogTable details column', () => {
     expect(button.element.parentElement!.classList.contains('-my-2.5')).toBe(false)
   })
 })
+
+// Acceptance recheck: the status column is a phone default now, so its priority badge is on the first screen: 12px.
+describe('OpsErrorLogTable badges', () => {
+  it('draws the priority and the deleted key at 12px', () => {
+    const wrapper = mount(OpsErrorLogTable, {
+      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', severity: 'P1', status_code: 502, api_key_id: 3, api_key_deleted: true } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, layout: 'table' },
+      global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
+    })
+    const badge = wrapper.findAll('span').find((el) => el.text() === 'P1')!
+    expect(badge.classes()).toContain('text-xs')
+    const deleted = wrapper.findAll('span').find((el) => el.text() === 'admin.ops.errorLog.keyDeletedBadge')!
+    expect(deleted.classes()).toContain('text-xs')
+  })
+})
