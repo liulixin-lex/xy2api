@@ -175,6 +175,9 @@ const DataTableStub = {
       <div v-if="data.length" data-test="billing-cell">
         <slot name="cell-billing_type" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="name-cell">
+        <slot name="cell-name" :row="data[0]" :value="data[0].name" />
+      </div>
       <div v-if="data.length" data-test="rate-cell">
         <slot name="cell-rate_multiplier" :row="data[0]" :value="data[0].rate_multiplier" />
       </div>
@@ -565,6 +568,19 @@ describe('admin GroupsView column settings', () => {
       expect(wrapper.find('[data-test="filter-sheet"] [data-filter="group_category"]').exists()).toBe(true)
     })
 
+    // Browser acceptance (step 2): the phone's name column keeps its first line for the name, the alias on the second.
+    it('puts the alias on the second line of the name on a phone', async () => {
+      setPhone()
+      listGroups.mockResolvedValue({
+        items: [{ id: 1, name: 'R3 gateway east', alias: 'GW', platform: 'anthropic', rate_multiplier: 1, status: 'active', active_account_count: 1, account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
+        total: 1, page: 1, page_size: 20, pages: 1,
+      })
+      const wrapper = await mountView()
+      const cell = wrapper.get('[data-test="name-cell"]')
+      expect(cell.get('.table-identity__primary').text()).toBe('R3 gateway east')
+      expect(cell.get('.table-identity__secondary').text()).toBe('GW')
+    })
+
     it('shows the phone toolbar: count, filters as removable tags, columns in a sheet', async () => {
       setPhone()
       const wrapper = await mountView()
@@ -598,5 +614,16 @@ describe('admin GroupsView column settings', () => {
     // Astra review 6: thousands separators, and a right-aligned number column.
     expect(accounts.findAll(':scope > span').map((el) => el.text())).toEqual(['1,234', '/', '2,234', 'admin.groups.accountsLimitedShort'])
     expect((wrapper.vm as any).columns.find((col: { key: string }) => col.key === 'account_count').class).toBe('text-right')
+  })
+
+  it('keeps the alias pill before the name from 768px', async () => {
+    listGroups.mockResolvedValue({
+      items: [{ id: 1, name: 'R3 gateway east', alias: 'GW', platform: 'anthropic', rate_multiplier: 1, status: 'active', active_account_count: 1, account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    const wrapper = await mountView()
+    const cell = wrapper.get('[data-test="name-cell"]')
+    expect(cell.get('.table-identity__primary').text()).toBe('GWR3 gateway east')
+    expect(cell.find('.table-identity__secondary').exists()).toBe(false)
   })
 })
