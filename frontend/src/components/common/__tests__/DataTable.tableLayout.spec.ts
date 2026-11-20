@@ -278,7 +278,14 @@ describe('touch and phone sizes', () => {
   })
   it('gives the toolbar 16px fields on touch and 40px buttons on any coarse pointer', () => {
     const toolbar = read('../../layout/TableToolbar.vue')
-    expect(toolbar).toMatch(/@media \(pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__input\) \{\s*font-size: 16px;/)
+    expect(toolbar).toMatch(/@media \(pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__input\) \{\s*height: 40px;\s*font-size: 16px;/)
+    // The shared Select: the sm trigger 40px on touch, the dropdown's search box 16px (no zoom on focus), sm options 40px.
+    const select = read('../Select.vue')
+    expect(select).toMatch(/@media \(pointer: coarse\) \{\s*\.select-trigger\.select-trigger--sm \{\s*height: 40px;/)
+    const portal = select.slice(select.lastIndexOf('@media (pointer: coarse) {'))
+    expect(portal).toMatch(/^@media \(pointer: coarse\) \{\s*\.select-dropdown-portal \.select-search-input \{\s*font-size: 16px;\s*\}\s*\.select-dropdown-portal--sm \.select-option \{\s*min-height: 40px;/)
+    // Last in the sheet: nothing after it sets the search box's size again.
+    expect(portal.slice(portal.indexOf('}\n}'))).not.toContain('.select-search-input {')
     expect(toolbar).toMatch(/@media \(any-pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__btn\) \{\s*min-height: 40px;/)
   })
 })
