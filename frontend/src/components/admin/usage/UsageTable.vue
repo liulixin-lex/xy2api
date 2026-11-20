@@ -32,7 +32,7 @@
         :default-sort-order="defaultSortOrder"
         @sort="(key, order) => $emit('sort', key, order)"
       >
-        <!-- 手机上第一列冻结为身份列：两行（邮箱 / #编号），超长省略；点邮箱照旧看充值记录 -->
+        <!-- 手机上第一列冻结为身份列：一行邮箱，超长省略，点邮箱照旧看充值记录；#编号和“已删除”在明细里（一行保住手机行高） -->
         <template #cell-user="{ row }">
           <TableIdentityCell v-if="identityKey === 'user'">
             <template #primary>
@@ -44,7 +44,6 @@
               >{{ row.user.email }}</button>
               <CellEmpty v-else />
             </template>
-            <template #secondary>#{{ row.user_id }}<template v-if="row.user?.deleted_at"> · {{ t('admin.usage.userDeletedBadge') }}</template></template>
           </TableIdentityCell>
           <div v-else class="text-sm">
             <button
@@ -406,6 +405,7 @@
     :show-account-billing="showAccountBilling"
     :show-upstream-endpoint="showUpstreamEndpoint"
     :show-fallback-origin="props.showFallbackOrigin"
+    :show-user="showsUsers"
     @close="detailRow = null"
   />
 </template>
@@ -532,6 +532,8 @@ const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 
  */
 const { phone } = useTableViewport()
 const identityKey = computed(() => (phone.value ? props.columns[0]?.key ?? null : null))
+/** The page lists users (the admin page): the request detail names the user, with the id and a deleted mark. */
+const showsUsers = computed(() => props.columns.some((col) => col.key === 'user'))
 
 /** The upstream endpoint is shown on this page, known and not the inbound one. */
 const upstreamDiffers = (row: AdminUsageLog) => {

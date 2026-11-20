@@ -186,16 +186,30 @@ describe('UsageTable on the shared table layout (B)', () => {
     expect(mountTable(ADMIN).findComponent(DataTableStub).props('layout')).toBe('table')
   })
 
-  it('makes the admin page\'s first column the two-line identity cell on a phone, the email still opening the balance', async () => {
+  // Owner ruling: one line on a phone (rows near 53px, about ten a screen); the id and the deleted mark are in the detail.
+  it('makes the admin page\'s first column a one-line identity cell on a phone, the email still opening the balance', async () => {
     setPhone(true)
-    const wrapper = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'account', label: 'Account' }] })
+    const wrapper = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'account', label: 'Account' }, { key: 'created_at', label: 'Time' }] })
     const identity = cell(wrapper, 'user').get('[data-test="table-identity"]')
-    expect(identity.get('.table-identity__primary').text()).toBe('alice@example.com')
-    expect(identity.get('.table-identity__secondary').text()).toBe('#12 · admin.usage.userDeletedBadge')
+    expect(identity.text()).toBe('alice@example.com')
+    expect(identity.find('.table-identity__secondary').exists()).toBe(false)
+    expect(cell(wrapper, 'user').text()).not.toContain('#12')
     await identity.get('button').trigger('click')
     expect(wrapper.emitted('userClick')).toEqual([[12, 'alice@example.com']])
     // Only the frozen first column: the API key is a plain cell here.
     expect(cell(wrapper, 'api_key').find('[data-test="table-identity"]').exists()).toBe(false)
+    // What the second line carried is in the row's detail.
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    const user = wrapper.get('[data-testid="usage-detail-user"]')
+    expect(user.get('dt').text()).toBe('admin.usage.user')
+    expect(user.findAll('dd > span').map((el) => el.text())).toEqual(['alice@example.com', '#12', '· admin.usage.userDeletedBadge'])
+  })
+
+  it('names no user in the user page\'s detail', async () => {
+    const wrapper = mountTable({ ...USER, columns: [{ key: 'api_key', label: 'Key' }, { key: 'created_at', label: 'Time' }] })
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    expect(wrapper.find('[data-testid="usage-detail-user"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="usage-request-detail"]').text()).not.toContain('alice@example.com')
   })
 
   it('makes the user page\'s API key the identity cell on a phone, and keeps the one-line cells from 768px', () => {

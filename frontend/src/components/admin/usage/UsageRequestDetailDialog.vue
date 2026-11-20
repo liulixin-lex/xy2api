@@ -36,6 +36,15 @@
       <section class="pt-4" :aria-labelledby="`${uid}-request`">
         <h4 :id="`${uid}-request`" class="mb-2 font-semibold text-gray-900 dark:text-white">{{ t('usage.requestDetail.request') }}</h4>
         <dl class="space-y-1.5">
+          <!-- Admin page: who sent it, the id and a deleted mark (on a phone the frozen column shows the email only) -->
+          <div v-if="showUser" class="flex items-baseline justify-between gap-4" data-testid="usage-detail-user">
+            <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.usage.user') }}</dt>
+            <dd class="min-w-0 break-all text-right">
+              <span :class="row.user?.email ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'">{{ row.user?.email || '—' }}</span>
+              <span class="ml-1 tabular-nums text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+              <span v-if="row.user?.deleted_at" class="ml-1 text-rose-600 dark:text-rose-400">· {{ t('admin.usage.userDeletedBadge') }}</span>
+            </dd>
+          </div>
           <div class="flex items-baseline justify-between gap-4">
             <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('usage.model') }}</dt>
             <dd class="min-w-0 break-all text-right font-medium text-gray-900 dark:text-gray-100" data-testid="usage-detail-model">{{ modelSteps(row).join(' → ') }}</dd>
@@ -122,6 +131,8 @@ const props = defineProps<{
   showAccountBilling: boolean
   showUpstreamEndpoint: boolean
   showFallbackOrigin: boolean
+  /** The page lists users (admin): name the request's user. */
+  showUser?: boolean
 }>()
 const emit = defineEmits<{ close: [] }>()
 
