@@ -3,27 +3,29 @@
     <div class="flex h-16 items-center justify-between gap-2 px-2 sm:px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title. From 1024px the title area takes the room the right side leaves and the
            description is cut with an ellipsis, so a long one never widens the page (7s-2). -->
-      <div class="flex shrink-0 items-center gap-2 sm:gap-4 lg:min-w-0 lg:flex-1">
+      <!-- Below 1024px the page's name sits right of the menu button on one line, cut with an ellipsis before the
+           buttons on the right give way (they keep their size down to 320px; mobile list plan). -->
+      <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon lg:hidden"
+          class="btn-ghost btn-icon shrink-0 lg:hidden"
           :aria-label="t('common.toggleMenu')"
         >
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden min-w-0 lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+        <div class="min-w-0">
+          <h1 class="truncate text-base font-semibold text-gray-900 dark:text-white lg:text-lg" data-test="page-title">
             {{ pageTitle }}
           </h1>
-          <p v-if="pageDescription" class="truncate text-xs text-gray-500 dark:text-dark-400">
+          <p v-if="pageDescription" class="hidden truncate text-xs text-gray-500 dark:text-dark-400 lg:block">
             {{ pageDescription }}
           </p>
         </div>
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex min-w-0 items-center gap-1 sm:gap-3">
+      <div class="flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Page search (Ctrl/⌘K) -->
         <button
           type="button"

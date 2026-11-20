@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
+  <div v-if="!showsTable" ref="mobileRootRef" class="table-cards" :aria-busy="loading ? 'true' : undefined">
     <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
          column (and the select column before it), and at its right any column marked `cardHeadEnd`; the other columns
          follow as label-over-value pairs in two columns, the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
@@ -150,7 +150,9 @@
     class="table-wrapper"
     :class="{
       'actions-expanded': actionsExpanded,
-      'is-scrollable': isScrollable
+      'is-scrollable': isScrollable,
+      'dt-layout-table': layout === 'table',
+      'dt-builtin-select': layout === 'table' && selectable
     }"
     :aria-busy="loading ? 'true' : undefined"
   >
@@ -165,18 +167,20 @@
             v-if="selectable && rowIndex === 0"
             scope="col"
             :rowspan="headerRows.length"
-            class="sticky-header-cell w-11 min-w-11 px-3 py-3 text-center"
+            :class="['sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
           >
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              :indeterminate="someVisibleSelected"
-              :disabled="visibleRowKeys.length === 0"
-              :aria-label="t('common.selectAll')"
-              data-test="select-all"
-              @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
-            />
+            <label class="dt-check">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500"
+                :checked="allVisibleSelected"
+                :indeterminate="someVisibleSelected"
+                :disabled="visibleRowKeys.length === 0"
+                :aria-label="t('common.selectAll')"
+                data-test="select-all"
+                @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
+              />
+            </label>
           </th>
           <template v-for="cell in headerRow" :key="cell.key">
             <th
@@ -203,7 +207,15 @@
               ]"
               @click="cell.column.sortable && handleSort(cell.column.key)"
             >
-              <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(cell.column)]">
+              <!-- A sortable header is a button across its whole cell (mobile list plan): a click anywhere on the cell, or
+                   Enter / Space on the focused button, sorts; the th keeps scope and aria-sort. -->
+              <component
+                :is="cell.column.sortable ? 'button' : 'div'"
+                :type="cell.column.sortable ? 'button' : undefined"
+                :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(cell.column), { 'dt-sort': cell.column.sortable }]"
+                :data-test="cell.column.sortable ? `sort-${cell.column.key}` : undefined"
+                @click.stop="cell.column.sortable && handleSort(cell.column.key)"
+              >
                 <slot
                   :name="`header-${cell.column.key}`"
                   :column="cell.column"
@@ -235,7 +247,7 @@
                     <path d="M5 8L1.5 3.5h7L5 8z" />
                   </svg>
                 </span>
-              </div>
+              </component>
             </th>
           </template>
         </tr>
@@ -243,7 +255,7 @@
       <tbody class="table-body bg-surface">
         <!-- Loading skeleton: only while there is nothing to show yet -->
         <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
-          <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
+          <td v-if="selectable" :class="['w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-surface-pill"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
@@ -291,6 +303,7 @@
             :index="item.index"
             :columns="columns"
             :sticky-classes="stickyColumnClasses"
+            :select-class="builtinSelectStickyClass"
             :padding-class="adaptivePaddingClass"
             :selectable="selectable"
             :selected="selectable && isRowSelected(item.row, item.index)"
@@ -315,12 +328,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, useSlots, type ComponentPublicInstance, type FunctionalComponent } from 'vue'
+import { computed, inject, ref, onMounted, onUnmounted, watch, nextTick, useId, useSlots, type ComponentPublicInstance, type FunctionalComponent } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
 import DataTableRow from './DataTableRow'
+import { TABLE_REGION_KEY } from '@/components/layout/tableRegion'
 
 const { t } = useI18n()
 
@@ -493,6 +507,13 @@ onUnmounted(() => {
 })
 
 interface Props {
+  /**
+   * `table` (mobile list plan): the table at every width, cards never. Below 1024px it keeps the sticky header, the
+   * frozen columns and their edge lines, the size tracking and, inside a bounded table region, the windowing; below
+   * 768px the frozen identity column takes `--table-identity-width` (clamp(120px, 36vw, 160px)) and a frozen actions
+   * column 44px. `cards` is the old narrow layout, kept only until every page has moved (then it and this prop go).
+   */
+  layout?: 'cards' | 'table'
   columns: Column[]
   data: any[]
   loading?: boolean
@@ -553,6 +574,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  layout: 'cards',
   loading: false,
   stickyFirstColumn: true,
   stickyActionsColumn: true,
@@ -564,6 +586,12 @@ const props = withDefaults(defineProps<Props>(), {
   pageSorts: () => [],
   pageSort: null
 })
+
+/** The table is mounted: always in the table layout, from 1024px in the cards layout. */
+const showsTable = computed(() => props.layout === 'table' || isDesktopViewport.value)
+/** Below 1024px rows are windowed only inside a bounded table region (TablePageLayout); a page that scrolls renders them all. */
+const tableRegion = inject(TABLE_REGION_KEY, null)
+const windowedHere = computed(() => isDesktopViewport.value || (props.layout === 'table' && tableRegion?.value === true))
 
 // A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
 // skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
@@ -784,11 +812,12 @@ const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
 
+// The table's size tracking (sideways scroll, the actions column's room) runs while the table is mounted.
 watch(
-  isDesktopViewport,
-  async (isDesktop) => {
+  showsTable,
+  async (mounted) => {
     detachDesktopTableTracking()
-    if (!isDesktop) return
+    if (!mounted) return
     await nextTick()
     attachDesktopTableTracking()
   },
@@ -902,7 +931,7 @@ const toggleAllVisible = (checked: boolean) => {
 // 是否启用虚拟化:仅桌面端且行数超过阈值时开启。小列表全量渲染,彻底绕开虚拟器的
 // 估算/测量/滚动补偿链路,消除可变行高导致的滚动抖动。
 const shouldVirtualize = computed(() =>
-  isDesktopViewport.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
+  showsTable.value && windowedHere.value && (sortedData.value?.length ?? 0) > (props.virtualizeThreshold ?? 100)
 )
 
 // 行高只取 ResizeObserver 给出的 borderBoxSize。默认实现在 ref 回调里同步读 offsetHeight,
@@ -1083,13 +1112,19 @@ const hasSelectColumn = computed(() => {
 })
 
 // 生成固定列的 CSS 类
+/** The table layout freezes the built-in check box column with the first column (the explicit select column already is). */
+const freezesBuiltinSelect = computed(() => props.layout === 'table' && props.selectable && props.stickyFirstColumn)
+const builtinSelectStickyClass = computed(() => (freezesBuiltinSelect.value ? 'sticky-col sticky-col-left-first' : ''))
+
 const getStickyColumnClass = (column: Column, index: number) => {
   const classes: string[] = []
 
   if (props.stickyFirstColumn) {
     // 如果第一列是勾选列，固定前两列（勾选+名称）
-    if (hasSelectColumn.value) {
-      if (index === 0) {
+    if (hasSelectColumn.value || freezesBuiltinSelect.value) {
+      if (freezesBuiltinSelect.value) {
+        if (index === 0) classes.push('sticky-col sticky-col-left-second')
+      } else if (index === 0) {
         classes.push('sticky-col sticky-col-left-first')
       } else if (index === 1) {
         classes.push('sticky-col sticky-col-left-second')
@@ -1293,6 +1328,90 @@ defineExpose({
 
 .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 var(--color-line-strong);
+}
+/* ---- The table layout (mobile list plan) ---- */
+/* The built-in check box column is 44px (w-11): the first column freezes right after it. */
+.table-wrapper.dt-builtin-select {
+  --select-col-width: 44px;
+}
+/* A sortable header is one button across its cell: the button keeps the header's look, its ::after takes the whole
+   cell (the th is sticky, so positioned), and keyboard focus rings the cell. */
+.dt-sort {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.dt-sort::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+.dt-sort:focus {
+  outline: none;
+}
+.dt-sort:focus-visible::after {
+  border-radius: var(--radius-sm);
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
+/* Phones: the cells sit 12px from their edges whatever the column count; the frozen identity column (the first one,
+   after any check box) is clamp(120px, 36vw, 160px) wide and cuts its lines with "…"; the frozen actions column is a
+   44px square for the row's "⋯". */
+@media (max-width: 767px) {
+  .dt-layout-table {
+    --table-identity-width: clamp(120px, 36vw, 160px);
+  }
+  .dt-layout-table :deep(th),
+  .dt-layout-table :deep(td) {
+    padding-inline: 12px;
+  }
+  .dt-layout-table :deep(.sticky-col-left),
+  .dt-layout-table :deep(.sticky-col-left-second) {
+    width: var(--table-identity-width);
+    min-width: var(--table-identity-width);
+    max-width: var(--table-identity-width);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dt-layout-table :deep(.sticky-col-right) {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    padding-inline: 0;
+    text-align: center;
+  }
+}
+/* Touch (pointer: coarse): rows at least 48px, the header 40px, a check box's hit area 40px (the box itself keeps
+   its size); layout still follows the width. */
+@media (pointer: coarse) {
+  .dt-layout-table :deep(tbody td) {
+    height: 48px;
+  }
+  .dt-layout-table .sticky-header-cell {
+    height: 40px;
+  }
+  /* The built-in check boxes sit in a label as big as their cell (44 x 48 in the body, 44 x 40 in the header). */
+  .dt-layout-table :deep(.dt-check) {
+    display: inline-flex;
+    width: 44px;
+    height: 48px;
+    margin: -16px -12px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .dt-layout-table thead :deep(.dt-check) {
+    height: 40px;
+    margin: -12px;
+  }
 }
 /* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout
    space and needs no script; on the cards it sits on the list's top edge and does not follow the page scroll. */

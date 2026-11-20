@@ -5,7 +5,7 @@
       <div
         v-if="show"
         ref="rootRef"
-        class="modal-overlay"
+        :class="['modal-overlay', { 'modal-overlay--sheet': placement === 'sheet' }]"
         :style="{ zIndex: stackZ }"
         :aria-labelledby="dialogId"
         role="dialog"
@@ -15,7 +15,7 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" tabindex="-1" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', placement === 'sheet' ? 'modal-content--sheet' : widthClasses]" tabindex="-1" @click.stop>
           <!-- Header -->
           <div class="modal-header">
             <h3 :id="dialogId" class="modal-title flex min-w-0 items-center gap-1.5">
@@ -81,6 +81,11 @@ interface Props {
   zIndex?: number
   /** Changing it while open brings the dialog back to the top, with the focused element as its new opener. */
   raiseKey?: number
+  /**
+   * `sheet`: a panel along the bottom edge, the screen's full width (a phone's filters or column settings, BottomSheet);
+   * the same focus trap, Escape and return of focus as the centred dialog.
+   */
+  placement?: 'center' | 'sheet'
 }
 
 interface Emits {
@@ -93,7 +98,8 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnClickOutside: false,
   showCloseButton: true,
   zIndex: undefined,
-  raiseKey: 0
+  raiseKey: 0,
+  placement: 'center'
 })
 
 const emit = defineEmits<Emits>()

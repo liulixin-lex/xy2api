@@ -1095,6 +1095,7 @@ export default {
 
   // Pagination
   pagination: {
+    range: '第 {from}–{to} 条，共 {total} 条',
     showing: '显示',
     to: '至',
     of: '共',

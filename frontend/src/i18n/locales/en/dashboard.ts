@@ -1091,6 +1091,7 @@ export default {
 
   // Pagination
   pagination: {
+    range: '{from}–{to} of {total}',
     showing: 'Showing',
     to: 'to',
     of: 'of',
