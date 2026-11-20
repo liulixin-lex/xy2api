@@ -2,14 +2,15 @@ import type { Directive } from 'vue'
 import { anyOverlayOpen } from './overlayStack'
 
 /**
- * v-tip="text": short tip (design spec E): shown after 400ms hover, or on keyboard focus once the focus has
- * scrolled its element into view; hidden on leave, blur, scroll or Escape. With no layer open Escape only closes the
- * tip; while a popover, panel or dialog is open the key goes on to it as well, so one press closes both (7m-2). One
- * shared element with role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's
- * own description stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus:
- * keyboard focus only. The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
- * Instead of text the value may be a card (12.7): a title, a state at the top right, column heads and rows of data,
- * built node by node (text only, never markup) in the same element, with the same timing and placement.
+ * v-tip="text": short tip (design spec E): shown after 400ms hover, or on keyboard focus (an element not wholly in
+ * view is scrolled in first, at once); hidden on leave, blur, scroll or Escape. With no layer open Escape only closes
+ * the tip; while a popover, panel or dialog is open the key goes on to it as well, so one press closes both (7m-2).
+ * One shared element with role="tooltip"; while it is shown the target's aria-describedby also points to it (the
+ * target's own description stays). No native title. Empty text = no tip. Line breaks in the text are kept.
+ * v-tip.focus: keyboard focus only. The value may be a function: it is called when the tip shows, so a countdown in it
+ * needs no re-render to stay right. Instead of text the value may be a card (12.7): a title, a state at the top right,
+ * column heads and rows of data, built node by node (text only, never markup) in the same element, with the same
+ * timing and placement.
  */
 const TIP_ID = 'sq-tip'
 const HOVER_DELAY_MS = 400
@@ -184,38 +185,72 @@ function hide() {
   window.removeEventListener('scroll', hide, true)
 }
 
+/** Wholly inside the viewport and the visible box of its nearest scrolling ancestor. */
+function wholeInView(el: HTMLElement) {
+  const rect = el.getBoundingClientRect()
+  let box = { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth }
+  for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+    const { overflowX, overflowY } = getComputedStyle(node)
+    if (!/auto|scroll|overlay/.test(`${overflowX} ${overflowY}`)) continue
+    const r = node.getBoundingClientRect()
+    box = { top: Math.max(box.top, r.top), left: Math.max(box.left, r.left), bottom: Math.min(box.bottom, r.bottom), right: Math.min(box.right, r.right) }
+    break
+  }
+  return rect.top >= box.top && rect.left >= box.left && rect.bottom <= box.bottom && rect.right <= box.right
+}
+
 /**
- * Keyboard focus scrolls an element below the fold into view (smoothly: html has scroll-behavior: smooth), and a
- * scroll hides the tip. So a keyboard-focused element's tip shows once two frames have gone by without a scroll, if
- * the element still has keyboard focus; a scroll after that hides it as any other.
+ * Scrolls an element into view at once: smooth scrolling (html has scroll-behavior: smooth) is off for the call, which
+ * also stops a smooth scroll the browser started for the focus. Not behavior: 'instant', which older Safari ignores.
  */
-let settling: { target: TipTarget; stop: () => void } | null = null
-function showWhenSettled(target: TipTarget) {
-  settling?.stop()
-  let quiet = 0
+function jumpIntoView(el: HTMLElement) {
+  const root = document.documentElement
+  const before = root.style.scrollBehavior
+  root.style.scrollBehavior = 'auto'
+  try {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } finally {
+    root.style.scrollBehavior = before
+  }
+}
+
+/** A tip waiting to show on keyboard focus (showOnFocus). */
+let pending: { target: TipTarget; cancel: () => void } | null = null
+
+/**
+ * Keyboard focus on an element not wholly in view would have the browser scroll it in, smoothly, and a scroll hides
+ * the tip. So the element is scrolled in here at once, and the tip shows two frames later, once that jump's scroll
+ * events have gone by, if the element still has keyboard focus; a scroll after that hides it as any other. Escape
+ * (passed on to an open layer, as for a shown tip), blur or unmount before then cancel it.
+ */
+function showOnFocus(target: TipTarget) {
+  pending?.cancel()
+  if (!wholeInView(target)) jumpIntoView(target)
   let frame = 0
-  const onScrolling = () => { quiet = 0 }
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return
+    if (!anyOverlayOpen()) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    state.cancel()
+  }
   const state = {
     target,
-    stop: () => {
+    cancel: () => {
       cancelAnimationFrame(frame)
-      window.removeEventListener('scroll', onScrolling, true)
-      if (settling === state) settling = null
+      document.removeEventListener('keydown', onKey, true)
+      if (pending === state) pending = null
     }
   }
-  const tick = () => {
-    if (document.activeElement !== target) return state.stop()
-    quiet += 1
-    if (quiet < 2) {
-      frame = requestAnimationFrame(tick)
-      return
-    }
-    state.stop()
-    if (keyboardFocus(target)) show(target)
-  }
-  settling = state
-  window.addEventListener('scroll', onScrolling, true)
-  frame = requestAnimationFrame(tick)
+  frame = requestAnimationFrame(() => {
+    frame = requestAnimationFrame(() => {
+      state.cancel()
+      if (document.activeElement === target && keyboardFocus(target)) show(target)
+    })
+  })
+  document.addEventListener('keydown', onKey, true)
+  pending = state
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -259,9 +294,9 @@ export const vTip: Directive<TipTarget, TipText> = {
   mounted(el, binding) {
     el.__tipText = binding.value ?? ''
     const handlers: Record<string, (event: Event) => void> = {
-      focus: () => { if (keyboardFocus(el)) showWhenSettled(el) },
+      focus: () => { if (keyboardFocus(el)) showOnFocus(el) },
       blur: () => {
-        if (settling?.target === el) settling.stop()
+        if (pending?.target === el) pending.cancel()
         if (current === el) hide()
       }
     }
@@ -290,7 +325,7 @@ export const vTip: Directive<TipTarget, TipText> = {
     }
   },
   beforeUnmount(el) {
-    if (settling?.target === el) settling.stop()
+    if (pending?.target === el) pending.cancel()
     if (current === el) hide()
     for (const [name, handler] of Object.entries(el.__tipHandlers ?? {})) el.removeEventListener(name, handler)
     delete el.__tipHandlers

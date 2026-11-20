@@ -128,8 +128,8 @@ describe('v-tip cards', () => {
   })
 })
 
-// A scroll hides any tip (spec E). Tabbing to an element below the fold scrolls it into view (smoothly: html has
-// scroll-behavior: smooth), so a keyboard-focused element's tip waits until no scroll has come for two frames.
+// A scroll hides any tip (spec E). Keyboard focus on an element below the fold would have the browser scroll it in
+// smoothly (html has scroll-behavior: smooth), so v-tip scrolls it in at once itself and shows the tip two frames later.
 describe('v-tip on keyboard focus and scroll', () => {
   const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   const scroll = () => document.dispatchEvent(new Event('scroll'))
@@ -139,28 +139,88 @@ describe('v-tip on keyboard focus and scroll', () => {
     el.focus()
     return el
   }
+  /** A target at `top` (the viewport is 768px high) whose scrollIntoView brings it to 700 and records smoothness. */
+  const offScreen = (top: number) => {
+    const el = mount(Host, { attachTo: document.body }).element as HTMLElement
+    let at = top
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: at, bottom: at + 20, left: 100, right: 124, width: 24, height: 20 }) as DOMRect)
+    const jumps: [ScrollIntoViewOptions | boolean | undefined, string][] = []
+    el.scrollIntoView = vi.fn((options?: ScrollIntoViewOptions | boolean) => {
+      jumps.push([options, document.documentElement.style.scrollBehavior])
+      at = 700
+    })
+    return { el, jumps }
+  }
+  afterEach(() => {
+    document.documentElement.style.scrollBehavior = ''
+    delete document.documentElement.dataset.motion
+  })
 
-  it('shows a keyboard-focused tip once the focus has scrolled its element into view; a later scroll hides it', async () => {
+  it('scrolls an off-screen target in at once (smooth scrolling off for the call), then shows its tip; a later scroll hides it', async () => {
     content.value = 'tip text'
-    const el = focusHost()
-    // The focus scroll, one scroll event a frame: no tip yet.
-    for (let i = 0; i < 3; i++) {
-      scroll()
-      await frame()
-    }
+    document.documentElement.style.scrollBehavior = 'smooth'
+    const { el, jumps } = offScreen(900)
+    el.focus()
+    expect(jumps).toEqual([[{ block: 'nearest', inline: 'nearest' }, 'auto']])
+    expect(document.documentElement.style.scrollBehavior).toBe('smooth')
+    // The jump's scroll event comes with the next frame, before the tip shows.
+    scroll()
+    await frame()
     expect(shown()).toBe(false)
     await frame()
-    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([true, 'sq-tip'])
+    expect([shown(), el.getAttribute('aria-describedby'), tip().style.top]).toEqual([true, 'sq-tip', '694px'])
     // The user's own scroll hides it as any other.
     scroll()
     expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
-    // Nothing to scroll: two frames.
-    el.blur()
+  })
+
+  it('shows the tip however the scroll events come while it waits (滚、滚、静、滚、静、静); none for a target in view', async () => {
+    content.value = 'tip text'
+    const { el, jumps } = offScreen(-200)
     el.focus()
+    scroll()
+    scroll()
     await frame()
-    expect(shown()).toBe(false)
+    scroll()
+    await frame()
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby'), jumps.length]).toEqual([true, 'sq-tip', 1])
+    el.blur()
+    // In view: no scrolling, the tip two frames later.
+    const inView = mount(Host, { attachTo: document.body }).element as HTMLElement
+    inView.scrollIntoView = vi.fn()
+    inView.focus()
+    await frame()
     await frame()
     expect(shown()).toBe(true)
+    expect(inView.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('works the same under reduced motion (no smooth scrolling to stop)', async () => {
+    content.value = 'tip text'
+    document.documentElement.dataset.motion = 'reduced'
+    const { el, jumps } = offScreen(900)
+    el.focus()
+    await frame()
+    await frame()
+    expect([jumps.length, shown(), document.documentElement.style.scrollBehavior]).toEqual([1, true, ''])
+  })
+
+  it('cancels a tip waiting to show on Escape (kept from the page with no layer open) and on blur', async () => {
+    content.value = 'tip text'
+    const el = focusHost()
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    document.dispatchEvent(escape)
+    expect(escape.defaultPrevented).toBe(true)
+    await frame()
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    el.blur()
+    el.focus()
+    el.blur()
+    await frame()
+    await frame()
+    expect(shown()).toBe(false)
   })
 
   it('closes a hover tip on scroll, also one hovered open again on a keyboard-focused element after Escape', async () => {
@@ -185,7 +245,7 @@ describe('v-tip on keyboard focus and scroll', () => {
     expect([shown(), focused.getAttribute('aria-describedby')]).toEqual([false, null])
   })
 
-  it('closes a keyboard-focused tip on Escape and on blur, and shows none when the focus leaves before it settles', async () => {
+  it('closes a shown keyboard-focused tip on Escape and on blur', async () => {
     content.value = 'tip text'
     const el = focusHost()
     await frame()
@@ -199,11 +259,6 @@ describe('v-tip on keyboard focus and scroll', () => {
     expect(shown()).toBe(true)
     el.blur()
     expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
-    el.focus()
-    el.blur()
-    await frame()
-    await frame()
-    expect(shown()).toBe(false)
   })
 
   // A fixed box is as wide as its text but no wider than the room right of its left: measured at its last left, a tip
