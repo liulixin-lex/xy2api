@@ -154,7 +154,7 @@
           :loading="loading"
           row-key="id"
           selectable
-          :sticky-actions-column="!phone"
+          :sticky-actions-column="desktop"
           :selected-keys="selectedIds"
           :selection-label="proxySelectionLabel"
           :server-side-sort="true"
@@ -300,7 +300,7 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (four buttons do not fit 44px). -->
+            <!-- Touch: 40px buttons 8px apart. Below 1024px the column scrolls with the row (four buttons do not fit a phone's 44px, and on a tablet would take a third of the table). -->
             <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="canManage"
@@ -1053,7 +1053,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
-import { usePhoneViewport } from '@/composables/useTableViewport'
+import { useTableViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import { useClipboard } from '@/composables/useClipboard'
@@ -1067,7 +1067,8 @@ import { useAdminAccessStore } from '@/stores/adminAccess'
 import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 
 const { t } = useI18n()
-const phone = usePhoneViewport()
+// The actions freeze from 1024px only: below, frozen, they would take a third of the table or more.
+const { desktop } = useTableViewport()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 const { canManage, has, isSuperAdmin } = useAdminPermission('proxies')

@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
-    <TablePageLayout table-layout>
+    <!-- A phone: the whole page scrolls (the toolbar is tall; a table region under it would show about three rows). -->
+    <TablePageLayout table-layout :page-scroll="phone">
       <template #filters>
         <div class="flex flex-col gap-3">
           <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">

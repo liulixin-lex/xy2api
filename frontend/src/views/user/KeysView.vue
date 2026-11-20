@@ -110,7 +110,7 @@
           :selection-label="(key: ApiKey) => t('keys.bulkEdit.selectKey', { name: key.name })"
           @update:selected-keys="handleSelectionChange"
           :server-side-sort="true"
-          :sticky-actions-column="!phone"
+          :sticky-actions-column="desktop"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
@@ -404,7 +404,7 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (five buttons do not fit its 44px). -->
+            <!-- Touch: 40px buttons 8px apart. Below 1024px the column scrolls with the row (five buttons do not fit a phone's 44px, and on a tablet would take a third of the table). -->
             <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <!-- Use Key Button -->
               <button
@@ -1207,13 +1207,14 @@
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
-const phone = usePhoneViewport()
+// The actions freeze from 1024px only: below, frozen, they would take a third of the table or more.
+const { desktop } = useTableViewport()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
-import { usePhoneViewport } from '@/composables/useTableViewport'
+import { useTableViewport } from '@/composables/useTableViewport'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 	import DataTable from '@/components/common/DataTable.vue'
 	import Pagination from '@/components/common/Pagination.vue'
