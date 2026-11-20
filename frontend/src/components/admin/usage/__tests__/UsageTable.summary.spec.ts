@@ -443,3 +443,13 @@ describe('UsageTable after the re-review', () => {
     wrapper.unmount()
   })
 })
+
+// Review after acceptance, item 3: the usage tables' own "Fetch regions" button is 40px high on touch too, its row
+// losing its padding there so the row keeps its 40px (as the errors tables' toolbar).
+describe('UsageTable IP lookup bar on touch', () => {
+  it('gives the batch button 40px on a coarse pointer', () => {
+    const wrapper = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'ip_address', label: 'IP' }] }, [{ ...row, ip_address: '203.0.113.7' }])
+    expect(wrapper.get('[data-testid="usage-ip-geo-toolbar"]').classes()).toEqual(expect.arrayContaining(['py-2', '[@media(pointer:coarse)]:py-0']))
+    expect(wrapper.get('[data-testid="usage-ip-geo-batch"]').classes()).toContain('[@media(pointer:coarse)]:min-h-10')
+  })
+})
