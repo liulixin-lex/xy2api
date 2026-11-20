@@ -61,6 +61,11 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		}
 	}()
 
+	if cmd.Usage != nil && len(cmd.Usage.ServiceTierDetails) > 0 {
+		if err := enableTierBillingProtocol(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
 	if cmd.Usage != nil {
 		if err := lockBillingIntent(ctx, tx, cmd); err != nil {
 			return nil, err

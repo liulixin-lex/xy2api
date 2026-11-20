@@ -7,7 +7,7 @@
 ### OpenAI 服务档位
 
 - OpenAI 与组合分组分别配置 Fast、Ultrafast 的跟随、强制打开、强制关闭和赠免。旧分组保留旧套餐语义，管理员可以显式启用新版策略。管理接口支持 revision 并发检查，渠道及分组 Token 价卡可单独设置 Ultrafast 倍率。
-- 使用记录和新建导出增加出站档位、结算档位、赠免和实扣证据。升级执行迁移 322，启用显式策略或新增倍率前需排空旧实例和计费恢复进程。[分组配置](docs/guides/groups.md#openai-分组-fast) · [蓝绿发布与回滚](docs/deployment/upgrade.md#openai-档位策略蓝绿发布)
+- 使用记录和新建导出增加出站档位、结算档位、赠免和实扣证据。升级执行迁移 322、323。启用显式策略或新增倍率前需排空旧网关；数据库会拒绝旧恢复进程领取新版档位计费意图。[分组配置](docs/guides/groups.md#openai-分组-fast) · [蓝绿发布与回滚](docs/deployment/upgrade.md#openai-档位策略蓝绿发布)
 
 ### 账号
 
