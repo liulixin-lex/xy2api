@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
+import { SHORT_VIEWPORT_PX, visibleHeight } from '@/components/layout/tableRegion'
 
 /**
  * The widths and input a list page lays out by (mobile list plan): a phone below 768px, a tablet from 768 to 1023, a
@@ -15,17 +16,11 @@ export const TABLET_UP_QUERY = '(min-width: 768px)'
 export const PHONE_QUERY = '(max-width: 767px)'
 export const DESKTOP_QUERY = '(min-width: 1024px)'
 export const COARSE_QUERY = '(pointer: coarse)'
-/** Below this visible height (a phone on its side, or a small phone with the keyboard up) the whole page scrolls. */
-export const SHORT_VIEWPORT_PX = 500
-
-const visibleHeight = () => {
-  if (typeof window === 'undefined') return 1000
-  return window.visualViewport?.height ?? window.innerHeight
-}
+export { SHORT_VIEWPORT_PX } from '@/components/layout/tableRegion'
 
 /**
- * Whether the visible part of the viewport is under SHORT_VIEWPORT_PX: the visual viewport when the browser has one, so
- * a software keyboard that leaves the layout viewport as it is still counts.
+ * Whether the visible part of the viewport is under SHORT_VIEWPORT_PX (tableRegion's visibleHeight: the visual
+ * viewport times its scale, so a keyboard counts and a pinch zoom does not).
  */
 export function useShortViewport() {
   const height = ref(visibleHeight())
