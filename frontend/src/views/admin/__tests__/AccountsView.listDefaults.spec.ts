@@ -175,22 +175,28 @@ describe('admin AccountsView list defaults and column order', () => {
     expect(JSON.parse(localStorage.getItem('account-column-order-v2') || '[]').slice(0, 2)).toEqual(['schedulable', 'status'])
   })
 
-  it('restores both visibility and order with "restore default columns", offered only when either differs', async () => {
+  // Mobile list plan: "restore default columns" restores this width's shown columns only; the order, shared by both
+  // widths, has its own "restore default order".
+  it('restores the shown columns and the order apart, each offered only when it differs', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="account-tools"]').trigger('click')
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="reset-column-order"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="swap-first-two"]').trigger('click')
-    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+    await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
+    expect(localStorage.getItem('account-hidden-columns-v2')).not.toBeNull()
+
     await wrapper.get('[data-test="reset-columns"]').trigger('click')
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'status', 'schedulable'])
-    expect(localStorage.getItem('account-column-order-v2')).toBeNull()
     expect(localStorage.getItem('account-hidden-columns-v2')).toBeNull()
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'schedulable', 'status'])
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
 
-    // A visibility that differs from the default offers it too.
-    await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
-    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(true)
+    await wrapper.get('[data-test="reset-column-order"]').trigger('click')
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'status', 'schedulable'])
+    expect(localStorage.getItem('account-column-order-v2')).toBeNull()
+    expect(wrapper.find('[data-test="reset-column-order"]').exists()).toBe(false)
   })
 })

@@ -1,0 +1,50 @@
+import { computed, onScopeDispose, ref } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
+import { usePointerCoarse } from './usePointerCoarse'
+import { SHORT_VIEWPORT_PX, visibleHeight } from '@/components/layout/tableRegion'
+
+/**
+ * The widths and input a list page lays out by (mobile list plan): a phone below 768px, a tablet from 768 to 1023, a
+ * desktop from 1024. Touch sizes follow the primary pointer (`pointer: coarse`, an iPad in landscape included), never
+ * the width; a hybrid device with a touch screen besides its mouse matches `any-pointer: coarse` in CSS for its buttons.
+ */
+/** From 768px: a tablet or wider. A phone is "not this" (so a test environment that matches every query is wide). */
+export const TABLET_UP_QUERY = '(min-width: 768px)'
+/**
+ * Below 768px, as a query string. In code use usePhoneViewport() (or useTableViewport().phone), which asks for "not
+ * from 768px": the unit tests' matchMedia mock matches every query, and would make every test a phone with this one.
+ */
+export const PHONE_QUERY = '(max-width: 767px)'
+export const DESKTOP_QUERY = '(min-width: 1024px)'
+export const COARSE_QUERY = '(pointer: coarse)'
+export { SHORT_VIEWPORT_PX } from '@/components/layout/tableRegion'
+
+/**
+ * Whether the visible part of the viewport is under SHORT_VIEWPORT_PX (tableRegion's visibleHeight: the visual
+ * viewport times its scale, so a keyboard counts and a pinch zoom does not).
+ */
+export function useShortViewport() {
+  const height = ref(visibleHeight())
+  if (typeof window !== 'undefined') {
+    const update = () => { height.value = visibleHeight() }
+    const target: EventTarget = window.visualViewport ?? window
+    target.addEventListener('resize', update)
+    onScopeDispose(() => target.removeEventListener('resize', update))
+  }
+  return computed(() => height.value < SHORT_VIEWPORT_PX)
+}
+
+/** Below 768px. */
+export function usePhoneViewport() {
+  const tabletUp = useMediaQuery(TABLET_UP_QUERY)
+  return computed(() => !tabletUp.value)
+}
+
+export function useTableViewport() {
+  const phone = usePhoneViewport()
+  const desktop = useMediaQuery(DESKTOP_QUERY)
+  // Touch as the rest of the app tells it (usePointerCoarse: no fine pointer), so a test environment that matches every
+  // query reads as a mouse.
+  const coarse = usePointerCoarse()
+  return { phone, desktop, coarse }
+}

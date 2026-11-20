@@ -1,5 +1,50 @@
 <template>
-  <div class="pills" :class="{ 'pills--center': groups.length <= 3, 'pills--card': card }" :data-groups-cell="account.id" data-test="group-pills">
+  <!-- Touch (mobile list plan): the whole cell is one button that lists every group in a bottom sheet, each 48px high:
+       its dot, name and state; a group with quality data opens the quality panel on it; managers edit the groups from
+       the sheet's foot. The pills are drawn as they are, without hit zones of their own. -->
+  <button
+    v-if="coarse"
+    ref="cellRef"
+    type="button"
+    class="pills pills--touch"
+    :class="{ 'pills--center': groups.length <= 3 }"
+    :data-groups-cell="account.id"
+    :data-quality-opener="openerKey"
+    aria-haspopup="dialog"
+    :aria-label="t('admin.accounts.table.groupsSheetOpen', { name: account.name, n: groups.length })"
+    data-test="group-pills"
+    @click="sheetOpen = true"
+  >
+    <span v-if="!groups.length" class="pill pill--empty" aria-hidden="true" data-test="group-pill-empty"><Icon name="plus" size="xs" /></span>
+    <span v-for="pill in shownPills" :key="pill.group.id" class="pill" :class="{ 'pill--nodot': !pill.state }" :data-group-id="pill.group.id" aria-hidden="true" data-test="group-pill">
+      <span v-if="pill.state" class="pill__dot"><StatusDot :tone="DOT_TONES[pill.state]" /></span>
+      <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
+    </span>
+    <span v-if="rest.length" class="pill pill--more" :class="{ 'pill--nodot': !restWorst }" aria-hidden="true" data-test="group-pill-more">
+      <span v-if="restWorst" class="pill__dot"><StatusDot :tone="DOT_TONES[restWorst.state]" /></span>
+      <span class="pill__text">+{{ rest.length }}</span>
+    </span>
+    <BottomSheet :show="sheetOpen" :title="t('admin.accounts.table.groupsSheetTitle', { name: account.name })" test-id="groups-sheet" @close="sheetOpen = false">
+      <ul v-if="groups.length" class="gsheet">
+        <li v-for="item in sheetItems" :key="item.group.id">
+          <button v-if="item.state" type="button" class="gsheet__item" :data-group-id="item.group.id" data-test="groups-sheet-item" @click="openGroup(item.group.id)">
+            <StatusDot :tone="DOT_TONES[item.state]" />
+            <span class="gsheet__name">{{ item.group.name }}</span>
+            <span class="gsheet__state">{{ stateLabel(item.state) }}</span>
+          </button>
+          <div v-else class="gsheet__item gsheet__item--plain" :data-group-id="item.group.id" data-test="groups-sheet-item">
+            <span class="gsheet__name">{{ item.group.name }}</span>
+            <span class="gsheet__state">{{ t('admin.accounts.table.pillNoQuality') }}</span>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="gsheet__none">{{ t('admin.accounts.table.groupsSheetNone') }}</p>
+      <template v-if="!readonly" #footer>
+        <button type="button" class="btn btn-secondary" data-test="groups-sheet-edit" @click="editGroups">{{ t('admin.accounts.editGroups') }}</button>
+      </template>
+    </BottomSheet>
+  </button>
+  <div v-else class="pills" :class="{ 'pills--center': groups.length <= 3 }" :data-groups-cell="account.id" data-test="group-pills">
     <button
       v-if="!groups.length"
       type="button"
@@ -14,35 +59,7 @@
     </button>
 
     <template v-for="pill in shownPills" :key="pill.group.id">
-      <!-- Touch (spec 4.3): the whole pill opens the quality panel on its group; a pill with no dot has nothing to open. -->
-      <button
-        v-if="coarse && pill.state"
-        type="button"
-        class="pill pill--whole"
-        :data-group-id="pill.group.id"
-        :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
-        :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
-        data-test="group-pill"
-        @click="emit('open-quality', pill.group.id)"
-      >
-        <span class="pill__dot"><StatusDot :tone="DOT_TONES[pill.state]" /></span>
-        <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
-      </button>
-      <!-- No dot, nothing to open: a tap shows the group's card, as "+N" lists what it folds (7l-5). -->
-      <button
-        v-else-if="coarse"
-        type="button"
-        class="pill pill--nodot pill--whole"
-        :data-group-id="pill.group.id"
-        :aria-label="t('admin.accounts.table.pillTip', { name: pill.group.name, state: t('admin.accounts.table.pillNoQuality') })"
-        v-tip="() => pillCard(pill.group, null)"
-        data-test="group-pill"
-        @click="showTipNow($event.currentTarget)"
-      >
-        <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
-      </button>
       <span
-        v-else
         class="pill"
         :class="{ 'pill--nodot': !pill.state }"
         :data-group-id="pill.group.id"
@@ -74,22 +91,7 @@
       </span>
     </template>
 
-    <!-- Touch: the whole "+N" opens the worst folded group in the quality panel, or lists them without quality data. -->
-    <button
-      v-if="rest.length && coarse"
-      type="button"
-      class="pill pill--more pill--whole"
-      :class="{ 'pill--nodot': !restWorst }"
-      :aria-label="restWorst ? t('admin.accounts.table.pillMoreWorst', { n: rest.length, state: stateLabel(restWorst.state) }) : t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
-      :data-quality-opener="restWorst ? qualityOpenerKey(account.id, restWorst.group.id) : undefined"
-      data-test="group-pill-more"
-      @click="restWorst ? emit('open-quality', restWorst.group.id) : showTipNow($event.currentTarget)"
-      v-tip="moreTip"
-    >
-      <span v-if="restWorst" class="pill__dot"><StatusDot :tone="DOT_TONES[restWorst.state]" /></span>
-      <span class="pill__text">+{{ rest.length }}</span>
-    </button>
-    <span v-else-if="rest.length" class="pill pill--more" :class="{ 'pill--nodot': !restWorst }" data-test="group-pill-more">
+    <span v-if="rest.length" class="pill pill--more" :class="{ 'pill--nodot': !restWorst }" data-test="group-pill-more">
       <button
         v-if="restWorst"
         type="button"
@@ -121,11 +123,13 @@
  * zones: the dot opens the quality panel on that group, the text edits the account's groups; both show the group's
  * tip card (12.7): its full name and state, and the state's data. Non-OpenAI accounts have no quality data and no dot.
  *
- * On a touch screen (coarse pointer, whatever the width) the whole pill opens the quality panel on its group, "+N" on
- * the worst folded one; editing goes through the card's and the row menu's "edit groups". In the card's grid each
- * pill's hit area is 40px high, the 8px gaps keeping neighbours' areas apart.
+ * On a touch screen (coarse pointer, whatever the width; mobile list plan) 50x20 pills are too small to hit: the whole
+ * cell opens a bottom sheet listing every group (its dot, name and state, 48px each); one with quality data opens the
+ * quality panel on that group, and managers edit the groups from the sheet's foot (`edit-groups-at`, with the cell as
+ * the picker's anchor). Editing also goes through the row menu's "edit groups". A mouse keeps the two zones.
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
@@ -150,10 +154,13 @@ const props = defineProps<{
   readonly?: boolean
   /** Quality scheduling is switched off (a fresh summary's global_enabled; a stale one cannot tell): an unknown dot says so. */
   gateOff?: boolean
-  /** The narrow card's grid (prototype): 72×32 pills, 8px apart, the same zones and order. */
-  card?: boolean
 }>()
-const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
+const emit = defineEmits<{
+  'open-quality': [groupId: number]
+  'edit-groups': [event: MouseEvent]
+  /** The touch sheet's "edit groups": the picker opens beside the cell, focus coming back to it. */
+  'edit-groups-at': [opener: HTMLElement]
+}>()
 const { t, te } = useI18n()
 const now = useLiveClock()
 const coarse = usePointerCoarse()
@@ -174,6 +181,28 @@ const shownPills = computed(() =>
   })
 )
 const rest = computed(() => split.value.rest)
+
+// ---- Touch: the cell's bottom sheet ----
+const cellRef = ref<HTMLElement | null>(null)
+const sheetOpen = ref(false)
+/** The quality panel gives focus back to the element with its opener key: the cell, for the group opened last. */
+const openerKey = ref<string | undefined>(undefined)
+const sheetItems = computed(() => props.groups.map((group) => ({ group, state: stateOf(group) })))
+// The sheet belongs to the touch layout: leaving it (a mouse becomes the main pointer) closes the sheet, so it does not
+// open again by itself on the next switch back to touch.
+watch(coarse, (touch) => { if (!touch) sheetOpen.value = false })
+/** The sheet closes first (focus back on the cell), then the layer it asked for opens. */
+const openGroup = async (groupId: number) => {
+  openerKey.value = qualityOpenerKey(props.account.id, groupId)
+  sheetOpen.value = false
+  await nextTick()
+  emit('open-quality', groupId)
+}
+const editGroups = async () => {
+  sheetOpen.value = false
+  await nextTick()
+  if (cellRef.value) emit('edit-groups-at', cellRef.value)
+}
 const restWorst = computed(() => {
   if (!props.quality) return null
   const states = rest.value.map((group) => ({ group, state: stateOf(group)! }))
@@ -292,22 +321,6 @@ function moreTip(): TipCard {
 .pills--center {
   align-content: center;
 }
-.pills--card {
-  --pill-width: 72px;
-  --pill-height: 32px;
-  --pill-dot-zone: 24px;
-  --pill-gap-x: 8px;
-  --pill-gap-y: 8px;
-  height: auto;
-  align-content: start;
-}
-.pills--card .pill,
-.pills--card .pill__text {
-  font-size: var(--font-size-body);
-}
-.pills--card .pill__text--latin {
-  font-size: var(--font-size-small);
-}
 .pill {
   display: flex;
   width: var(--pill-width);
@@ -355,7 +368,7 @@ function moreTip(): TipCard {
   cursor: default;
 }
 .pill__text--latin {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
 }
 .pill__dot:focus-visible,
 .pill__text:focus-visible {
@@ -382,25 +395,77 @@ function moreTip(): TipCard {
   color: var(--color-text-secondary);
 }
 /* Touch: one button over the whole pill; the text still cuts inside it. */
-.pill--whole {
-  position: relative;
-  border: 0;
+/* Touch: the cell is one button, at least 44px high, the pills inside drawn as they are. */
+.pills--touch {
+  width: 100%;
+  min-height: 44px;
   padding: 0;
-  font-family: inherit;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.pill--whole:focus-visible {
+.pills--touch:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 1px;
 }
-.pills--card .pill--whole {
-  overflow: visible;
+.pills--touch .pill__dot {
+  display: inline-grid;
+  place-items: center;
 }
-.pills--card .pill--whole::after {
-  position: absolute;
-  inset: -4px 0;
-  content: '';
+.gsheet {
+  display: grid;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.gsheet__item {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--color-line-row);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-name);
+  text-align: left;
+}
+button.gsheet__item {
+  cursor: pointer;
+}
+.gsheet__item--plain {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.gsheet__item:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  button.gsheet__item:hover {
+    background: var(--color-bg-control-hover);
+  }
+}
+.gsheet__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gsheet__state {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+}
+.gsheet__none {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
 }
 .pill--empty {
   display: grid;

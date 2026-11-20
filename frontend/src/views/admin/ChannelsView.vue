@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <!-- Left: Search + Filters -->
@@ -36,6 +36,7 @@
               :disabled="loading"
               class="btn btn-secondary"
               :title="t('common.refresh', 'Refresh')"
+              :aria-label="t('common.refresh', 'Refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -49,29 +50,36 @@
 
       <template #table>
         <DataTable
+          :scroll-label="t('admin.channels.title')"
           :columns="columns"
           :data="channels"
           :loading="loading"
           :server-side-sort="true"
+          :sticky-actions-column="!phone"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <!-- The frozen identity column: at most 240px, the name cut with "…" and whole on a tap. -->
+            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-description="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{ value || '-' }}</span>
+            <span v-if="value" class="text-sm text-gray-600 dark:text-gray-400">{{ value }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-status="{ row }">
-            <Toggle
-              :modelValue="row.status === 'active'"
-              :disabled="!canToggleStatus(row)"
-              class="disabled:cursor-not-allowed disabled:opacity-50"
-              @update:modelValue="toggleChannelStatus(row)"
-            />
+            <!-- The label is the switch's 40px touch area (a click on it clicks the switch). -->
+            <label class="inline-flex cursor-pointer items-center [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-10">
+              <Toggle
+                :modelValue="row.status === 'active'"
+                :disabled="!canToggleStatus(row)"
+                class="disabled:cursor-not-allowed disabled:opacity-50"
+                @update:modelValue="toggleChannelStatus(row)"
+              />
+            </label>
           </template>
 
           <template #cell-group_count="{ row }">
@@ -93,17 +101,19 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">
+            <span v-if="formatDate(value)" class="text-sm text-gray-600 dark:text-gray-400">
               {{ formatDate(value) }}
             </span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (two do not fit its 44px). -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="canManage"
                 @click="openEditDialog(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
@@ -111,7 +121,7 @@
               <button
                 v-if="canManage && has('users.balance_adjust')"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t('common.delete', 'Delete') }}</span>
@@ -317,12 +327,12 @@
                     />
                     <span :class="['font-medium', platformTextClass(group.platform)]">{{ group.name }}</span>
                     <span
-                      :class="['rounded-full px-1 py-0 text-[10px]', platformBadgeLightClass(group.platform)]"
+                      :class="['rounded-full px-1 py-0 text-xs', platformBadgeLightClass(group.platform)]"
                     >{{ group.rate_multiplier }}x</span>
-                    <span class="text-[10px] text-gray-400">{{ group.account_count || 0 }}</span>
+                    <span class="text-xs text-gray-400">{{ group.account_count || 0 }}</span>
                     <span
                       v-if="isGroupInOtherChannel(group.id, section.platform)"
-                      class="text-[10px] text-gray-400"
+                      class="text-xs text-gray-400"
                     >{{ getGroupInOtherChannelLabel(group.id) }}</span>
                   </label>
                 </div>
@@ -336,7 +346,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.webSearchEmulation') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-red-500 dark:text-red-400">
+                  <p class="mt-0.5 text-xs text-red-500 dark:text-red-400">
                     {{ t('admin.channels.form.webSearchEmulationHint') }}
                   </p>
                 </div>
@@ -351,7 +361,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.codexImageGenerationBridge') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                  <p class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
                     {{ t('admin.channels.form.codexImageGenerationBridgeHint') }}
                   </p>
                 </div>
@@ -366,7 +376,7 @@
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.bedrockCCCompat') }}
                   </label>
-                  <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+                  <p class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
                     {{ t('admin.channels.form.bedrockCCCompatHint') }}
                   </p>
                 </div>
@@ -654,6 +664,10 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import { formatListDateTime } from '@/utils/format'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
@@ -663,6 +677,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage, has } = useAdminPermission('channels')
 const adminAccess = useAdminAccessStore()
@@ -785,9 +800,9 @@ const platformOrder = computed<GroupPlatform[]>(() => listPlatformIds())
 const compositePlatforms = platformOrder
 
 // ── Helpers ──
+/** The list's date (item 18): this year's without the year ("11-20"), an earlier one with it ("2025-03-04"); no time. */
 function formatDate(value: string): string {
-  if (!value) return '-'
-  return new Date(value).toLocaleDateString()
+  return formatListDateTime(value).split(' ')[0]
 }
 
 // ── Platform section helpers ──

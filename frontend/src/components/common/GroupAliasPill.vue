@@ -51,7 +51,8 @@ const latin = computed(() => isLatinPillText(text.value))
   padding-right: 4px;
   text-align: left;
 }
+/* Latin text at 12px too (mobile list plan, item 19: no text under 12px); what does not fit is cut inside the pill. */
 .alias-pill--latin {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
 }
 </style>

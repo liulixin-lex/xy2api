@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import AccountGroupPills from '../AccountGroupPills.vue'
 import { formatShortTime } from '../accountTime'
@@ -248,37 +248,85 @@ describe('AccountGroupPills', () => {
     expect(cardOf(mountPills(0).get('[data-test="group-pill-empty"]'))).toBeUndefined()
   })
 
-  it('on a touch screen opens the quality panel from the whole pill, at any width; a pill with no dot shows its full name (spec 4.3, 7l-5)', async () => {
+  // Mobile list plan (review #5): 50x20 pills are too small to hit by touch. The whole cell opens a bottom sheet with
+  // every group, 48px each; a group with quality data opens its panel, managers edit the groups from the sheet's foot.
+  it('on a touch screen lists every group in a bottom sheet from the whole cell, at any width', async () => {
     const matchMedia = window.matchMedia
     window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+    onTestFinished(() => { window.matchMedia = matchMedia })
     const wrapper = mountPills(12)
     expect(wrapper.find('[data-test="group-pill-dot"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="group-pill-text"]').exists()).toBe(false)
-    await wrapper.findAll('[data-test="group-pill"]')[1].trigger('click')
-    await wrapper.get('[data-test="group-pill-more"]').trigger('click')
-    expect(wrapper.emitted('open-quality')).toEqual([[2], [9]])
-    expect(wrapper.emitted('edit-groups')).toBeUndefined()
-    wrapper.unmount()
+    const cell = wrapper.get('button[data-test="group-pills"]')
+    expect(cell.findAll('button')).toHaveLength(0)
+    expect(cell.findAll('[data-test="group-pill"]')).toHaveLength(8)
+    await cell.trigger('click')
+    await flushPromises()
+    const items = () => Array.from(document.querySelectorAll<HTMLElement>('[data-test="groups-sheet"] [data-test="groups-sheet-item"]'))
+    expect(items()).toHaveLength(12)
+    expect(items()[1].tagName).toBe('BUTTON')
+    expect(items()[1].textContent).toContain('Group 2')
+    items()[1].click()
+    await flushPromises()
+    expect(wrapper.emitted('open-quality')).toEqual([[2]])
+    // The sheet has closed (its leave transition runs on the next frames).
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(document.querySelector('[data-test="groups-sheet"]')).toBeNull()
+    expect(cell.attributes('data-quality-opener')).toBeTruthy()
 
-    const plain = mountPills(1, false)
-    await plain.get('[data-test="group-pill"]').trigger('click')
-    expect(plain.emitted('open-quality')).toBeUndefined()
-    expect(document.querySelector('#sq-tip .sq-tip__title')!.textContent).toBe('Group 1')
-    expect(document.querySelector('#sq-tip .sq-tip__chip')!.textContent).toBe('admin.accounts.table.pillNoQuality')
+    await cell.trigger('click')
+    await flushPromises()
+    ;(document.querySelector('[data-test="groups-sheet-edit"]') as HTMLElement).click()
+    await flushPromises()
+    expect(wrapper.emitted('edit-groups-at')).toEqual([[cell.element]])
+    wrapper.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Without quality data a group has nothing to open: its name and "no quality data"; a viewer has no edit.
+    const plain = mount(AccountGroupPills, { props: { account: { id: 1, name: 'acc-1', platform: 'anthropic' } as never, groups: [{ id: 1, name: 'Group 1' }] as never, quality: null, readonly: true } })
+    await plain.get('button[data-test="group-pills"]').trigger('click')
+    await flushPromises()
+    expect(items()[0].tagName).toBe('DIV')
+    expect(items()[0].textContent).toContain('admin.accounts.table.pillNoQuality')
+    expect(document.querySelector('[data-test="groups-sheet-edit"]')).toBeNull()
     plain.unmount()
-    window.matchMedia = matchMedia
+  })
+
+  // Astra re-review, suggestion: switching the main pointer to a mouse and back to touch reopened an old sheet.
+  it('closes the touch sheet when the pointer becomes a mouse, so it does not come back by itself', async () => {
+    const matchMedia = window.matchMedia
+    let fine = false
+    const listeners = new Set<(event: { matches: boolean }) => void>()
+    window.matchMedia = ((query: string) => ({
+      get matches() { return query.includes('pointer: fine') ? fine : !fine },
+      media: query,
+      addEventListener: (_: string, listener: (event: { matches: boolean }) => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: (event: { matches: boolean }) => void) => listeners.delete(listener)
+    })) as unknown as typeof window.matchMedia
+    onTestFinished(() => { window.matchMedia = matchMedia })
+    const setFine = async (next: boolean) => {
+      fine = next
+      listeners.forEach((listener) => listener({ matches: next }))
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const wrapper = mountPills(3)
+    await wrapper.get('button[data-test="group-pills"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-test="groups-sheet"]')).not.toBeNull()
+    await setFine(true)
+    expect(document.querySelector('[data-test="groups-sheet"]')).toBeNull()
+    await setFine(false)
+    expect(document.querySelector('[data-test="groups-sheet"]')).toBeNull()
+    wrapper.unmount()
   })
 
   it('keeps a tip a tap brought up through the mouse events after the tap, until a press elsewhere or 4s (7q-6)', async () => {
-    const matchMedia = window.matchMedia
-    window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
     vi.useFakeTimers()
-    onTestFinished(() => {
-      vi.useRealTimers()
-      window.matchMedia = matchMedia
-    })
-    const wrapper = mountPills(1, false)
-    const pill = wrapper.get('[data-test="group-pill"]')
+    onTestFinished(() => { vi.useRealTimers() })
+    // "+N" lists what it folds on a click or tap (7l-5).
+    const wrapper = mountPills(10, false)
+    const pill = wrapper.get('[data-test="group-pill-more-text"]')
     const tap = async (pointerType: string) => {
       pill.element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType }))
       await pill.trigger('click')

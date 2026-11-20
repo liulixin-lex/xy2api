@@ -13,6 +13,22 @@ export default {
       pausedLabel: 'Live updates paused, click to resume',
       staleLabel: 'Data is out of date and retrying, click to pause'
     },
+    table: {
+      filters: 'Filters',
+      filtersActive: 'Filters, {n} chosen',
+      clearFilters: 'Clear all',
+      done: 'Done',
+      count: '{n} items',
+      columns: 'Columns',
+      columnsTitle: 'Shown columns',
+      resetColumns: 'Restore default columns',
+      removeFilter: 'Remove filter {label}',
+      resetColumnOrder: 'Restore default order',
+      sortedBy: 'Sorted by {label}',
+      ascending: 'ascending',
+      descending: 'descending',
+      showFull: 'Tap to see it whole'
+    },
     pendingChanges: {
       changes: '{n} changes',
       tip: 'Row order holds between two of your own actions',
@@ -56,10 +72,6 @@ export default {
     all: 'All',
     none: 'None',
     selectAll: 'Select all',
-    sortBy: 'Sort by',
-    sortPlaceholder: 'Choose a field',
-    sortAscending: 'Ascending, tap for descending',
-    sortDescending: 'Descending, tap for ascending',
     noData: 'No data',
     expand: 'Expand',
     collapse: 'Collapse',

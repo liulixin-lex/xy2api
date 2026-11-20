@@ -52,23 +52,6 @@ describe('DataTable reload with rows on screen', () => {
     expect(wrapper.get('.table-wrapper').attributes('aria-busy')).toBeUndefined()
   })
 
-  it('keeps the same cards on the mobile layout while reloading', async () => {
-    stubViewport(false)
-    const wrapper = mount(DataTable, { props: { columns, data: page(), rowKey: 'id' } })
-    const card = () => wrapper.get('[data-field="name"]').element.closest('.table-card')
-    const before = card()
-
-    await wrapper.setProps({ loading: true })
-    expect(card()).toBe(before)
-    expect(wrapper.find('.animate-pulse').exists()).toBe(false)
-    expect(wrapper.find('[data-test="table-progress"]').exists()).toBe(true)
-    expect(wrapper.attributes('aria-busy')).toBe('true')
-
-    await wrapper.setProps({ data: page(' (new)'), loading: false })
-    expect(card()).toBe(before)
-    expect(wrapper.get('[data-field="name"]').text()).toContain('One (new)')
-  })
-
   it('still shows the skeleton for a load with no rows yet', async () => {
     stubViewport(true)
     const wrapper = mount(DataTable, { props: { columns, data: [], loading: true } })

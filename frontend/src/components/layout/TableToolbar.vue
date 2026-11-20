@@ -1,18 +1,69 @@
 <template>
-  <div class="table-toolbar" :class="{ 'table-toolbar--compact': compact }">
+  <!-- filterSheet below 768px (`sheetBelow` 'tablet') or 1024px ('desktop'): the phone toolbar (mobile list plan,
+       item 15). Without #search and #create it has no first row: "Filters" leads the info row's actions. -->
+  <div v-if="phoneSheet" ref="phoneRef" class="table-toolbar table-toolbar--compact table-toolbar--phone" data-test="table-toolbar-phone">
+    <div v-if="$slots.search || $slots.create" class="table-toolbar__row" data-test="toolbar-first-row">
+      <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
+      <button v-if="$slots.sheet" v-bind="sheetButton" @click="sheetOpen = true">
+        <Icon name="filter" size="sm" />
+        <span aria-hidden="true">{{ t('common.table.filters') }}</span>
+        <span v-if="filterCount" class="table-toolbar__count" aria-hidden="true" data-test="toolbar-filter-count">{{ filterCount }}</span>
+      </button>
+      <slot name="create" />
+    </div>
+    <div v-if="filled($slots.tags)" class="table-toolbar__tags" data-test="toolbar-tags"><slot name="tags" /></div>
+    <div class="table-toolbar__info-row">
+      <div class="table-toolbar__info">
+        <slot name="info" />
+        <span v-if="filled($slots.info) && $slots.status" class="table-toolbar__sep" aria-hidden="true">·</span>
+        <slot name="status" />
+      </div>
+      <div class="table-toolbar__actions">
+        <button v-if="!($slots.search || $slots.create) && $slots.sheet" v-bind="sheetButton" @click="sheetOpen = true">
+          <Icon name="filter" size="sm" />
+          <span aria-hidden="true">{{ t('common.table.filters') }}</span>
+          <span v-if="filterCount" class="table-toolbar__count" aria-hidden="true" data-test="toolbar-filter-count">{{ filterCount }}</span>
+        </button>
+        <slot name="actions" />
+      </div>
+    </div>
+    <BottomSheet :show="sheetOpen" :title="t('common.table.filters')" test-id="filter-sheet" @close="sheetOpen = false">
+      <slot name="sheet" />
+      <template #footer>
+        <button v-if="filterCount" type="button" class="btn btn-secondary" data-test="filter-sheet-clear" @click="emit('clear-filters')">
+          {{ t('common.table.clearFilters') }}
+        </button>
+        <button type="button" class="btn btn-primary" data-test="filter-sheet-done" @click="sheetOpen = false">{{ t('common.table.done') }}</button>
+      </template>
+    </BottomSheet>
+  </div>
+  <div v-else ref="rowRef" class="table-toolbar" :class="{ 'table-toolbar--compact': compact, 'table-toolbar--sheet': filterSheet }">
     <div class="table-toolbar__main">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
-      <div v-if="filled($slots.filters)" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
+      <div
+        v-if="filled($slots.filters)"
+        ref="filtersRef"
+        class="table-toolbar__filters"
+        :class="{ 'is-fade-start': fade.start, 'is-fade-end': fade.end }"
+        data-test="toolbar-filters"
+        @scroll.passive="updateFade"
+      ><slot name="filters" /></div>
     </div>
     <div class="table-toolbar__actions">
       <div v-if="$slots.status" class="table-toolbar__status"><slot name="status" /></div>
       <slot name="actions" />
+      <slot name="create" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
+import { Comment, Fragment, Text, computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Slot, type VNode } from 'vue'
+import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
+import { useTableViewport } from '@/composables/useTableViewport'
+import { focusOrigin } from '@/utils/overlayStack'
 
 /**
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
@@ -43,8 +94,112 @@ import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
  * narrower it is its icon in a 32px square and a filter narrows to 104px (12.9-4). The accounts toolbar keeps its own
  * widths (its own search box rule; its selects are not `table-toolbar__filter`). Below 1024px the narrow layout above
  * applies, the controls 40px high.
+ *
+ * `filterSheet` (mobile list plan, the accounts, groups, users and usage pages): from 768px the row layout above (the
+ * compact sizes from 768, wrapping where it does not fit) instead of the narrow one. Below 768px the phone toolbar:
+ * the search, "Filters n" and #create on the first row; #tags (the chosen filters as removable tags) on the next; an
+ * info row with #info ("N items"), #status and #actions (refresh, columns, the page's own "⋯"). "Filters" opens a
+ * bottom sheet holding #sheet, the page's fields, which apply at once; its footer clears them (`clear-filters`) and
+ * closes it. #create also sits at the end of the actions from 768px.
+ * - `sheetBelow="desktop"` keeps the phone toolbar up to 1024px (a page whose filters are a long form, as usage
+ *   records), so 768-1023px has no row layout; the row layout then starts at 1024px. Default 'tablet' (768px).
+ * - Without #search and #create the phone toolbar has no first row: "Filters n" leads the info row's actions, 40px
+ *   high like them, with the same count and name.
+ * - Crossing the width where the toolbar changes form keeps the focus: from the sheet (which closes) to the inline
+ *   field with the same `data-filter="<key>"` as the focused one (the page marks a field and its inline twin alike),
+ *   else the first inline filter, else the search; from the row to "Filters". Focus in a list opened from a field
+ *   (a Select's, teleported out of the sheet) counts as on that field (overlayStack's focusOrigin).
  */
-defineProps<{ compact?: boolean }>()
+const props = defineProps<{
+  compact?: boolean
+  filterSheet?: boolean
+  /** The number of chosen filters, on the phone's "Filters" button. */
+  filterCount?: number
+  /** With `filterSheet`: below which width the phone toolbar is used, 768px ('tablet', default) or 1024px ('desktop'). */
+  sheetBelow?: 'tablet' | 'desktop'
+}>()
+const emit = defineEmits<{ 'clear-filters': [] }>()
+const { t } = useI18n()
+const { phone, desktop } = useTableViewport()
+const phoneSheet = computed(() => !!props.filterSheet && (props.sheetBelow === 'desktop' ? !desktop.value : phone.value))
+const sheetOpen = ref(false)
+/** The phone's "Filters" button, on the first row beside the search and #create, or leading the info row's actions. */
+const sheetButton = computed(() => ({
+  type: 'button' as const,
+  class: 'table-toolbar__btn table-toolbar__btn--secondary table-toolbar__sheet-btn',
+  'aria-haspopup': 'dialog' as const,
+  'aria-expanded': sheetOpen.value ? ('true' as const) : ('false' as const),
+  'aria-label': props.filterCount ? t('common.table.filtersActive', { n: props.filterCount }) : t('common.table.filters'),
+  'data-test': 'toolbar-filter-button'
+}))
+const phoneRef = ref<HTMLElement | null>(null)
+const rowRef = ref<HTMLElement | null>(null)
+
+/**
+ * The filter row below 1024px scrolls sideways (mobile list plan, item 15): an edge with more filters past it fades
+ * out, so the row reads as one that goes on. Measured on scroll and whenever the row or its filters change size.
+ */
+const filtersRef = ref<HTMLElement | null>(null)
+const fade = reactive({ start: false, end: false })
+const updateFade = () => {
+  const row = filtersRef.value
+  fade.start = !!row && row.scrollLeft > 1
+  fade.end = !!row && row.scrollLeft + row.clientWidth < row.scrollWidth - 1
+}
+let fadeObserver: ResizeObserver | null = null
+let fadeMutations: MutationObserver | null = null
+/** Watches the row and each filter in it now: a filter added or removed later is watched (or let go) too. */
+const observeFilters = () => {
+  const row = filtersRef.value
+  fadeObserver?.disconnect()
+  if (row && fadeObserver) {
+    fadeObserver.observe(row)
+    Array.from(row.children).forEach((child) => fadeObserver!.observe(child))
+  }
+  updateFade()
+}
+watch(filtersRef, (row) => {
+  fadeObserver?.disconnect()
+  fadeMutations?.disconnect()
+  fadeObserver = null
+  fadeMutations = null
+  updateFade()
+  if (!row) return
+  if (typeof ResizeObserver !== 'undefined') fadeObserver = new ResizeObserver(updateFade)
+  if (typeof MutationObserver !== 'undefined') {
+    fadeMutations = new MutationObserver(observeFilters)
+    fadeMutations.observe(row, { childList: true, subtree: true })
+  }
+  observeFilters()
+}, { flush: 'post' })
+onBeforeUnmount(() => {
+  fadeObserver?.disconnect()
+  fadeMutations?.disconnect()
+})
+const FOCUSABLE = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+const firstFocusable = (el: Element | null | undefined) => (el ? ((el.matches(FOCUSABLE) ? el : el.querySelector(FOCUSABLE)) as HTMLElement | null) : null)
+/** The row's field for a sheet field: the same `data-filter`, else the first inline filter, else the search. */
+function inlineTwin(key: string | undefined) {
+  const row = rowRef.value
+  if (!row) return null
+  const same = key ? row.querySelector(`[data-filter=${JSON.stringify(key)}]`) : null
+  return firstFocusable(same) ?? firstFocusable(row.querySelector('.table-toolbar__filters')) ?? firstFocusable(row.querySelector('.table-toolbar__search'))
+}
+// The sheet belongs to the phone toolbar: leaving it (crossing 768px, or 1024px with 'desktop') closes it. The switch
+// removes the focused field, so focus moves to its counterpart instead of falling to the page (Astra review, 5).
+watch(phoneSheet, async (on) => {
+  // What goes: the row, or the sheet (its fields, header and footer: the dialog around them) and the phone toolbar.
+  // The sheet comes first, so a Select open in it answers before "Filters" (expanded too while the sheet is open).
+  const sheet = document.querySelector('[data-test="filter-sheet"]')?.closest('[role="dialog"]')
+  const origin = focusOrigin(on ? [rowRef.value] : [sheet, phoneRef.value])
+  const key = origin?.closest<HTMLElement>('[data-filter]')?.dataset.filter
+  if (!on) sheetOpen.value = false
+  if (!origin) return
+  await nextTick()
+  const target = on ? phoneRef.value?.querySelector<HTMLElement>('[data-test="toolbar-filter-button"]') : inlineTwin(key)
+  target?.focus()
+}, { flush: 'pre' })
+defineExpose({ openSheet: () => { sheetOpen.value = true }, closeSheet: () => { sheetOpen.value = false } })
 
 /**
  * Whether a slot renders anything: a filters slot whose filters are all switched off (the users page) renders only
@@ -244,8 +399,8 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 @media (max-width: 1023px) {
   /* One column that never wraps: a wrapping column takes the width of its widest row (the filters), which then widens
      the whole page (7n-1). */
-  .table-toolbar,
-  .table-toolbar__main {
+  .table-toolbar:where(:not(.table-toolbar--sheet)),
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__main {
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
@@ -253,15 +408,15 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
   }
   /* Its basis and growth are for the wide row; in the column they would be about a height (an empty band under the
      filters, 7q-2): here it is as tall as its rows. */
-  .table-toolbar__main {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__main {
     flex: none;
   }
-  .table-toolbar__search {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__search {
     width: 100%;
   }
   /* The filter row scrolls out to the screen's edges (prototype): it reaches across the page padding of AppLayout's
      main, where every page puts its toolbar, full width below 1024px (16px, 24px from 768px). */
-  .table-toolbar__filters {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters {
     flex-wrap: nowrap;
     gap: 8px;
     margin-inline: -16px;
@@ -270,64 +425,191 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
     scroll-padding-inline: 16px;
     scrollbar-width: none;
   }
-  .table-toolbar__filters::-webkit-scrollbar {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters::-webkit-scrollbar {
     display: none;
   }
-  .table-toolbar__status {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__status {
     margin-right: auto;
   }
-  .table-toolbar :deep(.table-toolbar__label) {
+  .table-toolbar:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__label) {
     display: none;
   }
-  .table-toolbar :deep(:has(> .table-toolbar__label)),
-  .table-toolbar :deep(.table-toolbar__icon) {
+  .table-toolbar:where(:not(.table-toolbar--sheet)) :deep(:has(> .table-toolbar__label)),
+  .table-toolbar:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__icon) {
     width: 40px;
     height: 40px;
     flex: none;
     justify-content: center;
     padding: 0;
   }
-  .table-toolbar :deep(:has(> .table-toolbar__label) > *) {
+  .table-toolbar:where(:not(.table-toolbar--sheet)) :deep(:has(> .table-toolbar__label) > *) {
     margin: 0;
   }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  .table-toolbar__filters {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters {
     margin-inline: -24px;
     padding-inline: 24px;
     scroll-padding-inline: 24px;
   }
 }
+/* The sideways filter row fades out at an edge with more filters past it (24px, the screen's edge). */
+@media (max-width: 1023px) {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-start {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 24px);
+    mask-image: linear-gradient(to right, transparent, #000 24px);
+  }
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-end {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-start.is-fade-end {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  }
+}
 /* Compact below 1024px: the narrow layout's 40px controls; the divider goes (the row has no room for it). */
 @media (max-width: 1023px) {
-  .table-toolbar--compact :deep(.table-toolbar__input) {
+  .table-toolbar--compact:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__input) {
     height: 40px;
     font-size: 15px;
   }
-  .table-toolbar--compact :deep(.table-toolbar__btn) {
+  .table-toolbar--compact:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__btn) {
     height: 40px;
   }
-  .table-toolbar--compact :deep(.table-toolbar__icon-btn) {
+  .table-toolbar--compact:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__icon-btn) {
     width: 40px;
     height: 40px;
   }
-  .table-toolbar--compact :deep(.table-toolbar__divider) {
+  .table-toolbar--compact:where(:not(.table-toolbar--sheet)) :deep(.table-toolbar__divider) {
     display: none;
   }
 }
 /* A mouse cannot swipe: it gets a thin scrollbar to reach the filters off screen; touch keeps it hidden (7j-6). */
 @media (max-width: 1023px) and (pointer: fine) {
-  .table-toolbar__filters {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters {
     scrollbar-color: var(--color-line-control) transparent;
     scrollbar-width: thin;
   }
-  .table-toolbar__filters::-webkit-scrollbar {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters::-webkit-scrollbar {
     display: block;
     height: 6px;
   }
-  .table-toolbar__filters::-webkit-scrollbar-thumb {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters::-webkit-scrollbar-thumb {
     border-radius: 3px;
     background: var(--color-line-control);
+  }
+}
+/* filterSheet from 768px: the row layout, in the compact sizes from 768 instead of 1024 (mobile list plan). */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .table-toolbar--sheet.table-toolbar--compact,
+  .table-toolbar--sheet.table-toolbar--compact .table-toolbar__main,
+  .table-toolbar--sheet.table-toolbar--compact .table-toolbar__filters {
+    gap: 8px;
+  }
+  .table-toolbar--sheet.table-toolbar--compact .table-toolbar__search {
+    flex: 1 1 128px;
+    width: 128px;
+    max-width: 220px;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  @container (max-width: 1183px) {
+    .table-toolbar--compact.table-toolbar--sheet :deep(.table-toolbar__filter) {
+      width: 104px;
+    }
+    .table-toolbar--compact.table-toolbar--sheet :deep(.table-toolbar__label--wide) {
+      display: none;
+    }
+    .table-toolbar--compact.table-toolbar--sheet :deep(.table-toolbar__btn:has(> .table-toolbar__label--wide)) {
+      width: var(--control-height);
+      padding: 0;
+    }
+  }
+}
+/* The phone toolbar: three rows, 8px apart. The search takes the first row's room, "Filters" and the primary action
+   their own width. The info row is 12px text in the secondary colour, its tools on the right. */
+.table-toolbar--phone .table-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.table-toolbar--phone .table-toolbar__row > .table-toolbar__search {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.table-toolbar--phone .table-toolbar__row > :deep(*:not(.table-toolbar__search)) {
+  flex: none;
+}
+.table-toolbar--phone .table-toolbar__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.table-toolbar--phone .table-toolbar__info-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.table-toolbar--phone .table-toolbar__info {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+  font-variant-numeric: tabular-nums;
+}
+.table-toolbar--phone .table-toolbar__sep {
+  color: var(--color-text-muted);
+}
+/* When the info and the actions ("Filters" among them) do not fit one line, the actions take the next one, on the
+   right, and wrap within it if they must: nothing overlaps, every target keeps its 8px. */
+.table-toolbar--phone .table-toolbar__actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.table-toolbar__sheet-btn {
+  gap: 6px;
+}
+.table-toolbar__count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: theme('colors.primary.500');
+  color: #fff;
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+}
+/* Touch: text fields 40px high at 16px, so they are easy to hit and the browser does not zoom in on focus (mobile list
+   plan). A hybrid device with a touch screen gets the 40px buttons too (any-pointer). */
+@media (pointer: coarse) {
+  .table-toolbar--compact :deep(.table-toolbar__input) {
+    height: 40px;
+    font-size: 16px;
+  }
+}
+@media (any-pointer: coarse) {
+  /* min-width too: a secondary action whose wide label is hidden is a 32px square there. */
+  .table-toolbar--compact :deep(.table-toolbar__btn) {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .table-toolbar--compact :deep(.table-toolbar__icon-btn) {
+    min-width: 40px;
+    min-height: 40px;
   }
 }
 </style>

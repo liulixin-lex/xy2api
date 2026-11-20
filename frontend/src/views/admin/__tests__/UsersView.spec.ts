@@ -45,7 +45,8 @@ vi.mock('@/api/admin', () => ({
       batchUpdateStatus
     },
     groups: {
-      getAll: getAllGroups
+      getAll: getAllGroups,
+      getAllIncludingInactive: getAllGroups
     },
     dashboard: {
       getBatchUsersUsage
@@ -417,16 +418,22 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
-  it('keeps a long email to one line, whole in the tip a tap shows (7o-5)', async () => {
+  // Mobile list plan: the frozen identity is the address with the user name under it, no avatar; a cut line shows
+  // whole in the tip a tap opens (7o-5).
+  it('shows the address and the user name in the identity, whole in the tip a tap shows when cut (7o-5)', async () => {
     const email = 'a-very-long-address-for-acceptance@example.test'
-    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email })], total: 1, page: 1, page_size: 20, pages: 1 })
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email, username: 'acceptance' })], total: 1, page: 1, page_size: 20, pages: 1 })
     const wrapper = mountBulkDeleteView()
     await flushPromises()
     document.body.appendChild(wrapper.element)
     const cell = wrapper.get('[data-test="user-email"]')
-    expect(cell.classes()).toContain('truncate')
+    const primary = cell.get('.table-identity__primary')
+    expect(primary.text()).toBe(email)
+    expect(cell.get('.table-identity__secondary').text()).toBe('acceptance')
+    Object.defineProperty(primary.element, 'scrollWidth', { configurable: true, value: 400 })
+    Object.defineProperty(primary.element, 'clientWidth', { configurable: true, value: 160 })
     await cell.trigger('click')
-    expect(document.getElementById('sq-tip')!.textContent).toBe(email)
+    expect(document.getElementById('sq-tip')!.textContent).toBe(`${email}\nacceptance`)
     wrapper.unmount()
   })
 
@@ -738,4 +745,222 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
+
+  // Mobile list plan: below 768px a memory of its own, showing balance, status and last use until changed; the
+  // wide memory (the page's old key) is neither read for it nor written.
+  it('shows the phone defaults below 768px, its own memory, and the column sheet', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    localStorage.setItem('user-hidden-columns', JSON.stringify(['notes']))
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,balance,status,last_used_at,actions')
+      await wrapper.get('[data-test="users-columns"]').trigger('click')
+      await flushPromises()
+      const role = wrapper.findAll('[data-test="column-sheet"] [data-test="column-setting"]').find((el) => el.text().includes('admin.users.columns.role'))
+      await role!.trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,role,balance,status,last_used_at,actions')
+      expect(JSON.parse(localStorage.getItem('user-hidden-columns-phone-v1')!)).not.toContain('role')
+      expect(JSON.parse(localStorage.getItem('user-hidden-columns')!)).toEqual(['notes'])
+      await wrapper.get('[data-test="column-sheet"] [data-test="reset-columns"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,balance,status,last_used_at,actions')
+      expect(localStorage.getItem('user-hidden-columns-phone-v1')).toBeNull()
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('user-hidden-columns')
+    }
+  })
+
+  it('filters from the phone sheet, shows the choice as a tag, and keeps it shown from 768px', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="users-count"]').text()).toBe('common.table.count')
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      const role = wrapper.get('[data-test="filter-sheet"] [data-filter="role"]').findComponent({ name: 'Select' })
+      role.vm.$emit('update:modelValue', 'operator')
+      await flushPromises()
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ role: 'operator' }), expect.any(Object))
+      expect(wrapper.get('[data-test="toolbar-filter-count"]').text()).toBe('1')
+      const tag = wrapper.get('[data-key="role"]')
+      expect(tag.text()).toContain('admin.users.operator')
+      expect(JSON.parse(localStorage.getItem('user-visible-filters')!)).toContain('role')
+      await tag.get('button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-key="role"]').exists()).toBe(false)
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.not.objectContaining({ role: 'operator' }), expect.any(Object))
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('user-visible-filters')
+      localStorage.removeItem('user-filter-values')
+    }
+  })
+
+  it('keeps only "⋯" in a phone row, editing and enabling leading its menu', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email: 'phone@example.test' })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      const actions = wrapper.get('[data-test="actions-42"]')
+      expect(actions.findAll('button')).toHaveLength(1)
+      const more = actions.get('[data-test="row-more"]')
+      expect(more.attributes('aria-label')).toBe('common.more phone@example.test')
+      await more.trigger('click')
+      await flushPromises()
+      const items = wrapper.findAll('.action-menu-content button').map((el) => el.attributes('data-test') ?? '')
+      expect(items.slice(0, 2)).toEqual(['menu-edit', 'menu-toggle-status'])
+      await wrapper.get('[data-test="menu-toggle-status"]').trigger('click')
+      await flushPromises()
+      expect(toggleStatus).toHaveBeenCalled()
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+    }
+  })
+
+  // Astra review: the page's own usage sort, on while its column is hidden (a phone), still fetches and orders.
+  it('fetches usage and orders by it while the usage sort is on and its column hidden', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    localStorage.setItem('admin-users-usage-sort', JSON.stringify({ key: 'usage', metric: 'today', order: 'desc' }))
+    try {
+      listUsers.mockResolvedValue({
+        items: [1, 2, 3].map((id) => createAdminUser({ id, email: `u${id}@example.test` })),
+        total: 3,
+        page: 1,
+        page_size: 20,
+        pages: 1
+      })
+      getBatchUsersUsage.mockResolvedValue({
+        stats: Object.fromEntries([1, 2, 3].map((id) => [id, { user_id: id, today_actual_cost: id, total_actual_cost: id, by_platform: [] }]))
+      })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).not.toContain('usage')
+      expect(getBatchUsersUsage).toHaveBeenCalled()
+      expect(wrapper.get('[data-test="row-order"]').text()).toBe('u3@example.test,u2@example.test,u1@example.test')
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('admin-users-usage-sort')
+    }
+  })
+
+  // Astra review: a super admin's menu (nine items, 395px) ran past a 320px-high screen; it is placed by its real
+  // height and scrolls inside itself when taller than the room.
+  it('places the row menu by its real height, scrolling inside when the screen is shorter', async () => {
+    const proto = HTMLElement.prototype
+    const scrollHeight = Object.getOwnPropertyDescriptor(proto, 'scrollHeight')
+    const offsetWidth = Object.getOwnPropertyDescriptor(proto, 'offsetWidth')
+    Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('action-menu-content') ? 395 : 0 } })
+    Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('action-menu-content') ? 192 : 0 } })
+    const height = window.innerHeight
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 320 })
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      await wrapper.get('[data-test="actions-42"] .action-menu-trigger').trigger('click')
+      await flushPromises()
+      const menu = wrapper.get('.action-menu-content').element as HTMLElement
+      expect(menu.style.maxHeight).toBe('304px')
+      expect(menu.style.overflowY).toBe('auto')
+      expect(menu.style.top).toBe('8px')
+      wrapper.unmount()
+    } finally {
+      if (scrollHeight) Object.defineProperty(proto, 'scrollHeight', scrollHeight)
+      else delete (proto as { scrollHeight?: number }).scrollHeight
+      if (offsetWidth) Object.defineProperty(proto, 'offsetWidth', offsetWidth)
+      else delete (proto as { offsetWidth?: number }).offsetWidth
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+    }
+  })
+
+  // Astra review: text typed in a phone's attribute field went with the sheet when the width crossed 768px.
+  it('keeps text typed in a sheet attribute and applies it shortly after', async () => {
+    vi.useFakeTimers()
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listEnabledDefinitions.mockResolvedValue([{ id: 7, key: 'code', name: 'Code', type: 'text', enabled: true }])
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      const input = wrapper.get('[data-test="filter-sheet"] [data-filter="attr_7"] input')
+      await input.setValue('xyz')
+      expect(JSON.parse(localStorage.getItem('user-visible-filters')!)).toContain('attr_7')
+      expect(JSON.parse(localStorage.getItem('user-filter-values')!).attributes).toEqual({ 7: 'xyz' })
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ attributes: { 7: 'xyz' } }), expect.any(Object))
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      vi.useRealTimers()
+      localStorage.removeItem('user-visible-filters')
+      localStorage.removeItem('user-filter-values')
+    }
+  })
+
+  // Decided (item 15): from 768px a filter with nothing chosen shows its name; "all" stays first in its list.
+  it('names the wide filters while nothing is chosen', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { dirname, resolve } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../UsersView.vue'), 'utf8')
+    for (const [field, label] of [['role', "t('admin.users.columns.role')"], ['status', "t('admin.users.columns.status')"], ['group', "t('admin.users.authorizedGroupFilter')"]]) {
+      expect(source).toContain(`<template #selected="{ option }">{{ filters.${field} ? option?.label ?? filters.${field} : ${label} }}</template>`)
+    }
+    expect(source).toContain(`<template #selected="{ option }">{{ filters.apiKeyGroup !== null ? option?.label : t('admin.users.apiKeyGroupFilter') }}</template>`)
+  })
 })
+

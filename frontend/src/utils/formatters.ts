@@ -8,6 +8,16 @@ export function formatCacheTokens(tokens: number): string {
 }
 
 /**
+ * A rate as list pages show it (mobile list plan, typography): up to 4 decimals with trailing zeros dropped, at least
+ * one kept, "x" appended: 1 -> "1.0x", 1.5 -> "1.5x", 0.035 -> "0.035x".
+ */
+export function formatRate(val: number): string {
+  if (val < 0.0001) return `${val.toPrecision(2)}x`
+  const text = val.toFixed(4).replace(/0+$/, '')
+  return `${text.endsWith('.') ? `${text}0` : text}x`
+}
+
+/**
  * 自适应精度格式化倍率：保留至多 4 位小数并去掉末尾多余的 0，
  * 但至少保留 2 位小数（0.035 -> "0.035"，0.3 -> "0.30"，1 -> "1.00"）
  */

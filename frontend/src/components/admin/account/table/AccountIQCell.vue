@@ -1,5 +1,5 @@
 <template>
-  <div v-if="account.platform === 'openai'" class="iq" :class="{ 'iq--off': !enabled, 'iq--detailed': detailed }" data-testid="iq-check-cell">
+  <div v-if="account.platform === 'openai'" class="iq" :class="{ 'iq--off': !enabled }" data-testid="iq-check-cell">
     <AccountSwitch :checked="enabled" :label="t('admin.accounts.iqCheck') + ' · ' + account.name" :disabled="disabled" :busy="busy" @toggle="emit('toggle', $event)" />
     <button
       v-if="lines.length"
@@ -15,7 +15,6 @@
         <span class="iq__v" :class="`iq__v--${line.state}`">
           <Icon v-if="line.state === 'checking'" name="refresh" size="xs" class="iq__spin" />{{ t(`admin.accounts.table.iqStates.${line.state}`) }}
         </span>
-        <span v-if="detailed" class="iq__r" data-test="iq-recheck">{{ recheckOf(line.target, line.state) }}</span>
       </template>
       <span v-if="more > 0" class="iq__more" data-test="iq-more">{{ t('admin.accounts.table.iqMore', { n: more }) }}</span>
     </button>
@@ -29,23 +28,22 @@
  * IQ check column (spec 4.4, 7c, prototype): the switch and one line per model, at most two, then "+N". The words are
  * only smart (ok green), degraded (error red), checking (queued included, info blue), all at 500, and paused (the
  * secondary text, uncoloured) (12.3); the tip card uses the same tones. Unknown and disabled targets show "—". The records button has one tip card (12.7) listing every model, the folded
- * ones too, with its state, last check and recheck. The narrow card's details (`detailed`) list every model with its
- * recheck time beside it: touch screens have no hover.
+ * ones too, with its state, last check and recheck; a tap opens the records, which list every model with its recheck
+ * (touch has no hover).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { iqGateEntries, iqModelLabel, isIQBuiltinModel, sortIQTargets } from '@/components/admin/account/iqCheckPresentation'
-import { currentTime, useLiveClock } from '@/composables/useLiveClock'
+import { currentTime } from '@/composables/useLiveClock'
 import type { Account, IQTargetSummary } from '@/types'
 import { vTip, type TipCard, type TipTone } from '@/utils/tip'
 import AccountSwitch from './AccountSwitch.vue'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 
-const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean; detailed?: boolean }>()
+const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ toggle: [enabled: boolean]; records: [] }>()
 const { t } = useI18n()
-const now = useLiveClock()
 
 const targets = computed(() => sortIQTargets(props.account.iq_targets ?? []))
 const enabled = computed(() => targets.value.some((target) => isIQBuiltinModel(target.model) && target.enabled))
@@ -69,7 +67,7 @@ const allLines = computed(() =>
       return state ? [{ model: target.model, name: iqModelLabel(target.model), state, target }] : []
     })
 )
-const lines = computed(() => (props.detailed ? allLines.value : allLines.value.slice(0, 2)))
+const lines = computed(() => allLines.value.slice(0, 2))
 const more = computed(() => allLines.value.length - lines.value.length)
 
 const gates = computed(() => new Map(iqGateEntries(props.account.extra as Record<string, unknown> | undefined).map((gate) => [gate.model, gate.reset_at])))
@@ -79,15 +77,6 @@ function recheckAt(target: IQTargetSummary, state: LineState): string | null {
   if (state === 'checking' || state === 'paused') return null
   const gate = target.gate_active ? gates.value.get(target.model) : undefined
   return gate ?? target.next_run_at ?? null
-}
-
-/** The card details' recheck: "3m 后复检", "等待复检" once due, empty without a time. */
-function recheckOf(target: IQTargetSummary, state: LineState): string {
-  const next = recheckAt(target, state)
-  if (!next) return ''
-  // The ticking clock only for a time still ahead (7g-1).
-  const left = msLeft(next, currentTime()) === null ? null : msLeft(next, now.value)
-  return left === null ? t('admin.accounts.table.iqRecheckPending') : t('admin.accounts.table.iqRecheckIn', { time: formatRemaining(t, left) })
 }
 
 const STATE_TONES: Record<LineState, TipTone | undefined> = { smart: 'ok', degraded: 'error', checking: 'info', paused: undefined }
@@ -186,19 +175,6 @@ function tipCard(): TipCard {
 .iq__none {
   color: var(--color-text-muted);
   font-size: var(--font-size-body);
-}
-.iq--detailed {
-  align-items: flex-start;
-}
-.iq--detailed .iq__lines {
-  grid-template-columns: auto auto minmax(0, 1fr);
-  column-gap: 8px;
-}
-.iq__r {
-  min-width: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-body);
 }
 @keyframes spin {
   to {

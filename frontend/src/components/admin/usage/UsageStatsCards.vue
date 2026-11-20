@@ -6,7 +6,7 @@
       </div>
       <div v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalRequests') }}</p>
-        <p class="text-xl font-bold">{{ unread ?? (stats?.total_requests?.toLocaleString() || '0') }}</p>
+        <p class="text-xl font-bold tabular-nums">{{ unread ?? (stats?.total_requests?.toLocaleString() || '0') }}</p>
         <!-- 管理端（后端 0.6.5 请求层）带结果拆分；用户端没有这些字段，仍显示范围说明 -->
         <p v-if="outcomes && !unread" class="text-xs text-gray-500" data-testid="usage-request-outcomes">
           {{ t('admin.usage.requestOutcomes', outcomes) }}
@@ -18,7 +18,7 @@
       <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 text-amber-600"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></div>
       <div v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalTokens') }}</p>
-        <p class="text-xl font-bold">{{ unread ?? formatTokens(stats?.total_tokens || 0) }}</p>
+        <p class="text-xl font-bold tabular-nums">{{ unread ?? formatTokens(stats?.total_tokens || 0) }}</p>
         <p v-if="!unread" class="flex flex-wrap items-center gap-x-1 text-xs text-gray-500">
           <span>{{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }}</span>
           <span>/</span>
@@ -68,18 +68,18 @@
       </div>
       <div class="min-w-0 flex-1" v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
-        <p v-if="unread" class="text-xl font-bold text-green-600">{{ unread }}</p>
-        <p v-else class="text-xl font-bold text-green-600">
-          ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
+        <p v-if="unread" class="text-xl font-bold tabular-nums text-green-600">{{ unread }}</p>
+        <p v-else class="text-xl font-bold tabular-nums text-green-600">
+          {{ formatUsdTotal(stats?.total_actual_cost) }}
         </p>
         <p v-if="!unread" class="text-xs text-gray-400">
           <template v-if="showAccountCost && totalAccountCost != null">
-            <span class="text-orange-500">{{ t('usage.accountCost') }} ${{ totalAccountCost.toFixed(4) }}</span>
+            <span class="text-orange-500">{{ t('usage.accountCost') }} {{ formatUsdTotal(totalAccountCost) }}</span>
             <span> · </span>
           </template>
           <span>
             {{ t('usage.standardCost') }}
-            <span :class="{ 'line-through': strikeStandardCost }">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+            <span :class="{ 'line-through': strikeStandardCost }">{{ formatUsdTotal(stats?.total_cost) }}</span>
           </span>
         </p>
       </div>
@@ -88,7 +88,7 @@
       <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30 text-purple-600">
         <Icon name="clock" size="md" />
       </div>
-      <div v-bind="adminWrap"><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ unread ?? formatDuration(stats?.average_duration_ms || 0) }}</p></div>
+      <div v-bind="adminWrap"><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold tabular-nums">{{ unread ?? formatDuration(stats?.average_duration_ms || 0) }}</p></div>
     </div>
     <!-- 管理端：端到端首输出的中位数（用户实际等了多久）和样本数；用户端接口没有这些字段，页面不传 e2eState，不显示 -->
     <div v-if="e2eShown" class="card p-4 flex items-center gap-3" data-testid="usage-e2e-card" :title="t('usage.e2eFirstOutputHint')">
@@ -97,7 +97,7 @@
       </div>
       <div v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.e2eFirstOutputP50') }}</p>
-        <p class="text-xl font-bold" data-testid="usage-e2e-p50">{{ e2e.value }}</p>
+        <p class="text-xl font-bold tabular-nums" data-testid="usage-e2e-p50">{{ e2e.value }}</p>
         <p class="text-xs text-gray-400" data-testid="usage-e2e-samples">{{ e2e.note }}</p>
       </div>
     </div>
@@ -110,6 +110,8 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { formatUsdTotal } from '@/utils/format'
+import { formatTokenTotal } from './usageRow'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
@@ -180,12 +182,7 @@ const strikeStandardCost = computed(() => props.strikeStandardCost)
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`
 
-const formatTokens = (value: number) => {
-  if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B'
-  if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M'
-  if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K'
-  return value.toLocaleString()
-}
+const formatTokens = formatTokenTotal
 
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')

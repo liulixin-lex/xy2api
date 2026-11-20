@@ -481,6 +481,28 @@
     opacity: 1;
   }
 
+  /* A bottom sheet (BaseDialog placement="sheet"): the panel on the bottom edge across the screen, rounded on top only,
+     no taller than 85% of the visible height, clear of the home indicator. It slides up from the edge; with reduced
+     motion it only fades (motion.css shortens the transition). */
+  .modal-overlay--sheet {
+    @apply items-end p-0;
+  }
+
+  .modal-content--sheet {
+    @apply w-full max-w-none rounded-b-none border-x-0 border-b-0;
+    max-height: 85vh;
+    max-height: 85dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .modal-enter-from .modal-content--sheet {
+    transform: translate3d(0, 24px, 0);
+  }
+
+  .modal-leave-to .modal-content--sheet {
+    transform: translate3d(0, 16px, 0);
+  }
+
   /* ============ Dialog ============ */
   .dialog-overlay {
     @apply fixed inset-0 z-50;

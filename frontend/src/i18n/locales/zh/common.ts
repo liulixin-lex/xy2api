@@ -13,6 +13,22 @@ export default {
       pausedLabel: '实时更新：已暂停，点击继续',
       staleLabel: '数据已过时，正在重试，点击暂停'
     },
+    table: {
+      filters: '筛选',
+      filtersActive: '筛选，已选 {n} 项',
+      clearFilters: '清除全部',
+      done: '完成',
+      count: '{n} 条',
+      columns: '列',
+      columnsTitle: '显示的列',
+      resetColumns: '恢复默认列',
+      removeFilter: '移除筛选 {label}',
+      resetColumnOrder: '恢复默认顺序',
+      sortedBy: '排序：{label}',
+      ascending: '升序',
+      descending: '降序',
+      showFull: '点按看全文'
+    },
     pendingChanges: {
       changes: '有 {n} 条变动',
       tip: '行顺序在两次主动操作之间保持不变',
@@ -56,10 +72,6 @@ export default {
     all: '全部',
     none: '无',
     selectAll: '全选',
-    sortBy: '排序',
-    sortPlaceholder: '选择排序字段',
-    sortAscending: '当前升序，点按改为降序',
-    sortDescending: '当前降序，点按改为升序',
     noData: '暂无数据',
     expand: '展开',
     collapse: '收起',

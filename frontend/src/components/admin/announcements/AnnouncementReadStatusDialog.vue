@@ -16,40 +16,44 @@
             @input="handleSearch"
           />
         </div>
-        <button @click="load" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
+        <button @click="load" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')" :aria-label="t('common.refresh')">
           <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
         </button>
       </div>
 
-      <DataTable
-        :columns="columns"
-        :data="items"
-        :loading="loading"
-        :server-side-sort="true"
-        default-sort-key="email"
-        default-sort-order="asc"
-        @sort="handleSort"
-      >
-        <template #cell-email="{ value }">
-          <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-        </template>
+      <!-- The same table at every width, framed in the dialog; it scrolls sideways inside, the email frozen. -->
+      <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+        <DataTable
+          :scroll-label="t('admin.announcements.readStatus')"
+          :columns="columns"
+          :data="items"
+          :loading="loading"
+          :server-side-sort="true"
+          default-sort-key="email"
+          default-sort-order="asc"
+          @sort="handleSort"
+        >
+          <template #cell-email="{ value }">
+            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
+          </template>
 
-        <template #cell-balance="{ value }">
-          <span class="font-medium text-gray-900 dark:text-white">${{ Number(value ?? 0).toFixed(2) }}</span>
-        </template>
+          <template #cell-balance="{ value }">
+            <span class="font-medium text-gray-900 dark:text-white">${{ Number(value ?? 0).toFixed(2) }}</span>
+          </template>
 
-        <template #cell-eligible="{ value }">
-          <span :class="['badge', value ? 'badge-success' : 'badge-gray']">
-            {{ value ? t('admin.announcements.eligible') : t('common.no') }}
-          </span>
-        </template>
+          <template #cell-eligible="{ value }">
+            <span :class="['badge', value ? 'badge-success' : 'badge-gray']">
+              {{ value ? t('admin.announcements.eligible') : t('common.no') }}
+            </span>
+          </template>
 
-        <template #cell-read_at="{ value }">
-          <span class="text-sm text-gray-500 dark:text-dark-400">
-            {{ value ? formatDateTime(value) : t('admin.announcements.unread') }}
-          </span>
-        </template>
-      </DataTable>
+          <template #cell-read_at="{ value }">
+            <span class="text-sm text-gray-500 dark:text-dark-400">
+              {{ value ? formatListDateTime(value) : t('admin.announcements.unread') }}
+            </span>
+          </template>
+        </DataTable>
+      </div>
 
       <Pagination
         v-if="pagination.total > 0"
@@ -74,7 +78,7 @@ import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import { formatDateTime } from '@/utils/format'
+import { formatListDateTime } from '@/utils/format'
 import type { AnnouncementUserReadStatus } from '@/types'
 import type { Column } from '@/components/common/types'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -83,6 +87,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()

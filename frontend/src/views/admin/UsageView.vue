@@ -1,71 +1,72 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :e2e-state="usageStatsState" />
-      <!-- Charts Section -->
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
-                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
-              </div>
+      <!-- 统计卡、日期范围与图表；1024 以下收起成日期范围 + 一行摘要（日期也控制下面的列表） -->
+      <UsageOverview :stats="usageStats" :e2e-state="usageStatsState">
+        <template #range>
+          <div class="flex items-center gap-2">
+            <span class="sr-only text-sm font-medium text-gray-700 dark:text-gray-300 sm:not-sr-only">{{ t('admin.dashboard.timeRange') }}:</span>
+            <DateRangePicker
+              v-model:start-date="startDate"
+              v-model:end-date="endDate"
+              @change="onDateRangeChange"
+            />
+          </div>
+        </template>
+        <template #granularity>
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+            <div class="w-28">
+              <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
             </div>
           </div>
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
-            v-model:source="modelDistributionSource"
-            v-model:metric="modelDistributionMetric"
-            :model-stats="requestedModelStats"
-            :upstream-model-stats="upstreamModelStats"
-            :mapping-model-stats="mappingModelStats"
-            :loading="modelStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
-            v-model:source="endpointDistributionSource"
-            v-model:metric="endpointDistributionMetric"
-            :endpoint-stats="inboundEndpointStats"
-            :upstream-endpoint-stats="upstreamEndpointStats"
-            :endpoint-path-stats="endpointPathStats"
-            :loading="endpointStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-        </div>
-      </div>
-      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
-      <div class="card">
+        </template>
+        <template #charts>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ModelDistributionChart
+              v-model:source="modelDistributionSource"
+              v-model:metric="modelDistributionMetric"
+              :model-stats="requestedModelStats"
+              :upstream-model-stats="upstreamModelStats"
+              :mapping-model-stats="mappingModelStats"
+              :loading="modelStatsLoading"
+              :show-source-toggle="true"
+              :show-metric-toggle="true"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+            <GroupDistributionChart
+              v-model:metric="groupDistributionMetric"
+              :group-stats="groupStats"
+              :loading="chartsLoading"
+              :show-metric-toggle="true"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+          </div>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <EndpointDistributionChart
+              v-model:source="endpointDistributionSource"
+              v-model:metric="endpointDistributionMetric"
+              :endpoint-stats="inboundEndpointStats"
+              :upstream-endpoint-stats="upstreamEndpointStats"
+              :endpoint-path-stats="endpointPathStats"
+              :loading="endpointStatsLoading"
+              :show-source-toggle="true"
+              :show-metric-toggle="true"
+              :title="t('usage.endpointDistribution')"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          </div>
+        </template>
+      </UsageOverview>
+      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感；手机上贴到屏幕两边（同账号页的表格） -->
+      <div class="card max-md:-mx-4 max-md:rounded-none max-md:border-x-0">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
           <button
             v-for="tab in detailTabs"
@@ -84,44 +85,49 @@
         </div>
 
         <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" :can-cleanup="!adminAccess.isOperator" :can-export="has('data.export')" @cleanup="openCleanupDialog" @export="exportToExcel">
-          <template #status>
-            <LiveStatusIndicator v-if="activeTab === 'usage'" :status="liveStatus" :pause="liveUsage.pause" :resume="liveUsage.resume" :detail="t('admin.usage.liveDetail')" />
+          <template v-if="activeTab === 'usage'" #status>
+            <LiveStatusIndicator :status="liveStatus" :pause="liveUsage.pause" :resume="liveUsage.resume" :detail="t('admin.usage.liveDetail')" />
+          </template>
+          <!-- Phone toolbar: the count of the tab (and the sort while its column is hidden), the columns tool. The usage
+               tab's count only when it is exact (the summary above has the requests either way). -->
+          <template #info>
+            <template v-if="activeTab !== 'ranking'">
+              <span v-if="countShown" data-testid="usage-count">{{ t('common.table.count', { n: (activeTab === 'errors' ? errTotal : usageTotal).toLocaleString() }) }}</span>
+              <template v-if="hiddenSort">
+                <span v-if="countShown" class="table-toolbar__sep" aria-hidden="true">·</span>
+                <TableSortHint :label="hiddenSort.label" :order="hiddenSort.order" />
+              </template>
+            </template>
+          </template>
+          <template #phone-tools>
+            <UsageColumnSettings
+              v-if="activeTab !== 'ranking'"
+              variant="sheet"
+              :columns="currentToggleableColumns"
+              :is-visible="isCurrentColumnVisible"
+              :at-default="currentColumnsAtDefault"
+              @toggle="toggleCurrentColumn"
+              @reset="resetCurrentColumns"
+            />
+          </template>
+          <template v-if="hiddenSort" #sort-hint>
+            <TableSortHint :label="hiddenSort.label" :order="hiddenSort.order" />
           </template>
           <template #after-reset>
-            <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
-              <button
-                data-testid="usage-column-settings"
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
-              >
+            <UsageColumnSettings
+              v-if="activeTab !== 'ranking'"
+              :columns="currentToggleableColumns"
+              :is-visible="isCurrentColumnVisible"
+              :at-default="currentColumnsAtDefault"
+              @toggle="toggleCurrentColumn"
+              @reset="resetCurrentColumns"
+            >
+              <template #icon>
                 <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
-              </button>
-              <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-              >
-                <button
-                  v-for="col in currentToggleableColumns"
-                  :key="col.key"
-                  :data-testid="`usage-column-toggle-${col.key}`"
-                  @click="toggleCurrentColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isCurrentColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-500"
-                    :stroke-width="2"
-                  />
-                </button>
-              </div>
-            </div>
+              </template>
+            </UsageColumnSettings>
           </template>
         </UsageFilters>
         <UsageExportTasks v-if="has('data.export')" ref="exportPanel" scope="admin" @busy="exporting = $event" />
@@ -131,6 +137,7 @@
           <UsageTable
             ref="usageTableRef"
             flat
+            viewer="admin"
             :row-class="usageRowClass"
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"
@@ -140,8 +147,8 @@
             :loading="usageLoading"
             :columns="visibleColumns"
             :server-side-sort="true"
-            :default-sort-key="'created_at'"
-            :default-sort-order="'desc'"
+            :sort="tableSort"
+            :scroll-label="t('usage.tabs.usage')"
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
@@ -157,7 +164,7 @@
               </div>
             </template>
           </UsageTable>
-          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usagePaginationTotal" :total-exact="usageTotalExact" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
@@ -165,6 +172,9 @@
             :rows="errRows" :total="errTotal" :loading="errLoading"
             :page="errPage" :page-size="errPageSize"
             :visible-column-keys="errVisibleColumnKeys"
+            :sort-by="errSortBy"
+            :sort-order="errSortOrder"
+            :scroll-label="t('usage.tabs.errors')"
             user-clickable
             @userClick="handleUserClick"
             @openErrorDetail="openError"
@@ -205,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
@@ -215,10 +225,13 @@ import { useLiveTable } from '@/composables/useLiveTable'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { useUsageStatsState } from './usageStatsState'
-import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
-import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
+import UsageOverview from '@/components/admin/usage/UsageOverview.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'; import { usageTotalIsExact } from '@/components/admin/usage/usageTotal'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import UsageColumnSettings from '@/components/admin/usage/UsageColumnSettings.vue'
+import TableSortHint from '@/components/common/TableSortHint.vue'
+import { useColumnVisibility } from '@/composables/useColumnVisibility'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
@@ -331,6 +344,8 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+/** The sort the list is requested with: the table's headers follow it (DataTable's page-owned sort). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
   if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0)
@@ -444,6 +459,12 @@ const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 // to it, each with its generation. The other cards keep the last stats answer until a new one arrives, as before.
 const statsCard = useUsageStatsState(() => JSON.stringify(filters.value))
 const usageStatsState = statsCard.phase
+/** The list a page belongs to: filters, page size and sort. */
+const usageList = () => JSON.stringify([filters.value, pagination.page_size, sortState.sort_by, sortState.sort_order])
+/** The query a list answer is for: the list and the page. */
+const usageQuery = () => JSON.stringify([usageList(), pagination.page])
+/** The last list answer the table took, with what it was asked for (an active load's or the 5 s check's). */
+const usageAnswer = ref<{ list: string; query: string; filters: AdminUsageQueryParams; page: number; pageSize: number; rows: number; total: number } | null>(null)
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: async (signal) => {
@@ -451,8 +472,12 @@ const liveUsage = useLiveTable<AdminUsageLog>({
     // asked. The 5 s membership check uses the same request but starts no stats, so its failure says nothing about
     // them (fourth review). The engine sets `loading` before an active load asks, and runs no check during one.
     const list = liveUsage.loading.value ? statsCard.listStarted() : null
+    const asked = { list: usageList(), query: usageQuery(), filters: { ...filters.value }, page: pagination.page, pageSize: pagination.page_size }
     try {
-      return await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
+      const answer = await adminAPI.usage.list(buildUsageListParams(asked.page, asked.pageSize, false), { signal })
+      // The engine aborts what a newer load replaces: an answer that comes back unaborted is the one it takes.
+      if (!signal.aborted) usageAnswer.value = { ...asked, rows: answer.items.length, total: answer.total }
+      return answer
     } catch (error) {
       if (!signal.aborted) list?.failed()
       throw error
@@ -468,6 +493,36 @@ const liveUsage = useLiveTable<AdminUsageLog>({
   tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
 })
 const { rows: usageRows, loading: usageLoading, total: usageTotal, pending, pendingMore, status: liveStatus } = liveUsage
+/** The answer for the query on screen; none while a new page, filter or sort is on its way, or after it failed. */
+const currentUsageAnswer = computed(() => (usageAnswer.value?.query === usageQuery() ? usageAnswer.value : null))
+/**
+ * The usage total is a count (see usageTotalIsExact), judged on the answer for the query on screen only: an earlier
+ * answer's total says nothing about this page or filter. The errors list always counts.
+ */
+const usageTotalExact = computed(() => {
+  const answer = currentUsageAnswer.value
+  return !!answer && usageTotalIsExact(answer.filters, answer)
+})
+const countShown = computed(() => activeTab.value === 'errors' || usageTotalExact.value)
+/**
+ * The pagination's total. While a page is on its way (or failed) it shows the page asked for as an open range, and
+ * "next" goes no further than the last answer for this list showed pages for: never past a page not yet answered
+ * (previous, and the retry, stay).
+ */
+const usagePaginationTotal = computed(() => {
+  if (currentUsageAnswer.value) return usageTotal.value
+  const size = pagination.page_size
+  const answer = usageAnswer.value
+  const known = answer && answer.list === usageList() ? Math.ceil(answer.total / size) : 0
+  return Math.max(pagination.page, known) * size
+})
+// A page past the end (rows went since the pages were counted) comes back empty with only its offset as the total:
+// back to the last page that answer allows, asked again (each step is a lower page, page 1 ends it).
+watch(currentUsageAnswer, (answer) => {
+  if (!answer || answer.page <= 1 || answer.rows > 0) return
+  pagination.page = Math.min(answer.page - 1, Math.max(1, Math.ceil(answer.total / answer.pageSize)))
+  void reloadUsage()
+})
 const newRecordsText = (n: string) => t('admin.usage.newRecords', { n })
 const usageRowClass = (row: AdminUsageLog) =>
   liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined
@@ -666,7 +721,12 @@ const exportToExcel = async () => {
 // Column visibility
 const ALWAYS_VISIBLE = ['user', 'created_at']
 const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'request_id', 'upstream_request_id', 'user_agent']
+// Below 768px (mobile list plan): user (frozen), account, model, tokens, cost, latency and time; the rest in the settings.
+const NARROW_DEFAULT_HIDDEN_COLUMNS = [
+  'api_key', 'endpoint', 'group', 'stream', 'billing_mode', 'ip_address', ...DEFAULT_HIDDEN_COLUMNS,
+]
 const HIDDEN_COLUMNS_KEY = 'usage-hidden-columns'
+const NARROW_HIDDEN_COLUMNS_KEY = 'usage-hidden-columns-narrow'
 const HIDDEN_COLUMNS_VERSION_KEY = 'usage-hidden-columns-version'
 // 隐藏列版本链：每级只把当级新增列加入隐藏集，不重置用户已显式打开的列。
 const HIDDEN_COLUMNS_PREV_VERSION = 'request-id-hidden-by-default'
@@ -682,9 +742,9 @@ const allColumns = computed(() => [
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
-  { key: 'tokens', label: t('usage.tokens'), sortable: false },
-  { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'latency', label: t('usage.latency'), sortable: false },
+  { key: 'tokens', label: t('usage.tokens'), sortable: false, class: 'text-right' },
+  { key: 'cost', label: t('usage.cost'), sortable: false, class: 'text-right' },
+  { key: 'latency', label: t('usage.latency'), sortable: false, class: 'text-right' },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
   { key: 'upstream_request_id', label: t('admin.usage.upstreamRequestId'), sortable: false },
@@ -692,37 +752,41 @@ const allColumns = computed(() => [
   { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
 ])
 
-const hiddenColumns = reactive<Set<string>>(new Set())
-
 const toggleableColumns = computed(() =>
   allColumns.value.filter(col => !ALWAYS_VISIBLE.includes(col.key))
 )
 
+/** The wide memory is the page's existing key: its version chain hides the columns added since it was saved. */
+const migrateUsageColumns = (hidden: Set<string>) => {
+  const savedVersion = localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY)
+  if (savedVersion === HIDDEN_COLUMNS_CURRENT_VERSION) return false
+  if (savedVersion !== HIDDEN_COLUMNS_PREV_VERSION) hidden.add('request_id')
+  hidden.add('upstream_request_id')
+  localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
+  return true
+}
+// Nothing saved yet: the defaults are current, so a set saved later is not run through the chain again.
+try {
+  if (localStorage.getItem(HIDDEN_COLUMNS_KEY) === null) localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
+} catch { /* storage unavailable: the defaults apply */ }
+
+const usageColumns = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map(col => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateUsageColumns },
+  narrow: { storageKey: NARROW_HIDDEN_COLUMNS_KEY, defaultHidden: NARROW_DEFAULT_HIDDEN_COLUMNS },
+})
+
 const visibleColumns = computed(() =>
   allColumns.value.filter(col =>
-    ALWAYS_VISIBLE.includes(col.key) || !hiddenColumns.has(col.key)
+    ALWAYS_VISIBLE.includes(col.key) || usageColumns.isVisible(col.key)
   )
 )
-
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-
-const toggleColumn = (key: string) => {
-  if (hiddenColumns.has(key)) {
-    hiddenColumns.delete(key)
-  } else {
-    hiddenColumns.add(key)
-  }
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-    localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
-  } catch (e) {
-    console.error('Failed to save columns:', e)
-  }
-}
 
 // ---- 错误请求 tab 列设置(与用量明细同机制,独立存储) ----
 const ERR_ALWAYS_VISIBLE = ['user', 'status', 'created_at', 'actions']
 const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+// Below 768px: user (frozen), category, status and time, then the details button; the rest in the settings.
+const ERR_NARROW_DEFAULT_HIDDEN_COLUMNS = ['api_key', 'account', 'platform', 'model', 'endpoint', 'group', 'type', 'message', 'user_agent', 'client_ip']
 const ERR_HIDDEN_COLUMNS_KEY = 'usage-error-hidden-columns'
 
 // key 集合须与 OpsErrorLogTable 内部 allColumns 一致
@@ -744,78 +808,46 @@ const errAllColumns = computed(() => [
   { key: 'actions', label: t('admin.ops.errorLog.action') },
 ])
 
-const errHiddenColumns = reactive<Set<string>>(new Set())
-
 const errToggleableColumns = computed(() =>
   errAllColumns.value.filter(col => !ERR_ALWAYS_VISIBLE.includes(col.key))
 )
 
+// The errors tab keeps its own two memories; phones start from their own defaults.
+const errorColumns = useColumnVisibility({
+  keys: computed(() => errToggleableColumns.value.map(col => col.key)),
+  wide: { storageKey: ERR_HIDDEN_COLUMNS_KEY, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_NARROW_DEFAULT_HIDDEN_COLUMNS },
+})
+
 const errVisibleColumnKeys = computed(() =>
   errAllColumns.value
-    .filter(col => ERR_ALWAYS_VISIBLE.includes(col.key) || !errHiddenColumns.has(col.key))
+    .filter(col => ERR_ALWAYS_VISIBLE.includes(col.key) || errorColumns.isVisible(col.key))
     .map(col => col.key)
 )
 
-const toggleErrColumn = (key: string) => {
-  if (errHiddenColumns.has(key)) {
-    errHiddenColumns.delete(key)
-  } else {
-    errHiddenColumns.add(key)
-  }
-  try {
-    localStorage.setItem(ERR_HIDDEN_COLUMNS_KEY, JSON.stringify([...errHiddenColumns]))
-  } catch (e) {
-    console.error('Failed to save error columns:', e)
-  }
-}
-
-const loadSavedErrColumns = () => {
-  try {
-    const saved = localStorage.getItem(ERR_HIDDEN_COLUMNS_KEY)
-    const keys = saved ? (JSON.parse(saved) as string[]) : ERR_DEFAULT_HIDDEN_COLUMNS
-    keys.forEach((key) => errHiddenColumns.add(key))
-  } catch {
-    ERR_DEFAULT_HIDDEN_COLUMNS.forEach((key) => errHiddenColumns.add(key))
-  }
-}
-
-// 列设置下拉按当前 tab 分发
+// 列设置按当前 tab 分发（两类日志各自两份记忆）
+const currentColumns = computed(() => (activeTab.value === 'errors' ? errorColumns : usageColumns))
 const currentToggleableColumns = computed(() =>
   activeTab.value === 'errors' ? errToggleableColumns.value : toggleableColumns.value
 )
-const isCurrentColumnVisible = (key: string) =>
-  activeTab.value === 'errors' ? !errHiddenColumns.has(key) : isColumnVisible(key)
-const toggleCurrentColumn = (key: string) =>
-  activeTab.value === 'errors' ? toggleErrColumn(key) : toggleColumn(key)
-
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      (JSON.parse(saved) as string[]).forEach((key) => {
-        hiddenColumns.add(key)
-      })
-      const savedVersion = localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY)
-      if (savedVersion !== HIDDEN_COLUMNS_CURRENT_VERSION) {
-        if (savedVersion !== HIDDEN_COLUMNS_PREV_VERSION) {
-          hiddenColumns.add('request_id')
-        }
-        hiddenColumns.add('upstream_request_id')
-        localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-        localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
-      }
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
-        hiddenColumns.add(key)
-      })
-      localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
-    }
-  } catch {
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
-      hiddenColumns.add(key)
-    })
-  }
-}
+const isCurrentColumnVisible = (key: string) => currentColumns.value.isVisible(key)
+const toggleCurrentColumn = (key: string) => currentColumns.value.toggle(key)
+const resetCurrentColumns = () => currentColumns.value.reset()
+const currentColumnsAtDefault = computed(() => currentColumns.value.atDefault.value)
+/**
+ * The tab's sort while its column is hidden (only the model column can be), named in the toolbar: the request keeps the
+ * sort, so the headers show no arrow (the usage tab's sort, or the errors tab's in API keys, status_code = status).
+ */
+const hiddenSort = computed(() => {
+  if (activeTab.value === 'ranking') return null
+  const errors = activeTab.value === 'errors'
+  const key = errors ? (errSortBy.value === 'status_code' ? 'status' : errSortBy.value) : sortState.sort_by
+  const columns: { key: string; label: string }[] = errors ? errAllColumns.value : allColumns.value
+  const column = columns.find((col) => col.key === key)
+  const shown = errors ? errVisibleColumnKeys.value.includes(key) : visibleColumns.value.some((col) => col.key === key)
+  if (!column || shown) return null
+  return { label: column.label, order: (errors ? errSortOrder.value : sortState.sort_order) as 'asc' | 'desc' }
+})
 
 // Detail tabs
 const detailTabs = computed(() => [
@@ -888,15 +920,6 @@ const onErrPage = (p: number) => { errPage.value = p; loadAdminErrors() }
 const onErrPageSize = (s: number) => { errPageSize.value = s; errPage.value = 1; loadAdminErrors() }
 const openError = (id: number) => { selectedErrorId.value = id; showErrorModal.value = true }
 
-const showColumnDropdown = ref(false)
-const columnDropdownRef = ref<HTMLElement | null>(null)
-
-const handleColumnClickOutside = (event: MouseEvent) => {
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
-    showColumnDropdown.value = false
-  }
-}
-
 onMounted(() => {
   void adminSettingsStore.fetch(true)
   applyRouteQueryFilters()
@@ -909,11 +932,7 @@ onMounted(() => {
   window.setTimeout(() => {
     void loadChartData()
   }, 120)
-  loadSavedColumns()
-  loadSavedErrColumns()
-  document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

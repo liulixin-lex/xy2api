@@ -3,7 +3,7 @@
  * snapshot (extra.upstream_billing_probe) and the page clock. Pure: no timers, no requests. The rate follows one rule
  * (snapshotRate) whether the snapshot is fresh or stale; staleness only greys it.
  */
-import { formatMultiplier } from '@/utils/formatters'
+import { formatRate } from '@/utils/formatters'
 import type { Account, UpstreamBillingData, UpstreamBillingProbeSnapshot } from '@/types'
 
 const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
@@ -116,7 +116,7 @@ export function upstreamRateView(account: Pick<Account, 'type' | 'extra'>, now: 
   // the snapshot is fresh, greyed once it is stale.
   const rate = snapshot && ['ok', 'failed'].includes(snapshot.status) ? snapshotRate(data, now) : null
   const current = rate != null && validTimestamps && !stale
-  const rateText = rate == null ? '' : `${formatMultiplier(rate)}x`
+  const rateText = rate == null ? '' : formatRate(rate)
   const failureCode = snapshot?.status === 'failed' || stale ? snapshot?.last_error?.trim() ?? '' : ''
   const failure: ProbeFailure | null = failureCode ? { code: failureCode, httpStatus: snapshot?.http_status ?? 0 } : null
   const lastAttemptAt = typeof snapshot?.last_attempt_at === 'string' && Number.isFinite(Date.parse(snapshot.last_attempt_at)) ? snapshot.last_attempt_at : ''

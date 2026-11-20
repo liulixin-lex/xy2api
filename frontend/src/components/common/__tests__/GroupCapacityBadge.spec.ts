@@ -24,4 +24,12 @@ describe('GroupCapacityBadge group concurrency', () => {
     expect(wrapper.find('[data-test="capacity-group-current"]').exists()).toBe(false)
     expect(wrapper.get('span.font-mono').element.parentElement!.textContent!.replace(/\s+/g, '')).toBe('5/600')
   })
+
+  // Mobile list plan, item 19: no text under 12px.
+  it('draws its badges at 12px', () => {
+    const wrapper = mount(GroupCapacityBadge, { props: { ...baseProps, sessionsMax: 10, rpmMax: 100 } })
+    const badges = wrapper.findAll('span.rounded-md')
+    expect(badges.length).toBeGreaterThan(0)
+    for (const badge of badges) expect(badge.classes()).toContain('text-xs')
+  })
 })

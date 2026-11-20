@@ -236,7 +236,7 @@ watch(
               <input
                 v-model="q"
                 type="text"
-                class="w-full rounded-lg border-gray-200 bg-gray-50/50 py-1.5 pl-9 pr-3 text-xs font-medium text-gray-700 transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/10 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-300 dark:focus:bg-dark-800"
+                class="w-full rounded-lg border-gray-200 bg-gray-50/50 py-1.5 pl-9 pr-3 text-xs font-medium text-gray-700 transition-all focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/10 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-300 dark:focus:bg-dark-800 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:text-base"
                 :placeholder="t('admin.ops.errorDetails.searchPlaceholder')"
               />
             </div>
@@ -261,7 +261,7 @@ watch(
           </div>
 
           <div class="flex items-center justify-end">
-            <button type="button" class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600" @click="resetFilters">
+            <button type="button" class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600 [@media(pointer:coarse)]:min-h-10" @click="resetFilters">
               {{ t('common.reset') }}
             </button>
           </div>
@@ -276,6 +276,7 @@ watch(
 
           <OpsErrorLogTable
             class="min-h-0 flex-1"
+            :scroll-label="modalTitle"
             summary-first
             :rows="rows"
             :total="total"
@@ -295,7 +296,10 @@ watch(
 </template>
 
 <style>
-.compact-select .select-trigger {
-  @apply py-1.5 px-3 text-xs rounded-lg;
+/* The compact filters are for a mouse; on touch the selects keep their own 40px size (mobile list plan). */
+@media (pointer: fine) {
+  .compact-select .select-trigger {
+    @apply py-1.5 px-3 text-xs rounded-lg;
+  }
 }
 </style>
