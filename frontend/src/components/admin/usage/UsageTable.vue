@@ -52,11 +52,12 @@
             <button
               v-if="row.user?.email"
               type="button"
-              class="min-w-0 truncate font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              data-testid="usage-user-email"
+              class="relative min-w-0 text-left font-medium text-primary-600 transition-colors before:absolute before:inset-x-0 before:-inset-y-3 before:content-[''] hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
               @click="$emit('userClick', row.user_id, row.user?.email)"
               :title="`${row.user.email}\n${t('admin.usage.clickToViewBalance')}`"
             >
-              {{ row.user.email }}
+              <span class="block truncate underline decoration-dashed underline-offset-2">{{ row.user.email }}</span>
             </button>
             <CellEmpty v-else />
             <span v-if="row.user?.deleted_at" class="ml-1 inline-flex flex-none items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
@@ -293,6 +294,7 @@
               v-if="desktop"
               type="button"
               data-testid="usage-detail-open"
+              :data-row-key="rowKey(row)"
               class="relative rounded text-xs font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
               :aria-label="t('usage.requestDetail.open', { time: formatListDateTime(value) })"
               aria-haspopup="dialog"
@@ -301,12 +303,16 @@
           </div>
         </template>
 
+        <template #header-actions>
+          <span class="sr-only">{{ t('usage.requestDetail.button') }}</span>
+        </template>
         <template #cell-actions="{ row }">
           <!-- A 40px button in a block whose negative margins give back 20px: the row stays one text line high. -->
           <div class="-my-2.5 flex justify-center">
             <button
               type="button"
               data-testid="usage-detail-open"
+              :data-row-key="rowKey(row)"
               class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               :aria-label="t('usage.requestDetail.open', { time: formatListDateTime(row.created_at) })"
               :title="t('usage.requestDetail.button')"
@@ -564,7 +570,9 @@ const identityKey = computed(() => (phone.value ? props.columns[0]?.key ?? null 
  * a row's detail is one tap away without scrolling to the time; from 1024px the button sits beside the time.
  */
 const tableColumns = computed<Column[]>(() =>
-  desktop.value ? props.columns : [...props.columns, { key: 'actions', label: t('usage.requestDetail.button'), class: 'text-center' }]
+  desktop.value
+    ? props.columns
+    : [...props.columns, { key: 'actions', label: t('usage.requestDetail.button'), class: 'w-11 min-w-11 !px-0 text-center' }]
 )
 /** The page lists users (the admin page): the request detail names the user, with the id and a deleted mark. */
 const showsUsers = computed(() => props.columns.some((col) => col.key === 'user'))

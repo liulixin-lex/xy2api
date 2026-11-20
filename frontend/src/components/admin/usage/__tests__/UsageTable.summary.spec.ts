@@ -1,7 +1,7 @@
 // Mobile list plan, usage records: tokens, cost and latency on one line each in every width, everything else in a
 // per-row request detail dialog (click, Enter or Space) that shows only what the page may show.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import UsageTable from '../UsageTable.vue'
@@ -51,6 +51,8 @@ function mountTable(props: Record<string, unknown>, data: unknown[] = [row]) {
 
 const cell = (w: ReturnType<typeof mountTable>, key: string) => w.get(`[data-cell="${key}"]`)
 
+// Each test's dialogs leave the shared overlay stack with their wrapper (focus return reads the stack).
+enableAutoUnmount(afterEach)
 afterEach(() => { document.body.innerHTML = '' })
 
 describe('UsageTable one-line summaries', () => {
@@ -331,5 +333,84 @@ describe('UsageTable after review', () => {
     await cell(full, 'created_at').get('button').trigger('click')
     expect(full.find('[data-testid="usage-cache-creation-total"]').exists()).toBe(false)
     expect(full.get('[data-testid="usage-cache-creation-5m"]').classes()).not.toContain('pl-3')
+  })
+})
+
+// Re-review fixes (items 2–4).
+describe('UsageTable after the re-review', () => {
+  // A matchMedia whose answers change with the width and tell their listeners (vueuse's useMediaQuery listens).
+  const media = (() => {
+    let width = 1280
+    const lists: { query: string; listeners: Set<(e: { matches: boolean }) => void> }[] = []
+    const matches = (query: string) => { const min = /min-width:\s*(\d+)px/.exec(query); return min ? width >= Number(min[1]) : true }
+    return {
+      install() {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+          const entry = { query, listeners: new Set<(e: { matches: boolean }) => void>() }
+          lists.push(entry)
+          return {
+            get matches() { return matches(query) }, media: query, onchange: null,
+            addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => entry.listeners.add(fn),
+            removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => entry.listeners.delete(fn),
+            addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+          } as unknown as MediaQueryList
+        })
+      },
+      set(next: number) {
+        width = next
+        for (const entry of lists) for (const fn of entry.listeners) fn({ matches: matches(entry.query) })
+      },
+    }
+  })()
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('keeps the details column 44px wide with a name for screen readers only, below 1024px', () => {
+    media.install()
+    media.set(834)
+    const ColumnsStub = { props: ['data', 'columns'], template: '<div><span data-test="actions-header"><slot name="header-actions" /></span></div>' }
+    const wrapper = mount(UsageTable, { props: { data: [row] as never, ...ADMIN }, global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } } })
+    const actions = wrapper.findComponent(ColumnsStub).props('columns').find((c: { key: string }) => c.key === 'actions')
+    expect(actions.class.split(' ')).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
+    // The header's words never widen the column: read aloud, not shown.
+    const header = wrapper.get('[data-test="actions-header"]')
+    expect(header.get('span').classes()).toEqual(['sr-only'])
+    expect(header.text()).toBe('usage.requestDetail.button')
+  })
+
+  it('gives the tablet\'s email a 40px-high target too', () => {
+    media.install()
+    media.set(834)
+    const email = cell(mountTable(ADMIN), 'user').get('[data-testid="usage-user-email"]')
+    expect(email.classes()).toEqual(expect.arrayContaining(['relative', 'before:absolute', 'before:-inset-y-3']))
+    expect(email.get('span').classes()).toContain('truncate')
+  })
+
+  // Re-review: opened at 834px from the frozen column, closed at 1180px: focus goes back to the same row's button.
+  it('returns focus to the same row\'s details button after the detail crossed 1024px', async () => {
+    media.install()
+    media.set(834)
+    const ColumnsStub = {
+      props: ['data', 'columns', 'rowKey'],
+      template: `<div><div v-for="r in data" :key="rowKey(r)"><div v-for="col in columns" :key="col.key"><slot :name="'cell-' + col.key" :row="r" :value="r[col.key]" /></div></div></div>`,
+    }
+    const rows = [row, { ...row, id: 10 }, { ...row, id: 11 }]
+    const wrapper = mount(UsageTable, {
+      props: { data: rows as never, ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'created_at', label: 'Time' }] },
+      global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } },
+      attachTo: document.body,
+    })
+    const opener = wrapper.findAll('[data-testid="usage-detail-open"]')[1]
+    expect(opener.attributes('data-row-key')).toBe('usage:10')
+    ;(opener.element as HTMLElement).focus()
+    await opener.trigger('click')
+    await nextTick()
+    media.set(1180)
+    await nextTick()
+    expect(wrapper.findAll('[data-testid="usage-detail-open"]').map((b) => b.text())).toEqual(Array(3).fill('usage.requestDetail.button'))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    await nextTick()
+    expect((document.activeElement as HTMLElement | null)?.getAttribute('data-row-key')).toBe('usage:10')
+    wrapper.unmount()
   })
 })
