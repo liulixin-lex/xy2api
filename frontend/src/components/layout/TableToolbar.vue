@@ -147,16 +147,35 @@ const updateFade = () => {
   fade.end = !!row && row.scrollLeft + row.clientWidth < row.scrollWidth - 1
 }
 let fadeObserver: ResizeObserver | null = null
+let fadeMutations: MutationObserver | null = null
+/** Watches the row and each filter in it now: a filter added or removed later is watched (or let go) too. */
+const observeFilters = () => {
+  const row = filtersRef.value
+  fadeObserver?.disconnect()
+  if (row && fadeObserver) {
+    fadeObserver.observe(row)
+    Array.from(row.children).forEach((child) => fadeObserver!.observe(child))
+  }
+  updateFade()
+}
 watch(filtersRef, (row) => {
   fadeObserver?.disconnect()
+  fadeMutations?.disconnect()
   fadeObserver = null
+  fadeMutations = null
   updateFade()
-  if (!row || typeof ResizeObserver === 'undefined') return
-  fadeObserver = new ResizeObserver(updateFade)
-  fadeObserver.observe(row)
-  Array.from(row.children).forEach((child) => fadeObserver!.observe(child))
+  if (!row) return
+  if (typeof ResizeObserver !== 'undefined') fadeObserver = new ResizeObserver(updateFade)
+  if (typeof MutationObserver !== 'undefined') {
+    fadeMutations = new MutationObserver(observeFilters)
+    fadeMutations.observe(row, { childList: true, subtree: true })
+  }
+  observeFilters()
 }, { flush: 'post' })
-onBeforeUnmount(() => fadeObserver?.disconnect())
+onBeforeUnmount(() => {
+  fadeObserver?.disconnect()
+  fadeMutations?.disconnect()
+})
 const FOCUSABLE = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
 const firstFocusable = (el: Element | null | undefined) => (el ? ((el.matches(FOCUSABLE) ? el : el.querySelector(FOCUSABLE)) as HTMLElement | null) : null)
 /** The row's field for a sheet field: the same `data-filter`, else the first inline filter, else the search. */
