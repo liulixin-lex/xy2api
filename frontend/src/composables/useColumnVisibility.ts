@@ -4,7 +4,13 @@ import { usePhoneViewport } from './useTableViewport'
 /** One width's memory of the hidden columns: where it is kept and what it hides until the user changes it. */
 export interface ColumnVisibilityTier {
   storageKey: string
-  defaultHidden: readonly string[]
+  /** The columns hidden until the user changes them. */
+  defaultHidden?: readonly string[]
+  /**
+   * Instead of `defaultHidden`: only these show until the user changes them; every other column hides, those the page
+   * adds later (attribute columns loaded after the page) included.
+   */
+  defaultVisible?: readonly string[]
   /**
    * Runs on the saved set once, when it is first read (a version chain that hides columns added since): returns true
    * when it changed the set, which is then written back. Not run on the defaults.
@@ -28,18 +34,19 @@ export interface UseColumnVisibilityOptions {
 
 type Tier = 'wide' | 'narrow'
 
-const readHidden = (tier: ColumnVisibilityTier): Set<string> => {
+/** The saved set, or null when nothing (usable) is saved: the defaults then apply. */
+const readHidden = (tier: ColumnVisibilityTier): Set<string> | null => {
   try {
     const raw = localStorage.getItem(tier.storageKey)
-    if (raw === null) return new Set(tier.defaultHidden)
+    if (raw === null) return null
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Set(tier.defaultHidden)
+    if (!Array.isArray(parsed)) return null
     const hidden = new Set(parsed.filter((key): key is string => typeof key === 'string'))
     if (tier.migrate?.(hidden)) writeHidden(tier, hidden)
     return hidden
   } catch (error) {
     console.error('Failed to load column settings:', error)
-    return new Set(tier.defaultHidden)
+    return null
   }
 }
 
@@ -61,29 +68,41 @@ const writeHidden = (tier: ColumnVisibilityTier, hidden: ReadonlySet<string>) =>
 export function useColumnVisibility(options: UseColumnVisibilityOptions) {
   const phone = usePhoneViewport()
   const tier = computed<Tier>(() => (phone.value ? 'narrow' : 'wide'))
-  const sets = reactive<Partial<Record<Tier, Set<string>>>>({})
+  // A memory's saved set; null while it is at its defaults (nothing saved); missing until first read.
+  const sets = reactive<Partial<Record<Tier, Set<string> | null>>>({})
+  const defaultsOf = (name: Tier): Set<string> => {
+    const visible = options[name].defaultVisible
+    if (!visible) return new Set(options[name].defaultHidden ?? [])
+    const shown = new Set(visible)
+    return new Set(options.keys.value.filter((key) => !shown.has(key)))
+  }
   /** A memory is read when its width is first in use; never inside a computed, so reading it changes nothing there. */
   const load = (name: Tier) => {
-    if (!sets[name]) sets[name] = readHidden(options[name])
-    return sets[name]!
+    if (!(name in sets)) sets[name] = readHidden(options[name])
   }
-  const hiddenOf = (name: Tier): Set<string> => sets[name] ?? load(name)
+  /** What a memory hides now: its saved set, or its defaults (with `defaultVisible`, over the columns there are now). */
+  const hiddenOf = (name: Tier): Set<string> => {
+    load(name)
+    return sets[name] ?? defaultsOf(name)
+  }
   load(tier.value)
   let previous = tier.value
   // Synchronous, so the new memory is there before anything renders with the new width.
   watch(tier, (next) => {
     const before = hiddenOf(previous)
     previous = next
-    const after = load(next)
+    const after = hiddenOf(next)
     const shown = [...before].filter((key) => !after.has(key))
     if (shown.length) options.onShown?.(shown)
   }, { flush: 'sync' })
 
-  const hidden = computed<ReadonlySet<string>>(() => sets[tier.value] ?? new Set(options[tier.value].defaultHidden))
+  const hidden = computed<ReadonlySet<string>>(() => sets[tier.value] ?? defaultsOf(tier.value))
   const isVisible = (key: string) => !hidden.value.has(key)
 
   const toggle = (key: string) => {
-    const set = hiddenOf(tier.value)
+    // The first change saves the memory: from then on it is the user's own set.
+    const set = new Set(hiddenOf(tier.value))
+    sets[tier.value] = set
     const wasHidden = set.delete(key)
     if (!wasHidden) set.add(key)
     writeHidden(options[tier.value], set)
@@ -94,9 +113,9 @@ export function useColumnVisibility(options: UseColumnVisibilityOptions) {
   const reset = () => {
     const name = tier.value
     const set = hiddenOf(name)
-    const defaults = new Set(options[name].defaultHidden)
+    const defaults = defaultsOf(name)
     const shown = [...set].filter((key) => !defaults.has(key))
-    sets[name] = defaults
+    sets[name] = null
     try {
       localStorage.removeItem(options[name].storageKey)
     } catch (error) {
@@ -106,7 +125,7 @@ export function useColumnVisibility(options: UseColumnVisibilityOptions) {
   }
 
   const atDefault = computed(() => {
-    const defaults = new Set(options[tier.value].defaultHidden)
+    const defaults = defaultsOf(tier.value)
     return options.keys.value.every((key) => hidden.value.has(key) === defaults.has(key))
   })
 

@@ -22,6 +22,7 @@ export default {
       columns: '列',
       columnsTitle: '显示的列',
       resetColumns: '恢复默认列',
+      removeFilter: '移除筛选 {label}',
       resetColumnOrder: '恢复默认顺序',
       sortedBy: '排序：{label}',
       ascending: '升序',

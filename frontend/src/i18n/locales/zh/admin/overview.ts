@@ -512,6 +512,7 @@ export default {
       description: '管理用户账户和权限',
       liveDetail: '余额与并发 10 秒、用量 30 秒',
       createUser: '创建用户',
+      createShort: '添加',
       bulkDelete: {
         title: '删除已选用户',
         confirm: '确定删除已选的 {count} 个用户吗？此操作无法撤销。管理员账号无法删除。',
@@ -551,7 +552,7 @@ export default {
       deleteUser: '删除用户',
       deleteConfirmMessage: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       searchPlaceholder: '邮箱/用户名/备注/API Key 模糊搜索...',
-      searchUsers: '邮箱/用户名/备注/API Key 模糊搜索',
+      searchUsers: '搜索邮箱、用户名、备注或 API Key',
       roleFilter: '角色筛选',
       allRoles: '全部角色',
       allStatus: '全部状态',
@@ -608,8 +609,8 @@ export default {
         usageAntigravity: '用量 (Antigravity)',
         concurrency: '并发数',
         status: '状态',
-        lastActive: '最后活跃时间',
-        lastUsed: '最后使用时间',
+        lastActive: '最近活跃',
+        lastUsed: '最近使用',
         created: '创建时间',
         actions: '操作'
       },

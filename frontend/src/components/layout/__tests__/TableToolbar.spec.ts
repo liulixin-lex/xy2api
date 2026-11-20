@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createCommentVNode, h } from 'vue'
+import { createCommentVNode, h, nextTick, ref } from 'vue'
 
 import TableToolbar from '../TableToolbar.vue'
 
@@ -44,3 +44,54 @@ describe('TableToolbar below 1024px', () => {
     expect(narrow).toMatch(/\n {2}:where\(\.table-toolbar:not\(\.table-toolbar--sheet\)\) \.table-toolbar__main \{\s*flex: none;\s*\}/)
   })
 })
+
+// Mobile list plan, item 15: the sideways filter row below 1024px fades out at an edge with more filters past it.
+describe('TableToolbar filter row fade', () => {
+  it('fades the edges that have filters past them, following the scroll', async () => {
+    const wrapper = mount(TableToolbar, { slots: { filters: () => h('div', { class: 'f' }, 'filters') }, attachTo: document.body })
+    const row = wrapper.get('[data-test="toolbar-filters"]')
+    const el = row.element as HTMLElement
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 300 })
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 700 })
+    el.scrollLeft = 0
+    await row.trigger('scroll')
+    expect(row.classes()).toEqual(expect.arrayContaining(['is-fade-end']))
+    expect(row.classes()).not.toContain('is-fade-start')
+    el.scrollLeft = 200
+    await row.trigger('scroll')
+    expect(row.classes()).toEqual(expect.arrayContaining(['is-fade-start', 'is-fade-end']))
+    el.scrollLeft = 400
+    await row.trigger('scroll')
+    expect(row.classes()).toContain('is-fade-start')
+    expect(row.classes()).not.toContain('is-fade-end')
+    expect(source).toMatch(/\.table-toolbar__filters\.is-fade-start \{\s*-webkit-mask-image: linear-gradient\(to right, transparent, #000 24px\);/)
+    wrapper.unmount()
+  })
+})
+
+// Astra review: filters added after mounting widened the row with no fade until it was scrolled.
+describe('TableToolbar filter row fade after filters change', () => {
+  it('measures again when filters are added', async () => {
+    // Sizes alone would not tell: the row keeps its width, so only the change of its filters can.
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const count = ref(2)
+    const wrapper = mount(TableToolbar, {
+      slots: { filters: () => Array.from({ length: count.value }, (_, i) => h('div', { class: 'f', key: i }, `f${i}`)) },
+      attachTo: document.body
+    })
+    const row = wrapper.get('[data-test="toolbar-filters"]')
+    const el = row.element as HTMLElement
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 390 })
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, get: () => el.children.length * 150 })
+    await row.trigger('scroll')
+    expect(row.classes()).not.toContain('is-fade-end')
+    count.value = 6
+    await nextTick()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    expect(row.classes()).toContain('is-fade-end')
+    wrapper.unmount()
+    vi.unstubAllGlobals()
+  })
+})
+

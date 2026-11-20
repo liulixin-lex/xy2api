@@ -27,7 +27,7 @@
             <button
               v-if="showCloseButton"
               @click="emit('close')"
-              class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
+              class="dialog-close -mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
               :aria-label="closeLabel"
             >
               <Icon name="x" size="md" />
@@ -172,3 +172,16 @@ onUnmounted(() => {
 
 defineExpose({ holdFocus: () => holdFocus(dialogToken) })
 </script>
+
+<style scoped>
+/* Touch (pointer: coarse, mobile list plan): the close button is 40px to hit; a mouse keeps 36px. */
+@media (pointer: coarse) {
+  .dialog-close {
+    display: inline-grid;
+    min-width: 40px;
+    min-height: 40px;
+    place-items: center;
+  }
+}
+</style>
+

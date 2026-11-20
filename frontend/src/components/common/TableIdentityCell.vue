@@ -25,7 +25,20 @@ const props = defineProps<{ primary?: string; secondary?: string; full?: string 
 const primaryRef = ref<HTMLElement | null>(null)
 const secondaryRef = ref<HTMLElement | null>(null)
 const cut = ref(false)
-const isCut = () => [primaryRef.value, secondaryRef.value].some((el) => !!el && el.scrollWidth > el.clientWidth + 1)
+/**
+ * Whether a line is cut: its content wider than its box. Rounded widths miss a cut under a pixel (116.484px of text in
+ * a 116.391px box reads 116 / 116 and still draws "…"), so the text's own width is measured too where the browser can,
+ * with only a rounding error's allowance.
+ */
+const lineCut = (el: HTMLElement) => {
+  if (el.scrollWidth > el.clientWidth) return true
+  if (typeof document.createRange !== 'function') return false
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const text = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0
+  return text > el.getBoundingClientRect().width + 0.01
+}
+const isCut = () => [primaryRef.value, secondaryRef.value].some((el) => !!el && lineCut(el))
 const tipText = computed(() => props.full || [props.primary, props.secondary].filter(Boolean).join('\n'))
 /** The tip only when something is cut (or the page gave its own text): measured when it would show. */
 const tip = () => {
