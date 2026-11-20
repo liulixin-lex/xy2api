@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DataTable from '../DataTable.vue'
+import dataTableSource from '../DataTable.vue?raw'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -42,6 +43,13 @@ const stubMobileMatchMedia = () => {
 }
 
 describe('DataTable', () => {
+  // The sticky header covers the top of the scroll box: a focus scroll or scrollIntoView({ block: 'nearest' }) stops a
+  // row below it, not under it.
+  it('keeps scrolled-to rows out from under the sticky header (scroll-padding-top)', () => {
+    const wrapper = dataTableSource.slice(dataTableSource.indexOf('.table-wrapper {'), dataTableSource.indexOf('}', dataTableSource.indexOf('.table-wrapper {')))
+    expect(wrapper).toMatch(/scroll-padding-top: var\(--header-height, 40px\);/)
+  })
+
   beforeEach(() => {
     stubDesktopMatchMedia()
     localStorage.clear()
