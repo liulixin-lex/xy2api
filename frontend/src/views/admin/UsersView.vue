@@ -201,21 +201,23 @@
             </div>
             <!-- Column Settings Dropdown -->
             <div class="relative" ref="columnDropdownRef">
+              <!-- A phone: this width's columns in a bottom sheet (mobile list plan); wider, the dropdown. -->
               <button
                 type="button"
-                @click="showColumnDropdown = !showColumnDropdown"
+                @click="phone ? (showColumnSheet = true) : (showColumnDropdown = !showColumnDropdown)"
                 class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.users.columnSettings')"
-                aria-haspopup="true"
-                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                :aria-haspopup="phone ? 'dialog' : 'true'"
+                :aria-expanded="(phone ? showColumnSheet : showColumnDropdown) ? 'true' : 'false'"
                 v-tip="t('admin.users.columnSettings')"
+                data-test="users-columns"
               >
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
               </button>
               <div
-                v-if="showColumnDropdown"
+                v-if="showColumnDropdown && !phone"
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <button
@@ -240,6 +242,15 @@
                     :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
                     :stroke-width="2"
                   />
+                </button>
+                <button
+                  v-if="!columnVisibility.atDefault.value"
+                  type="button"
+                  :class="[POPOVER_ITEM, 'border-t border-line-popover text-primary-600 hover:bg-surface-popover-hover dark:text-primary-400']"
+                  data-test="reset-columns"
+                  @click="resetColumns"
+                >
+                  {{ t('common.table.resetColumns') }}
                 </button>
               </div>
             </div>
@@ -835,6 +846,27 @@
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="reloadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
+    <!-- A phone's column settings: this width's own columns and their "restore default columns". -->
+    <BottomSheet :show="showColumnSheet" :title="t('common.table.columnsTitle')" test-id="column-sheet" @close="showColumnSheet = false">
+      <div class="users-colsheet">
+        <button
+          v-for="col in toggleableColumns"
+          :key="col.key"
+          type="button"
+          class="users-colsheet__item"
+          :disabled="isForcedVisibleColumn(col.key)"
+          :aria-pressed="isColumnVisible(col.key) ? 'true' : 'false'"
+          data-test="column-setting"
+          @click="toggleColumn(col.key)"
+        >
+          <span class="truncate">{{ col.label }}</span>
+          <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" :stroke-width="2" />
+        </button>
+        <button v-if="!columnVisibility.atDefault.value" type="button" class="users-colsheet__reset" data-test="reset-columns" @click="resetColumns">
+          {{ t('common.table.resetColumns') }}
+        </button>
+      </div>
+    </BottomSheet>
   </AppLayout>
 </template>
 
@@ -847,6 +879,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
+import { useColumnVisibility } from '@/composables/useColumnVisibility'
+import { useTableViewport } from '@/composables/useTableViewport'
 import { formatDateTime, formatListDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
@@ -875,6 +909,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import Select from '@/components/common/Select.vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
 import { buildApiKeyGroupFilterOptions } from './apiKeyGroupFilterOptions'
 import UserAttributesConfigModal from '@/components/user/UserAttributesConfigModal.vue'
 import UserConcurrencyCell from '@/components/user/UserConcurrencyCell.vue'
@@ -983,23 +1018,23 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'email' && col.key !== 'actions')
 )
 
-// Hidden columns (stored in Set - columns NOT in this set are visible)
-// This way, new columns are visible by default
-const hiddenColumns = reactive<Set<string>>(new Set())
-
-// Default hidden columns (columns hidden by default on first load)
+// Default hidden columns from 768px (columns hidden by default on first load)
 const DEFAULT_HIDDEN_COLUMNS = [
   'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
   'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity',
   'balance_platform_quota'
 ]
 const REMOVED_COLUMNS = new Set(['last_login_at'])
-// 强制可见列：加载时会被强制移出 hiddenColumns，并在列设置 UI 上 disabled。
+// 强制可见列：加载时会被移出隐藏集，并在列设置 UI 上 disabled。
 // 当前没有列需要强制可见 —— last_active_at 已改为可被用户隐藏。
 const FORCED_VISIBLE_COLUMNS = new Set<string>()
 
-// localStorage keys for column settings
+// localStorage keys for column settings: the page's own key is the preference from 768px (mobile list plan, two
+// memories); a phone has its own key and defaults.
 const HIDDEN_COLUMNS_KEY = 'user-hidden-columns'
+const PHONE_HIDDEN_COLUMNS_KEY = 'user-hidden-columns-phone-v1'
+/** Below 768px only these show until the user changes them; the rest, attribute columns included, in the settings. */
+const PHONE_DEFAULT_COLUMNS = ['balance', 'status', 'last_used_at']
 // 列设置 schema 版本号。每次给 DEFAULT_HIDDEN_COLUMNS 新增列时 bump 一次，
 // 并在 VERSION_NEW_HIDDEN_COLUMNS 中登记该版本新增的 key。
 // 这样老用户升级后这些新列会被自动隐藏一次，而不会影响他们对其它老列的偏好。
@@ -1009,81 +1044,65 @@ const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
   2: ['usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity'],
   3: ['balance_platform_quota']
 }
-
-// Load saved column settings
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as string[]
-      parsed
-        .filter(key => !REMOVED_COLUMNS.has(key) && !FORCED_VISIBLE_COLUMNS.has(key))
-        .forEach(key => hiddenColumns.add(key))
-
-      // 老用户升级：把每个未应用过的版本里新增的默认隐藏列自动追加到 hiddenColumns。
-      const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? '1')
-      if (storedVersion < COLUMN_SETTINGS_VERSION) {
-        let mutated = false
-        for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
-          for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
-            if (REMOVED_COLUMNS.has(key) || FORCED_VISIBLE_COLUMNS.has(key)) continue
-            if (!hiddenColumns.has(key)) {
-              hiddenColumns.add(key)
-              mutated = true
-            }
-          }
-        }
-        if (mutated) saveColumnsToStorage()
-        else localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-      }
-    } else {
-      // Use default hidden columns on first load
-      DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
-      localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+// A first visit has no saved set: the defaults already carry every version.
+try {
+  if (localStorage.getItem(HIDDEN_COLUMNS_KEY) === null) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+} catch {
+  // Storage unavailable: the defaults apply.
+}
+/** The wide memory's version chain, run once on a saved set: 老用户升级时把未应用过的版本新增的默认隐藏列追加进去。 */
+const migrateWideColumns = (hidden: Set<string>) => {
+  let mutated = false
+  for (const key of [...hidden]) {
+    if (REMOVED_COLUMNS.has(key) || FORCED_VISIBLE_COLUMNS.has(key)) {
+      hidden.delete(key)
+      mutated = true
     }
-  } catch (e) {
-    console.error('Failed to load saved columns:', e)
-    DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
   }
+  const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? '1')
+  for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
+    for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
+      if (!hidden.has(key)) {
+        hidden.add(key)
+        mutated = true
+      }
+    }
+  }
+  if (storedVersion < COLUMN_SETTINGS_VERSION) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+  return mutated
 }
 
-// Save column settings to localStorage
-const saveColumnsToStorage = () => {
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-  } catch (e) {
-    console.error('Failed to save columns:', e)
-  }
+const columnVisibility = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateWideColumns },
+  narrow: { storageKey: PHONE_HIDDEN_COLUMNS_KEY, defaultVisible: PHONE_DEFAULT_COLUMNS },
+  onShown: (keys) => loadShownColumns(keys)
+})
+/** A source skips a hidden column; once it shows again (a toggle, a reset, the other width's memory) it runs now. */
+const loadShownColumns = (keys: string[]) => {
+  if (keys.some((key) => key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
+  if (keys.some((key) => key.startsWith('attr_'))) void liveUsers.refresh('attributes')
+  if (keys.includes('balance_platform_quota')) void liveUsers.refresh('quotas')
+  if (keys.includes('subscriptions')) void reloadUsers()
+  if (keys.includes('groups')) loadAllGroups()
 }
 
 // Toggle column visibility
 const isForcedVisibleColumn = (key: string) => FORCED_VISIBLE_COLUMNS.has(key)
 const toggleColumn = (key: string) => {
-  // 强制可见列(如 last_active_at)在加载时会被恢复成可见，
-  // 这里阻止用户在当前会话隐藏它，避免"取消勾选 → 刷新又恢复"的反直觉行为。
+  // 强制可见列在加载时会被恢复成可见，这里阻止用户在当前会话隐藏它。
   if (FORCED_VISIBLE_COLUMNS.has(key)) return
-  const wasHidden = hiddenColumns.has(key)
-  if (hiddenColumns.has(key)) {
-    hiddenColumns.delete(key)
-  } else {
-    hiddenColumns.add(key)
-  }
-  saveColumnsToStorage()
-  // A source skips a hidden column; once it is shown again, that source runs now.
-  if (wasHidden && (key === 'usage' || key.startsWith('usage_'))) void liveUsers.refresh('usage')
-  if (wasHidden && key.startsWith('attr_')) void liveUsers.refresh('attributes')
-  if (wasHidden && key === 'balance_platform_quota') void liveUsers.refresh('quotas')
-  if (key === 'subscriptions') {
-    void reloadUsers()
-  }
-  if (wasHidden && key === 'groups') {
-    loadAllGroups()
-  }
+  columnVisibility.toggle(key)
+  if (key === 'subscriptions' && !isColumnVisible(key)) void reloadUsers()
 }
+/** This width's columns back to its defaults (the other width keeps its own). */
+const resetColumns = () => columnVisibility.reset()
 
-// Check if column is visible (not in hidden set)
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
+const isColumnVisible = columnVisibility.isVisible
+const { phone } = useTableViewport()
+const showColumnSheet = ref(false)
+// The sheet belongs to a phone: crossing 768px closes it.
+watch(phone, (on) => { if (!on) showColumnSheet.value = false })
 // usage 主列或任意 usage_<platform> 子列可见时都需要批量拉取用量数据
 // 列 key → 平台名（'usage' 主列汇总所有平台时为 null）
 // 显式数组取代 Object.keys()：保证迭代顺序（决定列头排序按钮渲染顺序）
@@ -1098,18 +1117,18 @@ const USAGE_COLUMN_PLATFORMS: Record<string, string | null> = {
 }
 const PLATFORM_USAGE_COLUMNS = USAGE_COLUMN_KEYS.filter((k) => k !== 'usage')
 const hasVisibleUsageColumn = computed(
-  () => !hiddenColumns.has('usage') || PLATFORM_USAGE_COLUMNS.some((k) => !hiddenColumns.has(k))
+  () => isColumnVisible('usage') || PLATFORM_USAGE_COLUMNS.some((k) => isColumnVisible(k))
 )
-const hasVisibleGroupsColumn = computed(() => !hiddenColumns.has('groups'))
-const hasVisiblePlatformQuotaColumn = computed(() => !hiddenColumns.has('balance_platform_quota'))
+const hasVisibleGroupsColumn = computed(() => isColumnVisible('groups'))
+const hasVisiblePlatformQuotaColumn = computed(() => isColumnVisible('balance_platform_quota'))
 const hasVisibleAttributeColumns = computed(() =>
-  attributeDefinitions.value.some((def) => def.enabled && !hiddenColumns.has(`attr_${def.id}`))
+  attributeDefinitions.value.some((def) => def.enabled && isColumnVisible(`attr_${def.id}`))
 )
 
 // Filtered columns based on visibility
 const columns = computed<Column[]>(() =>
   allColumns.value.filter(col =>
-    col.key === 'email' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    col.key === 'email' || col.key === 'actions' || isColumnVisible(col.key)
   )
 )
 
@@ -2001,7 +2020,6 @@ const handleScroll = () => {
 onMounted(async () => {
   await loadAttributeDefinitions()
   loadSavedFilters()
-  loadSavedColumns()
   void reloadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
@@ -2021,6 +2039,34 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* A phone's column settings: one row per column, 44px to hit. */
+.users-colsheet {
+  display: grid;
+  gap: 4px;
+  margin: 0 -8px;
+}
+.users-colsheet__item,
+.users-colsheet__reset {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-body);
+  text-align: left;
+}
+.users-colsheet__item:disabled {
+  color: var(--color-text-muted);
+}
+.users-colsheet__reset {
+  color: theme('colors.primary.600');
+}
+:global(.dark) .users-colsheet__reset {
+  color: theme('colors.primary.400');
+}
 /* The identity column from 768px: 240px at most (a phone has the shared clamp). */
 @media (min-width: 768px) {
   .users-identity {

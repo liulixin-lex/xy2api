@@ -744,4 +744,42 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
+
+  // Mobile list plan: below 768px a memory of its own, showing balance, status and last use until changed; the
+  // wide memory (the page's old key) is neither read for it nor written.
+  it('shows the phone defaults below 768px, its own memory, and the column sheet', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    localStorage.setItem('user-hidden-columns', JSON.stringify(['notes']))
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,balance,status,last_used_at,actions')
+      await wrapper.get('[data-test="users-columns"]').trigger('click')
+      await flushPromises()
+      const role = wrapper.findAll('[data-test="column-sheet"] [data-test="column-setting"]').find((el) => el.text().includes('admin.users.columns.role'))
+      await role!.trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,role,balance,status,last_used_at,actions')
+      expect(JSON.parse(localStorage.getItem('user-hidden-columns-phone-v1')!)).not.toContain('role')
+      expect(JSON.parse(localStorage.getItem('user-hidden-columns')!)).toEqual(['notes'])
+      await wrapper.get('[data-test="column-sheet"] [data-test="reset-columns"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).toBe('email,balance,status,last_used_at,actions')
+      expect(localStorage.getItem('user-hidden-columns-phone-v1')).toBeNull()
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('user-hidden-columns')
+    }
+  })
 })
+
