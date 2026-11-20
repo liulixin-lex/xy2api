@@ -256,6 +256,34 @@ describe('v-tip on keyboard focus and scroll', () => {
     expect([jumps.length, shown(), el.getAttribute('aria-describedby')]).toEqual([1, true, 'sq-tip'])
   })
 
+  // A table's sticky header covers the top of its scroll box (DataTable: scroll-padding-top, both rows of a grouped
+  // header); an element under it, or whose scroll-margin (the recent cell's ring) is, is not in view and is scrolled.
+  it('takes the box\'s scroll-padding and the element\'s scroll-margin as out of view, as the browser does', () => {
+    content.value = 'tip text'
+    const box = document.createElement('div')
+    box.style.overflow = 'auto'
+    box.style.scrollPaddingTop = '105.5px'
+    document.body.appendChild(box)
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 700, left: 0, right: 1000 } as DOMRect)
+    const el = mount(Host, { attachTo: box }).element as HTMLElement
+    let at = 150
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: at, bottom: at + 20, left: 100, right: 124, width: 24, height: 20 }) as DOMRect)
+    const jump = vi.fn(() => { at = 220 })
+    el.scrollIntoView = jump
+    // Under the 105.5px header (it ends at 205.5).
+    tabTo(el)
+    expect(jump).toHaveBeenCalledTimes(1)
+    el.blur()
+    // Clear of the header, but not its 10px scroll-margin: still scrolled. Clear of both: left alone.
+    el.style.scrollMarginTop = '10px'
+    at = 212
+    tabTo(el)
+    el.blur()
+    at = 216
+    tabTo(el)
+    expect(jump).toHaveBeenCalledTimes(2)
+  })
+
   // The root's own declaration goes back with its priority: smooth !important stays important.
   it('puts the root\'s scroll-behavior back with its priority, or removes it when there was none', () => {
     content.value = 'tip text'

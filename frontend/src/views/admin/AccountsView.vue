@@ -1523,6 +1523,12 @@ onUnmounted(() => cancelModalPrefetch?.())
 /* The recent cell's focus ring goes on its column's cell, in the side padding (24px in the compact widths, 36px in the
    roomy ones): the 72/84px content has no room for it and .acell clips outside it. Without :has the cell's own ring
    stays (cut at the sides). */
+/* Scrolled to (Tab, scrollIntoView), the cell keeps its column cell's top and bottom padding in view, where that ring
+   is drawn: (row height 77 − three lines 58) / 2 ≈ 10px. */
+.account-table :deep(td.acol-sq_recent .recent:not(.recent--card)) {
+  scroll-margin-top: 10px;
+  scroll-margin-bottom: 10px;
+}
 @supports selector(:has(*)) {
   .account-table :deep(td.acol-sq_recent:has(.recent:focus-visible)) {
     outline: 2px solid var(--sq-ring);

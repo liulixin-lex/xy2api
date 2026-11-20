@@ -47,7 +47,7 @@ describe('DataTable', () => {
   // row below it, not under it.
   it('keeps scrolled-to rows out from under the sticky header (scroll-padding-top)', () => {
     const wrapper = dataTableSource.slice(dataTableSource.indexOf('.table-wrapper {'), dataTableSource.indexOf('}', dataTableSource.indexOf('.table-wrapper {')))
-    expect(wrapper).toMatch(/scroll-padding-top: var\(--header-height, 40px\);/)
+    expect(wrapper).toMatch(/scroll-padding-top: var\(--table-head-h, var\(--header-height, 40px\)\);/)
   })
 
   beforeEach(() => {
