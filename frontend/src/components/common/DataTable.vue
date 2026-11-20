@@ -154,6 +154,8 @@
       'dt-layout-table': layout === 'table',
       'dt-builtin-select': layout === 'table' && selectable
     }"
+    :style="freezePadding"
+    @focusin="revealFocused"
     :aria-busy="loading ? 'true' : undefined"
   >
     <!-- Reload with rows on screen: a thin bar on the top edge of the table; it takes no layout space. -->
@@ -379,10 +381,60 @@ const observeElementRectNonZero = (
   if (rect.height > 0) cb(rect)
 })
 
+/**
+ * What the frozen parts cover of the scroll area: the left frozen columns, the right one and the sticky header. The
+ * wrapper's scroll padding keeps them out of the area a focused cell is scrolled into, so keyboard focus never sits
+ * under a frozen column or the header (mobile list plan; Astra review #3).
+ */
+const freezeInsets = ref({ left: 0, right: 0, top: 0 })
+const freezePadding = computed(() => ({
+  scrollPaddingLeft: `${freezeInsets.value.left}px`,
+  scrollPaddingRight: `${freezeInsets.value.right}px`,
+  scrollPaddingTop: `${freezeInsets.value.top}px`
+}))
+const measureFreeze = (wrapper: HTMLElement) => {
+  const firstRow = wrapper.querySelector<HTMLElement>(':scope > table > thead > tr')
+  const width = (el: Element) => el.getBoundingClientRect().width
+  const left = Array.from(firstRow?.querySelectorAll('.sticky-col-left, .sticky-col-left-first, .sticky-col-left-second') ?? []).reduce((sum, th) => sum + width(th), 0)
+  const rightCell = firstRow?.querySelector('.sticky-col-right')
+  const next = {
+    left: Math.round(left),
+    right: Math.round(rightCell ? width(rightCell) : 0),
+    top: Math.round(wrapper.querySelector<HTMLElement>(':scope > table > thead')?.getBoundingClientRect().height ?? 0)
+  }
+  const now = freezeInsets.value
+  if (now.left !== next.left || now.right !== next.right || now.top !== next.top) freezeInsets.value = next
+}
+
+/**
+ * Keyboard focus on a control in an unfrozen cell: when the browser's own scroll leaves part of it under a frozen
+ * column or the header, the wrapper scrolls by the rest, so the ring and the control are whole in view.
+ */
+const REVEAL_GAP = 4
+function revealFocused(event: FocusEvent) {
+  const wrapper = tableWrapperRef.value
+  const target = event.target
+  if (!wrapper || !(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
+  const cell = target.closest('td, th')
+  if (!cell || cell.classList.contains('sticky-col') || cell.classList.contains('sticky-header-cell')) return
+  const box = wrapper.getBoundingClientRect()
+  const rect = target.getBoundingClientRect()
+  const insets = freezeInsets.value
+  const left = box.left + insets.left
+  const right = box.left + wrapper.clientWidth - insets.right
+  if (rect.left < left) wrapper.scrollLeft -= left - rect.left + REVEAL_GAP
+  else if (rect.right > right) wrapper.scrollLeft += Math.min(rect.right - right + REVEAL_GAP, rect.left - left)
+  const top = box.top + insets.top
+  const bottom = box.top + wrapper.clientHeight
+  if (rect.top < top) wrapper.scrollTop -= top - rect.top + REVEAL_GAP
+  else if (rect.bottom > bottom) wrapper.scrollTop += rect.bottom - bottom + REVEAL_GAP
+}
+
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    measureFreeze(tableWrapperRef.value)
   }
 }
 

@@ -130,6 +130,48 @@ describe('DataTable layout="table" below 1024px', () => {
     localStorage.clear()
   })
 
+  // Astra review #3: keyboard focus under a frozen column. The wrapper's scroll padding is the frozen widths and the
+  // header; a control the browser leaves partly covered is scrolled clear.
+  it('keeps keyboard focus clear of the frozen columns and the header', async () => {
+    stubPhone()
+    const rect = (left: number, width: number, top = 0, height = 40) => () => ({ left, width, right: left + width, top, height, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+    const wrapper = mount(DataTable, {
+      attachTo: document.body,
+      props: { layout: 'table', columns: [{ key: 'name', label: 'Name' }, { key: 'state', label: 'State' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true },
+      slots: { 'cell-state': '<button data-test="switch">s</button>', 'cell-actions': '<button>⋯</button>' }
+    })
+    const box = wrapper.get('.table-wrapper').element as HTMLElement
+    const heads = box.querySelectorAll<HTMLElement>('thead th')
+    heads[0].getBoundingClientRect = rect(0, 44)
+    heads[1].getBoundingClientRect = rect(44, 140)
+    heads[3].getBoundingClientRect = rect(346, 44)
+    box.querySelector<HTMLElement>('thead')!.getBoundingClientRect = rect(0, 390, 0, 45)
+    box.getBoundingClientRect = rect(0, 390, 0, 600)
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 390 })
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 600 })
+    let left = 100
+    Object.defineProperty(box, 'scrollLeft', { configurable: true, get: () => left, set: (value: number) => { left = value } })
+    window.dispatchEvent(new Event('resize'))
+    await wrapper.setProps({ data: rows(1, 2) })
+    await nextTick()
+    await nextTick()
+    expect(box.style.scrollPaddingLeft).toBe('184px')
+    expect(box.style.scrollPaddingRight).toBe('44px')
+    expect(box.style.scrollPaddingTop).toBe('45px')
+
+    const control = box.querySelector<HTMLElement>('[data-test="switch"]')!
+    control.matches = ((selector: string) => selector === ':focus-visible') as typeof control.matches
+    // Under the frozen name column (184px): scrolled back by the covered part and a 4px gap.
+    control.getBoundingClientRect = rect(160, 28, 100, 28)
+    control.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(left).toBe(100 - (184 - 160 + 4))
+    // Under the frozen "⋯" (from 346px): scrolled on by the covered part and the gap.
+    control.getBoundingClientRect = rect(330, 28, 100, 28)
+    control.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(left).toBe(72 + (358 - 346 + 4))
+    wrapper.unmount()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
