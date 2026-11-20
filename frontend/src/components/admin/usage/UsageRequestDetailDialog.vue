@@ -111,10 +111,11 @@
               <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ id.label }}</dt>
               <dd class="flex min-w-0 items-baseline justify-end gap-1.5">
                 <span class="min-w-0 break-all text-right font-mono text-xs" :class="id.value ? 'text-gray-900 dark:text-gray-100' : 'font-sans text-gray-400 dark:text-gray-500'">{{ id.value || '—' }}</span>
+                <!-- The 40×38px target grows to the left only: it ends at the row's edge, the body never scrolls sideways. -->
                 <button
                   v-if="id.value"
                   type="button"
-                  class="relative flex-none rounded p-0.5 text-gray-400 transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+                  class="relative flex-none rounded p-0.5 text-gray-400 transition-colors before:absolute before:-inset-y-2.5 before:-left-[22px] before:right-0 before:content-[''] hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-gray-300"
                   :aria-label="`${t('keys.copyToClipboard')}: ${id.label}`"
                   :title="t('keys.copyToClipboard')"
                   :data-testid="`usage-detail-copy-${id.key}`"
