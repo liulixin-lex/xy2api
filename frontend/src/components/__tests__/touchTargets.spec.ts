@@ -96,4 +96,13 @@ describe('touch targets', () => {
     expect(touchRule(source, '.pager-wide')).toContain('flex-wrap: wrap;')
     expect(px(touchRule(source, 'input.pager-jump'), 'font-size')).toBe(16)
   })
+
+  it('dialogs: the close button is 40px', () => {
+    const source = read('common/BaseDialog.vue')
+    expect(source).toContain('class="dialog-close ')
+    const rule = touchRule(source, '.dialog-close')
+    expect(px(rule, 'min-width')).toBe(40)
+    expect(px(rule, 'min-height')).toBe(40)
+  })
 })
+
