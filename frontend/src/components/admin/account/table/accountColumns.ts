@@ -2,7 +2,7 @@
  * The accounts table's column widths (prototype, spec 12.5): each column has a fixed width in two sizes, [compact,
  * roomy]; the name column takes what is left, between NAME_MIN and NAME_MAX.
  *
- * Compact, the ten default columns take 1104px and the table at least 1280px with the name column. At 1440 with the
+ * Compact, the ten default columns take 1108px and the table at least 1284px with the name column. At 1440 with the
  * navigation folded the table's scroll container is 1302px wide, 1287px once a classic scrollbar (15px on Windows)
  * takes its reserved gutter, so nothing scrolls sideways (7i-2, 7m-1); at 1366 the table scrolls, the name and actions
  * frozen. Roomy, they take 1222px: from 1454px (1222 + NAME_MAX) the table switches to the roomy widths, which 1920
@@ -13,8 +13,8 @@
  * - The two rate columns are 88px compact and 96px roomy, with 8px of padding on the left and 6px on the right: the
  *   74px left take "9.9999x" (51.1px at 13px) with the 3px gap and the 18px refresh button (72.1px), or the account
  *   rate's sync mark (12px, 4px gap); longer values end in "…" and the tip has them whole.
- * - The actions column keeps two 28px buttons 4px apart; today's stats keep "用户扣费 $12,345.67" (122.6px of 124px in tabular digits;
- *   mobile list plan: exact amounts, an English label gives way with "…");
+ * - The actions column keeps two 28px buttons 4px apart; today's stats keep "用户扣费 $12,345.67" (122.6px of 128px in tabular digits;
+ *   mobile list plan: exact amounts) and the English "Requests" / "Acct cost" / "Charged" (52.4px at most) whole;
  *   status "23h 59m 后恢复" (90.2px of 92px); the IQ check "Astra" and "检测中" with its spinner (123.4px of 125px).
  *
  * In either size, once the name column has reached NAME_MAX the room left over is shared evenly between the content
@@ -29,7 +29,7 @@
  */
 export const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
-  capacity: [155, 154], upstream_billing_rate: [88, 96], today_stats: [148, 168], actions: [76, 104], id: [80, 88],
+  capacity: [155, 154], upstream_billing_rate: [88, 96], today_stats: [152, 168], actions: [76, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [88, 96],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
