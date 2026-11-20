@@ -72,7 +72,7 @@
           <div v-if="row.reasoning_effort" class="flex items-baseline justify-between gap-4">
             <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('usage.reasoningEffort') }}</dt>
             <dd class="text-right text-gray-900 dark:text-gray-100">
-              {{ formatReasoningEffort(row.reasoning_effort) }}<template v-if="hasReasoningEffortMapping(row)"> → {{ formatReasoningEffort(row.upstream_reasoning_effort) }}</template>
+              {{ formatReasoningEffort(row.reasoning_effort) }}<template v-if="showAdminFields && hasReasoningEffortMapping(row)"> → {{ formatReasoningEffort(row.upstream_reasoning_effort) }}</template>
             </dd>
           </div>
           <div class="flex items-baseline justify-between gap-4">
@@ -106,7 +106,7 @@
             <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('admin.usage.ipAddress') }}</dt>
             <dd class="min-w-0 break-all text-right font-mono text-gray-900 dark:text-gray-100" :class="{ 'font-sans text-gray-400 dark:text-gray-500': !row.ip_address }">{{ row.ip_address || '—' }}</dd>
           </div>
-          <template v-if="showAdminFields">
+          <template v-if="requestIds.length">
             <div v-for="id in requestIds" :key="id.key" class="flex items-baseline justify-between gap-4" :data-testid="`usage-detail-${id.key}`">
               <dt class="shrink-0 text-gray-500 dark:text-gray-400">{{ id.label }}</dt>
               <dd class="flex min-w-0 items-baseline justify-end gap-1.5">
@@ -174,8 +174,8 @@ const props = defineProps<{
   showUpstreamEndpoint: boolean
   showFallbackOrigin: boolean
   /**
-   * The admin page (the page that lists users): the user, the account with its rescue marks, the model sent upstream
-   * and the upstream's answer, the request IDs. The user page shows none of these.
+   * The admin page: the user, the account with its rescue marks, the model sent upstream and the upstream's answer, the
+   * forwarded reasoning effort, the upstream request ID. The user page shows none of these.
    */
   showAdminFields?: boolean
 }>()
@@ -187,8 +187,11 @@ const uid = useId()
 const unbilled = computed(() => (props.row ? isUnbilled(props.row) : false))
 const endpoints = computed(() => (props.row ? endpointPair(props.row, props.showUpstreamEndpoint) : { inbound: '', upstream: null }))
 const group = computed(() => (props.row ? groupLabel(props.row, props.showFallbackOrigin) : ''))
+/** The request ID on both pages (users quote it when they report a problem); the upstream ID on the admin page only. */
 const requestIds = computed(() => [
   { key: 'request_id' as const, label: t('admin.usage.requestId'), value: props.row?.request_id || '' },
-  { key: 'upstream_request_id' as const, label: t('admin.usage.upstreamRequestId'), value: props.row?.upstream_request_id || '' },
+  ...(props.showAdminFields
+    ? [{ key: 'upstream_request_id' as const, label: t('admin.usage.upstreamRequestId'), value: props.row?.upstream_request_id || '' }]
+    : []),
 ])
 </script>

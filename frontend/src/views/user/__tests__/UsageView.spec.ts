@@ -164,7 +164,7 @@ function mountUsageView(extraStubs: Record<string, unknown> = {}) {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
-        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed', 'showFallbackOrigin'] },
+        UsageTable: { ...chartStub, props: ['columns', 'showCacheHitRate', 'showTokenSpeed', 'showFallbackOrigin', 'viewer'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
@@ -303,6 +303,13 @@ describe('user UsageView', () => {
     const wrapper = mountUsageView()
     await flushPromises()
     expect(wrapper.findComponent(UsageTable).props('showFallbackOrigin')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('tells the usage table it is on the user page: the model and effort asked for, no upstream ID', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent(UsageTable).props('viewer')).toBe('user')
     wrapper.unmount()
   })
 

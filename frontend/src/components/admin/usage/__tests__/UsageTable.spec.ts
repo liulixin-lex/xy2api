@@ -465,6 +465,7 @@ describe('admin UsageTable tooltip', () => {
         data: [row],
         loading: false,
         columns: [],
+        viewer: 'admin',
       },
       global: {
         stubs: {
@@ -492,6 +493,7 @@ describe('admin UsageTable tooltip', () => {
         }],
         loading: false,
         columns: [],
+        viewer: 'admin',
       },
       global: {
         stubs: {
@@ -585,6 +587,7 @@ describe('admin UsageTable tooltip', () => {
 				}],
 				loading: false,
 				columns: [],
+				viewer: 'admin',
 			},
 			global: {
 				stubs: {
@@ -1144,7 +1147,11 @@ describe('admin usage latency: the user wait first', () => {
     const detail = await openDetail(wrapper)
     expect(detail.find('[data-testid="usage-detail-e2e"]').exists()).toBe(false)
     expect(detail.text()).toContain('Avg TPS')
-    expect(detail.find('[title]').exists()).toBe(false)
+    // No latency hint: the only tip left is the request ID's copy button (the user page shows that ID, not the upstream's).
+    const tipped = detail.findAll('[title]')
+    expect(tipped.length).toBeGreaterThan(0)
+    expect(tipped.every((el) => el.element.closest('[data-testid="usage-detail-request_id"]') != null)).toBe(true)
+    expect(detail.find('[data-testid="usage-detail-upstream_request_id"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('51.00s')
   })
 })

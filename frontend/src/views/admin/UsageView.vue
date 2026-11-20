@@ -136,6 +136,7 @@
           <UsageTable
             ref="usageTableRef"
             flat
+            viewer="admin"
             :row-class="usageRowClass"
             :show-cache-hit-rate="adminSettingsStore.usageCacheHitRateEnabled"
             :show-token-speed="adminSettingsStore.usageTokenSpeedEnabled"

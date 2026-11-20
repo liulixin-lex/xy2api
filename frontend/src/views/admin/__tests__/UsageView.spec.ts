@@ -221,6 +221,13 @@ describe('admin UsageView route filters', () => {
     wrapper.unmount()
   })
 
+  it('tells the usage table it is on the admin page (the mapping, the user, the account and the upstream ID)', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'UsageTable' }).props('viewer')).toBe('admin')
+    wrapper.unmount()
+  })
+
   it('shows the routed user while applying user_id to usage requests', async () => {
     routeQuery.user_id = '42'
     getById.mockResolvedValue({ id: 42, email: 'route-user@test.com' })

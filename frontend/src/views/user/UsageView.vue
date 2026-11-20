@@ -227,6 +227,7 @@
           :loading="loading"
           :columns="visibleColumns"
           :server-side-sort="true"
+          viewer="user"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
           :show-cache-hit-rate="appStore.cachedPublicSettings?.user_usage_cache_hit_rate_enabled === true"

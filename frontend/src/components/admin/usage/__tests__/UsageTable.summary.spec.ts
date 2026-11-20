@@ -38,8 +38,8 @@ const DataTableStub = {
 }
 
 // The admin page always lists the user column (it marks the page that may show admin-only detail).
-const ADMIN = { showEndToEnd: true, showFallbackOrigin: true, showTokenSpeed: true, showCacheHitRate: true, columns: [{ key: 'user', label: 'User' }] }
-const USER = { showAccountBilling: false, showUpstreamEndpoint: false, showTokenSpeed: true, showCacheHitRate: true }
+const ADMIN = { viewer: 'admin', showEndToEnd: true, showFallbackOrigin: true, showTokenSpeed: true, showCacheHitRate: true, columns: [{ key: 'user', label: 'User' }] }
+const USER = { viewer: 'user', showAccountBilling: false, showUpstreamEndpoint: false, showTokenSpeed: true, showCacheHitRate: true }
 
 function mountTable(props: Record<string, unknown>, data: unknown[] = [row]) {
   return mount(UsageTable, {
@@ -305,16 +305,38 @@ describe('UsageTable after review', () => {
     expect(writeText.mock.calls).toEqual([['r-1'], ['up-9']])
   })
 
-  it('shows the user page the model asked for only, and no account or request IDs', async () => {
-    const wrapper = mountTable({ ...USER, columns: [{ key: 'api_key', label: 'Key' }] }, [{ ...row, result: 2, switches: 1, upstream_model_mismatch: true, upstream_response_model: 'gpt-6.1-x' }])
-    await cell(wrapper, 'created_at').get('button').trigger('click')
+  // Re-review: the user page is projected by role everywhere (cells, tips, detail): the model and reasoning effort asked
+  // for only; its detail shows the request ID (users quote it when reporting a problem), never the upstream one.
+  it('shows the user page the model and effort asked for only, its request ID, and no account or upstream ID', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const synthetic = {
+      ...row, result: 2, switches: 1, upstream_model_mismatch: true, upstream_response_model: 'gpt-6.1-x',
+      model_mapping_chain: 'gpt-6.1-sol→gpt-6.1', reasoning_effort: 'medium', upstream_reasoning_effort: 'xhigh', upstream_request_id: 'up-9',
+    }
+    const ModelStub = { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><div data-cell="model"><slot name="cell-model" :row="row" /></div><div data-cell="reasoning_effort"><slot name="cell-reasoning_effort" :row="row" /></div><div data-cell="created_at"><slot name="cell-created_at" :row="row" :value="row.created_at" /></div></div></div>' }
+    const wrapper = mount(UsageTable, {
+      props: { data: [synthetic] as never, columns: [{ key: 'api_key', label: 'Key' }], ...USER },
+      global: { stubs: { DataTable: ModelStub, Icon: true, Teleport: true } },
+      attachTo: document.body,
+    })
+    const model = wrapper.get('[data-cell="model"]')
+    expect(model.get('[data-testid="usage-model-steps"]').text()).toBe('gpt-6.1-sol')
+    expect(model.get('[data-testid="usage-model-steps"]').attributes('title')).toBe('gpt-6.1-sol')
+    expect(model.text()).not.toContain('gpt-6.1-x')
+    expect(wrapper.get('[data-cell="reasoning_effort"]').text()).not.toContain('→')
+    await wrapper.get('[data-cell="created_at"] button').trigger('click')
     const detail = wrapper.get('[data-testid="usage-request-detail"]')
     expect(detail.get('[data-testid="usage-detail-model"]').text()).toBe('gpt-6.1-sol')
     expect(detail.text()).not.toContain('gpt-6.1-x')
-    for (const id of ['usage-detail-account', 'usage-detail-request_id', 'usage-detail-upstream_request_id', 'usage-detail-user']) {
+    expect(detail.text()).not.toContain('→ XHigh')
+    for (const id of ['usage-detail-account', 'usage-detail-upstream_request_id', 'usage-detail-user']) {
       expect(detail.find(`[data-testid="${id}"]`).exists()).toBe(false)
     }
     expect(detail.get('[data-testid="usage-detail-api-key"] dd').text()).toBe('prod-key')
+    expect(detail.get('[data-testid="usage-detail-request_id"]').text()).toContain('r-1')
+    await detail.get('[data-testid="usage-detail-copy-request_id"]').trigger('click')
+    expect(writeText).toHaveBeenCalledWith('r-1')
   })
 
   // Review item 5: buckets that cover part of the cache creation are listed under its known total.

@@ -85,17 +85,20 @@
           </span>
         </template>
 
-        <!-- 请求模型和发往上游的模型写在同一行（a → b）；上游答回的模型不一致属少见的异常，另起一行标出 -->
+        <!--
+          管理端：请求模型和发往上游的模型写在同一行（a → b），上游答回的模型不一致属少见的异常，另起一行标出。
+          用户端只写请求的模型（不推断、不显示上游映射），悬停和明细同样。
+        -->
         <template #cell-model="{ row }">
           <div class="max-w-[280px] text-sm">
-            <div class="truncate" data-testid="usage-model-steps" :title="modelSteps(row).join(' → ')">
-              <template v-for="(step, i) in modelSteps(row)" :key="i">
+            <div class="truncate" data-testid="usage-model-steps" :title="shownModelSteps(row).join(' → ')">
+              <template v-for="(step, i) in shownModelSteps(row)" :key="i">
                 <span v-if="i > 0" class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
                 <span :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'">{{ step }}</span>
               </template>
             </div>
             <div
-              v-if="hasModelAudit(row)"
+              v-if="isAdmin && hasModelAudit(row)"
               class="mt-0.5 truncate text-xs"
               :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
               :title="modelAuditTitle(row, t)"
@@ -115,8 +118,8 @@
 
         <template #cell-reasoning_effort="{ row }">
           <span data-testid="reasoning-effort-cell" class="text-sm">
-            <span class="text-gray-900 dark:text-white" :class="{ 'font-medium': hasReasoningEffortMapping(row) }">{{ formatReasoningEffort(row.reasoning_effort) }}</span>
-            <template v-if="hasReasoningEffortMapping(row)">
+            <span class="text-gray-900 dark:text-white" :class="{ 'font-medium': isAdmin && hasReasoningEffortMapping(row) }">{{ formatReasoningEffort(row.reasoning_effort) }}</span>
+            <template v-if="isAdmin && hasReasoningEffortMapping(row)">
               <span class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
               <span class="text-gray-500 dark:text-gray-400">{{ formatReasoningEffort(row.upstream_reasoning_effort) }}</span>
             </template>
@@ -435,7 +438,7 @@
     :show-account-billing="showAccountBilling"
     :show-upstream-endpoint="showUpstreamEndpoint"
     :show-fallback-origin="props.showFallbackOrigin"
-    :show-admin-fields="showsUsers"
+    :show-admin-fields="isAdmin"
     @close="detailRow = null"
     @copy="(kind, value) => (kind === 'request_id' ? copyRequestId(value) : copyUpstreamRequestId(value))"
   />
@@ -513,6 +516,11 @@ interface Props {
   flat?: boolean
   /** Passed to DataTable's rowClass (a stable function from the page's setup). */
   rowClass?: (row: AdminUsageLog, index: number) => unknown
+  /**
+   * Whose page this is. The user page shows the model and reasoning effort asked for only (never an upstream mapping or
+   * the upstream's answer), in the cells, tips and detail, and its detail has no user, account or upstream request ID.
+   */
+  viewer?: 'admin' | 'user'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -526,7 +534,8 @@ const props = withDefaults(defineProps<Props>(), {
   showUpstreamEndpoint: true,
   showFallbackOrigin: false,
   showEndToEnd: false,
-  flat: false
+  flat: false,
+  viewer: 'user'
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
@@ -574,8 +583,9 @@ const tableColumns = computed<Column[]>(() =>
     ? props.columns
     : [...props.columns, { key: 'actions', label: t('usage.requestDetail.button'), class: 'w-11 min-w-11 !px-0 text-center' }]
 )
-/** The page lists users (the admin page): the request detail names the user, with the id and a deleted mark. */
-const showsUsers = computed(() => props.columns.some((col) => col.key === 'user'))
+const isAdmin = computed(() => props.viewer === 'admin')
+/** The model steps a page may show: the admin page the whole mapping, the user page the model asked for. */
+const shownModelSteps = (row: AdminUsageLog) => (isAdmin.value ? modelSteps(row) : [row.model])
 
 /** The upstream endpoint is shown on this page, known and not the inbound one. */
 const upstreamDiffers = (row: AdminUsageLog) => {
